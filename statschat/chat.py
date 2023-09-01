@@ -46,7 +46,7 @@ class Chat:
                 top_p=config.azure.oai.top_p,
                 **kwargs,
                 )
-        response = openai.Completion.create(**settings)
+        response = openai.ChatCompletion.create(**settings)
         message = response.choices[0].message
         self.add_example(text, message['content'])
         return message['content']
