@@ -6,7 +6,7 @@ authors = ["Joe Nudell <jnu@stanford.edu>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "^3.10"
 openai = "^0.28.0"
 pydantic = "^2.3.0"
 pydantic-settings = "^2.0.3"
