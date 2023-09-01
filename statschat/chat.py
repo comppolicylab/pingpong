@@ -11,7 +11,7 @@ openai.api_key = config.azure.oai.api.key
 openai.api_version = config.azure.oai.api.version
 
 
-ChatTurn = NamedTuple('ChatTurn', [('user', str), ('system', str)])
+ChatTurn = NamedTuple('ChatTurn', [('user', str), ('ai', str)])
 
 
 class Chat:
@@ -20,14 +20,14 @@ class Chat:
         self.system_prompt = system_prompt
         self.history = list[ChatTurn]()
 
-    def add_example(self, user: str, system: str):
+    def add_example(self, user: str, ai: str):
         """Add an example to the chat history.
 
         Args:
             user: The user's message.
-            system: The system's response.
+            ai: The AI's response.
         """
-        self.history.append(ChatTurn(user, system))
+        self.history.append(ChatTurn(user, ai))
 
     def chat(self, text: str, **kwargs) -> str:
         """Chat with the system.
@@ -51,4 +51,34 @@ class Chat:
         self.add_example(text, message['content'])
         return message['content']
 
+    def _get_messages(self, text: str) -> list[dict]:
+        """Get the chat history as a list of messages.
+
+        Args:
+            text: The user's message.
+
+        Returns:
+            The chat history as a list of messages.
+        """
+        messages = [{
+            "role": "system",
+            "content": self.system_prompt,
+            }]
+
+        for turn in self.history:
+            messages.append({
+                "role": "user",
+                "content": turn.user,
+                })
+            messages.append({
+                "role": "assistant",
+                "content": turn.ai,
+                })
+
+        messages.append({
+            "role": "user",
+            "content": text,
+            })
+
+        return messages
 
