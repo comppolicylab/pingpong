@@ -8,7 +8,7 @@ from config import config
 openai.api_type = config.azure.oai.api.type
 openai.api_base = config.azure.oai.api.base
 openai.api_key = config.azure.oai.api.key
-openai.api_version = config.azure.oai.api.version
+openai.api_version = config.azure.oai.api.chat_version
 
 
 ChatTurn = NamedTuple('ChatTurn', [('user', str), ('ai', str)])

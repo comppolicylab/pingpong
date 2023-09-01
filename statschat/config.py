@@ -20,7 +20,6 @@ class OpenAIApiSettings(BaseSettings):
 
     type: str
     base: str
-    version: str
     chat_version: str
     key: str
 
