@@ -29,6 +29,9 @@ class AzureOpenAISettings(BaseSettings):
     """Azure OpenAI settings."""
 
     engine: str
+    temperature: float = Field(0.2)
+    top_p: float = Field(0.95)
+
     api: OpenAIApiSettings
 
 
