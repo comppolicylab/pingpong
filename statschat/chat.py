@@ -11,7 +11,16 @@ openai.api_key = config.azure.oai.api.key
 openai.api_version = config.azure.oai.api.chat_version
 
 
-ChatTurn = NamedTuple('ChatTurn', [('user', str), ('ai', str)])
+class Role:
+    """Roles for chat participants."""
+
+    USER = "user"
+    AI = "assistant"
+    TOOL = "tool"
+    SYSTEM = "system"
+
+
+ChatTurn = NamedTuple('ChatTurn', [('role', str), ('content', str)])
 
 
 class ChatWithDataCompletion(openai.ChatCompletion):
@@ -43,9 +52,10 @@ class ChatWithDataCompletion(openai.ChatCompletion):
                     "indexName": config.azure.cs.index_name,
                     "inScope": True,
                     "key": config.azure.cs.key,
-                    "queryType": "semantic",
+                    "queryType": "simple",
+                    #  "queryType": "semantic",
+                    #  "semanticConfiguration": "default",
                     "roleInformation": system_prompt,
-                    "semanticConfiguration": "default",
                 },
                 "type": "AzureCognitiveSearch"
             }]
@@ -91,9 +101,23 @@ class Chat:
             user: The user's message.
             ai: The AI's response.
         """
-        self.history.append(ChatTurn(user, ai))
+        self.add_message(Role.USER, user)
+        self.add_message(Role.AI, ai)
 
-    async def chat(self, text: str, **kwargs) -> str:
+    def add_message(self, role: str, text: str):
+        self.history.append(ChatTurn(role, text))
+
+    def last_message(self):
+        """Get the last message in the chat history.
+
+        Returns:
+            The last message.
+        """
+        if not self.history:
+            return None
+        return self.history[-1]
+
+    async def chat(self, text: str, **kwargs) -> list[ChatTurn]:
         """Chat with the system.
 
         Args:
@@ -111,9 +135,12 @@ class Chat:
                 **kwargs,
                 )
         response = await ChatWithDataCompletion.acreate(**settings)
-        message = response.choices[0].messages[-1]
-        self.add_example(text, message['content'])
-        return message['content']
+        self.add_message(Role.USER, text)
+        new_messages = list[ChatTurn]()
+        for msg in response.choices[0].messages:
+            self.add_message(msg['role'], msg['content'])
+            new_messages.append(self.history[-1])
+        return new_messages
 
     def _get_messages(self, text: str) -> list[dict]:
         """Get the chat history as a list of messages.
@@ -125,22 +152,18 @@ class Chat:
             The chat history as a list of messages.
         """
         messages = [{
-            "role": "system",
+            "role": Role.SYSTEM,
             "content": self.system_prompt,
             }]
 
         for turn in self.history:
             messages.append({
-                "role": "user",
-                "content": turn.user,
-                })
-            messages.append({
-                "role": "assistant",
-                "content": turn.ai,
+                "role": turn.role,
+                "content": turn.content,
                 })
 
         messages.append({
-            "role": "user",
+            "role": Role.USER,
             "content": text,
             })
 
