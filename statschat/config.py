@@ -6,6 +6,12 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
+class TutorSettings(BaseSettings):
+    """Tutor settings."""
+
+    prompt_file: str
+
+
 class SlackSettings(BaseSettings):
     """Slack settings."""
 
@@ -13,12 +19,14 @@ class SlackSettings(BaseSettings):
     client_id: str
     client_secret: str
     signing_secret: str
+    web_token: str
+    socket_token: str
 
 
 class OpenAIApiSettings(BaseSettings):
     """OpenAI API settings."""
 
-    type: str
+    type: str = Field("azure")
     base: str
     chat_version: str
     key: str
@@ -34,10 +42,20 @@ class AzureOpenAISettings(BaseSettings):
     api: OpenAIApiSettings
 
 
+class AzureCSSettings(BaseSettings):
+    """Azure cognitive services search settings."""
+
+    key: str
+    endpoint: str
+    index_name: str
+    type: str = Field("AzureCognitiveSearch")
+
+
 class AzureSettings(BaseSettings):
     """Azure settings."""
 
     oai: AzureOpenAISettings
+    cs: AzureCSSettings
 
 
 class Config(BaseSettings):
@@ -47,6 +65,7 @@ class Config(BaseSettings):
 
     slack: SlackSettings
     azure: AzureSettings
+    tutor: TutorSettings
 
 
 _config_path = os.environ.get('CONFIG_PATH', "config.toml")
