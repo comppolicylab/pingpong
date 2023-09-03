@@ -41,7 +41,7 @@ async def client_user_id(client: SocketModeClient) -> str:
     return _user_id
 
 
-async def get_thread_history(client: SocketModeClient, event) -> Chat:
+async def get_thread_history(client: SocketModeClient, event: dict) -> Chat:
     """Get the history of a thread.
 
     Args:
@@ -56,6 +56,7 @@ async def get_thread_history(client: SocketModeClient, event) -> Chat:
     chat = Chat(bot_id, prompt)
     thread_ts = event.get('thread_ts')
     if not thread_ts:
+        chat.add_message(Role.USER, event['text'])
         return chat
 
     # Get the thread history
@@ -98,10 +99,6 @@ async def reply(client: SocketModeClient, event: dict, chat: Chat):
         event: Event description
         chat: Chat instance
     """
-    claimed = await claim_message(event['channel'], event['ts'])
-    if not claimed:
-        logger.debug("Message %s already claimed", event['ts'])
-        return
 
     # Show "loading" status
     await client.web_client.reactions_add(
@@ -111,7 +108,7 @@ async def reply(client: SocketModeClient, event: dict, chat: Chat):
             )
 
     # Get the response from the chatbot
-    new_turns = await chat.chat(event['text'])
+    new_turns = await chat.reply()
 
     # Post the response in the thread.
     result = await client.web_client.chat_postMessage(
@@ -157,6 +154,11 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
 
             match event.get('type'):
                 case 'message':
+                    claimed = await claim_message(event['channel'], event['ts'])
+                    if not claimed:
+                        logger.debug("Message %s already claimed", event['ts'])
+                        return
+
                     chat = await get_thread_history(client, event)
                     if chat.is_relevant():
                         await reply(client, event, chat)
@@ -171,6 +173,11 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
                             channel=event['channel'],
                             timestamp=event['ts'],
                             )
+
+                    claimed = await claim_message(event['channel'], event['ts'])
+                    if not claimed:
+                        logger.debug("Message %s already claimed", event['ts'])
+                        return
 
                     chat = await get_thread_history(client, event)
                     await reply(client, event, chat)

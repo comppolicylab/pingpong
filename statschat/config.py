@@ -44,11 +44,12 @@ class AzureOpenAISettings(BaseSettings):
 
 
 class AzureCSSettings(BaseSettings):
-    """Azure cognitive services search settings."""
+    """Azure cognitive search settings."""
 
     key: str
     endpoint: str
     index_name: str
+    restrict_answers_to_data: bool = Field(True)
     type: str = Field("AzureCognitiveSearch")
 
 

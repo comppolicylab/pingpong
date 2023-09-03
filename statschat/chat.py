@@ -40,7 +40,8 @@ class ChatWithDataCompletion(openai.ChatCompletion):
                     "endpoint": config.azure.cs.endpoint,
                     "fieldsMapping": {
                         "contentFields": [
-                            "content"
+                            "content",
+                            "title",
                         ],
                         "contentFieldsSeparator": "\n",
                         "filepathField": None,
@@ -50,7 +51,7 @@ class ChatWithDataCompletion(openai.ChatCompletion):
                     },
                     "filter": None,
                     "indexName": config.azure.cs.index_name,
-                    "inScope": True,
+                    "inScope": config.azure.cs.restrict_answers_to_data,
                     "key": config.azure.cs.key,
                     "queryType": "simple",
                     #  "queryType": "semantic",
@@ -140,20 +141,18 @@ class Chat:
         else:
             self.history.append(ChatTurn(role, text))
 
-    async def chat(self, text: str, **kwargs) -> list[ChatTurn]:
-        """Chat with the system.
+    async def reply(self, **kwargs) -> list[ChatTurn]:
+        """Generate the next reply.
 
         Args:
-            text: The user's message.
             **kwargs: Additional keyword arguments to pass to OpenAI.
 
         Returns:
             The system's response.
         """
-        self.add_message(Role.USER, text)
         settings = dict(
                 engine=config.azure.oai.engine,
-                messages=self._get_messages(text),
+                messages=self._get_messages(),
                 temperature=config.azure.oai.temperature,
                 top_p=config.azure.oai.top_p,
                 **kwargs,
@@ -165,11 +164,8 @@ class Chat:
             new_messages.append(self.history[-1])
         return new_messages
 
-    def _get_messages(self, text: str) -> list[dict]:
+    def _get_messages(self) -> list[dict]:
         """Get the chat history as a list of messages.
-
-        Args:
-            text: The user's message.
 
         Returns:
             The chat history as a list of messages.
