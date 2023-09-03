@@ -105,7 +105,7 @@ async def reply(client: SocketModeClient, event: dict, chat: Chat):
 
     # Show "loading" status
     await client.web_client.reactions_add(
-            name="thinkspin",
+            name=config.tutor.loading_reaction,
             channel=event['channel'],
             timestamp=event['ts'],
             )
@@ -122,7 +122,7 @@ async def reply(client: SocketModeClient, event: dict, chat: Chat):
 
     # Remove the "loading" status
     await client.web_client.reactions_remove(
-            name="thinkspin",
+            name=config.tutor.loading_reaction,
             channel=event['channel'],
             timestamp=event['ts'],
             )

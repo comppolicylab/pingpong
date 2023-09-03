@@ -10,6 +10,7 @@ class TutorSettings(BaseSettings):
     """Tutor settings."""
 
     prompt_file: str
+    loading_reaction: str = Field("thinking_face")
 
 
 class SlackSettings(BaseSettings):
