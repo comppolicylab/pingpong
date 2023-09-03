@@ -52,7 +52,8 @@ async def get_thread_history(client: SocketModeClient, event) -> Chat:
     Returns:
         List of messages in the thread
     """
-    chat = Chat(prompt)
+    bot_id = await client_user_id(client)
+    chat = Chat(bot_id, prompt)
     thread_ts = event.get('thread_ts')
     if not thread_ts:
         return chat
@@ -66,7 +67,6 @@ async def get_thread_history(client: SocketModeClient, event) -> Chat:
 
     # Get the messages from the history
     messages = history['messages']
-    bot_id = await client_user_id(client)
 
     # Add messages to the chat
     for message in messages:
@@ -85,14 +85,7 @@ async def get_thread_history(client: SocketModeClient, event) -> Chat:
         for turn in turns:
             chat.add_message(turn.role, turn.content)
 
-        last_message = chat.last_message()
-        if last_message and last_message.role == role:
-            # If the last message was from the same role, add the message to
-            # the last message
-            chat.append_last_message(message['text'])
-        else:
-            # Otherwise, create a new message
-            chat.add_message(role, message['text'])
+        chat.add_message(role, message['text'])
 
     return chat
 
@@ -110,6 +103,13 @@ async def reply(client: SocketModeClient, event: dict, chat: Chat):
         logger.debug("Message %s already claimed", event['ts'])
         return
 
+    # Show "loading" status
+    await client.web_client.reactions_add(
+            name="thinkspin",
+            channel=event['channel'],
+            timestamp=event['ts'],
+            )
+
     # Get the response from the chatbot
     new_turns = await chat.chat(event['text'])
 
@@ -120,22 +120,16 @@ async def reply(client: SocketModeClient, event: dict, chat: Chat):
             text=new_turns[-1].content,
             )
 
+    # Remove the "loading" status
+    await client.web_client.reactions_remove(
+            name="thinkspin",
+            channel=event['channel'],
+            timestamp=event['ts'],
+            )
+
     # Save metadata
     if len(new_turns) > 1:
         await save_metadata(result['ts'], new_turns[:-1])
-
-
-def is_relevant_thread(bot_id: str, chat: Chat) -> bool:
-    """Check if bot has been @-mentioned in this thread.
-
-    Args:
-        bot_id: User ID of the bot
-        chat: Chat instance
-    """
-    at_mention = f'<@{bot_id}>'
-    for turn in chat:
-        if turn.role == Role.USER and at_mention in turn.content:
-            return True
 
 
 async def handle_message(client: SocketModeClient, req: SocketModeRequest):
@@ -164,7 +158,7 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
             match event.get('type'):
                 case 'message':
                     chat = await get_thread_history(client, event)
-                    if is_relevant_thread(bot_id, chat):
+                    if chat.is_relevant():
                         await reply(client, event, chat)
                     else:
                         logger.debug("Ignoring event %s, bot was not tagged",

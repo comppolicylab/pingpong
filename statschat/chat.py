@@ -90,13 +90,26 @@ class ChatWithDataCompletion(openai.ChatCompletion):
 
 class Chat:
 
-    def __init__(self, system_prompt: str):
+    def __init__(self, bot_id: str, system_prompt: str):
         self.system_prompt = system_prompt
         self.history = list[ChatTurn]()
+        self.bot_id = bot_id
 
     def __iter__(self):
         """Iterate over the chat history."""
         return iter(self.history)
+
+    def is_relevant(self) -> bool:
+        """Check if the chat is relevant to the bot.
+
+        Returns:
+            True if the chat is relevant, False otherwise.
+        """
+        at_mention = f"<@{self.bot_id}>"
+        for turn in self.history:
+            if turn.role == Role.USER and at_mention in turn.content:
+                return True
+        return False
 
     def add_example(self, user: str, ai: str):
         """Add an example to the chat history.
@@ -109,29 +122,23 @@ class Chat:
         self.add_message(Role.AI, ai)
 
     def add_message(self, role: str, text: str):
-        self.history.append(ChatTurn(role, text))
-
-    def last_message(self):
-        """Get the last message in the chat history.
-
-        Returns:
-            The last message.
-        """
-        if not self.history:
-            return None
-        return self.history[-1]
-
-    def append_last_message(self, text: str):
-        """Append text to the last message in the chat history.
+        """Add a message to the chat history.
 
         Args:
-            text: The text to append.
+            role: The role of the message sender.
+            text: The message text.
         """
-        if not self.history:
-            raise ValueError("No messages in chat history")
-        self.history[-1] = ChatTurn(
-                self.history[-1].role,
-                self.history[-1].content + '\n' + text)
+        last_message = self.history[-1] if self.history else None
+        # Append to the last message if it was sent by the same role.
+        # The language model seems to focus on the most recent USER message,
+        # so make sure it has full context.
+        # TODO(jnu): There might be multiple parties in the conversation, and
+        # I'm not sure whether to try to model this here or not.
+        if last_message and last_message.role == role:
+            new_text = last_message.content + '\n' + text
+            self.history[-1] = ChatTurn(role, new_text)
+        else:
+            self.history.append(ChatTurn(role, text))
 
     async def chat(self, text: str, **kwargs) -> list[ChatTurn]:
         """Chat with the system.
@@ -143,6 +150,7 @@ class Chat:
         Returns:
             The system's response.
         """
+        self.add_message(Role.USER, text)
         settings = dict(
                 engine=config.azure.oai.engine,
                 messages=self._get_messages(text),
@@ -151,7 +159,6 @@ class Chat:
                 **kwargs,
                 )
         response = await ChatWithDataCompletion.acreate(**settings)
-        self.add_message(Role.USER, text)
         new_messages = list[ChatTurn]()
         for msg in response.choices[0].messages:
             self.add_message(msg['role'], msg['content'])
@@ -172,15 +179,12 @@ class Chat:
             "content": self.system_prompt,
             }]
 
+        at_mention = f"<@{self.bot_id}>"
         for turn in self.history:
             messages.append({
                 "role": turn.role,
-                "content": turn.content,
+                "content": turn.content.replace(
+                    at_mention, "[Assistant, please pay attention to this!]"),
                 })
-
-        messages.append({
-            "role": Role.USER,
-            "content": text,
-            })
 
         return messages
