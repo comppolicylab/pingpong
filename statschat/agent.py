@@ -7,6 +7,7 @@ from slack_sdk.socket_mode.request import SocketModeRequest
 from chat import Chat, Role
 from config import config
 from meta import load_metadata, save_metadata
+from claim import claim_message
 
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,7 @@ with open(config.tutor.prompt_file, "r") as f:
     prompt = f.read()
 
 
+# Cached bot client user ID.
 _user_id: str | None = None
 
 
@@ -87,12 +89,53 @@ async def get_thread_history(client: SocketModeClient, event) -> Chat:
         if last_message and last_message.role == role:
             # If the last message was from the same role, add the message to
             # the last message
-            last_message.content += '\n\n' + message['text']
+            chat.append_last_message(message['text'])
         else:
             # Otherwise, create a new message
             chat.add_message(role, message['text'])
 
     return chat
+
+
+async def reply(client: SocketModeClient, event: dict, chat: Chat):
+    """Reply to a message described by event.
+
+    Args:
+        client: SocketModeClient instance
+        event: Event description
+        chat: Chat instance
+    """
+    claimed = await claim_message(event['channel'], event['ts'])
+    if not claimed:
+        logger.debug("Message %s already claimed", event['ts'])
+        return
+
+    # Get the response from the chatbot
+    new_turns = await chat.chat(event['text'])
+
+    # Post the response in the thread.
+    result = await client.web_client.chat_postMessage(
+            channel=event['channel'],
+            thread_ts=event['ts'],
+            text=new_turns[-1].content,
+            )
+
+    # Save metadata
+    if len(new_turns) > 1:
+        await save_metadata(result['ts'], new_turns[:-1])
+
+
+def is_relevant_thread(bot_id: str, chat: Chat) -> bool:
+    """Check if bot has been @-mentioned in this thread.
+
+    Args:
+        bot_id: User ID of the bot
+        chat: Chat instance
+    """
+    at_mention = f'<@{bot_id}>'
+    for turn in chat:
+        if turn.role == Role.USER and at_mention in turn.content:
+            return True
 
 
 async def handle_message(client: SocketModeClient, req: SocketModeRequest):
@@ -102,7 +145,8 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
         client: SocketModeClient instance
         req: SocketModeRequest instance
     """
-    logger.info("Received message: %s", req.payload)
+    logger.info("Handling message %s", req.payload['event_id'])
+
     match req.type:
         case "events_api":
             response = SocketModeResponse(envelope_id=req.envelope_id)
@@ -111,14 +155,22 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
             event = req.payload["event"]
 
             # Filter events from self
-            if event.get('user') == await client_user_id(client):
+            bot_id = await client_user_id(client)
+            if event.get('user') == bot_id:
                 logger.debug("Ignoring event %s from self",
                              req.payload['event_id'])
                 return
 
-            if event.get("type") == "message" and event.get("subtype") is None:
-                chat = await get_thread_history(client, event)
-                if Role.AI not in [turn.role for turn in chat.history]:
+            match event.get('type'):
+                case 'message':
+                    chat = await get_thread_history(client, event)
+                    if is_relevant_thread(bot_id, chat):
+                        await reply(client, event, chat)
+                    else:
+                        logger.debug("Ignoring event %s, bot was not tagged",
+                                     req.payload['event_id'])
+
+                case 'app_mention':
                     # If the bot hasn't responded yet, send a wave reaction
                     await client.web_client.reactions_add(
                             name="wave",
@@ -126,16 +178,10 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
                             timestamp=event['ts'],
                             )
 
-                # Get the response from the chatbot
-                new_turns = await chat.chat(event['text'])
+                    chat = await get_thread_history(client, event)
+                    await reply(client, event, chat)
 
-                # Post the response in the thread.
-                result = await client.web_client.chat_postMessage(
-                        channel=event['channel'],
-                        thread_ts=event['ts'],
-                        text=new_turns[-1].content,
-                        )
+                case _:
+                    logger.debug("Ignoring event %s of type %s",
+                                 req.payload['event_id'], event['type'])
 
-                # Save metadata
-                if len(new_turns) > 1:
-                    await save_metadata(result['ts'], new_turns[:-1])

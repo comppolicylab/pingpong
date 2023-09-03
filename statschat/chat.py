@@ -94,6 +94,10 @@ class Chat:
         self.system_prompt = system_prompt
         self.history = list[ChatTurn]()
 
+    def __iter__(self):
+        """Iterate over the chat history."""
+        return iter(self.history)
+
     def add_example(self, user: str, ai: str):
         """Add an example to the chat history.
 
@@ -116,6 +120,18 @@ class Chat:
         if not self.history:
             return None
         return self.history[-1]
+
+    def append_last_message(self, text: str):
+        """Append text to the last message in the chat history.
+
+        Args:
+            text: The text to append.
+        """
+        if not self.history:
+            raise ValueError("No messages in chat history")
+        self.history[-1] = ChatTurn(
+                self.history[-1].role,
+                self.history[-1].content + '\n' + text)
 
     async def chat(self, text: str, **kwargs) -> list[ChatTurn]:
         """Chat with the system.

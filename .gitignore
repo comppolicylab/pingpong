@@ -162,4 +162,4 @@ cython_debug/
 .swo
 .swp
 config.toml
-.metacache/
+*.db
