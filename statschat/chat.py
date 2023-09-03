@@ -1,7 +1,7 @@
 from typing import NamedTuple
 import openai
 
-from config import config
+from .config import config
 
 
 # Configure OpenAI with values from config

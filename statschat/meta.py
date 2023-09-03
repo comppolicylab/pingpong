@@ -2,7 +2,7 @@ import json
 import logging
 import dbm
 
-from chat import ChatTurn
+from .chat import ChatTurn
 
 
 logger = logging.getLogger(__name__)

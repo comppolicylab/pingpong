@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings
 class TutorSettings(BaseSettings):
     """Tutor settings."""
 
-    prompt_file: str
+    prompt_file: str = Field(os.path.join("statschat", "prompts", "stats-tutor.txt"))
     loading_reaction: str = Field("thinking_face")
 
 

@@ -4,10 +4,10 @@ from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.socket_mode.request import SocketModeRequest
 
-from chat import Chat, Role
-from config import config
-from meta import load_metadata, save_metadata
-from claim import claim_message
+from .chat import Chat, Role
+from .config import config
+from .meta import load_metadata, save_metadata
+from .claim import claim_message
 
 
 logger = logging.getLogger(__name__)

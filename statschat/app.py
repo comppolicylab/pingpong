@@ -5,8 +5,8 @@ import asyncio
 from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 
-from config import config
-from agent import handle_message
+from .config import config
+from .agent import handle_message
 
 
 logging.basicConfig(level=config.log_level)
