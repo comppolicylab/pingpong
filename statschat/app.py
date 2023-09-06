@@ -77,10 +77,11 @@ def main():
 
 
 if __name__ == "__main__":
-    sentry_sdk.init(
-            dsn=config.sentry.dsn,
-            integrations=[AioHttpIntegration()],
-            traces_sample_rate=1.0,
-            profiles_sample_rate=1.0,
-            )
+    if config.sentry.dsn:
+        sentry_sdk.init(
+                dsn=config.sentry.dsn,
+                integrations=[AioHttpIntegration()],
+                traces_sample_rate=1.0,
+                profiles_sample_rate=1.0,
+                )
     main()
