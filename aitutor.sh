@@ -1,2 +1,2 @@
 #!/bin/sh
-poetry run python -m statschat
+POETRY_CACHE_DIR=$(pwd)/.cache poetry run python -m statschat

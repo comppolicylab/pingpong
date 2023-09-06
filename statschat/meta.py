@@ -3,6 +3,7 @@ import logging
 import dbm
 
 from .chat import ChatTurn
+from .config import config
 
 
 logger = logging.getLogger(__name__)
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 # TODO - write this to non-local storage!
 # And keep a local copy of it until it's written to protect against races!
 
-_DB_DIR = '.db'
+_DB_DIR = config.tutor.db_dir
 os.makedirs(_DB_DIR, exists=True)
 _META_CACHE = os.path.join(_DB_DIR, 'meta')
 

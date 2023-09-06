@@ -11,6 +11,7 @@ class TutorSettings(BaseSettings):
 
     prompt_file: str = Field(os.path.join("statschat", "prompts", "stats-tutor.txt"))
     loading_reaction: str = Field("thinking_face")
+    db_dir: str = Field(".db")
 
 
 class SlackSettings(BaseSettings):
