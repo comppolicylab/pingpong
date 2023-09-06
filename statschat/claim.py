@@ -1,7 +1,9 @@
 import dbm
 
+from .meta import _DB_DIR
 
-_CLAIM_CACHE = 'claim'
+
+_CLAIM_CACHE = os.path.join(_DB_DIR, 'claim')
 
 
 async def claim_message(channel: str, ts: str) -> bool:
