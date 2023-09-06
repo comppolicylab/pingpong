@@ -1,7 +1,7 @@
 [Unit]
 Description=AI Tutor Slack Bot
 [Service]
-User=aitutor
+User=root
 WorkingDirectory=/opt/aitutor
 ExecStart=/opt/aitutor/aitutor.sh
 Type=simple
