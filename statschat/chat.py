@@ -179,8 +179,8 @@ class Chat:
         for turn in self.history:
             messages.append({
                 "role": turn.role,
-                "content": turn.content.replace(
-                    at_mention, "[Assistant, please pay attention to this!]"),
+                # Remove at-mentions for the bot from the message content
+                "content": turn.content.replace(at_mention, "").strip(),
                 })
 
         return messages

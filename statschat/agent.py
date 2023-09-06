@@ -6,7 +6,7 @@ from slack_sdk.socket_mode.request import SocketModeRequest
 
 from .chat import Chat, Role
 from .config import config
-from .meta import load_metadata, save_metadata
+from .meta import load_metadata, save_metadata, save_error, get_mdid
 from .claim import claim_message
 
 
@@ -82,9 +82,13 @@ async def get_thread_history(client: SocketModeClient, event: dict) -> Chat:
 
         role = Role.AI if message['user'] == bot_id else Role.USER
 
-        turns = await load_metadata(message['ts'])
-        for turn in turns:
-            chat.add_message(turn.role, turn.content)
+        turns = await load_metadata(get_mdid(message))
+        if isinstance(turns, dict) and 'error' in turns:
+            logger.warning("Ignoring an error message we sent: %s",
+                           turns['error'])
+        else:
+            for turn in turns:
+                chat.add_message(turn.role, turn.content)
 
         chat.add_message(role, message['text'])
 
@@ -100,33 +104,56 @@ async def reply(client: SocketModeClient, event: dict, chat: Chat):
         chat: Chat instance
     """
 
-    # Show "loading" status
-    await client.web_client.reactions_add(
-            name=config.tutor.loading_reaction,
-            channel=event['channel'],
-            timestamp=event['ts'],
-            )
+    try:
+        # Show "loading" status
+        await client.web_client.reactions_add(
+                name=config.tutor.loading_reaction,
+                channel=event['channel'],
+                timestamp=event['ts'],
+                )
+    except Exception as e:
+        logger.error("Failed to add reaction: %s", e)
+        # This is not a critical error, so we can continue
 
     # Get the response from the chatbot
-    new_turns = await chat.reply()
+    try:
+        new_turns = await chat.reply()
 
-    # Post the response in the thread.
-    result = await client.web_client.chat_postMessage(
-            channel=event['channel'],
-            thread_ts=event['ts'],
-            text=new_turns[-1].content,
-            )
+        # Post the response in the thread.
+        result = await client.web_client.chat_postMessage(
+                channel=event['channel'],
+                thread_ts=event['ts'],
+                text=new_turns[-1].content,
+                )
 
-    # Remove the "loading" status
-    await client.web_client.reactions_remove(
-            name=config.tutor.loading_reaction,
-            channel=event['channel'],
-            timestamp=event['ts'],
-            )
+        # Save metadata
+        if len(new_turns) > 1:
+            await save_metadata(get_mdid(result), new_turns[:-1])
+    except Exception as e:
+        logger.error("Failed to generate reply: %s", e)
+        # Send an error message to the channel, and store some metadata that
+        # flags that this new message is an error, so that we can exclude it
+        # from the conversation thread in the future.
+        # TODO(jnu): may be more robust to use Slack's built-in metadata for
+        # this, so that we can simplify our own meta store.
+        result = await client.web_client.chat_postMessage(
+                channel=event['channel'],
+                thread_ts=event['ts'],
+                text="Sorry, an error occurred while generating a reply. You can try to repeat the question, or contact my maintainer if the problem persists.",
+                )
 
-    # Save metadata
-    if len(new_turns) > 1:
-        await save_metadata(result['ts'], new_turns[:-1])
+        await save_error(get_mdid(result), str(e))
+    finally:
+        try:
+            # Remove the "loading" status
+            await client.web_client.reactions_remove(
+                    name=config.tutor.loading_reaction,
+                    channel=event['channel'],
+                    timestamp=event['ts'],
+                    )
+        except Exception as e:
+            logger.error("Failed to remove reaction: %s", e)
+            # This is not a critical error, so we can continue
 
 
 async def handle_message(client: SocketModeClient, req: SocketModeRequest):

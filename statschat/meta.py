@@ -14,6 +14,30 @@ logger = logging.getLogger(__name__)
 _META_CACHE = 'meta'
 
 
+def get_mdid(event: dict) -> str:
+    """Get the metadata ID for an event.
+
+    Args:
+        event: Slack event
+    
+    Returns:
+        Metadata ID
+    """
+    return f"{event['channel']}:{event['ts']}"
+
+
+async def save_error(mdid: str, error: str):
+    """Save error metadata to a file.
+
+    Args:
+        mdid: Metadata ID
+        error: Error message
+    """
+    # TODO - consolidate this with the other save_metadata
+    with dbm.open(_META_CACHE, 'c') as db:
+        db[mdid] = json.dumps({'error': error})
+
+
 async def save_metadata(mdid: str, turns: list[ChatTurn]):
     """Save metadata to a file.
 
@@ -25,7 +49,7 @@ async def save_metadata(mdid: str, turns: list[ChatTurn]):
         db[mdid] = json.dumps([turn._asdict() for turn in turns])
 
 
-async def load_metadata(mdid: str) -> list[ChatTurn]:
+async def load_metadata(mdid: str) -> list[ChatTurn] | dict:
     """Load metadata from a file.
 
     Args:
@@ -39,4 +63,7 @@ async def load_metadata(mdid: str) -> list[ChatTurn]:
             logger.debug("Metadata file %s does not exist", mdid)
             return []
         data = json.loads(db[mdid])
+        if isinstance(data, dict):
+            return data
+
         return [ChatTurn(msg['role'], msg['content']) for msg in data]
