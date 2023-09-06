@@ -2,6 +2,8 @@ import signal
 import logging
 import asyncio
 
+import sentry_sdk
+from sentry_sdk.integrations.aiohttp import AioHttpIntegration
 from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 
@@ -75,4 +77,10 @@ def main():
 
 
 if __name__ == "__main__":
+    sentry_sdk.init(
+            dsn=config.sentry.dsn,
+            integrations=[AioHttpIntegration()],
+            traces_sample_rate=1.0,
+            profiles_sample_rate=1.0,
+            )
     main()

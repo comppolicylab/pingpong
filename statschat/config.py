@@ -60,13 +60,20 @@ class AzureSettings(BaseSettings):
     cs: AzureCSSettings
 
 
+class SentrySettings(BaseSettings):
+    """Sentry settings."""
+
+    dsn: str
+
+
 class Config(BaseSettings):
     """Stats Chat Bot config."""
     
     log_level: str = Field("INFO", env="LOG_LEVEL")
 
-    slack: SlackSettings
     azure: AzureSettings
+    sentry: SentrySettings
+    slack: SlackSettings
     tutor: TutorSettings
 
 
