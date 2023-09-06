@@ -3,8 +3,6 @@
 # Ensure that the aitutor user exists
 useradd -r -s /bin/false aitutor
 
-curl -sSL https://install.python-poetry.org | sudo -u aitutor python3 -
-
 # Make sure that the /opt/aitutor directory exists
 mkdir -p /opt/aitutor
 mkdir -p /opt/aitutor/db
