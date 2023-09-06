@@ -1,6 +1,7 @@
 import json
 import logging
 import dbm
+import os
 
 from .chat import ChatTurn
 from .config import config
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 # And keep a local copy of it until it's written to protect against races!
 
 _DB_DIR = config.tutor.db_dir
-os.makedirs(_DB_DIR, exists=True)
+os.makedirs(_DB_DIR, exist_ok=True)
 _META_CACHE = os.path.join(_DB_DIR, 'meta')
 
 

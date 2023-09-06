@@ -1,2 +1,2 @@
 #!/bin/sh
-POETRY_CACHE_DIR=$(pwd)/.cache poetry run python -m statschat
+docker run -d -it --rm --name aitutor --mount type=bind,source="$(pwd)"/config.toml,target=/code/config.toml,readonly --mount type=bind,source="$(pwd)"/db,target=/db aitutor:latest

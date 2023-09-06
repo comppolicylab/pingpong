@@ -1,4 +1,5 @@
 import dbm
+import os
 
 from .meta import _DB_DIR
 
