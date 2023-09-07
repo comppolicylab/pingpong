@@ -9,6 +9,8 @@ The Slack Bot only interacts with threads where it has been @-messaged in the ch
 
 To ask a question, simply @-mention the bot in the channel where you've added it. The bot will consider as much of the context in a single conversation thread as it is able, so you can keep replying within a thread. The bot does _not_ share context between threads, and it does not see other messages in the channel if it has not been @-mentioned.
 
+You can downvote answers within threads by reacting with the `:-1:` 👎 emoji. This will make the message invisible to the bot. You can use this to flag messages the bot generates that are irrelevant, or messages written by you or other humans that are unhelpful. The bot will ignore these messages as you continue your conversation.
+
 # Setup
 
 ## Overview
