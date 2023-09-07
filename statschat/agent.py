@@ -1,4 +1,3 @@
-import json
 import logging
 from datetime import datetime
 
@@ -7,10 +6,14 @@ from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.socket_mode.request import SocketModeRequest
 
 from .chat import Chat, Role
-from .config import config
-from .meta import load_metadata, save_metadata, save_error, get_mdid
+from .meta import load_metadata, save_metadata, save_error
 from .claim import claim_message
-from .prompt import get_prompt_for_channel, get_examples_for_channel, get_channel_config
+from .prompt import (
+        get_prompt_for_channel,
+        get_examples_for_channel,
+        get_channel_config,
+        WrongChannelError,
+        )
 
 
 logger = logging.getLogger(__name__)
@@ -106,31 +109,72 @@ async def get_thread_history(client: SocketModeClient, payload: dict) -> Chat:
     return chat
 
 
-async def reply(client: SocketModeClient, payload: dict, chat: Chat):
+async def react(client: SocketModeClient, event: dict, reaction: str):
+    """React to a message described by event.
+
+    Args:
+        client: SocketModeClient instance
+        event: Event dictionary
+        reaction: Reaction emoji
+    """
+    try:
+        await client.web_client.reactions_add(
+                name=reaction,
+                channel=event['channel'],
+                timestamp=event['ts'],
+                )
+    except Exception as e:
+        # This is not a critical error, so we can continue
+        logger.error("Failed to add reaction %s to %s/%s: %s",
+                     reaction, event['channel'], event['ts'], e)
+
+
+async def unreact(client: SocketModeClient, event: dict, reaction: str):
+    """Remove reaction to a message described by event.
+
+    Args:
+        client: SocketModeClient instance
+        event: Event dictionary
+        reaction: Reaction emoji
+    """
+    try:
+        await client.web_client.reactions_remove(
+                name=reaction,
+                channel=event['channel'],
+                timestamp=event['ts'],
+                )
+    except Exception as e:
+        # This is not a critical error, so we can continue
+        logger.error("Failed to remove reaction %s from %s/%s: %s",
+                     reaction, event['channel'], event['ts'], e)
+
+
+async def reply(client: SocketModeClient, payload: dict):
     """Reply to a message described by event.
 
     Args:
         client: SocketModeClient instance
         payload: Event payload
-        chat: Chat instance
     """
     event = payload['event']
-    channel_config = get_channel_config(payload['team_id'], event['channel'])
-    loading_reaction = channel_config.loading_reaction
+    send_error = False
 
     try:
-        # Show "loading" status
-        await client.web_client.reactions_add(
-                name=loading_reaction,
-                channel=event['channel'],
-                timestamp=event['ts'],
-                )
-    except Exception as e:
-        logger.error("Failed to add reaction: %s", e)
-        # This is not a critical error, so we can continue
+        channel_config = get_channel_config(payload['team_id'], event['channel'])
+        loading_reaction = channel_config.loading_reaction
+        chat = await get_thread_history(client, payload)
+        if not chat.is_relevant():
+            return
+        else:
+            logger.debug("Ignoring event %s (%s), bot was not tagged",
+                         payload['event_id'], event['type'])
 
-    # Get the response from the chatbot
-    try:
+        # From here on out, if we hit some error generating a response we
+        # should send some message to the channel.
+        send_error = True
+
+        await react(client, event, loading_reaction)
+
         new_turns = await chat.reply()
 
         # Post the response in the thread.
@@ -143,6 +187,21 @@ async def reply(client: SocketModeClient, payload: dict, chat: Chat):
         # Save metadata
         if len(new_turns) > 1:
             await save_metadata(payload, new_turns[:-1])
+    except WrongChannelError as e:
+        logger.warning("Ignoring message in wrong channel: %s", e)
+        result = await client.web_client.chat_postMessage(
+                channel=event['channel'],
+                thread_ts=event['ts'],
+                text="Sorry, I have not been configured to respond in this channel. If you think this is a mistake, please contact my maintainer and tell them I said: `{}`.".format(str(e)),
+                )
+
+        await save_error({
+            'team_id': payload['team_id'],
+            'event': {
+                'channel': event['channel'],
+                'ts': result['ts'],
+                },
+            }, str(e))
     except Exception as e:
         logger.error("Failed to generate reply: %s", e)
         # Send an error message to the channel, and store some metadata that
@@ -150,24 +209,22 @@ async def reply(client: SocketModeClient, payload: dict, chat: Chat):
         # from the conversation thread in the future.
         # TODO(jnu): may be more robust to use Slack's built-in metadata for
         # this, so that we can simplify our own meta store.
-        result = await client.web_client.chat_postMessage(
-                channel=event['channel'],
-                thread_ts=event['ts'],
-                text="Sorry, an error occurred while generating a reply. You can try to repeat the question, or contact my maintainer if the problem persists.",
-                )
-
-        await save_error(payload, str(e))
-    finally:
-        try:
-            # Remove the "loading" status
-            await client.web_client.reactions_remove(
-                    name=loading_reaction,
+        if send_error:
+            result = await client.web_client.chat_postMessage(
                     channel=event['channel'],
-                    timestamp=event['ts'],
+                    thread_ts=event['ts'],
+                    text="Sorry, an error occurred while generating a reply. You can try to repeat the question, or contact my maintainer if the problem persists.",
                     )
-        except Exception as e:
-            logger.error("Failed to remove reaction: %s", e)
-            # This is not a critical error, so we can continue
+
+            await save_error({
+                'team_id': payload['team_id'],
+                'event': {
+                    'channel': event['channel'],
+                    'ts': result['ts'],
+                    },
+            }, str(e))
+    finally:
+        await unreact(client, event, loading_reaction)
 
 
 async def handle_message(client: SocketModeClient, req: SocketModeRequest):
@@ -202,29 +259,18 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
                                      event_id, event_type)
                         return
 
-                    chat = await get_thread_history(client, req.payload)
-                    if chat.is_relevant():
-                        await reply(client, req.payload, chat)
-                    else:
-                        logger.debug("Ignoring event %s (%s), bot was not tagged",
-                                     event_id, event_type)
+                    await reply(client, req.payload)
 
                 case 'app_mention':
                     # If the bot hasn't responded yet, send a wave reaction
-                    await client.web_client.reactions_add(
-                            name="wave",
-                            channel=event['channel'],
-                            timestamp=event['ts'],
-                            )
-
+                    await react(client, event, "wave")
                     claimed = await claim_message(req.payload)
                     if not claimed:
                         logger.debug("Message %s (%s) already claimed",
                                      event_id, event_type)
                         return
 
-                    chat = await get_thread_history(client, req.payload)
-                    await reply(client, req.payload, chat)
+                    await reply(client, req.payload)
 
                 case _:
                     logger.debug("Ignoring event %s (%s)",

@@ -4,6 +4,10 @@ import json
 from .config import config, Channel
 
 
+class WrongChannelError(Exception):
+    pass
+
+
 def get_channel_config(team_id: str, channel_id: str) -> Channel:
     """Get the config for a channel.
 
@@ -18,7 +22,7 @@ def get_channel_config(team_id: str, channel_id: str) -> Channel:
         if channel.channel_id == channel_id and channel.team_id == team_id:
             return channel
 
-    raise ValueError(f"Channel {team_id}/{channel_id} not found in config")
+    raise WrongChannelError(f"config not found for {team_id}/{channel_id}")
 
 
 @cache
