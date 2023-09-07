@@ -3,8 +3,13 @@ Stats Tutor Slack Bot
 
 A Slack Bot that helps students out with class assignments and logistics.
 
+# Usage
 
-# Development
+The Slack Bot only interacts with threads where it has been @-messaged in the channel where it has been configured.
+
+To ask a question, simply @-mention the bot in the channel where you've added it. The bot will consider as much of the context in a single conversation thread as it is able, so you can keep replying within a thread. The bot does _not_ share context between threads, and it does not see other messages in the channel if it has not been @-mentioned.
+
+# Setup
 
 ## Overview
 
@@ -37,19 +42,7 @@ You will need to request to install your Slack App into your workspace.
 After you do this, take note of the Workspace ID. You can find this in the URL on the Slack Developer page for managing that workspace. The ID begins with `T`, like `TABC123XYZ9`. This will be your `team_id` you need to list in the config.
 You will also need the channel ID for _each channel you want to add the bot to_. You can find this in Slack by copying a the link to the channel in the context menu and pulling out the ID that starts with `C`, like `C00ABC1230`.
 
-## Local setup
-
-### Dependencies
-
-This project uses [poetry](https://python-poetry.org/) for package management,
-and Python3.11.
-Install poetry, then in the root directory run:
-
-```
-poetry install
-```
-
-### Config
+### Config file
 
 You will need a `config.toml` file that supplies required params from `config.py`.
 
@@ -86,6 +79,18 @@ The config file will be loaded from the path specified in the `CONFIG_PATH` envi
 #### `tutor.channels[]` settings
 
 You need to configure the app explicitly for _each_ channel you want to integrate the app with. This has two purposes: 1) so that multiple classes can tailor the bot to their subject areas using their own search indexes and model prompts, and 2) to prevent unauthorized usage of the services, which all have costs and quotas associated with them.
+
+## Local development
+
+### Dependencies
+
+This project uses [poetry](https://python-poetry.org/) for package management,
+and Python3.11.
+Install poetry, then in the root directory run:
+
+```
+poetry install
+```
 
 ### Running the app
 
@@ -125,8 +130,10 @@ and the `/path/to/db/dir` should be some existing directory on the machine where
 You might need additional bind mounts, depending on what your config file says.
 For example, you can supply your own prompts in a custom directory and mount it into the container.
 
-## Usage
+# About
 
-The Slack Bot only interacts with threads where it has been @-messaged in the channel where it has been configured.
+This project was developed by the [Computational Policy Lab](https://policylab.stanford.edu/).
 
-To ask a question, simply @-mention the bot in the channel where you've added it. The bot will consider as much of the context in a single conversation thread as it is able, so you can keep replying within a thread. The bot does _not_ share context between threads, and it does not see other messages in the channel if it has not been @-mentioned.
+Maintainer / dev contact: [Joe Nudell](https://github.com/jnu).
+
+Code is available under the MIT License. See [LICENSE](LICENSE) for more information.
