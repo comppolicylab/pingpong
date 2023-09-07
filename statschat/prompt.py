@@ -26,21 +26,6 @@ def get_channel_config(team_id: str, channel_id: str) -> Channel:
 
 
 @cache
-def get_loading_reaction_for_channel(team_id: str, channel_id: str) -> str:
-    """Get the loading reaction for a channel.
-
-    Args:
-        team_id: Team (workspace) ID
-        channel_id: Channel ID
-
-    Returns:
-        Loading reaction for the channel
-    """
-    channel_config = get_channel_config(team_id, channel_id)
-    return channel_config.loading_reaction
-
-
-@cache
 def get_prompt_for_channel(team_id: str, channel_id: str) -> str:
     """Get the prompt for a channel.
 

@@ -167,6 +167,7 @@ async def reply(client: SocketModeClient, payload: dict):
     """
     event = payload['event']
     send_error = False
+    loading_reaction = "thinking_face"
 
     try:
         channel_config = get_channel_config(payload['team_id'], event['channel'])
