@@ -1,0 +1,2 @@
+{"role": "user", "content": "Hi! For the binary variable question in 2D, does anyone know if we have to remove the NA values, and if so, how do we do that using the ifelse function?"}
+{"role": "assistant", "content": "Hi, you shouldn't have to remove the NAs because you only want to sum up population in countries that are known to have GDP below mean. If you wanted to drop NA values, you could use the `drop_na()` function."}

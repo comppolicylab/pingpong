@@ -10,6 +10,7 @@ class TutorSettings(BaseSettings):
     """Tutor settings."""
 
     prompt_file: str = Field(os.path.join("statschat", "prompts", "stats-tutor.txt"))
+    examples_file: str | None = Field(None)
     loading_reaction: str = Field("thinking_face")
     db_dir: str = Field(".db")
 

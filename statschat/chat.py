@@ -91,10 +91,13 @@ class ChatWithDataCompletion(openai.ChatCompletion):
 
 class Chat:
 
-    def __init__(self, bot_id: str, system_prompt: str):
+    def __init__(self, bot_id: str, system_prompt: str, examples: list[dict] = None):
         self.system_prompt = system_prompt
         self.history = list[ChatTurn]()
         self.bot_id = bot_id
+        if examples:
+            for example in examples:
+                self.add_example(example['role'], example['content'])
 
     def __iter__(self):
         """Iterate over the chat history."""

@@ -1,4 +1,6 @@
+import json
 import logging
+from datetime import datetime
 
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
@@ -17,6 +19,13 @@ logger = logging.getLogger(__name__)
 with open(config.tutor.prompt_file, "r") as f:
     prompt = f.read()
 
+# Load few-shot examples if some are given
+examples = []
+if config.tutor.examples_file:
+    with open(config.tutor.examples_file, "r") as f:
+        for line in f:
+            if line.strip():
+                examples.append(json.loads(line))
 
 # Cached bot client user ID.
 _user_id: str | None = None
@@ -53,7 +62,9 @@ async def get_thread_history(client: SocketModeClient, event: dict) -> Chat:
         List of messages in the thread
     """
     bot_id = await client_user_id(client)
-    chat = Chat(bot_id, prompt)
+    # Today's date as a string like Wednesday, December 4, 2019.
+    today = datetime.today().strftime("%A, %B %d, %Y")
+    chat = Chat(bot_id, prompt.format(date=today))
     thread_ts = event.get('thread_ts')
     if not thread_ts:
         chat.add_message(Role.USER, event['text'])
