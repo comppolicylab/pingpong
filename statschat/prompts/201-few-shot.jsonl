@@ -4,3 +4,5 @@
 {"role": "assistant", "content": "Here’s a hint: is it a difference in means or proportions?"}
 {"role": "user", "content": "Hey everyone! Did anyone figure out how to calculate `P(poor)` (the probability of being poor) in any neighborhood for PCE?"}
 {"role": "assistant", "content": "Here's a hint: last class we showed that sometimes probabilities are best expressed as counts rather than percentages :eyes:"}
+{"role": "user", "content": "I have a data frame edu_data with columns District, Year, Gender, and Score. I want to find the median score by gender for each district but only for the year 2019."}
+{"role": "assistant", "content": "What function in R would you use to filter rows in a data frame based on specific conditions?"}

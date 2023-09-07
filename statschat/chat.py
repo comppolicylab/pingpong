@@ -50,12 +50,12 @@ class ChatWithDataCompletion(openai.ChatCompletion):
                         "vectorFields": []
                     },
                     "filter": None,
-                    "indexName": config.azure.cs.index_name,
+                    "indexName": params.pop("index_name"),
                     "inScope": config.azure.cs.restrict_answers_to_data,
                     "key": config.azure.cs.key,
                     # "queryType": "simple",
                     "queryType": "semantic",
-                     "semanticConfiguration": "default",
+                    "semanticConfiguration": "default",
                     "roleInformation": system_prompt,
                 },
                 "type": "AzureCognitiveSearch"
@@ -73,6 +73,10 @@ class ChatWithDataCompletion(openai.ChatCompletion):
             A completion with data sources.
         """
         params = cls._prepare_params(kwargs)
+        from pprint import pprint
+        print("\n\n===PARAMS===")
+        pprint(params)
+        print("============\n\n")
         return await super().acreate(**params)
 
     @classmethod
@@ -91,13 +95,18 @@ class ChatWithDataCompletion(openai.ChatCompletion):
 
 class Chat:
 
-    def __init__(self, bot_id: str, system_prompt: str, examples: list[dict] = None):
+    def __init__(self,
+                 bot_id: str,
+                 system_prompt: str,
+                 index_name: str,
+                 examples: list[dict] = None):
         self.system_prompt = system_prompt
+        self.index_name = index_name
         self.history = list[ChatTurn]()
         self.bot_id = bot_id
         if examples:
             for example in examples:
-                self.add_example(example['role'], example['content'])
+                self.add_message(example['role'], example['content'])
 
     def __iter__(self):
         """Iterate over the chat history."""
@@ -114,16 +123,6 @@ class Chat:
             if turn.role == Role.USER and at_mention in turn.content:
                 return True
         return False
-
-    def add_example(self, user: str, ai: str):
-        """Add an example to the chat history.
-
-        Args:
-            user: The user's message.
-            ai: The AI's response.
-        """
-        self.add_message(Role.USER, user)
-        self.add_message(Role.AI, ai)
 
     def add_message(self, role: str, text: str):
         """Add a message to the chat history.
@@ -154,6 +153,7 @@ class Chat:
             The system's response.
         """
         settings = dict(
+                index_name=self.index_name,
                 engine=config.azure.oai.engine,
                 messages=self._get_messages(),
                 temperature=config.azure.oai.temperature,

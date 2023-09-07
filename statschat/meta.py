@@ -18,51 +18,56 @@ os.makedirs(_DB_DIR, exist_ok=True)
 _META_CACHE = os.path.join(_DB_DIR, 'meta')
 
 
-def get_mdid(channel: str, ts: str) -> str:
-    """Get the metadata ID for an event.
+def get_mdid(payload: dict) -> str:
+    """Get the metadata ID for a message event.
 
     Args:
-        channel: Slack channel ID
-        ts: Message timestamp
+        payload: Event payload dictionary
     
     Returns:
         Metadata ID
     """
-    return f"{channel}:{ts}"
+    team_id = payload['team_id']
+    channel_id = payload['event']['channel']
+    msg_ts = payload['event']['ts']
+    return f"{team_id}:{channel_id}:{msg_ts}"
 
 
-async def save_error(mdid: str, error: str):
+async def save_error(payload: dict, error: str):
     """Save error metadata to a file.
 
     Args:
-        mdid: Metadata ID
+        payload: Event payload dictionary
         error: Error message
     """
     # TODO - consolidate this with the other save_metadata
+    mdid = get_mdid(payload)
     with dbm.open(_META_CACHE, 'c') as db:
         db[mdid] = json.dumps({'error': error})
 
 
-async def save_metadata(mdid: str, turns: list[ChatTurn]):
+async def save_metadata(payload: dict, turns: list[ChatTurn]):
     """Save metadata to a file.
 
     Args:
-        mdid: Metadata ID
+        payload: Event payload dictionary
         turns: List of ChatTurns
     """
+    mdid = get_mdid(payload)
     with dbm.open(_META_CACHE, 'c') as db:
         db[mdid] = json.dumps([turn._asdict() for turn in turns])
 
 
-async def load_metadata(mdid: str) -> list[ChatTurn] | dict:
+async def load_metadata(payload: dict) -> list[ChatTurn] | dict:
     """Load metadata from a file.
 
     Args:
-        mdid: Metadata ID
+        payload: Event payload dictionary
 
     Returns:
         List of ChatTurns
     """
+    mdid = get_mdid(payload)
     with dbm.open(_META_CACHE, 'c') as db:
         if mdid not in db:
             logger.debug("Metadata file %s does not exist", mdid)

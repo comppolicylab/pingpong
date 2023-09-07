@@ -6,12 +6,21 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
+class Channel(BaseSettings):
+    """Describe one slack channel integration."""
+
+    team_id: str
+    channel_id: str
+    prompt_file: str
+    examples_file: str | None = Field(None)
+    loading_reaction: str = Field("thinking_face")
+    cs_index_name: str
+
+
 class TutorSettings(BaseSettings):
     """Tutor settings."""
 
-    prompt_file: str = Field(os.path.join("statschat", "prompts", "stats-tutor.txt"))
-    examples_file: str | None = Field(None)
-    loading_reaction: str = Field("thinking_face")
+    channels: list[Channel]
     db_dir: str = Field(".db")
 
 
@@ -50,7 +59,6 @@ class AzureCSSettings(BaseSettings):
 
     key: str
     endpoint: str
-    index_name: str
     restrict_answers_to_data: bool = Field(True)
     type: str = Field("AzureCognitiveSearch")
 

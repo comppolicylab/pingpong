@@ -10,22 +10,11 @@ from .chat import Chat, Role
 from .config import config
 from .meta import load_metadata, save_metadata, save_error, get_mdid
 from .claim import claim_message
+from .prompt import get_prompt_for_channel, get_examples_for_channel, get_channel_config
 
 
 logger = logging.getLogger(__name__)
 
-
-# Load the system prompt from the file
-with open(config.tutor.prompt_file, "r") as f:
-    prompt = f.read()
-
-# Load few-shot examples if some are given
-examples = []
-if config.tutor.examples_file:
-    with open(config.tutor.examples_file, "r") as f:
-        for line in f:
-            if line.strip():
-                examples.append(json.loads(line))
 
 # Cached bot client user ID.
 _user_id: str | None = None
@@ -50,21 +39,29 @@ async def client_user_id(client: SocketModeClient) -> str:
     return _user_id
 
 
-async def get_thread_history(client: SocketModeClient, event: dict) -> Chat:
+async def get_thread_history(client: SocketModeClient, payload: dict) -> Chat:
     """Get the history of a thread.
 
     Args:
         client: SocketModeClient instance
-        channel: Channel ID
-        ts: Timestamp of the thread
+        payload: Event payload dictionary
 
     Returns:
         List of messages in the thread
     """
+    event = payload['event']
     bot_id = await client_user_id(client)
     # Today's date as a string like Wednesday, December 4, 2019.
     today = datetime.today().strftime("%A, %B %d, %Y")
-    chat = Chat(bot_id, prompt.format(date=today))
+    prompt = get_prompt_for_channel(payload['team_id'], event['channel'])
+    examples = get_examples_for_channel(payload['team_id'], event['channel'])
+    channel_config = get_channel_config(payload['team_id'], event['channel'])
+    index_name = channel_config.cs_index_name
+    chat = Chat(bot_id,
+                prompt.format(date=today),
+                index_name,
+                examples=examples)
+
     thread_ts = event.get('thread_ts')
     if not thread_ts:
         chat.add_message(Role.USER, event['text'])
@@ -80,7 +77,7 @@ async def get_thread_history(client: SocketModeClient, event: dict) -> Chat:
     # Get the messages from the history
     messages = history['messages']
 
-    # Add messages to the chat
+    # Add historical messages to the chat
     for message in messages:
         if message.get('type') != 'message':
             logger.debug("Ignoring message %s of type %s",
@@ -93,7 +90,7 @@ async def get_thread_history(client: SocketModeClient, event: dict) -> Chat:
 
         role = Role.AI if message['user'] == bot_id else Role.USER
 
-        turns = await load_metadata(get_mdid(event['channel'], message['ts']))
+        turns = await load_metadata(payload)
         if isinstance(turns, dict) and 'error' in turns:
             logger.warning("Ignoring an error message we sent: %s",
                            turns['error'])
@@ -103,22 +100,28 @@ async def get_thread_history(client: SocketModeClient, event: dict) -> Chat:
 
         chat.add_message(role, message['text'])
 
+    # Add the new message to the chat
+    chat.add_message(Role.USER, event['text'])
+
     return chat
 
 
-async def reply(client: SocketModeClient, event: dict, chat: Chat):
+async def reply(client: SocketModeClient, payload: dict, chat: Chat):
     """Reply to a message described by event.
 
     Args:
         client: SocketModeClient instance
-        event: Event description
+        payload: Event payload
         chat: Chat instance
     """
+    event = payload['event']
+    channel_config = get_channel_config(payload['team_id'], event['channel'])
+    loading_reaction = channel_config.loading_reaction
 
     try:
         # Show "loading" status
         await client.web_client.reactions_add(
-                name=config.tutor.loading_reaction,
+                name=loading_reaction,
                 channel=event['channel'],
                 timestamp=event['ts'],
                 )
@@ -139,7 +142,7 @@ async def reply(client: SocketModeClient, event: dict, chat: Chat):
 
         # Save metadata
         if len(new_turns) > 1:
-            await save_metadata(get_mdid(event['channel'], result['ts']), new_turns[:-1])
+            await save_metadata(payload, new_turns[:-1])
     except Exception as e:
         logger.error("Failed to generate reply: %s", e)
         # Send an error message to the channel, and store some metadata that
@@ -153,12 +156,12 @@ async def reply(client: SocketModeClient, event: dict, chat: Chat):
                 text="Sorry, an error occurred while generating a reply. You can try to repeat the question, or contact my maintainer if the problem persists.",
                 )
 
-        await save_error(get_mdid(event['channel'], result['ts']), str(e))
+        await save_error(payload, str(e))
     finally:
         try:
             # Remove the "loading" status
             await client.web_client.reactions_remove(
-                    name=config.tutor.loading_reaction,
+                    name=loading_reaction,
                     channel=event['channel'],
                     timestamp=event['ts'],
                     )
@@ -174,35 +177,37 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
         client: SocketModeClient instance
         req: SocketModeRequest instance
     """
-    logger.info("Handling message %s", req.payload['event_id'])
+    event_id = req.payload['event_id']
+    event = req.payload["event"]
+    event_type = event.get('type', req.payload['type'])
+    logger.info("Handling message %s (%s)", event_id, event_type)
 
     match req.type:
         case "events_api":
             response = SocketModeResponse(envelope_id=req.envelope_id)
             await client.send_socket_mode_response(response)
 
-            event = req.payload["event"]
-
             # Filter events from self
             bot_id = await client_user_id(client)
             if event.get('user') == bot_id:
-                logger.debug("Ignoring event %s from self",
-                             req.payload['event_id'])
+                logger.debug("Ignoring event %s (%s) from self",
+                             event_id, event_type)
                 return
 
             match event.get('type'):
                 case 'message':
-                    claimed = await claim_message(event['channel'], event['ts'])
+                    claimed = await claim_message(req.payload)
                     if not claimed:
-                        logger.debug("Message %s already claimed", event['ts'])
+                        logger.debug("Message %s (%s) already claimed",
+                                     event_id, event_type)
                         return
 
-                    chat = await get_thread_history(client, event)
+                    chat = await get_thread_history(client, req.payload)
                     if chat.is_relevant():
-                        await reply(client, event, chat)
+                        await reply(client, req.payload, chat)
                     else:
-                        logger.debug("Ignoring event %s, bot was not tagged",
-                                     req.payload['event_id'])
+                        logger.debug("Ignoring event %s (%s), bot was not tagged",
+                                     event_id, event_type)
 
                 case 'app_mention':
                     # If the bot hasn't responded yet, send a wave reaction
@@ -212,15 +217,16 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
                             timestamp=event['ts'],
                             )
 
-                    claimed = await claim_message(event['channel'], event['ts'])
+                    claimed = await claim_message(req.payload)
                     if not claimed:
-                        logger.debug("Message %s already claimed", event['ts'])
+                        logger.debug("Message %s (%s) already claimed",
+                                     event_id, event_type)
                         return
 
-                    chat = await get_thread_history(client, event)
-                    await reply(client, event, chat)
+                    chat = await get_thread_history(client, req.payload)
+                    await reply(client, req.payload, chat)
 
                 case _:
-                    logger.debug("Ignoring event %s of type %s",
-                                 req.payload['event_id'], event['type'])
+                    logger.debug("Ignoring event %s (%s)",
+                                 event_id, event_type)
 
