@@ -17,10 +17,10 @@ You will need to set up the following services:
 
  - **Slack App / Socket mode** Create a Slack App in the Slack developer console and enable "Socket Mode." In addition, you will need to request the correct scopes (listed below).
  - **Azure OpenAI** As of Sept 2023, you need to apply for access to this service within the Azure Portal. After getting that access, you need to apply for GPT-4 access as well. After getting approved for OpenAI with GPT-4, create a new OpenAI service in a region where GPT-4 is available (`East US 2` is currently a good option for North America, but this may change). Then, deploy the GPT-4 model in this region.
- - **Azure Blob Storage** Set up a blob storage container to hold documents for cognitive search. Add any documents that are relevant to the class that you want to be indexed for search (e.g., syllabi, assignments, readings).
+ - **Azure Blob Storage** Set up a blob storage container to hold documents for cognitive search. Add any documents that are relevant to the class that you want to be indexed for search (e.g., syllabi, assignments, readings). You can set downgrade the service tier to Locally Redundant Storage (default is more expensive).
  - **Azure Cognitive Search** Set up a new search service in the same region as the OpenAI service. You will (probably) need to use the `Basic` pricing tier; be careful to set this correctly, as the default tier (`Standard`) is much more expensive and probably unnecessary.
  - **Azure Semantic Search** Enable Semantic Search in the `Free` tier under your Cognitive Search deployment.
- - **Azure Search Index / Indexer** Set up an index within the cognitive search deployment based on your blob storage documents. Then, set up an indexer to process these documents. You can put this on a schedule if you are updating your documents dynamically; running the indexer on demand is also fine. Just make sure to remember to run it when you update documents!
+ - **Azure Search Index / Indexer** Set up an index within the cognitive search deployment based on your blob storage documents. Then, set up an indexer to process these documents. You can put this on a schedule if you are updating your documents dynamically; running the indexer on demand is also fine. Just make sure to remember to run it when you update documents! The index should have `title` and `content` fields, and you should add a Semantic Configuration called `default` with the corresponding title/content configuration.
 
 ### Slack App Scopes
 
