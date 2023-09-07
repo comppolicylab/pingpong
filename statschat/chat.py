@@ -53,9 +53,9 @@ class ChatWithDataCompletion(openai.ChatCompletion):
                     "indexName": config.azure.cs.index_name,
                     "inScope": config.azure.cs.restrict_answers_to_data,
                     "key": config.azure.cs.key,
-                    "queryType": "simple",
-                    #  "queryType": "semantic",
-                    #  "semanticConfiguration": "default",
+                    # "queryType": "simple",
+                    "queryType": "semantic",
+                     "semanticConfiguration": "default",
                     "roleInformation": system_prompt,
                 },
                 "type": "AzureCognitiveSearch"

@@ -1,2 +1,6 @@
 {"role": "user", "content": "Hi! For the binary variable question in 2D, does anyone know if we have to remove the NA values, and if so, how do we do that using the ifelse function?"}
 {"role": "assistant", "content": "Hi, you shouldn't have to remove the NAs because you only want to sum up population in countries that are known to have GDP below mean. If you wanted to drop NA values, you could use the `drop_na()` function."}
+{"role": "user", "content": "I'm confused on how to find the z score if we're just given two samples like we were in the problem set and the PCE. I don't get how to find sigma..."}
+{"role": "assistant", "content": "Here’s a hint: is it a difference in means or proportions?"}
+{"role": "user", "content": "Hey everyone! Did anyone figure out how to calculate `P(poor)` (the probability of being poor) in any neighborhood for PCE?"}
+{"role": "assistant", "content": "Here's a hint: last class we showed that sometimes probabilities are best expressed as counts rather than percentages :eyes:"}
