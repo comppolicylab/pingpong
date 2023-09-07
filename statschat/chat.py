@@ -73,10 +73,6 @@ class ChatWithDataCompletion(openai.ChatCompletion):
             A completion with data sources.
         """
         params = cls._prepare_params(kwargs)
-        from pprint import pprint
-        print("\n\n===PARAMS===")
-        pprint(params)
-        print("============\n\n")
         return await super().acreate(**params)
 
     @classmethod
