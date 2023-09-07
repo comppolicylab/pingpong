@@ -82,7 +82,7 @@ async def get_thread_history(client: SocketModeClient, event: dict) -> Chat:
 
         role = Role.AI if message['user'] == bot_id else Role.USER
 
-        turns = await load_metadata(get_mdid(message))
+        turns = await load_metadata(get_mdid(event['channel'], message['ts']))
         if isinstance(turns, dict) and 'error' in turns:
             logger.warning("Ignoring an error message we sent: %s",
                            turns['error'])
@@ -128,7 +128,7 @@ async def reply(client: SocketModeClient, event: dict, chat: Chat):
 
         # Save metadata
         if len(new_turns) > 1:
-            await save_metadata(get_mdid(result), new_turns[:-1])
+            await save_metadata(get_mdid(event['channel'], result['ts']), new_turns[:-1])
     except Exception as e:
         logger.error("Failed to generate reply: %s", e)
         # Send an error message to the channel, and store some metadata that
@@ -142,7 +142,7 @@ async def reply(client: SocketModeClient, event: dict, chat: Chat):
                 text="Sorry, an error occurred while generating a reply. You can try to repeat the question, or contact my maintainer if the problem persists.",
                 )
 
-        await save_error(get_mdid(result), str(e))
+        await save_error(get_mdid(event['channel'], result['ts']), str(e))
     finally:
         try:
             # Remove the "loading" status

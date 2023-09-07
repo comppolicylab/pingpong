@@ -18,16 +18,17 @@ os.makedirs(_DB_DIR, exist_ok=True)
 _META_CACHE = os.path.join(_DB_DIR, 'meta')
 
 
-def get_mdid(event: dict) -> str:
+def get_mdid(channel: str, ts: str) -> str:
     """Get the metadata ID for an event.
 
     Args:
-        event: Slack event
+        channel: Slack channel ID
+        ts: Message timestamp
     
     Returns:
         Metadata ID
     """
-    return f"{event['channel']}:{event['ts']}"
+    return f"{channel}:{ts}"
 
 
 async def save_error(mdid: str, error: str):
