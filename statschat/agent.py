@@ -91,6 +91,15 @@ async def get_thread_history(client: SocketModeClient, payload: dict) -> Chat:
             # Ignore the message that triggered this function
             continue
 
+        # Looking for reactions like:
+        # [{'count': 1, 'name': '-1', 'users': ['WXYZ']}]
+        # The -1 (thumbs-down) means we should ignore this message.
+        for reaction in message.get('reactions', []):
+            if reaction['name'] == '-1':
+                logger.warning("Ignoring message %s due to downvotes",
+                               message['ts'])
+                continue
+
         role = Role.AI if message['user'] == bot_id else Role.USER
 
         turns = await load_metadata(payload)
