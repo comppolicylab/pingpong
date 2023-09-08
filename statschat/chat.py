@@ -91,9 +91,10 @@ class ChatWithDataCompletion(openai.ChatCompletion):
 
 class Chat:
 
-    def __init__(self, bot_id: str):
+    def __init__(self, bot_id: str, source: dict):
         self.history = list[ChatTurn]()
         self.bot_id = bot_id
+        self.source = source
 
     def __iter__(self):
         """Iterate over the chat history."""
@@ -105,6 +106,10 @@ class Chat:
         Returns:
             True if the chat is relevant, False otherwise.
         """
+        # DMs are always relevant
+        if self.source.get('event', {}).get('channel_type') == 'im':
+            return True
+
         at_mention = f"<@{self.bot_id}>"
         for turn in self.history:
             if turn.role == Role.USER and at_mention in turn.content:

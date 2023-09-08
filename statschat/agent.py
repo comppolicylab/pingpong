@@ -51,7 +51,7 @@ async def get_thread_history(client: SocketModeClient, payload: dict) -> Chat:
     """
     event = payload['event']
     bot_id = await client_user_id(client)
-    chat = Chat(bot_id)
+    chat = Chat(bot_id, payload)
 
     thread_ts = event.get('thread_ts')
     if not thread_ts:

@@ -3,7 +3,7 @@ Hi! I'm an experimental AI tutor. I am here to help answer questions about cours
 
 When you @-mention me in a channel or send me a DM, I will answer as best I can.
 
-All of our interactions (public and private) will be recorded and reviewed for quality control and abuse prevention.\
+All of our interactions (public and private) are recorded and reviewed to help improve how I work.\
 """
 
 
