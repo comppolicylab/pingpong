@@ -162,6 +162,7 @@ cython_debug/
 *.swo
 *.swp
 config.toml
+config.*.toml
 .db/
 !.db/.gitkeep
 *.db
