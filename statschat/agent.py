@@ -14,6 +14,7 @@ from .prompt import (
         get_channel_config,
         WrongChannelError,
         )
+from .reaction import Reaction, react, unreact
 
 
 logger = logging.getLogger(__name__)
@@ -95,7 +96,8 @@ async def get_thread_history(client: SocketModeClient, payload: dict) -> Chat:
         # [{'count': 1, 'name': '-1', 'users': ['WXYZ']}]
         # The -1 (thumbs-down) means we should ignore this message.
         for reaction in message.get('reactions', []):
-            if reaction['name'] == '-1':
+            # Use the `Reaction` class to ignore skin tone
+            if Reaction.parse_emoji(reaction['name']).name == '-1':
                 logger.warning("Ignoring message %s due to downvotes",
                                message['ts'])
                 continue
@@ -116,46 +118,6 @@ async def get_thread_history(client: SocketModeClient, payload: dict) -> Chat:
     chat.add_message(Role.USER, event['text'])
 
     return chat
-
-
-async def react(client: SocketModeClient, event: dict, reaction: str):
-    """React to a message described by event.
-
-    Args:
-        client: SocketModeClient instance
-        event: Event dictionary
-        reaction: Reaction emoji
-    """
-    try:
-        await client.web_client.reactions_add(
-                name=reaction,
-                channel=event['channel'],
-                timestamp=event['ts'],
-                )
-    except Exception as e:
-        # This is not a critical error, so we can continue
-        logger.error("Failed to add reaction %s to %s/%s: %s",
-                     reaction, event['channel'], event['ts'], e)
-
-
-async def unreact(client: SocketModeClient, event: dict, reaction: str):
-    """Remove reaction to a message described by event.
-
-    Args:
-        client: SocketModeClient instance
-        event: Event dictionary
-        reaction: Reaction emoji
-    """
-    try:
-        await client.web_client.reactions_remove(
-                name=reaction,
-                channel=event['channel'],
-                timestamp=event['ts'],
-                )
-    except Exception as e:
-        # This is not a critical error, so we can continue
-        logger.error("Failed to remove reaction %s from %s/%s: %s",
-                     reaction, event['channel'], event['ts'], e)
 
 
 async def reply(client: SocketModeClient, payload: dict):
