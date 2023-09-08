@@ -55,16 +55,7 @@ async def get_thread_history(client: SocketModeClient, payload: dict) -> Chat:
     """
     event = payload['event']
     bot_id = await client_user_id(client)
-    # Today's date as a string like Wednesday, December 4, 2019.
-    today = datetime.today().strftime("%A, %B %d, %Y")
-    prompt = get_prompt_for_channel(payload['team_id'], event['channel'])
-    examples = get_examples_for_channel(payload['team_id'], event['channel'])
-    channel_config = get_channel_config(payload['team_id'], event['channel'])
-    index_name = channel_config.cs_index_name
-    chat = Chat(bot_id,
-                prompt.format(date=today),
-                index_name,
-                examples=examples)
+    chat = Chat(bot_id)
 
     thread_ts = event.get('thread_ts')
     if not thread_ts:
@@ -141,7 +132,16 @@ async def reply(client: SocketModeClient, payload: dict):
 
         # Make sure that the bot is configured to work with this channel.
         channel_config = get_channel_config(payload['team_id'], event['channel'])
+        prompt = get_prompt_for_channel(payload['team_id'], event['channel'])
+        # Today's date as a string like Wednesday, December 4, 2019.
+        today = datetime.today().strftime("%A, %B %d, %Y")
+        examples = get_examples_for_channel(payload['team_id'], event['channel'])
+        index_name = channel_config.cs_index_name
         loading_reaction = channel_config.loading_reaction
+
+        # TODO(jnu) - refactor Chat to branch using GPT35 to figure out which
+        # prompt to use. Switch between CogSearch and normal and try to filter
+        # out irrelevant tasks.
 
         # From here on out, if we hit some error generating a response we
         # should send some message to the channel.
@@ -149,7 +149,7 @@ async def reply(client: SocketModeClient, payload: dict):
 
         await react(client, event, loading_reaction)
 
-        new_turns = await chat.reply()
+        new_turns = await chat.reply(prompt.format(date=today), index_name, examples=examples)
 
         # Post the response in the thread.
         result = await client.web_client.chat_postMessage(

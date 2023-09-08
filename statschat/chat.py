@@ -91,18 +91,9 @@ class ChatWithDataCompletion(openai.ChatCompletion):
 
 class Chat:
 
-    def __init__(self,
-                 bot_id: str,
-                 system_prompt: str,
-                 index_name: str,
-                 examples: list[dict] = None):
-        self.system_prompt = system_prompt
-        self.index_name = index_name
+    def __init__(self, bot_id: str):
         self.history = list[ChatTurn]()
         self.bot_id = bot_id
-        if examples:
-            for example in examples:
-                self.add_message(example['role'], example['content'])
 
     def __iter__(self):
         """Iterate over the chat history."""
@@ -139,7 +130,7 @@ class Chat:
         else:
             self.history.append(ChatTurn(role, text))
 
-    async def reply(self, **kwargs) -> list[ChatTurn]:
+    async def reply(self, system_prompt: str, index_name: str, **kwargs) -> list[ChatTurn]:
         """Generate the next reply.
 
         Args:
@@ -148,10 +139,16 @@ class Chat:
         Returns:
             The system's response.
         """
+        history = self.history.copy()
+        examples = kwargs.get('examples', []) or []
+        ex_turns = [ChatTurn(example['role'], example['content'])
+                    for example in examples]
+        history = ex_turns + self.history
+
         settings = dict(
-                index_name=self.index_name,
+                index_name=index_name,
                 engine=config.azure.oai.engine,
-                messages=self._get_messages(),
+                messages=self._get_messages(system_prompt, history),
                 temperature=config.azure.oai.temperature,
                 top_p=config.azure.oai.top_p,
                 **kwargs,
@@ -163,7 +160,7 @@ class Chat:
             new_messages.append(self.history[-1])
         return new_messages
 
-    def _get_messages(self) -> list[dict]:
+    def _get_messages(self, system_prompt: str, history: list[ChatTurn]) -> list[dict]:
         """Get the chat history as a list of messages.
 
         Returns:
@@ -171,11 +168,11 @@ class Chat:
         """
         messages = [{
             "role": Role.SYSTEM,
-            "content": self.system_prompt,
+            "content": system_prompt,
             }]
 
         at_mention = f"<@{self.bot_id}>"
-        for turn in self.history:
+        for turn in history:
             messages.append({
                 "role": turn.role,
                 # Remove at-mentions for the bot from the message content
