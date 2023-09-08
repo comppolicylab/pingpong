@@ -132,14 +132,16 @@ async def reply(client: SocketModeClient, payload: dict):
     loading_reaction = "thinking_face"
 
     try:
-        channel_config = get_channel_config(payload['team_id'], event['channel'])
-        loading_reaction = channel_config.loading_reaction
         chat = await get_thread_history(client, payload)
         if not chat.is_relevant():
             return
         else:
             logger.debug("Ignoring event %s (%s), bot was not tagged",
                          payload['event_id'], event['type'])
+
+        # Make sure that the bot is configured to work with this channel.
+        channel_config = get_channel_config(payload['team_id'], event['channel'])
+        loading_reaction = channel_config.loading_reaction
 
         # From here on out, if we hit some error generating a response we
         # should send some message to the channel.
@@ -164,7 +166,7 @@ async def reply(client: SocketModeClient, payload: dict):
         result = await client.web_client.chat_postMessage(
                 channel=event['channel'],
                 thread_ts=event['ts'],
-                text="Sorry, I have not been configured to respond in this channel. If you think this is a mistake, please contact my maintainer and tell them I said: `{}`.".format(str(e)),
+                text="Sorry, I have not been configured to respond in this channel. Contact the app maintainer and tell them I said: `{}`.".format(str(e)),
                 )
 
         await save_error({
