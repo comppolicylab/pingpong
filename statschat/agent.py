@@ -8,13 +8,9 @@ from slack_sdk.socket_mode.request import SocketModeRequest
 from .chat import Chat, Role
 from .meta import load_metadata, save_metadata, save_error
 from .claim import claim_message
-from .prompt import (
-        get_prompt_for_channel,
-        get_examples_for_channel,
-        get_channel_config,
-        WrongChannelError,
-        )
+from .config import config
 from .reaction import Reaction, react, unreact
+from .text import ERROR
 
 
 logger = logging.getLogger(__name__)
@@ -121,6 +117,7 @@ async def reply(client: SocketModeClient, payload: dict):
     event = payload['event']
     send_error = False
     loading_reaction = "thinking_face"
+    reacted = False
 
     try:
         chat = await get_thread_history(client, payload)
@@ -130,12 +127,14 @@ async def reply(client: SocketModeClient, payload: dict):
             logger.debug("Ignoring event %s (%s), bot was not tagged",
                          payload['event_id'], event['type'])
 
-        # Make sure that the bot is configured to work with this channel.
-        channel_config = get_channel_config(payload['team_id'], event['channel'])
-        prompt = get_prompt_for_channel(payload['team_id'], event['channel'])
-        # Today's date as a string like Wednesday, December 4, 2019.
-        today = datetime.today().strftime("%A, %B %d, %Y")
-        examples = get_examples_for_channel(payload['team_id'], event['channel'])
+        # Get the channel configuration
+        channel_config = config.get_channel(payload['team_id'], event['channel'])
+        prompt = channel_config.prompt.system.format(
+                # Today's date as a string like Wednesday, December 4, 2019.
+                date=datetime.today().strftime("%A, %B %d, %Y"),
+                focus=channel_config.prompt.focus,
+                )
+        examples = channel_config.prompt.examples
         index_name = channel_config.cs_index_name
         loading_reaction = channel_config.loading_reaction
 
@@ -148,8 +147,9 @@ async def reply(client: SocketModeClient, payload: dict):
         send_error = True
 
         await react(client, event, loading_reaction)
+        reacted = True
 
-        new_turns = await chat.reply(prompt.format(date=today), index_name, examples=examples)
+        new_turns = await chat.reply(prompt, index_name, examples=examples)
 
         # Post the response in the thread.
         result = await client.web_client.chat_postMessage(
@@ -161,21 +161,6 @@ async def reply(client: SocketModeClient, payload: dict):
         # Save metadata
         if len(new_turns) > 1:
             await save_metadata(payload, new_turns[:-1])
-    except WrongChannelError as e:
-        logger.warning("Ignoring message in wrong channel: %s", e)
-        result = await client.web_client.chat_postMessage(
-                channel=event['channel'],
-                thread_ts=event['ts'],
-                text="Sorry, I have not been configured to respond in this channel. Contact the app maintainer and tell them I said: `{}`.".format(str(e)),
-                )
-
-        await save_error({
-            'team_id': payload['team_id'],
-            'event': {
-                'channel': event['channel'],
-                'ts': result['ts'],
-                },
-            }, str(e))
     except Exception as e:
         logger.error("Failed to generate reply: %s", e)
         # Send an error message to the channel, and store some metadata that
@@ -187,7 +172,7 @@ async def reply(client: SocketModeClient, payload: dict):
             result = await client.web_client.chat_postMessage(
                     channel=event['channel'],
                     thread_ts=event['ts'],
-                    text="Sorry, an error occurred while generating a reply. You can try to repeat the question, or contact my maintainer if the problem persists.",
+                    text=ERROR,
                     )
 
             await save_error({
@@ -198,7 +183,8 @@ async def reply(client: SocketModeClient, payload: dict):
                     },
             }, str(e))
     finally:
-        await unreact(client, event, loading_reaction)
+        if reacted:
+            await unreact(client, event, loading_reaction)
 
 
 async def handle_message(client: SocketModeClient, req: SocketModeRequest):

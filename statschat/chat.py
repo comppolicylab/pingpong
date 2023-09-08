@@ -111,6 +111,14 @@ class Chat:
                 return True
         return False
 
+    def add_example(self, user: str, ai: str):
+        """Add an example to the chat history.
+
+        Args:
+            user: The user's message.
+            ai: The AI's response.
+        """
+
     def add_message(self, role: str, text: str):
         """Add a message to the chat history.
 
@@ -141,8 +149,10 @@ class Chat:
         """
         history = self.history.copy()
         examples = kwargs.get('examples', []) or []
-        ex_turns = [ChatTurn(example['role'], example['content'])
-                    for example in examples]
+        ex_turns = list[ChatTurn]()
+        for example in examples:
+            ex_turns.append(ChatTurn(Role.USER, example.user))
+            ex_turns.append(ChatTurn(Role.AI, example.ai))
         history = ex_turns + self.history
 
         settings = dict(
