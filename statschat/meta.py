@@ -33,47 +33,76 @@ def get_mdid(payload: dict) -> str:
     return f"{team_id}:{channel_id}:{msg_ts}"
 
 
-async def save_error(payload: dict, error: str):
-    """Save error metadata to a file.
+def get_channel_mdid(payload: dict) -> str:
+    """Get the metadata ID for a channel.
 
     Args:
         payload: Event payload dictionary
-        error: Error message
+    
+    Returns:
+        Metadata ID
     """
-    # TODO - consolidate this with the other save_metadata
-    mdid = get_mdid(payload)
-    with dbm.open(_META_CACHE, 'c') as db:
-        db[mdid] = json.dumps({'error': error})
+    team_id = payload['team_id']
+    channel_id = payload['event']['channel']
+    return f"channel.{team_id}:{channel_id}"
 
 
-async def save_metadata(payload: dict, turns: list[ChatTurn]):
+async def save_channel_metadata(payload: dict, meta: dict):
     """Save metadata to a file.
 
     Args:
         payload: Event payload dictionary
-        turns: List of ChatTurns
+        meta: Metadata to save
+    """
+    mdid = get_channel_mdid(payload)
+    with dbm.open(_META_CACHE, 'c') as db:
+        db[mdid] = json.dumps(meta)
+
+
+async def load_channel_metadata(payload: dict) -> dict:
+    """Load metadata from a file.
+
+    Args:
+        payload: Event payload dictionary
+    
+    Returns:
+        Metadata dictionary
+    """
+    mdid = get_channel_mdid(payload)
+    with dbm.open(_META_CACHE, 'c') as db:
+        if mdid not in db:
+            logger.debug("Metadata file %s does not exist", mdid)
+            return {}
+        return json.loads(db[mdid])
+
+
+async def save_metadata(payload: dict, meta: dict):
+    """Save metadata to a file.
+
+    Args:
+        payload: Event payload dictionary
+        meta: Metadata to save
     """
     mdid = get_mdid(payload)
     with dbm.open(_META_CACHE, 'c') as db:
-        db[mdid] = json.dumps([turn._asdict() for turn in turns])
+        db[mdid] = json.dumps(meta)
 
 
-async def load_metadata(payload: dict) -> list[ChatTurn] | dict:
+async def load_metadata(payload: dict) -> dict:
     """Load metadata from a file.
 
     Args:
         payload: Event payload dictionary
 
     Returns:
-        List of ChatTurns
+        Metadata dictionary
     """
     mdid = get_mdid(payload)
     with dbm.open(_META_CACHE, 'c') as db:
         if mdid not in db:
             logger.debug("Metadata file %s does not exist", mdid)
-            return []
+            return {}
         data = json.loads(db[mdid])
-        if isinstance(data, dict):
-            return data
-
-        return [ChatTurn(msg['role'], msg['content']) for msg in data]
+        if 'turns' in data:
+            data['turns'] = [ChatTurn(*msg) for msg in data['turns']]
+        return data

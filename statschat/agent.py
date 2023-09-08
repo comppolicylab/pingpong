@@ -6,11 +6,11 @@ from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.socket_mode.request import SocketModeRequest
 
 from .chat import Chat, Role
-from .meta import load_metadata, save_metadata, save_error
+from .meta import load_metadata, save_metadata, load_channel_metadata, save_channel_metadata
 from .claim import claim_message
 from .config import config
 from .reaction import Reaction, react, unreact
-from .text import ERROR
+from .text import ERROR, GREETING
 
 
 logger = logging.getLogger(__name__)
@@ -91,12 +91,12 @@ async def get_thread_history(client: SocketModeClient, payload: dict) -> Chat:
 
         role = Role.AI if message['user'] == bot_id else Role.USER
 
-        turns = await load_metadata(payload)
-        if isinstance(turns, dict) and 'error' in turns:
+        meta = await load_metadata(payload)
+        if 'error' in meta:
             logger.warning("Ignoring an error message we sent: %s",
-                           turns['error'])
+                           meta['error'])
         else:
-            for turn in turns:
+            for turn in meta.get('turns', []):
                 chat.add_message(turn.role, turn.content)
 
         chat.add_message(role, message['text'])
@@ -105,6 +105,24 @@ async def get_thread_history(client: SocketModeClient, payload: dict) -> Chat:
     chat.add_message(Role.USER, event['text'])
 
     return chat
+
+
+async def ensure_disclaimer(client: SocketModeClient, payload: dict):
+    """Ensure that a disclaimer has been sent to the channel.
+
+    Args:
+        client: SocketModeClient instance
+        payload: Event payload
+    """
+    meta = await load_channel_metadata(payload)
+    if not meta.get('disclaimer_sent', False):
+        channel_config = config.get_channel(payload['team_id'], payload['event']['channel'])
+        await client.web_client.chat_postMessage(
+                channel=payload['event']['channel'],
+                text=GREETING.format(focus=channel_config.prompt.focus),
+                )
+        meta['disclaimer_sent'] = True
+        await save_channel_metadata(payload, meta)
 
 
 async def reply(client: SocketModeClient, payload: dict):
@@ -137,6 +155,9 @@ async def reply(client: SocketModeClient, payload: dict):
         examples = channel_config.prompt.examples
         index_name = channel_config.cs_index_name
         loading_reaction = channel_config.loading_reaction
+
+        # Send a disclaimer if we haven't yet.
+        await ensure_disclaimer(client, payload)
 
         # TODO(jnu) - refactor Chat to branch using GPT35 to figure out which
         # prompt to use. Switch between CogSearch and normal and try to filter
@@ -175,13 +196,13 @@ async def reply(client: SocketModeClient, payload: dict):
                     text=ERROR,
                     )
 
-            await save_error({
+            await save_metadata({
                 'team_id': payload['team_id'],
                 'event': {
                     'channel': event['channel'],
                     'ts': result['ts'],
                     },
-            }, str(e))
+            }, {'error': str(e)})
     finally:
         if reacted:
             await unreact(client, event, loading_reaction)
