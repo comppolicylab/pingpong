@@ -1,4 +1,7 @@
+import os
+import json
 from typing import NamedTuple
+
 import openai
 
 from .config import config
@@ -116,14 +119,6 @@ class Chat:
                 return True
         return False
 
-    def add_example(self, user: str, ai: str):
-        """Add an example to the chat history.
-
-        Args:
-            user: The user's message.
-            ai: The AI's response.
-        """
-
     def add_message(self, role: str, text: str):
         """Add a message to the chat history.
 
@@ -160,6 +155,10 @@ class Chat:
             ex_turns.append(ChatTurn(Role.AI, example.ai))
         history = ex_turns + self.history
 
+        import pprint
+        pprint.pprint("HISTORY")
+        pprint.pprint(history)
+
         settings = dict(
                 index_name=index_name,
                 engine=config.azure.oai.engine,
@@ -174,6 +173,17 @@ class Chat:
             self.add_message(msg['role'], msg['content'])
             new_messages.append(self.history[-1])
         return new_messages
+
+    async def save(self):
+        """Persist the chat history."""
+        os.makedirs(os.path.join(config.tutor.db_dir, 'threads'), exist_ok=True)
+        team_id = self.source['team_id']
+        channel_id = self.source['event']['channel']
+        ts = self.source['event']['ts']
+        thread_ts = self.source['event'].get('thread_ts', ts)
+        fn = f"{team_id}-{channel_id}-{thread_ts}.json"
+        with open(os.path.join(config.tutor.db_dir, 'threads', fn), 'w') as f:
+            json.dump(self.history, f)
 
     def _get_messages(self, system_prompt: str, history: list[ChatTurn]) -> list[dict]:
         """Get the chat history as a list of messages.

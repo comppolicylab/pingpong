@@ -6,7 +6,12 @@ from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.socket_mode.request import SocketModeRequest
 
 from .chat import Chat, Role
-from .meta import load_metadata, save_metadata, load_channel_metadata, save_channel_metadata
+from .meta import (
+        load_metadata,
+        save_metadata,
+        load_channel_metadata,
+        save_channel_metadata,
+        )
 from .claim import claim_message
 from .config import config
 from .reaction import Reaction, react, unreact
@@ -136,15 +141,15 @@ async def reply(client: SocketModeClient, payload: dict):
     send_error = False
     loading_reaction = "thinking_face"
     reacted = False
+    relevant = False
 
     try:
         chat = await get_thread_history(client, payload)
-        if not chat.is_relevant():
-            return
-        else:
+        relevant = chat.is_relevant()
+        if not relevant:
             logger.debug("Ignoring event %s (%s), bot was not tagged",
                          payload['event_id'], event['type'])
-
+            return
         # Get the channel configuration
         channel_config = config.get_channel(payload['team_id'], event['channel'])
         prompt = channel_config.prompt.system.format(
@@ -206,6 +211,8 @@ async def reply(client: SocketModeClient, payload: dict):
     finally:
         if reacted:
             await unreact(client, event, loading_reaction)
+        if relevant:
+            await chat.save()
 
 
 async def handle_message(client: SocketModeClient, req: SocketModeRequest):
