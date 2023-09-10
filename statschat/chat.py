@@ -92,12 +92,22 @@ class ChatWithDataCompletion(openai.ChatCompletion):
         return super().create(**params)
 
 
-class Chat:
+class SlackThread:
 
-    def __init__(self, bot_id: str, source: dict):
-        self.history = list[ChatTurn]()
+    def __init__(self,
+                 bot_id: str,
+                 source_event: dict,
+                 directory: str = os.path.join(config.tutor.db_dir, 'threads'),
+                 ):
         self.bot_id = bot_id
-        self.source = source
+        self.source_event = source_event
+        event = source_event['event']
+        self.team_id = source_event['team_id']
+        self.channel = event['channel']
+        self.channel_type = event.get('channel_type')
+        self.thread_ts = event.get('thread_ts', event['ts'])
+        self.history = list[ChatTurn]()
+        self.directory = directory
 
     def __iter__(self):
         """Iterate over the chat history."""
@@ -110,7 +120,7 @@ class Chat:
             True if the chat is relevant, False otherwise.
         """
         # DMs are always relevant
-        if self.source.get('event', {}).get('channel_type') == 'im':
+        if self.channel_type == 'im':
             return True
 
         at_mention = f"<@{self.bot_id}>"
@@ -138,15 +148,37 @@ class Chat:
         else:
             self.history.append(ChatTurn(role, text))
 
-    async def reply(self, system_prompt: str, index_name: str, **kwargs) -> list[ChatTurn]:
+    async def save(self):
+        """Persist the chat history."""
+        os.makedirs(self.directory, exist_ok=True)
+        fn = f"{self.team_id}-{self.channel}-{self.thread_ts}.json"
+        thread_path = os.path.join(self.directory, fn) 
+        with open(thread_path, 'w') as f:
+            json.dump(self.history, f)
+
+
+class AiChat:
+
+    def __init__(self,
+                 prompt: str,
+                 index_name: str | None = None,
+                 examples: list[Example] | None = None,
+                 ):
+        self.prompt = prompt
+        self.index_name = index_name
+        self.examples = examples or []
+
+    async def generate_next_turn(self, thread: SlackThread, **kwargs) -> list[ChatTurn]:
         """Generate the next reply.
 
         Args:
+            thread: The Slack thread.
             **kwargs: Additional keyword arguments to pass to OpenAI.
 
         Returns:
             The system's response.
         """
+
         history = self.history.copy()
         examples = kwargs.get('examples', []) or []
         ex_turns = list[ChatTurn]()
@@ -155,10 +187,30 @@ class Chat:
             ex_turns.append(ChatTurn(Role.AI, example.ai))
         history = ex_turns + self.history
 
-        import pprint
-        pprint.pprint("HISTORY")
-        pprint.pprint(history)
 
+        endpoint = await self.choose_endpoint()
+        kwargs.setdefault('messages', self._format_convo(thread))
+        response = await endpoint(**kwargs)
+
+        new_messages = list[ChatTurn]()
+        for msg in response.choices[0].messages:
+            thread.add_message(msg['role'], msg['content'])
+            new_messages.append(self.history[-1])
+        return new_messages
+
+    async def _choose_endpoint(self):
+        # TODO - Endpoint class with __call__ method for each endpoint
+        # Endpoint should have defaults for params, which can be overridden
+        # by kwargs to __call__.
+
+        # Maybe something like:
+        # 'semantic', 'code', 'simple'
+        # Need to update config to support different configurations.
+        ...
+
+
+    async def _reply_with_data(self, history: list[ChatTurn], **kwargs) -> list[ChatTurn]:
+        # TODO - turn this into an Endpoint wrapping ChatWithDataCompletion
         settings = dict(
                 index_name=index_name,
                 engine=config.azure.oai.engine,
@@ -168,24 +220,10 @@ class Chat:
                 **kwargs,
                 )
         response = await ChatWithDataCompletion.acreate(**settings)
-        new_messages = list[ChatTurn]()
-        for msg in response.choices[0].messages:
-            self.add_message(msg['role'], msg['content'])
-            new_messages.append(self.history[-1])
         return new_messages
 
-    async def save(self):
-        """Persist the chat history."""
-        os.makedirs(os.path.join(config.tutor.db_dir, 'threads'), exist_ok=True)
-        team_id = self.source['team_id']
-        channel_id = self.source['event']['channel']
-        ts = self.source['event']['ts']
-        thread_ts = self.source['event'].get('thread_ts', ts)
-        fn = f"{team_id}-{channel_id}-{thread_ts}.json"
-        with open(os.path.join(config.tutor.db_dir, 'threads', fn), 'w') as f:
-            json.dump(self.history, f)
 
-    def _get_messages(self, system_prompt: str, history: list[ChatTurn]) -> list[dict]:
+    def _format_convo(self, system_prompt: str, history: list[ChatTurn]) -> list[dict]:
         """Get the chat history as a list of messages.
 
         Returns:
