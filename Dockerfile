@@ -23,4 +23,4 @@ RUN poetry install --only main --no-interaction --no-ansi
 
 COPY . /code
 
-CMD ["python", "-m", "statschat"]
+CMD ["python", "-m", "aitutor"]
