@@ -16,7 +16,7 @@ from .meta import (
         Role,
         )
 from .reaction import react, unreact
-from .text import SWITCH_PROMPT
+from .text import SWITCH_PROMPT, ERROR
 
 
 logger = logging.getLogger(__name__)
@@ -132,7 +132,7 @@ class AiChat:
             logger.exception(e)
             await client.web_client.chat_postMessage(
                     channel=self.thread.channel,
-                    text=f"An error occurred: {e}",
+                    text=ERROR,
                     )
             await save_metadata({
                 'team_id': self.thread.team_id,
