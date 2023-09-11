@@ -1,9 +1,10 @@
 [tool.poetry]
-name = "statschat"
+name = "aitutor"
 version = "0.1.0"
 description = ""
 authors = ["Joe Nudell <jnu@stanford.edu>"]
 readme = "README.md"
+
 
 [tool.poetry.dependencies]
 python = "^3.10"

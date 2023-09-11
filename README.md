@@ -1,4 +1,4 @@
-Stats Tutor Slack Bot
+AI Tutor Slack Bot
 ===
 
 A Slack Bot that helps students out with class assignments and logistics.
@@ -99,7 +99,7 @@ poetry install
 You can start the service locally by running:
 
 ```
-poetry run python -m statschat
+poetry run python -m aitutor
 ```
 
 ## Deployment
@@ -108,7 +108,7 @@ poetry run python -m statschat
 
 You can run the Python script directly on a server. You should install dependencies with Poetry with the virtual environment setting disabled `POETRY_VIRTUALENVS_CREATE=false`.
 
-To run, use the command `CONFIG_PATH=/path/to/config.toml python3 -m statschat` from the code directory.
+To run, use the command `CONFIG_PATH=/path/to/config.toml python3 -m aitutor` from the code directory.
 
 ### Docker
 
