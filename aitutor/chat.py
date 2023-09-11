@@ -30,7 +30,29 @@ openai.api_key = config.openai.api_key
 openai.api_version = config.openai.api_version
 
 
+def _switch_response(name: str, reason: str) -> str:
+    """Format one of the example AI responses for the switch model.
+
+    Args:
+        name: The name of the model to switch to.
+        reason: The reason for the switch.
+
+    Returns:
+        The formatted response.
+    """
+    return """\
+{{
+  "intent": {reasons},
+  "model": {name}
+}}\
+""".format(
+        reasons=json.dumps([reason]),
+        name=json.dumps(name),
+        )
+
+
 class AiChat:
+    """Wrapper for the SlackThread that adds AI response capabilities."""
 
     def __init__(self, thread: SlackThread):
         self.thread = thread
@@ -174,8 +196,21 @@ class AiChat:
                 )
         logger.debug(f"Switch Prompt: {prompt}")
 
-        # TODO format few-shot examples into the prompt
+        # Format the switch prompt along with examples that were provided
+        # in the config about how to use each model.
         messages = [{"role": Role.SYSTEM, "content": prompt}]
+        for model in models:
+            for ex in model.examples:
+                messages.append({"role": Role.USER, "content": ex.user})
+                messages.append({
+                    "role": Role.AI,
+                    "content": _switch_response(model.name, ex.ai),
+                    })
+        # Now add the most recent message in the thread.
+        messages.append({
+            "role": Role.USER,
+            "content": self.thread.history[-1].content,
+            })
 
         try:
             response = await switch(messages=messages)
@@ -187,7 +222,9 @@ class AiChat:
         except Exception as e:
             logger.exception(e)
             default_model = models[0]
-            logger.warning(f"Failed to make an informed model choice. Defaulting to {default_model.name}.")
+            logger.warning(
+                    "Failed to make an informed model choice. "
+                    f"Defaulting to {default_model.name}.")
             return Endpoint(default_model)
 
     def _format_convo(self) -> list[dict]:
