@@ -1,28 +1,15 @@
 import os
 import json
 import logging
-from typing import NamedTuple
 
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 
 from .config import config
 from .reaction import Reaction
-from .meta import load_metadata
+from .meta import load_metadata, ChatTurn, Role
 
 
 logger = logging.getLogger(__name__)
-
-
-class Role:
-    """Roles for chat participants."""
-
-    USER = "user"
-    AI = "assistant"
-    TOOL = "tool"
-    SYSTEM = "system"
-
-
-ChatTurn = NamedTuple('ChatTurn', [('role', str), ('content', str)])
 
 
 # Cached bot client user ID.
@@ -51,10 +38,10 @@ async def client_user_id(client: SocketModeClient) -> str:
 class SlackThread:
 
     @classmethod
-    def load_from_event(cls,
-                        client: SocketModeClient,
-                        payload: dict,
-                        **kwargs) -> 'SlackThread':
+    async def load_from_event(cls,
+                              client: SocketModeClient,
+                              payload: dict,
+                              **kwargs) -> 'SlackThread':
         """Get the history of a thread.
 
         Args:

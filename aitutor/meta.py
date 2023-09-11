@@ -2,12 +2,24 @@ import json
 import logging
 import dbm
 import os
+from typing import NamedTuple
 
-from .chat import ChatTurn
 from .config import config
 
 
 logger = logging.getLogger(__name__)
+
+
+class Role:
+    """Roles for chat participants."""
+
+    USER = "user"
+    AI = "assistant"
+    TOOL = "tool"
+    SYSTEM = "system"
+
+
+ChatTurn = NamedTuple('ChatTurn', [('role', str), ('content', str)])
 
 
 # TODO - write this to non-local storage!

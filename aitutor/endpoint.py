@@ -1,6 +1,7 @@
 import openai
 
 from .config import Model
+from .meta import ChatTurn
 
 
 class ChatWithDataCompletion(openai.ChatCompletion):
@@ -110,9 +111,9 @@ class Endpoint:
             ValueError: If the model type is invalid.
         """
         self.model = model
-        if model.type not in _CLASSES:
-            raise ValueError(f"Invalid model type: {model.type}")
-        self._completion_class = _CLASSES[model.type]
+        if model.params.completion_type not in _CLASSES:
+            raise ValueError(f"Invalid model completion type: {model.params.completion_type}")
+        self._completion_class = _CLASSES[model.params.completion_type]
 
     async def __call__(self, **kwargs):
         """Create a completion asynchronously.
@@ -123,6 +124,29 @@ class Endpoint:
         Returns:
             See `_CLASSES` return types
         """
-        params = self.model.params._asdict()
+        params = self.model.params.dict()
+        params.pop("completion_type")
+        params.pop("type")
         params.update(kwargs)
-        return await self._completion_class.acreate(**params)
+        response = await self._completion_class.acreate(**params)
+        return self._format_response(response)
+
+    def _format_response(self, response: dict) -> list[ChatTurn]:
+        """Format a response from OpenAI.
+
+        Args:
+            response: A response from an OpenAI endpoint.
+
+        Returns:
+            A list of ChatTurns.
+        """
+        first_choice = response.choices[0]
+        msgs = list[dict]()
+        if 'message' in first_choice:
+            msgs.append(first_choice['message'])
+        elif 'messages' in first_choice:
+            msgs.extend(first_choice['messages'])
+        else:
+            raise ValueError(f"Invalid response: {response}")
+
+        return [ChatTurn(m['role'], m['content']) for m in msgs]

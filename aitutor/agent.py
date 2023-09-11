@@ -7,7 +7,7 @@ from slack_sdk.socket_mode.request import SocketModeRequest
 from .thread import SlackThread, client_user_id
 from .chat import AiChat
 from .claim import claim_message
-from .react import react
+from .reaction import react
 
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,6 @@ async def reply(client: SocketModeClient, payload: dict):
             return
 
         await AiChat(thread).reply(client)
-        await thread.save()
     except Exception as e:
         logger.exception(e)
         pass

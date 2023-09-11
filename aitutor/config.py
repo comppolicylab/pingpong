@@ -1,12 +1,16 @@
 import os
 import tomllib
+import logging
 from pathlib import Path
-from typing import Union
+from typing import Union, Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
 
 from .text import GREETING, DEFAULT_SYSTEM_PROMPT
+
+
+logger = logging.getLogger(__name__)
 
 
 class Example(BaseSettings):
@@ -31,7 +35,7 @@ class Channel(BaseSettings):
     channel_id: str
     loading_reaction: str = Field("")
     prompt: Prompt | dict | None = Field(None)
-    models: list[str]
+    models: list[str] | None = Field(None)
 
 
 class TutorSettings(BaseSettings):
@@ -41,6 +45,7 @@ class TutorSettings(BaseSettings):
     channels: list[Channel]
     db_dir: str = Field(".db")
     switch_model: str = Field("switch")
+    models: list[str]
     loading_reaction: str = Field("thinking_face")
     greeting: str = Field(GREETING)
 
@@ -68,18 +73,17 @@ class OpenAISettings(BaseSettings):
 class OpenAIModelParams(BaseSettings):
     """Configurable parameters for an OpenAI LLM."""
 
+    type: Literal["llm"]
     engine: str
     temperature: float = Field(0.0)
     top_p: float = Field(0.95)
-
-    @property
-    def type(self):
-        return "ChatCompletion"
+    completion_type: Literal["ChatCompletion"] = Field("ChatCompletion")
 
 
 class AzureCSModelParams(BaseSettings):
     """Azure cognitive search model."""
 
+    type: Literal["csm"]
     engine: str
     temperature: float = Field(0.2)
     top_p: float = Field(0.95)
@@ -88,10 +92,7 @@ class AzureCSModelParams(BaseSettings):
     restrict_answers_to_data: bool = Field(True)
     index_name: str
     semantic_configuration: str = Field("default")
-
-    @property
-    def type(self):
-        return "ChatWithDataCompletion"
+    completion_type: Literal["ChatWithDataCompletion"] = Field("ChatWithDataCompletion")
 
 
 ModelParams = Union[OpenAIModelParams, AzureCSModelParams]
@@ -102,7 +103,7 @@ class Model(BaseSettings):
 
     name: str
     description: str
-    params: ModelParams
+    params: ModelParams = Field(..., discriminator="type")
 
 
 class SentrySettings(BaseSettings):
@@ -122,8 +123,8 @@ class Config(BaseSettings):
     tutor: TutorSettings
     models: list[Model]
 
-    @model_validator
-    def check_models(self):
+    @model_validator(mode="after")
+    def check_models(self) -> "Config":
         """Check that all referenced models are defined."""
         model_names = {m.name for m in self.models}
         # Make sure the "switch" model is defined
@@ -138,12 +139,20 @@ class Config(BaseSettings):
             raise ValueError("Need at least 1 non-switch model.")
 
         for channel in self.tutor.channels:
-            for model in channel.models:
+            # The models can be defined in either the channel config or as
+            # defaults in the tutor config. Only validate what will actually
+            # be used. (This is a little redundant if there are multiple
+            # channels that all use the tutor's default models, but it doesn't
+            # make a difference for performance and it's simpler to think about
+            # what's happening this way.)
+            for model in (channel.models or self.tutor.models):
                 if model not in model_names:
                     if model == self.tutor.switch_model:
                         raise ValueError(f"Model {model} referenced in channel {channel} is the switch model and cannot be used in a channel.")
                     else:
                         raise ValueError(f"Model {model} referenced in channel {channel} is not defined.")
+
+        return self
 
     def get_model(self, model_name: str) -> Model:
         """Get the config for a model.
@@ -172,14 +181,29 @@ class Config(BaseSettings):
         """
         for channel in self.tutor.channels:
             if channel.channel_id == channel_id and channel.team_id == team_id:
-                return channel
+                full_channel = channel.copy()
+                # Fill in defaults in case they're missing
+                prompt = self.tutor.default_prompt.dict()
+                overrides = channel.prompt.dict() \
+                        if isinstance(channel.prompt, Prompt) \
+                        else (channel.prompt or {})
+                prompt.update(overrides)
+                full_channel.prompt = Prompt.parse_obj(prompt)
+                full_channel.loading_reaction = (
+                        channel.loading_reaction or self.tutor.loading_reaction
+                        )
+                full_channel.models = (
+                        channel.models or self.tutor.models
+                        )
+
+                return full_channel
 
         return Channel(
                 team_id="",
                 channel_id="",
                 loading_reaction=self.tutor.loading_reaction,
-                cs_index_name=self.tutor.cs_index_name,
                 prompt=self.tutor.default_prompt,
+                models=self.tutor.models,
                 )
 
 
@@ -192,22 +216,8 @@ def load_config(path: str = os.environ.get('CONFIG_PATH', "config.toml")):
     Returns:
         Config: Parsed config object.
     """
-    parsed = Config.parse_obj(tomllib.loads(Path(path).read_text()))
-
-    # TODO - can just merge this with the channel config stuff above
-
-    # Set defaults for channel-specific prompts.
-    for channel in parsed.tutor.channels:
-        prompt = parsed.tutor.default_prompt.dict()
-        overrides = channel.prompt.dict() if isinstance(channel.prompt, Prompt) else (channel.prompt or {})
-        prompt.update(overrides)
-        channel.prompt = Prompt.parse_obj(prompt)
-
-        # Set other defaults
-        channel.loading_reaction = channel.loading_reaction or parsed.tutor.loading_reaction
-        channel.cs_index_name = channel.cs_index_name or parsed.tutor.cs_index_name
-
-    return parsed
+    logger.debug(f"Loading config from {path}")
+    return Config.parse_obj(tomllib.loads(Path(path).read_text()))
 
 
 # Globally available config object.

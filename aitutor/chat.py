@@ -6,12 +6,14 @@ import openai
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 
 from .endpoint import Endpoint
-from .thread import SlackThread, ChatTurn, Role
+from .thread import SlackThread
 from .config import config
 from .meta import (
         save_metadata,
         load_channel_metadata,
         save_channel_metadata,
+        ChatTurn,
+        Role,
         )
 from .reaction import react, unreact
 from .text import SWITCH_PROMPT
@@ -21,10 +23,11 @@ logger = logging.getLogger(__name__)
 
 
 # Configure OpenAI with values from config
-openai.api_type = config.azure.oai.api.type
-openai.api_base = config.azure.oai.api.base
-openai.api_key = config.azure.oai.api.key
-openai.api_version = config.azure.oai.api.chat_version
+# TODO - may need to scope this per request
+openai.api_type = config.openai.api_type
+openai.api_base = config.openai.api_base
+openai.api_key = config.openai.api_key
+openai.api_version = config.openai.api_version
 
 
 class AiChat:
@@ -75,16 +78,23 @@ class AiChat:
                       self.thread.source_event.get('event'),
                       self.channel_config.loading_reaction)
 
-    async def reply(self, client: SocketModeClient):
+    async def reply(self, client: SocketModeClient, **kwargs):
         """Reply to the thread.
+
+        This method doesn't return anything; instead it performs IO both
+        to post to Slack and to save metadata in our own stores.
+
+        The `thread` object that this instance wraps will be updated to reflect
+        the new state of the conversation.
 
         Args:
             client: SocketModeClient instance
+            **kwargs: Additional keyword arguments to pass to OpenAI.
         """
         await self.ensure_disclaimer(client)
         await self.mark_as_loading(client)
         try:
-            new_turns = await self.generate_next_turn(Role.AI, self.prompt)
+            new_turns = await self.generate_next_turn(**kwargs)
 
             # Post the response in the thread.
             await client.web_client.chat_postMessage(
@@ -109,6 +119,7 @@ class AiChat:
                     'ts': self.thread.ts,
                     },
             }, {'error': str(e)})
+        await self.thread.save()
         await self.mark_as_finished(client)
 
     async def generate_next_turn(self, **kwargs) -> list[ChatTurn]:
@@ -121,12 +132,11 @@ class AiChat:
             The system's response.
         """
         endpoint = await self.choose_endpoint()
-        response = await endpoint(messages=self._format_convo(), **kwargs)
+        new_messages = await endpoint(messages=self._format_convo(), **kwargs)
 
-        new_messages = list[ChatTurn]()
-        for msg in response.choices[0].messages:
-            self.thread.add_message(msg['role'], msg['content'])
-            new_messages.append(self.thread.history[-1])
+        # Add the new messages to the thread
+        for msg in new_messages:
+            self.thread.add_message(*msg)
 
         return new_messages
 
@@ -170,7 +180,7 @@ class AiChat:
         try:
             response = await switch(messages=messages)
             logger.debug(f"Switch response: {response}")
-            payload = json.loads(response.choices[0].messages[-1]['content'])
+            payload = json.loads(response[-1].content)
             model = next(m for m in models if m.name == payload['model'])
             logger.debug(f"Selected model: {model.name}")
             return Endpoint(model)
@@ -196,9 +206,9 @@ class AiChat:
         for example in examples:
             ex_turns.append(ChatTurn(Role.USER, example.user))
             ex_turns.append(ChatTurn(Role.AI, example.ai))
-        history = ex_turns + self.threads.history
+        history = ex_turns + self.thread.history
 
-        at_mention = f"<@{self.bot_id}>"
+        at_mention = f"<@{self.thread.bot_id}>"
         for turn in history:
             messages.append({
                 "role": turn.role,

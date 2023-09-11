@@ -32,8 +32,8 @@ Instructions:
  - Then, choose one of the available models that is the best fit to respond to the input.
  - Generate your output as JSON matching the following Typescript schema:
 
-interface Response {
+interface Response {{
   intent: string[];
   model: {slugs};
-}\
+}}\
 """
