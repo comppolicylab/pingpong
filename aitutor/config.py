@@ -87,6 +87,8 @@ class AzureCSModelParams(BaseSettings):
     engine: str
     temperature: float = Field(0.2)
     top_p: float = Field(0.95)
+    threshold: float = Field(0.3)
+    topNDocuments: int = Field(5, alias="top_n_documents")
     cs_key: str
     cs_endpoint: str
     restrict_answers_to_data: bool = Field(True)

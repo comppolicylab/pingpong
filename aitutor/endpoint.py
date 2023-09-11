@@ -38,17 +38,7 @@ class ChatWithDataCompletion(openai.ChatCompletion):
                     "embeddingEndpoint": None,
                     "embeddingKey": None,
                     "endpoint": cs_endpoint,
-                    "fieldsMapping": {
-                        "contentFields": [
-                            "content",
-                            "title",
-                        ],
-                        "contentFieldsSeparator": "\n",
-                        "filepathField": None,
-                        "titleField": "title",
-                        "urlField": None,
-                        "vectorFields": []
-                    },
+                    "fieldsMapping": {},
                     "filter": None,
                     "indexName": index_name,
                     "inScope": restrict_answers_to_data,
