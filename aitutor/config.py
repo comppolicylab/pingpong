@@ -1,8 +1,9 @@
 import os
 import tomllib
 from pathlib import Path
+from typing import Union
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
 
 from .text import GREETING, DEFAULT_SYSTEM_PROMPT
@@ -29,8 +30,8 @@ class Channel(BaseSettings):
     team_id: str
     channel_id: str
     loading_reaction: str = Field("")
-    cs_index_name: str = Field("")
     prompt: Prompt | dict | None = Field(None)
+    models: list[str]
 
 
 class TutorSettings(BaseSettings):
@@ -39,8 +40,8 @@ class TutorSettings(BaseSettings):
     default_prompt: Prompt
     channels: list[Channel]
     db_dir: str = Field(".db")
+    switch_model: str = Field("switch")
     loading_reaction: str = Field("thinking_face")
-    cs_index_name: str
     greeting: str = Field(GREETING)
 
 
@@ -55,39 +56,53 @@ class SlackSettings(BaseSettings):
     socket_token: str
 
 
-class OpenAIApiSettings(BaseSettings):
+class OpenAISettings(BaseSettings):
     """OpenAI API settings."""
 
-    type: str = Field("azure")
-    base: str
-    chat_version: str
-    key: str
+    api_type: str = Field("azure")
+    api_base: str
+    api_version: str
+    api_key: str
 
 
-class AzureOpenAISettings(BaseSettings):
-    """Azure OpenAI settings."""
+class OpenAIModelParams(BaseSettings):
+    """Configurable parameters for an OpenAI LLM."""
+
+    engine: str
+    temperature: float = Field(0.0)
+    top_p: float = Field(0.95)
+
+    @property
+    def type(self):
+        return "ChatCompletion"
+
+
+class AzureCSModelParams(BaseSettings):
+    """Azure cognitive search model."""
 
     engine: str
     temperature: float = Field(0.2)
     top_p: float = Field(0.95)
-
-    api: OpenAIApiSettings
-
-
-class AzureCSSettings(BaseSettings):
-    """Azure cognitive search settings."""
-
-    key: str
-    endpoint: str
+    cs_key: str
+    cs_endpoint: str
     restrict_answers_to_data: bool = Field(True)
-    type: str = Field("AzureCognitiveSearch")
+    index_name: str
+    semantic_configuration: str = Field("default")
+
+    @property
+    def type(self):
+        return "ChatWithDataCompletion"
 
 
-class AzureSettings(BaseSettings):
-    """Azure settings."""
+ModelParams = Union[OpenAIModelParams, AzureCSModelParams]
 
-    oai: AzureOpenAISettings
-    cs: AzureCSSettings
+
+class Model(BaseSettings):
+    """Language model."""
+
+    name: str
+    description: str
+    params: ModelParams
 
 
 class SentrySettings(BaseSettings):
@@ -101,10 +116,49 @@ class Config(BaseSettings):
     
     log_level: str = Field("INFO", env="LOG_LEVEL")
 
-    azure: AzureSettings
+    openai: OpenAISettings
     sentry: SentrySettings
     slack: SlackSettings
     tutor: TutorSettings
+    models: list[Model]
+
+    @model_validator
+    def check_models(self):
+        """Check that all referenced models are defined."""
+        model_names = {m.name for m in self.models}
+        # Make sure the "switch" model is defined
+        if self.tutor.switch_model not in {m.name for m in self.models}:
+            raise ValueError(f"Switch model {self.tutor.switch_model} is not defined.")
+
+        # The switch model is a special case, so remove it from the list of
+        # other models that are available.
+        model_names.remove(self.tutor.switch_model)
+
+        if not model_names:
+            raise ValueError("Need at least 1 non-switch model.")
+
+        for channel in self.tutor.channels:
+            for model in channel.models:
+                if model not in model_names:
+                    if model == self.tutor.switch_model:
+                        raise ValueError(f"Model {model} referenced in channel {channel} is the switch model and cannot be used in a channel.")
+                    else:
+                        raise ValueError(f"Model {model} referenced in channel {channel} is not defined.")
+
+    def get_model(self, model_name: str) -> Model:
+        """Get the config for a model.
+
+        Args:
+            model_name: Name of the model
+
+        Returns:
+            Config for the model
+        """
+        for model in self.models:
+            if model.name == model_name:
+                return model
+
+        raise ValueError(f"Model {model_name} not defined.")
 
     def get_channel(self, team_id: str, channel_id: str) -> Channel:
         """Get the config for a channel.

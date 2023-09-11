@@ -1,133 +1,16 @@
 import logging
-from datetime import datetime
 
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.socket_mode.request import SocketModeRequest
 
-from .chat import Chat, Role
-from .meta import (
-        load_metadata,
-        save_metadata,
-        load_channel_metadata,
-        save_channel_metadata,
-        )
+from .thread import SlackThread, client_user_id
+from .chat import AiChat
 from .claim import claim_message
-from .config import config
-from .reaction import Reaction, react, unreact
-from .text import ERROR, GREETING
+from .react import react
 
 
 logger = logging.getLogger(__name__)
-
-
-# Cached bot client user ID.
-_user_id: str | None = None
-
-
-async def client_user_id(client: SocketModeClient) -> str:
-    """Get the user ID of the bot.
-
-    Args:
-        client: SocketModeClient instance
-
-    Returns:
-        User ID of the bot
-    """
-    # TODO - functools.cache doesn't work with async functions
-    global _user_id
-    if _user_id:
-        return _user_id
-    # Get the user ID of the bot
-    auth = await client.web_client.auth_test()
-    _user_id = auth['user_id'].strip()
-    return _user_id
-
-
-async def get_thread_history(client: SocketModeClient, payload: dict) -> Chat:
-    """Get the history of a thread.
-
-    Args:
-        client: SocketModeClient instance
-        payload: Event payload dictionary
-
-    Returns:
-        List of messages in the thread
-    """
-    event = payload['event']
-    bot_id = await client_user_id(client)
-    chat = Chat(bot_id, payload)
-
-    thread_ts = event.get('thread_ts')
-    if not thread_ts:
-        chat.add_message(Role.USER, event['text'])
-        return chat
-
-    # Get the thread history
-    history = await client.web_client.conversations_replies(
-            channel=event['channel'],
-            ts=thread_ts,
-            include_all_metadata=True,
-            )
-
-    # Get the messages from the history
-    messages = history['messages']
-
-    # Add historical messages to the chat
-    for message in messages:
-        if message.get('type') != 'message':
-            logger.debug("Ignoring message %s of type %s",
-                         message['ts'], message['type'])
-            continue
-
-        if message['ts'] == event['ts']:
-            # Ignore the message that triggered this function
-            continue
-
-        # Looking for reactions like:
-        # [{'count': 1, 'name': '-1', 'users': ['WXYZ']}]
-        # The -1 (thumbs-down) means we should ignore this message.
-        for reaction in message.get('reactions', []):
-            # Use the `Reaction` class to ignore skin tone
-            if Reaction.parse_emoji(reaction['name']).name == '-1':
-                logger.warning("Ignoring message %s due to downvotes",
-                               message['ts'])
-                continue
-
-        role = Role.AI if message['user'] == bot_id else Role.USER
-
-        meta = await load_metadata(payload)
-        if 'error' in meta:
-            logger.warning("Ignoring an error message we sent: %s",
-                           meta['error'])
-        else:
-            for turn in meta.get('turns', []):
-                chat.add_message(turn.role, turn.content)
-
-        chat.add_message(role, message['text'])
-
-    # Add the new message to the chat
-    chat.add_message(Role.USER, event['text'])
-
-    return chat
-
-
-async def ensure_disclaimer(client: SocketModeClient, payload: dict):
-    """Ensure that a disclaimer has been sent to the channel.
-
-    Args:
-        client: SocketModeClient instance
-        payload: Event payload
-    """
-    meta = await load_channel_metadata(payload)
-    if not meta.get('disclaimer_sent', False):
-        channel_config = config.get_channel(payload['team_id'], payload['event']['channel'])
-        await client.web_client.chat_postMessage(
-                channel=payload['event']['channel'],
-                text=GREETING.format(focus=channel_config.prompt.focus),
-                )
-        meta['disclaimer_sent'] = True
-        await save_channel_metadata(payload, meta)
 
 
 async def reply(client: SocketModeClient, payload: dict):
@@ -137,82 +20,18 @@ async def reply(client: SocketModeClient, payload: dict):
         client: SocketModeClient instance
         payload: Event payload
     """
-    event = payload['event']
-    send_error = False
-    loading_reaction = "thinking_face"
-    reacted = False
-    relevant = False
-
     try:
-        chat = await get_thread_history(client, payload)
-        relevant = chat.is_relevant()
-        if not relevant:
+        thread = await SlackThread.load_from_event(client, payload)
+        if not thread.is_relevant():
             logger.debug("Ignoring event %s (%s), bot was not tagged",
-                         payload['event_id'], event['type'])
+                         payload['event_id'], payload['event']['type'])
             return
-        # Get the channel configuration
-        channel_config = config.get_channel(payload['team_id'], event['channel'])
-        prompt = channel_config.prompt.system.format(
-                # Today's date as a string like Wednesday, December 4, 2019.
-                date=datetime.today().strftime("%A, %B %d, %Y"),
-                focus=channel_config.prompt.focus,
-                )
-        examples = channel_config.prompt.examples
-        index_name = channel_config.cs_index_name
-        loading_reaction = channel_config.loading_reaction
 
-        # Send a disclaimer if we haven't yet.
-        await ensure_disclaimer(client, payload)
-
-        # TODO(jnu) - refactor Chat to branch using GPT35 to figure out which
-        # prompt to use. Switch between CogSearch and normal and try to filter
-        # out irrelevant tasks.
-
-        # From here on out, if we hit some error generating a response we
-        # should send some message to the channel.
-        send_error = True
-
-        await react(client, event, loading_reaction)
-        reacted = True
-
-        new_turns = await chat.reply(prompt, index_name, examples=examples)
-
-        # Post the response in the thread.
-        result = await client.web_client.chat_postMessage(
-                channel=event['channel'],
-                thread_ts=event['ts'],
-                text=new_turns[-1].content,
-                )
-
-        # Save metadata
-        if len(new_turns) > 1:
-            await save_metadata(payload, new_turns[:-1])
+        await AiChat(thread).reply(client)
+        await thread.save()
     except Exception as e:
-        logger.error("Failed to generate reply: %s", e)
-        # Send an error message to the channel, and store some metadata that
-        # flags that this new message is an error, so that we can exclude it
-        # from the conversation thread in the future.
-        # TODO(jnu): may be more robust to use Slack's built-in metadata for
-        # this, so that we can simplify our own meta store.
-        if send_error:
-            result = await client.web_client.chat_postMessage(
-                    channel=event['channel'],
-                    thread_ts=event['ts'],
-                    text=ERROR,
-                    )
-
-            await save_metadata({
-                'team_id': payload['team_id'],
-                'event': {
-                    'channel': event['channel'],
-                    'ts': result['ts'],
-                    },
-            }, {'error': str(e)})
-    finally:
-        if reacted:
-            await unreact(client, event, loading_reaction)
-        if relevant:
-            await chat.save()
+        logger.exception(e)
+        pass
 
 
 async def handle_message(client: SocketModeClient, req: SocketModeRequest):
@@ -263,4 +82,3 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
                 case _:
                     logger.debug("Ignoring event %s (%s)",
                                  event_id, event_type)
-
