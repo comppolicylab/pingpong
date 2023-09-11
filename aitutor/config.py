@@ -42,7 +42,7 @@ class TutorSettings(BaseSettings):
     """Tutor settings."""
 
     default_prompt: Prompt
-    channels: list[Channel]
+    channels: list[Channel] = Field([])
     db_dir: str = Field(".db")
     switch_model: str = Field("switch")
     models: list[str]
