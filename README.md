@@ -73,6 +73,9 @@ The config file will be loaded from the path specified in the `CONFIG_PATH` envi
 | `openai.api_key` | The Azure OpenAI key | _None_ | `aaa111222333abcabc123abc987` |
 | `models[].name` | Name to use for the model | _None_ | `general` |
 | `models[].description` | Description of the model, which will be used to classify inputs and select this model for answering questions | _None_ | `A general-purpose language model that can answer most questions` |
+| `models[].prompt.system` | System prompt for the LLM. | _None_ | `You are a friendly chat bot named $name.` |
+| `models[].prompt.examples[]` | List of example responses to use for few-shot tuning. | `[]` | `{ user = "what is your name?", ai = "Glen" }` |
+| `models[].prompt.variables` | Variables to inject into the prompt template. | `{}` | `{ name = "glen" }` |
 | `models[].params.type` | `llm` for general models, `csm` for cognitive search | _None_ | `llm` |
 | `models[].params.engine` | The name of your Azure OpenAI GPT-4 deployment | _None_ | `stats-tutor-gpt4` |
 | `models[].params.temperature` | The temperature setting for the LLM | `0.2` | `0.2` |
@@ -85,13 +88,15 @@ The config file will be loaded from the path specified in the `CONFIG_PATH` envi
 | `sentry.dsn` | (Optional) Sentry DSN for error reporting | _None_ | `https://aaabbbcccdddeeefff000111222@o111111.ingest.sentry.io/0001112223334445555` |
 | `tutor.db_dir` | Directory where local app data can be cached | `.db/` | `/cache/statstutor` |
 | `tutor.loading_reaction` | Default loading emoji to post as a reaction | `thinking_face` | `thinking_face` |
-| `tutor.models[]` | Default list of names of `models` available in this workspace | _None_ | `["general"]` |
-| `tutor.channels[].team_id` | Workspace (team) ID from Slack where bot will be integrated | _None_ | `T000AAAZZZ` |
-| `tutor.channels[].channel_id` | Channel in the Workspace where Slack bot will be integrated | _None_ | `C000AAAZZZ` |
-| `tutor.channels[].prompt_file` | Path to text file containing system prompt for this channel | _None_ | `/opt/aitutor/prompts/cs101.txt` |
-| `tutor.channels[].examples_file` | (Optional) path to few-shot examples to use with the system prompt | _None_ | `/opt/aitutor/prompts/cs101.examples.jsonl` |
-| `tutor.channels[].loading_reaction` | Reaction to use to indicate that the bot is processing a message | `thinking_face` | `dancing_robot` |
-| `tutor.channels[].models[]` | Overrides `tutor.models[]` | `[]` | `[ "general", "my-class" ]` |
+| `tutor.variables` | Common variables to inject into templates | `{}` | `{ name = "glen" }` |
+| `tutor.greeting` | Message to send when bot responds for the very first time in the channel. | _See text.py_ | `"Hi, I'm a friendly bot!"` |
+| `tutor.models[]` | Default list of `models` available in this workspace. Can either be string names or dicts with a `name` key that override values in the model. | _None_ | `["general"]` |
+| `tutor.workspaces[].models[]` | Overrides `tutor.models[]` | `[]` | `[ "general", "my-class" ]` |
+| `tutor.workspaces[].team_id` | Workspace (team) ID from Slack where bot will be integrated | _None_ | `T000AAAZZZ` |
+| `tutor.workspaces[].loading_reaction` | Override for inherited `loading_reaction`. | `thinking_face` | `thinking_face` |
+| `tutor.workspaces[].channels[].channel_id` | Channel in the Workspace where Slack bot will be integrated | _None_ | `C000AAAZZZ` |
+| `tutor.workspaces[].channels[].loading_reaction` | Override for inherited `loading_reaction`. | `thinking_face` | `dancing_robot` |
+| `tutor.workspaces[].channels[].models[]` | Overrides `tutor.workspaces[].models[]` | `[]` | `[ "general", "my-class" ]` |
 
 #### `models[]` settings
 
@@ -114,10 +119,15 @@ This model will be used to direct input to one of the other models.
 You will also probably want at least one GPT-4 deployment to answer general questions,
 and a CognitiveSearch model to answer additional questions.
 
+You should define a `[models.prompt]` section with the system prompt here.
+These (and the `params`) values can be overridden for a specific workspace / channel.
 
-#### `tutor.channels[]` settings
 
-You need to configure the app explicitly for _each_ channel you want to integrate the app with. This has two purposes: 1) so that multiple classes can tailor the bot to their subject areas using their own search indexes and model prompts, and 2) to prevent unauthorized usage of the services, which all have costs and quotas associated with them.
+#### `tutor.workspaces[]` and `.channels[]` settings
+
+You _must_ set the `tutor.models[]` list to provide default models available for use.
+Optionally, you can override which models are available on a per-workspace and per-channel basis.
+
 
 ## Local development
 

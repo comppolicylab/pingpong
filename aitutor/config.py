@@ -2,12 +2,13 @@ import os
 import tomllib
 import logging
 from pathlib import Path
-from typing import Union, Literal
+from typing import Union, Literal, Any
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
 
-from .text import GREETING, DEFAULT_SYSTEM_PROMPT
+from .text import GREETING, SWITCH_PROMPT, DEFAULT_PROMPT
+from .template import validate_template, format_template
 
 
 logger = logging.getLogger(__name__)
@@ -23,51 +24,9 @@ class Example(BaseSettings):
 class Prompt(BaseSettings):
     """Describe a prompt."""
 
-    system: str = Field(DEFAULT_SYSTEM_PROMPT)
+    system: str = Field("")
     examples: list[Example] = Field([])
-    focus: str
-
-
-class Channel(BaseSettings):
-    """Describe one slack channel integration."""
-
-    team_id: str
-    channel_id: str
-    loading_reaction: str = Field("")
-    prompt: Prompt | dict | None = Field(None)
-    models: list[str] | None = Field(None)
-
-
-class TutorSettings(BaseSettings):
-    """Tutor settings."""
-
-    default_prompt: Prompt
-    channels: list[Channel] = Field([])
-    db_dir: str = Field(".db")
-    switch_model: str = Field("switch")
-    models: list[str]
-    loading_reaction: str = Field("thinking_face")
-    greeting: str = Field(GREETING)
-
-
-class SlackSettings(BaseSettings):
-    """Slack settings."""
-
-    app_id: str
-    client_id: str
-    client_secret: str
-    signing_secret: str
-    web_token: str
-    socket_token: str
-
-
-class OpenAISettings(BaseSettings):
-    """OpenAI API settings."""
-
-    api_type: str = Field("azure")
-    api_base: str
-    api_version: str
-    api_key: str
+    variables: dict[str, str] = Field({})
 
 
 class OpenAIModelParams(BaseSettings):
@@ -107,6 +66,89 @@ class Model(BaseSettings):
     description: str
     examples: list[Example] = Field([])
     params: ModelParams = Field(..., discriminator="type")
+    prompt: Prompt = Field(Prompt())
+
+    def get_prompt(self, extra_vars: dict[str, str] | None = None) -> str:
+        """Get the full prompt with template vars filled in.
+
+        Args:
+            extra_vars: Extra variables to fill in the template
+
+        Returns:
+            The full prompt with template variables filled in.
+        """
+        all_vars = self.prompt.variables.copy()
+        if extra_vars:
+            all_vars.update(extra_vars)
+        return format_template(self.prompt.system, all_vars)
+
+
+class ModelOverride(BaseSettings):
+    """Override the default parameters for a model."""
+
+    name: str
+    params: dict[str, Any] = Field({})
+    prompt: dict[str, Any] = Field({})
+
+
+class Channel(BaseSettings):
+    """Describe one slack channel integration."""
+
+    team_id: str = Field("")
+    channel_id: str
+    loading_reaction: str = Field("")
+    models: list[Union[str, ModelOverride, Model]] | None = Field(None)
+
+
+class Workspace(BaseSettings):
+    """Describe one slack workspace integration."""
+
+    team_id: str
+    loading_reaction: str = Field("")
+    models: list[Union[str, ModelOverride, Model]] | None = Field(None)
+    channels: list[Channel] = Field([])
+
+
+class TutorSettings(BaseSettings):
+    """Tutor settings."""
+
+    workspaces: list[Workspace] = Field([])
+    db_dir: str = Field(".db")
+    switch_model: str = Field("switch")
+    models: list[Union[str, ModelOverride, Model]]
+    loading_reaction: str = Field("thinking_face")
+    greeting: str = Field(GREETING)
+    variables: dict[str, str] = Field({})
+
+    @model_validator(mode="after")
+    def check_greeting(self) -> "TutorSettings":
+        """Validate the greeting template."""
+        validate_template(self.greeting, self.variables)
+        return self
+
+    def get_greeting(self) -> str:
+        """Get the greeting template."""
+        return format_template(self.greeting, self.variables)
+
+
+class SlackSettings(BaseSettings):
+    """Slack settings."""
+
+    app_id: str
+    client_id: str
+    client_secret: str
+    signing_secret: str
+    web_token: str
+    socket_token: str
+
+
+class OpenAISettings(BaseSettings):
+    """OpenAI API settings."""
+
+    api_type: str = Field("azure")
+    api_base: str
+    api_version: str
+    api_key: str
 
 
 class SentrySettings(BaseSettings):
@@ -127,33 +169,56 @@ class Config(BaseSettings):
     models: list[Model]
 
     @model_validator(mode="after")
-    def check_models(self) -> "Config":
+    def check_switch_model(self) -> "Config":
         """Check that all referenced models are defined."""
         model_names = {m.name for m in self.models}
         # Make sure the "switch" model is defined
-        if self.tutor.switch_model not in {m.name for m in self.models}:
+        if self.tutor.switch_model not in model_names:
             raise ValueError(f"Switch model {self.tutor.switch_model} is not defined.")
 
-        # The switch model is a special case, so remove it from the list of
-        # other models that are available.
-        model_names.remove(self.tutor.switch_model)
-
-        if not model_names:
+        if len(self.tutor.models) < 2:
             raise ValueError("Need at least 1 non-switch model.")
 
-        for channel in self.tutor.channels:
-            # The models can be defined in either the channel config or as
-            # defaults in the tutor config. Only validate what will actually
-            # be used. (This is a little redundant if there are multiple
-            # channels that all use the tutor's default models, but it doesn't
-            # make a difference for performance and it's simpler to think about
-            # what's happening this way.)
-            for model in (channel.models or self.tutor.models):
-                if model not in model_names:
-                    if model == self.tutor.switch_model:
-                        raise ValueError(f"Model {model} referenced in channel {channel} is the switch model and cannot be used in a channel.")
-                    else:
-                        raise ValueError(f"Model {model} referenced in channel {channel} is not defined.")
+        m = self.get_model(self.tutor.switch_model)
+        # Fill in default switch prompt
+        if not m.prompt.system:
+            m.prompt.system = SWITCH_PROMPT
+
+        return self
+
+    @model_validator(mode="after")
+    def check_model_overrides(self) -> "Config":
+        """Validate and apply model overrides."""
+        self.tutor.models = self._apply_model_overrides(
+                self.tutor.models,
+                self.tutor.variables)
+
+        # Apply overrides to models for workspaces and channels.
+        # There is not real "inheritance" going on here apart from the base
+        # variables that are defined for the tutor. Otherwise, each set of
+        # models are evaluated independently and only inherit things from the
+        # original self.models definition.
+        #
+        # When models and select other parameters are None, we *do* use
+        # inheritance to fill in the missing value from the parent object.
+        for workspace in self.tutor.workspaces:
+            workspace.loading_reaction = (
+                    workspace.loading_reaction or self.tutor.loading_reaction)
+            if workspace.models is not None:
+                workspace.models = self._apply_model_overrides(
+                        workspace.models,
+                        self.tutor.variables)
+            else:
+                workspace.models = self.tutor.models
+            for channel in workspace.channels:
+                channel.loading_reaction = (
+                        channel.loading_reaction or workspace.loading_reaction)
+                if channel.models is not None:
+                    channel.models = self._apply_model_overrides(
+                            channel.models,
+                            self.tutor.variables)
+                else:
+                    channel.models = workspace.models
 
         return self
 
@@ -182,32 +247,69 @@ class Config(BaseSettings):
         Returns:
             Config for the channel
         """
-        for channel in self.tutor.channels:
-            if channel.channel_id == channel_id and channel.team_id == team_id:
-                full_channel = channel.copy()
-                # Fill in defaults in case they're missing
-                prompt = self.tutor.default_prompt.dict()
-                overrides = channel.prompt.dict() \
-                        if isinstance(channel.prompt, Prompt) \
-                        else (channel.prompt or {})
-                prompt.update(overrides)
-                full_channel.prompt = Prompt.parse_obj(prompt)
-                full_channel.loading_reaction = (
-                        channel.loading_reaction or self.tutor.loading_reaction
-                        )
-                full_channel.models = (
-                        channel.models or self.tutor.models
+        for workspace in self.tutor.workspaces:
+            if workspace.team_id == team_id:
+                for channel in workspace.channels:
+                    if channel.channel_id == channel_id:
+                        channel.team_id = team_id
+                        return channel
+
+                # Return default Channel for Workspace
+                return Channel(
+                        team_id=workspace.team_id,
+                        channel_id=channel_id,
+                        loading_reaction=workspace.loading_reaction,
+                        models=workspace.models,
                         )
 
-                return full_channel
-
+        # Return general default Channel
         return Channel(
-                team_id="",
-                channel_id="",
+                team_id=team_id,
+                channel_id=channel_id,
                 loading_reaction=self.tutor.loading_reaction,
-                prompt=self.tutor.default_prompt,
                 models=self.tutor.models,
                 )
+
+    def _apply_model_overrides(self,
+                               overrides: list[str, ModelOverride, Model],
+                               *dicts: dict[str, Any]) -> list[Model]:
+        """Get a fully-specified list of models with overrides applied."""
+        variables = {}
+        for d in dicts:
+            variables.update(d)
+
+        models = list[Model]()
+        for override in overrides:
+            if isinstance(override, Model):
+                new_vars = variables.copy()
+                new_vars.update(override.prompt.variables)
+                override.prompt.variables = new_vars
+                models.append(override)
+            elif isinstance(override, str):
+                m = self.get_model(override).copy(deep=True)
+                new_vars = variables.copy()
+                new_vars.update(m.prompt.variables)
+                m.prompt.variables = new_vars
+                models.append(self.get_model(override))
+            elif isinstance(override, ModelOverride):
+                model = self.get_model(override.name).copy(deep=True)
+                model.params = model.params.copy(update=override.params)
+                new_vars = variables.copy()
+                new_vars.update(override.prompt.get('variables', {}))
+                override.prompt['variables'] = variables
+                model.prompt = model.prompt.copy(update=override.prompt)
+                models.append(model)
+            else:
+                raise ValueError(f"Unknown model override type {type(override)}")
+
+        for m in models:
+            if not m.prompt.system:
+                m.prompt.system = DEFAULT_PROMPT
+            validate_template(m.prompt.system, m.prompt.variables)
+            if m.name == self.tutor.switch_model:
+                raise ValueError(f"Switch model {self.tutor.switch_model} cannot be overridden.")
+
+        return models
 
 
 def load_config(path: str = os.environ.get('CONFIG_PATH', "config.toml")):
