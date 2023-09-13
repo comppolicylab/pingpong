@@ -1,7 +1,7 @@
 import openai
 
 from .config import Model
-from .meta import ChatTurn
+from .meta import ChatTurn, Role
 
 
 class ChatWithDataCompletion(openai.ChatCompletion):
@@ -114,12 +114,44 @@ class Endpoint:
         Returns:
             See `_CLASSES` return types
         """
+        extra_vars = kwargs.pop("variables", {})
         params = self.model.params.dict()
         params.pop("completion_type")
         params.pop("type")
         params.update(kwargs)
+
+        # Add a system prompt from the model config if one is not defined.
+        params['messages'] = (
+                self._get_model_messages(extra_vars) +
+                params.get('messages', [])
+                )
+
         response = await self._completion_class.acreate(**params)
         return self._format_response(response)
+
+    def _get_model_messages(self, extra_vars: dict | None = None) -> list[dict]:
+        """Get the chat turns that come from the model config.
+
+        Args:
+            extra_vars: Extra variables to pass to the model template
+
+        Returns:
+            A list of messages from the model config.
+        """
+        messages = [{
+                "role": Role.SYSTEM,
+                "content": self.model.get_prompt(extra_vars),
+                }]
+        for ex in self.model.prompt.examples:
+            messages.append({
+                "role": Role.USER,
+                "content": ex.user,
+                })
+            messages.append({
+                "role": Role.AI,
+                "content": ex.ai,
+                })
+        return messages
 
     def _format_response(self, response: dict) -> list[ChatTurn]:
         """Format a response from OpenAI.

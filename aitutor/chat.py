@@ -17,6 +17,7 @@ from .meta import (
         )
 from .reaction import react, unreact
 from .text import SWITCH_PROMPT, ERROR
+from .template import format_template
 
 
 logger = logging.getLogger(__name__)
@@ -57,12 +58,6 @@ class AiChat:
     def __init__(self, thread: SlackThread):
         self.thread = thread
         self.channel_config = config.get_channel(thread.team_id, thread.channel)
-        # Get the channel configuration
-        self.prompt = self.channel_config.prompt.system.format(
-                # Today's date as a string like Wednesday, December 4, 2019.
-                date=datetime.today().strftime("%A, %B %d, %Y"),
-                focus=self.channel_config.prompt.focus,
-                )
 
     async def ensure_disclaimer(self, client: SocketModeClient):
         """Ensure that a disclaimer has been sent to the channel.
@@ -74,8 +69,7 @@ class AiChat:
         if not meta.get('disclaimer_sent', False):
             await client.web_client.chat_postMessage(
                     channel=self.thread.channel,
-                    text=config.tutor.greeting.format(
-                        focus=self.channel_config.prompt.focus),
+                    text=config.tutor.get_greeting(),
                     )
             meta['disclaimer_sent'] = True
             await save_channel_metadata(self.thread.source_event, meta)
@@ -172,7 +166,7 @@ class AiChat:
             ValueError: If no models are configured.
         """
         switch_model = config.get_model(config.tutor.switch_model)
-        models = [m for m in config.models if m.name != switch_model.name]
+        models = self.channel_config.models
         if not models:
             raise ValueError("No models are configured.")
         switch = Endpoint(switch_model)
@@ -189,16 +183,8 @@ class AiChat:
                 for m in models
                 )
 
-        # Generate prompt
-        prompt = SWITCH_PROMPT.format(
-                descriptions=descriptions,
-                slugs=slugs,
-                )
-        logger.debug(f"Switch Prompt: {prompt}")
-
-        # Format the switch prompt along with examples that were provided
-        # in the config about how to use each model.
-        messages = [{"role": Role.SYSTEM, "content": prompt}]
+        # Format examples about how to use the model into the convo.
+        messages = []
         for model in models:
             for ex in model.examples:
                 messages.append({"role": Role.USER, "content": ex.user})
@@ -213,9 +199,14 @@ class AiChat:
             })
 
         try:
-            response = await switch(messages=messages)
+            response = await switch(messages=messages, variables={
+                "descriptions": descriptions,
+                "slugs": slugs,
+                })
             logger.debug(f"Switch response: {response}")
             payload = json.loads(response[-1].content)
+            # NOTE: find the model within the channel_config.models, not the
+            # main config, which might not be fully-specified.
             model = next(m for m in models if m.name == payload['model'])
             logger.debug(f"Selected model: {model.name}")
             return Endpoint(model)
@@ -233,20 +224,9 @@ class AiChat:
         Returns:
             The chat history as a list of messages.
         """
-        messages = [{
-            "role": Role.SYSTEM,
-            "content": self.prompt,
-            }]
-
-        examples = self.channel_config.prompt.examples
-        ex_turns = list[ChatTurn]()
-        for example in examples:
-            ex_turns.append(ChatTurn(Role.USER, example.user))
-            ex_turns.append(ChatTurn(Role.AI, example.ai))
-        history = ex_turns + self.thread.history
-
+        messages = []
         at_mention = f"<@{self.thread.bot_id}>"
-        for turn in history:
+        for turn in self.thread.history:
             messages.append({
                 "role": turn.role,
                 # Remove at-mentions for the bot from the message content
