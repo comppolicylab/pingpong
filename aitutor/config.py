@@ -98,6 +98,7 @@ class Channel(BaseSettings):
     channel_id: str
     loading_reaction: str = Field("")
     models: list[Union[str, ModelOverride, Model]] | None = Field(None)
+    variables: dict[str, str] = Field({})
 
 
 class Workspace(BaseSettings):
@@ -107,6 +108,7 @@ class Workspace(BaseSettings):
     loading_reaction: str = Field("")
     models: list[Union[str, ModelOverride, Model]] | None = Field(None)
     channels: list[Channel] = Field([])
+    variables: dict[str, str] = Field({})
 
 
 class TutorSettings(BaseSettings):
@@ -176,9 +178,6 @@ class Config(BaseSettings):
         if self.tutor.switch_model not in model_names:
             raise ValueError(f"Switch model {self.tutor.switch_model} is not defined.")
 
-        if len(self.tutor.models) < 2:
-            raise ValueError("Need at least 1 non-switch model.")
-
         m = self.get_model(self.tutor.switch_model)
         # Fill in default switch prompt
         if not m.prompt.system:
@@ -194,10 +193,18 @@ class Config(BaseSettings):
                 self.tutor.variables)
 
         # Apply overrides to models for workspaces and channels.
-        # There is not real "inheritance" going on here apart from the base
-        # variables that are defined for the tutor. Otherwise, each set of
-        # models are evaluated independently and only inherit things from the
-        # original self.models definition.
+        # Models themselves are each an independent definition at each level
+        # of the hierarchy. So, if a list of two models is defined in the base
+        # tutor level, and a list of one model is defined in a workspace, then
+        # the workspace will only have that one single model it defined; it
+        # will not inherit the other two models from the base tutor level.
+        #
+        # Variables, however, are inherited. So if a variable is defined in
+        # the base tutor level, it will be available in all workspaces and
+        # channels. If a variable is defined in a workspace, it will be
+        # available in all channels in that workspace. Each level can override
+        # variables defined above it. ModelOverrides can also override the
+        # variables that are used in a prompt.
         #
         # When models and select other parameters are None, we *do* use
         # inheritance to fill in the missing value from the parent object.
@@ -207,7 +214,8 @@ class Config(BaseSettings):
             if workspace.models is not None:
                 workspace.models = self._apply_model_overrides(
                         workspace.models,
-                        self.tutor.variables)
+                        self.tutor.variables,
+                        workspace.variables)
             else:
                 workspace.models = self.tutor.models
             for channel in workspace.channels:
@@ -216,7 +224,9 @@ class Config(BaseSettings):
                 if channel.models is not None:
                     channel.models = self._apply_model_overrides(
                             channel.models,
-                            self.tutor.variables)
+                            self.tutor.variables,
+                            workspace.variables,
+                            channel.variables)
                 else:
                     channel.models = workspace.models
 
@@ -296,7 +306,7 @@ class Config(BaseSettings):
                 model.params = model.params.copy(update=override.params)
                 new_vars = variables.copy()
                 new_vars.update(override.prompt.get('variables', {}))
-                override.prompt['variables'] = variables
+                override.prompt['variables'] = new_vars
                 model.prompt = model.prompt.copy(update=override.prompt)
                 models.append(model)
             else:

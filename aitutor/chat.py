@@ -1,6 +1,6 @@
-from datetime import datetime
 import logging
 import json
+import re
 
 import openai
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
@@ -16,8 +16,7 @@ from .meta import (
         Role,
         )
 from .reaction import react, unreact
-from .text import SWITCH_PROMPT, ERROR
-from .template import format_template
+from .text import ERROR
 
 
 logger = logging.getLogger(__name__)
@@ -94,6 +93,67 @@ class AiChat:
                       self.thread.source_event.get('event'),
                       self.channel_config.loading_reaction)
 
+    def _format_content(self, turns: list[ChatTurn]) -> list[dict]:
+        """Format the content of the thread for posting to Slack.
+
+        Args:
+            turns: The turns to format.
+            
+        Returns:
+            The formatted content.
+        """
+        doc_pattern = r"\[doc(\d+)\]"
+        doc_ref_labels = {}
+        # Find all references to citations in the text. We want to rewrite this
+        # text to use nicer citations, like [1] instead of [doc1]. We also
+        # want to track specifically which citations are referenced, so if we
+        # see [doc1] and [doc2], we want a set that contains {0, 1}.
+        #
+        # The text might also use unintuitive ordering of citations, like only
+        # referencing [doc2] and [doc3]. So we also renumber the references
+        # here so that they make more sense.
+        text = turns[-1].content
+        while True:
+            match = re.search(doc_pattern, text)
+            if not match:
+                break
+            ref = match.group(1)
+            doc_idx = int(ref) - 1
+            if doc_idx not in doc_ref_labels:
+                doc_ref_labels[doc_idx] = len(doc_ref_labels) + 1
+            label = doc_ref_labels[doc_idx]
+            text = text[:match.start()] + f"[{label}]" + text[match.end():]
+
+        # Add the main, rewritten text to the reply.
+        blocks = [{
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": text,
+                    },
+            }]
+
+        if len(turns) > 1 and turns[-2].role == Role.TOOL:
+            tool_data = json.loads(turns[-2].content)
+            citations = tool_data.get('citations', [])
+            if citations:
+                blocks.append({
+                    "type": "divider",
+                    })
+                for i, citation in enumerate(citations):
+                    # Only add docs that were referenced in the text.
+                    if i not in doc_ref_labels:
+                        continue
+                    blocks.append({
+                        "type": "context",
+                        "elements": [{
+                            "type": "mrkdwn",
+                            "text": f"*[{doc_ref_labels[i]}]* <{citation['url']}|{citation['filepath']}>",
+                            }],
+                    })
+
+        return blocks
+
     async def reply(self, client: SocketModeClient, **kwargs):
         """Reply to the thread.
 
@@ -112,11 +172,20 @@ class AiChat:
         try:
             new_turns = await self.generate_next_turn(**kwargs)
 
+            # Try to generate a nicely-formatted version of the response. If
+            # we fail, we'll fall back to the raw text.
+            reply_blocks = None
+            try:
+                reply_blocks = self._format_content(new_turns)
+            except Exception as e:
+                logger.exception(e)
+
             # Post the response in the thread.
             await client.web_client.chat_postMessage(
                     channel=self.thread.channel,
                     thread_ts=self.thread.ts,
                     text=new_turns[-1].content,
+                    blocks=reply_blocks,
                     )
 
             # Save metadata
