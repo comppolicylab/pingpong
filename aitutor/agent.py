@@ -1,4 +1,5 @@
 import logging
+import time
 
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
@@ -8,29 +9,48 @@ from .thread import SlackThread, client_user_id
 from .chat import AiChat
 from .claim import claim_message
 from .reaction import react
+import aitutor.metrics as metrics
 
 
 logger = logging.getLogger(__name__)
 
 
-async def reply(client: SocketModeClient, payload: dict):
+async def reply(client: SocketModeClient, payload: dict) -> bool:
     """Reply to a message described by event.
 
     Args:
         client: SocketModeClient instance
         payload: Event payload
+
+    Returns:
+        True if the message was processed, False otherwise
     """
     try:
         thread = await SlackThread.load_from_event(client, payload)
         if not thread.is_relevant():
             logger.debug("Ignoring event %s (%s), bot was not tagged",
                          payload['event_id'], payload['event']['type'])
-            return
+            return False
+
+        metrics.inbound_messages.labels(
+                workspace=thread.team_id,
+                channel=thread.channel,
+                user=thread.user_id,
+                ).inc()
 
         await AiChat(thread).reply(client)
+
+        metrics.replies.labels(
+                workspace=thread.team_id,
+                channel=thread.channel,
+                user=thread.user_id,
+                ).inc()
     except Exception as e:
         logger.exception(e)
         pass
+
+    return True
+
 
 
 async def handle_message(client: SocketModeClient, req: SocketModeRequest):
@@ -57,6 +77,9 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
                              event_id, event_type)
                 return
 
+            t0 = time.monotonic()
+            did_process = False
+
             match event.get('type'):
                 case 'message':
                     claimed = await claim_message(req.payload)
@@ -65,7 +88,7 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
                                      event_id, event_type)
                         return
 
-                    await reply(client, req.payload)
+                    did_process = await reply(client, req.payload)
 
                 case 'app_mention':
                     # If the bot hasn't responded yet, send a wave reaction
@@ -76,8 +99,17 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
                                      event_id, event_type)
                         return
 
-                    await reply(client, req.payload)
+                    did_process = await reply(client, req.payload)
 
                 case _:
                     logger.debug("Ignoring event %s (%s)",
                                  event_id, event_type)
+
+            # Log request duration
+            t1 = time.monotonic()
+            metrics.reply_duration.labels(
+                    relevant=did_process,
+                    workspace=event.get('team_id', ''),
+                    channel=event.get('event', {}).get('channel', ''),
+                    ).observe(t1 - t0)
+

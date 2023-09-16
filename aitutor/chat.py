@@ -17,6 +17,7 @@ from .meta import (
         )
 from .reaction import react, unreact
 from .text import ERROR
+import aitutor.metrics as metrics
 
 
 logger = logging.getLogger(__name__)
@@ -217,7 +218,25 @@ class AiChat:
             The system's response.
         """
         endpoint = await self.choose_endpoint()
-        new_messages = await endpoint(messages=self._format_convo(), **kwargs)
+        new_messages, call_meta = await endpoint(messages=self._format_convo(), **kwargs)
+
+        # Log the metadata as metrics
+        metrics.engine_usage.labels(
+                direction='out',
+                model=endpoint.model.name,
+                engine=endpoint.model.params.engine.name,
+                workspace=self.thread.team_id,
+                channel=self.thread.channel,
+                user=self.thread.user_id,
+                ).observe(call_meta.tok_out)
+        metrics.engine_usage.labels(
+                direction='in',
+                model=endpoint.model.name,
+                engine=endpoint.model.params.engine.name,
+                workspace=self.thread.team_id,
+                channel=self.thread.channel,
+                user=self.thread.user_id,
+                ).observe(call_meta.tok_in)
 
         # Add the new messages to the thread
         for msg in new_messages:
