@@ -181,6 +181,13 @@ class SentrySettings(BaseSettings):
     dsn: str
 
 
+class MetricsSettings(BaseSettings):
+    """Metrics settings."""
+
+    enabled: bool = Field(False)
+    port: int = Field(8008)
+
+
 class Config(BaseSettings):
     """Stats Chat Bot config."""
     
@@ -188,6 +195,7 @@ class Config(BaseSettings):
 
     openai: OpenAISettings
     sentry: SentrySettings
+    metrics: MetricsSettings = Field(MetricsSettings())
     slack: SlackSettings
     tutor: TutorSettings
     models: list[Model]

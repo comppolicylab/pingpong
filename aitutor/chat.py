@@ -287,7 +287,7 @@ class AiChat:
             })
 
         try:
-            response = await switch(messages=messages, variables={
+            response, _ = await switch(messages=messages, variables={
                 "descriptions": descriptions,
                 "slugs": slugs,
                 })

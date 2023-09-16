@@ -16,7 +16,7 @@ replies = Counter(
 reply_duration = Histogram(
         'reply_duration',
         'Duration of replies',
-        ['relevant', 'workspace', 'channel'],
+        ['relevant', 'success', 'workspace', 'channel'],
         )
 
 engine_quota = Gauge(

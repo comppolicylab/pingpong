@@ -4,6 +4,7 @@ import asyncio
 
 from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
+from prometheus_client import start_http_server
 
 from .config import config
 from .agent import handle_message
@@ -51,6 +52,9 @@ def main():
     
     for sig in [signal.SIGINT, signal.SIGTERM]:
         loop.add_signal_handler(sig, handle_sig)
+
+    if config.metrics.enabled:
+        start_http_server(config.metrics.port)
 
     while not _done:
         try:

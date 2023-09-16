@@ -54,16 +54,20 @@ async def reply(client: SocketModeClient, payload: dict) -> bool:
 
 
 
-async def handle_message_impl(client: SocketModeClient, req: SocketModeRequest):
+async def handle_message_impl(client: SocketModeClient, req: SocketModeRequest) -> bool:
     """Process incoming messages.
 
     Args:
         client: SocketModeClient instance
         req: SocketModeRequest instance
+
+    Returns:
+        True if the message was processed, False otherwise
     """
     event_id = req.payload['event_id']
     event = req.payload["event"]
     event_type = event.get('type', req.payload['type'])
+    did_process = False
     logger.info("Handling message %s (%s)", event_id, event_type)
 
     match req.type:
@@ -76,10 +80,7 @@ async def handle_message_impl(client: SocketModeClient, req: SocketModeRequest):
             if event.get('user') == bot_id:
                 logger.debug("Ignoring event %s (%s) from self",
                              event_id, event_type)
-                return
-
-            t0 = time.monotonic()
-            did_process = False
+                return False
 
             match event.get('type'):
                 case 'message':
@@ -87,7 +88,7 @@ async def handle_message_impl(client: SocketModeClient, req: SocketModeRequest):
                     if not claimed:
                         logger.debug("Message %s (%s) already claimed",
                                      event_id, event_type)
-                        return
+                        return False
 
                     did_process = await reply(client, req.payload)
 
@@ -98,7 +99,7 @@ async def handle_message_impl(client: SocketModeClient, req: SocketModeRequest):
                     if not claimed:
                         logger.debug("Message %s (%s) already claimed",
                                      event_id, event_type)
-                        return
+                        return False
 
                     did_process = await reply(client, req.payload)
 
@@ -106,13 +107,7 @@ async def handle_message_impl(client: SocketModeClient, req: SocketModeRequest):
                     logger.debug("Ignoring event %s (%s)",
                                  event_id, event_type)
 
-            # Log request duration
-            t1 = time.monotonic()
-            metrics.reply_duration.labels(
-                    relevant=did_process,
-                    workspace=event.get('team_id', ''),
-                    channel=event.get('event', {}).get('channel', ''),
-                    ).observe(t1 - t0)
+    return did_process
 
 
 async def handle_message(client: SocketModeClient, req: SocketModeRequest):
@@ -132,9 +127,11 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
     channel = evt.get('channel', '')
     channel_type = evt.get('channel_type', '')
     success = True
+    did_process = True
+    t0 = time.monotonic()
 
     try:
-        await handle_message_impl(client, req)
+        did_process = await handle_message_impl(client, req)
     except Exception as e:
         logger.exception(e)
         success = False
@@ -149,3 +146,12 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
                 channel_type=channel_type,
                 channel=channel,
                 ).inc()
+
+        # Log request duration
+        t1 = time.monotonic()
+        metrics.reply_duration.labels(
+                relevant=did_process,
+                success=success,
+                workspace=team_id,
+                channel=channel,
+                ).observe(t1 - t0)
