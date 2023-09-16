@@ -1,6 +1,7 @@
 import openai
 import logging
 import json
+from typing import NamedTuple
 
 from async_throttle import Throttle
 import tiktoken
@@ -8,9 +9,16 @@ import tiktoken
 from .config import Model, Engine
 from .meta import ChatTurn, Role
 from .chat_with_data_completion import ChatWithDataCompletion
+import aitutor.metrics as metrics
 
 
 logger = logging.getLogger(__name__)
+
+
+CallMeta = NamedTuple("CallMeta", [
+    ("tok_out", int),
+    ("tok_in", int),
+])
 
 
 # Classes that are available for completion
@@ -94,15 +102,17 @@ class Endpoint:
             raise ValueError(f"Invalid model completion type: {model.params.completion_type}")
         self._completion_class = _CLASSES[model.params.completion_type]
 
-    async def __call__(self, **kwargs):
+    async def __call__(self, **kwargs) -> tuple[list[ChatTurn], CallMeta]:
         """Create a completion asynchronously.
 
         Args:
             **kwargs: Keyword arguments to pass to OpenAI.
 
-        Returns:
-            See `_CLASSES` return types
+            List of new chat turns from the completion, as well as metadata
+            about token usage.
         """
+        engine_metric = metrics.engine_quota.labels(engine=self.model.params.engine.name)
+
         extra_vars = kwargs.pop("variables", {})
         params = self.model.params.dict()
         params.pop("completion_type")
@@ -122,8 +132,10 @@ class Endpoint:
         # Send requests when we have free capacity for it
         engine = get_engine(self.model.params.engine)
         logger.debug(f"Requesting {tokens} tokens, current capacity {engine.throttle.level}")
+        engine_metric.set(engine.throttle.level)
         async with engine.throttle(tokens) as t:
             logger.debug(f"Starting completion, quota at {engine.throttle.level}")
+            engine_metric.set(engine.throttle.level)
             response = await self._completion_class.acreate(**params)
             turns = self._format_response(response)
             new_tokens = 0
@@ -133,7 +145,8 @@ class Endpoint:
             logger.debug(f"Received {new_tokens} tokens, current capacity {engine.throttle.level}")
             await t.consume(new_tokens)
             logger.debug(f"Finished completion, quota at {engine.throttle.level}")
-            return turns
+            engine_metric.set(engine.throttle.level)
+            return turns, CallMeta(tok_out=tokens, tok_in=new_tokens)
 
     def _simplify_messages(self, messages: list[dict]) -> tuple[list[dict], int]:
         """Simplify the messages until it fits within the context window.

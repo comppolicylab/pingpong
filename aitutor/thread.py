@@ -118,6 +118,7 @@ class SlackThread:
         self.source_event = source_event
         event = source_event['event']
         self.team_id = source_event['team_id']
+        self.user_id = event['user']
         self.channel = event['channel']
         self.channel_type = event.get('channel_type')
         self.ts = event['ts']
