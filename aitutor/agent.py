@@ -9,6 +9,7 @@ from .thread import SlackThread, client_user_id
 from .chat import AiChat
 from .claim import claim_message
 from .reaction import react
+from .config import config
 import aitutor.metrics as metrics
 
 
@@ -53,7 +54,7 @@ async def reply(client: SocketModeClient, payload: dict) -> bool:
 
 
 
-async def handle_message(client: SocketModeClient, req: SocketModeRequest):
+async def handle_message_impl(client: SocketModeClient, req: SocketModeRequest):
     """Process incoming messages.
 
     Args:
@@ -113,3 +114,38 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
                     channel=event.get('event', {}).get('channel', ''),
                     ).observe(t1 - t0)
 
+
+async def handle_message(client: SocketModeClient, req: SocketModeRequest):
+    """Process incoming messages.
+
+    Args:
+        See `handle_message_impl`
+
+    Returns:
+        See `handle_message_impl`
+    """
+    req_metric = metrics.in_flight.labels(app=config.slack.app_id)
+    req_metric.inc()
+    evt = req.payload.get('event', {})
+    evt_type = evt.get('type', req.payload.get('type', ''))
+    team_id = req.payload.get('team_id', '')
+    channel = evt.get('channel', '')
+    channel_type = evt.get('channel_type', '')
+    success = True
+
+    try:
+        await handle_message_impl(client, req)
+    except Exception as e:
+        logger.exception(e)
+        success = False
+        pass
+    finally:
+        req_metric.dec()
+        metrics.event_count.labels(
+                app=config.slack.app_id,
+                event_type=evt_type,
+                success=success,
+                workspace=team_id,
+                channel_type=channel_type,
+                channel=channel,
+                ).inc()

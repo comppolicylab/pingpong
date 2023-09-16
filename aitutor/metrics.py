@@ -30,3 +30,15 @@ engine_usage = Histogram(
         'Token usage for user requests',
         ['direction', 'model', 'engine', 'workspace', 'channel', 'user'],
         )
+
+in_flight = Gauge(
+        'in_flight',
+        'Number of in-flight requests',
+        ['app'],
+        )
+
+event_count = Counter(
+        'event_count',
+        'Number of events processed',
+        ['app', 'event_type', 'success', 'workspace', 'channel_type', 'channel'],
+        )
