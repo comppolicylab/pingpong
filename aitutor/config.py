@@ -4,7 +4,8 @@ import logging
 from pathlib import Path
 from typing import Union, Literal, Any
 
-from pydantic import Field, model_validator
+import tiktoken
+from pydantic import Field, model_validator, field_validator
 from pydantic_settings import BaseSettings
 
 from .text import GREETING, SWITCH_PROMPT, DEFAULT_PROMPT
@@ -29,11 +30,32 @@ class Prompt(BaseSettings):
     variables: dict[str, str] = Field({})
 
 
+class Engine(BaseSettings):
+    """Language model engine."""
+
+    name: str
+    encoding: str
+    capacity: int  # Number of tokens per minute
+    context_size: int  # Max number of tokens that can be included in context
+    concurrency: int = Field(5)  # Number of concurrent requests allowed
+    response_tokens: int = Field(400)  # Number of tokens to hold out for response
+
+    @field_validator("encoding")
+    @classmethod
+    def validate_encoding(cls, v: str) -> str:
+        """Validate the encoding."""
+        try:
+            tiktoken.get_encoding(v)
+        except Exception as e:
+            raise ValueError(f"Invalid encoding {v}") from e
+        return v
+
+
 class OpenAIModelParams(BaseSettings):
     """Configurable parameters for an OpenAI LLM."""
 
     type: Literal["llm"]
-    engine: str
+    engine: Union[str, Engine]
     temperature: float = Field(0.0)
     top_p: float = Field(0.95)
     completion_type: Literal["ChatCompletion"] = Field("ChatCompletion")
@@ -43,7 +65,7 @@ class AzureCSModelParams(BaseSettings):
     """Azure cognitive search model."""
 
     type: Literal["csm"]
-    engine: str
+    engine: Union[str, Engine]
     temperature: float = Field(0.2)
     top_p: float = Field(0.95)
     threshold: float = Field(0.3)
@@ -169,6 +191,22 @@ class Config(BaseSettings):
     slack: SlackSettings
     tutor: TutorSettings
     models: list[Model]
+    engines: list[Engine] = Field([])
+
+    @model_validator(mode="after")
+    def check_engines(self) -> "Config":
+        """Make sure that all model engines are defined.
+
+        Turn all of the engine names as strings into Engine objects, as they
+        are defined in the config.engines list.
+        """
+        engines = {e.name: e for e in self.engines}
+        for m in self.models:
+            if isinstance(m.params.engine, str):
+                if m.params.engine not in engines:
+                    raise ValueError(f"Engine {m.params.engine} is not defined.")
+                m.params.engine = engines[m.params.engine]
+        return self
 
     @model_validator(mode="after")
     def check_switch_model(self) -> "Config":
