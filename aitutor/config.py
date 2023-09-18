@@ -184,8 +184,7 @@ class SentrySettings(BaseSettings):
 class MetricsSettings(BaseSettings):
     """Metrics settings."""
 
-    enabled: bool = Field(False)
-    port: int = Field(8008)
+    connection_string: str = Field("")
 
 
 class Config(BaseSettings):

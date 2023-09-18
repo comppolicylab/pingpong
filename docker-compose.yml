@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  aitutor:
+    platform: linux/amd64
+    image: aitutor.azurecr.io/aitutor:latest
+    restart: always
+    networks: [main]
+    # Expose metrics port for scraping
+    expose: [8008]
+    ports: ["8008:8008"]
+    secrets:
+      - source: bot_config
+        target: /code/config.toml
+        mode: 0400
+    volumes:
+      - dbdata:/db
+
+networks:
+  main:
+
+# Use ephemeral volume in dev
+volumes:
+  dbdata:
+    driver_opts: {}
+
+# Use local config in dev
+secrets:
+  bot_config:
+    file: ./config.toml

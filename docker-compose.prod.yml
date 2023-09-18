@@ -1,0 +1,11 @@
+volumes:
+  dbdata:
+    driver: local
+    driver_opts:
+      type: none
+      device: /opt/aitutor/db
+      o: bind
+
+secrets:
+  bot_config:
+    file: /opt/aitutor/config.toml
