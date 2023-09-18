@@ -81,8 +81,11 @@ def get_engine(engine: Engine) -> EngineImpl:
     """
     if engine.name not in _ENGINES:
         _ENGINES[engine.name] = EngineImpl(engine)
-    return _ENGINES[engine.name]
-
+    eng = _ENGINES[engine.name]
+    # Set up monitoring on this engine.
+    metrics.engine_quota.monitor(
+            lambda: (eng.throttle.level, {"engine": engine.name}))
+    return eng
 
 
 class Endpoint:
@@ -111,8 +114,6 @@ class Endpoint:
             List of new chat turns from the completion, as well as metadata
             about token usage.
         """
-        engine_metric = metrics.engine_quota.labels(engine=self.model.params.engine.name)
-
         extra_vars = kwargs.pop("variables", {})
         params = self.model.params.dict()
         params.pop("completion_type")
@@ -132,10 +133,8 @@ class Endpoint:
         # Send requests when we have free capacity for it
         engine = get_engine(self.model.params.engine)
         logger.debug(f"Requesting {tokens} tokens, current capacity {engine.throttle.level}")
-        engine_metric.set(engine.throttle.level)
         async with engine.throttle(tokens) as t:
             logger.debug(f"Starting completion, quota at {engine.throttle.level}")
-            engine_metric.set(engine.throttle.level)
             response = await self._completion_class.acreate(**params)
             turns = self._format_response(response)
             new_tokens = 0
@@ -145,7 +144,6 @@ class Endpoint:
             logger.debug(f"Received {new_tokens} tokens, current capacity {engine.throttle.level}")
             await t.consume(new_tokens)
             logger.debug(f"Finished completion, quota at {engine.throttle.level}")
-            engine_metric.set(engine.throttle.level)
             return turns, CallMeta(tok_out=tokens, tok_in=new_tokens)
 
     def _simplify_messages(self, messages: list[dict]) -> tuple[list[dict], int]:

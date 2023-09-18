@@ -1,4 +1,4 @@
-from .otel import Counter, Gauge, Histogram
+from .otel import Counter, AsyncGauge, Gauge, Histogram
 
 
 inbound_messages = Counter(
@@ -25,10 +25,10 @@ reply_duration = Histogram(
         )
 
 
-engine_quota = Gauge(
+engine_quota = AsyncGauge(
         "engine_quota",
-        "TPM quota usage for the engine",
-        unit="TPM",
+        "Token quota usage for the engine",
+        unit="tokens",
         labels=["engine"])
 
 

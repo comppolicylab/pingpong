@@ -73,6 +73,31 @@ class Gauge(Metric):
             yield Observation(value, dict(labels))
 
 
+class AsyncGauge(Metric):
+
+    def __init__(self,
+                 name: str,
+                 description: str,
+                 callbacks: list[callable] = None,
+                 unit: str | None = None,
+                 labels: list[str] = None):
+        self._labels = labels or []
+        self._callbacks = callbacks or []
+        self._gauge = self.meter.create_observable_gauge(
+                name,
+                callbacks=[self._invoke],
+                description=description,
+                unit=unit)
+
+    def _invoke(self, _: CallbackOptions):
+        for callback in self._callbacks:
+            val, attrs = callback()
+            yield Observation(val, attrs)
+
+    def monitor(self, callback: callable):
+        self._callbacks.append(callback)
+
+
 class Histogram(Metric):
 
     def __init__(self,
