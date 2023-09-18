@@ -4,7 +4,7 @@ import asyncio
 
 from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
-from prometheus_client import start_http_server
+from azure.monitor.opentelemetry import configure_azure_monitor
 
 from .config import config
 from .agent import handle_message
@@ -53,8 +53,10 @@ def main():
     for sig in [signal.SIGINT, signal.SIGTERM]:
         loop.add_signal_handler(sig, handle_sig)
 
-    if config.metrics.enabled:
-        start_http_server(config.metrics.port)
+    if config.metrics.connection_string:
+        configure_azure_monitor(
+                connection_string=config.metrics.connection_string,
+                )
 
     while not _done:
         try:
