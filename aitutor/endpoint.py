@@ -81,10 +81,10 @@ def get_engine(engine: Engine) -> EngineImpl:
     """
     if engine.name not in _ENGINES:
         _ENGINES[engine.name] = EngineImpl(engine)
+        # Set up monitoring on this engine.
+        metrics.engine_quota.monitor(
+                lambda: (eng.throttle.level, {"engine": engine.name}))
     eng = _ENGINES[engine.name]
-    # Set up monitoring on this engine.
-    metrics.engine_quota.monitor(
-            lambda: (eng.throttle.level, {"engine": engine.name}))
     return eng
 
 
