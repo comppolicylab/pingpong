@@ -163,13 +163,13 @@ tests = ["mypy (>=0.800)", "pytest", "pytest-asyncio"]
 
 [[package]]
 name = "async-throttle"
-version = "0.2.3"
+version = "1.0.0"
 description = "Multipurpose asyncio throttle"
 optional = false
 python-versions = ">=3.10,<4.0"
 files = [
-    {file = "async_throttle-0.2.3-py3-none-any.whl", hash = "sha256:a6296644c41cbbec07a82ad0e4e6b9f62f41ea9b82593a14dd596b73fedb8e7e"},
-    {file = "async_throttle-0.2.3.tar.gz", hash = "sha256:8ec317d9c4ff3a3c221a03e4613c70fbdcc87407deeae4445661d6baa8619171"},
+    {file = "async_throttle-1.0.0-py3-none-any.whl", hash = "sha256:db0df33190357548383e46b4e8189a81bb3e0bc609c9952f3ed3fa70dba1ce64"},
+    {file = "async_throttle-1.0.0.tar.gz", hash = "sha256:9bb35cd57a55164c4f8c54bc15c0161b0068f89b4785caf468ab298c96ed1989"},
 ]
 
 [[package]]
@@ -1644,4 +1644,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "3852746f716dbe750ce266f0fda5fb85ff3498e7b3695a48da6b9602a5cdf2a1"
+content-hash = "1864c08b2f3c150b9c4c8a3e3655381cfc205c7c35e46e8c90b83114a57369cd"
