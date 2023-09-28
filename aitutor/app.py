@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import signal
+from functools import partial
 
 from azure.monitor.opentelemetry import configure_azure_monitor
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
@@ -20,18 +21,31 @@ _done = False
 async def run():
     """Connect to Slack and handle events."""
     global _done
-    client = SocketModeClient(
-        app_token=config.slack.socket_token,
-        web_client=AsyncWebClient(token=config.slack.web_token),
-    )
-    client.socket_mode_request_listeners.append(handle_message)
-    await client.connect()
+
+    apps = config.slack if isinstance(config.slack, list) else [config.slack]
+
+    clients = list[SocketModeClient]()
+    logger.info("Starting client(s) ...")
+    for app in apps:
+        client = SocketModeClient(
+            app_token=app.socket_token,
+            web_client=AsyncWebClient(token=app.web_token),
+        )
+        handler = partial(handle_message, app)
+        client.socket_mode_request_listeners.append(handler)
+        clients.append(client)
+        logger.debug(f"Starting client for {app.app_id}...")
+        await client.connect()
+
     # Wait until a signal is received to shut down
     while not _done:
         await asyncio.sleep(1)
-    logger.debug("Stopping client...")
-    await client.disconnect()
-    await client.close()
+
+    logger.info("Stopping client(s) ...")
+    for i, client in enumerate(clients):
+        logger.debug(f"Stopping client {apps[i].app_id}...")
+        await client.disconnect()
+        await client.close()
 
 
 def handle_sig():

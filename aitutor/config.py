@@ -214,7 +214,7 @@ class Config(BaseSettings):
     openai: OpenAISettings
     sentry: SentrySettings
     metrics: MetricsSettings = Field(MetricsSettings())
-    slack: SlackSettings
+    slack: SlackSettings | list[SlackSettings]
     tutor: TutorSettings
     models: list[Model]
     engines: list[Engine] = Field([])

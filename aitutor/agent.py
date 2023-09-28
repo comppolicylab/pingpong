@@ -7,7 +7,7 @@ from slack_sdk.socket_mode.response import SocketModeResponse
 
 from .chat import AiChat
 from .claim import claim_message
-from .config import config
+from .config import SlackSettings
 from .metrics import event_count, in_flight, inbound_messages, replies, reply_duration
 from .reaction import react
 from .thread import SlackThread, client_user_id
@@ -111,7 +111,9 @@ async def handle_message_impl(client: SocketModeClient, req: SocketModeRequest) 
     return did_process
 
 
-async def handle_message(client: SocketModeClient, req: SocketModeRequest):
+async def handle_message(
+    slack_app: SlackSettings, client: SocketModeClient, req: SocketModeRequest
+):
     """Process incoming messages.
 
     Args:
@@ -120,7 +122,7 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
     Returns:
         See `handle_message_impl`
     """
-    req_metric = in_flight.labels(app=config.slack.app_id)
+    req_metric = in_flight.labels(app=slack_app.app_id)
     req_metric.inc()
     evt = req.payload.get("event", {})
     evt_type = evt.get("type", req.payload.get("type", ""))
@@ -140,7 +142,7 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
     finally:
         req_metric.dec()
         event_count.labels(
-            app=config.slack.app_id,
+            app=slack_app.app_id,
             event_type=evt_type,
             success=success,
             workspace=team_id,
