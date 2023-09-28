@@ -3,6 +3,8 @@
 Allows instrumentation with Prometheus-style syntax but using OpenTelemetry
 on the backend.
 """
+from typing import Callable
+
 from opentelemetry import metrics
 from opentelemetry.metrics import CallbackOptions, Observation
 
@@ -44,10 +46,10 @@ class Gauge(Metric):
         name: str,
         description: str,
         unit: str | None = None,
-        labels: list[str] = None,
+        labels: list[str] | None = None,
     ):
         self._labels = labels or []
-        self._values = {}
+        self._values = dict[frozenset[tuple[str, str]], float]()
         self._gauge = self.meter.create_observable_gauge(
             name, callbacks=[self._report], description=description, unit=unit
         )
@@ -71,14 +73,17 @@ class Gauge(Metric):
             yield Observation(value, dict(labels))
 
 
+AsyncGaugeCallback = Callable[[], tuple[float, dict[str, str]]]
+
+
 class AsyncGauge(Metric):
     def __init__(
         self,
         name: str,
         description: str,
-        callbacks: list[callable] = None,
+        callbacks: list[AsyncGaugeCallback] | None = None,
         unit: str | None = None,
-        labels: list[str] = None,
+        labels: list[str] | None = None,
     ):
         self._labels = labels or []
         self._callbacks = callbacks or []
@@ -91,7 +96,7 @@ class AsyncGauge(Metric):
             val, attrs = callback()
             yield Observation(val, attrs)
 
-    def monitor(self, callback: callable):
+    def monitor(self, callback: AsyncGaugeCallback):
         self._callbacks.append(callback)
 
 
@@ -101,7 +106,7 @@ class Histogram(Metric):
         name: str,
         description: str,
         unit: str | None = None,
-        labels: list[str] = None,
+        labels: list[str] | None = None,
     ):
         self._labels = labels or []
         self._histogram = self.meter.create_histogram(
@@ -119,7 +124,7 @@ class Counter(Metric):
         name: str,
         description: str,
         unit: str | None = None,
-        labels: list[str] = None,
+        labels: list[str] | None = None,
     ):
         self._labels = labels or []
         self._counter = self.meter.create_counter(

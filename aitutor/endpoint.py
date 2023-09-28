@@ -5,6 +5,7 @@ from typing import NamedTuple
 import openai
 import tiktoken
 from async_throttle import Throttle
+from openai.openai_object import OpenAIObject
 
 from .chat_with_data_completion import ChatWithDataCompletion
 from .config import Engine, Model
@@ -83,9 +84,9 @@ def get_engine(engine: Engine) -> EngineImpl:
     if engine.name not in _ENGINES:
         _ENGINES[engine.name] = EngineImpl(engine)
         # Set up monitoring on this engine.
+        eng = _ENGINES[engine.name]
         engine_quota.monitor(lambda: (eng.throttle.level, {"engine": engine.name}))
-    eng = _ENGINES[engine.name]
-    return eng
+    return _ENGINES[engine.name]
 
 
 class Endpoint:
@@ -245,7 +246,7 @@ class Endpoint:
             )
         return messages
 
-    def _format_response(self, response: dict) -> list[ChatTurn]:
+    def _format_response(self, response: OpenAIObject) -> list[ChatTurn]:
         """Format a response from OpenAI.
 
         Args:

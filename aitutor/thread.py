@@ -4,7 +4,6 @@ import os
 
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 
-from .config import config
 from .meta import _DB_DIR, ChatTurn, Role, load_metadata
 from .reaction import Reaction
 
@@ -33,6 +32,8 @@ async def client_user_id(client: SocketModeClient) -> str:
     # Get the user ID of the bot
     auth = await client.web_client.auth_test()
     _user_id = auth["user_id"].strip()
+    if not _user_id:
+        raise ValueError("Could not get user ID of the bot")
     return _user_id
 
 

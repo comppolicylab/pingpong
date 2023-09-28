@@ -3,6 +3,13 @@ import logging
 import re
 
 import openai
+from slack_sdk.models.blocks import (
+    Block,
+    ContextBlock,
+    DividerBlock,
+    MarkdownTextObject,
+    SectionBlock,
+)
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 
 from .config import config
@@ -97,7 +104,7 @@ class AiChat:
             self.channel_config.loading_reaction,
         )
 
-    def _format_content(self, turns: list[ChatTurn]) -> list[dict]:
+    def _format_content(self, turns: list[ChatTurn]) -> list[Block]:
         """Format the content of the thread for posting to Slack.
 
         Args:
@@ -107,7 +114,7 @@ class AiChat:
             The formatted content.
         """
         doc_pattern = r"\[doc(\d+)\]"
-        doc_ref_labels = {}
+        doc_ref_labels = dict[int, int]()
         # Find all references to citations in the text. We want to rewrite this
         # text to use nicer citations, like [1] instead of [doc1]. We also
         # want to track specifically which citations are referenced, so if we
@@ -129,42 +136,29 @@ class AiChat:
             text = text[: match.start()] + f"[{label}]" + text[match.end() :]
 
         # Add the main, rewritten text to the reply.
-        blocks = [
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": text,
-                },
-            }
-        ]
+        blocks = list[Block]()
+        blocks.append(SectionBlock(text=MarkdownTextObject(text=text)))
 
         if len(turns) > 1 and turns[-2].role == Role.TOOL:
             tool_data = json.loads(turns[-2].content)
             citations = tool_data.get("citations", [])
             if citations:
-                blocks.append(
-                    {
-                        "type": "divider",
-                    }
-                )
+                blocks.append(DividerBlock())
                 for i, citation in enumerate(citations):
                     # Only add docs that were referenced in the text.
                     if i not in doc_ref_labels:
                         continue
                     blocks.append(
-                        {
-                            "type": "context",
-                            "elements": [
-                                {
-                                    "type": "mrkdwn",
-                                    "text": (
+                        ContextBlock(
+                            elements=[
+                                MarkdownTextObject(
+                                    text=(
                                         f"*[{doc_ref_labels[i]}]* "
-                                        f"<{citation['url']}|{citation['filepath']}>",
+                                        f"<{citation['url']}|{citation['filepath']}>"
                                     ),
-                                },
+                                )
                             ],
-                        }
+                        )
                     )
 
         return blocks

@@ -2,7 +2,7 @@ import logging
 import os
 import tomllib
 from pathlib import Path
-from typing import Any, Literal, Union
+from typing import Any, Literal
 
 import tiktoken
 from pydantic import Field, field_validator, model_validator
@@ -54,7 +54,7 @@ class OpenAIModelParams(BaseSettings):
     """Configurable parameters for an OpenAI LLM."""
 
     type: Literal["llm"]
-    engine: Union[str, Engine]
+    engine: str | Engine
     temperature: float = Field(0.0)
     top_p: float = Field(0.95)
     completion_type: Literal["ChatCompletion"] = Field("ChatCompletion")
@@ -64,7 +64,7 @@ class AzureCSModelParams(BaseSettings):
     """Azure cognitive search model."""
 
     type: Literal["csm"]
-    engine: Union[str, Engine]
+    engine: str | Engine
     temperature: float = Field(0.2)
     top_p: float = Field(0.95)
     threshold: float = Field(0.3)
@@ -77,7 +77,7 @@ class AzureCSModelParams(BaseSettings):
     completion_type: Literal["ChatWithDataCompletion"] = Field("ChatWithDataCompletion")
 
 
-ModelParams = Union[OpenAIModelParams, AzureCSModelParams]
+ModelParams = OpenAIModelParams | AzureCSModelParams
 
 
 class Model(BaseSettings):
@@ -118,7 +118,7 @@ class Channel(BaseSettings):
     team_id: str = Field("")
     channel_id: str
     loading_reaction: str = Field("")
-    models: list[Union[str, ModelOverride, Model]] | None = Field(None)
+    models: list[str | ModelOverride] | list[Model] | None = Field(None)
     variables: dict[str, str] = Field({})
 
 
@@ -127,7 +127,7 @@ class Workspace(BaseSettings):
 
     team_id: str
     loading_reaction: str = Field("")
-    models: list[Union[str, ModelOverride, Model]] | None = Field(None)
+    models: list[str | ModelOverride] | list[Model] | None = Field(None)
     channels: list[Channel] = Field([])
     variables: dict[str, str] = Field({})
 
@@ -138,7 +138,7 @@ class TutorSettings(BaseSettings):
     workspaces: list[Workspace] = Field([])
     db_dir: str = Field(".db")
     switch_model: str = Field("switch")
-    models: list[Union[str, ModelOverride, Model]]
+    models: list[str | ModelOverride] | list[Model]
     loading_reaction: str = Field("thinking_face")
     greeting: str = Field(GREETING)
     variables: dict[str, str] = Field({})
@@ -327,7 +327,7 @@ class Config(BaseSettings):
         )
 
     def _apply_model_overrides(
-        self, overrides: list[str, ModelOverride, Model], *dicts: dict[str, Any]
+        self, overrides: list[str | ModelOverride] | list[Model], *dicts: dict[str, Any]
     ) -> list[Model]:
         """Get a fully-specified list of models with overrides applied."""
         variables = {}
