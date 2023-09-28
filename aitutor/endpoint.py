@@ -122,7 +122,8 @@ class Endpoint:
         params.pop("completion_type")
         params.pop("type")
         params.update(kwargs)
-        params["engine"] = self.model.params.engine.name
+        cfg_eng = self.model.engine
+        params["engine"] = cfg_eng.name
 
         # Add a system prompt from the model config if one is not defined.
         params["messages"] = self._get_model_messages(extra_vars) + params.get(
@@ -133,7 +134,7 @@ class Endpoint:
         params["messages"], tokens = self._simplify_messages(params["messages"])
 
         # Send requests when we have free capacity for it
-        engine = get_engine(self.model.params.engine)
+        engine = get_engine(cfg_eng)
         logger.debug(
             f"Requesting {tokens} tokens, current capacity {engine.throttle.level}"
         )
@@ -162,7 +163,7 @@ class Endpoint:
             A tuple containing the simplified messages and the number of tokens
             contained in the message.
         """
-        engine = get_engine(self.model.params.engine)
+        engine = get_engine(self.model.engine)
         total_tokens = 0
         if not messages:
             return messages, total_tokens

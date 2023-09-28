@@ -89,6 +89,14 @@ class Model(BaseSettings):
     params: ModelParams = Field(..., discriminator="type")
     prompt: Prompt = Field(Prompt())
 
+    @property
+    def engine(self) -> Engine:
+        """Get the engine in a type-safe way."""
+        engine = self.params.engine
+        if not isinstance(engine, Engine):
+            raise RuntimeError(f"Engine not initialized {engine}")
+        return engine
+
     def get_prompt(self, extra_vars: dict[str, str] | None = None) -> str:
         """Get the full prompt with template vars filled in.
 
@@ -120,6 +128,18 @@ class Channel(BaseSettings):
     loading_reaction: str = Field("")
     models: list[str | ModelOverride] | list[Model] | None = Field(None)
     variables: dict[str, str] = Field({})
+
+    def get_models(self) -> list[Model]:
+        """Access the models list in a type-safe way."""
+        if self.models is None:
+            return []
+
+        models = list[Model]()
+        for m in self.models:
+            if not isinstance(m, Model):
+                raise RuntimeError(f"Model not initialized {m}")
+            models.append(m)
+        return models
 
 
 class Workspace(BaseSettings):

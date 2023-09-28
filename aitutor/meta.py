@@ -2,7 +2,7 @@ import dbm
 import json
 import logging
 import os
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from .config import config
 
@@ -87,7 +87,7 @@ async def load_channel_metadata(payload: dict) -> dict:
         return json.loads(db[mdid])
 
 
-async def save_metadata(payload: dict, meta: dict):
+async def save_metadata(payload: dict, meta: Any):
     """Save metadata to a file.
 
     Args:

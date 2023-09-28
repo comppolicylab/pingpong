@@ -88,7 +88,7 @@ class AiChat:
         """
         await react(
             client,
-            self.thread.source_event.get("event"),
+            self.thread.source_event["event"],
             self.channel_config.loading_reaction,
         )
 
@@ -100,7 +100,7 @@ class AiChat:
         """
         await unreact(
             client,
-            self.thread.source_event.get("event"),
+            self.thread.source_event["event"],
             self.channel_config.loading_reaction,
         )
 
@@ -237,7 +237,7 @@ class AiChat:
         engine_usage.labels(
             direction="out",
             model=endpoint.model.name,
-            engine=endpoint.model.params.engine.name,
+            engine=endpoint.model.engine.name,
             workspace=self.thread.team_id,
             channel=self.thread.channel,
             user=self.thread.user_id,
@@ -245,7 +245,7 @@ class AiChat:
         engine_usage.labels(
             direction="in",
             model=endpoint.model.name,
-            engine=endpoint.model.params.engine.name,
+            engine=endpoint.model.engine.name,
             workspace=self.thread.team_id,
             channel=self.thread.channel,
             user=self.thread.user_id,
@@ -267,7 +267,7 @@ class AiChat:
             ValueError: If no models are configured.
         """
         switch_model = config.get_model(config.tutor.switch_model)
-        models = self.channel_config.models
+        models = self.channel_config.get_models()
         if not models:
             raise ValueError("No models are configured.")
         switch = Endpoint(switch_model)
