@@ -1,11 +1,10 @@
+import dbm
 import json
 import logging
-import dbm
 import os
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from .config import config
-
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +18,7 @@ class Role:
     SYSTEM = "system"
 
 
-ChatTurn = NamedTuple('ChatTurn', [('role', str), ('content', str)])
+ChatTurn = NamedTuple("ChatTurn", [("role", str), ("content", str)])
 
 
 # TODO - write this to non-local storage!
@@ -27,7 +26,7 @@ ChatTurn = NamedTuple('ChatTurn', [('role', str), ('content', str)])
 
 _DB_DIR = config.tutor.db_dir
 os.makedirs(_DB_DIR, exist_ok=True)
-_META_CACHE = os.path.join(_DB_DIR, 'meta')
+_META_CACHE = os.path.join(_DB_DIR, "meta")
 
 
 def get_mdid(payload: dict) -> str:
@@ -35,13 +34,13 @@ def get_mdid(payload: dict) -> str:
 
     Args:
         payload: Event payload dictionary
-    
+
     Returns:
         Metadata ID
     """
-    team_id = payload['team_id']
-    channel_id = payload['event']['channel']
-    msg_ts = payload['event']['ts']
+    team_id = payload["team_id"]
+    channel_id = payload["event"]["channel"]
+    msg_ts = payload["event"]["ts"]
     return f"{team_id}:{channel_id}:{msg_ts}"
 
 
@@ -50,12 +49,12 @@ def get_channel_mdid(payload: dict) -> str:
 
     Args:
         payload: Event payload dictionary
-    
+
     Returns:
         Metadata ID
     """
-    team_id = payload['team_id']
-    channel_id = payload['event']['channel']
+    team_id = payload["team_id"]
+    channel_id = payload["event"]["channel"]
     return f"channel.{team_id}:{channel_id}"
 
 
@@ -67,7 +66,7 @@ async def save_channel_metadata(payload: dict, meta: dict):
         meta: Metadata to save
     """
     mdid = get_channel_mdid(payload)
-    with dbm.open(_META_CACHE, 'c') as db:
+    with dbm.open(_META_CACHE, "c") as db:
         db[mdid] = json.dumps(meta)
 
 
@@ -76,19 +75,19 @@ async def load_channel_metadata(payload: dict) -> dict:
 
     Args:
         payload: Event payload dictionary
-    
+
     Returns:
         Metadata dictionary
     """
     mdid = get_channel_mdid(payload)
-    with dbm.open(_META_CACHE, 'c') as db:
+    with dbm.open(_META_CACHE, "c") as db:
         if mdid not in db:
             logger.debug("Metadata file %s does not exist", mdid)
             return {}
         return json.loads(db[mdid])
 
 
-async def save_metadata(payload: dict, meta: dict):
+async def save_metadata(payload: dict, meta: Any):
     """Save metadata to a file.
 
     Args:
@@ -96,7 +95,7 @@ async def save_metadata(payload: dict, meta: dict):
         meta: Metadata to save
     """
     mdid = get_mdid(payload)
-    with dbm.open(_META_CACHE, 'c') as db:
+    with dbm.open(_META_CACHE, "c") as db:
         db[mdid] = json.dumps(meta)
 
 
@@ -110,11 +109,11 @@ async def load_metadata(payload: dict) -> dict:
         Metadata dictionary
     """
     mdid = get_mdid(payload)
-    with dbm.open(_META_CACHE, 'c') as db:
+    with dbm.open(_META_CACHE, "c") as db:
         if mdid not in db:
             logger.debug("Metadata file %s does not exist", mdid)
             return {}
         data = json.loads(db[mdid])
-        if 'turns' in data:
-            data['turns'] = [ChatTurn(*msg) for msg in data['turns']]
+        if "turns" in data:
+            data["turns"] = [ChatTurn(*msg) for msg in data["turns"]]
         return data

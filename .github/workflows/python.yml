@@ -1,0 +1,43 @@
+name: Python
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Test Python
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    env:
+      wd: ./
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v2
+        with:
+          ref: ${{github.head_ref}}
+
+      - name: Set up poetry
+        run: pipx install poetry
+
+      - name: Set up Python3.x
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11.5
+          cache: "poetry"
+        id: py
+
+      - name: Get requirements
+        working-directory: ${{env.wd}}
+        run: |
+          poetry install --with dev --no-interaction --no-ansi
+
+      - name: Linting, formatting, and type checking
+        working-directory: ${{env.wd}}
+        run: poetry run pre-commit run --show-diff-on-failure --all-files
+
+      - name: Test
+        working-directory: ${{env.wd}}
+        run: poetry run pytest -v

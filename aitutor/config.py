@@ -1,16 +1,15 @@
+import logging
 import os
 import tomllib
-import logging
 from pathlib import Path
-from typing import Union, Literal, Any
+from typing import Any, Literal
 
 import tiktoken
-from pydantic import Field, model_validator, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
-from .text import GREETING, SWITCH_PROMPT, DEFAULT_PROMPT
-from .template import validate_template, format_template
-
+from .template import format_template, validate_template
+from .text import DEFAULT_PROMPT, GREETING, SWITCH_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +54,7 @@ class OpenAIModelParams(BaseSettings):
     """Configurable parameters for an OpenAI LLM."""
 
     type: Literal["llm"]
-    engine: Union[str, Engine]
+    engine: str | Engine
     temperature: float = Field(0.0)
     top_p: float = Field(0.95)
     completion_type: Literal["ChatCompletion"] = Field("ChatCompletion")
@@ -65,7 +64,7 @@ class AzureCSModelParams(BaseSettings):
     """Azure cognitive search model."""
 
     type: Literal["csm"]
-    engine: Union[str, Engine]
+    engine: str | Engine
     temperature: float = Field(0.2)
     top_p: float = Field(0.95)
     threshold: float = Field(0.3)
@@ -78,7 +77,7 @@ class AzureCSModelParams(BaseSettings):
     completion_type: Literal["ChatWithDataCompletion"] = Field("ChatWithDataCompletion")
 
 
-ModelParams = Union[OpenAIModelParams, AzureCSModelParams]
+ModelParams = OpenAIModelParams | AzureCSModelParams
 
 
 class Model(BaseSettings):
@@ -89,6 +88,14 @@ class Model(BaseSettings):
     examples: list[Example] = Field([])
     params: ModelParams = Field(..., discriminator="type")
     prompt: Prompt = Field(Prompt())
+
+    @property
+    def engine(self) -> Engine:
+        """Get the engine in a type-safe way."""
+        engine = self.params.engine
+        if not isinstance(engine, Engine):
+            raise RuntimeError(f"Engine not initialized {engine}")
+        return engine
 
     def get_prompt(self, extra_vars: dict[str, str] | None = None) -> str:
         """Get the full prompt with template vars filled in.
@@ -119,8 +126,20 @@ class Channel(BaseSettings):
     team_id: str = Field("")
     channel_id: str
     loading_reaction: str = Field("")
-    models: list[Union[str, ModelOverride, Model]] | None = Field(None)
+    models: list[str | ModelOverride] | list[Model] | None = Field(None)
     variables: dict[str, str] = Field({})
+
+    def get_models(self) -> list[Model]:
+        """Access the models list in a type-safe way."""
+        if self.models is None:
+            return []
+
+        models = list[Model]()
+        for m in self.models:
+            if not isinstance(m, Model):
+                raise RuntimeError(f"Model not initialized {m}")
+            models.append(m)
+        return models
 
 
 class Workspace(BaseSettings):
@@ -128,7 +147,7 @@ class Workspace(BaseSettings):
 
     team_id: str
     loading_reaction: str = Field("")
-    models: list[Union[str, ModelOverride, Model]] | None = Field(None)
+    models: list[str | ModelOverride] | list[Model] | None = Field(None)
     channels: list[Channel] = Field([])
     variables: dict[str, str] = Field({})
 
@@ -139,7 +158,7 @@ class TutorSettings(BaseSettings):
     workspaces: list[Workspace] = Field([])
     db_dir: str = Field(".db")
     switch_model: str = Field("switch")
-    models: list[Union[str, ModelOverride, Model]]
+    models: list[str | ModelOverride] | list[Model]
     loading_reaction: str = Field("thinking_face")
     greeting: str = Field(GREETING)
     variables: dict[str, str] = Field({})
@@ -189,7 +208,7 @@ class MetricsSettings(BaseSettings):
 
 class Config(BaseSettings):
     """Stats Chat Bot config."""
-    
+
     log_level: str = Field("INFO", env="LOG_LEVEL")
 
     openai: OpenAISettings
@@ -234,8 +253,8 @@ class Config(BaseSettings):
     def check_model_overrides(self) -> "Config":
         """Validate and apply model overrides."""
         self.tutor.models = self._apply_model_overrides(
-                self.tutor.models,
-                self.tutor.variables)
+            self.tutor.models, self.tutor.variables
+        )
 
         # Apply overrides to models for workspaces and channels.
         # Models themselves are each an independent definition at each level
@@ -255,23 +274,25 @@ class Config(BaseSettings):
         # inheritance to fill in the missing value from the parent object.
         for workspace in self.tutor.workspaces:
             workspace.loading_reaction = (
-                    workspace.loading_reaction or self.tutor.loading_reaction)
+                workspace.loading_reaction or self.tutor.loading_reaction
+            )
             if workspace.models is not None:
                 workspace.models = self._apply_model_overrides(
-                        workspace.models,
-                        self.tutor.variables,
-                        workspace.variables)
+                    workspace.models, self.tutor.variables, workspace.variables
+                )
             else:
                 workspace.models = self.tutor.models
             for channel in workspace.channels:
                 channel.loading_reaction = (
-                        channel.loading_reaction or workspace.loading_reaction)
+                    channel.loading_reaction or workspace.loading_reaction
+                )
                 if channel.models is not None:
                     channel.models = self._apply_model_overrides(
-                            channel.models,
-                            self.tutor.variables,
-                            workspace.variables,
-                            channel.variables)
+                        channel.models,
+                        self.tutor.variables,
+                        workspace.variables,
+                        channel.variables,
+                    )
                 else:
                     channel.models = workspace.models
 
@@ -311,23 +332,23 @@ class Config(BaseSettings):
 
                 # Return default Channel for Workspace
                 return Channel(
-                        team_id=workspace.team_id,
-                        channel_id=channel_id,
-                        loading_reaction=workspace.loading_reaction,
-                        models=workspace.models,
-                        )
+                    team_id=workspace.team_id,
+                    channel_id=channel_id,
+                    loading_reaction=workspace.loading_reaction,
+                    models=workspace.models,
+                )
 
         # Return general default Channel
         return Channel(
-                team_id=team_id,
-                channel_id=channel_id,
-                loading_reaction=self.tutor.loading_reaction,
-                models=self.tutor.models,
-                )
+            team_id=team_id,
+            channel_id=channel_id,
+            loading_reaction=self.tutor.loading_reaction,
+            models=self.tutor.models,
+        )
 
-    def _apply_model_overrides(self,
-                               overrides: list[str, ModelOverride, Model],
-                               *dicts: dict[str, Any]) -> list[Model]:
+    def _apply_model_overrides(
+        self, overrides: list[str | ModelOverride] | list[Model], *dicts: dict[str, Any]
+    ) -> list[Model]:
         """Get a fully-specified list of models with overrides applied."""
         variables = {}
         for d in dicts:
@@ -350,8 +371,8 @@ class Config(BaseSettings):
                 model = self.get_model(override.name).copy(deep=True)
                 model.params = model.params.copy(update=override.params)
                 new_vars = variables.copy()
-                new_vars.update(override.prompt.get('variables', {}))
-                override.prompt['variables'] = new_vars
+                new_vars.update(override.prompt.get("variables", {}))
+                override.prompt["variables"] = new_vars
                 model.prompt = model.prompt.copy(update=override.prompt)
                 models.append(model)
             else:
@@ -362,12 +383,18 @@ class Config(BaseSettings):
                 m.prompt.system = DEFAULT_PROMPT
             validate_template(m.prompt.system, m.prompt.variables)
             if m.name == self.tutor.switch_model:
-                raise ValueError(f"Switch model {self.tutor.switch_model} cannot be overridden.")
+                raise ValueError(
+                    f"Switch model {self.tutor.switch_model} cannot be overridden."
+                )
 
         return models
 
 
-def load_config(path: str = os.environ.get('CONFIG_PATH', "config.toml")):
+# Find default location for config file.
+DEFAULT_CONFIG_PATH = os.environ.get("CONFIG_PATH", "config.toml")
+
+
+def load_config(path: str = DEFAULT_CONFIG_PATH) -> Config:
     """Parse config file from path.
 
     Args:
