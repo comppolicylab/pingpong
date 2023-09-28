@@ -1,0 +1,53 @@
+{
+    "display_information": {
+        "name": "StatGPT",
+        "description": "Experimental course assistant powered by GPT-4.",
+        "background_color": "#4a7fcf",
+        "long_description": "This experimental app is meant to help answer questions about the course material. The app has access to the syllabus, reading material, and assignments, in addition to the general information already available in GPT-4.\r\n\r\nAll interactions with the app (including direct messages) are recorded to improve how it works."
+    },
+    "features": {
+        "bot_user": {
+            "display_name": "StatGPT",
+            "always_online": true
+        }
+    },
+    "oauth_config": {
+        "scopes": {
+            "bot": [
+                "app_mentions:read",
+                "channels:history",
+                "chat:write",
+                "groups:history",
+                "im:history",
+                "im:write",
+                "incoming-webhook",
+                "links:read",
+                "mpim:history",
+                "mpim:write",
+                "reactions:read",
+                "reactions:write",
+                "users.profile:read"
+            ]
+        }
+    },
+    "settings": {
+        "event_subscriptions": {
+            "bot_events": [
+                "app_mention",
+                "link_shared",
+                "message.channels",
+                "message.groups",
+                "message.im",
+                "message.mpim",
+                "reaction_added",
+                "reaction_removed"
+            ]
+        },
+        "interactivity": {
+            "is_enabled": true
+        },
+        "org_deploy_enabled": true,
+        "socket_mode_enabled": true,
+        "token_rotation_enabled": false
+    }
+}
