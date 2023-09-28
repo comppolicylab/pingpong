@@ -5,11 +5,10 @@ from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
 
-import aitutor.metrics as metrics
-
 from .chat import AiChat
 from .claim import claim_message
 from .config import config
+from .metrics import event_count, in_flight, inbound_messages, replies, reply_duration
 from .reaction import react
 from .thread import SlackThread, client_user_id
 
@@ -36,7 +35,7 @@ async def reply(client: SocketModeClient, payload: dict) -> bool:
             )
             return False
 
-        metrics.inbound_messages.labels(
+        inbound_messages.labels(
             workspace=thread.team_id,
             channel=thread.channel,
             user=thread.user_id,
@@ -44,7 +43,7 @@ async def reply(client: SocketModeClient, payload: dict) -> bool:
 
         await AiChat(thread).reply(client)
 
-        metrics.replies.labels(
+        replies.labels(
             workspace=thread.team_id,
             channel=thread.channel,
             user=thread.user_id,
@@ -121,7 +120,7 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
     Returns:
         See `handle_message_impl`
     """
-    req_metric = metrics.in_flight.labels(app=config.slack.app_id)
+    req_metric = in_flight.labels(app=config.slack.app_id)
     req_metric.inc()
     evt = req.payload.get("event", {})
     evt_type = evt.get("type", req.payload.get("type", ""))
@@ -140,7 +139,7 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
         pass
     finally:
         req_metric.dec()
-        metrics.event_count.labels(
+        event_count.labels(
             app=config.slack.app_id,
             event_type=evt_type,
             success=success,
@@ -151,7 +150,7 @@ async def handle_message(client: SocketModeClient, req: SocketModeRequest):
 
         # Log request duration
         t1 = time.monotonic()
-        metrics.reply_duration.labels(
+        reply_duration.labels(
             relevant=did_process,
             success=success,
             workspace=team_id,

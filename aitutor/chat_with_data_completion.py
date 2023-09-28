@@ -1,8 +1,4 @@
-import json
-
 import openai
-
-from .meta import Role
 
 
 class ChatWithDataCompletion(openai.ChatCompletion):

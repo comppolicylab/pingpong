@@ -5,8 +5,6 @@ import re
 import openai
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 
-import aitutor.metrics as metrics
-
 from .config import config
 from .endpoint import Endpoint
 from .meta import (
@@ -16,6 +14,7 @@ from .meta import (
     save_channel_metadata,
     save_metadata,
 )
+from .metrics import engine_usage
 from .reaction import react, unreact
 from .text import ERROR
 from .thread import SlackThread
@@ -159,8 +158,11 @@ class AiChat:
                             "elements": [
                                 {
                                     "type": "mrkdwn",
-                                    "text": f"*[{doc_ref_labels[i]}]* <{citation['url']}|{citation['filepath']}>",
-                                }
+                                    "text": (
+                                        f"*[{doc_ref_labels[i]}]* "
+                                        f"<{citation['url']}|{citation['filepath']}>",
+                                    ),
+                                },
                             ],
                         }
                     )
@@ -238,7 +240,7 @@ class AiChat:
         )
 
         # Log the metadata as metrics
-        metrics.engine_usage.labels(
+        engine_usage.labels(
             direction="out",
             model=endpoint.model.name,
             engine=endpoint.model.params.engine.name,
@@ -246,7 +248,7 @@ class AiChat:
             channel=self.thread.channel,
             user=self.thread.user_id,
         ).observe(call_meta.tok_out)
-        metrics.engine_usage.labels(
+        engine_usage.labels(
             direction="in",
             model=endpoint.model.name,
             engine=endpoint.model.params.engine.name,

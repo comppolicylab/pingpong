@@ -6,11 +6,10 @@ import openai
 import tiktoken
 from async_throttle import Throttle
 
-import aitutor.metrics as metrics
-
 from .chat_with_data_completion import ChatWithDataCompletion
 from .config import Engine, Model
 from .meta import ChatTurn, Role
+from .metrics import engine_quota
 
 logger = logging.getLogger(__name__)
 
@@ -84,9 +83,7 @@ def get_engine(engine: Engine) -> EngineImpl:
     if engine.name not in _ENGINES:
         _ENGINES[engine.name] = EngineImpl(engine)
         # Set up monitoring on this engine.
-        metrics.engine_quota.monitor(
-            lambda: (eng.throttle.level, {"engine": engine.name})
-        )
+        engine_quota.monitor(lambda: (eng.throttle.level, {"engine": engine.name}))
     eng = _ENGINES[engine.name]
     return eng
 

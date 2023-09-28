@@ -5,10 +5,12 @@ import os
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 
 from .config import config
-from .meta import ChatTurn, Role, load_metadata
+from .meta import _DB_DIR, ChatTurn, Role, load_metadata
 from .reaction import Reaction
 
 logger = logging.getLogger(__name__)
+
+_THREADS_CACHE = os.path.join(_DB_DIR, "threads")
 
 
 # Cached bot client user ID.
@@ -111,7 +113,7 @@ class SlackThread:
         self,
         bot_id: str,
         source_event: dict,
-        directory: str = os.path.join(config.tutor.db_dir, "threads"),
+        directory: str = _THREADS_CACHE,
     ):
         self.bot_id = bot_id
         self.source_event = source_event

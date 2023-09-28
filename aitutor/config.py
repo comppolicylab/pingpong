@@ -370,7 +370,11 @@ class Config(BaseSettings):
         return models
 
 
-def load_config(path: str = os.environ.get("CONFIG_PATH", "config.toml")):
+# Find default location for config file.
+DEFAULT_CONFIG_PATH = os.environ.get("CONFIG_PATH", "config.toml")
+
+
+def load_config(path: str = DEFAULT_CONFIG_PATH) -> Config:
     """Parse config file from path.
 
     Args:
