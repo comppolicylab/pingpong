@@ -13,7 +13,7 @@ _THREADS_CACHE = os.path.join(_DB_DIR, "threads")
 
 
 # Cached bot client user ID.
-_user_id: str | None = None
+_user_ids = dict[SocketModeClient, str]()
 
 
 async def client_user_id(client: SocketModeClient) -> str:
@@ -26,15 +26,11 @@ async def client_user_id(client: SocketModeClient) -> str:
         User ID of the bot
     """
     # TODO - functools.cache doesn't work with async functions
-    global _user_id
-    if _user_id:
-        return _user_id
-    # Get the user ID of the bot
-    auth = await client.web_client.auth_test()
-    _user_id = auth["user_id"].strip()
-    if not _user_id:
-        raise ValueError("Could not get user ID of the bot")
-    return _user_id
+    if client not in _user_ids:
+        # Get the user ID of the bot
+        auth = await client.web_client.auth_test()
+        _user_ids[client] = auth["user_id"].strip()
+    return _user_ids[client]
 
 
 class SlackThread:
