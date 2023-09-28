@@ -9,8 +9,13 @@ import aitutor.metrics as metrics
 
 from .config import config
 from .endpoint import Endpoint
-from .meta import (ChatTurn, Role, load_channel_metadata,
-                   save_channel_metadata, save_metadata)
+from .meta import (
+    ChatTurn,
+    Role,
+    load_channel_metadata,
+    save_channel_metadata,
+    save_metadata,
+)
 from .reaction import react, unreact
 from .text import ERROR
 from .thread import SlackThread
