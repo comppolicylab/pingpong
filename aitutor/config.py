@@ -214,7 +214,7 @@ class Config(BaseSettings):
     openai: OpenAISettings
     sentry: SentrySettings
     metrics: MetricsSettings = Field(MetricsSettings())
-    slack: SlackSettings
+    slack: SlackSettings | list[SlackSettings]
     tutor: TutorSettings
     models: list[Model]
     engines: list[Engine] = Field([])
@@ -357,15 +357,12 @@ class Config(BaseSettings):
         models = list[Model]()
         for override in overrides:
             if isinstance(override, Model):
-                new_vars = variables.copy()
-                new_vars.update(override.prompt.variables)
-                override.prompt.variables = new_vars
-                models.append(override)
+                new_override = override.copy(deep=True)
+                new_override.prompt.variables.update(variables)
+                models.append(new_override)
             elif isinstance(override, str):
                 m = self.get_model(override).copy(deep=True)
-                new_vars = variables.copy()
-                new_vars.update(m.prompt.variables)
-                m.prompt.variables = new_vars
+                m.prompt.variables.update(variables)
                 models.append(self.get_model(override))
             elif isinstance(override, ModelOverride):
                 model = self.get_model(override.name).copy(deep=True)
