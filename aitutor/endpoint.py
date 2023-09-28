@@ -1,43 +1,45 @@
-import openai
-import logging
 import json
+import logging
 from typing import NamedTuple
 
-from async_throttle import Throttle
+import openai
 import tiktoken
+from async_throttle import Throttle
 
-from .config import Model, Engine
-from .meta import ChatTurn, Role
-from .chat_with_data_completion import ChatWithDataCompletion
 import aitutor.metrics as metrics
 
+from .chat_with_data_completion import ChatWithDataCompletion
+from .config import Engine, Model
+from .meta import ChatTurn, Role
 
 logger = logging.getLogger(__name__)
 
 
-CallMeta = NamedTuple("CallMeta", [
-    ("tok_out", int),
-    ("tok_in", int),
-])
+CallMeta = NamedTuple(
+    "CallMeta",
+    [
+        ("tok_out", int),
+        ("tok_in", int),
+    ],
+)
 
 
 # Classes that are available for completion
 _CLASSES = {
-        c.__name__: c
-        for c in [
-            openai.ChatCompletion,
-            ChatWithDataCompletion,
-        ]}
+    c.__name__: c
+    for c in [
+        openai.ChatCompletion,
+        ChatWithDataCompletion,
+    ]
+}
 
 
 class EngineImpl:
-
     def __init__(self, engine: Engine):
         self.engine = engine
         self._throttle = Throttle(
-                engine.capacity,
-                concurrency=engine.concurrency,
-                period=60)
+            engine.capacity, concurrency=engine.concurrency, period=60
+        )
         self._enc = tiktoken.get_encoding(engine.encoding)
 
     @property
@@ -83,7 +85,8 @@ def get_engine(engine: Engine) -> EngineImpl:
         _ENGINES[engine.name] = EngineImpl(engine)
         # Set up monitoring on this engine.
         metrics.engine_quota.monitor(
-                lambda: (eng.throttle.level, {"engine": engine.name}))
+            lambda: (eng.throttle.level, {"engine": engine.name})
+        )
     eng = _ENGINES[engine.name]
     return eng
 
@@ -102,7 +105,9 @@ class Endpoint:
         """
         self.model = model
         if model.params.completion_type not in _CLASSES:
-            raise ValueError(f"Invalid model completion type: {model.params.completion_type}")
+            raise ValueError(
+                f"Invalid model completion type: {model.params.completion_type}"
+            )
         self._completion_class = _CLASSES[model.params.completion_type]
 
     async def __call__(self, **kwargs) -> tuple[list[ChatTurn], CallMeta]:
@@ -119,20 +124,21 @@ class Endpoint:
         params.pop("completion_type")
         params.pop("type")
         params.update(kwargs)
-        params['engine'] = self.model.params.engine.name
+        params["engine"] = self.model.params.engine.name
 
         # Add a system prompt from the model config if one is not defined.
-        params['messages'] = (
-                self._get_model_messages(extra_vars) +
-                params.get('messages', [])
-                )
+        params["messages"] = self._get_model_messages(extra_vars) + params.get(
+            "messages", []
+        )
 
         # Simplify the messages until it fits within the context window.
-        params['messages'], tokens = self._simplify_messages(params['messages'])
+        params["messages"], tokens = self._simplify_messages(params["messages"])
 
         # Send requests when we have free capacity for it
         engine = get_engine(self.model.params.engine)
-        logger.debug(f"Requesting {tokens} tokens, current capacity {engine.throttle.level}")
+        logger.debug(
+            f"Requesting {tokens} tokens, current capacity {engine.throttle.level}"
+        )
         async with engine.throttle(tokens) as t:
             logger.debug(f"Starting completion, quota at {engine.throttle.level}")
             response = await self._completion_class.acreate(**params)
@@ -141,7 +147,9 @@ class Endpoint:
             for turn in turns:
                 new_tokens += engine.num_tokens(turn)
             # Anything that was returned by the model counts against the quota.
-            logger.debug(f"Received {new_tokens} tokens, current capacity {engine.throttle.level}")
+            logger.debug(
+                f"Received {new_tokens} tokens, current capacity {engine.throttle.level}"
+            )
             await t.consume(new_tokens)
             logger.debug(f"Finished completion, quota at {engine.throttle.level}")
             return turns, CallMeta(tok_out=tokens, tok_in=new_tokens)
@@ -165,7 +173,7 @@ class Endpoint:
         budget = engine.budget
 
         simplified = list[dict]()
-        
+
         # We definitely want to include the system prompt
         simplified.append(messages[0])
         total_tokens += engine.num_tokens(messages[0])
@@ -185,10 +193,12 @@ class Endpoint:
             spare_tokens = budget - total_tokens - 10
             encoded = engine.encoder.encode(messages[-1])
             content = engine.encoder.decode(encoded[:spare_tokens])
-            simplified.append({
-                "role": messages[-1]['role'],
-                "content": content,
-                })
+            simplified.append(
+                {
+                    "role": messages[-1]["role"],
+                    "content": content,
+                }
+            )
             total_tokens += len(encoded)
 
         # For the rest of the messages, work backwards and add as many messages
@@ -217,19 +227,25 @@ class Endpoint:
         Returns:
             A list of messages from the model config.
         """
-        messages = [{
+        messages = [
+            {
                 "role": Role.SYSTEM,
                 "content": self.model.get_prompt(extra_vars),
-                }]
+            }
+        ]
         for ex in self.model.prompt.examples:
-            messages.append({
-                "role": Role.USER,
-                "content": ex.user,
-                })
-            messages.append({
-                "role": Role.AI,
-                "content": ex.ai,
-                })
+            messages.append(
+                {
+                    "role": Role.USER,
+                    "content": ex.user,
+                }
+            )
+            messages.append(
+                {
+                    "role": Role.AI,
+                    "content": ex.ai,
+                }
+            )
         return messages
 
     def _format_response(self, response: dict) -> list[ChatTurn]:
@@ -243,11 +259,11 @@ class Endpoint:
         """
         first_choice = response.choices[0]
         msgs = list[dict]()
-        if 'message' in first_choice:
-            msgs.append(first_choice['message'])
-        elif 'messages' in first_choice:
-            msgs.extend(first_choice['messages'])
+        if "message" in first_choice:
+            msgs.append(first_choice["message"])
+        elif "messages" in first_choice:
+            msgs.extend(first_choice["messages"])
         else:
             raise ValueError(f"Invalid response: {response}")
 
-        return [ChatTurn(m['role'], m['content']) for m in msgs]
+        return [ChatTurn(m["role"], m["content"]) for m in msgs]

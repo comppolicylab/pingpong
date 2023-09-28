@@ -7,8 +7,8 @@ def _get_date():
 
 
 HARDCODED = {
-        "date": _get_date(),
-        }
+    "date": _get_date(),
+}
 
 
 def validate_template(tpl: str, variables: dict[str, str]) -> None:
@@ -38,9 +38,6 @@ def format_template(tpl: str, variables: dict[str, str]) -> str:
     Returns:
         The formatted string.
     """
-    all_vars = {
-            k: v() if callable(v) else v
-            for k, v in HARDCODED.items()
-            }
+    all_vars = {k: v() if callable(v) else v for k, v in HARDCODED.items()}
     all_vars.update(variables)
     return string.Template(tpl).safe_substitute(all_vars)

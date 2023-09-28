@@ -1,5 +1,6 @@
-import openai
 import json
+
+import openai
 
 from .meta import Role
 
@@ -33,37 +34,39 @@ class ChatWithDataCompletion(openai.ChatCompletion):
 
         if "dataSources" not in params:
             system_prompt = params["messages"][0]["content"]
-            params["dataSources"] = [{
-                "parameters": {
-                    "embeddingEndpoint": None,
-                    "embeddingKey": None,
-                    "endpoint": cs_endpoint,
-                    "fieldsMapping": {},
-                    # document how it needs to be set up in the index!
-                     #   "contentFields": [
-                     #       "content"
-                     #   ],
-                     #   "contentFieldsSeparator": "\n",
-                     #   "filepathField": "filepath",
+            params["dataSources"] = [
+                {
+                    "parameters": {
+                        "embeddingEndpoint": None,
+                        "embeddingKey": None,
+                        "endpoint": cs_endpoint,
+                        "fieldsMapping": {},
+                        # document how it needs to be set up in the index!
+                        #   "contentFields": [
+                        #       "content"
+                        #   ],
+                        #   "contentFieldsSeparator": "\n",
+                        #   "filepathField": "filepath",
                         # These are two custom fields we have added to enrich
                         # the documents in the index with the original source
                         # document link, *not* the Azure storage link! This
                         # way the bot will seem to be more directly integrated
                         # with the course documents (on Canvas, Github, etc).
-                     #   "titleField": "simple_name",
-                     #   "urlField": "original_link",
-                     #   "vectorFields": []
-                    #},
-                    "filter": None,
-                    "indexName": index_name,
-                    "inScope": restrict_answers_to_data,
-                    "key": cs_key,
-                    "queryType": "semantic",
-                    "semanticConfiguration": semantic_configuration,
-                    "roleInformation": system_prompt,
-                },
-                "type": "AzureCognitiveSearch"
-            }]
+                        #   "titleField": "simple_name",
+                        #   "urlField": "original_link",
+                        #   "vectorFields": []
+                        # },
+                        "filter": None,
+                        "indexName": index_name,
+                        "inScope": restrict_answers_to_data,
+                        "key": cs_key,
+                        "queryType": "semantic",
+                        "semanticConfiguration": semantic_configuration,
+                        "roleInformation": system_prompt,
+                    },
+                    "type": "AzureCognitiveSearch",
+                }
+            ]
 
         return params
 

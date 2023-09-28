@@ -4,11 +4,10 @@ Allows instrumentation with Prometheus-style syntax but using OpenTelemetry
 on the backend.
 """
 from opentelemetry import metrics
-from opentelemetry.metrics import Observation, CallbackOptions
+from opentelemetry.metrics import CallbackOptions, Observation
 
 
 class PartialProxy:
-
     def __init__(self, obj, *args, **kwargs):
         self._obj = obj
         self._args = args
@@ -20,12 +19,12 @@ class PartialProxy:
         attr = getattr(self._obj, name)
         if callable(attr):
             return lambda *args, **kwargs: attr(
-                    *self._args, *args, **self._kwargs, **kwargs)
+                *self._args, *args, **self._kwargs, **kwargs
+            )
         return attr
 
 
 class Metric:
-
     @property
     def meter(self):
         return metrics.get_meter_provider().get_meter(__name__)
@@ -40,19 +39,18 @@ class Metric:
 
 
 class Gauge(Metric):
-
-    def __init__(self,
-                 name: str,
-                 description: str,
-                 unit: str | None = None,
-                 labels: list[str] = None):
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        unit: str | None = None,
+        labels: list[str] = None,
+    ):
         self._labels = labels or []
         self._values = {}
         self._gauge = self.meter.create_observable_gauge(
-                name,
-                callbacks=[self._report],
-                description=description,
-                unit=unit)
+            name, callbacks=[self._report], description=description, unit=unit
+        )
 
     def set(self, value: float, **kwargs):
         self.check_labels(**kwargs)
@@ -74,20 +72,19 @@ class Gauge(Metric):
 
 
 class AsyncGauge(Metric):
-
-    def __init__(self,
-                 name: str,
-                 description: str,
-                 callbacks: list[callable] = None,
-                 unit: str | None = None,
-                 labels: list[str] = None):
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        callbacks: list[callable] = None,
+        unit: str | None = None,
+        labels: list[str] = None,
+    ):
         self._labels = labels or []
         self._callbacks = callbacks or []
         self._gauge = self.meter.create_observable_gauge(
-                name,
-                callbacks=[self._invoke],
-                description=description,
-                unit=unit)
+            name, callbacks=[self._invoke], description=description, unit=unit
+        )
 
     def _invoke(self, _: CallbackOptions):
         for callback in self._callbacks:
@@ -99,17 +96,17 @@ class AsyncGauge(Metric):
 
 
 class Histogram(Metric):
-
-    def __init__(self,
-                 name: str,
-                 description: str,
-                 unit: str | None = None,
-                 labels: list[str] = None):
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        unit: str | None = None,
+        labels: list[str] = None,
+    ):
         self._labels = labels or []
         self._histogram = self.meter.create_histogram(
-                name,
-                description=description,
-                unit=unit)
+            name, description=description, unit=unit
+        )
 
     def observe(self, value: float, **kwargs):
         self.check_labels(**kwargs)
@@ -117,17 +114,17 @@ class Histogram(Metric):
 
 
 class Counter(Metric):
-
-    def __init__(self,
-                 name: str,
-                 description: str,
-                 unit: str | None = None,
-                 labels: list[str] = None):
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        unit: str | None = None,
+        labels: list[str] = None,
+    ):
         self._labels = labels or []
         self._counter = self.meter.create_counter(
-                name,
-                description=description,
-                unit=unit)
+            name, description=description, unit=unit
+        )
 
     def inc(self, value: float = 1.0, **kwargs):
         self.check_labels(**kwargs)

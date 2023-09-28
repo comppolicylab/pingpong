@@ -3,8 +3,7 @@ import os
 
 from .meta import _DB_DIR, get_mdid
 
-
-_CLAIM_CACHE = os.path.join(_DB_DIR, 'claim')
+_CLAIM_CACHE = os.path.join(_DB_DIR, "claim")
 
 
 async def claim_message(payload: dict) -> bool:
@@ -20,8 +19,8 @@ async def claim_message(payload: dict) -> bool:
         True if the message was claimed, False otherwise
     """
     id_ = get_mdid(payload)
-    with dbm.open(_CLAIM_CACHE, 'c') as cache:
+    with dbm.open(_CLAIM_CACHE, "c") as cache:
         if id_ in cache:
             return False
-        cache[id_] = b''
+        cache[id_] = b""
     return True

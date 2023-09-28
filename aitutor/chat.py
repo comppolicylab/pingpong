@@ -1,24 +1,19 @@
-import logging
 import json
+import logging
 import re
 
 import openai
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 
-from .endpoint import Endpoint
-from .thread import SlackThread
-from .config import config
-from .meta import (
-        save_metadata,
-        load_channel_metadata,
-        save_channel_metadata,
-        ChatTurn,
-        Role,
-        )
-from .reaction import react, unreact
-from .text import ERROR
 import aitutor.metrics as metrics
 
+from .config import config
+from .endpoint import Endpoint
+from .meta import (ChatTurn, Role, load_channel_metadata,
+                   save_channel_metadata, save_metadata)
+from .reaction import react, unreact
+from .text import ERROR
+from .thread import SlackThread
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +44,7 @@ def _switch_response(name: str, reason: str) -> str:
 """.format(
         reasons=json.dumps([reason]),
         name=json.dumps(name),
-        )
+    )
 
 
 class AiChat:
@@ -66,12 +61,12 @@ class AiChat:
             client: SocketModeClient instance
         """
         meta = await load_channel_metadata(self.thread.source_event)
-        if not meta.get('disclaimer_sent', False):
+        if not meta.get("disclaimer_sent", False):
             await client.web_client.chat_postMessage(
-                    channel=self.thread.channel,
-                    text=config.tutor.get_greeting(),
-                    )
-            meta['disclaimer_sent'] = True
+                channel=self.thread.channel,
+                text=config.tutor.get_greeting(),
+            )
+            meta["disclaimer_sent"] = True
             await save_channel_metadata(self.thread.source_event, meta)
 
     async def mark_as_loading(self, client: SocketModeClient):
@@ -80,9 +75,11 @@ class AiChat:
         Args:
             client: SocketModeClient instance
         """
-        await react(client,
-                    self.thread.source_event.get('event'),
-                    self.channel_config.loading_reaction)
+        await react(
+            client,
+            self.thread.source_event.get("event"),
+            self.channel_config.loading_reaction,
+        )
 
     async def mark_as_finished(self, client: SocketModeClient):
         """Mark the thread as finished loading.
@@ -90,16 +87,18 @@ class AiChat:
         Args:
             client: SocketModeClient instance
         """
-        await unreact(client,
-                      self.thread.source_event.get('event'),
-                      self.channel_config.loading_reaction)
+        await unreact(
+            client,
+            self.thread.source_event.get("event"),
+            self.channel_config.loading_reaction,
+        )
 
     def _format_content(self, turns: list[ChatTurn]) -> list[dict]:
         """Format the content of the thread for posting to Slack.
 
         Args:
             turns: The turns to format.
-            
+
         Returns:
             The formatted content.
         """
@@ -123,35 +122,43 @@ class AiChat:
             if doc_idx not in doc_ref_labels:
                 doc_ref_labels[doc_idx] = len(doc_ref_labels) + 1
             label = doc_ref_labels[doc_idx]
-            text = text[:match.start()] + f"[{label}]" + text[match.end():]
+            text = text[: match.start()] + f"[{label}]" + text[match.end() :]
 
         # Add the main, rewritten text to the reply.
-        blocks = [{
+        blocks = [
+            {
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
                     "text": text,
-                    },
-            }]
+                },
+            }
+        ]
 
         if len(turns) > 1 and turns[-2].role == Role.TOOL:
             tool_data = json.loads(turns[-2].content)
-            citations = tool_data.get('citations', [])
+            citations = tool_data.get("citations", [])
             if citations:
-                blocks.append({
-                    "type": "divider",
-                    })
+                blocks.append(
+                    {
+                        "type": "divider",
+                    }
+                )
                 for i, citation in enumerate(citations):
                     # Only add docs that were referenced in the text.
                     if i not in doc_ref_labels:
                         continue
-                    blocks.append({
-                        "type": "context",
-                        "elements": [{
-                            "type": "mrkdwn",
-                            "text": f"*[{doc_ref_labels[i]}]* <{citation['url']}|{citation['filepath']}>",
-                            }],
-                    })
+                    blocks.append(
+                        {
+                            "type": "context",
+                            "elements": [
+                                {
+                                    "type": "mrkdwn",
+                                    "text": f"*[{doc_ref_labels[i]}]* <{citation['url']}|{citation['filepath']}>",
+                                }
+                            ],
+                        }
+                    )
 
         return blocks
 
@@ -183,11 +190,11 @@ class AiChat:
 
             # Post the response in the thread.
             await client.web_client.chat_postMessage(
-                    channel=self.thread.channel,
-                    thread_ts=self.thread.ts,
-                    text=new_turns[-1].content,
-                    blocks=reply_blocks,
-                    )
+                channel=self.thread.channel,
+                thread_ts=self.thread.ts,
+                text=new_turns[-1].content,
+                blocks=reply_blocks,
+            )
 
             # Save metadata
             if len(new_turns) > 1:
@@ -195,16 +202,19 @@ class AiChat:
         except Exception as e:
             logger.exception(e)
             await client.web_client.chat_postMessage(
-                    channel=self.thread.channel,
-                    text=ERROR,
-                    )
-            await save_metadata({
-                'team_id': self.thread.team_id,
-                'event': {
-                    'channel': self.thread.channel,
-                    'ts': self.thread.ts,
+                channel=self.thread.channel,
+                text=ERROR,
+            )
+            await save_metadata(
+                {
+                    "team_id": self.thread.team_id,
+                    "event": {
+                        "channel": self.thread.channel,
+                        "ts": self.thread.ts,
                     },
-            }, {'error': str(e)})
+                },
+                {"error": str(e)},
+            )
         await self.thread.save()
         await self.mark_as_finished(client)
 
@@ -218,25 +228,27 @@ class AiChat:
             The system's response.
         """
         endpoint = await self.choose_endpoint()
-        new_messages, call_meta = await endpoint(messages=self._format_convo(), **kwargs)
+        new_messages, call_meta = await endpoint(
+            messages=self._format_convo(), **kwargs
+        )
 
         # Log the metadata as metrics
         metrics.engine_usage.labels(
-                direction='out',
-                model=endpoint.model.name,
-                engine=endpoint.model.params.engine.name,
-                workspace=self.thread.team_id,
-                channel=self.thread.channel,
-                user=self.thread.user_id,
-                ).observe(call_meta.tok_out)
+            direction="out",
+            model=endpoint.model.name,
+            engine=endpoint.model.params.engine.name,
+            workspace=self.thread.team_id,
+            channel=self.thread.channel,
+            user=self.thread.user_id,
+        ).observe(call_meta.tok_out)
         metrics.engine_usage.labels(
-                direction='in',
-                model=endpoint.model.name,
-                engine=endpoint.model.params.engine.name,
-                workspace=self.thread.team_id,
-                channel=self.thread.channel,
-                user=self.thread.user_id,
-                ).observe(call_meta.tok_in)
+            direction="in",
+            model=endpoint.model.name,
+            engine=endpoint.model.params.engine.name,
+            workspace=self.thread.team_id,
+            channel=self.thread.channel,
+            user=self.thread.user_id,
+        ).observe(call_meta.tok_in)
 
         # Add the new messages to the thread
         for msg in new_messages:
@@ -260,50 +272,52 @@ class AiChat:
         switch = Endpoint(switch_model)
 
         # Generate model descriptions
-        descriptions = "\n".join(
-                f"` - {m.name}`: {m.description}"
-                for m in models
-                )
+        descriptions = "\n".join(f"` - {m.name}`: {m.description}" for m in models)
 
         # Generate model slugs for TypeScript string literal union
-        slugs = " | ".join(
-                f"'{m.name}'"
-                for m in models
-                )
+        slugs = " | ".join(f"'{m.name}'" for m in models)
 
         # Format examples about how to use the model into the convo.
         messages = []
         for model in models:
             for ex in model.examples:
                 messages.append({"role": Role.USER, "content": ex.user})
-                messages.append({
-                    "role": Role.AI,
-                    "content": _switch_response(model.name, ex.ai),
-                    })
+                messages.append(
+                    {
+                        "role": Role.AI,
+                        "content": _switch_response(model.name, ex.ai),
+                    }
+                )
         # Now add the most recent message in the thread.
-        messages.append({
-            "role": Role.USER,
-            "content": self.thread.history[-1].content,
-            })
+        messages.append(
+            {
+                "role": Role.USER,
+                "content": self.thread.history[-1].content,
+            }
+        )
 
         try:
-            response, _ = await switch(messages=messages, variables={
-                "descriptions": descriptions,
-                "slugs": slugs,
-                })
+            response, _ = await switch(
+                messages=messages,
+                variables={
+                    "descriptions": descriptions,
+                    "slugs": slugs,
+                },
+            )
             logger.debug(f"Switch response: {response}")
             payload = json.loads(response[-1].content)
             # NOTE: find the model within the channel_config.models, not the
             # main config, which might not be fully-specified.
-            model = next(m for m in models if m.name == payload['model'])
+            model = next(m for m in models if m.name == payload["model"])
             logger.debug(f"Selected model: {model.name}")
             return Endpoint(model)
         except Exception as e:
             logger.exception(e)
             default_model = models[0]
             logger.warning(
-                    "Failed to make an informed model choice. "
-                    f"Defaulting to {default_model.name}.")
+                "Failed to make an informed model choice. "
+                f"Defaulting to {default_model.name}."
+            )
             return Endpoint(default_model)
 
     def _format_convo(self) -> list[dict]:
@@ -315,10 +329,12 @@ class AiChat:
         messages = []
         at_mention = f"<@{self.thread.bot_id}>"
         for turn in self.thread.history:
-            messages.append({
-                "role": turn.role,
-                # Remove at-mentions for the bot from the message content
-                "content": turn.content.replace(at_mention, "").strip(),
-                })
+            messages.append(
+                {
+                    "role": turn.role,
+                    # Remove at-mentions for the bot from the message content
+                    "content": turn.content.replace(at_mention, "").strip(),
+                }
+            )
 
         return messages
