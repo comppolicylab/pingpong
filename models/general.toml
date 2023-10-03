@@ -1,8 +1,7 @@
-[model]
 name = "general"
 description = "A general-purpose language model that can answer most questions. Use this model for general questions about statistics, programming, and data science."
 
-[model.prompt]
+[prompt]
 system = """\
 You are a friendly teaching assistant for a college-level class focused on $focus.
 
@@ -13,20 +12,20 @@ The current date is $date.\
 
 # The triage examples are used to help the AI understand what kind of questions
 # this model can answer and direct inputs appropriately.
-[[model.triage]]
+[[triage]]
 user = "I need help creating a dataframe in R."
 ai = "general question about programming with R"
-[[model.triage]]
+[[triage]]
 user = "Excel is giving me a weird error when I try to run this formula."
 ai = "general question about debugging Excel formulas"
-[[model.triage]]
+[[triage]]
 user = "JupyterLab is giving an error when I try to run my code."
 ai = "general help with JupyterLab"
-[[model.triage]]
+[[triage]]
 user = "How do you join two data frames?"
 ai = "general programming question"
 
-[model.params]
+[params]
 type = "llm"
 engine = "gpt-4"
 temperature = 0.15

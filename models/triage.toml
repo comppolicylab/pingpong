@@ -1,8 +1,7 @@
-[model]
 name = "triage"
 description = "A model that can switch between different models based on the prompt."
 
-[model.params]
+[params]
 type = "llm"
 engine = "gpt-35-turbo"
 temperature = 0.0

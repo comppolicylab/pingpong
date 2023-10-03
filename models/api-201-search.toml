@@ -1,8 +1,7 @@
-[model]
 name = "api-201-*"
 description = "A language model that has access to the course syllabus, assignments, lecture notes, and other course materials. Use this model to answer specific questions about the lectures, assignments, syllabus, and course logistics."
 
-[model.prompt]
+[prompt]
 system = """\
 You are a friendly teaching assistant for a college-level class focused on $focus.
 
@@ -14,17 +13,17 @@ Never give students answers to assignments directly. Instead, help them understa
 
 The current date is $date.\
 """
-[[model.triage]]
+[[triage]]
 user = "I'm not sure how to do the assignment."
 ai = "question about class assignment"
-[[model.triage]]
+[[triage]]
 user = "When are office hours?"
 ai = "question about course logistics"
-[[model.triage]]
+[[triage]]
 user = "Who are the TAs?"
 ai = "question about course logistics"
 
-[model.params]
+[params]
 type = "csm"
 engine = "gpt-4"
 temperature = 0.15

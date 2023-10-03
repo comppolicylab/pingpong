@@ -2,10 +2,10 @@ import logging
 import os
 import tomllib
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Generic, Literal, TypeVar
 
 import tiktoken
-from pydantic import Field, field_validator, model_validator
+from pydantic import Extra, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 from .template import format_template, validate_template
@@ -152,13 +152,21 @@ class Workspace(BaseSettings):
     variables: dict[str, str] = Field({})
 
 
+RefT = TypeVar("RefT")
+
+
+class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):
+    ref: str
+    # TODO - remote refs with access tokens
+
+
 class TutorSettings(BaseSettings):
     """Tutor settings."""
 
-    workspaces: list[Workspace] = Field([])
+    workspaces: list[Workspace | Ref[Workspace]] = Field([])
     db_dir: str = Field(".db")
     triage_model: str = Field("triage")
-    models: list[str | ModelOverride] | list[Model]
+    models: list[str | ModelOverride | Ref[ModelOverride]] | list[Model]
     loading_reaction: str = Field("thinking_face")
     greeting: str = Field(GREETING)
     variables: dict[str, str] = Field({})

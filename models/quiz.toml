@@ -1,8 +1,7 @@
-[model]
 name = "quiz"
 description = "A language model that can quiz students on a concept. Use this model when the student asks to be quizzed to test their understanding of a certain concept."
 
-[model.prompt]
+[prompt]
 system = """\
 You are a friendly teaching assistant for a college-level class focused on $focus.
 
@@ -16,17 +15,17 @@ You are only allowed to give them the answer directly if they are stuck and can'
 
 # The triage examples are used to help the AI understand what kind of questions
 # this model can answer and direct inputs appropriately.
-[[model.triage]]
+[[triage]]
 user = "Quiz me on the difference between a dataframe and a tibble."
 ai = "quiz on dataframes and tibbles"
-[[model.triage]]
+[[triage]]
 user = "Quiz me on different types of probability distributions."
 ai = "quiz on probability distributions"
-[[model.triage]]
+[[triage]]
 user = "Quiz me on how to generate plots with ggplot2."
 ai = "quiz on ggplot2"
 
-[model.params]
+[params]
 type = "llm"
 engine = "gpt-4"
 temperature = 0.15

@@ -1,11 +1,10 @@
-[workspace]
 team_id = "T05KXSJJP47" # API 201 A&B
 variables = { focus = "teaching analytic concepts and tools like Excel to inform public policy issues" }
-[[workspace.models]]
+[[models]]
 name = "general"
-[[workspace.models]]
+[[models]]
 name = "quiz"
-[[workspace.models]]
+[[models]]
 name = "api-201-*"
-[workspace.models.params]
+[models.params]
 index_name = "api-201-ab"
