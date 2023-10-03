@@ -85,7 +85,7 @@ class Model(BaseSettings):
 
     name: str
     description: str
-    examples: list[Example] = Field([])
+    triage: list[Example] = Field([])
     params: ModelParams = Field(..., discriminator="type")
     prompt: Prompt = Field(Prompt())
 

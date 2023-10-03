@@ -278,10 +278,10 @@ class AiChat:
         # Generate model slugs for TypeScript string literal union
         slugs = " | ".join(f"'{m.name}'" for m in models)
 
-        # Format examples about how to use the model into the convo.
+        # Format triage examples about how to use the model into the convo.
         messages = []
         for model in models:
-            for ex in model.examples:
+            for ex in model.triage:
                 messages.append({"role": Role.USER, "content": ex.user})
                 messages.append(
                     {
