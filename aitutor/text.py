@@ -12,7 +12,7 @@ Sorry, an error occurred while generating a reply. You can try to repeat the que
 """
 
 
-SWITCH_PROMPT = """\
+TRIAGE_PROMPT = """\
 Your task is to inspect incoming messages from students and identify which model is best able to answer their question.
 
 The models you have access to are:

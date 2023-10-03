@@ -9,7 +9,7 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 from .template import format_template, validate_template
-from .text import DEFAULT_PROMPT, GREETING, SWITCH_PROMPT
+from .text import DEFAULT_PROMPT, GREETING, TRIAGE_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +157,7 @@ class TutorSettings(BaseSettings):
 
     workspaces: list[Workspace] = Field([])
     db_dir: str = Field(".db")
-    switch_model: str = Field("switch")
+    triage_model: str = Field("triage")
     models: list[str | ModelOverride] | list[Model]
     loading_reaction: str = Field("thinking_face")
     greeting: str = Field(GREETING)
@@ -235,17 +235,17 @@ class Config(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def check_switch_model(self) -> "Config":
+    def check_triage_model(self) -> "Config":
         """Check that all referenced models are defined."""
         model_names = {m.name for m in self.models}
-        # Make sure the "switch" model is defined
-        if self.tutor.switch_model not in model_names:
-            raise ValueError(f"Switch model {self.tutor.switch_model} is not defined.")
+        # Make sure the "triage" model is defined
+        if self.tutor.triage_model not in model_names:
+            raise ValueError(f"Triage model {self.tutor.triage_model} is not defined.")
 
-        m = self.get_model(self.tutor.switch_model)
-        # Fill in default switch prompt
+        m = self.get_model(self.tutor.triage_model)
+        # Fill in default triage prompt
         if not m.prompt.system:
-            m.prompt.system = SWITCH_PROMPT
+            m.prompt.system = TRIAGE_PROMPT
 
         return self
 
@@ -379,9 +379,9 @@ class Config(BaseSettings):
             if not m.prompt.system:
                 m.prompt.system = DEFAULT_PROMPT
             validate_template(m.prompt.system, m.prompt.variables)
-            if m.name == self.tutor.switch_model:
+            if m.name == self.tutor.triage_model:
                 raise ValueError(
-                    f"Switch model {self.tutor.switch_model} cannot be overridden."
+                    f"Triage model {self.tutor.triage_model} cannot be overridden."
                 )
 
         return models
