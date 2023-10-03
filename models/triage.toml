@@ -1,0 +1,9 @@
+[model]
+name = "switch"
+description = "A model that can switch between different models based on the prompt."
+
+[model.params]
+type = "llm"
+engine = "gpt-35-turbo"
+temperature = 0.0
+top_p = 0.95
