@@ -102,15 +102,15 @@ The config file will be loaded from the path specified in the `CONFIG_PATH` envi
 
 You will need to deploy at least two models in Azure OpenAI, then describe them here.
 
-One model must be called `switch` and it should use GPT-3.5. Configure it like this:
+One model must be called `triage` and it should use GPT-3.5. Configure it like this:
 
 ```
 [[models]]
-name = "switch"
+name = "triage"
 description = "Triage requests to the appropriate model."
 [models.params]
 type = "llm"
-engine = "ai-tutor-switch"
+engine = "ai-tutor-triage"
 temperature = 0.0
 ```
 

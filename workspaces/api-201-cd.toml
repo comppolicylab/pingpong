@@ -1,0 +1,10 @@
+team_id = "T05LR6BUJM7" # API 201 C&D
+variables = { focus = "statistics using R and tidyverse" }
+[[models]]
+name = "general"
+[[models]]
+name = "quiz"
+[[models]]
+name = "api-201-*"
+[models.params]
+index_name = "api-201-cd"

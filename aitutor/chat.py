@@ -37,8 +37,8 @@ openai.api_key = config.openai.api_key
 openai.api_version = config.openai.api_version
 
 
-def _switch_response(name: str, reason: str) -> str:
-    """Format one of the example AI responses for the switch model.
+def _triage_response(name: str, reason: str) -> str:
+    """Format one of the example AI responses for the triage model.
 
     Args:
         name: The name of the model to switch to.
@@ -266,11 +266,11 @@ class AiChat:
         Raises:
             ValueError: If no models are configured.
         """
-        switch_model = config.get_model(config.tutor.switch_model)
+        triage_model = config.get_model(config.tutor.triage_model)
         models = self.channel_config.get_models()
         if not models:
             raise ValueError("No models are configured.")
-        switch = Endpoint(switch_model)
+        triage = Endpoint(triage_model)
 
         # Generate model descriptions
         descriptions = "\n".join(f"` - {m.name}`: {m.description}" for m in models)
@@ -278,15 +278,15 @@ class AiChat:
         # Generate model slugs for TypeScript string literal union
         slugs = " | ".join(f"'{m.name}'" for m in models)
 
-        # Format examples about how to use the model into the convo.
+        # Format triage examples about how to use the model into the convo.
         messages = []
         for model in models:
-            for ex in model.examples:
+            for ex in model.triage:
                 messages.append({"role": Role.USER, "content": ex.user})
                 messages.append(
                     {
                         "role": Role.AI,
-                        "content": _switch_response(model.name, ex.ai),
+                        "content": _triage_response(model.name, ex.ai),
                     }
                 )
         # Now add the most recent message in the thread.
@@ -298,14 +298,14 @@ class AiChat:
         )
 
         try:
-            response, _ = await switch(
+            response, _ = await triage(
                 messages=messages,
                 variables={
                     "descriptions": descriptions,
                     "slugs": slugs,
                 },
             )
-            logger.debug(f"Switch response: {response}")
+            logger.debug(f"Triage response: {response}")
             payload = json.loads(response[-1].content)
             # NOTE: find the model within the channel_config.models, not the
             # main config, which might not be fully-specified.

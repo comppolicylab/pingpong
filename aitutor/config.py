@@ -1,15 +1,19 @@
+import hashlib
 import logging
 import os
 import tomllib
 from pathlib import Path
-from typing import Any, Literal
+from threading import Lock, Timer
+from typing import Any, Generic, Literal, TypeVar
 
+import requests
 import tiktoken
-from pydantic import Field, field_validator, model_validator
+from pydantic import Extra, Field, PrivateAttr, field_validator, model_validator
+from pydantic.v1.utils import deep_update
 from pydantic_settings import BaseSettings
 
 from .template import format_template, validate_template
-from .text import DEFAULT_PROMPT, GREETING, SWITCH_PROMPT
+from .text import DEFAULT_PROMPT, GREETING, TRIAGE_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +89,7 @@ class Model(BaseSettings):
 
     name: str
     description: str
-    examples: list[Example] = Field([])
+    triage: list[Example] = Field([])
     params: ModelParams = Field(..., discriminator="type")
     prompt: Prompt = Field(Prompt())
 
@@ -152,13 +156,132 @@ class Workspace(BaseSettings):
     variables: dict[str, str] = Field({})
 
 
+RefT = TypeVar("RefT")
+
+
+class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-arg]
+    """Specify an external source for the configuration.
+
+    When a field is defined with `Ref[T]` as a possible type, you can opt to
+    move the parameters for `T` to an external source, either as a local file
+    or a remote URL. The file will be loaded as TOML and parsed, with
+    validation, according to type `T`.
+
+    The `Ref[T]` instance can be used as a drop-in replacement for `T`; all
+    attributes will be proxied to the underlying `T` instance.
+
+    Any additional attributes used in the `Ref[T]` config will override the
+    values in the external source.
+
+    Optionally specify a reload interval (in seconds) to refetch the config
+    file in case it changes over time.
+
+    Use the `authorization` field to specify an authorization header to pass to
+    remote resources, such as `Bearer <token>`.
+    """
+
+    ref__path__: str = Field(..., alias="ref", required=True)
+    ref__authorization__: str | None = Field(None, alias="authorization")
+    ref__reload__: int = Field(0, alias="reload")
+    _instance: RefT = PrivateAttr()
+    _hash: str = PrivateAttr("")
+    _timer: Timer | None = PrivateAttr()
+
+    def __init__(self, **kwargs: Any):
+        """Initialize the ref."""
+        super().__init__(**kwargs)
+        object.__setattr__(self, "_lock", Lock())
+        self._hash = ""
+        self._timer = None
+        self._load()
+
+    def _schedule_reload(self, iv: int):
+        """Schedule a reload of the ref.
+
+        No-op if `iv` is not a positive number. Otherwise, will trigger a
+        refresh in a background thread after `iv` seconds.
+
+        Args:
+            iv: Interval in seconds between polls
+        """
+        if iv <= 0:
+            return
+        if self._timer:
+            self._timer.cancel()
+        self._timer = Timer(iv, self._load)
+        self._timer.start()
+
+    def _get_cls(self) -> type[RefT]:
+        """Get the class used to parameterize the generic Ref."""
+        # HACK(jnu): Reach into Pydantic internals to get the actual class
+        # used to define the generic type. We'll use this to instantiate the
+        # model instance after loading the raw data from the `ref` path.
+        return self.__class__.__pydantic_generic_metadata__["args"][0]
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate attribute access to the referenced object."""
+        # HACK(jnu): Reach into Pydantic internals to get the private attrs.
+        with object.__getattribute__(self, "_lock"):
+            private = object.__getattribute__(self, "__pydantic_private__")
+            if name.startswith("_"):
+                return private[name]
+            inst = private["_instance"]
+            return getattr(inst, name)
+
+    def _load(self):
+        """Load the referenced object."""
+        raw = self._load_raw()
+        new_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+        # Only update if the hash has changed
+        if new_hash != self._hash:
+            # Parse the raw data into a dictionary
+            new_dict = tomllib.loads(raw)
+
+            # Update the instance and hash
+            with object.__getattribute__(self, "_lock"):
+                # HACK(jnu): Reach into Pydantic internals to get the extra attrs.
+                extra = object.__getattribute__(self, "__pydantic_extra__")
+                # Merge the extra attributes into the new config
+                new_cfg = deep_update(new_dict, extra)
+                # Parse the raw data into a new instance
+                new_inst = self._get_cls().parse_obj(new_cfg)
+                self._instance = new_inst
+                self._hash = new_hash
+                logger.debug(f"Ref {self.ref__path__} updated to version {new_hash}")
+        else:
+            logger.debug(f"Ref {self.ref__path__} unchanged at {new_hash}")
+
+        # Schedule a reload. (No-op when ref__reload__ is 0.)
+        self._schedule_reload(self.ref__reload__)
+
+    def _load_raw(self):
+        """Load the referenced object."""
+        # Load from remote URL
+        if self.ref__path__.startswith("http://") or self.ref__path__.startswith(
+            "https://"
+        ):
+            headers = {}
+            if self.ref__authorization__:
+                headers["Authorization"] = self.ref__authorization__
+            resp = requests.get(self.ref__path__, headers=headers)
+            if resp.status_code != 200:
+                raise RuntimeError(f"Ref URL not found {self.ref__path__}")
+            return resp.text
+        else:
+            # Otherwise assume ref is a local file
+            if not os.path.exists(self.ref__path__):
+                raise RuntimeError(f"Ref local file not found {self.ref__path__}")
+            return Path(self.ref__path__).read_text()
+
+
 class TutorSettings(BaseSettings):
     """Tutor settings."""
 
-    workspaces: list[Workspace] = Field([])
+    workspaces: list[Workspace | Ref[Workspace]] = Field([])
     db_dir: str = Field(".db")
-    switch_model: str = Field("switch")
-    models: list[str | ModelOverride] | list[Model]
+    triage_model: str = Field("triage")
+    models: list[str | ModelOverride | Ref[ModelOverride]] | list[Model]
     loading_reaction: str = Field("thinking_face")
     greeting: str = Field(GREETING)
     variables: dict[str, str] = Field({})
@@ -235,17 +358,17 @@ class Config(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def check_switch_model(self) -> "Config":
+    def check_triage_model(self) -> "Config":
         """Check that all referenced models are defined."""
         model_names = {m.name for m in self.models}
-        # Make sure the "switch" model is defined
-        if self.tutor.switch_model not in model_names:
-            raise ValueError(f"Switch model {self.tutor.switch_model} is not defined.")
+        # Make sure the "triage" model is defined
+        if self.tutor.triage_model not in model_names:
+            raise ValueError(f"Triage model {self.tutor.triage_model} is not defined.")
 
-        m = self.get_model(self.tutor.switch_model)
-        # Fill in default switch prompt
+        m = self.get_model(self.tutor.triage_model)
+        # Fill in default triage prompt
         if not m.prompt.system:
-            m.prompt.system = SWITCH_PROMPT
+            m.prompt.system = TRIAGE_PROMPT
 
         return self
 
@@ -379,9 +502,9 @@ class Config(BaseSettings):
             if not m.prompt.system:
                 m.prompt.system = DEFAULT_PROMPT
             validate_template(m.prompt.system, m.prompt.variables)
-            if m.name == self.tutor.switch_model:
+            if m.name == self.tutor.triage_model:
                 raise ValueError(
-                    f"Switch model {self.tutor.switch_model} cannot be overridden."
+                    f"Triage model {self.tutor.triage_model} cannot be overridden."
                 )
 
         return models
