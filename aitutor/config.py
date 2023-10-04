@@ -204,7 +204,6 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
         Args:
             iv: Interval in seconds between polls
         """
-        print("SCHEUDLING RELOAD IN ", iv)
         if iv <= 0:
             return
         if self._timer:
