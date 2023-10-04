@@ -1,11 +1,15 @@
+import hashlib
 import logging
 import os
 import tomllib
 from pathlib import Path
+from threading import Lock, Timer
 from typing import Any, Generic, Literal, TypeVar
 
+import requests
 import tiktoken
-from pydantic import Extra, Field, field_validator, model_validator
+from pydantic import Extra, Field, PrivateAttr, field_validator, model_validator
+from pydantic.v1.utils import deep_update
 from pydantic_settings import BaseSettings
 
 from .template import format_template, validate_template
@@ -155,9 +159,121 @@ class Workspace(BaseSettings):
 RefT = TypeVar("RefT")
 
 
-class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):
-    ref: str
-    # TODO - remote refs with access tokens
+class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-arg]
+    """Specify an external source for the configuration.
+
+    When a field is defined with `Ref[T]` as a possible type, you can opt to
+    move the parameters for `T` to an external source, either as a local file
+    or a remote URL. The file will be loaded as TOML and parsed, with
+    validation, according to type `T`.
+
+    The `Ref[T]` instance can be used as a drop-in replacement for `T`; all
+    attributes will be proxied to the underlying `T` instance.
+
+    Any additional attributes used in the `Ref[T]` config will override the
+    values in the external source.
+
+    Optionally specify a reload interval (in seconds) to refetch the config
+    file in case it changes over time.
+
+    Use the `authorization` field to specify an authorization header to pass to
+    remote resources, such as `Bearer <token>`.
+    """
+
+    ref__path__: str = Field(..., alias="ref", required=True)
+    ref__authorization__: str | None = Field(None, alias="authorization")
+    ref__reload__: int = Field(0, alias="reload")
+    _instance: RefT = PrivateAttr()
+    _hash: str = PrivateAttr("")
+    _timer: Timer | None = PrivateAttr()
+
+    def __init__(self, **kwargs: Any):
+        """Initialize the ref."""
+        super().__init__(**kwargs)
+        object.__setattr__(self, "_lock", Lock())
+        self._hash = ""
+        self._timer = None
+        self._load()
+
+    def _schedule_reload(self, iv: int):
+        """Schedule a reload of the ref.
+
+        No-op if `iv` is not a positive number. Otherwise, will trigger a
+        refresh in a background thread after `iv` seconds.
+
+        Args:
+            iv: Interval in seconds between polls
+        """
+        print("SCHEUDLING RELOAD IN ", iv)
+        if iv <= 0:
+            return
+        if self._timer:
+            self._timer.cancel()
+        self._timer = Timer(iv, self._load)
+        self._timer.start()
+
+    def _get_cls(self) -> type[RefT]:
+        """Get the class used to parameterize the generic Ref."""
+        # HACK(jnu): Reach into Pydantic internals to get the actual class
+        # used to define the generic type. We'll use this to instantiate the
+        # model instance after loading the raw data from the `ref` path.
+        return self.__class__.__pydantic_generic_metadata__["args"][0]
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate attribute access to the referenced object."""
+        # HACK(jnu): Reach into Pydantic internals to get the private attrs.
+        with object.__getattribute__(self, "_lock"):
+            private = object.__getattribute__(self, "__pydantic_private__")
+            if name.startswith("_"):
+                return private[name]
+            inst = private["_instance"]
+            return getattr(inst, name)
+
+    def _load(self):
+        """Load the referenced object."""
+        raw = self._load_raw()
+        new_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+        # Only update if the hash has changed
+        if new_hash != self._hash:
+            # Parse the raw data into a dictionary
+            new_dict = tomllib.loads(raw)
+
+            # Update the instance and hash
+            with object.__getattribute__(self, "_lock"):
+                # HACK(jnu): Reach into Pydantic internals to get the extra attrs.
+                extra = object.__getattribute__(self, "__pydantic_extra__")
+                # Merge the extra attributes into the new config
+                new_cfg = deep_update(new_dict, extra)
+                # Parse the raw data into a new instance
+                new_inst = self._get_cls().parse_obj(new_cfg)
+                self._instance = new_inst
+                self._hash = new_hash
+                logger.debug(f"Ref {self.ref__path__} updated to version {new_hash}")
+        else:
+            logger.debug(f"Ref {self.ref__path__} unchanged at {new_hash}")
+
+        # Schedule a reload. (No-op when ref__reload__ is 0.)
+        self._schedule_reload(self.ref__reload__)
+
+    def _load_raw(self):
+        """Load the referenced object."""
+        # Load from remote URL
+        if self.ref__path__.startswith("http://") or self.ref__path__.startswith(
+            "https://"
+        ):
+            headers = {}
+            if self.ref__authorization__:
+                headers["Authorization"] = self.ref__authorization__
+            resp = requests.get(self.ref__path__, headers=headers)
+            if resp.status_code != 200:
+                raise RuntimeError(f"Ref URL not found {self.ref__path__}")
+            return resp.text
+        else:
+            # Otherwise assume ref is a local file
+            if not os.path.exists(self.ref__path__):
+                raise RuntimeError(f"Ref local file not found {self.ref__path__}")
+            return Path(self.ref__path__).read_text()
 
 
 class TutorSettings(BaseSettings):
