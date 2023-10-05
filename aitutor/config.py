@@ -12,6 +12,7 @@ import tiktoken
 from pydantic import Extra, Field, PrivateAttr, field_validator, model_validator
 from pydantic.v1.utils import deep_update
 from pydantic_settings import BaseSettings
+from sentry_sdk import capture_message
 
 from .template import format_template, validate_template
 from .text import DEFAULT_PROMPT, GREETING, TRIAGE_PROMPT
@@ -152,6 +153,9 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
                 self._instance = new_inst
                 self._hash = new_hash
                 logger.debug(f"Ref {self.ref__path__} updated to version {new_hash}")
+                capture_message(
+                    f"Config {self.ref__path__} updated to version {new_hash}"
+                )
         else:
             logger.debug(f"Ref {self.ref__path__} unchanged at {new_hash}")
 
