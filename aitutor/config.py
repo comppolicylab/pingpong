@@ -2,8 +2,9 @@ import hashlib
 import logging
 import os
 import tomllib
+import weakref
 from pathlib import Path
-from threading import Lock, Timer
+from threading import RLock, Timer
 from typing import Any, Generic, Literal, TypeVar
 
 import requests
@@ -158,6 +159,11 @@ class Workspace(BaseSettings):
 
 RefT = TypeVar("RefT")
 
+# Cache of locks used for safely accessing/updating instances. These are not
+# stored on the instances themselves so that we don't have to mess with
+# Pydantic's deepcopy utils (Locks are not pickleable).
+_LOCKS = weakref.WeakKeyDictionary["Ref", RLock]()
+
 
 class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-arg]
     """Specify an external source for the configuration.
@@ -190,10 +196,22 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
     def __init__(self, **kwargs: Any):
         """Initialize the ref."""
         super().__init__(**kwargs)
-        object.__setattr__(self, "_lock", Lock())
         self._hash = ""
         self._timer = None
         self._load()
+
+    def __hash__(self) -> int:
+        """Make the ref hashable based on what it refers to."""
+        return hash((type(self), id(self)) + tuple(self.__dict__.values()))
+
+    def _lock(self) -> RLock:
+        """Get the lock for this instance.
+
+        A lock is created lazily for each instance that needs one.
+        """
+        if self not in _LOCKS:
+            _LOCKS[self] = RLock()
+        return _LOCKS[self]
 
     def _schedule_reload(self, iv: int):
         """Schedule a reload of the ref.
@@ -221,12 +239,23 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to the referenced object."""
         # HACK(jnu): Reach into Pydantic internals to get the private attrs.
-        with object.__getattribute__(self, "_lock"):
+        with self._lock():
             private = object.__getattribute__(self, "__pydantic_private__")
             if name.startswith("_"):
                 return private[name]
             inst = private["_instance"]
             return getattr(inst, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Delegate attribute setting to the referenced object."""
+        # HACK(jnu): Reach into Pydantic internals to get the private attrs.
+        with self._lock():
+            private = object.__getattribute__(self, "__pydantic_private__")
+            if name.startswith("_"):
+                private[name] = value
+                return
+            inst = private["_instance"]
+            setattr(inst, name, value)
 
     def _load(self):
         """Load the referenced object."""
@@ -239,7 +268,7 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
             new_dict = tomllib.loads(raw)
 
             # Update the instance and hash
-            with object.__getattribute__(self, "_lock"):
+            with self._lock():
                 # HACK(jnu): Reach into Pydantic internals to get the extra attrs.
                 extra = object.__getattribute__(self, "__pydantic_extra__")
                 # Merge the extra attributes into the new config
@@ -339,7 +368,7 @@ class Config(BaseSettings):
     metrics: MetricsSettings = Field(MetricsSettings())
     slack: SlackSettings | list[SlackSettings]
     tutor: TutorSettings
-    models: list[Model]
+    models: list[Model | Ref[Model]]
     engines: list[Engine] = Field([])
 
     @model_validator(mode="after")
@@ -479,7 +508,7 @@ class Config(BaseSettings):
 
         models = list[Model]()
         for override in overrides:
-            if isinstance(override, Model):
+            if isinstance(override, Model) or isinstance(override, Ref):
                 new_override = override.copy(deep=True)
                 new_override.prompt.variables.update(variables)
                 models.append(new_override)
