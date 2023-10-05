@@ -19,144 +19,6 @@ from .text import DEFAULT_PROMPT, GREETING, TRIAGE_PROMPT
 logger = logging.getLogger(__name__)
 
 
-class Example(BaseSettings):
-    """Example chat turn for few-shot tuning."""
-
-    user: str
-    ai: str
-
-
-class Prompt(BaseSettings):
-    """Describe a prompt."""
-
-    system: str = Field("")
-    examples: list[Example] = Field([])
-    variables: dict[str, str] = Field({})
-
-
-class Engine(BaseSettings):
-    """Language model engine."""
-
-    name: str
-    encoding: str
-    capacity: int  # Number of tokens per minute
-    context_size: int  # Max number of tokens that can be included in context
-    concurrency: int = Field(5)  # Number of concurrent requests allowed
-    response_tokens: int = Field(400)  # Number of tokens to hold out for response
-
-    @field_validator("encoding")
-    @classmethod
-    def validate_encoding(cls, v: str) -> str:
-        """Validate the encoding."""
-        try:
-            tiktoken.get_encoding(v)
-        except Exception as e:
-            raise ValueError(f"Invalid encoding {v}") from e
-        return v
-
-
-class OpenAIModelParams(BaseSettings):
-    """Configurable parameters for an OpenAI LLM."""
-
-    type: Literal["llm"]
-    engine: str | Engine
-    temperature: float = Field(0.0)
-    top_p: float = Field(0.95)
-    completion_type: Literal["ChatCompletion"] = Field("ChatCompletion")
-
-
-class AzureCSModelParams(BaseSettings):
-    """Azure cognitive search model."""
-
-    type: Literal["csm"]
-    engine: str | Engine
-    temperature: float = Field(0.2)
-    top_p: float = Field(0.95)
-    threshold: float = Field(0.3)
-    topNDocuments: int = Field(5, alias="top_n_documents")
-    cs_key: str
-    cs_endpoint: str
-    restrict_answers_to_data: bool = Field(True)
-    index_name: str
-    semantic_configuration: str = Field("default")
-    completion_type: Literal["ChatWithDataCompletion"] = Field("ChatWithDataCompletion")
-
-
-ModelParams = OpenAIModelParams | AzureCSModelParams
-
-
-class Model(BaseSettings):
-    """Language model."""
-
-    name: str
-    description: str
-    triage: list[Example] = Field([])
-    params: ModelParams = Field(..., discriminator="type")
-    prompt: Prompt = Field(Prompt())
-
-    @property
-    def engine(self) -> Engine:
-        """Get the engine in a type-safe way."""
-        engine = self.params.engine
-        if not isinstance(engine, Engine):
-            raise RuntimeError(f"Engine not initialized {engine}")
-        return engine
-
-    def get_prompt(self, extra_vars: dict[str, str] | None = None) -> str:
-        """Get the full prompt with template vars filled in.
-
-        Args:
-            extra_vars: Extra variables to fill in the template
-
-        Returns:
-            The full prompt with template variables filled in.
-        """
-        all_vars = self.prompt.variables.copy()
-        if extra_vars:
-            all_vars.update(extra_vars)
-        return format_template(self.prompt.system, all_vars)
-
-
-class ModelOverride(BaseSettings):
-    """Override the default parameters for a model."""
-
-    name: str
-    params: dict[str, Any] = Field({})
-    prompt: dict[str, Any] = Field({})
-
-
-class Channel(BaseSettings):
-    """Describe one slack channel integration."""
-
-    team_id: str = Field("")
-    channel_id: str
-    loading_reaction: str = Field("")
-    models: list[str | ModelOverride] | list[Model] | None = Field(None)
-    variables: dict[str, str] = Field({})
-
-    def get_models(self) -> list[Model]:
-        """Access the models list in a type-safe way."""
-        if self.models is None:
-            return []
-
-        models = list[Model]()
-        for m in self.models:
-            if not isinstance(m, Model):
-                raise RuntimeError(f"Model not initialized {m}")
-            models.append(m)
-        return models
-
-
-class Workspace(BaseSettings):
-    """Describe one slack workspace integration."""
-
-    team_id: str
-    loading_reaction: str = Field("")
-    models: list[str | ModelOverride] | list[Model] | None = Field(None)
-    channels: list[Channel] = Field([])
-    variables: dict[str, str] = Field({})
-
-
 RefT = TypeVar("RefT")
 
 # Cache of locks used for safely accessing/updating instances. These are not
@@ -304,13 +166,151 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
             return Path(self.ref__path__).read_text()
 
 
+class Example(BaseSettings):
+    """Example chat turn for few-shot tuning."""
+
+    user: str
+    ai: str
+
+
+class Prompt(BaseSettings):
+    """Describe a prompt."""
+
+    system: str = Field("")
+    examples: list[Example] = Field([])
+    variables: dict[str, str] = Field({})
+
+
+class Engine(BaseSettings):
+    """Language model engine."""
+
+    name: str
+    encoding: str
+    capacity: int  # Number of tokens per minute
+    context_size: int  # Max number of tokens that can be included in context
+    concurrency: int = Field(5)  # Number of concurrent requests allowed
+    response_tokens: int = Field(400)  # Number of tokens to hold out for response
+
+    @field_validator("encoding")
+    @classmethod
+    def validate_encoding(cls, v: str) -> str:
+        """Validate the encoding."""
+        try:
+            tiktoken.get_encoding(v)
+        except Exception as e:
+            raise ValueError(f"Invalid encoding {v}") from e
+        return v
+
+
+class OpenAIModelParams(BaseSettings):
+    """Configurable parameters for an OpenAI LLM."""
+
+    type: Literal["llm"]
+    engine: str | Engine
+    temperature: float = Field(0.0)
+    top_p: float = Field(0.95)
+    completion_type: Literal["ChatCompletion"] = Field("ChatCompletion")
+
+
+class AzureCSModelParams(BaseSettings):
+    """Azure cognitive search model."""
+
+    type: Literal["csm"]
+    engine: str | Engine
+    temperature: float = Field(0.2)
+    top_p: float = Field(0.95)
+    threshold: float = Field(0.3)
+    topNDocuments: int = Field(5, alias="top_n_documents")
+    cs_key: str
+    cs_endpoint: str
+    restrict_answers_to_data: bool = Field(True)
+    index_name: str
+    semantic_configuration: str = Field("default")
+    completion_type: Literal["ChatWithDataCompletion"] = Field("ChatWithDataCompletion")
+
+
+ModelParams = OpenAIModelParams | AzureCSModelParams
+
+
+class Model(BaseSettings):
+    """Language model."""
+
+    name: str
+    description: str
+    triage: list[Example] = Field([])
+    params: ModelParams = Field(..., discriminator="type")
+    prompt: Prompt = Field(Prompt())
+
+    @property
+    def engine(self) -> Engine:
+        """Get the engine in a type-safe way."""
+        engine = self.params.engine
+        if not isinstance(engine, Engine):
+            raise RuntimeError(f"Engine not initialized {engine}")
+        return engine
+
+    def get_prompt(self, extra_vars: dict[str, str] | None = None) -> str:
+        """Get the full prompt with template vars filled in.
+
+        Args:
+            extra_vars: Extra variables to fill in the template
+
+        Returns:
+            The full prompt with template variables filled in.
+        """
+        all_vars = self.prompt.variables.copy()
+        if extra_vars:
+            all_vars.update(extra_vars)
+        return format_template(self.prompt.system, all_vars)
+
+
+class ModelOverride(BaseSettings):
+    """Override the default parameters for a model."""
+
+    name: str
+    params: dict[str, Any] = Field({})
+    prompt: dict[str, Any] = Field({})
+
+
+class Channel(BaseSettings):
+    """Describe one slack channel integration."""
+
+    team_id: str = Field("")
+    channel_id: str
+    loading_reaction: str = Field("")
+    models: list[str | ModelOverride] | list[Model | Ref[Model]] | None = Field(None)
+    variables: dict[str, str] = Field({})
+
+    def get_models(self) -> list[Model | Ref[Model]]:
+        """Access the models list in a type-safe way."""
+        if self.models is None:
+            return []
+
+        models = list[Model | Ref[Model]]()
+        for m in self.models:
+            if not isinstance(m, Model) and not isinstance(m, Ref):
+                raise RuntimeError(f"Model not initialized {m} ({type(m)})")
+            models.append(m)
+        return models
+
+
+class Workspace(BaseSettings):
+    """Describe one slack workspace integration."""
+
+    team_id: str
+    loading_reaction: str = Field("")
+    models: list[str | ModelOverride] | list[Model | Ref[Model]] | None = Field(None)
+    channels: list[Channel] = Field([])
+    variables: dict[str, str] = Field({})
+
+
 class TutorSettings(BaseSettings):
     """Tutor settings."""
 
     workspaces: list[Workspace | Ref[Workspace]] = Field([])
     db_dir: str = Field(".db")
     triage_model: str = Field("triage")
-    models: list[str | ModelOverride | Ref[ModelOverride]] | list[Model]
+    models: list[str | ModelOverride | Ref[ModelOverride]] | list[Model | Ref[Model]]
     loading_reaction: str = Field("thinking_face")
     greeting: str = Field(GREETING)
     variables: dict[str, str] = Field({})
@@ -499,14 +499,16 @@ class Config(BaseSettings):
         )
 
     def _apply_model_overrides(
-        self, overrides: list[str | ModelOverride] | list[Model], *dicts: dict[str, Any]
-    ) -> list[Model]:
+        self,
+        overrides: list[str | ModelOverride] | list[Model | Ref[Model]],
+        *dicts: dict[str, Any],
+    ) -> list[Model | Ref[Model]]:
         """Get a fully-specified list of models with overrides applied."""
         variables = {}
         for d in dicts:
             variables.update(d)
 
-        models = list[Model]()
+        models = list[Model | Ref[Model]]()
         for override in overrides:
             if isinstance(override, Model) or isinstance(override, Ref):
                 new_override = override.copy(deep=True)
