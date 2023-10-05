@@ -5,7 +5,7 @@ import tomllib
 import weakref
 from pathlib import Path
 from threading import RLock, Timer
-from typing import Any, Generic, Literal, TypeVar
+from typing import Any, Callable, Generic, Literal, TypeVar
 
 import requests
 import tiktoken
@@ -21,10 +21,36 @@ logger = logging.getLogger(__name__)
 
 RefT = TypeVar("RefT")
 
-# Cache of locks used for safely accessing/updating instances. These are not
-# stored on the instances themselves so that we don't have to mess with
-# Pydantic's deepcopy utils (Locks are not pickleable).
+# Cache of lock-related objects used for safely accessing/updating instances.
+# These are not stored on the instances themselves so that we don't have to
+# mess with Pydantic's deepcopy utils (Locks are not pickleable).
 _LOCKS = weakref.WeakKeyDictionary["Ref", RLock]()
+_TIMERS = weakref.WeakKeyDictionary["Ref", Timer]()
+
+
+def _lock(obj: Any) -> RLock:
+    """Get the lock for an object.
+
+    A lock is created lazily for each object that needs one.
+    """
+    if obj not in _LOCKS:
+        _LOCKS[obj] = RLock()
+    return _LOCKS[obj]
+
+
+def _set_timer(obj: Any, iv: int, f: Callable[[], None]):
+    """Store a timer for an object, canceling old timers if necessary.
+
+    Args:
+        obj: Object to associate the timer with
+        iv: Time in seconds to wait before calling the function
+        f: Function to call when the timer expires
+    """
+    if obj in _TIMERS:
+        _TIMERS[obj].cancel()
+    t = Timer(iv, f)
+    _TIMERS[obj] = t
+    t.start()
 
 
 class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-arg]
@@ -53,27 +79,16 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
     ref__reload__: int = Field(0, alias="reload")
     _instance: RefT = PrivateAttr()
     _hash: str = PrivateAttr("")
-    _timer: Timer | None = PrivateAttr()
 
     def __init__(self, **kwargs: Any):
         """Initialize the ref."""
         super().__init__(**kwargs)
         self._hash = ""
-        self._timer = None
         self._load()
 
     def __hash__(self) -> int:
         """Make the ref hashable based on what it refers to."""
         return hash((type(self), id(self)) + tuple(self.__dict__.values()))
-
-    def _lock(self) -> RLock:
-        """Get the lock for this instance.
-
-        A lock is created lazily for each instance that needs one.
-        """
-        if self not in _LOCKS:
-            _LOCKS[self] = RLock()
-        return _LOCKS[self]
 
     def _schedule_reload(self, iv: int):
         """Schedule a reload of the ref.
@@ -86,10 +101,7 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
         """
         if iv <= 0:
             return
-        if self._timer:
-            self._timer.cancel()
-        self._timer = Timer(iv, self._load)
-        self._timer.start()
+        _set_timer(self, iv, self._load)
 
     def _get_cls(self) -> type[RefT]:
         """Get the class used to parameterize the generic Ref."""
@@ -101,7 +113,7 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to the referenced object."""
         # HACK(jnu): Reach into Pydantic internals to get the private attrs.
-        with self._lock():
+        with _lock(self):
             private = object.__getattribute__(self, "__pydantic_private__")
             if name.startswith("_"):
                 return private[name]
@@ -111,7 +123,7 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
     def __setattr__(self, name: str, value: Any) -> None:
         """Delegate attribute setting to the referenced object."""
         # HACK(jnu): Reach into Pydantic internals to get the private attrs.
-        with self._lock():
+        with _lock(self):
             private = object.__getattribute__(self, "__pydantic_private__")
             if name.startswith("_"):
                 private[name] = value
@@ -130,7 +142,7 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
             new_dict = tomllib.loads(raw)
 
             # Update the instance and hash
-            with self._lock():
+            with _lock(self):
                 # HACK(jnu): Reach into Pydantic internals to get the extra attrs.
                 extra = object.__getattribute__(self, "__pydantic_extra__")
                 # Merge the extra attributes into the new config
@@ -224,7 +236,7 @@ class AzureCSModelParams(BaseSettings):
     cs_key: str
     cs_endpoint: str
     restrict_answers_to_data: bool = Field(True)
-    index_name: str
+    index_name: str = Field("default")
     semantic_configuration: str = Field("default")
     completion_type: Literal["ChatWithDataCompletion"] = Field("ChatWithDataCompletion")
 
