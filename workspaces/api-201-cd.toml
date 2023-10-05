@@ -1,5 +1,5 @@
 team_id = "T05LR6BUJM7" # API 201 C&D
-variables = { focus = "statistics using R and tidyverse" }
+variables = { focus = "statistics using R and tidyverse, and Python using Pandas" }
 [[models]]
 name = "general"
 [[models]]
