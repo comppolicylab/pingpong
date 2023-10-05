@@ -85,6 +85,8 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
         super().__init__(**kwargs)
         self._hash = ""
         self._load()
+        # Schedule a reload. (No-op when ref__reload__ is 0.)
+        self._schedule_reload(self.ref__reload__)
 
     def __hash__(self) -> int:
         """Make the ref hashable based on what it refers to."""
@@ -101,7 +103,17 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
         """
         if iv <= 0:
             return
-        _set_timer(self, iv, self._load)
+
+        def safe_load():
+            try:
+                self._load()
+            except Exception:
+                logger.exception(f"Failed to reload {self.ref__path__}")
+            finally:
+                # Keep reloading automatically, even if there's an error
+                _set_timer(self, iv, safe_load)
+
+        _set_timer(self, iv, safe_load)
 
     def _get_cls(self) -> type[RefT]:
         """Get the class used to parameterize the generic Ref."""
@@ -154,9 +166,6 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
                 logger.debug(f"Ref {self.ref__path__} updated to version {new_hash}")
         else:
             logger.debug(f"Ref {self.ref__path__} unchanged at {new_hash}")
-
-        # Schedule a reload. (No-op when ref__reload__ is 0.)
-        self._schedule_reload(self.ref__reload__)
 
     def _load_raw(self):
         """Load the referenced object."""
