@@ -14,8 +14,8 @@ Never give students answers to assignments directly. Instead, help them understa
 The current date is $date.\
 """
 [[triage]]
-user = "I'm not sure how to do the assignment."
-ai = "question about class assignment"
+user = "I want to review last week's lecture notes."
+ai = "question about course documents"
 [[triage]]
 user = "When are office hours?"
 ai = "question about course logistics"

@@ -1,5 +1,5 @@
 name = "api-201-ab-general"
-description = "A general-purpose language model that can answer most questions. Use this model for general questions about statistics, programming, and data science."
+description = "A general-purpose language model that can answer questions when no more specific model is available. Use this model for general questions about statistics and data science."
 
 [prompt]
 system = """\
@@ -13,14 +13,11 @@ The current date is $date.\
 # The triage examples are used to help the AI understand what kind of questions
 # this model can answer and direct inputs appropriately.
 [[triage]]
-user = "I need help creating a dataframe in R."
-ai = "general question about programming with R"
-[[triage]]
 user = "Excel is giving me a weird error when I try to run this formula."
-ai = "general question about debugging Excel formulas"
+ai = "general help with Excel"
 [[triage]]
-user = "JupyterLab is giving an error when I try to run my code."
-ai = "general help with JupyterLab"
+user = "I need help formatting a graph in Excel"
+ai = "general help with Excel"
 [[triage]]
 user = "How do you join two data frames?"
 ai = "general programming question"
