@@ -583,5 +583,16 @@ def load_config(path: str = DEFAULT_CONFIG_PATH) -> Config:
     return Config.parse_obj(tomllib.loads(Path(path).read_text()))
 
 
+T = TypeVar("T")
+
+
+class ReadOnlyFunctorProxy(Generic[T]):
+    def __init__(self, f: Callable[[], T]) -> None:
+        self._f = f
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._f(), name)
+
+
 # Globally available config object.
-config = load_config()
+config = ReadOnlyFunctorProxy(load_config)
