@@ -1,5 +1,5 @@
 name = "api-201-ab-search"
-description = "A language model that has access to the course syllabus, assignments, lecture notes, and other course materials. Use this model to answer specific questions about the lectures, assignments, syllabus, and course logistics."
+description = "A language model that has access to the course syllabus, assignments, and lecture notes. Only use this model for specific questions about the course. Do not use this model for general help understanding concepts."
 
 [prompt]
 system = """\
@@ -14,13 +14,13 @@ Never give students answers to assignments directly. Instead, help them understa
 The current date is $date.\
 """
 [[triage]]
-user = "I want to review last week's lecture notes."
-ai = "question about course documents"
-[[triage]]
 user = "When are office hours?"
 ai = "question about course logistics"
 [[triage]]
 user = "Who are the TAs?"
+ai = "question about course logistics"
+[[triage]]
+user = "When is the midterm?"
 ai = "question about course logistics"
 
 [params]
