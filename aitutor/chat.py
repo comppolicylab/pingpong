@@ -293,7 +293,7 @@ class AiChat:
         messages.append(
             {
                 "role": Role.USER,
-                "content": self.thread.history[-1].content,
+                "content": self.thread.history[0].content,
             }
         )
 
