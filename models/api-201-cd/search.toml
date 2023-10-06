@@ -1,4 +1,4 @@
-name = "api-201-*"
+name = "api-201-cd-search"
 description = "A language model that has access to the course syllabus, assignments, lecture notes, and other course materials. Use this model to answer specific questions about the lectures, assignments, syllabus, and course logistics."
 
 [prompt]
@@ -29,3 +29,4 @@ engine = "gpt-4"
 temperature = 0.15
 top_p = 0.95
 restrict_answers_to_data = false
+index_name = "api-201-cd"

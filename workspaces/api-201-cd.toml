@@ -1,10 +1,8 @@
 team_id = "T05LR6BUJM7" # API 201 C&D
-variables = { focus = "statistics using R and tidyverse, and Python using Pandas" }
+variables = { focus = "statistics using R and tidyverse" }
 [[models]]
-name = "general"
+name = "api-201-cd-general"
 [[models]]
-name = "quiz"
+name = "api-201-cd-quiz"
 [[models]]
-name = "api-201-*"
-[models.params]
-index_name = "api-201-cd"
+name = "api-201-cd-search"

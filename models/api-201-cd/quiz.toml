@@ -1,4 +1,4 @@
-name = "quiz"
+name = "api-201-cd-quiz"
 description = "A language model that can quiz students on a concept. Use this model when the student asks to be quizzed to test their understanding of a certain concept."
 
 [prompt]

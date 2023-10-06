@@ -1,4 +1,4 @@
-name = "general"
+name = "api-201-cd-general"
 description = "A general-purpose language model that can answer most questions. Use this model for general questions about statistics, programming, and data science."
 
 [prompt]

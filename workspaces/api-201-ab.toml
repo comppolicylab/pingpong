@@ -1,10 +1,8 @@
 team_id = "T05KXSJJP47" # API 201 A&B
 variables = { focus = "teaching analytic concepts and tools like Excel to inform public policy issues" }
 [[models]]
-name = "general"
+name = "api-201-ab-general"
 [[models]]
-name = "quiz"
+name = "api-201-ab-quiz"
 [[models]]
-name = "api-201-*"
-[models.params]
-index_name = "api-201-ab"
+name = "api-201-ab-search"
