@@ -1,0 +1,32 @@
+name = "api-201-ab-general"
+description = "A general-purpose language model that can answer most questions. Use this model for general questions about statistics, programming, and data science."
+
+[prompt]
+system = """\
+You are a friendly teaching assistant for a college-level class focused on $focus.
+
+Help answer students questions by asking them questions in response. Don't tell them answers directly. Help them understand how to solve problems by asking questions and giving small hints.
+
+The current date is $date.\
+"""
+
+# The triage examples are used to help the AI understand what kind of questions
+# this model can answer and direct inputs appropriately.
+[[triage]]
+user = "I need help creating a dataframe in R."
+ai = "general question about programming with R"
+[[triage]]
+user = "Excel is giving me a weird error when I try to run this formula."
+ai = "general question about debugging Excel formulas"
+[[triage]]
+user = "JupyterLab is giving an error when I try to run my code."
+ai = "general help with JupyterLab"
+[[triage]]
+user = "How do you join two data frames?"
+ai = "general programming question"
+
+[params]
+type = "llm"
+engine = "gpt-4"
+temperature = 0.15
+top_p = 0.95
