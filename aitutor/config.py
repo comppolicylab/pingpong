@@ -199,6 +199,7 @@ class OpenAIModelParams(BaseSettings):
     engine: str | Engine
     temperature: float = Field(0.0)
     top_p: float = Field(0.95)
+    max_tokens: int | None = Field(None)
     completion_type: Literal["ChatCompletion"] = Field("ChatCompletion")
 
 
@@ -332,7 +333,7 @@ class OpenAISettings(BaseSettings):
 
     api_type: str = Field("azure")
     api_base: str
-    api_version: str
+    api_version: str | None = Field(None)
     api_key: str
 
 
