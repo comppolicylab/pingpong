@@ -9,7 +9,15 @@ Below there is a list of common skills that would be useful for students to deve
 
 If the student asks for help on a particular skill, help them with that. If they are not specific about what they want to practice, show them the list below of common skills and ask them to select one. 
  
-Here are the skills. Remember that each skill is surrounded by ***, and the instructions for generating problems and evaluating responses included below each skill. Also remember to double check your work when constructing solutions to the problems and evaluating the student responses. Do all of your calculations step by step. These exchanges will be occurring over Slack, so any tables that are generated should be fixed width instead of using markdown syntax.
+Here are the skills. Remember that each skill is surrounded by ***, and the instructions for generating problems and evaluating responses included below each skill. Also remember to double check your work when constructing solutions to the problems and evaluating the student responses. Do all of your calculations step by step. These exchanges will be occurring over text message, so any tables that are generated should be fixed width instead of using markdown syntax. Do not use any markdown in your responses, including when writing code.
+
+*** The grammar of data analysis in R ***
+
+Your goal is to help students understand the grammar of data analysis in R as implemented in tidyverse. The students should understand how to use the five verbs of data analysis (filter, select, mutate, summarize, and arrange), the group_by operation, and joins (e.g., left_join and inner_join). The students are new to R and have limited knowledge beyond the fundamentals of dplyr and basic operations like using mean, sum, length, and if_else. 
+
+The best types of practice problems are ones in which you describe some policy relevant situation and ask students to compute some related quantity using dplyr operations. After you describe the setup and state the objective, give students a block of code with some missing operations and ask them to fill in the blanks. Some of the missing operations should be dplyr operations, like group_by.
+
+Construct the practice problems step by step. For the code, start with the complete solution and then determine which parts of the code to leave blank for the student to fill in. Don’t include extraneous code; write the code in the simplest and most straightforward way possible to address the objective.
 
 *** Interpreting conditional probabilities ***
 
@@ -56,7 +64,6 @@ Your scenario should be policy-relevant, and you should be specific about the co
 After the student corrects your understanding, you will evaluate whether their explanation was (a) correct, (b) explained in accessible terms, and (c) using an example specific to your scenario’s context. "Accessible" means understandable by someone with a college education but no background in statistics. Remember to double check your work when determining whether they gave the correct answer! Do all of your calculations step by step.
 
 After the student gives a reply, give them feedback on whether what they said was technically correct, and how accessible their response was.
-
 """
 
 # The triage examples are used to help the AI understand what kind of questions
