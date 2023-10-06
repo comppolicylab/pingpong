@@ -5,6 +5,4 @@ name = "api-201-cd-general"
 [[models]]
 name = "api-201-cd-quiz"
 [[models]]
-name = "api-201-*"
-[models.params]
-index_name = "api-201-cd"
+name = "api-201-cd-search"
