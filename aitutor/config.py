@@ -1,15 +1,23 @@
 import hashlib
 import logging
 import os
+import time
 import tomllib
 import weakref
 from pathlib import Path
-from threading import RLock, Timer
+from threading import RLock
 from typing import Any, Callable, Generic, Literal, TypeVar
 
 import requests
 import tiktoken
-from pydantic import Extra, Field, PrivateAttr, field_validator, model_validator
+from pydantic import (
+    Extra,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 from pydantic.v1.utils import deep_update
 from pydantic_settings import BaseSettings
 from sentry_sdk import capture_message
@@ -20,13 +28,12 @@ from .text import DEFAULT_PROMPT, GREETING, TRIAGE_PROMPT
 logger = logging.getLogger(__name__)
 
 
-RefT = TypeVar("RefT")
+RefT = TypeVar("RefT", bound="BaseSettings")
 
 # Cache of lock-related objects used for safely accessing/updating instances.
 # These are not stored on the instances themselves so that we don't have to
 # mess with Pydantic's deepcopy utils (Locks are not pickleable).
 _LOCKS = weakref.WeakKeyDictionary["Ref", RLock]()
-_TIMERS = weakref.WeakKeyDictionary["Ref", Timer]()
 
 
 def _lock(obj: Any) -> RLock:
@@ -37,21 +44,6 @@ def _lock(obj: Any) -> RLock:
     if obj not in _LOCKS:
         _LOCKS[obj] = RLock()
     return _LOCKS[obj]
-
-
-def _set_timer(obj: Any, iv: int, f: Callable[[], None]):
-    """Store a timer for an object, canceling old timers if necessary.
-
-    Args:
-        obj: Object to associate the timer with
-        iv: Time in seconds to wait before calling the function
-        f: Function to call when the timer expires
-    """
-    if obj in _TIMERS:
-        _TIMERS[obj].cancel()
-    t = Timer(iv, f)
-    _TIMERS[obj] = t
-    t.start()
 
 
 class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-arg]
@@ -68,16 +60,12 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
     Any additional attributes used in the `Ref[T]` config will override the
     values in the external source.
 
-    Optionally specify a reload interval (in seconds) to refetch the config
-    file in case it changes over time.
-
     Use the `authorization` field to specify an authorization header to pass to
     remote resources, such as `Bearer <token>`.
     """
 
     ref__path__: str = Field(..., alias="ref", required=True)
     ref__authorization__: str | None = Field(None, alias="authorization")
-    ref__reload__: int = Field(0, alias="reload")
     _instance: RefT = PrivateAttr()
     _hash: str = PrivateAttr("")
 
@@ -86,35 +74,15 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
         super().__init__(**kwargs)
         self._hash = ""
         self._load()
-        # Schedule a reload. (No-op when ref__reload__ is 0.)
-        self._schedule_reload(self.ref__reload__)
 
     def __hash__(self) -> int:
         """Make the ref hashable based on what it refers to."""
         return hash((type(self), id(self)) + tuple(self.__dict__.values()))
 
-    def _schedule_reload(self, iv: int):
-        """Schedule a reload of the ref.
-
-        No-op if `iv` is not a positive number. Otherwise, will trigger a
-        refresh in a background thread after `iv` seconds.
-
-        Args:
-            iv: Interval in seconds between polls
-        """
-        if iv <= 0:
-            return
-
-        def safe_load():
-            try:
-                self._load()
-            except Exception:
-                logger.exception(f"Failed to reload {self.ref__path__}")
-            finally:
-                # Keep reloading automatically, even if there's an error
-                _set_timer(self, iv, safe_load)
-
-        _set_timer(self, iv, safe_load)
+    @model_serializer
+    def dump(self) -> dict[str, Any]:
+        """Dump the ref as a dictionary."""
+        return self._instance.model_dump()
 
     def _get_cls(self) -> type[RefT]:
         """Get the class used to parameterize the generic Ref."""
@@ -164,10 +132,7 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
                 new_inst = self._get_cls().parse_obj(new_cfg)
                 self._instance = new_inst
                 self._hash = new_hash
-                logger.debug(f"Ref {self.ref__path__} updated to version {new_hash}")
-                capture_message(
-                    f"Config {self.ref__path__} updated to version {new_hash}"
-                )
+                logger.info(f"Ref {self.ref__path__} updated to version {new_hash}")
         else:
             logger.debug(f"Ref {self.ref__path__} unchanged at {new_hash}")
 
@@ -388,6 +353,7 @@ class Config(BaseSettings):
 
     log_level: str = Field("INFO", env="LOG_LEVEL")
 
+    reload: int = Field(0)
     openai: OpenAISettings
     sentry: SentrySettings
     metrics: MetricsSettings = Field(MetricsSettings())
@@ -570,17 +536,45 @@ class Config(BaseSettings):
 DEFAULT_CONFIG_PATH = os.environ.get("CONFIG_PATH", "config.toml")
 
 
-def load_config(path: str = DEFAULT_CONFIG_PATH) -> Config:
-    """Parse config file from path.
+class ConfigLoader:
+    """Wrapper for Config that can periodically refresh it."""
 
-    Args:
-        path (str, optional): Path to config file. Defaults to "config.toml".
+    config: Config
 
-    Returns:
-        Config: Parsed config object.
-    """
-    logger.debug(f"Loading config from {path}")
-    return Config.parse_obj(tomllib.loads(Path(path).read_text()))
+    def __init__(self, path: str = DEFAULT_CONFIG_PATH) -> None:
+        self.path = Path(path)
+        self._last_load = 0.0
+        self._last_hash = ""
+        self.load()
+
+    def __call__(self) -> Config:
+        self._check_reload()
+        return self.config
+
+    def load(self):
+        """Parse config file from path."""
+        logger.debug(f"Loading config from {self.path}")
+        raw = self.path.read_text()
+        self.config = Config.parse_obj(tomllib.loads(raw))
+        self._last_load = time.monotonic()
+        new_hash = hashlib.sha256(
+            self.config.model_dump_json().encode("utf-8")
+        ).hexdigest()
+        if new_hash != self._last_hash:
+            self._last_hash = new_hash
+            logger.info(f"Config updated to {new_hash} at {self._last_load}")
+            capture_message(f"Config updated to {new_hash} at {self._last_load}")
+
+    def _check_reload(self) -> None:
+        """Refresh the configuration."""
+        try:
+            if not self.config.reload:
+                return
+            now = time.monotonic()
+            if now - self._last_load > self.config.reload:
+                self.load()
+        except Exception as e:
+            logger.error(f"Error reloading config: {e}")
 
 
 T = TypeVar("T")
@@ -595,4 +589,4 @@ class ReadOnlyFunctorProxy(Generic[T]):
 
 
 # Globally available config object.
-config = ReadOnlyFunctorProxy(load_config)
+config = ReadOnlyFunctorProxy(ConfigLoader())
