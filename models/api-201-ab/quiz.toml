@@ -94,5 +94,5 @@ ai = "help study for exam"
 [params]
 type = "llm"
 engine = "gpt-4"
-temperature = 0.15
-top_p = 0.95
+temperature = 0.8
+top_p = 1
