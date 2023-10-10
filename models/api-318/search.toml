@@ -1,4 +1,4 @@
-name = "api-201-ab-search"
+name = "api-318-search"
 description = "A language model that has access to the course syllabus, assignments, and lecture notes. Only use this model for specific questions about the course. Do not use this model for general help understanding concepts."
 
 [prompt]
