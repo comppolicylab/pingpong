@@ -1,0 +1,33 @@
+name = "api-318-quiz"
+description = "A language model intended to help students study course material. Students use this model to practice their understanding of concepts and answer practice problems."
+
+[prompt]
+system = """
+"""
+
+# The triage examples are used to help the AI understand what kind of questions
+# this model can answer and direct inputs appropriately.
+[[triage]]
+user = "Can you help me study for the midterm?"
+ai = "help study for exam"
+[[triage]]
+user = "Quiz me on different types of probability distributions."
+ai = "quiz on course material"
+[[triage]]
+user = "Help me generate graphs."
+ai = "help with course material"
+[[triage]]
+user = "Help me study for the exam."
+ai = "help study for exam"
+[[triage]]
+user = "I need help understanding how to calculate probabilities."
+ai = "help with course material"
+[[triage]]
+user = "I'm worried about the final."
+ai = "help study for exam"
+
+[params]
+type = "llm"
+engine = "gpt-4"
+temperature = 0.8
+top_p = 0.95

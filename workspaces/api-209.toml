@@ -1,0 +1,8 @@
+team_id = "T05B70ZF2L8" # API 209
+variables = { focus = "analyzing public policy issues using statistics, covering probability theory, estimation, hypothesis testing, regression analysis, causal inference and prediction" }
+[[models]]
+name = "api-209-general"
+[[models]]
+name = "api-209-quiz"
+[[models]]
+name = "api-209-search"
