@@ -2,7 +2,7 @@
     "display_information": {
         "name": "StatGPT",
         "description": "Experimental course assistant powered by GPT-4.",
-        "background_color": "#4a7fcf",
+        "background_color": "#5c7594",
         "long_description": "This experimental app is meant to help answer questions about the course material. The app has access to the syllabus, reading material, and assignments, in addition to the general information already available in GPT-4.\r\n\r\nAll interactions with the app (including direct messages) are recorded to improve how it works."
     },
     "features": {
