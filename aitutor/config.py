@@ -548,7 +548,6 @@ class ConfigLoader:
         self.path = Path(path)
         self._last_load = 0.0
         self._last_hash = ""
-        self.load()
 
     def __call__(self) -> Config:
         self._check_reload()
