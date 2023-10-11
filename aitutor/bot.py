@@ -1,27 +1,21 @@
 import asyncio
 import logging
 import signal
+from contextlib import asynccontextmanager
 from functools import partial
 
-from azure.monitor.opentelemetry import configure_azure_monitor
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.web.async_client import AsyncWebClient
 
 from .agent import handle_message
 from .config import config
 
-logging.basicConfig(level=config.log_level)
 logger = logging.getLogger(__name__)
 
 
-# Flag for signaling when to shut down event loop.
-_done = False
-
-
-async def run():
+@asynccontextmanager
+async def run_slack_bot():
     """Connect to Slack and handle events."""
-    global _done
-
     apps = config.slack if isinstance(config.slack, list) else [config.slack]
 
     clients = list[SocketModeClient]()
@@ -37,9 +31,8 @@ async def run():
         logger.debug(f"Starting client for {app.app_id}...")
         await client.connect()
 
-    # Wait until a signal is received to shut down
-    while not _done:
-        await asyncio.sleep(1)
+    # Yield control until we're done.
+    yield
 
     logger.info("Stopping client(s) ...")
     for i, client in enumerate(clients):
@@ -48,10 +41,15 @@ async def run():
         await client.close()
 
 
-def handle_sig():
+async def _run_until_done(event: asyncio.Event):
+    """Run the agent until it's done."""
+    async with run_slack_bot():
+        await event.wait()
+
+
+def handle_sig(event: asyncio.Event):
     """Handle signals."""
-    global _done
-    _done = True
+    event.set()
 
 
 def main():
@@ -60,27 +58,23 @@ def main():
     Keeps the agent running until it's explicitly stopped with a signal or
     keyboard interrupt.
     """
-    global _done
     loop = asyncio.new_event_loop()
 
+    event = asyncio.Event()
     for sig in [signal.SIGINT, signal.SIGTERM]:
-        loop.add_signal_handler(sig, handle_sig)
+        loop.add_signal_handler(sig, handle_sig, event)
 
-    if config.metrics.connection_string:
-        configure_azure_monitor(
-            connection_string=config.metrics.connection_string,
-        )
-
-    while not _done:
+    while not event.is_set():
         try:
-            task = loop.create_task(run())
+            task = loop.create_task(_run_until_done(event))
             loop.run_until_complete(task)
         except Exception:
             logger.exception("Agent encountered an exception!")
             logger.warning("Agent restarting...")
             continue
         except (KeyboardInterrupt, SystemExit):
-            _done = True
+            logger.info("Agent received an exit signal!")
+            event.set()
 
     logger.info("Agent shutting down...")
     try:
@@ -91,7 +85,3 @@ def main():
         logger.warning("Agent shutting down anyway...")
 
     logger.info("Bye! 👋")
-
-
-if __name__ == "__main__":
-    main()

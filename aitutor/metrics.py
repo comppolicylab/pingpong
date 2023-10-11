@@ -1,3 +1,8 @@
+from contextlib import contextmanager
+
+from azure.monitor.opentelemetry import configure_azure_monitor
+
+from .config import config
 from .otel import AsyncGauge, Counter, Gauge, Histogram
 
 inbound_messages = Counter(
@@ -51,3 +56,12 @@ event_count = Counter(
     unit="events",
     labels=["app", "event_type", "success", "workspace", "channel_type", "channel"],
 )
+
+
+@contextmanager
+def metrics():
+    if config.metrics.connection_string:
+        configure_azure_monitor(
+            connection_string=config.metrics.connection_string,
+        )
+    yield

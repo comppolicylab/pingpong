@@ -12,7 +12,7 @@ from slack_sdk.models.blocks import (
 )
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 
-from .config import config
+from .config import OpenAISettings, config
 from .endpoint import Endpoint
 from .meta import (
     ChatTurn,
@@ -31,10 +31,11 @@ logger = logging.getLogger(__name__)
 
 # Configure OpenAI with values from config
 # TODO - may need to scope this per request
-openai.api_type = config.openai.api_type
-openai.api_base = config.openai.api_base
-openai.api_key = config.openai.api_key
-openai.api_version = config.openai.api_version
+def configure_openai(oai: OpenAISettings):
+    openai.api_type = oai.api_type
+    openai.api_base = oai.api_base
+    openai.api_key = oai.api_key
+    openai.api_version = oai.api_version
 
 
 def _triage_response(name: str, reason: str) -> str:
@@ -178,6 +179,9 @@ class AiChat:
         """
         await self.ensure_disclaimer(client)
         await self.mark_as_loading(client)
+
+        configure_openai(config.openai)
+
         try:
             new_turns = await self.generate_next_turn(**kwargs)
 

@@ -80,8 +80,10 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
         return hash((type(self), id(self)) + tuple(self.__dict__.values()))
 
     @model_serializer
-    def dump(self) -> dict[str, Any]:
+    def dump(self) -> dict[str, Any] | None:
         """Dump the ref as a dictionary."""
+        if not hasattr(self, "_instance") or not self._instance:
+            return None
         return self._instance.model_dump()
 
     def _get_cls(self) -> type[RefT]:
@@ -540,27 +542,35 @@ DEFAULT_CONFIG_PATH = os.environ.get("CONFIG_PATH", "config.toml")
 class ConfigLoader:
     """Wrapper for Config that can periodically refresh it."""
 
-    config: Config
+    config: Config | None
 
     def __init__(self, path: str = DEFAULT_CONFIG_PATH) -> None:
         self.path = Path(path)
         self._last_load = 0.0
         self._last_hash = ""
-        self.load()
+        self.config = None
 
     def __call__(self) -> Config:
         self._check_reload()
+        if not self.config:
+            raise RuntimeError("Config not loaded yet")
         return self.config
 
     def load(self):
         """Parse config file from path."""
         logger.debug(f"Loading config from {self.path}")
+        if not self.path.exists():
+            logger.warning("Config {self.path} does not exist")
+            return
         raw = self.path.read_text()
         self.config = Config.parse_obj(tomllib.loads(raw))
         self._last_load = time.monotonic()
         new_hash = hashlib.sha256(
             self.config.model_dump_json().encode("utf-8")
         ).hexdigest()
+
+        logging.basicConfig(level=self.config.log_level)
+
         if new_hash != self._last_hash:
             self._last_hash = new_hash
             logger.info(f"Config updated to {new_hash} at {self._last_load}")
@@ -568,6 +578,9 @@ class ConfigLoader:
 
     def _check_reload(self) -> None:
         """Refresh the configuration."""
+        if not self.config:
+            self.load()
+            return
         try:
             if not self.config.reload:
                 return
