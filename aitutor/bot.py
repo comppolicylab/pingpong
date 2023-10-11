@@ -4,7 +4,6 @@ import signal
 from contextlib import asynccontextmanager
 from functools import partial
 
-from azure.monitor.opentelemetry import configure_azure_monitor
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.web.async_client import AsyncWebClient
 
@@ -18,11 +17,6 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def run_slack_bot():
     """Connect to Slack and handle events."""
-    if config.metrics.connection_string:
-        configure_azure_monitor(
-            connection_string=config.metrics.connection_string,
-        )
-
     apps = config.slack if isinstance(config.slack, list) else [config.slack]
 
     clients = list[SocketModeClient]()
@@ -92,7 +86,3 @@ def main():
         logger.warning("Agent shutting down anyway...")
 
     logger.info("Bye! 👋")
-
-
-if __name__ == "__main__":
-    main()

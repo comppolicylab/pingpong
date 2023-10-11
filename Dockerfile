@@ -23,4 +23,4 @@ RUN poetry install --only main --no-interaction --no-ansi
 
 COPY . /code
 
-CMD ["python", "-m", "aitutor"]
+CMD ["uvicorn", "aitutor:server", "--host", "0.0.0.0", "--port", "8000"]]

@@ -1,15 +1,7 @@
-import sentry_sdk
-from sentry_sdk.integrations.aiohttp import AioHttpIntegration
-
-from .app import main
-from .config import config
+from .bot import main
+from .errors import sentry
+from .metrics import metrics
 
 if __name__ == "__main__":
-    if config.sentry.dsn:
-        sentry_sdk.init(
-            dsn=config.sentry.dsn,
-            integrations=[AioHttpIntegration()],
-            traces_sample_rate=1.0,
-            profiles_sample_rate=1.0,
-        )
-    main()
+    with sentry(), metrics():
+        main()
