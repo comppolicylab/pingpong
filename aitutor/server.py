@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from slack_sdk.web.async_client import AsyncWebClient
 
 from .app import run_slack_bot
@@ -25,5 +25,7 @@ async def get_user(user_id: str):
     user = await client.users_profile_get(user=user_id)
     data = user.get("data")
     if not data.get("ok"):
-        raise RuntimeError("failed to get user profile")
+        raise HTTPException(
+            status_code=502, detail="failed to get user profile from Slack"
+        )
     return {"user": data.get("profile")}
