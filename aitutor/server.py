@@ -23,4 +23,7 @@ def get_config():
 async def get_user(user_id: str):
     client = AsyncWebClient(token=config.slack[0].web_token)
     user = await client.users_profile_get(user=user_id)
-    return {"user": user["user"]}
+    data = user.get("data")
+    if not data.get("ok"):
+        raise RuntimeError("failed to get user profile")
+    return {"user": data.get("profile")}

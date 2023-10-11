@@ -80,8 +80,10 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
         return hash((type(self), id(self)) + tuple(self.__dict__.values()))
 
     @model_serializer
-    def dump(self) -> dict[str, Any]:
+    def dump(self) -> dict[str, Any] | None:
         """Dump the ref as a dictionary."""
+        if not hasattr(self, "_instance") or not self._instance:
+            return None
         return self._instance.model_dump()
 
     def _get_cls(self) -> type[RefT]:
