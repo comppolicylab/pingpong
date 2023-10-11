@@ -553,18 +553,24 @@ class ConfigLoader:
     def __call__(self) -> Config:
         self._check_reload()
         if not self.config:
-            raise RuntimeError("config was not loaded")
+            raise RuntimeError("Config not loaded yet")
         return self.config
 
     def load(self):
         """Parse config file from path."""
         logger.debug(f"Loading config from {self.path}")
+        if not self.path.exists():
+            logger.warning("Config {self.path} does not exist")
+            return
         raw = self.path.read_text()
         self.config = Config.parse_obj(tomllib.loads(raw))
         self._last_load = time.monotonic()
         new_hash = hashlib.sha256(
             self.config.model_dump_json().encode("utf-8")
         ).hexdigest()
+
+        logging.basicConfig(level=self.config.log_level)
+
         if new_hash != self._last_hash:
             self._last_hash = new_hash
             logger.info(f"Config updated to {new_hash} at {self._last_load}")

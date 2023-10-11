@@ -1,12 +1,10 @@
 import dbm
-import os
 
-from .meta import _DB_DIR, get_mdid
-
-_CLAIM_CACHE = os.path.join(_DB_DIR, "claim")
+from .meta import get_mdid, local_db
 
 
-async def claim_message(payload: dict) -> bool:
+@local_db("claim")
+async def claim_message(payload: dict, *, local_db_path: str) -> bool:
     """Claim a message.
 
     Currently claims are persisted in a local database. To scale this bot,
@@ -19,7 +17,7 @@ async def claim_message(payload: dict) -> bool:
         True if the message was claimed, False otherwise
     """
     id_ = get_mdid(payload)
-    with dbm.open(_CLAIM_CACHE, "c") as cache:
+    with dbm.open(local_db_path, "c") as cache:
         if id_ in cache:
             return False
         cache[id_] = b""

@@ -4,12 +4,10 @@ import os
 
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 
-from .meta import _DB_DIR, ChatTurn, Role, load_metadata
+from .meta import ChatTurn, Role, load_metadata, local_db
 from .reaction import Reaction
 
 logger = logging.getLogger(__name__)
-
-_THREADS_CACHE = os.path.join(_DB_DIR, "threads")
 
 
 # Cached bot client user ID.
@@ -106,11 +104,12 @@ class SlackThread:
 
         return chat
 
+    @local_db("threads")
     def __init__(
         self,
         bot_id: str,
         source_event: dict,
-        directory: str = _THREADS_CACHE,
+        local_db_path: str,
     ):
         self.bot_id = bot_id
         self.source_event = source_event
@@ -122,7 +121,7 @@ class SlackThread:
         self.ts = event["ts"]
         self.thread_ts = event.get("thread_ts", self.ts)
         self.history = list[ChatTurn]()
-        self.directory = directory
+        self.directory = local_db_path
 
     def __iter__(self):
         """Iterate over the chat history."""

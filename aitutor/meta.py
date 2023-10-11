@@ -2,7 +2,8 @@ import dbm
 import json
 import logging
 import os
-from typing import Any, NamedTuple
+from functools import cache, wraps
+from typing import Any, Callable, NamedTuple
 
 from .config import config
 
@@ -24,9 +25,28 @@ ChatTurn = NamedTuple("ChatTurn", [("role", str), ("content", str)])
 # TODO - write this to non-local storage!
 # And keep a local copy of it until it's written to protect against races!
 
-_DB_DIR = config.tutor.db_dir
-os.makedirs(_DB_DIR, exist_ok=True)
-_META_CACHE = os.path.join(_DB_DIR, "meta")
+
+@cache
+def _get_local_db(name: str) -> str:
+    os.makedirs(config.tutor.db_dir, exist_ok=True)
+    return os.path.join(config.tutor.db_dir, name)
+
+
+def local_db(name: str):
+    """Decorator to set up a local database and return a path to it.
+
+    Args:
+        name - name of local db file
+    """
+
+    def dec(f: Callable) -> Callable:
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            return f(*args, local_db_path=_get_local_db(name), **kwargs)
+
+        return wrapper
+
+    return dec
 
 
 def get_mdid(payload: dict) -> str:
@@ -58,7 +78,8 @@ def get_channel_mdid(payload: dict) -> str:
     return f"channel.{team_id}:{channel_id}"
 
 
-async def save_channel_metadata(payload: dict, meta: dict):
+@local_db("meta")
+async def save_channel_metadata(payload: dict, meta: dict, *, local_db_path: str):
     """Save metadata to a file.
 
     Args:
@@ -66,11 +87,12 @@ async def save_channel_metadata(payload: dict, meta: dict):
         meta: Metadata to save
     """
     mdid = get_channel_mdid(payload)
-    with dbm.open(_META_CACHE, "c") as db:
+    with dbm.open(local_db_path, "c") as db:
         db[mdid] = json.dumps(meta)
 
 
-async def load_channel_metadata(payload: dict) -> dict:
+@local_db("meta")
+async def load_channel_metadata(payload: dict, *, local_db_path: str) -> dict:
     """Load metadata from a file.
 
     Args:
@@ -80,14 +102,15 @@ async def load_channel_metadata(payload: dict) -> dict:
         Metadata dictionary
     """
     mdid = get_channel_mdid(payload)
-    with dbm.open(_META_CACHE, "c") as db:
+    with dbm.open(local_db_path, "c") as db:
         if mdid not in db:
             logger.debug("Metadata file %s does not exist", mdid)
             return {}
         return json.loads(db[mdid])
 
 
-async def save_metadata(payload: dict, meta: Any):
+@local_db("meta")
+async def save_metadata(payload: dict, meta: Any, *, local_db_path: str):
     """Save metadata to a file.
 
     Args:
@@ -95,11 +118,12 @@ async def save_metadata(payload: dict, meta: Any):
         meta: Metadata to save
     """
     mdid = get_mdid(payload)
-    with dbm.open(_META_CACHE, "c") as db:
+    with dbm.open(local_db_path, "c") as db:
         db[mdid] = json.dumps(meta)
 
 
-async def load_metadata(payload: dict) -> dict:
+@local_db("meta")
+async def load_metadata(payload: dict, *, local_db_path: str) -> dict:
     """Load metadata from a file.
 
     Args:
@@ -109,7 +133,7 @@ async def load_metadata(payload: dict) -> dict:
         Metadata dictionary
     """
     mdid = get_mdid(payload)
-    with dbm.open(_META_CACHE, "c") as db:
+    with dbm.open(local_db_path, "c") as db:
         if mdid not in db:
             logger.debug("Metadata file %s does not exist", mdid)
             return {}

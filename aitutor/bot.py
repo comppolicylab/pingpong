@@ -10,7 +10,6 @@ from slack_sdk.web.async_client import AsyncWebClient
 from .agent import handle_message
 from .config import config
 
-logging.basicConfig(level=config.log_level)
 logger = logging.getLogger(__name__)
 
 
