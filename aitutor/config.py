@@ -542,15 +542,18 @@ DEFAULT_CONFIG_PATH = os.environ.get("CONFIG_PATH", "config.toml")
 class ConfigLoader:
     """Wrapper for Config that can periodically refresh it."""
 
-    config: Config
+    config: Config | None
 
     def __init__(self, path: str = DEFAULT_CONFIG_PATH) -> None:
         self.path = Path(path)
         self._last_load = 0.0
         self._last_hash = ""
+        self.config = None
 
     def __call__(self) -> Config:
         self._check_reload()
+        if not self.config:
+            raise RuntimeError("config was not loaded")
         return self.config
 
     def load(self):
@@ -569,6 +572,9 @@ class ConfigLoader:
 
     def _check_reload(self) -> None:
         """Refresh the configuration."""
+        if not self.config:
+            self.load()
+            return
         try:
             if not self.config.reload:
                 return
