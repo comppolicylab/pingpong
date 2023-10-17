@@ -29,4 +29,4 @@ engine = "gpt-4"
 temperature = 0.15
 top_p = 0.95
 restrict_answers_to_data = false
-index_name = "api-201-ab"
+index_name = "api-318"
