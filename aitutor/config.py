@@ -351,6 +351,13 @@ class MetricsSettings(BaseSettings):
     connection_string: str = Field("")
 
 
+class DocumentIntelligenceSettings(BaseSettings):
+    """Document Intelligence settings."""
+
+    endpoint: str
+    key: str
+
+
 class Config(BaseSettings):
     """Stats Chat Bot config."""
 
@@ -358,6 +365,7 @@ class Config(BaseSettings):
 
     reload: int = Field(0)
     openai: OpenAISettings
+    di: DocumentIntelligenceSettings
     sentry: SentrySettings
     metrics: MetricsSettings = Field(MetricsSettings())
     slack: SlackSettings | list[SlackSettings]
