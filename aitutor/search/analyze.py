@@ -1,3 +1,4 @@
+import json
 import os
 
 from azure.ai.formrecognizer import AnalyzeResult, DocumentAnalysisClient
@@ -5,11 +6,15 @@ from azure.core.credentials import AzureKeyCredential
 from PyPDF2 import PdfReader
 
 from aitutor.cache import persist
-from aitutor.config import config
 
 
 def start_analyze(
-    cli: DocumentAnalysisClient, fn: str, pages: str, *, model: str, locale: str
+    cli: DocumentAnalysisClient,
+    fn: str,
+    pages: str,
+    *,
+    model: str,
+    locale: str,
 ):
     """Start analyzing the given document with Azure DocumentIntelligence.
 
@@ -26,23 +31,36 @@ def start_analyze(
         )
 
 
-def analyze_cache_key(_, fn: str, **kwargs) -> str:
+def analyze_cache_key(
+    cli: DocumentAnalysisClient,
+    fn: str,
+    **kwargs,
+) -> str:
     """Derive a cache key from the filename and kwargs."""
     parts = [f"{k}:{str(v)}" for k, v in kwargs.items()]
     return os.path.join(*parts, fn)
 
 
+def ser_analyze_result(x: list[AnalyzeResult]) -> str:
+    """Serialize an AnalyzeResult."""
+    return json.dumps([d.to_dict() for d in x])
+
+
+def des_analyze_result(x: str) -> list[AnalyzeResult]:
+    """Deserialize an AnalyzeResult."""
+    return [AnalyzeResult.from_dict(d) for d in json.loads(x)]
+
+
 @persist(
     "cache",
     key=analyze_cache_key,
-    ser=lambda x: [d.to_dict() for d in x],
-    de=lambda x: [AnalyzeResult.from_dict(d) for d in x],
+    ser=ser_analyze_result,
+    de=des_analyze_result,
 )
 def analyze_document(
     cli: DocumentAnalysisClient,
     fn: str,
-    model: str = "prebuilt-layout",
-    locale: str = "en-US",
+    **kwargs,
 ) -> list[AnalyzeResult]:
     """Analyze the given document with Azure DocumentIntelligence.
 
@@ -51,20 +69,39 @@ def analyze_document(
         fn: filename
         model: model to use
         locale: locale to use
+        parallelism: Number of pages to process simultaneously
 
     Returns:
         list of analyzed pages
     """
+    model = kwargs.get("model", "prebuilt-layout")
+    locale = kwargs.get("locale", "en-US")
+    parallelism = kwargs.get("parallelism", 2)
+
     page_count = len(PdfReader(fn).pages)
-    pages = []
+    pages = [None] * page_count
+    pending = []
     for i in range(page_count):
-        # TODO(jnu) when rate-limit is lifted, can parallelize
         poller = start_analyze(cli, fn, f"{i + 1}", model=model, locale=locale)
-        pages.append(poller.result())
+        pending.append((i, poller))
+        # Block until pending queue is cleared. This isn't perfectly
+        # efficient (since some requests might take longer than others,
+        # so we will end up blocking while the batch finishes even though
+        # we have spare capacity).
+        #
+        # Can rewrite a more efficient solution with threads if desired.
+        if parallelism >= 0 and len(pending) >= parallelism:
+            while pending:
+                i, p = pending.pop(0)
+                pages[i] = poller.result()
+    # Block waiting for results of the rest of the pollers.
+    for pend in pending:
+        i, p = pend
+        pages[i] = p.result()
     return pages
 
 
-def get_client(key: str, endpoint: str) -> DocumentAnalysisClient:
+def get_analysis_client(key: str, endpoint: str) -> DocumentAnalysisClient:
     """Get a DocumentAnalysisClient.
 
     Args:
@@ -75,17 +112,3 @@ def get_client(key: str, endpoint: str) -> DocumentAnalysisClient:
         DocumentAnalysisClient
     """
     return DocumentAnalysisClient(endpoint=endpoint, credential=AzureKeyCredential(key))
-
-
-def analyze(fn: str, **kwargs) -> list[AnalyzeResult]:
-    """Analyze the given document with Azure DocumentIntelligence.
-
-    Args:
-        fn: filename
-        **kwargs: see analyze_document
-
-    Returns:
-        list of analyzed pages
-    """
-    client = get_client(config.di.key, config.di.endpoint)
-    return analyze_document(client, fn, **kwargs)

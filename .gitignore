@@ -166,3 +166,5 @@ config.*.toml
 .db/
 !.db/.gitkeep
 *.db
+cache/
+chroma/

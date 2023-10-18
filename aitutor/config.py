@@ -205,6 +205,21 @@ class OpenAIModelParams(BaseSettings):
     completion_type: Literal["ChatCompletion"] = Field("ChatCompletion")
 
 
+class ChromaModelParams(BaseSettings):
+    """ChromaDB search model."""
+
+    type: Literal["chroma"]
+    engine: str | Engine
+    collection: str
+    dirs: list[str]
+    temperature: float = Field(0.2)
+    top_p: float = Field(0.95)
+    topNDocuments: int = Field(5, alias="top_n_documents")
+    completion_type: Literal["ChatWithChromaCompletion"] = Field(
+        "ChatWithChromaCompletion"
+    )
+
+
 class AzureCSModelParams(BaseSettings):
     """Azure cognitive search model."""
 
@@ -222,7 +237,7 @@ class AzureCSModelParams(BaseSettings):
     completion_type: Literal["ChatWithDataCompletion"] = Field("ChatWithDataCompletion")
 
 
-ModelParams = OpenAIModelParams | AzureCSModelParams
+ModelParams = OpenAIModelParams | AzureCSModelParams | ChromaModelParams
 
 
 class Model(BaseSettings):
@@ -577,7 +592,14 @@ class ConfigLoader:
             self.config.model_dump_json().encode("utf-8")
         ).hexdigest()
 
+        # Configure logging
         logging.basicConfig(level=self.config.log_level)
+        # Shut up some noisy libraries
+        logging.getLogger("azure.monitor.opentelemetry").setLevel(logging.WARNING)
+        logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
+            logging.WARNING
+        )
+        logging.getLogger("urllib3").setLevel(logging.WARNING)
 
         if new_hash != self._last_hash:
             self._last_hash = new_hash
