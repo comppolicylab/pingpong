@@ -3,7 +3,6 @@ import json
 import chromadb
 import openai
 
-from .meta import Role
 from .search import query_chroma
 
 
@@ -20,22 +19,12 @@ class ChatWithChromaCompletion(openai.ChatCompletion):
         db = chromadb.PersistentClient()
         q = params["messages"][-1]["content"]
         results = query_chroma(db, collection_name, q, n=top_n)
-        formatted = {
-            "citations": [
-                {
-                    "content": d["content"],
-                    "url": d["url"],
-                    "filepath": d["url"],
-                }
-                for d in results
-            ],
-        }
-        params["messages"].append(
-            {
-                "role": Role.TOOL,
-                "content": json.dumps(formatted),
-            }
+        ctx = [r["content"] for r in results]
+        addendum = (
+            "\n\nUse the following context to help answer the question:\n"
+            f"{json.dumps(ctx)}"
         )
+        params["messages"][-1]["content"] += addendum
         return params
 
     @classmethod
