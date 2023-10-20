@@ -2,6 +2,8 @@ from dataclasses import dataclass
 
 import chromadb
 
+from aitutor.cache import get_local_db
+
 
 @dataclass
 class QueryResult:
@@ -39,3 +41,13 @@ def query_chroma(
         )
         for i in range(len(results["documents"][0]))
     ]
+
+
+def get_chroma_client() -> chromadb.Client:
+    """Get a chroma client for the given path.
+
+    Returns:
+        A chroma client.
+    """
+    path = get_local_db("chroma")
+    return chromadb.PersistentClient(path=path)

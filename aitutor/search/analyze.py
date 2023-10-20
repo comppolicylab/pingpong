@@ -6,7 +6,9 @@ from azure.core.credentials import AzureKeyCredential
 from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 
-from aitutor.cache import persist
+from aitutor.cache import get_local_db, persist
+
+_CACHE_DIR = get_local_db("azure-di")
 
 
 def start_analyze(
@@ -53,7 +55,7 @@ def des_analyze_result(x: str) -> list[AnalyzeResult]:
 
 
 @persist(
-    "cache",
+    _CACHE_DIR,
     key=analyze_cache_key,
     ser=ser_analyze_result,
     de=des_analyze_result,

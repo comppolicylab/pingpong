@@ -1,11 +1,10 @@
-import chromadb
 import click
 
 from .bot import main
 from .config import config
 from .errors import sentry
 from .metrics import metrics
-from .search import ensure_search_index, get_analysis_client
+from .search import ensure_search_index, get_analysis_client, get_chroma_client
 
 
 @click.group()
@@ -27,10 +26,10 @@ def chroma() -> None:
 @chroma.command("ingest")
 def ingest() -> None:
     di = get_analysis_client(config.di.key, config.di.endpoint)
+    cli = get_chroma_client()
     for m in config.models:
         if m.params.type != "chroma":
             continue
-        cli = chromadb.PersistentClient()
         ensure_search_index(cli, di, m.params.collection, m.params.dirs)
 
 

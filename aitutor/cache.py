@@ -1,7 +1,9 @@
 import json
 import os
-from functools import wraps
+from functools import cache, wraps
 from typing import Callable, Generic, ParamSpec, TypeVar
+
+from .config import config
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -72,5 +74,36 @@ def persist(
     def dec(f: Callable[P, R]) -> _LocalCacheWrapper[P, R]:
         cache = _LocalCacheWrapper(f, cache_dir, key, ser, de)
         return wraps(f)(cache)
+
+    return dec
+
+
+@cache
+def get_local_db(name: str) -> str:
+    """Ensure that a local db directory exists.
+
+    Args:
+        name - name of local db file
+
+    Returns:
+        Path to local db file.
+    """
+    os.makedirs(config.tutor.db_dir, exist_ok=True)
+    return os.path.join(config.tutor.db_dir, name)
+
+
+def local_db(name: str):
+    """Decorator to set up a local database and return a path to it.
+
+    Args:
+        name - name of local db file
+    """
+
+    def dec(f: Callable) -> Callable:
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            return f(*args, local_db_path=get_local_db(name), **kwargs)
+
+        return wrapper
 
     return dec

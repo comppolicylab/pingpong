@@ -4,7 +4,8 @@ import os
 
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 
-from .meta import ChatTurn, Role, load_metadata, local_db
+from .cache import local_db
+from .meta import ChatTurn, Role, load_metadata
 from .reaction import Reaction
 
 logger = logging.getLogger(__name__)

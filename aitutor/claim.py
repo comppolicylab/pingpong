@@ -1,6 +1,7 @@
 import dbm
 
-from .meta import get_mdid, local_db
+from .cache import local_db
+from .meta import get_mdid
 
 
 @local_db("claim")

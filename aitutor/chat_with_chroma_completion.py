@@ -1,9 +1,8 @@
 import json
 
-import chromadb
 import openai
 
-from .search import query_chroma
+from .search import get_chroma_client, query_chroma
 
 
 class ChatWithChromaCompletion(openai.ChatCompletion):
@@ -16,7 +15,7 @@ class ChatWithChromaCompletion(openai.ChatCompletion):
         params.pop("dirs")
         collection_name = params.pop("collection")
 
-        db = chromadb.PersistentClient()
+        db = get_chroma_client()
         q = params["messages"][-1]["content"]
         results = query_chroma(db, collection_name, q, n=top_n)
         ctx = [r.content for r in results]
