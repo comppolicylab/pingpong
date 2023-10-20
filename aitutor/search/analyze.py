@@ -83,6 +83,7 @@ def analyze_document(
     # most common input type. So try to treat everything as a PDF to start,
     # then fall back to reading the whole document if that fails (because the
     # file is not actually a PDF).
+    # TODO - more robust support for non-PDF types, e.g. using LC chunkers.
     is_pdf = True
     try:
         page_count = len(PdfReader(fn).pages)
