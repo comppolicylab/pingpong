@@ -158,6 +158,21 @@ def ingest_folder(
         f"Scanning {directory} to ingest documents, this may take some time ..."
     )
     supported_exts = {".pdf"}
+    experimental_exts = {
+        ".html",
+        ".txt",
+        ".docx",
+        ".doc",
+        ".xls",
+        ".xlsx",
+        ".ppt",
+        ".pptx",
+        ".png",
+        ".jpeg",
+        ".jpg",
+        ".bmp",
+        ".tiff",
+    }
     ingested = set[str]()
     for root, _, files in os.walk(directory):
         bn = os.path.basename(root)
@@ -166,9 +181,11 @@ def ingest_folder(
             continue
         for f in files:
             _, ext = os.path.splitext(f)
-            if ext.lower() not in supported_exts:
+            if ext.lower() not in supported_exts | experimental_exts:
                 logger.warning(f"Unsupported filetype: {ext}")
                 continue
+            if ext.lower() in experimental_exts:
+                logger.warning(f"Analyzing {ext} file with experimental support")
             path = os.path.join(root, f)
             logger.info(f"Ingesting {path} ...")
             dochash = ingest(di_client, collection, path, metadata=metadata)

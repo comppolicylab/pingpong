@@ -19,9 +19,11 @@ class ChatWithChromaCompletion(openai.ChatCompletion):
         db = chromadb.PersistentClient()
         q = params["messages"][-1]["content"]
         results = query_chroma(db, collection_name, q, n=top_n)
-        ctx = [r["content"] for r in results]
+        ctx = [r.content for r in results]
         addendum = (
-            "\n\nUse the following context to help answer the question:\n"
+            "\n\nFor context, here is some additional information "
+            "that might of use in answering this question. "
+            "Only reference this information if it is relevant to the question:\n\n"
             f"{json.dumps(ctx)}"
         )
         params["messages"][-1]["content"] += addendum

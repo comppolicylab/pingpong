@@ -4,6 +4,7 @@ import os
 from azure.ai.formrecognizer import AnalyzeResult, DocumentAnalysisClient
 from azure.core.credentials import AzureKeyCredential
 from PyPDF2 import PdfReader
+from PyPDF2.errors import PdfReadError
 
 from aitutor.cache import persist
 
@@ -11,7 +12,7 @@ from aitutor.cache import persist
 def start_analyze(
     cli: DocumentAnalysisClient,
     fn: str,
-    pages: str,
+    pages: str | None = None,
     *,
     model: str,
     locale: str,
@@ -78,11 +79,29 @@ def analyze_document(
     locale = kwargs.get("locale", "en-US")
     parallelism = kwargs.get("parallelism", 2)
 
-    page_count = len(PdfReader(fn).pages)
-    pages = [None] * page_count
+    # For PDFs we need to process pages individually. PDF is probably also the
+    # most common input type. So try to treat everything as a PDF to start,
+    # then fall back to reading the whole document if that fails (because the
+    # file is not actually a PDF).
+    is_pdf = True
+    try:
+        page_count = len(PdfReader(fn).pages)
+        pages = [None] * page_count
+    except PdfReadError:
+        page_count = 1
+        pages = [None]
+        is_pdf = False
     pending = []
     for i in range(page_count):
-        poller = start_analyze(cli, fn, f"{i + 1}", model=model, locale=locale)
+        if is_pdf:
+            poller = start_analyze(
+                cli, fn, pages=f"{i + 1}", model=model, locale=locale
+            )
+        else:
+            # The prebuilt-layout model doesn't non-PDF format, so if the model
+            # was left as the default, replace it.
+            model = "prebuilt-read" if model == "prebuilt-layout" else model
+            poller = start_analyze(cli, fn, model=model, locale=locale)
         pending.append((i, poller))
         # Block until pending queue is cleared. This isn't perfectly
         # efficient (since some requests might take longer than others,
