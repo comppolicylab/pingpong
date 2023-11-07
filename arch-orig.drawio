@@ -1,4 +1,4 @@
-<mxfile host="app.diagrams.net" modified="2023-11-07T22:52:09.994Z" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/119.0" etag="J-7fplTpS0hGyx62DjNL" version="22.0.8" type="github" pages="2">
+<mxfile host="app.diagrams.net" modified="2023-11-07T22:52:19.321Z" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/119.0" etag="501CYqJUC8CRRLNJaNGD" version="22.0.8" type="github" pages="2">
   <diagram name="Prototype" id="znWVRUk8pd3wHXZzHybN">
     <mxGraphModel dx="2107" dy="1476" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
       <root>
@@ -331,9 +331,6 @@
         </mxCell>
         <mxCell id="_9ZX64CouvfesaiOhZ4w-29" value="" style="edgeStyle=elbowEdgeStyle;elbow=vertical;html=1;rounded=1;curved=0;sourcePerimeterSpacing=0;targetPerimeterSpacing=0;startSize=6;endSize=6;fontSize=12;fillColor=#dae8fc;strokeColor=#6c8ebf;" edge="1" parent="_9ZX64CouvfesaiOhZ4w-24" source="_9ZX64CouvfesaiOhZ4w-25" target="_9ZX64CouvfesaiOhZ4w-28">
           <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="_9ZX64CouvfesaiOhZ4w-30" value="Harvard VPN" style="text;strokeColor=none;fillColor=none;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;fontColor=#990000;" vertex="1" parent="1">
-          <mxGeometry x="-15.999727626459162" y="602.0045864661653" width="141.2645914396887" height="41.16541353383459" as="geometry" />
         </mxCell>
         <mxCell id="_9ZX64CouvfesaiOhZ4w-31" style="edgeStyle=none;curved=1;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=1;entryDx=0;entryDy=0;fontSize=12;startSize=8;endSize=8;fillColor=#dae8fc;strokeColor=#6c8ebf;" edge="1" parent="1" source="_9ZX64CouvfesaiOhZ4w-32" target="_9ZX64CouvfesaiOhZ4w-37">
           <mxGeometry relative="1" as="geometry">
