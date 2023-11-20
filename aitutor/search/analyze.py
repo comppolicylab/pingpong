@@ -1,5 +1,6 @@
 import json
 import os
+from functools import partial
 
 from azure.ai.formrecognizer import AnalyzeResult, DocumentAnalysisClient
 from azure.core.credentials import AzureKeyCredential
@@ -8,7 +9,7 @@ from PyPDF2.errors import PdfReadError
 
 from aitutor.cache import get_local_db, persist
 
-_CACHE_DIR = get_local_db("azure-di")
+_CACHE_DIR = partial(get_local_db, "azure-di")
 
 
 def start_analyze(

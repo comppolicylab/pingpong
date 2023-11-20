@@ -13,7 +13,7 @@ class _LocalCacheWrapper(Generic[P, R]):
     def __init__(
         self,
         f: Callable[P, R],
-        cache_dir: str,
+        cache_dir: str | Callable[[], str],
         key: Callable[P, str] | None = None,
         ser: Callable[[R], str] | None = None,
         de: Callable[[str], R] | None = None,
@@ -26,6 +26,7 @@ class _LocalCacheWrapper(Generic[P, R]):
 
     def _get_dest(self, *args: P.args, **kwargs: P.kwargs) -> str:
         """Get disk location for cached result."""
+        cache_base = self.cache_dir() if callable(self.cache_dir) else self.cache_dir
         if not self.key:
             cache_parts = [str(v) for v in args] + [
                 f"{k}:{str(v)}" for k, v in kwargs.items()
@@ -33,7 +34,7 @@ class _LocalCacheWrapper(Generic[P, R]):
             dest = ",".join(cache_parts)
         else:
             dest = self.key(*args, **kwargs)
-        return os.path.join(self.cache_dir, f"{dest}.json")
+        return os.path.join(cache_base, f"{dest}.json")
 
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:
         """Call the target function with caching."""
@@ -63,13 +64,12 @@ class _LocalCacheWrapper(Generic[P, R]):
 
 
 def persist(
-    cache_dir: str,
+    cache_dir: str | Callable[[], str],
     key: Callable[P, str] | None = None,
     ser: Callable[[R], str] | None = None,
     de: Callable[[str], R] | None = None,
 ) -> Callable[[Callable[P, R]], _LocalCacheWrapper[P, R]]:
     """Persistent (on-disk) memoize decorator."""
-    os.makedirs(cache_dir, exist_ok=True)
 
     def dec(f: Callable[P, R]) -> _LocalCacheWrapper[P, R]:
         cache = _LocalCacheWrapper(f, cache_dir, key, ser, de)
