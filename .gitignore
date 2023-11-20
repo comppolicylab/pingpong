@@ -168,3 +168,4 @@ config.*.toml
 *.db
 cache/
 chroma/
+.DS_Store
