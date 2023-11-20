@@ -7,6 +7,7 @@ import tiktoken
 from async_throttle import Throttle
 from openai.openai_object import OpenAIObject
 
+from .chat_with_chroma_completion import ChatWithChromaCompletion
 from .chat_with_data_completion import ChatWithDataCompletion
 from .config import Engine, Model
 from .meta import ChatTurn, Role
@@ -30,6 +31,7 @@ _CLASSES = {
     for c in [
         openai.ChatCompletion,
         ChatWithDataCompletion,
+        ChatWithChromaCompletion,
     ]
 }
 

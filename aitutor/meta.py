@@ -1,11 +1,9 @@
 import dbm
 import json
 import logging
-import os
-from functools import cache, wraps
-from typing import Any, Callable, NamedTuple
+from typing import Any, NamedTuple
 
-from .config import config
+from .cache import local_db
 
 logger = logging.getLogger(__name__)
 
@@ -24,29 +22,6 @@ ChatTurn = NamedTuple("ChatTurn", [("role", str), ("content", str)])
 
 # TODO - write this to non-local storage!
 # And keep a local copy of it until it's written to protect against races!
-
-
-@cache
-def _get_local_db(name: str) -> str:
-    os.makedirs(config.tutor.db_dir, exist_ok=True)
-    return os.path.join(config.tutor.db_dir, name)
-
-
-def local_db(name: str):
-    """Decorator to set up a local database and return a path to it.
-
-    Args:
-        name - name of local db file
-    """
-
-    def dec(f: Callable) -> Callable:
-        @wraps(f)
-        def wrapper(*args, **kwargs):
-            return f(*args, local_db_path=_get_local_db(name), **kwargs)
-
-        return wrapper
-
-    return dec
 
 
 def get_mdid(payload: dict) -> str:
