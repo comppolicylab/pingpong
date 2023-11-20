@@ -1,6 +1,6 @@
 # Set up image based on Poetry / Python3.11
 
-FROM python:3.11.5-bullseye
+FROM python:3.11.6-bookworm
 
 ENV PYTHONFAULTHANDLER=1 \
       PYTHONUNBUFFERED=1 \
