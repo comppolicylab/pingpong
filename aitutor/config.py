@@ -11,6 +11,7 @@ from typing import Any, Callable, Generic, Literal, TypeVar
 import requests
 import tiktoken
 from pydantic import (
+    Extra,
     Field,
     PrivateAttr,
     field_validator,
@@ -45,7 +46,7 @@ def _lock(obj: Any) -> RLock:
     return _LOCKS[obj]
 
 
-class Ref(BaseSettings, Generic[RefT], extra='allow'):  # type: ignore[call-arg]
+class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-arg]
     """Specify an external source for the configuration.
 
     When a field is defined with `Ref[T]` as a possible type, you can opt to
