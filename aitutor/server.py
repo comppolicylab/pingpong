@@ -26,6 +26,21 @@ async def get_user(user_id: str):
     return {"user": data.get("profile")}
 
 
+@v1.get("/thread/{thread_id}")
+async def get_thread(thread_id: str):
+    ...
+
+
+@v1.get("/thread")
+async def list_threads():
+    ...
+
+
+@v1.post("/thread")
+async def create_thread():
+    ...
+
+
 async def lifespan(app: FastAPI):
     """Run Slack Bot agent in the background."""
     with sentry(), metrics():

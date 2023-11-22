@@ -169,3 +169,6 @@ config.*.toml
 cache/
 chroma/
 .DS_Store
+
+# Node.js / JavaScript stuff
+node_modules/
