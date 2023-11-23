@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from slack_sdk.web.async_client import AsyncWebClient
 
+from .ai import openai_client
 from .bot import run_slack_bot
 from .config import config
 from .errors import sentry
@@ -28,7 +29,7 @@ async def get_user(user_id: str):
 
 @v1.get("/thread/{thread_id}")
 async def get_thread(thread_id: str):
-    ...
+    return await openai_client.beta.threads.messages.list(thread_id=thread_id)
 
 
 @v1.get("/thread")
@@ -38,7 +39,7 @@ async def list_threads():
 
 @v1.post("/thread")
 async def create_thread():
-    ...
+    return await openai_client.beta.threads.create()
 
 
 async def lifespan(app: FastAPI):

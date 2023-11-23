@@ -172,3 +172,6 @@ chroma/
 
 # Node.js / JavaScript stuff
 node_modules/
+
+# SQLite database files
+*.sqlite3

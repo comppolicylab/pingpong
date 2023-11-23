@@ -373,12 +373,27 @@ class DocumentIntelligenceSettings(BaseSettings):
     key: str
 
 
+class SecretKey(BaseSettings):
+    """Secret key."""
+
+    key: str
+    algorithm: str = Field("HS256")
+
+
+class AuthSettings(BaseSettings):
+
+    secret_keys: list[SecretKey]
+
+
 class Config(BaseSettings):
     """Stats Chat Bot config."""
 
     log_level: str = Field("INFO", env="LOG_LEVEL")
 
     reload: int = Field(0)
+    auth: AuthSettings
+    public_url: str = Field("http://localhost:8000")
+
     openai: OpenAISettings
     di: DocumentIntelligenceSettings
     sentry: SentrySettings

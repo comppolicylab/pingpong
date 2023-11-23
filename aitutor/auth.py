@@ -1,0 +1,76 @@
+from dataclasses import dataclass, asdict
+from datetime import datetime, timedelta, timezone
+import jwt
+
+from .config import config
+
+
+@dataclass
+class AuthToken:
+    """Auth Token."""
+
+    sub: str
+    exp: int
+    iat: int
+
+
+def encode_auth_token(user_id: int, expiry: int = 600) -> str:
+    """Generates the Auth Token.
+
+    Args:
+        user_id (int): User ID
+        expiry (int, optional): Expiry in seconds. Defaults to 600.
+
+    Returns:
+        str: Auth Token
+    """
+    if expiry < 1:
+        raise ValueError("expiry must be greater than 1 second")
+
+    now = datetime.utcnow().replace(tzinfo=timezone.utc)
+    exp = now + timedelta(seconds=expiry)
+    tok = AuthToken(
+        iat=int(now.timestamp()),
+        exp=int(exp.timestamp()),
+        sub=str(user_id),
+    )
+
+    secret = config.auth.secret_keys[0]
+
+    return jwt.encode(
+        asdict(tok),
+        secret.key,
+        algorithm=secret.algorithm,
+    )
+
+
+def decode_auth_token(token: str) -> AuthToken:
+    """Decodes the Auth Token.
+
+    Args:
+        token (str): Auth Token
+
+    Returns:
+        AuthToken: Auth Token
+
+    Raises:
+        jwt.exceptions.PyJWTError when token is not valid
+    """
+    exc: jwt.exceptions.PyJWTError | None = None
+
+    for secret in config.auth.secret_keys:
+        try:
+            return AuthToken(**jwt.decode(
+                token,
+                secret.key,
+                algorithms=[secret.algorithm]
+            ))
+        except jwt.exceptions.PyJWTError as e:
+            exc = e
+            continue
+
+    if exc is not None:
+        raise exc
+
+    # Unclear why we would get here
+    raise ValueError("invalid token")

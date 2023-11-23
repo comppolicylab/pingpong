@@ -1,5 +1,7 @@
+import asyncio
 import click
 
+from .db import init_db
 from .bot import main
 from .config import config
 from .errors import sentry
@@ -31,6 +33,29 @@ def ingest() -> None:
         if m.params.type != "chroma":
             continue
         ensure_search_index(cli, di, m.params.collection, m.params.dirs)
+
+
+@cli.group("auth")
+def auth() -> None:
+    pass
+
+
+@auth.command("login")
+@click.argument("email")
+def login(email: str) -> None:
+    print("TODO")
+
+
+@cli.group("db")
+def db() -> None:
+    pass
+
+
+@db.command("init")
+@click.argument("clean", default=False)
+def db_init(clean) -> None:
+    asyncio.run(init_db(drop_first=clean))
+
 
 
 if __name__ == "__main__":

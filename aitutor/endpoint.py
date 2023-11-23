@@ -2,13 +2,9 @@ import json
 import logging
 from typing import NamedTuple
 
-import openai
 import tiktoken
 from async_throttle import Throttle
-from openai.openai_object import OpenAIObject
 
-from .chat_with_chroma_completion import ChatWithChromaCompletion
-from .chat_with_data_completion import ChatWithDataCompletion
 from .config import Engine, Model
 from .meta import ChatTurn, Role
 from .metrics import engine_quota
@@ -23,17 +19,6 @@ CallMeta = NamedTuple(
         ("tok_in", int),
     ],
 )
-
-
-# Classes that are available for completion
-_CLASSES = {
-    c.__name__: c
-    for c in [
-        openai.ChatCompletion,
-        ChatWithDataCompletion,
-        ChatWithChromaCompletion,
-    ]
-}
 
 
 class EngineImpl:
@@ -104,11 +89,8 @@ class Endpoint:
             ValueError: If the model type is invalid.
         """
         self.model = model
-        if model.params.completion_type not in _CLASSES:
-            raise ValueError(
-                f"Invalid model completion type: {model.params.completion_type}"
-            )
-        self._completion_class = _CLASSES[model.params.completion_type]
+        # TODO(jnu): support the Assistants API
+        self._completion_class = None
 
     async def __call__(self, **kwargs) -> tuple[list[ChatTurn], CallMeta]:
         """Create a completion asynchronously.
@@ -249,7 +231,7 @@ class Endpoint:
             )
         return messages
 
-    def _format_response(self, response: OpenAIObject) -> list[ChatTurn]:
+    def _format_response(self, response) -> list[ChatTurn]:
         """Format a response from OpenAI.
 
         Args:
