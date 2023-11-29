@@ -7,11 +7,46 @@ from .config import config
 
 @dataclass
 class AuthToken:
-    """Auth Token."""
+    """Auth Token - minimal token used to log in."""
 
     sub: str
     exp: int
     iat: int
+
+
+@dataclass
+class SessionToken:
+    """Session Token - stores information about user for a session."""
+
+    sub: str
+    exp: int
+    iat: int
+
+
+def encode_session_token(user_id: int, expiry: int = 86_400) -> str:
+    """Encodes the session token as a JWT.
+
+    Args:
+        user_id (int): User ID
+        expiry (int, optional): Expiry in seconds. Defaults to 86400 (1 day).
+        
+    Returns:
+        str: Encoded session token JWT
+    """
+    return encode_auth_token(user_id, expiry)
+
+
+def decode_session_token(token: str) -> SessionToken:
+    """Decodes the Session Token.
+
+    Args:
+        token (str): Encoded session token JWT
+
+    Returns:
+        SessionToken: Session Token
+    """
+    auth_token = decode_auth_token(token)
+    return SessionToken(**asdict(auth_token))
 
 
 def encode_auth_token(user_id: int, expiry: int = 600) -> str:

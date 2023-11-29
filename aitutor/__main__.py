@@ -1,5 +1,6 @@
 import asyncio
 import click
+import webbrowser
 
 from .auth import encode_auth_token
 from .db import init_db, User, async_session
@@ -43,7 +44,8 @@ def auth() -> None:
 
 @auth.command("login")
 @click.argument("email")
-def login(email: str) -> None:
+@click.argument("redirect", default="/")
+def login(email: str, redirect: str) -> None:
     async def _get_or_create(email) -> int:
         async with async_session() as session:
             user = await User.get_by_email(session, email)
@@ -57,7 +59,11 @@ def login(email: str) -> None:
 
     user_id = asyncio.run(_get_or_create(email))
     tok = encode_auth_token(user_id)
-    print(f"{config.public_url}/api/v1/auth?token={tok}")
+    url = config.url(f"/api/v1/auth?token={tok}&redirect={redirect}")
+    print(f"Magic auth link: {url}")
+
+    # Open the URL in the default browser
+    webbrowser.open(url)
 
 
 @cli.group("db")

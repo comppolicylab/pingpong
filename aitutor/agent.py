@@ -6,7 +6,6 @@ from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
 
 from .claim import claim_message
-from .config import SlackSettings
 from .metrics import event_count, in_flight, inbound_messages, replies, reply_duration
 from .reaction import react
 from .thread import SlackThread, client_user_id
@@ -112,7 +111,7 @@ async def handle_message_impl(client: SocketModeClient, req: SocketModeRequest) 
 
 
 async def handle_message(
-    slack_app: SlackSettings, client: SocketModeClient, req: SocketModeRequest
+    slack_app, client: SocketModeClient, req: SocketModeRequest
 ):
     """Process incoming messages.
 

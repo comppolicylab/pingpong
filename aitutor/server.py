@@ -1,30 +1,40 @@
-from fastapi import FastAPI, HTTPException
-from slack_sdk.web.async_client import AsyncWebClient
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import RedirectResponse
+import jwt
 
 from .ai import openai_client
-from .bot import run_slack_bot
-from .config import config
+from .auth import decode_auth_token, encode_session_token
 from .errors import sentry
 from .metrics import metrics
+from .config import config
 
 v1 = FastAPI()
 
 
 @v1.get("/config")
-def get_config():
-    return {"config": config.dict()}
+def get_config(request: Request):
+    return {"config": config.dict(), "headers": dict(request.headers)}
 
 
-@v1.get("/user/{user_id}")
-async def get_user(user_id: str):
-    client = AsyncWebClient(token=config.slack[0].web_token)
-    user = await client.users_profile_get(user=user_id)
-    data = user.data
-    if not data.get("ok"):
-        raise HTTPException(
-            status_code=502, detail="failed to get user profile from Slack"
-        )
-    return {"user": data.get("profile")}
+@v1.get("/auth")
+async def auth(request: Request, response: Response):
+    # Get the `token` query parameter from the request and store it in variable.
+    dest = request.query_params.get("redirect")
+    stok = request.query_params.get("token")
+    try:
+        auth_token = decode_auth_token(stok)
+    except jwt.exceptions.PyJWTError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    # Create a token for the user with more information.
+    session_dur = 86_400
+    session_token = encode_session_token(int(auth_token.sub), expiry=session_dur)
+
+    response = RedirectResponse(config.url(dest), status_code=303)
+    response.set_cookie(key="session", value=session_token, max_age=session_dur)
+    return response
 
 
 @v1.get("/thread/{thread_id}")
@@ -43,10 +53,9 @@ async def create_thread():
 
 
 async def lifespan(app: FastAPI):
-    """Run Slack Bot agent in the background."""
+    """Run services in the background."""
     with sentry(), metrics():
-        async with run_slack_bot():
-            yield
+        yield
 
 
 app = FastAPI(lifespan=lifespan)
