@@ -1,11 +1,14 @@
 from sqlalchemy import (
+        Table,
         Column,
         Boolean,
         ForeignKey,
         Integer,
         String,
         Index,
+        select,
         )
+from sqlalchemy.sql import func
 from sqlalchemy.ext.asyncio import (
         async_sessionmaker,
         AsyncAttrs,
@@ -22,17 +25,40 @@ class Base(AsyncAttrs, DeclarativeBase):
     pass
 
 
+user_class_association = Table(
+        'users_classes',
+        Base.metadata,
+        Column('user_id', Integer, ForeignKey('users.id')),
+        Column('class_id', Integer, ForeignKey('classes.id')),
+        Index('user_class_idx', 'user_id', 'class_id', unique=True),
+        )
+
+
+user_thread_association = Table(
+        'users_threads',
+        Base.metadata,
+        Column('user_id', Integer, ForeignKey('users.id')),
+        Column('thread_id', Integer, ForeignKey('threads.id')),
+        Index('user_thread_idx', 'user_id', 'thread_id', unique=True),
+        )
+
+
 class User(Base):
     __tablename__ = 'users'
 
     id = Column(Integer, primary_key=True)
     name = Column(String)
     email = Column(String, unique=True)
-    classes = relationship('UserClass', back_populates='user_id')
-    roles = relationship('UserClassRole', back_populates='user_id')
-    threads = relationship('UserThread', back_populates='user_id')
-    created = Column(Integer)
-    updated = Column(Integer, index=True)
+    classes = relationship('Class', secondary=user_class_association, back_populates='users')
+    roles = relationship('UserClassRole', back_populates='users')
+    threads = relationship('Thread', secondary=user_thread_association, back_populates='users')
+    created = Column(Integer, server_default=func.now())
+    updated = Column(Integer, index=True, onupdate=func.now())
+
+    @classmethod
+    async def get_by_email(cls, session: AsyncSession, email: str) -> 'User':
+        stmt = select(User).where(User.email == email)
+        return await session.scalar(stmt)
 
 
 class Institution(Base):
@@ -41,8 +67,8 @@ class Institution(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String)
     classes = relationship('Class', back_populates='institution')
-    created = Column(Integer)
-    updated = Column(Integer, index=True)
+    created = Column(Integer, server_default=func.now())
+    updated = Column(Integer, index=True, onupdate=func.now())
 
 
 class Class(Base):
@@ -51,19 +77,12 @@ class Class(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String)
     institution_id = Column(Integer, ForeignKey('institutions.id'))
+    institution = relationship('Institution', back_populates='classes')
     term = Column(String)
-    users = relationship('UserClass', back_populates='class_id')
-    threads = relationship('Thread', back_populates='class_id')
-    created = Column(Integer)
-    updated = Column(Integer, index=True)
-
-
-class UserClass(Base):
-    __tablename__ = 'users_classes'
-
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id'))
-    class_id = Column(Integer, ForeignKey('classes.id'))
+    users = relationship('User', secondary=user_class_association, back_populates='classes')
+    threads = relationship('Thread', back_populates='class_')
+    created = Column(Integer, server_default=func.now())
+    updated = Column(Integer, index=True, onupdate=func.now())
 
 
 class UserClassRole(Base):
@@ -74,14 +93,7 @@ class UserClassRole(Base):
     class_id = Column(Integer, ForeignKey('classes.id'))
     role = Column(String)
 
-
-# Many:many mapping from users to threads
-class UserThread(Base):
-    __tablename__ = 'users_threads'
-
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id'))
-    thread_id = Column(Integer, ForeignKey('threads.id'))
+    users = relationship('User', back_populates='roles')
 
 
 class Thread(Base):
@@ -89,12 +101,13 @@ class Thread(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String)
-    thread_id = Column(String)
+    thread_id = Column(String, unique=True)
     class_id = Column(Integer, ForeignKey('classes.id'))
+    class_ = relationship('Class', back_populates='threads')
     private = Column(Boolean)
-    users = relationship('UserThread', back_populates='thread_id')
-    created = Column(Integer)
-    updated = Column(Integer, index=True)
+    users = relationship('User', secondary=user_thread_association, back_populates='threads')
+    created = Column(Integer, server_default=func.now())
+    updated = Column(Integer, index=True, onupdate=func.now())
 
 
 async def init_db(drop_first: bool = False):
@@ -106,3 +119,11 @@ async def init_db(drop_first: bool = False):
         await conn.run_sync(Base.metadata.create_all)
 
     await engine.dispose()
+
+
+def get_async_session():
+    engine = create_async_engine('sqlite+aiosqlite:///db.sqlite3', echo=True)
+    return async_sessionmaker(engine, expire_on_commit=False)
+
+
+async_session = get_async_session()

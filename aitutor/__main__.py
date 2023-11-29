@@ -1,7 +1,8 @@
 import asyncio
 import click
 
-from .db import init_db
+from .auth import encode_auth_token
+from .db import init_db, User, async_session
 from .bot import main
 from .config import config
 from .errors import sentry
@@ -43,7 +44,20 @@ def auth() -> None:
 @auth.command("login")
 @click.argument("email")
 def login(email: str) -> None:
-    print("TODO")
+    async def _get_or_create(email) -> int:
+        async with async_session() as session:
+            user = await User.get_by_email(session, email)
+            if not user:
+                user = User(email=email)
+                user.name = input("Name: ").strip()
+                session.add(user)
+                await session.commit()
+                await session.refresh(user)
+            return user.id
+
+    user_id = asyncio.run(_get_or_create(email))
+    tok = encode_auth_token(user_id)
+    print(f"{config.public_url}/api/v1/auth?token={tok}")
 
 
 @cli.group("db")
@@ -55,7 +69,6 @@ def db() -> None:
 @click.argument("clean", default=False)
 def db_init(clean) -> None:
     asyncio.run(init_db(drop_first=clean))
-
 
 
 if __name__ == "__main__":
