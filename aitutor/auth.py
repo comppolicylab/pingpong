@@ -1,7 +1,7 @@
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum, auto
-from typing import Optional
+from typing import Optional, cast
 
 import jwt
 from jwt.exceptions import PyJWTError
@@ -92,11 +92,17 @@ def encode_auth_token(user_id: int, expiry: int = 600) -> str:
 
     secret = config.auth.secret_keys[0]
 
-    return jwt.encode(
-        asdict(tok),
-        secret.key,
-        algorithm=secret.algorithm,
-    ).decode("utf-8")
+    # For some reason mypy is wrong and thinks this is a bytes object. It is
+    # actually a str in PyJWT:
+    # https://github.com/jpadilla/pyjwt/blob/2.8.0/jwt/api_jwt.py#L52
+    return cast(
+        str,
+        jwt.encode(
+            asdict(tok),
+            secret.key,
+            algorithm=secret.algorithm,
+        ),
+    )
 
 
 def decode_auth_token(token: str) -> AuthToken:
