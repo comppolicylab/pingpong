@@ -21,13 +21,15 @@ def auth() -> None:
 @auth.command("login")
 @click.argument("email")
 @click.argument("redirect", default="/")
-def login(email: str, redirect: str) -> None:
+@click.option("--super-user/--no-super-user", default=False)
+def login(email: str, redirect: str, super_user: bool) -> None:
     async def _get_or_create(email) -> int:
         async with async_session() as session:
             user = await User.get_by_email(session, email)
             if not user:
                 user = User(email=email)
                 user.name = input("Name: ").strip()
+                user.super_admin = super_user
                 session.add(user)
                 await session.commit()
                 await session.refresh(user)

@@ -8,6 +8,7 @@ from sqlalchemy import (
     Integer,
     String,
     Table,
+    and_,
     select,
 )
 from sqlalchemy.ext.asyncio import (
@@ -105,6 +106,47 @@ class Institution(Base):
     )
     created = Column(Integer, server_default=func.now())
     updated = Column(Integer, index=True, onupdate=func.now())
+
+    @classmethod
+    async def can_read(
+        cls, session: AsyncSession, institution_id: int, user: User
+    ) -> bool:
+        stmt = select(UserInstitutionRole).where(
+            and_(
+                UserInstitutionRole.user_id == user.id,
+                UserInstitutionRole.institution_id == institution_id,
+            )
+        )
+        result = await session.scalar(stmt)
+        return result is not None
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> "Institution":
+        institution = Institution(**data)
+        session.add(institution)
+        await session.flush()
+        await session.refresh(institution)
+        return institution
+
+    @classmethod
+    async def all(cls, session: AsyncSession) -> List["Institution"]:
+        stmt = select(Institution)
+        result = await session.execute(stmt)
+        return [row.Institution for row in result]
+
+    @classmethod
+    async def visible(cls, session: AsyncSession, user: User) -> List["Institution"]:
+        stmt = (
+            select(Institution)
+            .join(UserInstitutionRole)
+            .where(UserInstitutionRole.user_id == user.id)
+        )
+        return await session.scalars(stmt)
+
+    @classmethod
+    async def get_by_id(cls, session: AsyncSession, id: int) -> "Institution":
+        stmt = select(Institution).where(Institution.id == id)
+        return await session.scalar(stmt)
 
 
 class Class(Base):

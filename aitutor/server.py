@@ -15,7 +15,7 @@ from .config import config
 from .db import Class, Institution, Thread, User, async_session
 from .errors import sentry
 from .metrics import metrics
-from .permission import CanManage, CanRead, CanWrite, IsSuper
+from .permission import CanManage, CanRead, CanWrite, IsSuper, LoggedIn
 
 v1 = FastAPI()
 
@@ -60,7 +60,13 @@ async def begin_db_session(request: Request, call_next):
     """Create a database session for the request."""
     async with async_session() as db:
         request.state.db = db
-        return await call_next(request)
+        try:
+            result = await call_next(request)
+            await db.commit()
+            return result
+        except Exception as e:
+            await db.rollback()
+            raise e
 
 
 @v1.get("/config", dependencies=[Depends(IsSuper())])
@@ -89,9 +95,30 @@ async def auth(request: Request, response: Response):
     return response
 
 
+@v1.get("/institutions", dependencies=[Depends(LoggedIn())])
+async def list_institutions(request: Request):
+    inst = list[Institution]()
+
+    if await IsSuper().test(request):
+        inst = await Institution.all(request.state.db)
+    else:
+        inst = await Institution.visible(request.state.db, request.state.session.user)
+
+    return {"institutions": inst}
+
+
 @v1.post("/institution", dependencies=[Depends(IsSuper())])
-async def create_institution():
-    ...
+async def create_institution(request: Request):
+    data = await request.json()
+    return await Institution.create(request.state.db, data)
+
+
+@v1.get(
+    "/institution/{institution_id}",
+    dependencies=[Depends(IsSuper() | CanRead(Institution, "institution_id"))],
+)
+async def get_institution(institution_id: str, request: Request):
+    return await Institution.get_by_id(request.state.db, int(institution_id))
 
 
 @v1.post(

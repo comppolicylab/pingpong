@@ -39,7 +39,7 @@ class Or(Expression):
 
     async def test(self, request: Request) -> bool:
         for arg in self.args:
-            if await arg(request):
+            if await arg.test(request):
                 return True
         return False
 
@@ -50,7 +50,7 @@ class And(Expression):
 
     async def test(self, request: Request) -> bool:
         for arg in self.args:
-            if not await arg(request):
+            if not await arg.test(request):
                 return False
         return True
 
@@ -60,7 +60,7 @@ class Not(Expression):
         self.arg = arg
 
     async def test(self, request: Request) -> bool:
-        return not await self.arg(request)
+        return not await self.arg.test(request)
 
 
 class IsSuper(Expression):
