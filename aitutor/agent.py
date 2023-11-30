@@ -110,9 +110,7 @@ async def handle_message_impl(client: SocketModeClient, req: SocketModeRequest) 
     return did_process
 
 
-async def handle_message(
-    slack_app, client: SocketModeClient, req: SocketModeRequest
-):
+async def handle_message(slack_app, client: SocketModeClient, req: SocketModeRequest):
     """Process incoming messages.
 
     Args:

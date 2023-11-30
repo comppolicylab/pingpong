@@ -1,10 +1,11 @@
 import asyncio
-import click
 import webbrowser
 
+import click
+
 from .auth import encode_auth_token
-from .db import init_db, User, async_session
 from .config import config
+from .db import User, async_session, init_db
 
 
 @click.group()

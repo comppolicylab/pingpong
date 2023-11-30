@@ -9,12 +9,7 @@ from threading import RLock
 from typing import Any, Callable, Generic, TypeVar
 
 import requests
-from pydantic import (
-    Extra,
-    Field,
-    PrivateAttr,
-    model_serializer,
-)
+from pydantic import Extra, Field, PrivateAttr, model_serializer
 from pydantic.v1.utils import deep_update
 from pydantic_settings import BaseSettings
 from sentry_sdk import capture_message
@@ -178,7 +173,6 @@ class SecretKey(BaseSettings):
 
 
 class AuthSettings(BaseSettings):
-
     secret_keys: list[SecretKey]
 
 

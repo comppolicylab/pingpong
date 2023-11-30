@@ -1,14 +1,21 @@
-from fastapi import FastAPI, HTTPException, Request, Response, Depends
-from fastapi.responses import RedirectResponse
 import jwt
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.responses import RedirectResponse
+from jwt.exceptions import PyJWTError
 
 from .ai import openai_client
-from .auth import decode_auth_token, encode_session_token, decode_session_token, SessionState, SessionStatus
-from .db import Thread, Class, Institution, User, async_session
+from .auth import (
+    SessionState,
+    SessionStatus,
+    decode_auth_token,
+    decode_session_token,
+    encode_session_token,
+)
+from .config import config
+from .db import Class, Institution, Thread, User, async_session
 from .errors import sentry
 from .metrics import metrics
-from .config import config
-from .permission import CanManage, CanWrite, CanRead, IsSuper
+from .permission import CanManage, CanRead, CanWrite, IsSuper
 
 v1 = FastAPI()
 
@@ -20,8 +27,8 @@ async def parse_session_token(request: Request, call_next):
         session_token = request.cookies["session"]
     except KeyError:
         request.state.session = SessionState(
-                status=SessionStatus.MISSING,
-                )
+            status=SessionStatus.MISSING,
+        )
     else:
         try:
             token = decode_session_token(session_token)
@@ -33,17 +40,17 @@ async def parse_session_token(request: Request, call_next):
                 status=SessionStatus.VALID,
                 error=None,
                 user=user,
-                )
-        except jwt.exceptions.PyJWTError as e:
+            )
+        except PyJWTError as e:
             request.state.session = SessionState(
-                    status=SessionStatus.INVALID,
-                    error=e,
-                    )
+                status=SessionStatus.INVALID,
+                error=e,
+            )
         except Exception as e:
             request.state.session = SessionState(
-                    status=SessionStatus.ERROR,
-                    error=e,
-                    )
+                status=SessionStatus.ERROR,
+                error=e,
+            )
 
     return await call_next(request)
 
@@ -56,8 +63,7 @@ async def begin_db_session(request: Request, call_next):
         return await call_next(request)
 
 
-@v1.get("/config",
-        dependencies=[Depends(IsSuper())])
+@v1.get("/config", dependencies=[Depends(IsSuper())])
 def get_config(request: Request):
     return {"config": config.dict(), "headers": dict(request.headers)}
 
@@ -83,44 +89,57 @@ async def auth(request: Request, response: Response):
     return response
 
 
-@v1.post("/institution",
-         dependencies=[Depends(IsSuper())])
+@v1.post("/institution", dependencies=[Depends(IsSuper())])
 async def create_institution():
     ...
 
 
-@v1.post("/institution/{institution_id}/class",
-         dependencies=[Depends(IsSuper() | CanWrite(Institution, "institution_id"))])
+@v1.post(
+    "/institution/{institution_id}/class",
+    dependencies=[Depends(IsSuper() | CanWrite(Institution, "institution_id"))],
+)
 async def create_class():
     ...
 
 
-@v1.get("/class/{class_id}/thread/{thread_id}",
-        dependencies=[Depends(CanManage(Class, "class_id") | CanRead(Thread, "thread_id") | IsSuper())])
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}",
+    dependencies=[
+        Depends(CanManage(Class, "class_id") | CanRead(Thread, "thread_id") | IsSuper())
+    ],
+)
 async def get_thread(thread_id: str):
     return await openai_client.beta.threads.messages.list(thread_id=thread_id)
 
 
-@v1.get("/class/{class_id}/thread",
-        dependencies=[Depends(CanRead(Thread, "thread_id") | IsSuper())])
+@v1.get(
+    "/class/{class_id}/thread",
+    dependencies=[Depends(CanRead(Thread, "thread_id") | IsSuper())],
+)
 async def list_threads():
     ...
 
 
-@v1.post("/class/{class_id}/thread",
-         dependencies=[Depends(IsSuper() | CanWrite(Class, "class_id"))])
+@v1.post(
+    "/class/{class_id}/thread",
+    dependencies=[Depends(IsSuper() | CanWrite(Class, "class_id"))],
+)
 async def create_thread():
     return await openai_client.beta.threads.create()
 
 
-@v1.post("/class/{class_id}/file",
-         dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))])
+@v1.post(
+    "/class/{class_id}/file",
+    dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))],
+)
 async def create_file(class_id: str):
     return await openai_client.files.create(classification_id=class_id)
 
 
-@v1.post("/class/{class_id}/assistant",
-         dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))])
+@v1.post(
+    "/class/{class_id}/assistant",
+    dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))],
+)
 async def create_assistant(class_id: str):
     return await openai_client.beta.assistants.create(classification_id=class_id)
 

@@ -13,8 +13,8 @@
         <!-- List of chat threads -->
         <ul>
             {#each data.threads as thread}
-                <li 
-                    class="p-2 hover:bg-sky-700 cursor-pointer rounded" 
+                <li
+                    class="p-2 hover:bg-sky-700 cursor-pointer rounded"
                     class:bg-sky-700={thread.id === data.currentThread}
                 >
                   <a href="{threadUrl(thread.id)}" class="block">

@@ -1,11 +1,13 @@
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum, auto
 from typing import Optional
-import jwt
 
-from .db import User
+import jwt
+from jwt.exceptions import PyJWTError
+
 from .config import config
+from .db import User
 
 
 @dataclass
@@ -38,7 +40,7 @@ class SessionState:
     status: SessionStatus
     error: Optional[Exception] = None
     token: Optional[SessionToken] = None
-    user: User = None
+    user: Optional[User] = None
 
 
 def encode_session_token(user_id: int, expiry: int = 86_400) -> str:
@@ -47,7 +49,7 @@ def encode_session_token(user_id: int, expiry: int = 86_400) -> str:
     Args:
         user_id (int): User ID
         expiry (int, optional): Expiry in seconds. Defaults to 86400 (1 day).
-        
+
     Returns:
         str: Encoded session token JWT
     """
@@ -94,7 +96,7 @@ def encode_auth_token(user_id: int, expiry: int = 600) -> str:
         asdict(tok),
         secret.key,
         algorithm=secret.algorithm,
-    )
+    ).decode("utf-8")
 
 
 def decode_auth_token(token: str) -> AuthToken:
@@ -109,16 +111,14 @@ def decode_auth_token(token: str) -> AuthToken:
     Raises:
         jwt.exceptions.PyJWTError when token is not valid
     """
-    exc: jwt.exceptions.PyJWTError | None = None
+    exc: PyJWTError | None = None
 
     for secret in config.auth.secret_keys:
         try:
-            return AuthToken(**jwt.decode(
-                token,
-                secret.key,
-                algorithms=[secret.algorithm]
-            ))
-        except jwt.exceptions.PyJWTError as e:
+            return AuthToken(
+                **jwt.decode(token, secret.key, algorithms=[secret.algorithm])
+            )
+        except PyJWTError as e:
             exc = e
             continue
 

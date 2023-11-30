@@ -1,11 +1,11 @@
 from abc import abstractmethod
 
-from fastapi import Request, HTTPException
+from fastapi import HTTPException, Request
+
 from .auth import SessionStatus
 
 
 class Expression:
-
     async def __call__(self, request: Request):
         if request.state.session.status != SessionStatus.VALID:
             raise HTTPException(status_code=403, detail="Missing session token")
@@ -34,7 +34,6 @@ class Expression:
 
 
 class Or(Expression):
-
     def __init__(self, *args: Expression):
         self.args = args
 
@@ -46,7 +45,6 @@ class Or(Expression):
 
 
 class And(Expression):
-
     def __init__(self, *args: Expression):
         self.args = args
 
@@ -58,7 +56,6 @@ class And(Expression):
 
 
 class Not(Expression):
-    
     def __init__(self, arg: Expression):
         self.arg = arg
 
@@ -67,13 +64,11 @@ class Not(Expression):
 
 
 class IsSuper(Expression):
-
     async def test(self, request: Request) -> bool:
         return request.state.session.user.super_admin
 
 
 class CanRead(Expression):
-
     def __init__(self, model, id_field):
         self.model = model
         self.id_field = id_field
@@ -83,13 +78,11 @@ class CanRead(Expression):
         model_id = request.path_params[self.id_field]
         # Get the model from the database.
         return await self.model.can_read(
-                request.state.db,
-                model_id,
-                request.state.session.user)
+            request.state.db, model_id, request.state.session.user
+        )
 
 
 class CanWrite(Expression):
-
     def __init__(self, model, id_field):
         self.model = model
         self.id_field = id_field
@@ -99,28 +92,24 @@ class CanWrite(Expression):
         model_id = request.path_params[self.id_field]
         # Get the model from the database.
         return await self.model.can_write(
-                request.state.db,
-                model_id,
-                request.state.session.user)
+            request.state.db, model_id, request.state.session.user
+        )
 
 
 class CanManage(Expression):
-    
-        def __init__(self, model, id_field):
-            self.model = model
-            self.id_field = id_field
-    
-        async def test(self, request: Request) -> bool:
-            # Get the model ID from the request path.
-            model_id = request.path_params[self.id_field]
-            # Get the model from the database.
-            return await self.model.can_manage(
-                    request.state.db,
-                    model_id,
-                    request.state.session.user)
+    def __init__(self, model, id_field):
+        self.model = model
+        self.id_field = id_field
+
+    async def test(self, request: Request) -> bool:
+        # Get the model ID from the request path.
+        model_id = request.path_params[self.id_field]
+        # Get the model from the database.
+        return await self.model.can_manage(
+            request.state.db, model_id, request.state.session.user
+        )
 
 
 class LoggedIn(Expression):
-
     async def test(self, request: Request) -> bool:
         return request.state.session.status == SessionStatus.VALID
