@@ -1,17 +1,64 @@
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, Depends
 from fastapi.responses import RedirectResponse
 import jwt
 
 from .ai import openai_client
-from .auth import decode_auth_token, encode_session_token
+from .auth import decode_auth_token, encode_session_token, Role, decode_session_token, SessionState, SessionStatus
+from .db import Thread, User, async_session
 from .errors import sentry
 from .metrics import metrics
 from .config import config
+from .permission import CanRead, HasRole, LoggedIn
 
 v1 = FastAPI()
 
 
-@v1.get("/config")
+@v1.middleware("http")
+async def parse_session_token(request: Request, call_next):
+    """Parse the session token from the cookie and add it to the request state."""
+    try:
+        session_token = request.cookies["session"]
+    except KeyError:
+        request.state.session = SessionState(
+                status=SessionStatus.MISSING,
+                )
+    else:
+        try:
+            token = decode_session_token(session_token)
+            user = await User.get_by_id(request.state.db, int(token.sub))
+            if not user:
+                raise ValueError("User does not exist")
+            request.state.session = SessionState(
+                token=token,
+                status=SessionStatus.VALID,
+                error=None,
+                user=user,
+                )
+        except jwt.exceptions.PyJWTError as e:
+            request.state.session = SessionState(
+                    status=SessionStatus.INVALID,
+                    error=e,
+                    )
+        except Exception as e:
+            request.state.session = SessionState(
+                    status=SessionStatus.ERROR,
+                    error=e,
+                    )
+
+    print(request.state.session)
+    return await call_next(request)
+
+
+@v1.middleware("http")
+async def begin_db_session(request: Request, call_next):
+    """Create a database session for the request."""
+    async with async_session() as db:
+        request.state.db = db
+        return await call_next(request)
+
+
+@v1.get("/config",
+        dependencies=[Depends(HasRole(Role.SUPER))])
 def get_config(request: Request):
     return {"config": config.dict(), "headers": dict(request.headers)}
 
@@ -37,7 +84,8 @@ async def auth(request: Request, response: Response):
     return response
 
 
-@v1.get("/thread/{thread_id}")
+@v1.get("/thread/{thread_id}",
+        dependencies=[Depends(CanRead(Thread, "thread_id") | HasRole(Role.SUPER))])
 async def get_thread(thread_id: str):
     return await openai_client.beta.threads.messages.list(thread_id=thread_id)
 
@@ -47,7 +95,8 @@ async def list_threads():
     ...
 
 
-@v1.post("/thread")
+@v1.post("/thread",
+         dependencies=[Depends(LoggedIn())])
 async def create_thread():
     return await openai_client.beta.threads.create()
 

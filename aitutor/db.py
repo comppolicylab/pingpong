@@ -50,7 +50,7 @@ class User(Base):
     name = Column(String)
     email = Column(String, unique=True)
     classes = relationship('Class', secondary=user_class_association, back_populates='users')
-    roles = relationship('UserClassRole', back_populates='users')
+    roles = relationship('UserClassRole', back_populates='users', lazy='selectin')
     threads = relationship('Thread', secondary=user_thread_association, back_populates='users')
     created = Column(Integer, server_default=func.now())
     updated = Column(Integer, index=True, onupdate=func.now())
@@ -58,6 +58,11 @@ class User(Base):
     @classmethod
     async def get_by_email(cls, session: AsyncSession, email: str) -> 'User':
         stmt = select(User).where(User.email == email)
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id(cls, session: AsyncSession, id: int) -> 'User':
+        stmt = select(User).where(User.id == id)
         return await session.scalar(stmt)
 
 
@@ -108,6 +113,21 @@ class Thread(Base):
     users = relationship('User', secondary=user_thread_association, back_populates='threads')
     created = Column(Integer, server_default=func.now())
     updated = Column(Integer, index=True, onupdate=func.now())
+
+    @classmethod
+    async def can_read(self, session: AsyncSession, thread_id: int, user: User) -> bool:
+        thread = await session.scalar(
+                select(Thread).where(Thread.id == thread_id))
+
+        if not thread:
+            return False
+
+        print("thread.private", thread, user)
+
+        if thread.private:
+            return user in thread.users
+        else:
+            return user in thread.class_.users
 
 
 async def init_db(drop_first: bool = False):

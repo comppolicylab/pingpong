@@ -1,8 +1,16 @@
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta, timezone
+from enum import StrEnum, auto
+from typing import Optional
 import jwt
 
+from .db import User
 from .config import config
+
+
+class Role(StrEnum):
+    SUPER = auto()
+    ADMIN = auto()
 
 
 @dataclass
@@ -21,6 +29,21 @@ class SessionToken:
     sub: str
     exp: int
     iat: int
+
+
+class SessionStatus(StrEnum):
+    VALID = auto()
+    MISSING = auto()
+    INVALID = auto()
+    ERROR = auto()
+
+
+@dataclass
+class SessionState:
+    status: SessionStatus
+    error: Optional[Exception] = None
+    token: Optional[SessionToken] = None
+    user: User = None
 
 
 def encode_session_token(user_id: int, expiry: int = 86_400) -> str:
