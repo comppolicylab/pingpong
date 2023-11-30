@@ -1,7 +1,7 @@
 from abc import abstractmethod
 
 from fastapi import Request, HTTPException
-from .auth import SessionStatus, Role
+from .auth import SessionStatus
 
 
 class Expression:
@@ -66,13 +66,10 @@ class Not(Expression):
         return not await self.arg(request)
 
 
-class HasRole(Expression):
-
-    def __init__(self, role: Role):
-        self.role = role
+class IsSuper(Expression):
 
     async def test(self, request: Request) -> bool:
-        return self.role in request.state.session.user.roles
+        return request.state.session.user.super_admin
 
 
 class CanRead(Expression):
@@ -89,6 +86,38 @@ class CanRead(Expression):
                 request.state.db,
                 model_id,
                 request.state.session.user)
+
+
+class CanWrite(Expression):
+
+    def __init__(self, model, id_field):
+        self.model = model
+        self.id_field = id_field
+
+    async def test(self, request: Request) -> bool:
+        # Get the model ID from the request path.
+        model_id = request.path_params[self.id_field]
+        # Get the model from the database.
+        return await self.model.can_write(
+                request.state.db,
+                model_id,
+                request.state.session.user)
+
+
+class CanManage(Expression):
+    
+        def __init__(self, model, id_field):
+            self.model = model
+            self.id_field = id_field
+    
+        async def test(self, request: Request) -> bool:
+            # Get the model ID from the request path.
+            model_id = request.path_params[self.id_field]
+            # Get the model from the database.
+            return await self.model.can_manage(
+                    request.state.db,
+                    model_id,
+                    request.state.session.user)
 
 
 class LoggedIn(Expression):

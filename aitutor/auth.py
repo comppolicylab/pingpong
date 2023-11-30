@@ -8,11 +8,6 @@ from .db import User
 from .config import config
 
 
-class Role(StrEnum):
-    SUPER = auto()
-    ADMIN = auto()
-
-
 @dataclass
 class AuthToken:
     """Auth Token - minimal token used to log in."""

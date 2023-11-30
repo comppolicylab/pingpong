@@ -155,9 +155,6 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
 class OpenAISettings(BaseSettings):
     """OpenAI API settings."""
 
-    api_type: str = Field("azure")
-    api_base: str
-    api_version: str | None = Field(None)
     api_key: str
 
 

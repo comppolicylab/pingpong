@@ -47,7 +47,7 @@ def db() -> None:
 
 
 @db.command("init")
-@click.argument("clean", default=False)
+@click.option("--clean/--no-clean", default=False)
 def db_init(clean) -> None:
     asyncio.run(init_db(drop_first=clean))
 

@@ -1,3 +1,5 @@
+from typing import Optional, List
+
 from sqlalchemy import (
         Table,
         Column,
@@ -17,6 +19,8 @@ from sqlalchemy.ext.asyncio import (
         )
 from sqlalchemy.orm import (
         DeclarativeBase,
+        Mapped,
+        mapped_column,
         relationship,
         )
 
@@ -25,13 +29,26 @@ class Base(AsyncAttrs, DeclarativeBase):
     pass
 
 
-user_class_association = Table(
-        'users_classes',
-        Base.metadata,
-        Column('user_id', Integer, ForeignKey('users.id')),
-        Column('class_id', Integer, ForeignKey('classes.id')),
-        Index('user_class_idx', 'user_id', 'class_id', unique=True),
-        )
+class UserClassRole(Base):
+    __tablename__ = "users_classes"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, primary_key=True)
+    class_id: Mapped[int] = mapped_column(ForeignKey("classes.id"), nullable=False, primary_key=True)
+    role: Mapped[Optional[str]]
+    title: Mapped[Optional[str]]
+    user = relationship("User", back_populates="classes")
+    class_ = relationship("Class", back_populates="users")
+
+
+class UserInstitutionRole(Base):
+    __tablename__ = "users_institutions"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, primary_key=True)
+    institution_id: Mapped[int] = mapped_column(ForeignKey("institutions.id"), nullable=False, primary_key=True)
+    role: Mapped[Optional[str]]
+    title: Mapped[Optional[str]]
+    user = relationship("User", back_populates="institutions")
+    institution = relationship("Institution", back_populates="users")
 
 
 user_thread_association = Table(
@@ -46,11 +63,13 @@ user_thread_association = Table(
 class User(Base):
     __tablename__ = 'users'
 
-    id = Column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String)
     email = Column(String, unique=True)
-    classes = relationship('Class', secondary=user_class_association, back_populates='users')
-    roles = relationship('UserClassRole', back_populates='users', lazy='selectin')
+    state = Column(String)
+    classes: Mapped[List["UserClassRole"]] = relationship(back_populates="user", lazy='selectin')
+    institutions: Mapped[List["UserInstitutionRole"]] = relationship(back_populates="user", lazy='selectin')
+    super_admin = Column(Boolean, default=False)
     threads = relationship('Thread', secondary=user_thread_association, back_populates='users')
     created = Column(Integer, server_default=func.now())
     updated = Column(Integer, index=True, onupdate=func.now())
@@ -72,6 +91,7 @@ class Institution(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String)
     classes = relationship('Class', back_populates='institution')
+    users: Mapped[List["UserInstitutionRole"]] = relationship('UserInstitutionRole', back_populates='institution')
     created = Column(Integer, server_default=func.now())
     updated = Column(Integer, index=True, onupdate=func.now())
 
@@ -79,26 +99,60 @@ class Institution(Base):
 class Class(Base):
     __tablename__ = 'classes'
 
-    id = Column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String)
     institution_id = Column(Integer, ForeignKey('institutions.id'))
     institution = relationship('Institution', back_populates='classes')
     term = Column(String)
-    users = relationship('User', secondary=user_class_association, back_populates='classes')
+    users: Mapped[List["UserClassRole"]] = relationship('UserClassRole', back_populates='class_')
     threads = relationship('Thread', back_populates='class_')
     created = Column(Integer, server_default=func.now())
     updated = Column(Integer, index=True, onupdate=func.now())
 
+    @classmethod
+    async def can_manage(cls, session: AsyncSession, class_id: int, user: User) -> bool:
+        class_ = await session.scalar(
+                select(Class).where(Class.id == class_id))
 
-class UserClassRole(Base):
-    __tablename__ = 'users_class_roles'
+        if not class_:
+            return False
 
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id'))
-    class_id = Column(Integer, ForeignKey('classes.id'))
-    role = Column(String)
+        # Match the class._users to the given user by id:
+        for user_class in class_.users:
+            if user_class.user_id == user.id:
+                return user_class.role == 'admin'
 
-    users = relationship('User', back_populates='roles')
+        return False
+
+    @classmethod
+    async def can_write(cls, session: AsyncSession, class_id: int, user: User) -> bool:
+        class_ = await session.scalar(
+                select(Class).where(Class.id == class_id))
+
+        if not class_:
+            return False
+
+        # Match the class._users to the given user by id:
+        for user_class in class_.users:
+            if user_class.user_id == user.id:
+                return user_class.role in ('admin', 'write')
+
+        return False
+
+    @classmethod
+    async def can_read(cls, session: AsyncSession, class_id: int, user: User) -> bool:
+        class_ = await session.scalar(
+                select(Class).where(Class.id == class_id))
+
+        if not class_:
+            return False
+
+        # Match the class._users to the given user by id:
+        for user_class in class_.users:
+            if user_class.user_id == user.id:
+                return True
+
+        return False
 
 
 class Thread(Base):
