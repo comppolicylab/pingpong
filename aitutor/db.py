@@ -121,6 +121,26 @@ class Institution(Base):
         return result is not None
 
     @classmethod
+    async def can_write(
+        cls, session: AsyncSession, institution_id: int, user: User
+    ) -> bool:
+        stmt = select(UserInstitutionRole).where(
+            and_(
+                UserInstitutionRole.user_id == user.id,
+                UserInstitutionRole.institution_id == institution_id,
+                UserInstitutionRole.role == "admin",
+            )
+        )
+        result = await session.scalar(stmt)
+        return result is not None
+
+    @classmethod
+    async def can_manage(
+        cls, session: AsyncSession, institution_id: int, user: User
+    ) -> bool:
+        return False
+
+    @classmethod
     async def create(cls, session: AsyncSession, data: dict) -> "Institution":
         institution = Institution(**data)
         session.add(institution)
@@ -149,6 +169,49 @@ class Institution(Base):
         return await session.scalar(stmt)
 
 
+file_assistant_association = Table(
+    "files_assistants",
+    Base.metadata,
+    Column("file_id", Integer, ForeignKey("files.id")),
+    Column("assistant_id", Integer, ForeignKey("assistants.id")),
+    Index("file_assistant_idx", "file_id", "assistant_id", unique=True),
+)
+
+
+class File(Base):
+    __tablename__ = "files"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name = Column(String)
+    path = Column(String)
+    class_id = Column(Integer, ForeignKey("classes.id"))
+    class_ = relationship("Class", back_populates="files")
+    assistants = relationship(
+        "Assistant", secondary=file_assistant_association, back_populates="files"
+    )
+
+    created = Column(Integer, server_default=func.now())
+    updated = Column(Integer, index=True, onupdate=func.now())
+
+
+class Assistant(Base):
+    __tablename__ = "assistants"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name = Column(String)
+    instructions = Column(String)
+    assistant_id = Column(String, nullable=True)
+    tools = Column(String)
+    model = Column(String)
+    class_id = Column(Integer, ForeignKey("classes.id"))
+    class_ = relationship("Class", back_populates="assistants")
+    files = relationship(
+        "File", secondary=file_assistant_association, back_populates="assistants"
+    )
+    created = Column(Integer, server_default=func.now())
+    updated = Column(Integer, index=True, onupdate=func.now())
+
+
 class Class(Base):
     __tablename__ = "classes"
 
@@ -156,10 +219,14 @@ class Class(Base):
     name = Column(String)
     institution_id = Column(Integer, ForeignKey("institutions.id"))
     institution = relationship("Institution", back_populates="classes")
+    assistants: Mapped[List["Assistant"]] = relationship(
+        "Assistant", back_populates="class_"
+    )
     term = Column(String)
     users: Mapped[List["UserClassRole"]] = relationship(
         "UserClassRole", back_populates="class_"
     )
+    files: Mapped[List["File"]] = relationship("File", back_populates="class_")
     threads = relationship("Thread", back_populates="class_")
     created = Column(Integer, server_default=func.now())
     updated = Column(Integer, index=True, onupdate=func.now())
@@ -206,6 +273,27 @@ class Class(Base):
 
         return False
 
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> "Class":
+        class_ = Class(**data)
+        session.add(class_)
+        await session.flush()
+        await session.refresh(class_)
+        return class_
+
+    @classmethod
+    async def get_by_institution(
+        cls, session: AsyncSession, institution_id: int
+    ) -> List["Class"]:
+        stmt = select(Class).where(Class.institution_id == institution_id)
+        result = await session.execute(stmt)
+        return [row.Class for row in result]
+
+    @classmethod
+    async def get_by_id(cls, session: AsyncSession, id: int) -> "Class":
+        stmt = select(Class).where(Class.id == id)
+        return await session.scalar(stmt)
+
 
 class Thread(Base):
     __tablename__ = "threads"
@@ -228,8 +316,6 @@ class Thread(Base):
 
         if not thread:
             return False
-
-        print("thread.private", thread, user)
 
         if thread.private:
             return user in thread.users

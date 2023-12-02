@@ -121,12 +121,31 @@ async def get_institution(institution_id: str, request: Request):
     return await Institution.get_by_id(request.state.db, int(institution_id))
 
 
+@v1.get(
+    "/institution/{institution_id}/classes",
+    dependencies=[Depends(IsSuper() | CanRead(Institution, "institution_id"))],
+)
+async def get_institution_classes(institution_id: str, request: Request):
+    classes = await Class.get_by_institution(request.state.db, int(institution_id))
+    return {"classes": classes}
+
+
 @v1.post(
     "/institution/{institution_id}/class",
     dependencies=[Depends(IsSuper() | CanWrite(Institution, "institution_id"))],
 )
-async def create_class():
-    ...
+async def create_class(institution_id: str, request: Request):
+    data = await request.json()
+    data["institution_id"] = int(institution_id)
+    return await Class.create(request.state.db, data)
+
+
+@v1.get(
+    "/class/{class_id}",
+    dependencies=[Depends(IsSuper() | CanRead(Class, "class_id"))],
+)
+async def get_class(class_id: str, request: Request):
+    return await Class.get_by_id(request.state.db, int(class_id))
 
 
 @v1.get(
@@ -151,7 +170,7 @@ async def list_threads():
     "/class/{class_id}/thread",
     dependencies=[Depends(IsSuper() | CanWrite(Class, "class_id"))],
 )
-async def create_thread():
+async def create_thread(class_id: str):
     return await openai_client.beta.threads.create()
 
 
@@ -168,6 +187,11 @@ async def create_file(class_id: str):
     dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))],
 )
 async def create_assistant(class_id: str):
+    # TODO:
+    # create assistant object in DB
+    # create assistant in OpenAI
+    # Mark assistant as created in DB
+    # return assistant object
     return await openai_client.beta.assistants.create(classification_id=class_id)
 
 
