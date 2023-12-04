@@ -9,6 +9,7 @@ from sqlalchemy import (
     String,
     Table,
     and_,
+    or_,
     select,
 )
 from sqlalchemy.ext.asyncio import (
@@ -19,6 +20,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
+from sqlalchemy.sql.expression import false
 
 
 class Base(AsyncAttrs, DeclarativeBase):
@@ -321,6 +323,40 @@ class Thread(Base):
             return user in thread.users
         else:
             return user in thread.class_.users
+
+    @classmethod
+    async def all(cls, session: AsyncSession, class_id: int) -> List["Thread"]:
+        stmt = select(Thread).where(Thread.class_id == class_id)
+        result = await session.execute(stmt)
+        return [row.Thread for row in result]
+
+    @classmethod
+    async def visible(
+        cls, session: AsyncSession, class_id: int, user: User
+    ) -> List["Thread"]:
+        # Get all non-private threads for the class_id,
+        # plus any threads that are private in the class but which the
+        # user is a participant of.
+
+        # Private threads
+        # Get IDs of private threads from the `user_thread_association` table
+        # where the user is a participant.
+        p_stmt = select(user_thread_association).where(
+            user_thread_association.c.user_id == user.id
+        )
+        result = await session.execute(p_stmt)
+        private_thread_ids = [row.thread_id for row in result]
+
+        # Now select all threads for the class that are either public or
+        # which are included in the visible private thread IDs list.
+        stmt = select(Thread).where(
+            and_(
+                Thread.class_id == class_id,
+                or_(Thread.private == false(), Thread.id.in_(private_thread_ids)),
+            )
+        )
+        result = await session.execute(stmt)
+        return [row.Thread for row in result]
 
 
 async def init_db(drop_first: bool = False):

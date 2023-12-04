@@ -159,11 +159,20 @@ async def get_thread(thread_id: str):
 
 
 @v1.get(
-    "/class/{class_id}/thread",
-    dependencies=[Depends(CanRead(Thread, "thread_id") | IsSuper())],
+    "/class/{class_id}/threads",
+    dependencies=[Depends(CanRead(Thread, "class_id") | IsSuper())],
 )
-async def list_threads():
-    ...
+async def list_threads(class_id: str, request: Request):
+    threads = list[Thread]()
+
+    if await IsSuper().test(request):
+        threads = await Thread.all(request.state.db, int(class_id))
+    else:
+        threads = await Thread.visible(
+            request.state.db, int(class_id), request.state.session.user
+        )
+
+    return {"threads": threads}
 
 
 @v1.post(
