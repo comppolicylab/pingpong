@@ -1,5 +1,7 @@
+import json
+
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFile
 from fastapi.responses import RedirectResponse
 from jwt.exceptions import PyJWTError
 
@@ -12,7 +14,7 @@ from .auth import (
     encode_session_token,
 )
 from .config import config
-from .db import Class, Institution, Thread, User, async_session
+from .db import Assistant, Class, File, Institution, Thread, User, async_session
 from .errors import sentry
 from .metrics import metrics
 from .permission import CanManage, CanRead, CanWrite, IsSuper, LoggedIn
@@ -187,21 +189,67 @@ async def create_thread(class_id: str):
     "/class/{class_id}/file",
     dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))],
 )
-async def create_file(class_id: str):
-    return await openai_client.files.create(classification_id=class_id)
+async def create_file(class_id: str, request: Request, upload: UploadFile):
+    new_f = await openai_client.files.create(
+        file=upload.file,
+        purpose="assistants",
+    )
+    data = {
+        "file_id": new_f.id,
+        "class_id": int(class_id),
+        "name": upload.filename,
+        "content_type": upload.content_type,
+    }
+    try:
+        return await File.create(request.state.db, data)
+    except Exception as e:
+        await openai_client.files.delete(new_f.id)
+        raise e
+
+
+@v1.get(
+    "/class/{class_id}/files",
+    dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))],
+)
+async def list_files(class_id: str, request: Request):
+    return await File.for_class(request.state.db, int(class_id))
+
+
+@v1.get(
+    "/class/{class_id}/assistants",
+    dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))],
+)
+async def list_assistants(class_id: str, request: Request):
+    return await Assistant.for_class(request.state.db, int(class_id))
 
 
 @v1.post(
     "/class/{class_id}/assistant",
     dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))],
 )
-async def create_assistant(class_id: str):
-    # TODO:
-    # create assistant object in DB
-    # create assistant in OpenAI
-    # Mark assistant as created in DB
-    # return assistant object
-    return await openai_client.beta.assistants.create(classification_id=class_id)
+async def create_assistant(class_id: str, request: Request):
+    data = await request.json()
+    file_ids = data.pop("file_ids", [])
+    files = []
+    if file_ids:
+        files = await File.get_all_by_file_id(request.state.db, file_ids)
+    data["class_id"] = int(class_id)
+    data["files"] = files
+
+    new_asst = await openai_client.beta.assistants.create(
+        instructions=data["instructions"],
+        model=data["model"],
+        tools=data["tools"],
+        file_ids=file_ids,
+    )
+    data["assistant_id"] = new_asst.id
+
+    try:
+        data["tools"] = json.dumps(data["tools"])
+        return await Assistant.create(request.state.db, data)
+    except Exception as e:
+        await openai_client.beta.assistants.delete(new_asst.id)
+        raise e
 
 
 @v1.get("/me")

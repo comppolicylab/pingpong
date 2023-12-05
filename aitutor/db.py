@@ -185,7 +185,8 @@ class File(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String)
-    path = Column(String)
+    content_type = Column(String)
+    file_id = Column(String)
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="files")
     assistants = relationship(
@@ -195,6 +196,28 @@ class File(Base):
     created = Column(Integer, server_default=func.now())
     updated = Column(Integer, index=True, onupdate=func.now())
 
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> "File":
+        file = File(**data)
+        session.add(file)
+        await session.flush()
+        await session.refresh(file)
+        return file
+
+    @classmethod
+    async def for_class(cls, session: AsyncSession, class_id: int) -> list["File"]:
+        stmt = select(File).where(File.class_id == class_id)
+        result = await session.execute(stmt)
+        return [row.File for row in result]
+
+    @classmethod
+    async def get_all_by_file_id(
+        cls, session: AsyncSession, ids: List[str]
+    ) -> List["File"]:
+        stmt = select(File).where(File.file_id.in_(ids))
+        result = await session.execute(stmt)
+        return [row.File for row in result]
+
 
 class Assistant(Base):
     __tablename__ = "assistants"
@@ -202,7 +225,7 @@ class Assistant(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String)
     instructions = Column(String)
-    assistant_id = Column(String, nullable=True)
+    assistant_id = Column(String)
     tools = Column(String)
     model = Column(String)
     class_id = Column(Integer, ForeignKey("classes.id"))
@@ -212,6 +235,20 @@ class Assistant(Base):
     )
     created = Column(Integer, server_default=func.now())
     updated = Column(Integer, index=True, onupdate=func.now())
+
+    @classmethod
+    async def for_class(cls, session: AsyncSession, class_id: int) -> list["Assistant"]:
+        stmt = select(Assistant).where(Assistant.class_id == class_id)
+        result = await session.execute(stmt)
+        return [row.Assistant for row in result]
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> "Assistant":
+        assistant = Assistant(**data)
+        session.add(assistant)
+        await session.flush()
+        await session.refresh(assistant)
+        return assistant
 
 
 class Class(Base):

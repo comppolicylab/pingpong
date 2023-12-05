@@ -10,7 +10,9 @@
   <Heading tag="h2">Classes</Heading>
   <ul>
     {#each data.classes as class_}
-      <li><a href="/class/{class_.id}">{class_.name}</a></li>
+      <li>
+        <a href="/admin/institution/{data.institution.id}/class/{class_.id}">{class_.name}</a>
+      </li>
     {/each}
   </ul>
   <div>
