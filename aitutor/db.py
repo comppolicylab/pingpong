@@ -96,6 +96,14 @@ class User(Base):
         stmt = select(User).where(User.id == id)
         return await session.scalar(stmt)
 
+    @classmethod
+    async def get_all_by_id(cls, session: AsyncSession, ids: List[int]) -> List["User"]:
+        if not ids:
+            return []
+        stmt = select(User).where(User.id.in_(ids))
+        result = await session.execute(stmt)
+        return [row.User for row in result]
+
 
 class Institution(Base):
     __tablename__ = "institutions"
@@ -259,14 +267,14 @@ class Class(Base):
     institution_id = Column(Integer, ForeignKey("institutions.id"))
     institution = relationship("Institution", back_populates="classes")
     assistants: Mapped[List["Assistant"]] = relationship(
-        "Assistant", back_populates="class_"
+        "Assistant", back_populates="class_", lazy="selectin"
     )
     term = Column(String)
     users: Mapped[List["UserClassRole"]] = relationship(
-        "UserClassRole", back_populates="class_"
+        "UserClassRole", back_populates="class_", lazy="selectin"
     )
     files: Mapped[List["File"]] = relationship("File", back_populates="class_")
-    threads = relationship("Thread", back_populates="class_")
+    threads = relationship("Thread", back_populates="class_", lazy="selectin")
     created = Column(Integer, server_default=func.now())
     updated = Column(Integer, index=True, onupdate=func.now())
 
@@ -341,13 +349,29 @@ class Thread(Base):
     name = Column(String)
     thread_id = Column(String, unique=True)
     class_id = Column(Integer, ForeignKey("classes.id"))
-    class_ = relationship("Class", back_populates="threads")
+    class_ = relationship("Class", back_populates="threads", lazy="selectin")
     private = Column(Boolean)
     users = relationship(
-        "User", secondary=user_thread_association, back_populates="threads"
+        "User",
+        secondary=user_thread_association,
+        back_populates="threads",
+        lazy="selectin",
     )
     created = Column(Integer, server_default=func.now())
     updated = Column(Integer, index=True, onupdate=func.now())
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> "Thread":
+        thread = Thread(**data)
+        session.add(thread)
+        await session.flush()
+        await session.refresh(thread)
+        return thread
+
+    @classmethod
+    async def get_by_id(cls, session: AsyncSession, id: int) -> "Thread":
+        stmt = select(Thread).where(Thread.id == id)
+        return await session.scalar(stmt)
 
     @classmethod
     async def can_read(self, session: AsyncSession, thread_id: int, user: User) -> bool:

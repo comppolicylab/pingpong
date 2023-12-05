@@ -6,17 +6,6 @@
   export let data;
 
   const assistants = data.assistants || [];
-
-  const uploadFile = async (event) => {
-    event.preventDefault();
-    const fEl = document.getElementById('file');
-    const file = fEl.files[0];
-    if (!file) {
-      return;
-    }
-    const response = await api.uploadFile(fetch, data.class.id, file)
-    console.log(response);
-  }
 </script>
 
 <div class="m-24 space-y-12 divide-y divide-gray-200 dark:divide-gray-700">

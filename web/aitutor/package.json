@@ -35,5 +35,8 @@
 		"vite": "^4.4.2",
 		"vitest": "^0.34.0"
 	},
-	"type": "module"
+	"type": "module",
+	"dependencies": {
+		"svelte-markdown": "^0.4.0"
+	}
 }

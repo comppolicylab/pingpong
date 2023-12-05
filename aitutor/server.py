@@ -1,11 +1,19 @@
 import json
 
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFile
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import RedirectResponse
 from jwt.exceptions import PyJWTError
 
-from .ai import openai_client
+from .ai import openai_client, run_assistant
 from .auth import (
     SessionState,
     SessionStatus,
@@ -156,8 +164,10 @@ async def get_class(class_id: str, request: Request):
         Depends(CanManage(Class, "class_id") | CanRead(Thread, "thread_id") | IsSuper())
     ],
 )
-async def get_thread(thread_id: str):
-    return await openai_client.beta.threads.messages.list(thread_id=thread_id)
+async def get_thread(class_id: str, thread_id: str, request: Request):
+    thread = await Thread.get_by_id(request.state.db, int(thread_id))
+
+    return await openai_client.beta.threads.messages.list(thread.thread_id)
 
 
 @v1.get(
@@ -181,8 +191,84 @@ async def list_threads(class_id: str, request: Request):
     "/class/{class_id}/thread",
     dependencies=[Depends(IsSuper() | CanWrite(Class, "class_id"))],
 )
-async def create_thread(class_id: str):
-    return await openai_client.beta.threads.create()
+async def create_thread(
+    class_id: str, request: Request, background_tasks: BackgroundTasks
+):
+    data = await request.json()
+
+    parties = list[User]()
+    if "parties" in data:
+        parties = await User.get_all_by_id(
+            request.state.db, [int(p) for p in data["parties"]]
+        )
+
+    thread = await openai_client.beta.threads.create(
+        messages=[
+            {
+                "role": "user",
+                "content": data["message"],
+            }
+        ]
+    )
+
+    new_thread = {
+        "class_id": int(class_id),
+        "name": data["message"],
+        "private": True if parties else False,
+        "users": parties or [],
+        "thread_id": thread.id,
+    }
+
+    try:
+        result = await Thread.create(request.state.db, new_thread)
+
+        # Find the appropriate assistant.
+        # TODO be more clever about this
+        assts = await Assistant.for_class(request.state.db, int(class_id))
+        if not assts:
+            raise HTTPException(status_code=400, detail="No assistants found.")
+
+        background_tasks.add_task(
+            run_assistant, openai_client, assts[0].assistant_id, thread.id
+        )
+        # TODO - push response to thread
+
+        # Start running the thread in the background.
+        return result
+    except Exception as e:
+        await openai_client.beta.threads.delete(thread.id)
+        raise e
+
+
+@v1.post(
+    "/class/{class_id}/thread/{thread_id}",
+    dependencies=[Depends(IsSuper() | CanWrite(Class, "class_id"))],
+)
+async def send_message(
+    class_id: str, thread_id: str, request: Request, background_tasks: BackgroundTasks
+):
+    data = await request.json()
+    thread = await Thread.get_by_id(request.state.db, int(thread_id))
+
+    await openai_client.beta.threads.messages.create(
+        thread.thread_id,
+        role="user",
+        content=data["message"],
+        metadata={"user_id": request.state.session.user.id},
+    )
+
+    # TODO - select assistant better
+    assts = await Assistant.for_class(request.state.db, int(class_id))
+    if not assts:
+        raise HTTPException(status_code=400, detail="No assistants found.")
+
+    background_tasks.add_task(
+        run_assistant, openai_client, assts[0].assistant_id, thread.thread_id
+    )
+
+    # TODO - push response to thread
+
+    return {"message": "ok"}
 
 
 @v1.post(
