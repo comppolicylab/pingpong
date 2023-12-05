@@ -16,7 +16,7 @@
   }
 </script>
 
-<form action="{action}" method="POST">
+<form class="flex flex-col space-y-4" action="{action}" method="POST">
   <div>
     <Label for="name">Name</Label>
     <Input label="name" id="name" name="name" />
