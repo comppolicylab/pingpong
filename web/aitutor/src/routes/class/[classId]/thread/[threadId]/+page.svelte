@@ -1,4 +1,7 @@
 <script lang="ts">
+  import * as api from '$lib/api';
+  import {browser} from '$app/environment';
+  import {invalidateAll} from '$app/navigation';
   import {Avatar} from "flowbite-svelte";
   import SvelteMarkdown from "svelte-markdown";
 
@@ -6,9 +9,23 @@
 
   let thread = [];
 
+  let lastLoadedRun = "";
+
   $: {
-    thread = (data?.thread?.data || []);
+    thread = (data?.messages?.data || []);
     thread.sort((a, b) => a.created_at - b.created_at);
+    if (!lastLoadedRun) {
+      lastLoadedRun = data?.run?.id;
+    }
+
+    if (browser && data.currentThread && !api.finished(data?.run)) {
+      api.getLastThreadRun(fetch, data.class.id, data.currentThread).then((result) => {
+        if (result.run.id !== lastLoadedRun) {
+          lastLoadedRun = result.run.id;
+          invalidateAll();
+        }
+      });
+    }
   }
 </script>
 

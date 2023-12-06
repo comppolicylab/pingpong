@@ -1,19 +1,15 @@
+import asyncio
 import json
+import logging
+import time
 
 import jwt
-from fastapi import (
-    BackgroundTasks,
-    Depends,
-    FastAPI,
-    HTTPException,
-    Request,
-    Response,
-    UploadFile,
-)
+import openai
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFile
 from fastapi.responses import RedirectResponse
 from jwt.exceptions import PyJWTError
 
-from .ai import openai_client, run_assistant
+from .ai import openai_client
 from .auth import (
     SessionState,
     SessionStatus,
@@ -26,6 +22,8 @@ from .db import Assistant, Class, File, Institution, Thread, User, async_session
 from .errors import sentry
 from .metrics import metrics
 from .permission import CanManage, CanRead, CanWrite, IsSuper, LoggedIn
+
+logger = logging.getLogger(__name__)
 
 v1 = FastAPI()
 
@@ -167,7 +165,61 @@ async def get_class(class_id: str, request: Request):
 async def get_thread(class_id: str, thread_id: str, request: Request):
     thread = await Thread.get_by_id(request.state.db, int(thread_id))
 
-    return await openai_client.beta.threads.messages.list(thread.thread_id)
+    runs = [
+        r
+        async for r in await openai_client.beta.threads.runs.list(
+            thread.thread_id, limit=1, order="desc"
+        )
+    ]
+
+    return {
+        "thread": thread,
+        "run": runs[0] if runs else None,
+        "messages": await openai_client.beta.threads.messages.list(thread.thread_id),
+    }
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/last_run",
+    dependencies=[
+        Depends(CanManage(Class, "class_id") | CanRead(Thread, "thread_id") | IsSuper())
+    ],
+)
+async def get_last_run(class_id: str, thread_id: str, request: Request):
+    TIMEOUT = 60  # seconds
+    thread = await Thread.get_by_id(request.state.db, int(thread_id))
+
+    # Streaming is not supported right now, so we need to poll to get the last run.
+    # https://platform.openai.com/docs/assistants/how-it-works/runs-and-run-steps
+    runs = [
+        r
+        async for r in await openai_client.beta.threads.runs.list(
+            thread.thread_id, limit=1, order="desc"
+        )
+    ]
+
+    if not runs:
+        return {"thread": thread, "run": None}
+
+    last_run = runs[0]
+
+    t0 = time.monotonic()
+    while last_run.status not in {"completed", "failed", "expired", "cancelled"}:
+        if time.monotonic() - t0 > TIMEOUT:
+            raise HTTPException(
+                status_code=504, detail="Timeout waiting for run to complete"
+            )
+        # Poll until the run is complete.
+        await asyncio.sleep(1)
+        try:
+            last_run = await openai_client.beta.threads.runs.retrieve(
+                last_run.id, thread_id=thread.thread_id
+            )
+        except openai.APIConnectionError as e:
+            logger.error("Error connecting to OpenAI: %s", e)
+            # Contine polling
+
+    return {"thread": thread, "run": last_run}
 
 
 @v1.get(
@@ -191,9 +243,7 @@ async def list_threads(class_id: str, request: Request):
     "/class/{class_id}/thread",
     dependencies=[Depends(IsSuper() | CanWrite(Class, "class_id"))],
 )
-async def create_thread(
-    class_id: str, request: Request, background_tasks: BackgroundTasks
-):
+async def create_thread(class_id: str, request: Request):
     data = await request.json()
 
     parties = list[User]()
@@ -228,13 +278,13 @@ async def create_thread(
         if not assts:
             raise HTTPException(status_code=400, detail="No assistants found.")
 
-        background_tasks.add_task(
-            run_assistant, openai_client, assts[0].assistant_id, thread.id
+        # Start a new thread run.
+        run = await openai_client.beta.threads.runs.create(
+            thread_id=thread.id,
+            assistant_id=assts[0].assistant_id,
         )
-        # TODO - push response to thread
 
-        # Start running the thread in the background.
-        return result
+        return {"thread": result, "run": run}
     except Exception as e:
         await openai_client.beta.threads.delete(thread.id)
         raise e
@@ -244,9 +294,7 @@ async def create_thread(
     "/class/{class_id}/thread/{thread_id}",
     dependencies=[Depends(IsSuper() | CanWrite(Class, "class_id"))],
 )
-async def send_message(
-    class_id: str, thread_id: str, request: Request, background_tasks: BackgroundTasks
-):
+async def send_message(class_id: str, thread_id: str, request: Request):
     data = await request.json()
     thread = await Thread.get_by_id(request.state.db, int(thread_id))
 
@@ -262,13 +310,12 @@ async def send_message(
     if not assts:
         raise HTTPException(status_code=400, detail="No assistants found.")
 
-    background_tasks.add_task(
-        run_assistant, openai_client, assts[0].assistant_id, thread.thread_id
+    run = await openai_client.beta.threads.runs.create(
+        thread_id=thread.thread_id,
+        assistant_id=assts[0].assistant_id,
     )
 
-    # TODO - push response to thread
-
-    return {"message": "ok"}
+    return {"thread": thread, "run": run}
 
 
 @v1.post(
@@ -351,5 +398,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
 
 app.mount("/api/v1", v1)

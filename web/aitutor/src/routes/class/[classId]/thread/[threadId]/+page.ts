@@ -1,8 +1,10 @@
 import * as api from '$lib/api';
 
 export async function load({ fetch, params }) {
-  const thread = await api.getThread(fetch, params.classId, params.threadId);
+  const data = await api.getThread(fetch, params.classId, params.threadId);
   return {
-    thread,
+    thread: data.thread,
+    run: data.run,
+    messages: data.messages,
   };
 }
