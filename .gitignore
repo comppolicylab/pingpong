@@ -163,6 +163,8 @@ cython_debug/
 *.swp
 config.toml
 config.*.toml
+config.json
+config.*.json
 .db/
 !.db/.gitkeep
 *.db
