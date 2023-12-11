@@ -185,6 +185,7 @@ class Config(BaseSettings):
     public_url: str = Field("http://localhost:8000")
     db_dir: str = Field(".db")
 
+    development: bool = Field(False, env="DEVELOPMENT")
     auth: AuthSettings
     openai: OpenAISettings
     sentry: SentrySettings

@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import time
+from typing import Any
 
 import jwt
 import openai
@@ -16,6 +17,7 @@ from .auth import (
     decode_auth_token,
     decode_session_token,
     encode_session_token,
+    generate_auth_link,
 )
 from .config import config
 from .db import Assistant, Class, File, Institution, Thread, User, async_session
@@ -80,6 +82,40 @@ async def begin_db_session(request: Request, call_next):
 @v1.get("/config", dependencies=[Depends(IsSuper())])
 def get_config(request: Request):
     return {"config": config.dict(), "headers": dict(request.headers)}
+
+
+@v1.post("/login/magic")
+async def login(request: Request):
+    """Provide a magic link to the auth endpoint."""
+    # Get the email from the request.
+    body = await request.json()
+    email = body["email"]
+    # Look up the user by email
+    user = await User.get_by_email(request.state.db, email)
+    created = False
+    # Throw an error if the user does not exist.
+    if not user:
+        if config.development:
+            user = User(email=email)
+            user.name = ""
+            user.super_admin = True
+            request.state.db.add(user)
+            await request.state.db.commit()
+            await request.state.db.refresh(user)
+            created = True
+        else:
+            raise HTTPException(status_code=401, detail="User does not exist")
+    magic_link = generate_auth_link(user.id)
+
+    # TODO: Send the magic link to the user's email.
+    #   -- In development, we can get/or/create the user
+    #   -- and return a redirect to the magic link page.
+    response: dict[str, Any] = {"status": "ok"}
+    if config.development:
+        response["magic_link"] = magic_link
+        response["created"] = created
+
+    return response
 
 
 @v1.get("/auth")
