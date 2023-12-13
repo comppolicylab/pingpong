@@ -29,6 +29,7 @@ class AzureEmailSender(EmailSender):
                 "plainText": message,
             },
         }
+        print("TRYING TO SEND", azure_msg)
         poller = self.client.begin_send(azure_msg)
 
         # Create a future for the polling loop

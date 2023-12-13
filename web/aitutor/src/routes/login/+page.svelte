@@ -1,6 +1,6 @@
 <script lang="ts">
   import {enhance} from "$app/forms";
-  import logo from '../../logo.svg?raw';
+  import Logo from '../Logo.svelte';
   import {P, A, InputAddon, Input, Label, GradientButton, Button, Heading, ButtonGroup} from 'flowbite-svelte';
   import {EnvelopeSolid} from 'flowbite-svelte-icons';
 
@@ -15,11 +15,7 @@
 
 <div class="h-screen v-screen flex items-center justify-center">
   <div class="flex items-center justify-center flex-col">
-    <div class="w-20 fill-amber-600">
-      <div class:animate-spin="{loggingIn}">
-      {@html logo}
-        </div>
-    </div>
+    <div><Logo size="20" color="amber-600" /></div>
     <div class="mt-4">
       <Heading tag="h1" class="text-amber-500">AI Tutor</Heading>
     </div>
@@ -33,9 +29,8 @@
               <InputAddon>
               <EnvelopeSolid />
               </InputAddon>
-              <Input value={form?.email ?? ''} type="email" placeholder="you@school.edu" name="email" id="email">
-            </Input>
-              <GradientButton type="submit" color="cyanToBlue" on:click={() => loggingIn = true}>Login</GradientButton>
+              <Input value={form?.email ?? ''} type="email" readonly={loggingIn || null} placeholder="you@school.edu" name="email" id="email"></Input>
+                <GradientButton type="submit" color="cyanToBlue" disabled={loggingIn} on:click={() => loggingIn = true}>Login</GradientButton>
             </ButtonGroup>
           {#if form?.error}
             <div class="text-red-500 p-2">
