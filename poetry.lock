@@ -254,6 +254,22 @@ files = [
 ]
 
 [[package]]
+name = "azure-communication-email"
+version = "1.0.0"
+description = "Microsoft Azure MyService Management Client Library for Python"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "azure-communication-email-1.0.0.zip", hash = "sha256:5df96b8b4389696244982ffc3740722f1948abb289f19af00ce2e1c534450095"},
+    {file = "azure_communication_email-1.0.0-py3-none-any.whl", hash = "sha256:b580ccfc9f1372d0b65f235334e569f3909894316bc3203bd9deb5760612693a"},
+]
+
+[package.dependencies]
+azure-common = ">=1.1,<2.0"
+azure-mgmt-core = ">=1.3.2,<2.0.0"
+msrest = ">=0.7.1"
+
+[[package]]
 name = "azure-core"
 version = "1.29.4"
 description = "Microsoft Azure Core Library for Python"
@@ -286,6 +302,20 @@ files = [
 [package.dependencies]
 azure-core = ">=1.24.0,<2.0.0"
 opentelemetry-api = ">=1.12.0,<2.0.0"
+
+[[package]]
+name = "azure-mgmt-core"
+version = "1.4.0"
+description = "Microsoft Azure Management Core Library for Python"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "azure-mgmt-core-1.4.0.zip", hash = "sha256:d195208340094f98e5a6661b781cde6f6a051e79ce317caabd8ff97030a9b3ae"},
+    {file = "azure_mgmt_core-1.4.0-py3-none-any.whl", hash = "sha256:81071675f186a585555ef01816f2774d49c1c9024cb76e5720c3c0f6b337bb7d"},
+]
+
+[package.dependencies]
+azure-core = ">=1.26.2,<2.0.0"
 
 [[package]]
 name = "azure-monitor-opentelemetry"
@@ -3242,4 +3272,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "9719cfe8d4d7f27bdfe45bbd7a57c41ed41ffc0b0722d0f0edf703593c753924"
+content-hash = "ea13a4a4d47ff35d5778347624e50729e48e292e6eb16036052ce51df23c9c22"

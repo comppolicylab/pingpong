@@ -25,13 +25,7 @@
     </div>
     <div class="mt-8 w-90">
       {#if form?.success}
-        {#if form?.magicLink}
-          <div class="text-amber-300">
-            <P class="text-amber-300">[ Since the app is currently in development mode, you can <A href="{form.magicLink}" class="text-green-300 underline">click here</A> to finish signing in. ]</P>
-              <P class="text-amber-300">Normally, you would see the following message:</P>
-          </div>
         <div class="text-green-300">Success! Follow the link in your email to finish signing in.</div>
-        {/if}
       {:else}
       <form action="/login?/loginWithMagicLink" method="POST" use:enhance>
           <Label for="email" class="mb-2 text-white">Log in with your school email address:</Label>

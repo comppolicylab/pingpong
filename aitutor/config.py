@@ -147,6 +147,17 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
             return Path(self.ref__path__).read_text()
 
 
+class EmailSettings(BaseSettings):
+    from_address: str
+    from_name: str = Field("AI Tutor")
+    endpoint: str
+    access_key: str
+
+    @property
+    def connection_string(self) -> str:
+        return f"endpoint={self.endpoint};accessKey={self.access_key}"
+
+
 class OpenAISettings(BaseSettings):
     """OpenAI API settings."""
 
@@ -188,6 +199,7 @@ class Config(BaseSettings):
     development: bool = Field(False, env="DEVELOPMENT")
     auth: AuthSettings
     openai: OpenAISettings
+    email: EmailSettings
     sentry: SentrySettings
     metrics: MetricsSettings = Field(MetricsSettings())
 

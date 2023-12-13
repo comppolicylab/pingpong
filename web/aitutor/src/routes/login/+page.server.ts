@@ -8,7 +8,7 @@ export const actions = {
     const email = body.get("email");
     const result = await api.loginWithMagicLink(event.fetch, email);
     if (result.$status < 300) {
-      return {email, error: null, success: true, magicLink: result.magic_link, created: result.created};
+      return {email, error: null, success: true};
     } else {
       return fail(result.$status, {email, success: false, error: result.detail});
     }

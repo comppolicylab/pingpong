@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any
 
 import jwt
 import openai
@@ -21,6 +20,7 @@ from .auth import (
 )
 from .config import config
 from .db import Assistant, Class, File, Institution, Thread, User, async_session
+from .email import get_default_sender
 from .errors import sentry
 from .metrics import metrics
 from .permission import CanManage, CanRead, CanWrite, IsSuper, LoggedIn
@@ -92,7 +92,6 @@ async def login(request: Request):
     email = body["email"]
     # Look up the user by email
     user = await User.get_by_email(request.state.db, email)
-    created = False
     # Throw an error if the user does not exist.
     if not user:
         if config.development:
@@ -102,20 +101,18 @@ async def login(request: Request):
             request.state.db.add(user)
             await request.state.db.commit()
             await request.state.db.refresh(user)
-            created = True
         else:
             raise HTTPException(status_code=401, detail="User does not exist")
     magic_link = generate_auth_link(user.id)
 
-    # TODO: Send the magic link to the user's email.
-    #   -- In development, we can get/or/create the user
-    #   -- and return a redirect to the magic link page.
-    response: dict[str, Any] = {"status": "ok"}
-    if config.development:
-        response["magic_link"] = magic_link
-        response["created"] = created
+    sender = get_default_sender()
+    await sender.send(
+        email,
+        "Your AI Tutor login link!",
+        f"Click this link to log in to the AI Tutor: {magic_link}",
+    )
 
-    return response
+    return {"status": "ok"}
 
 
 @v1.get("/auth")
