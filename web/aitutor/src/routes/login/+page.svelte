@@ -1,6 +1,6 @@
 <script lang="ts">
   import {enhance} from "$app/forms";
-  import Logo from '../Logo.svelte';
+  import Logo from '$lib/components/Logo.svelte';
   import {P, A, InputAddon, Input, Label, GradientButton, Button, Heading, ButtonGroup} from 'flowbite-svelte';
   import {EnvelopeSolid} from 'flowbite-svelte-icons';
 

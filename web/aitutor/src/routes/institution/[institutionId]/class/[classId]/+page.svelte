@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import {GradientButton, ButtonGroup, Input} from "flowbite-svelte";
   import { enhance } from "$app/forms";
+  import ChatInput from "$lib/components/ChatInput.svelte";
 
   export let data;
   export let form;
@@ -16,10 +16,7 @@
 <div class="v-full h-full flex items-center">
   <div class="m-auto w-9/12">
     <form action="?/newThread" method="POST" use:enhance>
-      <ButtonGroup class="w-full">
-        <Input id="message" autocomplete="off" name="message" placeholder="Ask me anything" />
-        <GradientButton type="submit" color="cyanToBlue">Send</GradientButton>
-      </ButtonGroup>
+      <ChatInput />
     </form>
   </div>
 </div>

@@ -17,7 +17,10 @@ async def generate_name(
         messages=[
             {
                 "role": "user",
-                "content": f"Make a short name suitable for the following message:\n{prompt}",
+                "content": (
+                    "Come up with a short (few word) title for a chat thread "
+                    f"that begins with the following message:\n{prompt}"
+                ),
             }
         ],
         model=model,

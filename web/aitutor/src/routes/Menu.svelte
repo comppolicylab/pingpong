@@ -14,11 +14,9 @@
     SidebarDropdownWrapper, SidebarDropdownItem,
     Heading, NavBrand,
   } from 'flowbite-svelte';
-  import Logo from "./Logo.svelte";
+  import Logo from "$lib/components/Logo.svelte";
 
   export let data;
-
-  console.log(data);
 
   $: avatar = data?.me?.profile?.image_url;
   $: name = data?.me?.user?.name || data?.me?.user?.email;
@@ -51,7 +49,7 @@
       </Breadcrumb>
     </SidebarGroup>
 
-    <SidebarGroup>
+    <SidebarGroup class="overflow-y-auto">
       <SidebarItem href={`/institution/${currentInstId}/class/${currentClassId}`} label="New Thread" />
       {#each threads as thread}
         <SidebarItem

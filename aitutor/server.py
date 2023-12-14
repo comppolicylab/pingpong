@@ -208,10 +208,14 @@ async def get_thread(class_id: str, thread_id: str, request: Request):
         )
     ]
 
+    messages = await openai_client.beta.threads.messages.list(thread.thread_id)
+    user_ids = {m.metadata.get("user_id") for m in messages.data} - {None}
+    users = await User.get_all_by_id(request.state.db, list(user_ids))
     return {
         "thread": thread,
         "run": runs[0] if runs else None,
-        "messages": await openai_client.beta.threads.messages.list(thread.thread_id),
+        "messages": messages,
+        "participants": {u.id: Profile.from_email(u.email) for u in users},
     }
 
 
@@ -293,6 +297,7 @@ async def create_thread(class_id: str, request: Request):
     thread = await openai_client.beta.threads.create(
         messages=[
             {
+                "metadata": {"user_id": request.state.session.user.id},
                 "role": "user",
                 "content": data["message"],
             }

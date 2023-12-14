@@ -6,5 +6,6 @@ export async function load({ fetch, params }) {
     thread: data.thread,
     run: data.run,
     messages: data.messages,
+    participants: data.participants,
   };
 }
