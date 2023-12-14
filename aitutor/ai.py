@@ -1,3 +1,5 @@
+import hashlib
+
 import openai
 
 from .config import ReadOnlyFunctorProxy, config
@@ -26,6 +28,20 @@ async def generate_name(
         model=model,
     )
     return response.choices[0].message.content
+
+
+def hash_thread(messages, runs) -> str:
+    """Come up with a unique ID representing the thread state."""
+    rpart = ""
+    if runs:
+        last_run = runs[0]
+        rpart = f"{last_run.id}-{last_run.status}"
+
+    mpart = ""
+    if messages:
+        mpart = f"{messages.first_id}-{messages.last_id}"
+
+    return hashlib.md5(f"{mpart}-{rpart}".encode("utf-8")).hexdigest()
 
 
 def get_openai_client() -> openai.AsyncClient:

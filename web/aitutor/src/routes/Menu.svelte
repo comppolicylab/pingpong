@@ -2,6 +2,7 @@
   import {page} from '$app/stores';
   import {
     CogOutline,
+    FilePenOutline,
     UserSettingsOutline,
     QuestionCircleOutline, ArrowRightFromBracketSolid} from 'flowbite-svelte-icons';
 
@@ -30,7 +31,7 @@
   $: canManageClass = !!currentClass && data?.me?.user?.super_admin;
 </script>
 
-<Sidebar asideClass="shrink-0">
+<Sidebar asideClass="shrink-0 grow-0 w-80">
   <SidebarWrapper class="h-full flex flex-col">
     <SidebarGroup class="mb-4">
       <NavBrand href="/" class="mx-4">
@@ -49,8 +50,15 @@
       </Breadcrumb>
     </SidebarGroup>
 
-    <SidebarGroup class="overflow-y-auto">
-      <SidebarItem href={`/institution/${currentInstId}/class/${currentClassId}`} label="New Thread" />
+    <SidebarGroup border>
+      <SidebarItem href={`/institution/${currentInstId}/class/${currentClassId}`} label="New Thread" class="text-amber-800">
+        <svelte:fragment slot="icon">
+          <FilePenOutline size="sm" />
+        </svelte:fragment>
+      </SidebarItem>
+    </SidebarGroup>
+
+    <SidebarGroup border class="overflow-y-auto">
       {#each threads as thread}
         <SidebarItem
           class={thread.id === $page.params.threadId ? 'bg-gray-200' : ''}

@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFi
 from fastapi.responses import RedirectResponse
 from jwt.exceptions import PyJWTError
 
-from .ai import generate_name, openai_client
+from .ai import generate_name, hash_thread, openai_client
 from .auth import (
     SessionState,
     SessionStatus,
@@ -212,6 +212,7 @@ async def get_thread(class_id: str, thread_id: str, request: Request):
     user_ids = {m.metadata.get("user_id") for m in messages.data} - {None}
     users = await User.get_all_by_id(request.state.db, list(user_ids))
     return {
+        "hash": hash_thread(messages, runs),
         "thread": thread,
         "run": runs[0] if runs else None,
         "messages": messages,

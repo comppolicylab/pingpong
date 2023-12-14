@@ -1,11 +1,10 @@
-import * as api from '$lib/api';
+import {threads} from '$lib/stores/threads';
 
 export async function load({ fetch, params }) {
-  const data = await api.getThread(fetch, params.classId, params.threadId);
+  const thread = threads(fetch, params.classId, params.threadId);
+  // kick off the thread poller, but don't wait for it
+  thread.refresh();
   return {
-    thread: data.thread,
-    run: data.run,
-    messages: data.messages,
-    participants: data.participants,
+    thread,
   };
 }
