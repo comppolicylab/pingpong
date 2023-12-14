@@ -17,6 +17,7 @@
   $: participants = $thread?.participants || {};
   $: loading = !$thread && data?.thread?.loading;
 
+  // Get the name of the participant in the chat thread.
   const getName = (message) => {
     if (message.role === "user") {
       const participant = participants[message?.metadata?.user_id];
@@ -26,12 +27,29 @@
     }
   }
 
+  // Get the avatar URL of the participant in the chat thread.
   const getImage = (message) => {
     if (message.role === "user") {
       return participants[message?.metadata?.user_id]?.image_url;
     }
 
     return "";
+  }
+
+  // Scroll to the bottom of the chat thread.
+  const scroll = (el) => {
+    // Scroll to the bottom of the element.
+    return {
+      // TODO - would be good to figure out how to do this without a timeout.
+      update: () => {
+        setTimeout(() => {
+          el.scrollTo({
+            top: el.scrollHeight,
+            behavior: 'smooth'
+          });
+        }, 250);
+      }
+    }
   }
 </script>
 
@@ -43,7 +61,7 @@
       </div>
     </div>
   {/if}
-  <div class="w-full h-full overflow-y-auto pb-12">
+  <div class="w-full h-full overflow-y-auto pb-12 px-12" use:scroll={messages}>
     {#each messages as message}
       <div class="py-4 px-6 flex gap-x-3">
         <div>
