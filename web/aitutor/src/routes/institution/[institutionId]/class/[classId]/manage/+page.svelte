@@ -5,12 +5,13 @@
 
   export let data;
 
-  const assistants = data.assistants || [];
+  $: assistants = data?.assistants || [];
+  $: files = data?.files || [];
 </script>
 
-<div class="m-24 space-y-12 divide-y divide-gray-200 dark:divide-gray-700">
-  <Heading size="1">Manage Class</Heading>
-  <form action="/admin/institution/{data.institutionId}/class/{data.class.id}?/updateClass" class="pt-6" method="POST">
+<div class="container py-8 space-y-12 divide-y divide-gray-200 dark:divide-gray-700">
+  <Heading tag="h2">Manage Class</Heading>
+  <form action="?/updateClass" class="pt-6" method="POST">
     <div class="grid grid-cols-3 gap-x-6 gap-y-8">
       <div>
         <Heading tag="h3">Class Details</Heading>
@@ -56,7 +57,7 @@
     </div>
     <div class="col-span-2">
       <List tag="ul" list="none" class="w-full divide-y divide-gray-200 dark:divide-gray-700">
-        {#each data.files as file}
+        {#each files as file}
           <Li class="py-3 sm:py-4">
             <div class="flex flex-row">
               <div class="flex-1 basis-3/4 flex-grow font-bold">{file.name}</div>
@@ -67,7 +68,7 @@
           </Li>
         {/each}
         <Li class="py-3 sm:py-4">
-          <form action="/admin/institution/{data.institutionId}/class/{data.class.id}?/uploadFile" method="POST" enctype="multipart/form-data">
+          <form action="?/uploadFile" method="POST" enctype="multipart/form-data">
             <Label for="file">Upload file</Label>
             <Input type="file" id="file" name="file" />
             <Button color="dark" type="submit">Upload</Button>
@@ -82,9 +83,9 @@
       <Heading tag="h3">AI Assistants</Heading>
       <p>Manage AI assistants.</p>
     </div>
-    <div class="col-span-2">
+    <div class="col-span-2 flex flex-wrap gap-4">
         {#each assistants as assistant}
-          <Card class="space-y-1">
+          <Card class="w-80 space-y-2">
             <Heading tag="h4" class="pb-3">{assistant.name}</Heading>
             <Label>Instructions</Label>
             <span>{assistant.instructions}</span>
@@ -100,14 +101,10 @@
             <span>todo</span>
           </Card>
         {/each}
-      <div>
-        <Card>
+        <Card class="w-80">
           <Heading tag="h4" class="pb-3">Add new AI assistant</Heading>
-          <NewAssistant files={data.files} action="/admin/institution/{data.institutionId}/class/{data.class.id}?/createAssistant" />
+          <NewAssistant {files} />
         </Card>
-      </div>
     </div>
   </div>
-  <pre>{JSON.stringify(data, null, 2)}</pre>
-
 </div>

@@ -110,6 +110,8 @@ class Institution(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String)
+    description = Column(String, nullable=True)
+    logo = Column(String, nullable=True)
     classes = relationship("Class", back_populates="institution")
     users: Mapped[List["UserInstitutionRole"]] = relationship(
         "UserInstitutionRole", back_populates="institution"

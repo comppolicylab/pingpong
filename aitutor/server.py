@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFi
 from fastapi.responses import RedirectResponse
 from jwt.exceptions import PyJWTError
 
-from .ai import openai_client
+from .ai import generate_name, openai_client
 from .auth import (
     SessionState,
     SessionStatus,
@@ -288,6 +288,8 @@ async def create_thread(class_id: str, request: Request):
             request.state.db, [int(p) for p in data["parties"]]
         )
 
+    name = await generate_name(openai_client, data["message"])
+
     thread = await openai_client.beta.threads.create(
         messages=[
             {
@@ -299,7 +301,7 @@ async def create_thread(class_id: str, request: Request):
 
     new_thread = {
         "class_id": int(class_id),
-        "name": data["message"],
+        "name": name,
         "private": True if parties else False,
         "users": parties or [],
         "thread_id": thread.id,
@@ -381,7 +383,7 @@ async def create_file(class_id: str, request: Request, upload: UploadFile):
     dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))],
 )
 async def list_files(class_id: str, request: Request):
-    return await File.for_class(request.state.db, int(class_id))
+    return {"files": await File.for_class(request.state.db, int(class_id))}
 
 
 @v1.get(
@@ -389,7 +391,7 @@ async def list_files(class_id: str, request: Request):
     dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))],
 )
 async def list_assistants(class_id: str, request: Request):
-    return await Assistant.for_class(request.state.db, int(class_id))
+    return {"assistants": await Assistant.for_class(request.state.db, int(class_id))}
 
 
 @v1.post(

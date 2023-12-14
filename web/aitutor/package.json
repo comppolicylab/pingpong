@@ -38,7 +38,6 @@
 	"type": "module",
 	"dependencies": {
 		"flowbite-svelte-icons": "^0.4.5",
-		"js-sha256": "^0.10.1",
 		"svelte-markdown": "^0.4.0"
 	}
 }

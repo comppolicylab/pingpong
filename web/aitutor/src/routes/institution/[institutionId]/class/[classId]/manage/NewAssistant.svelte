@@ -1,7 +1,8 @@
 <script>
   import {Select, Label, MultiSelect, Input, Textarea, Button} from "flowbite-svelte";
+  import { enhance } from "$app/forms";
+
   export let files;
-  export let action;
 
   const models = [
     "gpt-4-1106-preview",
@@ -12,11 +13,11 @@
   let fileOptions = [];
 
   $: {
-    fileOptions = files.map((file) => ({ value: file.file_id, name: file.name }));
+    fileOptions = (files || []).map((file) => ({ value: file.file_id, name: file.name }));
   }
 </script>
 
-<form class="flex flex-col space-y-4" action="{action}" method="POST">
+<form class="flex flex-col space-y-4" action="?/createAssistant" method="POST" use:enhance>
   <div>
     <Label for="name">Name</Label>
     <Input label="name" id="name" name="name" />
