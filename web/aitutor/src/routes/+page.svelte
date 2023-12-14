@@ -2,7 +2,7 @@
   import {goto} from '$app/navigation';
   import {page} from '$app/stores';
   import {Modal, Heading, P, Card} from 'flowbite-svelte';
-  import CreateInstitution from './CreateInstitution.svelte';
+  import CreateInstitution from '$lib/components/CreateInstitution.svelte';
 
   export let data;
   export let form;

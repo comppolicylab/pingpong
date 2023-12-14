@@ -1,7 +1,7 @@
 <script>
   import "../app.pcss";
-  import Menu from './Menu.svelte';
-  import Main from './Main.svelte';
+  import Menu from '$lib/components/Menu.svelte';
+  import Main from '$lib/components/Main.svelte';
 
   export let data;
 </script>
