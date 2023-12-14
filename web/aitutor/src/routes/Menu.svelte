@@ -23,7 +23,7 @@
   $: name = data?.me?.user?.name || data?.me?.user?.email;
   $: institutions = data?.institutions || [];
   $: classes = data?.classes || [];
-  $: threads = data?.threads || [];
+  $: threads = (data?.threads || []).sort((a, b) => a.created > b.created ? -1 : 1);
   $: currentInstId = parseInt($page.params.institutionId, 10);
   $: currentClassId = parseInt($page.params.classId, 10);
   $: currentInst = institutions.find(inst => inst.id === currentInstId);
