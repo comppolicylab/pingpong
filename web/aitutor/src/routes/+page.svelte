@@ -1,15 +1,8 @@
-<script>
+<script lang="ts">
   export let data;
+console.log(data)
 </script>
 
 <div>
-  <h1>Home</h1>
-
-  <div>{JSON.stringify(data)}</div>
-
-  {#if data.me.user.super_admin}
-    <h2>Admin tools</h2>
-    <a href="/admin">Admin</a>
-  {/if}
-
+  landing page
 </div>

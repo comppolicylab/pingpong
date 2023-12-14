@@ -8,6 +8,7 @@ from jwt.exceptions import PyJWTError
 
 from .config import config
 from .db import User
+from .gravatar import Profile
 
 
 @dataclass
@@ -41,6 +42,7 @@ class SessionState:
     error: Optional[Exception] = None
     token: Optional[SessionToken] = None
     user: Optional[User] = None
+    profile: Optional[Profile] = None
 
 
 def encode_session_token(user_id: int, expiry: int = 86_400) -> str:

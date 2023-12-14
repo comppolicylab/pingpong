@@ -2,9 +2,9 @@
   import logo from '../logo.svg?raw';
 
   export let size = 8;
-  export let color = "amber-600";
+  export let extraClass = "fill-amber-600";
 </script>
 
-<div class="w-{size} fill-{color}">
+<div class="w-{size} {extraClass}">
   {@html logo}
 </div>

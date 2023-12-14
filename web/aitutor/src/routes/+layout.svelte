@@ -1,12 +1,18 @@
 <script>
   import "../app.pcss";
-  import TopMatter from "./TopMatter.svelte";
+  import Menu from './Menu.svelte';
+  import Main from './Main.svelte';
 
   export let data;
-
 </script>
 
 {#if data.me.user}
-  <TopMatter />
+  <div class="flex h-screen">
+    <Menu {data} />
+    <Main>
+      <slot></slot>
+    </Main>
+  </div>
+{:else}
+  <slot></slot>
 {/if}
-<slot></slot>

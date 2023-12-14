@@ -13,9 +13,9 @@
 }
 </script>
 
-<div class="h-screen v-screen flex items-center justify-center">
+<div class="h-screen v-screen flex items-center justify-center bg-sky-800">
   <div class="flex items-center justify-center flex-col">
-    <div><Logo size="20" color="amber-600" /></div>
+    <div><Logo size="20" extraClass="fill-amber-600" /></div>
     <div class="mt-4">
       <Heading tag="h1" class="text-amber-500">AI Tutor</Heading>
     </div>

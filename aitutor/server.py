@@ -22,6 +22,7 @@ from .config import config
 from .db import Assistant, Class, File, Institution, Thread, User, async_session
 from .email import get_default_sender
 from .errors import sentry
+from .gravatar import Profile
 from .metrics import metrics
 from .permission import CanManage, CanRead, CanWrite, IsSuper, LoggedIn
 
@@ -45,11 +46,13 @@ async def parse_session_token(request: Request, call_next):
             user = await User.get_by_id(request.state.db, int(token.sub))
             if not user:
                 raise ValueError("User does not exist")
+
             request.state.session = SessionState(
                 token=token,
                 status=SessionStatus.VALID,
                 error=None,
                 user=user,
+                profile=Profile.from_email(user.email),
             )
         except PyJWTError as e:
             request.state.session = SessionState(

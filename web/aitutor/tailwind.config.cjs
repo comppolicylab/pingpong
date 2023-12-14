@@ -5,6 +5,10 @@ const config = {
   darkMode: 'class',
 
 	theme: {
+    container: {
+      center: true,
+      padding: '2rem',
+    },
 		extend: {}
 	},
 
