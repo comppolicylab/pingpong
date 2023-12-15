@@ -1,4 +1,5 @@
 <script lang="ts">
+  import {writable} from "svelte/store";
   import * as api from '$lib/api';
   import { blur } from 'svelte/transition';
   import { enhance } from "$app/forms";
@@ -10,8 +11,9 @@
   import ChatInput from "$lib/components/ChatInput.svelte";
 
   export let data;
-  export let form;
 
+  let submitting = writable(false);
+  let waiting = writable(false);
   $: thread = data?.thread?.store;
   $: messages = ($thread?.messages?.data || []).sort((a, b) => a.created_at - b.created_at);
   $: participants = $thread?.participants || {};
@@ -51,6 +53,24 @@
       }
     }
   }
+
+  const handleSubmit = () => {
+    $submitting = true;
+    return ({result, update}) => {
+      $submitting = false;
+      $waiting = !api.finished(result.data.run);
+
+      data.thread.refresh().then(() => {
+        $waiting = false;
+      });
+
+      if (result.type === "success") {
+        update();
+      } else {
+        alert("Chat failed! Please try again.");
+      }
+    };
+  };
 </script>
 
 <div class="relative py-8 h-full w-full">
@@ -79,10 +99,13 @@
         </div>
       </div>
     {/each}
+  {#if $waiting}
+    <div class="text-center w-full" transition:blur={{amount: 10}}><Spinner color="blue" /></div>
+   {/if}
   </div>
   <div class="absolute w-full bottom-8 bg-gradient-to-t from-white to-transparent">
-    <form class="w-9/12 mx-auto" action="?/newMessage" method="POST" use:enhance>
-      <ChatInput />
+    <form class="w-9/12 mx-auto" action="?/newMessage" method="POST" use:enhance={handleSubmit}>
+      <ChatInput loading={$submitting} />
     </form>
   </div>
 </div>
