@@ -6,7 +6,6 @@ export const actions = {
   loginWithMagicLink: async (event) => {
     const body = await event.request.formData();
     const email = body.get("email");
-    console.log("loginWithMagicLink", email, body);
     const result = await api.loginWithMagicLink(event.fetch, email);
     if (result.$status < 300) {
       return {email, error: null, success: true};

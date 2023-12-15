@@ -15,8 +15,14 @@
 
 <div class="v-full h-full flex items-center">
   <div class="m-auto w-9/12">
-    <form action="?/newThread" method="POST" use:enhance>
-      <ChatInput />
-    </form>
+    {#if data.isConfigured}
+      <form action="?/newThread" method="POST" use:enhance>
+        <ChatInput />
+      </form>
+    {:else}
+      <div class="text-center">
+        <h1 class="text-2xl font-bold">No assistant configured</h1>
+      </div>
+    {/if}
   </div>
 </div>

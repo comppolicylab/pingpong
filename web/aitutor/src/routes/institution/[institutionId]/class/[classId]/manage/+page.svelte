@@ -1,12 +1,33 @@
 <script>
+  import {page} from '$app/stores';
+  import {beforeNavigate} from '$app/navigation';
   import * as api from '$lib/api';
   import { List, Li, Card, MultiSelect, Textarea, Accordion, AccordionItem, Dropzone, Heading, Button, Label, Input } from "flowbite-svelte";
-  import NewAssistant from "./NewAssistant.svelte";
+  import ManageAssistant from "$lib/components/ManageAssistant.svelte";
+  import ViewAssistant from "$lib/components/ViewAssistant.svelte";
 
   export let data;
 
+  $: editingAssistant = parseInt($page.url.searchParams.get('edit-assistant') || '0', 10);
   $: assistants = data?.assistants || [];
   $: files = data?.files || [];
+
+  // Check if we are editing an assistant and prompt if so.
+  beforeNavigate((nav) => {
+    const isSaved = nav.to.url.searchParams.has('save');
+
+    if (isSaved) {
+      nav.to.url.searchParams.delete('save');
+      return;
+    }
+
+    if (editingAssistant) {
+      const really = confirm('You have not saved your changes to this assistant. Do you wish to discard them?');
+      if (!really) {
+        nav.cancel();
+      }
+    }
+  });
 </script>
 
 <div class="container py-8 space-y-12 divide-y divide-gray-200 dark:divide-gray-700">
@@ -85,26 +106,22 @@
     </div>
     <div class="col-span-2 flex flex-wrap gap-4">
         {#each assistants as assistant}
-          <Card class="w-80 space-y-2">
-            <Heading tag="h4" class="pb-3">{assistant.name}</Heading>
-            <Label>Instructions</Label>
-            <span>{assistant.instructions}</span>
-            <Label>Model</Label>
-            <span>{assistant.model}</span>
-            <Label>Tools</Label>
-            <List>
-              {#each JSON.parse(assistant.tools) as tool}
-                <Li>{tool.type}</Li>
-              {/each}
-            </List>
-            <Label>Files</Label>
-            <span>todo</span>
+          {#if assistant.id == editingAssistant}
+          <Card class="w-full max-w-full">
+            <ManageAssistant {files} {assistant} />
           </Card>
+          {:else}
+          <Card class="w-full max-w-full space-y-2" href={`${$page.url.pathname}?edit-assistant=${assistant.id}`}>
+            <ViewAssistant {assistant} />
+          </Card>
+          {/if}
         {/each}
-        <Card class="w-80">
+        {#if !editingAssistant && assistants.length == 0}
+        <Card class="w-full max-w-full">
           <Heading tag="h4" class="pb-3">Add new AI assistant</Heading>
-          <NewAssistant {files} />
+          <ManageAssistant {files} />
         </Card>
+        {/if}
     </div>
   </div>
 </div>

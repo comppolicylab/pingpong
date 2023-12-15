@@ -429,6 +429,54 @@ async def create_assistant(class_id: str, request: Request):
         raise e
 
 
+@v1.put(
+    "/class/{class_id}/assistant/{assistant_id}",
+    dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))],
+)
+async def update_assistant(class_id: str, assistant_id: str, request: Request):
+    data = await request.json()
+
+    # Get the existing assistant.
+    asst = await Assistant.get_by_id(request.state.db, int(assistant_id))
+
+    if not data:
+        return asst
+
+    openai_update = {}
+    # Update the assistant
+    if "file_ids" in data:
+        openai_update["file_ids"] = data["file_ids"]
+        asst.files = await File.get_all_by_file_id(request.state.db, data["file_ids"])
+    if "instructions" in data:
+        openai_update["instructions"] = data["instructions"]
+        asst.instructions = data["instructions"]
+    if "model" in data:
+        openai_update["model"] = data["model"]
+        asst.model = data["model"]
+    if "tools" in data:
+        openai_update["tools"] = data["tools"]
+        asst.tools = json.dumps(data["tools"])
+
+    request.state.db.add(asst)
+
+    await openai_client.beta.assistants.update(
+        assistant_id=asst.assistant_id, **openai_update
+    )
+
+    return asst
+
+
+@v1.delete(
+    "/class/{class_id}/assistant/{assistant_id}",
+    dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))],
+)
+async def delete_assistant(class_id: str, assistant_id: str, request: Request):
+    asst = await Assistant.get_by_id(request.state.db, int(assistant_id))
+    await asst.delete(request.state.db)
+    await openai_client.beta.assistants.delete(asst.assistant_id)
+    return {"status": "ok"}
+
+
 @v1.get("/me")
 async def get_me(request: Request):
     """Get the session information."""

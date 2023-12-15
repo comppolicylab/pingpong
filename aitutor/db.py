@@ -239,12 +239,20 @@ class Assistant(Base):
     tools = Column(String)
     model = Column(String)
     class_id = Column(Integer, ForeignKey("classes.id"))
-    class_ = relationship("Class", back_populates="assistants")
+    class_ = relationship("Class", back_populates="assistants", foreign_keys=[class_id])
     files = relationship(
-        "File", secondary=file_assistant_association, back_populates="assistants"
+        "File",
+        secondary=file_assistant_association,
+        back_populates="assistants",
+        lazy="selectin",
     )
     created = Column(Integer, server_default=func.now())
     updated = Column(Integer, index=True, onupdate=func.now())
+
+    @classmethod
+    async def get_by_id(cls, session: AsyncSession, id_: int) -> "Assistant":
+        stmt = select(Assistant).where(Assistant.id == id_)
+        return await session.scalar(stmt)
 
     @classmethod
     async def for_class(cls, session: AsyncSession, class_id: int) -> list["Assistant"]:
