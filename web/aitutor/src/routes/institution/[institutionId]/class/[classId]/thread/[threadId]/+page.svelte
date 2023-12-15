@@ -13,11 +13,17 @@
   export let data;
 
   let submitting = writable(false);
-  let waiting = writable(false);
   $: thread = data?.thread?.store;
   $: messages = ($thread?.messages?.data || []).sort((a, b) => a.created_at - b.created_at);
   $: participants = $thread?.participants || {};
   $: loading = !$thread && data?.thread?.loading;
+
+  let waiting = writable(false);
+  $: {
+    if (!loading && $thread && $thread.run) {
+      waiting.set(!api.finished($thread.run));
+    }
+  }
 
   // Get the name of the participant in the chat thread.
   const getName = (message) => {
