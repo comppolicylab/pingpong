@@ -52,7 +52,7 @@
   <div class="border-t pt-4 mt-4 flex items-center col-span-2 ">
     <GradientButton color="cyanToBlue" type="submit">Save</GradientButton>
       {#if assistant}
-        <Button href="/manageAssistants" color="dark" class="ml-4" on:click={reset}>Cancel</Button>
+        <Button href="/manageAssistants" color="alternative" class="ml-4" on:click={reset}>Cancel</Button>
       {/if}
   </div>
 </form>

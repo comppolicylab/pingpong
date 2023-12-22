@@ -2,9 +2,10 @@
   import {page} from '$app/stores';
   import {beforeNavigate} from '$app/navigation';
   import * as api from '$lib/api';
-  import { List, Li, Card, MultiSelect, Textarea, Accordion, AccordionItem, Dropzone, Heading, Button, Label, Input } from "flowbite-svelte";
+  import { GradientButton, Secondary, Span, List, Li, Card, MultiSelect, Textarea, Accordion, AccordionItem, Dropzone, Heading, Button, Label, Input } from "flowbite-svelte";
   import ManageAssistant from "$lib/components/ManageAssistant.svelte";
   import ViewAssistant from "$lib/components/ViewAssistant.svelte";
+  import Info from "$lib/components/Info.svelte";
 
   export let data;
 
@@ -31,12 +32,12 @@
 </script>
 
 <div class="container py-8 space-y-12 divide-y divide-gray-200 dark:divide-gray-700">
-  <Heading tag="h2">Manage Class</Heading>
+  <Heading tag="h2"><Span gradient>Manage Class</Span></Heading>
   <form action="?/updateClass" class="pt-6" method="POST">
     <div class="grid grid-cols-3 gap-x-6 gap-y-8">
       <div>
-        <Heading customSize="text-xl font-bold" tag="h3">Class Details</Heading>
-        <p>General information about the class.</p>
+        <Heading customSize="text-xl font-bold" tag="h3"><Secondary class="text-xl">Class Details</Secondary></Heading>
+        <Info>General information about the class.</Info>
       </div>
       <div>
         <Label for="name">Name</Label>
@@ -50,31 +51,31 @@
 
       <div></div>
       <div>
-        <Button type="submit" color="dark">Save</Button>
+        <GradientButton type="submit" color="cyanToBlue">Save</GradientButton>
       </div>
     </div>
   </form>
 
   <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
     <div>
-      <Heading customSize="text-xl font-bold" tag="h3">Teaching Team</Heading>
-      <p>Manage teacher and course assistants.</p>
+      <Heading customSize="text-xl font-bold" tag="h3"><Secondary class="text-xl">Teaching Team</Secondary></Heading>
+      <Info>Manage teacher and course assistants.</Info>
     </div>
     <pre>todo</pre>
   </div>
 
   <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
     <div>
-      <Heading customSize="text-xl font-bold" tag="h3">Students</Heading>
-      <p>Manage students in the class.</p>
+      <Heading customSize="text-xl font-bold" tag="h3"><Secondary class="text-xl">Students</Secondary></Heading>
+      <Info>Manage students in the class.</Info>
     </div>
     <pre>todo</pre>
   </div>
 
   <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
     <div>
-      <Heading tag="h3" customSize="text-xl font-bold">Files</Heading>
-      <p>Manage files used by the automated tutors.</p>
+      <Heading tag="h3" customSize="text-xl font-bold"><Secondary class="text-xl">Files</Secondary></Heading>
+      <Info>Manage files used by the automated tutors.</Info>
     </div>
     <div class="col-span-2">
       <List tag="ul" list="none" class="w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -92,7 +93,7 @@
           <form action="?/uploadFile" method="POST" enctype="multipart/form-data">
             <Label for="file">Upload file</Label>
             <Input type="file" id="file" name="file" />
-            <Button color="dark" type="submit">Upload</Button>
+            <GradientButton color="cyanToBlue" type="submit">Upload</GradientButton>
           </form>
         </Li>
       </List>
@@ -101,8 +102,8 @@
 
   <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
     <div>
-      <Heading tag="h3" customSize="text-xl font-bold">AI Assistants</Heading>
-      <p>Manage AI assistants.</p>
+      <Heading tag="h3" customSize="text-xl font-bold"><Secondary class="text-xl">AI Assistants</Secondary></Heading>
+      <Info>Manage AI assistants.</Info>
     </div>
     <div class="col-span-2 flex flex-wrap gap-4">
         {#each assistants as assistant}
