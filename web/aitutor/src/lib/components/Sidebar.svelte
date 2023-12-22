@@ -2,9 +2,13 @@
   import {page} from '$app/stores';
   import {
     CogOutline,
+    BookOutline,
+    BuildingOutline,
     FilePenOutline,
     UserSettingsOutline,
-    QuestionCircleOutline, ArrowRightFromBracketSolid} from 'flowbite-svelte-icons';
+    QuestionCircleOutline,
+    ArrowRightFromBracketSolid,
+  } from 'flowbite-svelte-icons';
 
   import {
     Li,
@@ -44,10 +48,17 @@
     {#if currentClassId}
     <SidebarGroup>
       <Breadcrumb>
-        <BreadcrumbItem href={`/institution/${currentInstId}`}>{currentInst.name}</BreadcrumbItem>
+        <BreadcrumbItem href={`/institution/${currentInstId}`}>
+          <svelte:fragment slot="icon">
+            <BuildingOutline class="text-gray-400" size="sm" />
+          </svelte:fragment>
+      {currentInst.name}</BreadcrumbItem>
       </Breadcrumb>
-      <Breadcrumb class="mx-4 pr-4 w-full" olClass="w-full">
+      <Breadcrumb class="pr-2 w-full" olClass="w-full">
         <BreadcrumbItem spanClass="ms-1 text-sm font-medium text-gray-500 md:ms-2 dark:text-gray-400 flex items-center justify-between w-full" class="inline-flex items-center w-full">
+          <svelte:fragment slot="icon">
+            <BookOutline class="text-gray-400" size="sm" />
+          </svelte:fragment>
           <span>{currentClass.name}</span>
           {#if canManageClass}
             <a href={`/institution/${currentInstId}/class/${currentClassId}/manage`}>
