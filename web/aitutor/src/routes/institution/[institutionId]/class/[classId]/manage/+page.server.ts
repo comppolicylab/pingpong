@@ -5,6 +5,13 @@ import {redirect} from "@sveltejs/kit";
 export const actions = {
 
   /**
+   * Update the class metadata
+   */
+  updateClass: async (event) => {
+    return await forwardRequest((f, d) => api.updateClass(f, event.params.classId, d), event);
+  },
+
+  /**
    * Create a new class assistant.
    */
   createAssistant: async (event) => {
@@ -48,6 +55,16 @@ export const actions = {
 
     const response = await api.updateAssistant(event.fetch, event.params.classId, body.get("assistantId"), data);
     throw redirect(307, `${event.url.pathname}?save`);
+  },
+
+  /**
+   * Update the API key for a class.
+   */
+  updateApiKey: async (event) => {
+    const body = await event.request.formData();
+    const apiKey = body.get('apiKey');
+    console.log("Updating API key", apiKey);
+    return await api.updateApiKey(event.fetch, event.params.classId, apiKey);
   },
 
   /**

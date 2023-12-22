@@ -55,6 +55,7 @@ const _qmethod = async <T extends BaseData>(f: Fetcher, method: "GET" | "DELETE"
 const _bmethod = async <T extends BaseData>(f: Fetcher, method: "POST" | "PUT", path: string, data?: T) => {
   const body = JSON.stringify(data);
   const headers = {"Content-Type": "application/json"};
+  console.log("Sending", body, headers, method, path);
   return await _fetch(f, method, path, headers, body);
 }
 
@@ -137,11 +138,43 @@ export type CreateClassRequest = {
 }
 
 /**
+ * Parameters for updating a class.
+ */
+export type UpdateClassRequest = {
+  name?: string;
+  term?: string;
+}
+
+/**
  * Create a new class.
  */
 export const createClass = async (f: Fetcher, instId: number, data: CreateClassRequest) => {
   const url = `institution/${instId}/class`;
   return await POST(f, url, data);
+}
+
+/**
+ * Parameters for updating a class.
+ */
+export const updateClass = async (f: Fetcher, classId: number, data: UpdateClassRequest) => {
+  const url = `class/${classId}`;
+  return await PUT(f, url, data);
+}
+
+/**
+ * Update the API key for a class.
+ */
+export const updateApiKey = async (f: Fetcher, classId: number, apiKey: string) => {
+  const url = `class/${classId}/api_key`;
+  return await PUT(f, url, {api_key: apiKey});
+}
+
+/**
+ * Fetch the API key for a class.
+ */
+export const getApiKey = async (f: Fetcher, classId: number) => {
+  const url = `class/${classId}/api_key`;
+  return await GET(f, url);
 }
 
 /**

@@ -215,7 +215,7 @@ async def get_institution_classes(institution_id: str, request: Request):
 async def create_class(institution_id: str, request: Request):
     data = await request.json()
     data["institution_id"] = int(institution_id)
-    return await models.Class.create(request.state.db, data)
+    return await models.Class.create(request.state.db, schemas.CreateClass(**data))
 
 
 @v1.get(
@@ -225,6 +225,37 @@ async def create_class(institution_id: str, request: Request):
 )
 async def get_class(class_id: str, request: Request):
     return await models.Class.get_by_id(request.state.db, int(class_id))
+
+
+@v1.put(
+    "/class/{class_id}",
+    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    response_model=schemas.Class,
+)
+async def update_class(class_id: str, update: schemas.UpdateClass, request: Request):
+    return await models.Class.update(request.state.db, int(class_id), update)
+
+
+@v1.put(
+    "/class/{class_id}/api_key",
+    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    response_model=schemas.GenericStatus,
+)
+async def update_class_api_key(class_id: str, request: Request):
+    data = await request.json()
+    update = schemas.UpdateApiKey(**data)
+    await models.Class.update_api_key(request.state.db, int(class_id), update.api_key)
+    return {"status": "ok"}
+
+
+@v1.get(
+    "/class/{class_id}/api_key",
+    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    response_model=schemas.ApiKey,
+)
+async def get_class_api_key(class_id: str, request: Request):
+    api_key = await models.Class.get_api_key(request.state.db, int(class_id))
+    return {"api_key": api_key}
 
 
 @v1.get(

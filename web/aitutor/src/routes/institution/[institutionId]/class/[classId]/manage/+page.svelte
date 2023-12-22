@@ -1,13 +1,18 @@
 <script>
+  import {writable} from 'svelte/store';
   import {page} from '$app/stores';
+  import {enhance} from "$app/forms";
   import {beforeNavigate} from '$app/navigation';
   import * as api from '$lib/api';
   import { GradientButton, Secondary, Span, List, Li, Card, MultiSelect, Textarea, Accordion, AccordionItem, Dropzone, Heading, Button, Label, Input } from "flowbite-svelte";
   import ManageAssistant from "$lib/components/ManageAssistant.svelte";
   import ViewAssistant from "$lib/components/ViewAssistant.svelte";
   import Info from "$lib/components/Info.svelte";
+  import {PenOutline} from "flowbite-svelte-icons";
 
   export let data;
+
+  const blurred = writable(true);
 
   $: editingAssistant = parseInt($page.url.searchParams.get('edit-assistant') || '0', 10);
   $: assistants = data?.assistants || [];
@@ -33,7 +38,7 @@
 
 <div class="container py-8 space-y-12 divide-y divide-gray-200 dark:divide-gray-700">
   <Heading tag="h2"><Span gradient>Manage Class</Span></Heading>
-  <form action="?/updateClass" class="pt-6" method="POST">
+  <form action="?/updateClass" class="pt-6" method="POST" use:enhance>
     <div class="grid grid-cols-3 gap-x-6 gap-y-8">
       <div>
         <Heading customSize="text-xl font-bold" tag="h3"><Secondary class="text-xl">Class Details</Secondary></Heading>
@@ -47,6 +52,38 @@
       <div>
         <Label for="term">Term</Label>
         <Input label="Term" id="term" name="term" value="{data.class.term}" />
+      </div>
+
+      <div></div>
+      <div>
+        <GradientButton type="submit" color="cyanToBlue">Save</GradientButton>
+      </div>
+    </div>
+  </form>
+
+
+  <form action="?/updateApiKey" class="pt-6" method="POST" use:enhance>
+    <div class="grid grid-cols-3 gap-x-6 gap-y-8">
+      <div>
+        <Heading customSize="text-xl font-bold" tag="h3"><Secondary class="text-xl">Billing</Secondary></Heading>
+        <Info>Manage OpenAI credentials</Info>
+      </div>
+
+      <div class="col-span-2">
+        <Label for="apiKey">API Key</Label>
+        <div class="w-full h-full relative">
+          <Input autocomplete="off" label="API Key" id="apiKey" name="apiKey" value="{data.apiKey}" on:blur={() => $blurred = true} on:focus={() => $blurred = false} />
+          {#if $blurred}
+            <div class="flex items-center gap-2 w-full h-full absolute top-0 left-0 bg-white font-mono pointer-events-none">
+              {#if data.apiKey}
+                <span>{data.apiKey.substring(0,6)}**************{data.apiKey.substring(data.apiKey.length - 6)}</span>
+              {:else}
+                <span class="text-gray-400">No API key set</span>
+              {/if}
+              <PenOutline size="sm" />
+            </div>
+          {/if}
+        </div>
       </div>
 
       <div></div>

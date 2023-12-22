@@ -11,11 +11,14 @@ from sqlalchemy import (
     and_,
     or_,
     select,
+    update,
 )
 from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from sqlalchemy.sql.expression import false
+
+import aitutor.schemas as schemas
 
 
 class Base(AsyncAttrs, DeclarativeBase):
@@ -290,6 +293,11 @@ class Class(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def update_api_key(cls, session: AsyncSession, id: int, api_key: str) -> None:
+        stmt = update(Class).where(Class.id == id).values(api_key=api_key)
+        await session.execute(stmt)
+
+    @classmethod
     async def can_manage(cls, session: AsyncSession, class_id: int, user: User) -> bool:
         class_ = await session.scalar(select(Class).where(Class.id == class_id))
 
@@ -332,12 +340,22 @@ class Class(Base):
         return False
 
     @classmethod
-    async def create(cls, session: AsyncSession, data: dict) -> "Class":
-        class_ = Class(**data)
+    async def create(cls, session: AsyncSession, data: schemas.CreateClass) -> "Class":
+        class_ = Class(**data.dict())
         session.add(class_)
         await session.flush()
         await session.refresh(class_)
         return class_
+
+    @classmethod
+    async def update(
+        cls, session: AsyncSession, id: int, data: schemas.UpdateClass
+    ) -> "Class":
+        stmt = (
+            update(Class).where(Class.id == id).values(**data.dict(exclude_none=True))
+        )
+        await session.execute(stmt)
+        return await cls.get_by_id(session, id)
 
     @classmethod
     async def get_by_institution(

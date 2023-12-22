@@ -123,6 +123,25 @@ class Class(BaseModel):
         orm_mode = True
 
 
+class CreateClass(BaseModel):
+    name: str
+    term: str
+    institution_id: int
+
+
+class UpdateClass(BaseModel):
+    name: str | None = None
+    term: str | None = None
+
+
+class UpdateApiKey(BaseModel):
+    api_key: str
+
+
+class ApiKey(BaseModel):
+    api_key: str | None
+
+
 class Classes(BaseModel):
     classes: list[Class]
 
