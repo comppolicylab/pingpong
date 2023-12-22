@@ -1,8 +1,7 @@
+import functools
 import hashlib
 
 import openai
-
-from .config import ReadOnlyFunctorProxy, config
 
 
 async def generate_name(
@@ -44,8 +43,6 @@ def hash_thread(messages, runs) -> str:
     return hashlib.md5(f"{mpart}-{rpart}".encode("utf-8")).hexdigest()
 
 
-def get_openai_client() -> openai.AsyncClient:
-    return openai.AsyncClient(api_key=config.openai.api_key)
-
-
-openai_client = ReadOnlyFunctorProxy(get_openai_client)
+@functools.cache
+def get_openai_client(api_key: str) -> openai.AsyncClient:
+    return openai.AsyncClient(api_key=api_key)

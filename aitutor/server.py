@@ -2,14 +2,18 @@ import asyncio
 import json
 import logging
 import time
+from typing import Annotated
 
 import jwt
 import openai
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFile
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from jwt.exceptions import PyJWTError
 
-from .ai import generate_name, hash_thread, openai_client
+import aitutor.models as models
+import aitutor.schemas as schemas
+
+from .ai import generate_name, get_openai_client, hash_thread
 from .auth import (
     SessionState,
     SessionStatus,
@@ -19,16 +23,31 @@ from .auth import (
     generate_auth_link,
 )
 from .config import config
-from .db import Assistant, Class, File, Institution, Thread, User, async_session
+from .db import async_session
 from .email import get_default_sender
 from .errors import sentry
-from .gravatar import Profile
 from .metrics import metrics
 from .permission import CanManage, CanRead, CanWrite, IsSuper, LoggedIn
 
 logger = logging.getLogger(__name__)
 
 v1 = FastAPI()
+
+
+async def get_openai_client_for_class(request: Request) -> openai.AsyncClient:
+    """Get an OpenAI client for the class.
+
+    Requires the class_id to be in the path parameters.
+    """
+    class_id = request.path_params["class_id"]
+    api_key = await models.Class.get_api_key(request.state.db, int(class_id))
+    if not api_key:
+        raise HTTPException(status_code=401, detail="No API key for class")
+    return get_openai_client(api_key)
+
+
+OpenAIClientDependency = Depends(get_openai_client_for_class)
+OpenAIClient = Annotated[openai.AsyncClient, OpenAIClientDependency]
 
 
 @v1.middleware("http")
@@ -43,7 +62,7 @@ async def parse_session_token(request: Request, call_next):
     else:
         try:
             token = decode_session_token(session_token)
-            user = await User.get_by_id(request.state.db, int(token.sub))
+            user = await models.User.get_by_id(request.state.db, int(token.sub))
             if not user:
                 raise ValueError("User does not exist")
 
@@ -52,7 +71,7 @@ async def parse_session_token(request: Request, call_next):
                 status=SessionStatus.VALID,
                 error=None,
                 user=user,
-                profile=Profile.from_email(user.email),
+                profile=schemas.Profile.from_email(user.email),
             )
         except PyJWTError as e:
             request.state.session = SessionState(
@@ -87,18 +106,18 @@ def get_config(request: Request):
     return {"config": config.dict(), "headers": dict(request.headers)}
 
 
-@v1.post("/login/magic")
+@v1.post("/login/magic", response_model=schemas.GenericStatus)
 async def login(request: Request):
     """Provide a magic link to the auth endpoint."""
     # Get the email from the request.
     body = await request.json()
     email = body["email"]
     # Look up the user by email
-    user = await User.get_by_email(request.state.db, email)
+    user = await models.User.get_by_email(request.state.db, email)
     # Throw an error if the user does not exist.
     if not user:
         if config.development:
-            user = User(email=email)
+            user = models.User(email=email)
             user.name = ""
             user.super_admin = True
             request.state.db.add(user)
@@ -139,67 +158,90 @@ async def auth(request: Request, response: Response):
     return response
 
 
-@v1.get("/institutions", dependencies=[Depends(LoggedIn())])
+@v1.get(
+    "/institutions",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.Institutions,
+)
 async def list_institutions(request: Request):
-    inst = list[Institution]()
+    inst = list[models.Institution]()
 
     if await IsSuper().test(request):
-        inst = await Institution.all(request.state.db)
+        inst = await models.Institution.all(request.state.db)
     else:
-        inst = await Institution.visible(request.state.db, request.state.session.user)
+        inst = await models.Institution.visible(
+            request.state.db, request.state.session.user
+        )
 
     return {"institutions": inst}
 
 
-@v1.post("/institution", dependencies=[Depends(IsSuper())])
+@v1.post(
+    "/institution",
+    dependencies=[Depends(IsSuper())],
+    response_model=schemas.Institution,
+)
 async def create_institution(request: Request):
     data = await request.json()
-    return await Institution.create(request.state.db, data)
+    return await models.Institution.create(request.state.db, data)
 
 
 @v1.get(
     "/institution/{institution_id}",
-    dependencies=[Depends(IsSuper() | CanRead(Institution, "institution_id"))],
+    dependencies=[Depends(IsSuper() | CanRead(models.Institution, "institution_id"))],
+    response_model=schemas.Institution,
 )
 async def get_institution(institution_id: str, request: Request):
-    return await Institution.get_by_id(request.state.db, int(institution_id))
+    return await models.Institution.get_by_id(request.state.db, int(institution_id))
 
 
 @v1.get(
     "/institution/{institution_id}/classes",
-    dependencies=[Depends(IsSuper() | CanRead(Institution, "institution_id"))],
+    dependencies=[Depends(IsSuper() | CanRead(models.Institution, "institution_id"))],
+    response_model=schemas.Classes,
 )
 async def get_institution_classes(institution_id: str, request: Request):
-    classes = await Class.get_by_institution(request.state.db, int(institution_id))
+    classes = await models.Class.get_by_institution(
+        request.state.db, int(institution_id)
+    )
     return {"classes": classes}
 
 
 @v1.post(
     "/institution/{institution_id}/class",
-    dependencies=[Depends(IsSuper() | CanWrite(Institution, "institution_id"))],
+    dependencies=[Depends(IsSuper() | CanWrite(models.Institution, "institution_id"))],
+    response_model=schemas.Class,
 )
 async def create_class(institution_id: str, request: Request):
     data = await request.json()
     data["institution_id"] = int(institution_id)
-    return await Class.create(request.state.db, data)
+    return await models.Class.create(request.state.db, data)
 
 
 @v1.get(
     "/class/{class_id}",
-    dependencies=[Depends(IsSuper() | CanRead(Class, "class_id"))],
+    dependencies=[Depends(IsSuper() | CanRead(models.Class, "class_id"))],
+    response_model=schemas.Class,
 )
 async def get_class(class_id: str, request: Request):
-    return await Class.get_by_id(request.state.db, int(class_id))
+    return await models.Class.get_by_id(request.state.db, int(class_id))
 
 
 @v1.get(
     "/class/{class_id}/thread/{thread_id}",
     dependencies=[
-        Depends(CanManage(Class, "class_id") | CanRead(Thread, "thread_id") | IsSuper())
+        Depends(
+            CanManage(models.Class, "class_id")
+            | CanRead(models.Thread, "thread_id")
+            | IsSuper()
+        )
     ],
+    response_model=schemas.ThreadWithMeta,
 )
-async def get_thread(class_id: str, thread_id: str, request: Request):
-    thread = await Thread.get_by_id(request.state.db, int(thread_id))
+async def get_thread(
+    class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
+):
+    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
 
     runs = [
         r
@@ -210,25 +252,32 @@ async def get_thread(class_id: str, thread_id: str, request: Request):
 
     messages = await openai_client.beta.threads.messages.list(thread.thread_id)
     user_ids = {m.metadata.get("user_id") for m in messages.data} - {None}
-    users = await User.get_all_by_id(request.state.db, list(user_ids))
+    users = await models.User.get_all_by_id(request.state.db, list(user_ids))
     return {
         "hash": hash_thread(messages, runs),
         "thread": thread,
         "run": runs[0] if runs else None,
         "messages": messages,
-        "participants": {u.id: Profile.from_email(u.email) for u in users},
+        "participants": {u.id: schemas.Profile.from_email(u.email) for u in users},
     }
 
 
 @v1.get(
     "/class/{class_id}/thread/{thread_id}/last_run",
     dependencies=[
-        Depends(CanManage(Class, "class_id") | CanRead(Thread, "thread_id") | IsSuper())
+        Depends(
+            CanManage(models.Class, "class_id")
+            | CanRead(models.Thread, "thread_id")
+            | IsSuper()
+        )
     ],
+    response_model=schemas.ThreadRun,
 )
-async def get_last_run(class_id: str, thread_id: str, request: Request):
+async def get_last_run(
+    class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
+):
     TIMEOUT = 60  # seconds
-    thread = await Thread.get_by_id(request.state.db, int(thread_id))
+    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
 
     # Streaming is not supported right now, so we need to poll to get the last run.
     # https://platform.openai.com/docs/assistants/how-it-works/runs-and-run-steps
@@ -265,15 +314,16 @@ async def get_last_run(class_id: str, thread_id: str, request: Request):
 
 @v1.get(
     "/class/{class_id}/threads",
-    dependencies=[Depends(CanRead(Thread, "class_id") | IsSuper())],
+    dependencies=[Depends(CanRead(models.Thread, "class_id") | IsSuper())],
+    response_model=schemas.Threads,
 )
 async def list_threads(class_id: str, request: Request):
-    threads = list[Thread]()
+    threads = list[models.Thread]()
 
     if await IsSuper().test(request):
-        threads = await Thread.all(request.state.db, int(class_id))
+        threads = await models.Thread.all(request.state.db, int(class_id))
     else:
-        threads = await Thread.visible(
+        threads = await models.Thread.visible(
             request.state.db, int(class_id), request.state.session.user
         )
 
@@ -282,14 +332,15 @@ async def list_threads(class_id: str, request: Request):
 
 @v1.post(
     "/class/{class_id}/thread",
-    dependencies=[Depends(IsSuper() | CanWrite(Class, "class_id"))],
+    dependencies=[Depends(IsSuper() | CanWrite(models.Class, "class_id"))],
+    response_model=schemas.ThreadRun,
 )
-async def create_thread(class_id: str, request: Request):
+async def create_thread(class_id: str, request: Request, openai_client: OpenAIClient):
     data = await request.json()
 
-    parties = list[User]()
+    parties = list[models.User]()
     if "parties" in data:
-        parties = await User.get_all_by_id(
+        parties = await models.User.get_all_by_id(
             request.state.db, [int(p) for p in data["parties"]]
         )
 
@@ -314,11 +365,11 @@ async def create_thread(class_id: str, request: Request):
     }
 
     try:
-        result = await Thread.create(request.state.db, new_thread)
+        result = await models.Thread.create(request.state.db, new_thread)
 
         # Find the appropriate assistant.
-        # TODO be more clever about this
-        assts = await Assistant.for_class(request.state.db, int(class_id))
+        # TODO thjis should be specified in the request
+        assts = await models.Assistant.for_class(request.state.db, int(class_id))
         if not assts:
             raise HTTPException(status_code=400, detail="No assistants found.")
 
@@ -336,11 +387,14 @@ async def create_thread(class_id: str, request: Request):
 
 @v1.post(
     "/class/{class_id}/thread/{thread_id}",
-    dependencies=[Depends(IsSuper() | CanWrite(Class, "class_id"))],
+    dependencies=[Depends(IsSuper() | CanWrite(models.Class, "class_id"))],
+    response_model=schemas.ThreadRun,
 )
-async def send_message(class_id: str, thread_id: str, request: Request):
+async def send_message(
+    class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
+):
     data = await request.json()
-    thread = await Thread.get_by_id(request.state.db, int(thread_id))
+    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
 
     await openai_client.beta.threads.messages.create(
         thread.thread_id,
@@ -350,7 +404,7 @@ async def send_message(class_id: str, thread_id: str, request: Request):
     )
 
     # TODO - select assistant better
-    assts = await Assistant.for_class(request.state.db, int(class_id))
+    assts = await models.Assistant.for_class(request.state.db, int(class_id))
     if not assts:
         raise HTTPException(status_code=400, detail="No assistants found.")
 
@@ -364,9 +418,12 @@ async def send_message(class_id: str, thread_id: str, request: Request):
 
 @v1.post(
     "/class/{class_id}/file",
-    dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))],
+    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    response_model=schemas.File,
 )
-async def create_file(class_id: str, request: Request, upload: UploadFile):
+async def create_file(
+    class_id: str, request: Request, upload: UploadFile, openai_client: OpenAIClient
+):
     new_f = await openai_client.files.create(
         file=upload.file,
         purpose="assistants",
@@ -378,7 +435,7 @@ async def create_file(class_id: str, request: Request, upload: UploadFile):
         "content_type": upload.content_type,
     }
     try:
-        return await File.create(request.state.db, data)
+        return await models.File.create(request.state.db, data)
     except Exception as e:
         await openai_client.files.delete(new_f.id)
         raise e
@@ -386,30 +443,37 @@ async def create_file(class_id: str, request: Request, upload: UploadFile):
 
 @v1.get(
     "/class/{class_id}/files",
-    dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))],
+    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    response_model=schemas.Files,
 )
 async def list_files(class_id: str, request: Request):
-    return {"files": await File.for_class(request.state.db, int(class_id))}
+    files = await models.File.for_class(request.state.db, int(class_id))
+    return {"files": files}
 
 
 @v1.get(
     "/class/{class_id}/assistants",
-    dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))],
+    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    response_model=schemas.Assistants,
 )
 async def list_assistants(class_id: str, request: Request):
-    return {"assistants": await Assistant.for_class(request.state.db, int(class_id))}
+    assistants = await models.Assistant.for_class(request.state.db, int(class_id))
+    return {"assistants": assistants}
 
 
 @v1.post(
     "/class/{class_id}/assistant",
-    dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))],
+    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    response_model=schemas.Assistant,
 )
-async def create_assistant(class_id: str, request: Request):
+async def create_assistant(
+    class_id: str, request: Request, openai_client: OpenAIClient
+):
     data = await request.json()
     file_ids = data.pop("file_ids", [])
     files = []
     if file_ids:
-        files = await File.get_all_by_file_id(request.state.db, file_ids)
+        files = await models.File.get_all_by_file_id(request.state.db, file_ids)
     data["class_id"] = int(class_id)
     data["files"] = files
 
@@ -423,7 +487,7 @@ async def create_assistant(class_id: str, request: Request):
 
     try:
         data["tools"] = json.dumps(data["tools"])
-        return await Assistant.create(request.state.db, data)
+        return await models.Assistant.create(request.state.db, data)
     except Exception as e:
         await openai_client.beta.assistants.delete(new_asst.id)
         raise e
@@ -431,13 +495,16 @@ async def create_assistant(class_id: str, request: Request):
 
 @v1.put(
     "/class/{class_id}/assistant/{assistant_id}",
-    dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))],
+    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    response_model=schemas.Assistant,
 )
-async def update_assistant(class_id: str, assistant_id: str, request: Request):
+async def update_assistant(
+    class_id: str, assistant_id: str, request: Request, openai_client: OpenAIClient
+):
     data = await request.json()
 
     # Get the existing assistant.
-    asst = await Assistant.get_by_id(request.state.db, int(assistant_id))
+    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
 
     if not data:
         return asst
@@ -446,7 +513,9 @@ async def update_assistant(class_id: str, assistant_id: str, request: Request):
     # Update the assistant
     if "file_ids" in data:
         openai_update["file_ids"] = data["file_ids"]
-        asst.files = await File.get_all_by_file_id(request.state.db, data["file_ids"])
+        asst.files = await models.File.get_all_by_file_id(
+            request.state.db, data["file_ids"]
+        )
     if "instructions" in data:
         openai_update["instructions"] = data["instructions"]
         asst.instructions = data["instructions"]
@@ -468,10 +537,13 @@ async def update_assistant(class_id: str, assistant_id: str, request: Request):
 
 @v1.delete(
     "/class/{class_id}/assistant/{assistant_id}",
-    dependencies=[Depends(IsSuper() | CanManage(Class, "class_id"))],
+    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    response_model=schemas.GenericStatus,
 )
-async def delete_assistant(class_id: str, assistant_id: str, request: Request):
-    asst = await Assistant.get_by_id(request.state.db, int(assistant_id))
+async def delete_assistant(
+    class_id: str, assistant_id: str, request: Request, openai_client: OpenAIClient
+):
+    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
     await asst.delete(request.state.db)
     await openai_client.beta.assistants.delete(asst.assistant_id)
     return {"status": "ok"}
@@ -490,6 +562,21 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.exception_handler(Exception)
+async def handle_exception(request: Request, exc: Exception):
+    """Handle exceptions."""
+    if isinstance(exc, HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+        )
+    else:
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error."},
+        )
 
 
 app.mount("/api/v1", v1)

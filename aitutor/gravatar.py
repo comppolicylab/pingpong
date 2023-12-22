@@ -1,5 +1,4 @@
 import hashlib
-from dataclasses import dataclass
 
 
 def get_email_hash(email: str) -> str:
@@ -13,20 +12,3 @@ def get_gravatar_image(email: str, size: int | None = None) -> str:
     if size is not None:
         url += f"?s={size}"
     return url
-
-
-@dataclass
-class Profile:
-    email: str
-    gravatar_id: str
-    image_url: str
-
-    @classmethod
-    def from_email(cls, email: str) -> "Profile":
-        """Return a profile from an email address."""
-        hashed = get_email_hash(email)
-        return cls(
-            email=email,
-            gravatar_id=hashed,
-            image_url=get_gravatar_image(email),
-        )

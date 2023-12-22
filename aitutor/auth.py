@@ -7,8 +7,8 @@ import jwt
 from jwt.exceptions import PyJWTError
 
 from .config import config
-from .db import User
-from .gravatar import Profile
+from .models import User
+from .schemas import Profile
 
 
 @dataclass

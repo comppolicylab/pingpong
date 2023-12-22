@@ -17,6 +17,8 @@ export async function load({ fetch, params }) {
     }
   }
 
+  console.log("CLASS", classData)
+
   return {
     isConfigured: !!assistants && assistants.length > 0,
     "class": classData,

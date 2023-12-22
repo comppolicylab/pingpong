@@ -5,7 +5,8 @@ import click
 
 from .auth import encode_auth_token
 from .config import config
-from .db import User, async_session, init_db
+from .db import async_session, init_db
+from .models import User
 
 
 @click.group()
