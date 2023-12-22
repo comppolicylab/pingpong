@@ -1,6 +1,6 @@
 <script>
   import "../app.pcss";
-  import Menu from '$lib/components/Menu.svelte';
+  import Sidebar from '$lib/components/Sidebar.svelte';
   import Main from '$lib/components/Main.svelte';
 
   export let data;
@@ -8,7 +8,7 @@
 
 {#if data.me.user}
   <div class="flex h-screen">
-    <Menu {data} />
+    <Sidebar {data} />
     <Main>
       <slot></slot>
     </Main>

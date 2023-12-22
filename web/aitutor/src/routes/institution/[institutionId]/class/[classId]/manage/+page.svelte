@@ -35,7 +35,7 @@
   <form action="?/updateClass" class="pt-6" method="POST">
     <div class="grid grid-cols-3 gap-x-6 gap-y-8">
       <div>
-        <Heading tag="h3">Class Details</Heading>
+        <Heading customSize="text-xl font-bold" tag="h3">Class Details</Heading>
         <p>General information about the class.</p>
       </div>
       <div>
@@ -57,7 +57,7 @@
 
   <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
     <div>
-      <Heading tag="h3">Teaching Team</Heading>
+      <Heading customSize="text-xl font-bold" tag="h3">Teaching Team</Heading>
       <p>Manage teacher and course assistants.</p>
     </div>
     <pre>todo</pre>
@@ -65,7 +65,7 @@
 
   <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
     <div>
-      <Heading tag="h3">Students</Heading>
+      <Heading customSize="text-xl font-bold" tag="h3">Students</Heading>
       <p>Manage students in the class.</p>
     </div>
     <pre>todo</pre>
@@ -73,7 +73,7 @@
 
   <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
     <div>
-      <Heading tag="h3">Files</Heading>
+      <Heading tag="h3" customSize="text-xl font-bold">Files</Heading>
       <p>Manage files used by the automated tutors.</p>
     </div>
     <div class="col-span-2">
@@ -101,7 +101,7 @@
 
   <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
     <div>
-      <Heading tag="h3">AI Assistants</Heading>
+      <Heading tag="h3" customSize="text-xl font-bold">AI Assistants</Heading>
       <p>Manage AI assistants.</p>
     </div>
     <div class="col-span-2 flex flex-wrap gap-4">
