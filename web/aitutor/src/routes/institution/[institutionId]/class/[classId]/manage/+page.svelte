@@ -1,7 +1,6 @@
 <script>
   import {writable} from 'svelte/store';
   import {page} from '$app/stores';
-  import {enhance} from "$app/forms";
   import {beforeNavigate} from '$app/navigation';
   import * as api from '$lib/api';
   import { GradientButton, Secondary, Span, List, Li, Card, MultiSelect, Textarea, Accordion, AccordionItem, Dropzone, Heading, Button, Label, Input } from "flowbite-svelte";
@@ -13,7 +12,8 @@
   export let data;
 
   const blurred = writable(true);
-
+  $: apiKey = data.apiKey || '';
+  $: apiKeyBlur = apiKey.substring(0,6) + '**************' + apiKey.substring(apiKey.length - 6);
   $: editingAssistant = parseInt($page.url.searchParams.get('edit-assistant') || '0', 10);
   $: assistants = data?.assistants || [];
   $: files = data?.files || [];
@@ -38,7 +38,7 @@
 
 <div class="container py-8 space-y-12 divide-y divide-gray-200 dark:divide-gray-700">
   <Heading tag="h2"><Span gradient>Manage Class</Span></Heading>
-  <form action="?/updateClass" class="pt-6" method="POST" use:enhance>
+    <form action="?/updateClass" class="pt-6" method="POST">
     <div class="grid grid-cols-3 gap-x-6 gap-y-8">
       <div>
         <Heading customSize="text-xl font-bold" tag="h3"><Secondary class="text-xl">Class Details</Secondary></Heading>
@@ -62,7 +62,7 @@
   </form>
 
 
-  <form action="?/updateApiKey" class="pt-6" method="POST" use:enhance>
+  <form action="?/updateApiKey" class="pt-6" method="POST" >
     <div class="grid grid-cols-3 gap-x-6 gap-y-8">
       <div>
         <Heading customSize="text-xl font-bold" tag="h3"><Secondary class="text-xl">Billing</Secondary></Heading>
@@ -71,12 +71,12 @@
 
       <div class="col-span-2">
         <Label for="apiKey">API Key</Label>
-        <div class="w-full h-full relative">
-          <Input autocomplete="off" label="API Key" id="apiKey" name="apiKey" value="{data.apiKey}" on:blur={() => $blurred = true} on:focus={() => $blurred = false} />
+          <div class="w-full relative" class:cursor-pointer={$blurred}>
+          <Input autocomplete="off" class={$blurred ? 'cursor-pointer' : undefined} label="API Key" id="apiKey" name="apiKey" value="{apiKey}" on:blur={() => $blurred = true} on:focus={() => $blurred = false} />
           {#if $blurred}
-            <div class="flex items-center gap-2 w-full h-full absolute top-0 left-0 bg-white font-mono pointer-events-none">
-              {#if data.apiKey}
-                <span>{data.apiKey.substring(0,6)}**************{data.apiKey.substring(data.apiKey.length - 6)}</span>
+            <div class="cursor-pointer flex items-center gap-2 w-full h-full absolute top-0 left-0 bg-white font-mono pointer-events-none">
+              {#if apiKey}
+                <span>{apiKeyBlur}</span>
               {:else}
                 <span class="text-gray-400">No API key set</span>
               {/if}

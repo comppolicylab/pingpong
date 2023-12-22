@@ -239,13 +239,13 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
 @v1.put(
     "/class/{class_id}/api_key",
     dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
-    response_model=schemas.GenericStatus,
+    response_model=schemas.ApiKey,
 )
 async def update_class_api_key(class_id: str, request: Request):
     data = await request.json()
     update = schemas.UpdateApiKey(**data)
     await models.Class.update_api_key(request.state.db, int(class_id), update.api_key)
-    return {"status": "ok"}
+    return {"api_key": update.api_key}
 
 
 @v1.get(

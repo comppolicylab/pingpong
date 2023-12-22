@@ -17,10 +17,9 @@ export async function load({ fetch, params }) {
     }
   }
 
-  console.log("CLASS", classData)
-
   return {
-    isConfigured: !!assistants && assistants.length > 0,
+    hasAssistants: !!assistants && assistants.length > 0,
+    hasBilling: !!classData?.api_key,
     "class": classData,
     assistants,
     files,
