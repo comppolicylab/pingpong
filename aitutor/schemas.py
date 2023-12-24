@@ -10,6 +10,22 @@ class GenericStatus(BaseModel):
     status: str
 
 
+class Profile(BaseModel):
+    email: str
+    gravatar_id: str
+    image_url: str
+
+    @classmethod
+    def from_email(cls, email: str) -> "Profile":
+        """Return a profile from an email address."""
+        hashed = get_email_hash(email)
+        return cls(
+            email=email,
+            gravatar_id=hashed,
+            image_url=get_gravatar_image(email),
+        )
+
+
 class File(BaseModel):
     id: int
     name: str
@@ -58,6 +74,7 @@ class CreateAssistant(BaseModel):
 class Assistants(BaseModel):
     my_assistants: list[Assistant]
     class_assistants: list[Assistant]
+    creators: dict[int, Profile]
 
     class Config:
         orm_mode = True
@@ -79,7 +96,7 @@ class Thread(BaseModel):
 
 
 class CreateThread(BaseModel):
-    parties: list[str]
+    parties: list[int] = []
     message: str
     assistant_id: int
 
@@ -176,20 +193,9 @@ class ThreadRun(BaseModel):
         orm_mode = True
 
 
-class Profile(BaseModel):
-    email: str
-    gravatar_id: str
-    image_url: str
-
-    @classmethod
-    def from_email(cls, email: str) -> "Profile":
-        """Return a profile from an email address."""
-        hashed = get_email_hash(email)
-        return cls(
-            email=email,
-            gravatar_id=hashed,
-            image_url=get_gravatar_image(email),
-        )
+class ThreadParticipants(BaseModel):
+    user: dict[int, Profile]
+    assistant: dict[int, str]
 
 
 class ThreadWithMeta(BaseModel):
@@ -197,7 +203,7 @@ class ThreadWithMeta(BaseModel):
     hash: str
     run: OpenAIRun | None
     messages: list[OpenAIMessage]
-    participants: dict[str, Profile]
+    participants: ThreadParticipants
 
     class Config:
         orm_mode = True

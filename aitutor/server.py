@@ -284,12 +284,18 @@ async def get_thread(
     messages = await openai_client.beta.threads.messages.list(thread.thread_id)
     user_ids = {m.metadata.get("user_id") for m in messages.data} - {None}
     users = await models.User.get_all_by_id(request.state.db, list(user_ids))
+    assistants = await models.Assistant.get_all_by_id(
+        request.state.db, [thread.assistant_id]
+    )
     return {
         "hash": hash_thread(messages, runs),
         "thread": thread,
         "run": runs[0] if runs else None,
-        "messages": messages,
-        "participants": {u.id: schemas.Profile.from_email(u.email) for u in users},
+        "messages": list(messages.data),
+        "participants": {
+            "user": {u.id: schemas.Profile.from_email(u.email) for u in users},
+            "assistant": {a.id: a.name for a in assistants},
+        },
     }
 
 
@@ -372,9 +378,7 @@ async def create_thread(class_id: str, request: Request, openai_client: OpenAICl
 
     parties = list[models.User]()
     if req.parties:
-        parties = await models.User.get_all_by_id(
-            request.state.db, [int(p) for p in req.parties]
-        )
+        parties = await models.User.get_all_by_id(request.state.db, req.parties)
 
     name = await generate_name(openai_client, req.message)
 
@@ -397,24 +401,22 @@ async def create_thread(class_id: str, request: Request, openai_client: OpenAICl
         "assistant_id": req.assistant_id,
     }
 
+    result: None | models.Thread = None
     try:
         result = await models.Thread.create(request.state.db, new_thread)
-
-        # Find the appropriate assistant.
-        # TODO thjis should be specified in the request
-        assts = await models.Assistant.for_class(request.state.db, int(class_id))
-        if not assts:
-            raise HTTPException(status_code=400, detail="No assistants found.")
+        asst = await models.Assistant.get_by_id(request.state.db, req.assistant_id)
 
         # Start a new thread run.
         run = await openai_client.beta.threads.runs.create(
             thread_id=thread.id,
-            assistant_id=req.assistant_id,
+            assistant_id=asst.assistant_id,
         )
 
         return {"thread": result, "run": run}
     except Exception as e:
         await openai_client.beta.threads.delete(thread.id)
+        if result:
+            await result.delete(request.state.db)
         raise e
 
 
@@ -437,14 +439,9 @@ async def send_message(
         metadata={"user_id": request.state.session.user.id},
     )
 
-    # TODO - select assistant better
-    assts = await models.Assistant.for_class(request.state.db, int(class_id))
-    if not assts:
-        raise HTTPException(status_code=400, detail="No assistants found.")
-
     run = await openai_client.beta.threads.runs.create(
         thread_id=thread.thread_id,
-        assistant_id=asst.id,
+        assistant_id=asst.assistant_id,
     )
 
     return {"thread": thread, "run": run}
@@ -495,7 +492,13 @@ async def list_assistants(class_id: str, request: Request):
     my_assts = await models.Assistant.for_user(
         request.state.db, request.state.session.user.id
     )
-    return {"class_assistants": class_assts, "my_assistants": my_assts}
+    creator_ids = {a.creator_id for a in class_assts + my_assts}
+    creators = await models.User.get_all_by_id(request.state.db, list(creator_ids))
+    return {
+        "class_assistants": class_assts,
+        "my_assistants": my_assts,
+        "creators": {c.id: schemas.Profile.from_email(c.email) for c in creators},
+    }
 
 
 @v1.post(

@@ -14,7 +14,7 @@
 
   let submitting = writable(false);
   $: thread = data?.thread?.store;
-  $: messages = ($thread?.messages?.data || []).sort((a, b) => a.created_at - b.created_at);
+  $: messages = ($thread?.messages || []).sort((a, b) => a.created_at - b.created_at);
   $: participants = $thread?.participants || {};
   $: loading = !$thread && data?.thread?.loading;
 
@@ -27,11 +27,12 @@
 
   // Get the name of the participant in the chat thread.
   const getName = (message) => {
+    console.log("THREAD NAME", $thread.thread, participants)
     if (message.role === "user") {
-      const participant = participants[message?.metadata?.user_id];
+      const participant = participants.user[message?.metadata?.user_id];
       return participant?.name || participant?.email;
     } else {
-      return "AI Tutor"
+      return participants.assistant[$thread.thread.assistant_id] || "AI Tutor";
     }
   }
 
@@ -40,6 +41,7 @@
     if (message.role === "user") {
       return participants[message?.metadata?.user_id]?.image_url;
     }
+    // TODO - image for the assistant
 
     return "";
   }

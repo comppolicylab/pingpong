@@ -10,6 +10,7 @@ from sqlalchemy import (
     String,
     Table,
     and_,
+    delete,
     or_,
     select,
     update,
@@ -271,6 +272,16 @@ class Assistant(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_all_by_id(
+        cls, session: AsyncSession, ids: List[int]
+    ) -> List["Assistant"]:
+        if not ids:
+            return []
+        stmt = select(Assistant).where(Assistant.id.in_(ids))
+        result = await session.execute(stmt)
+        return [row.Assistant for row in result]
+
+    @classmethod
     async def for_class(cls, session: AsyncSession, class_id: int) -> list["Assistant"]:
         stmt = select(Assistant).where(
             and_(Assistant.class_id == class_id, Assistant.published.is_not(None))
@@ -446,6 +457,10 @@ class Thread(Base):
     )
     created = Column(Integer, server_default=func.now())
     updated = Column(Integer, index=True, onupdate=func.now())
+
+    async def delete(self, session: AsyncSession) -> None:
+        stmt = delete(Thread).where(Thread.id == self.id)
+        await session.execute(stmt)
 
     @classmethod
     async def create(cls, session: AsyncSession, data: dict) -> "Thread":

@@ -154,7 +154,7 @@
           </Card>
           {/if}
         {/each}
-        {#if !editingAssistant && assistants.length == 0}
+        {#if !editingAssistant}
         <Card class="w-full max-w-full">
           <Heading tag="h4" class="pb-3">Add new AI assistant</Heading>
           <ManageAssistant {files} />
