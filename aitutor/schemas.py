@@ -36,7 +36,9 @@ class Assistant(BaseModel):
     tools: str
     model: str
     class_id: int
+    creator_id: int
     files: list[File]
+    published: str
     created: str
     updated: str | None
 

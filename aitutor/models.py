@@ -77,6 +77,9 @@ class User(Base):
     institutions: Mapped[List["UserInstitutionRole"]] = relationship(
         back_populates="user", lazy="selectin"
     )
+    assistants: Mapped[List["Assistant"]] = relationship(
+        "Assistant", back_populates="user"
+    )
     super_admin = Column(Boolean, default=False)
     threads = relationship(
         "Thread", secondary=user_thread_association, back_populates="users"
@@ -244,8 +247,21 @@ class Assistant(Base):
         back_populates="assistants",
         lazy="selectin",
     )
+    creator_id = Column(Integer, ForeignKey("users.id"))
+    creator = relationship("User", back_populates="assistants")
+    published = Column(Integer, index=True, nullable=True)
     created = Column(Integer, server_default=func.now())
     updated = Column(Integer, index=True, onupdate=func.now())
+
+    @classmethod
+    async def can_manage(
+        cls, session: AsyncSession, assistant_id: int, user: User
+    ) -> bool:
+        asst = await cls.get_by_id(session, assistant_id)
+        if not asst:
+            return False
+
+        return asst.creator_id == user.id
 
     @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "Assistant":
@@ -254,7 +270,15 @@ class Assistant(Base):
 
     @classmethod
     async def for_class(cls, session: AsyncSession, class_id: int) -> list["Assistant"]:
-        stmt = select(Assistant).where(Assistant.class_id == class_id)
+        stmt = select(Assistant).where(
+            and_(Assistant.class_id == class_id, Assistant.published.is_not(None))
+        )
+        result = await session.execute(stmt)
+        return [row.Assistant for row in result]
+
+    @classmethod
+    async def for_user(cls, session: AsyncSession, user_id: int) -> list["Assistant"]:
+        stmt = select(Assistant).where(Assistant.creator_id == user_id)
         result = await session.execute(stmt)
         return [row.Assistant for row in result]
 
@@ -265,6 +289,16 @@ class Assistant(Base):
         await session.flush()
         await session.refresh(assistant)
         return assistant
+
+    @classmethod
+    async def publish(cls, session: AsyncSession, assistant_id: int) -> "Assistant":
+        stmt = (
+            update(Assistant)
+            .where(Assistant.id == assistant_id)
+            .values(published=func.now())
+            .returning(Assistant)
+        )
+        return await session.scalar(stmt)
 
 
 class Class(Base):

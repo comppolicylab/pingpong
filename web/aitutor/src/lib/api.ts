@@ -247,6 +247,14 @@ export const createAssistant = async (f: Fetcher, classId: number, data: CreateA
 }
 
 /**
+ * Publish an assistant.
+ */
+export const publishAssistant = async (f: Fetcher, classId: number, assistantId: number) => {
+  const url = `class/${classId}/assistant/${assistantId}/publish`;
+  return await POST(f, url);
+}
+
+/**
  * Update an existing assistant.
  */
 export const updateAssistant = async (f: Fetcher, classId: number, assistantId: number, data: UpdateAssistantRequest) => {

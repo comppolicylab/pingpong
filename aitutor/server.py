@@ -506,6 +506,7 @@ async def create_assistant(
     if file_ids:
         files = await models.File.get_all_by_file_id(request.state.db, file_ids)
     data["class_id"] = int(class_id)
+    data["creator_id"] = request.state.session.user.id
     data["files"] = files
 
     new_asst = await openai_client.beta.assistants.create(
@@ -513,6 +514,7 @@ async def create_assistant(
         model=data["model"],
         tools=data["tools"],
         file_ids=file_ids,
+        metadata={"class_id": data["class_id"], "creator_id": data["creator_id"]},
     )
     data["assistant_id"] = new_asst.id
 
@@ -522,6 +524,17 @@ async def create_assistant(
     except Exception as e:
         await openai_client.beta.assistants.delete(new_asst.id)
         raise e
+
+
+@v1.post(
+    "/class/{class_id}/assistant/{assistant_id}/publish",
+    dependencies=[Depends(IsSuper() | CanManage(models.Assistant, "assistant_id"))],
+    response_model=schemas.Assistant,
+)
+async def publish_assistant(
+    class_id: str, assistant_id: str, request: Request, openai_client: OpenAIClient
+):
+    return await models.Assistant.get_by_id(request.state.db, int(assistant_id))
 
 
 @v1.put(
