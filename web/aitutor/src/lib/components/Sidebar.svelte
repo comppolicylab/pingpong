@@ -8,6 +8,7 @@
     UserSettingsOutline,
     QuestionCircleOutline,
     ArrowRightFromBracketSolid,
+    EyeSlashOutline,
   } from 'flowbite-svelte-icons';
 
   import {
@@ -82,7 +83,11 @@
         <SidebarItem
           class="text-sm p-1"
           href={`/institution/${currentInstId}/class/${currentClassId}/thread/${thread.id}`}
-          label={thread.name || "Undefined"} />
+          label={thread.name || "Undefined"}>
+          <svelte:fragment slot="icon">
+            <EyeSlashOutline size="sm" class="text-gray-400" />
+          </svelte:fragment>
+        </SidebarItem>
       {/each}
     </SidebarGroup>
     {:else}

@@ -80,6 +80,11 @@ class Assistants(BaseModel):
         orm_mode = True
 
 
+class UserPlaceholder(BaseModel):
+    id: int
+    email: str
+
+
 class Thread(BaseModel):
     id: int
     name: str
@@ -87,7 +92,7 @@ class Thread(BaseModel):
     class_id: int
     assistant_id: int
     private: bool
-    users: list["User"]
+    users: list["UserPlaceholder"]
     created: str
     updated: str | None
 

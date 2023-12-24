@@ -13,6 +13,10 @@
 
   $: isConfigured = data?.hasAssistants && data?.hasBilling;
 
+  $: {
+    console.log("DATA", data);
+  }
+
   // Handle form submission
   const handleSubmit = () => {
     $loading = true;
@@ -45,6 +49,7 @@
       <form action="?/newThread" method="POST" use:enhance={handleSubmit}>
         <ChatInput loading={$loading} />
         <input type="hidden" name="assistant_id" bind:value={$assistant.id} />
+        <input type="hidden" name="parties" bind:value={data.me.user.id} />
       </form>
     {:else}
         <div class="text-center">

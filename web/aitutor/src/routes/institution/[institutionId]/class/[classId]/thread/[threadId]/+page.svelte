@@ -5,10 +5,13 @@
   import { enhance } from "$app/forms";
   import {browser} from '$app/environment';
   import {invalidateAll} from '$app/navigation';
-  import {Avatar, Spinner} from "flowbite-svelte";
+  import {Span, Avatar, Spinner} from "flowbite-svelte";
   import SvelteMarkdown from "svelte-markdown";
   import Logo from '$lib/components/Logo.svelte';
   import ChatInput from "$lib/components/ChatInput.svelte";
+  import {
+    EyeSlashOutline,
+  } from 'flowbite-svelte-icons';
 
   export let data;
 
@@ -17,6 +20,7 @@
   $: messages = ($thread?.messages || []).sort((a, b) => a.created_at - b.created_at);
   $: participants = $thread?.participants || {};
   $: loading = !$thread && data?.thread?.loading;
+  $: priv = !!$thread?.thread.private;
 
   let waiting = writable(false);
   $: {
@@ -110,6 +114,13 @@
     <div class="text-center w-full" transition:blur={{amount: 10}}><Spinner color="blue" /></div>
    {/if}
   </div>
+  {#if priv}
+  <div class="absolute top-0 left-0 flex gap-2 px-4 py-2 items-center w-full bg-gradient-to-t from-transparent to-white text-sm">
+    <EyeSlashOutline size="sm" class="text-gray-400" />
+    <Span class="text-gray-400">This thread is private to:</Span>
+    <Span class="text-gray-600">{($thread?.thread?.users || []).map(u => u.email).join(", ")}</Span>
+  </div>
+  {/if}
   <div class="absolute w-full bottom-8 bg-gradient-to-t from-white to-transparent">
     <form class="w-9/12 mx-auto" action="?/newMessage" method="POST" use:enhance={handleSubmit}>
       <ChatInput loading={$submitting} />
