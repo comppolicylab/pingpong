@@ -3,10 +3,13 @@
   import { goto } from "$app/navigation";
   import { enhance } from "$app/forms";
   import ChatInput from "$lib/components/ChatInput.svelte";
+  import {GradientButton, Dropdown, DropdownItem, Label} from 'flowbite-svelte';
+  import { ChevronDownSolid } from 'flowbite-svelte-icons';
 
   export let data;
 
   let loading = writable(false);
+  let assistant = writable(data?.assistants[0] || {});
 
   $: isConfigured = data?.hasAssistants && data?.hasBilling;
 
@@ -27,9 +30,20 @@
 
 <div class="v-full h-full flex items-center">
   <div class="m-auto w-9/12">
+    <div class="text-center my-2 w-full">
+      <GradientButton color="tealToLime">{$assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></GradientButton>
+      <Dropdown>
+        {#each data.assistants as asst}
+          <DropdownItem on:click={() => $assistant = asst}>
+            {asst.name}
+          </DropdownItem>
+        {/each}
+      </Dropdown>
+    </div>
     {#if isConfigured}
       <form action="?/newThread" method="POST" use:enhance={handleSubmit}>
         <ChatInput loading={$loading} />
+        <input type="hidden" name="assistant_id" bind:value={$assistant.id} />
       </form>
     {:else}
         <div class="text-center">

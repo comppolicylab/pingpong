@@ -242,6 +242,7 @@ class Assistant(Base):
     model = Column(String)
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="assistants", foreign_keys=[class_id])
+    threads = relationship("Thread", back_populates="assistant")
     files = relationship(
         "File",
         secondary=file_assistant_association,
@@ -434,6 +435,8 @@ class Thread(Base):
     thread_id = Column(String, unique=True)
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="threads", lazy="selectin")
+    assistant_id = Column(Integer, ForeignKey("assistants.id"))
+    assistant = relationship("Assistant", back_populates="threads")
     private = Column(Boolean)
     users = relationship(
         "User",

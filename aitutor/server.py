@@ -368,21 +368,22 @@ async def list_threads(class_id: str, request: Request):
 )
 async def create_thread(class_id: str, request: Request, openai_client: OpenAIClient):
     data = await request.json()
+    req = schemas.CreateThread(**data)
 
     parties = list[models.User]()
-    if "parties" in data:
+    if req.parties:
         parties = await models.User.get_all_by_id(
-            request.state.db, [int(p) for p in data["parties"]]
+            request.state.db, [int(p) for p in req.parties]
         )
 
-    name = await generate_name(openai_client, data["message"])
+    name = await generate_name(openai_client, req.message)
 
     thread = await openai_client.beta.threads.create(
         messages=[
             {
                 "metadata": {"user_id": request.state.session.user.id},
                 "role": "user",
-                "content": data["message"],
+                "content": req.message,
             }
         ]
     )
@@ -393,6 +394,7 @@ async def create_thread(class_id: str, request: Request, openai_client: OpenAICl
         "private": True if parties else False,
         "users": parties or [],
         "thread_id": thread.id,
+        "assistant_id": req.assistant_id,
     }
 
     try:
@@ -407,7 +409,7 @@ async def create_thread(class_id: str, request: Request, openai_client: OpenAICl
         # Start a new thread run.
         run = await openai_client.beta.threads.runs.create(
             thread_id=thread.id,
-            assistant_id=assts[0].assistant_id,
+            assistant_id=req.assistant_id,
         )
 
         return {"thread": result, "run": run}
@@ -426,6 +428,7 @@ async def send_message(
 ):
     data = await request.json()
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
 
     await openai_client.beta.threads.messages.create(
         thread.thread_id,
@@ -441,7 +444,7 @@ async def send_message(
 
     run = await openai_client.beta.threads.runs.create(
         thread_id=thread.thread_id,
-        assistant_id=assts[0].assistant_id,
+        assistant_id=asst.id,
     )
 
     return {"thread": thread, "run": run}

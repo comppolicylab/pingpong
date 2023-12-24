@@ -285,13 +285,14 @@ export const uploadFile = async (f: Fetcher, classId: number, file: File) => {
  */
 export type CreateThreadRequest = {
   message: string;
+  assistant_id: number;
   parties?: number[];
 };
 
 /**
  * Create a new conversation thread.
  */
-export const createThread = async (f: Fetcher, classId: number, data: {title: string}) => {
+export const createThread = async (f: Fetcher, classId: number, data: CreateThreadRequest) => {
   const url = `class/${classId}/thread`;
   return await POST(f, url, data);
 }

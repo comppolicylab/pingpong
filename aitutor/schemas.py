@@ -68,6 +68,7 @@ class Thread(BaseModel):
     name: str
     thread_id: str
     class_id: int
+    assistant_id: int
     private: bool
     users: list["User"]
     created: str
@@ -75,6 +76,12 @@ class Thread(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class CreateThread(BaseModel):
+    parties: list[str]
+    message: str
+    assistant_id: int
 
 
 class Threads(BaseModel):
