@@ -78,7 +78,7 @@ class User(Base):
         back_populates="user", lazy="selectin"
     )
     assistants: Mapped[List["Assistant"]] = relationship(
-        "Assistant", back_populates="user"
+        "Assistant", back_populates="creator"
     )
     super_admin = Column(Boolean, default=False)
     threads = relationship(
