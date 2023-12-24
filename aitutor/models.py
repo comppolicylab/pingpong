@@ -1,3 +1,4 @@
+import json
 from typing import List, Optional
 
 from sqlalchemy import (
@@ -283,8 +284,28 @@ class Assistant(Base):
         return [row.Assistant for row in result]
 
     @classmethod
-    async def create(cls, session: AsyncSession, data: dict) -> "Assistant":
-        assistant = Assistant(**data)
+    async def create(
+        cls,
+        session: AsyncSession,
+        data: schemas.CreateAssistant,
+        *,
+        class_id: int,
+        user_id: int,
+        assistant_id: str
+    ) -> "Assistant":
+        params = data.dict()
+        file_ids = params.pop("file_ids", [])
+        files = []
+        if file_ids:
+            files = await File.get_all_by_file_id(session, file_ids)
+        params["files"] = files
+        params["tools"] = json.dumps(params["tools"])
+        params["class_id"] = class_id
+        params["creator_id"] = user_id
+        params["assistant_id"] = assistant_id
+        params["published"] = None
+
+        assistant = Assistant(**params)
         session.add(assistant)
         await session.flush()
         await session.refresh(assistant)

@@ -488,8 +488,11 @@ async def list_files(class_id: str, request: Request):
     response_model=schemas.Assistants,
 )
 async def list_assistants(class_id: str, request: Request):
-    assistants = await models.Assistant.for_class(request.state.db, int(class_id))
-    return {"assistants": assistants}
+    class_assts = await models.Assistant.for_class(request.state.db, int(class_id))
+    my_assts = await models.Assistant.for_user(
+        request.state.db, request.state.session.user.id
+    )
+    return {"class_assistants": class_assts, "my_assistants": my_assts}
 
 
 @v1.post(
@@ -501,26 +504,26 @@ async def create_assistant(
     class_id: str, request: Request, openai_client: OpenAIClient
 ):
     data = await request.json()
-    file_ids = data.pop("file_ids", [])
-    files = []
-    if file_ids:
-        files = await models.File.get_all_by_file_id(request.state.db, file_ids)
-    data["class_id"] = int(class_id)
-    data["creator_id"] = request.state.session.user.id
-    data["files"] = files
+    req = schemas.CreateAssistant(**data)
+    class_id_int = int(class_id)
+    creator_id = request.state.session.user.id
 
     new_asst = await openai_client.beta.assistants.create(
-        instructions=data["instructions"],
-        model=data["model"],
-        tools=data["tools"],
-        file_ids=file_ids,
-        metadata={"class_id": data["class_id"], "creator_id": data["creator_id"]},
+        instructions=req.instructions,
+        model=req.model,
+        tools=req.tools,
+        metadata={"class_id": class_id_int, "creator_id": creator_id},
+        file_ids=req.file_ids,
     )
-    data["assistant_id"] = new_asst.id
 
     try:
-        data["tools"] = json.dumps(data["tools"])
-        return await models.Assistant.create(request.state.db, data)
+        return await models.Assistant.create(
+            request.state.db,
+            req,
+            class_id=class_id_int,
+            user_id=creator_id,
+            assistant_id=new_asst.id,
+        )
     except Exception as e:
         await openai_client.beta.assistants.delete(new_asst.id)
         raise e

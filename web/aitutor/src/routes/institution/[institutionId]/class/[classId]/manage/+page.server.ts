@@ -25,12 +25,15 @@ export const actions = {
       }
     }
 
+    const rawFiles = body.get('files');
+    const file_ids = rawFiles ? rawFiles.split(",") : [];
+
     const data: api.CreateAssistantRequest = {
       name: body.get('name'),
       instructions: body.get('instructions'),
       model: body.get('model'),
       tools,
-      file_ids: body.get('files').split(","),
+      file_ids,
     };
 
     return await api.createAssistant(event.fetch, event.params.classId, data);
@@ -42,8 +45,10 @@ export const actions = {
   updateAssistant: async (event) => {
     const body = await event.request.formData();
 
-    const tools = body.get('tools').split(",").map(t => ({type: t}));
-    const file_ids = body.get('files').split(",");
+    const rawTools = body.get('tools');
+    const tools = rawTools ? rawTools.split(",").map(t => ({type: t})) : [];
+    const rawFiles = body.get('files');
+    const file_ids = rawFiles ? rawFiles.split(",") : [];
 
     const data: api.UpdateAssistantRequest = {
       name: body.get('name'),

@@ -1,3 +1,4 @@
+from openai.types.beta.assistant_create_params import Tool
 from openai.types.beta.threads import Run as OpenAIRun
 from openai.types.beta.threads import ThreadMessage as OpenAIMessage
 from pydantic import BaseModel, SecretStr
@@ -38,7 +39,7 @@ class Assistant(BaseModel):
     class_id: int
     creator_id: int
     files: list[File]
-    published: str
+    published: str | None
     created: str
     updated: str | None
 
@@ -46,8 +47,17 @@ class Assistant(BaseModel):
         orm_mode = True
 
 
+class CreateAssistant(BaseModel):
+    name: str
+    file_ids: list[str]
+    instructions: str
+    model: str
+    tools: list[Tool]
+
+
 class Assistants(BaseModel):
-    assistants: list[Assistant]
+    my_assistants: list[Assistant]
+    class_assistants: list[Assistant]
 
     class Config:
         orm_mode = True
