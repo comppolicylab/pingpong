@@ -55,7 +55,6 @@ const _qmethod = async <T extends BaseData>(f: Fetcher, method: "GET" | "DELETE"
 const _bmethod = async <T extends BaseData>(f: Fetcher, method: "POST" | "PUT", path: string, data?: T) => {
   const body = JSON.stringify(data);
   const headers = {"Content-Type": "application/json"};
-  console.log("Sending", body, headers, method, path);
   return await _fetch(f, method, path, headers, body);
 }
 

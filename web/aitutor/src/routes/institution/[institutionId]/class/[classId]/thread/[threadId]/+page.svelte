@@ -27,7 +27,6 @@
 
   // Get the name of the participant in the chat thread.
   const getName = (message) => {
-    console.log("THREAD NAME", $thread.thread, participants)
     if (message.role === "user") {
       const participant = participants.user[message?.metadata?.user_id];
       return participant?.name || participant?.email;

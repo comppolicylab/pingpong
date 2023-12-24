@@ -68,7 +68,6 @@ export const actions = {
   updateApiKey: async (event) => {
     const body = await event.request.formData();
     const apiKey = body.get('apiKey');
-    console.log("Updating API key", apiKey);
     return await api.updateApiKey(event.fetch, event.params.classId, apiKey);
   },
 
