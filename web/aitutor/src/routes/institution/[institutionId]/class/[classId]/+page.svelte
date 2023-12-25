@@ -34,18 +34,18 @@
 
 <div class="v-full h-full flex items-center">
   <div class="m-auto w-9/12">
-    <div class="text-center my-2 w-full">
-      <GradientButton color="tealToLime">{$assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></GradientButton>
-      <Dropdown>
-        {#each data.assistants as asst}
-          <DropdownItem on:click={() => $assistant = asst}>
-            {asst.name}
-            <Helper class="text-xs">{data.assistantCreators[asst.creator_id].email}</Helper>
-          </DropdownItem>
-        {/each}
-      </Dropdown>
-    </div>
     {#if isConfigured}
+      <div class="text-center my-2 w-full">
+        <GradientButton color="tealToLime">{$assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></GradientButton>
+        <Dropdown>
+          {#each data.assistants as asst}
+            <DropdownItem on:click={() => $assistant = asst}>
+              {asst.name}
+              <Helper class="text-xs">{data.assistantCreators[asst.creator_id].email}</Helper>
+            </DropdownItem>
+          {/each}
+        </Dropdown>
+      </div>
       <form action="?/newThread" method="POST" use:enhance={handleSubmit}>
         <ChatInput loading={$loading} />
         <input type="hidden" name="assistant_id" bind:value={$assistant.id} />

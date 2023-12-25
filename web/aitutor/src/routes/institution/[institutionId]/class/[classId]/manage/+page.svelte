@@ -3,7 +3,7 @@
   import {page} from '$app/stores';
   import {beforeNavigate} from '$app/navigation';
   import * as api from '$lib/api';
-  import { GradientButton, Secondary, Span, List, Li, Card, MultiSelect, Textarea, Accordion, AccordionItem, Dropzone, Heading, Button, Label, Input } from "flowbite-svelte";
+  import { Listgroup, GradientButton, Secondary, Span, List, Li, Card, MultiSelect, Textarea, Accordion, AccordionItem, Dropzone, Heading, Button, Label, Input } from "flowbite-svelte";
   import ManageAssistant from "$lib/components/ManageAssistant.svelte";
   import ViewAssistant from "$lib/components/ViewAssistant.svelte";
   import Info from "$lib/components/Info.svelte";
@@ -17,6 +17,8 @@
   $: editingAssistant = parseInt($page.url.searchParams.get('edit-assistant') || '0', 10);
   $: assistants = data?.assistants || [];
   $: files = data?.files || [];
+  $: students = (data?.classUsers || []).filter(u => u.title === 'student');
+  $: tt = (data?.classUsers || []).filter(u => u.title !== 'student');
 
   // Check if we are editing an assistant and prompt if so.
   beforeNavigate((nav) => {
@@ -98,7 +100,18 @@
       <Heading customSize="text-xl font-bold" tag="h3"><Secondary class="text-xl">Teaching Team</Secondary></Heading>
       <Info>Manage teacher and course assistants.</Info>
     </div>
-    <pre>todo</pre>
+    <div class="col-span-2">
+      {#if tt.length === 0}
+        <div class="text-gray-400">Teaching team has not been configured yet.</div>
+      {:else}
+      <Listgroup items={tt} let:item on:click={console.log}>
+        {item.email}
+      </Listgroup>
+      {/if}
+      <form action="?/manageUsers" method="POST">
+
+      </form>
+    </div>
   </div>
 
   <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
@@ -106,9 +119,18 @@
       <Heading customSize="text-xl font-bold" tag="h3"><Secondary class="text-xl">Students</Secondary></Heading>
       <Info>Manage students in the class.</Info>
     </div>
-    <form action="?/manageUsers" method="POST">
+    <div class="col-span-2">
+      {#if students.length === 0}
+        <div class="text-gray-400">No students have been invited yet.</div>
+      {:else}
+      <Listgroup items={students} let:item on:click={console.log}>
+        {item.email}
+      </Listgroup>
+      {/if}
+      <form action="?/manageUsers" method="POST">
 
-    </form>
+      </form>
+    </div>
   </div>
 
   <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
