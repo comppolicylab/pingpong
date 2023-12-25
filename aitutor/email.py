@@ -5,6 +5,7 @@ from typing import Protocol
 from azure.communication.email import EmailClient
 
 from .config import config
+from .schemas import CreateInvite
 
 
 class EmailSender(Protocol):
@@ -29,7 +30,6 @@ class AzureEmailSender(EmailSender):
                 "plainText": message,
             },
         }
-        print("TRYING TO SEND", azure_msg)
         poller = self.client.begin_send(azure_msg)
 
         # Create a future for the polling loop
@@ -44,4 +44,17 @@ class AzureEmailSender(EmailSender):
 
 
 def get_default_sender() -> EmailSender:
+    """Get the default email send client based on config."""
     return AzureEmailSender(config.email.from_address, config.email.connection_string)
+
+
+async def send_invite(sender: EmailSender, invite: CreateInvite):
+    """Send an email invitation for a user to join a class."""
+    subject = f"You've been invited to join {invite.class_name}!"
+    message = f"""
+    Hello! You've been invited to join {invite.class_name} on AI Tutor. \
+            To join, click the link below:
+
+    {config.url("/login")}
+    """
+    await sender.send(invite.email, subject, message)

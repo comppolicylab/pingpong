@@ -1,4 +1,5 @@
 import json
+from enum import Enum
 from typing import List, Optional
 
 from sqlalchemy import (
@@ -41,6 +42,37 @@ class UserClassRole(Base):
     user = relationship("User", back_populates="classes")
     class_ = relationship("Class", back_populates="users")
 
+    @classmethod
+    async def get(
+        cls, session: AsyncSession, user_id: int, class_id: int
+    ) -> Optional["UserClassRole"]:
+        stmt = select(UserClassRole).where(
+            and_(UserClassRole.user_id == user_id, UserClassRole.class_id == class_id)
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        user_id: int,
+        class_id: int,
+        ucr: schemas.CreateUserClassRole,
+    ) -> "UserClassRole":
+        user_class_role = UserClassRole(
+            user_id=user_id, class_id=class_id, title=ucr.title, role=ucr.role
+        )
+        session.add(user_class_role)
+        return user_class_role
+
+    @classmethod
+    async def delete(cls, session: AsyncSession, user_id: int, class_id: int) -> None:
+        stmt = delete(UserClassRole).where(
+            and_(UserClassRole.user_id == user_id, UserClassRole.class_id == class_id)
+        )
+        await session.execute(stmt)
+        return None
+
 
 class UserInstitutionRole(Base):
     __tablename__ = "users_institutions"
@@ -66,11 +98,17 @@ user_thread_association = Table(
 )
 
 
+class UserState(Enum):
+    UNVERIFIED = "unverified"
+    VERIFIED = "verified"
+    BANNED = "banned"
+
+
 class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name = Column(String)
+    name = Column(String, nullable=True)
     email = Column(String, unique=True)
     state = Column(String)
     classes: Mapped[List["UserClassRole"]] = relationship(
@@ -89,10 +127,30 @@ class User(Base):
     created = Column(Integer, server_default=func.now())
     updated = Column(Integer, index=True, onupdate=func.now())
 
+    async def verify(self, session: AsyncSession) -> None:
+        self.state = UserState.VERIFIED
+        session.add(self)
+
     @classmethod
     async def get_by_email(cls, session: AsyncSession, email: str) -> "User":
         stmt = select(User).where(User.email == email)
         return await session.scalar(stmt)
+
+    @classmethod
+    async def get_or_create_by_email(
+        cls,
+        session: AsyncSession,
+        email: str,
+        initial_state: UserState = UserState.UNVERIFIED,
+    ) -> "User":
+        existing = await cls.get_by_email(session, email)
+        if existing:
+            return existing
+        user = User(email=email, state=initial_state)
+        session.add(user)
+        session.flush()
+        session.refresh(user)
+        return user
 
     @classmethod
     async def get_by_id(cls, session: AsyncSession, id: int) -> "User":

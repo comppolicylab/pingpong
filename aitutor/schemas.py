@@ -4,6 +4,7 @@ from openai.types.beta.threads import ThreadMessage as OpenAIMessage
 from pydantic import BaseModel, SecretStr
 
 from .gravatar import get_email_hash, get_gravatar_image
+from .permissions import ClassRole
 
 
 class GenericStatus(BaseModel):
@@ -212,3 +213,33 @@ class ThreadWithMeta(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class CreateUserClassRole(BaseModel):
+    email: str
+    role: ClassRole
+    title: str
+
+
+class CreateUserClassRoles(BaseModel):
+    roles: list[CreateUserClassRole]
+
+
+class UserClassRole(BaseModel):
+    user_id: int
+    class_id: int
+    role: ClassRole
+    title: str
+
+    class Config:
+        orm_mode = True
+
+
+class UpdateUserClassRole(BaseModel):
+    role: ClassRole
+    title: str
+
+
+class CreateInvite(BaseModel):
+    email: str
+    class_name: str

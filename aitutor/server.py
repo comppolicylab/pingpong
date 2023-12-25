@@ -6,7 +6,15 @@ from typing import Annotated
 
 import jwt
 import openai
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFile
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import JSONResponse, RedirectResponse
 from jwt.exceptions import PyJWTError
 
@@ -24,10 +32,10 @@ from .auth import (
 )
 from .config import config
 from .db import async_session
-from .email import get_default_sender
+from .email import get_default_sender, send_invite
 from .errors import sentry
 from .metrics import metrics
-from .permission import CanManage, CanRead, CanWrite, IsSuper, LoggedIn
+from .permission import CanManage, CanRead, CanWrite, ClassRole, IsSuper, LoggedIn
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +73,10 @@ async def parse_session_token(request: Request, call_next):
             user = await models.User.get_by_id(request.state.db, int(token.sub))
             if not user:
                 raise ValueError("User does not exist")
+
+            # Modify user state if necessary
+            if user.state == models.UserState.UNVERIFIED:
+                await user.verify(request.state.db)
 
             request.state.session = SessionState(
                 token=token,
@@ -215,7 +227,17 @@ async def get_institution_classes(institution_id: str, request: Request):
 async def create_class(institution_id: str, request: Request):
     data = await request.json()
     data["institution_id"] = int(institution_id)
-    return await models.Class.create(request.state.db, schemas.CreateClass(**data))
+    new_class = await models.Class.create(request.state.db, schemas.CreateClass(**data))
+
+    # Create an entry for the creator as the owner
+    ucr = schemas.UserClassRole(
+        user_id=request.state.session.user.id,
+        class_id=new_class.id,
+        role=ClassRole.ADMIN,
+        title="Owner",
+    )
+    await request.state.db.add(ucr)
+    return new_class
 
 
 @v1.get(
@@ -234,6 +256,72 @@ async def get_class(class_id: str, request: Request):
 )
 async def update_class(class_id: str, update: schemas.UpdateClass, request: Request):
     return await models.Class.update(request.state.db, int(class_id), update)
+
+
+@v1.post(
+    "/class/{class_id}/user",
+    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    response_model=schemas.UserClassRole,
+)
+async def add_users_to_class(class_id: str, request: Request, tasks: BackgroundTasks):
+    data = await request.json()
+    new_ucr = schemas.CreateUserClassRoles(**data)
+    cid = int(class_id)
+    class_ = await models.Class.get_by_id(request.state.db, cid)
+    result: list[schemas.UserClassRole] = []
+    new_: list[schemas.CreateInvite] = []
+    for ucr in new_ucr.roles:
+        user = await models.User.get_or_create_by_email(request.state.db, ucr.email)
+        if user.id == request.state.session.user.id:
+            if ucr.role != ClassRole.ADMIN:
+                raise HTTPException(status_code=403, detail="Cannot demote yourself")
+
+        existing = await models.UserClassRole.get(request.state.db, user.id, cid)
+        if existing:
+            existing.role = ucr.role
+            existing.title = ucr.title
+            result.append(existing)
+            request.state.db.add(existing)
+        else:
+            # Make sure the user exists...
+            added = await models.UserClassRole.create(
+                request.state.db, user.id, cid, ucr
+            )
+            new_.append(
+                schemas.CreateInvite(
+                    email=user.email,
+                    class_name=class_.name,
+                )
+            )
+            result.append(added)
+
+    # Send emails to new users in the background
+    for invite in new_:
+        sender = get_default_sender()
+        tasks.add_task(send_invite, sender, invite)
+
+    return new_ucr
+
+
+@v1.put(
+    "/class/{class_id}/user/{user_id}",
+    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    response_model=schemas.UserClassRole,
+)
+async def update_user_class_role(
+    class_id: str, user_id: str, update: schemas.UpdateUserClassRole, request: Request
+):
+    cid = int(class_id)
+    uid = int(user_id)
+    if uid == request.state.session.user.id and update.role != ClassRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Cannot demote yourself")
+    existing = await models.UserClassRole.get(request.state.db, uid, cid)
+    if not existing:
+        raise HTTPException(status_code=404, detail="User not found in class")
+    existing.role = update.role
+    existing.title = update.title
+    request.state.db.add(existing)
+    return existing
 
 
 @v1.put(
