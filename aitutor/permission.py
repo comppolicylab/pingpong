@@ -1,15 +1,8 @@
 from abc import abstractmethod
-from enum import Enum
 
 from fastapi import HTTPException, Request
 
-from .auth import SessionStatus
-
-
-class ClassRole(Enum):
-    ADMIN = "admin"
-    WRITE = "write"
-    READ = "read"
+from .schemas import SessionStatus
 
 
 class Expression:

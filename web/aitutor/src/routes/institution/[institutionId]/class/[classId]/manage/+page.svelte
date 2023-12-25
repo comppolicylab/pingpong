@@ -13,7 +13,7 @@
 
   const blurred = writable(true);
   $: apiKey = data.apiKey || '';
-  $: apiKeyBlur = apiKey.substring(0,6) + '**************' + apiKey.substring(apiKey.length - 6);
+  $: apiKeyBlur = apiKey.substring(0,6) + '**************' + apiKey.substring(Math.max(6, apiKey.length - 6));
   $: editingAssistant = parseInt($page.url.searchParams.get('edit-assistant') || '0', 10);
   $: assistants = data?.assistants || [];
   $: files = data?.files || [];
@@ -106,7 +106,9 @@
       <Heading customSize="text-xl font-bold" tag="h3"><Secondary class="text-xl">Students</Secondary></Heading>
       <Info>Manage students in the class.</Info>
     </div>
-    <pre>todo</pre>
+    <form action="?/manageUsers" method="POST">
+
+    </form>
   </div>
 
   <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">

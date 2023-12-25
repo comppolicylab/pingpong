@@ -1,48 +1,11 @@
-from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
-from enum import StrEnum, auto
-from typing import Optional, cast
+from typing import cast
 
 import jwt
 from jwt.exceptions import PyJWTError
 
 from .config import config
-from .models import User
-from .schemas import Profile
-
-
-@dataclass
-class AuthToken:
-    """Auth Token - minimal token used to log in."""
-
-    sub: str
-    exp: int
-    iat: int
-
-
-@dataclass
-class SessionToken:
-    """Session Token - stores information about user for a session."""
-
-    sub: str
-    exp: int
-    iat: int
-
-
-class SessionStatus(StrEnum):
-    VALID = auto()
-    MISSING = auto()
-    INVALID = auto()
-    ERROR = auto()
-
-
-@dataclass
-class SessionState:
-    status: SessionStatus
-    error: Optional[Exception] = None
-    token: Optional[SessionToken] = None
-    user: Optional[User] = None
-    profile: Optional[Profile] = None
+from .schemas import AuthToken, SessionToken
 
 
 def encode_session_token(user_id: int, expiry: int = 86_400) -> str:
@@ -68,7 +31,7 @@ def decode_session_token(token: str) -> SessionToken:
         SessionToken: Session Token
     """
     auth_token = decode_auth_token(token)
-    return SessionToken(**asdict(auth_token))
+    return SessionToken(**auth_token.dict())
 
 
 def encode_auth_token(user_id: int, expiry: int = 600) -> str:
@@ -100,7 +63,7 @@ def encode_auth_token(user_id: int, expiry: int = 600) -> str:
     return cast(
         str,
         jwt.encode(
-            asdict(tok),
+            tok.dict(),
             secret.key,
             algorithm=secret.algorithm,
         ),

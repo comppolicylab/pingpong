@@ -23,8 +23,6 @@ import aitutor.schemas as schemas
 
 from .ai import generate_name, get_openai_client, hash_thread
 from .auth import (
-    SessionState,
-    SessionStatus,
     decode_auth_token,
     decode_session_token,
     encode_session_token,
@@ -35,7 +33,7 @@ from .db import async_session
 from .email import get_default_sender, send_invite
 from .errors import sentry
 from .metrics import metrics
-from .permission import CanManage, CanRead, CanWrite, ClassRole, IsSuper, LoggedIn
+from .permission import CanManage, CanRead, CanWrite, IsSuper, LoggedIn
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +62,8 @@ async def parse_session_token(request: Request, call_next):
     try:
         session_token = request.cookies["session"]
     except KeyError:
-        request.state.session = SessionState(
-            status=SessionStatus.MISSING,
+        request.state.session = schemas.SessionState(
+            status=schemas.SessionStatus.MISSING,
         )
     else:
         try:
@@ -75,25 +73,25 @@ async def parse_session_token(request: Request, call_next):
                 raise ValueError("User does not exist")
 
             # Modify user state if necessary
-            if user.state == models.UserState.UNVERIFIED:
+            if user.state == schemas.UserState.UNVERIFIED:
                 await user.verify(request.state.db)
 
-            request.state.session = SessionState(
+            request.state.session = schemas.SessionState(
                 token=token,
-                status=SessionStatus.VALID,
+                status=schemas.SessionStatus.VALID,
                 error=None,
                 user=user,
                 profile=schemas.Profile.from_email(user.email),
             )
         except PyJWTError as e:
-            request.state.session = SessionState(
-                status=SessionStatus.INVALID,
-                error=e,
+            request.state.session = schemas.SessionState(
+                status=schemas.SessionStatus.INVALID,
+                error=str(e),
             )
         except Exception as e:
-            request.state.session = SessionState(
-                status=SessionStatus.ERROR,
-                error=e,
+            request.state.session = schemas.SessionState(
+                status=schemas.SessionStatus.ERROR,
+                error=str(e),
             )
 
     return await call_next(request)
@@ -230,13 +228,13 @@ async def create_class(institution_id: str, request: Request):
     new_class = await models.Class.create(request.state.db, schemas.CreateClass(**data))
 
     # Create an entry for the creator as the owner
-    ucr = schemas.UserClassRole(
+    ucr = models.UserClassRole(
         user_id=request.state.session.user.id,
         class_id=new_class.id,
-        role=ClassRole.ADMIN,
+        role=schemas.Role.ADMIN,
         title="Owner",
     )
-    await request.state.db.add(ucr)
+    request.state.db.add(ucr)
     return new_class
 
 
@@ -258,6 +256,16 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
     return await models.Class.update(request.state.db, int(class_id), update)
 
 
+@v1.get(
+    "/class/{class_id}/users",
+    dependencies=[Depends(IsSuper() | CanWrite(models.Class, "class_id"))],
+    response_model=schemas.ClassUsers,
+)
+async def list_class_users(class_id: str, request: Request):
+    users = await models.Class.get_users(request.state.db, int(class_id))
+    return {"users": users}
+
+
 @v1.post(
     "/class/{class_id}/user",
     dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
@@ -273,7 +281,7 @@ async def add_users_to_class(class_id: str, request: Request, tasks: BackgroundT
     for ucr in new_ucr.roles:
         user = await models.User.get_or_create_by_email(request.state.db, ucr.email)
         if user.id == request.state.session.user.id:
-            if ucr.role != ClassRole.ADMIN:
+            if ucr.role != schemas.Role.ADMIN:
                 raise HTTPException(status_code=403, detail="Cannot demote yourself")
 
         existing = await models.UserClassRole.get(request.state.db, user.id, cid)
@@ -313,7 +321,7 @@ async def update_user_class_role(
 ):
     cid = int(class_id)
     uid = int(user_id)
-    if uid == request.state.session.user.id and update.role != ClassRole.ADMIN:
+    if uid == request.state.session.user.id and update.role != schemas.Role.ADMIN:
         raise HTTPException(status_code=403, detail="Cannot demote yourself")
     existing = await models.UserClassRole.get(request.state.db, uid, cid)
     if not existing:
@@ -693,6 +701,8 @@ async def delete_assistant(
 @v1.get("/me")
 async def get_me(request: Request):
     """Get the session information."""
+    print("\n\n\n\nME:", request.state.session)
+    print("\n\n\n")
     return request.state.session
 
 

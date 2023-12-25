@@ -280,6 +280,14 @@ export const uploadFile = async (f: Fetcher, classId: number, file: File) => {
 }
 
 /**
+ * Fetch users in a class.
+ */
+export const getClassUsers = async (f: Fetcher, classId: number) => {
+  const url = `class/${classId}/users`;
+  return await GET(f, url);
+}
+
+/**
  * Parameters for creating a new thread.
  */
 export type CreateThreadRequest = {

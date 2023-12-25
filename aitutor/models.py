@@ -1,10 +1,9 @@
 import json
-from enum import Enum
 from typing import List, Optional
 
+from sqlalchemy import Boolean, Column
+from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
-    Boolean,
-    Column,
     ForeignKey,
     Index,
     Integer,
@@ -17,7 +16,13 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    joinedload,
+    mapped_column,
+    relationship,
+)
 from sqlalchemy.sql import func
 from sqlalchemy.sql.expression import false
 
@@ -37,7 +42,7 @@ class UserClassRole(Base):
     class_id: Mapped[int] = mapped_column(
         ForeignKey("classes.id"), nullable=False, primary_key=True
     )
-    role: Mapped[Optional[str]]
+    role = Column(SQLEnum(schemas.Role), nullable=True)
     title: Mapped[Optional[str]]
     user = relationship("User", back_populates="classes")
     class_ = relationship("Class", back_populates="users")
@@ -83,7 +88,7 @@ class UserInstitutionRole(Base):
     institution_id: Mapped[int] = mapped_column(
         ForeignKey("institutions.id"), nullable=False, primary_key=True
     )
-    role: Mapped[Optional[str]]
+    role = Column(SQLEnum(schemas.Role), nullable=True)
     title: Mapped[Optional[str]]
     user = relationship("User", back_populates="institutions")
     institution = relationship("Institution", back_populates="users")
@@ -98,19 +103,13 @@ user_thread_association = Table(
 )
 
 
-class UserState(Enum):
-    UNVERIFIED = "unverified"
-    VERIFIED = "verified"
-    BANNED = "banned"
-
-
 class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String, nullable=True)
     email = Column(String, unique=True)
-    state = Column(String)
+    state = Column(SQLEnum(schemas.UserState), default=schemas.UserState.UNVERIFIED)
     classes: Mapped[List["UserClassRole"]] = relationship(
         back_populates="user", lazy="selectin"
     )
@@ -128,7 +127,7 @@ class User(Base):
     updated = Column(Integer, index=True, onupdate=func.now())
 
     async def verify(self, session: AsyncSession) -> None:
-        self.state = UserState.VERIFIED
+        self.state = schemas.UserState.VERIFIED
         session.add(self)
 
     @classmethod
@@ -141,7 +140,7 @@ class User(Base):
         cls,
         session: AsyncSession,
         email: str,
-        initial_state: UserState = UserState.UNVERIFIED,
+        initial_state: schemas.UserState = schemas.UserState.UNVERIFIED,
     ) -> "User":
         existing = await cls.get_by_email(session, email)
         if existing:
@@ -201,7 +200,7 @@ class Institution(Base):
             and_(
                 UserInstitutionRole.user_id == user.id,
                 UserInstitutionRole.institution_id == institution_id,
-                UserInstitutionRole.role == "admin",
+                UserInstitutionRole.role == schemas.Role.ADMIN,
             )
         )
         result = await session.scalar(stmt)
@@ -413,6 +412,28 @@ class Class(Base):
     updated = Column(Integer, index=True, onupdate=func.now())
 
     @classmethod
+    async def get_users(
+        cls, session: AsyncSession, class_id: int
+    ) -> list[schemas.ClassUser]:
+        stmt = (
+            select(UserClassRole)
+            .options(joinedload(UserClassRole.user))
+            .where(UserClassRole.class_id == class_id)
+        )
+        result = await session.execute(stmt)
+        return [
+            schemas.ClassUser(
+                id=row.UserClassRole.user_id,
+                name=row.UserClassRole.user.name,
+                email=row.UserClassRole.user.email,
+                state=row.UserClassRole.user.state,
+                role=row.UserClassRole.role,
+                title=row.UserClassRole.title,
+            )
+            for row in result
+        ]
+
+    @classmethod
     async def get_api_key(cls, session: AsyncSession, id: int) -> str | None:
         stmt = select(Class.api_key).where(Class.id == id)
         return await session.scalar(stmt)
@@ -432,7 +453,7 @@ class Class(Base):
         # Match the class._users to the given user by id:
         for user_class in class_.users:
             if user_class.user_id == user.id:
-                return user_class.role == "admin"
+                return user_class.role == schemas.Role.ADMIN
 
         return False
 
@@ -446,7 +467,7 @@ class Class(Base):
         # Match the class._users to the given user by id:
         for user_class in class_.users:
             if user_class.user_id == user.id:
-                return user_class.role in ("admin", "write")
+                return user_class.role in (schemas.Role.ADMIN, schemas.Role.WRITE)
 
         return False
 

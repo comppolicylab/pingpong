@@ -1,10 +1,11 @@
+from enum import Enum, StrEnum, auto
+
 from openai.types.beta.assistant_create_params import Tool
 from openai.types.beta.threads import Run as OpenAIRun
 from openai.types.beta.threads import ThreadMessage as OpenAIMessage
 from pydantic import BaseModel, SecretStr
 
 from .gravatar import get_email_hash, get_gravatar_image
-from .permissions import ClassRole
 
 
 class GenericStatus(BaseModel):
@@ -37,14 +38,14 @@ class File(BaseModel):
     updated: str | None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class Files(BaseModel):
     files: list[File]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class Assistant(BaseModel):
@@ -61,7 +62,7 @@ class Assistant(BaseModel):
     updated: str | None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class CreateAssistant(BaseModel):
@@ -78,7 +79,7 @@ class Assistants(BaseModel):
     creators: dict[int, Profile]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class UserPlaceholder(BaseModel):
@@ -98,7 +99,7 @@ class Thread(BaseModel):
     updated: str | None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class CreateThread(BaseModel):
@@ -111,23 +112,80 @@ class Threads(BaseModel):
     threads: list[Thread]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
+
+
+class Role(Enum):
+    ADMIN = "admin"
+    WRITE = "write"
+    READ = "read"
+
+
+class CreateUserClassRole(BaseModel):
+    email: str
+    role: Role
+    title: str
+
+
+class CreateUserClassRoles(BaseModel):
+    roles: list[CreateUserClassRole]
+
+
+class UserClassRole(BaseModel):
+    user_id: int
+    class_id: int
+    role: Role
+    title: str
+
+    class Config:
+        from_attributes = True
+
+
+class UpdateUserClassRole(BaseModel):
+    role: Role
+    title: str
+
+
+class CreateInvite(BaseModel):
+    email: str
+    class_name: str
+
+
+class UserState(Enum):
+    UNVERIFIED = "unverified"
+    VERIFIED = "verified"
+    BANNED = "banned"
 
 
 class User(BaseModel):
     id: int
     name: str
     email: str
-    state: str
-    classes: list["Class"]
+    state: UserState
+    classes: list["UserClassRole"]
     institutions: list["Institution"]
     super_admin: bool
-    threads: list[Thread]
     created: str
     updated: str | None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
+
+
+class ClassUser(BaseModel):
+    id: int
+    name: str
+    email: str
+    state: UserState
+    role: Role
+    title: str
+
+
+class ClassUsers(BaseModel):
+    users: list[ClassUser]
+
+    class Config:
+        from_attributes = True
 
 
 class Institution(BaseModel):
@@ -139,14 +197,14 @@ class Institution(BaseModel):
     updated: str | None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class Institutions(BaseModel):
     institutions: list[Institution]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class Class(BaseModel):
@@ -156,13 +214,13 @@ class Class(BaseModel):
     institution_id: int
     assistants: list[Assistant]
     threads: list[Thread]
-    users: list[User]
+    users: list[UserClassRole]
     created: str
     updated: str | None
     api_key: SecretStr | None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class CreateClass(BaseModel):
@@ -188,7 +246,7 @@ class Classes(BaseModel):
     classes: list[Class]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class ThreadRun(BaseModel):
@@ -196,7 +254,7 @@ class ThreadRun(BaseModel):
     run: OpenAIRun | None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class ThreadParticipants(BaseModel):
@@ -212,34 +270,35 @@ class ThreadWithMeta(BaseModel):
     participants: ThreadParticipants
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
-class CreateUserClassRole(BaseModel):
-    email: str
-    role: ClassRole
-    title: str
+class AuthToken(BaseModel):
+    """Auth Token - minimal token used to log in."""
+
+    sub: str
+    exp: int
+    iat: int
 
 
-class CreateUserClassRoles(BaseModel):
-    roles: list[CreateUserClassRole]
+class SessionToken(BaseModel):
+    """Session Token - stores information about user for a session."""
+
+    sub: str
+    exp: int
+    iat: int
 
 
-class UserClassRole(BaseModel):
-    user_id: int
-    class_id: int
-    role: ClassRole
-    title: str
-
-    class Config:
-        orm_mode = True
+class SessionStatus(StrEnum):
+    VALID = auto()
+    MISSING = auto()
+    INVALID = auto()
+    ERROR = auto()
 
 
-class UpdateUserClassRole(BaseModel):
-    role: ClassRole
-    title: str
-
-
-class CreateInvite(BaseModel):
-    email: str
-    class_name: str
+class SessionState(BaseModel):
+    status: SessionStatus
+    error: str | None = None
+    token: SessionToken | None = None
+    user: User | None = None
+    profile: Profile | None = None
