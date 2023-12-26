@@ -269,7 +269,7 @@ async def list_class_users(class_id: str, request: Request):
 @v1.post(
     "/class/{class_id}/user",
     dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
-    response_model=schemas.UserClassRole,
+    response_model=schemas.UserClassRoles,
 )
 async def add_users_to_class(class_id: str, request: Request, tasks: BackgroundTasks):
     data = await request.json()
@@ -308,7 +308,7 @@ async def add_users_to_class(class_id: str, request: Request, tasks: BackgroundT
         sender = get_default_sender()
         tasks.add_task(send_invite, sender, invite)
 
-    return new_ucr
+    return {"roles": result}
 
 
 @v1.put(

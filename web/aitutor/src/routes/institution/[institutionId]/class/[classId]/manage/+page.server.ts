@@ -5,10 +5,31 @@ import {redirect} from "@sveltejs/kit";
 export const actions = {
 
   /**
+   * Create a user-class association.
+   */
+  createUser: async (event) => {
+    return await forwardRequest((f, d) => api.createClassUser(f, event.params.classId, d), event);
+  },
+
+  /**
+   * Update a user in a class.
+   */
+  updateUser: async (event) => {
+    return await forwardRequest((f, d) => {
+      // User ID is in the URL, not the body.
+      const userId = parseInt(d.user_id);
+      delete d.user_id;
+      // Email can't be updated.
+      delete d.email;
+      return api.updateClassUser(f, event.params.classId, userId, d);
+    }, event);
+  },
+
+  /**
    * Update the class metadata
    */
   updateClass: async (event) => {
-    return await forwardRequest((f, d) => api.updateClass(f, event.params.classId, d), event);
+    return await forwardRequest((f, d) => api.updateClassUser(f, event.params.classId, d), event);
   },
 
   /**

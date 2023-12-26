@@ -141,6 +141,10 @@ class UserClassRole(BaseModel):
         from_attributes = True
 
 
+class UserClassRoles(BaseModel):
+    roles: list[UserClassRole]
+
+
 class UpdateUserClassRole(BaseModel):
     role: Role
     title: str
@@ -174,7 +178,7 @@ class User(BaseModel):
 
 class ClassUser(BaseModel):
     id: int
-    name: str
+    name: str | None
     email: str
     state: UserState
     role: Role

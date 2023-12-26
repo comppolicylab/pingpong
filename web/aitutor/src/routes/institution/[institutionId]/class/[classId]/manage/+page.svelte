@@ -3,7 +3,9 @@
   import {page} from '$app/stores';
   import {beforeNavigate} from '$app/navigation';
   import * as api from '$lib/api';
-  import { Listgroup, GradientButton, Secondary, Span, List, Li, Card, MultiSelect, Textarea, Accordion, AccordionItem, Dropzone, Heading, Button, Label, Input } from "flowbite-svelte";
+  import { Modal, Listgroup, GradientButton, Secondary, Span, List, Li, Card, MultiSelect, Textarea, Accordion, AccordionItem, Dropzone, Heading, Button, Label, Input } from "flowbite-svelte";
+  import ManageUser from "$lib/components/ManageUser.svelte";
+  import ViewUser from "$lib/components/ViewUser.svelte";
   import ManageAssistant from "$lib/components/ManageAssistant.svelte";
   import ViewAssistant from "$lib/components/ViewAssistant.svelte";
   import Info from "$lib/components/Info.svelte";
@@ -11,14 +13,16 @@
 
   export let data;
 
+  let ttModal = false;
+  let studentModal = false;
   const blurred = writable(true);
   $: apiKey = data.apiKey || '';
   $: apiKeyBlur = apiKey.substring(0,6) + '**************' + apiKey.substring(Math.max(6, apiKey.length - 6));
   $: editingAssistant = parseInt($page.url.searchParams.get('edit-assistant') || '0', 10);
   $: assistants = data?.assistants || [];
   $: files = data?.files || [];
-  $: students = (data?.classUsers || []).filter(u => u.title === 'student');
-  $: tt = (data?.classUsers || []).filter(u => u.title !== 'student');
+  $: students = (data?.classUsers || []).filter(u => u.title.toLowerCase() === 'student');
+  $: tt = (data?.classUsers || []).filter(u => u.title.toLowerCase() !== 'student');
 
   // Check if we are editing an assistant and prompt if so.
   beforeNavigate((nav) => {
@@ -64,7 +68,6 @@
     </div>
   </form>
 
-
   <form action="?/updateApiKey" class="pt-6" method="POST" >
     <div class="grid grid-cols-3 gap-x-6 gap-y-8">
       <div>
@@ -104,15 +107,20 @@
     </div>
     <div class="col-span-2">
       {#if tt.length === 0}
-        <div class="text-gray-400">Teaching team has not been configured yet.</div>
+        <div class="text-gray-400 mb-4">Teaching team has not been configured yet.</div>
       {:else}
-      <Listgroup items={tt} let:item on:click={console.log}>
-        {item.email}
-      </Listgroup>
+        <div class="mb-4">
+        <Listgroup items={tt} let:item>
+          <ViewUser user={item} on:click={() => ttModal = item} />
+        </Listgroup>
+        </div>
       {/if}
-      <form action="?/manageUsers" method="POST">
-
-      </form>
+      <GradientButton color="cyanToBlue" on:click={() => ttModal = true}>Invite teaching team</GradientButton>
+      {#if ttModal}
+        <Modal bind:open={ttModal} title="Manage the teaching team">
+          <ManageUser on:cancel={() => ttModal = false} user={typeof ttModal === 'boolean' ? null : ttModal} />
+        </Modal>
+      {/if}
     </div>
   </div>
 
@@ -123,15 +131,20 @@
     </div>
     <div class="col-span-2">
       {#if students.length === 0}
-        <div class="text-gray-400">No students have been invited yet.</div>
+        <div class="text-gray-400 mb-4">No students have been invited yet.</div>
       {:else}
-      <Listgroup items={students} let:item on:click={console.log}>
-        {item.email}
+      <div class="mb-4">
+        <Listgroup active items={students} let:item>
+          <ViewUser user={item} on:click={() => studentModal = item} />
       </Listgroup>
+      </div>
       {/if}
-      <form action="?/manageUsers" method="POST">
-
-      </form>
+      <GradientButton color="cyanToBlue" on:click={() => studentModal = true}>Invite students</GradientButton>
+      {#if studentModal}
+        <Modal bind:open={studentModal} title="Manage students">
+          <ManageUser user={typeof studentModal === 'boolean' ? null : studentModal} on:cancel={() => studentModal = false} />
+        </Modal>
+      {/if}
     </div>
   </div>
 

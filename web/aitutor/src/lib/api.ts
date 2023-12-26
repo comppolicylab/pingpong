@@ -288,6 +288,53 @@ export const getClassUsers = async (f: Fetcher, classId: number) => {
 }
 
 /**
+ * Parameters for creating a new class user.
+ */
+export type CreateClassUserRequest = {
+  email: string;
+  role: string;
+  title: string;
+}
+
+/**
+ * Create a new class user.
+ */
+export const createClassUser = async (f: Fetcher, classId: number, data: CreateClassUserRequest) => {
+  return createClassUsers(f, classId, {roles: [data]});
+}
+
+/**
+ * Plural version of CreateClassUserRequest.
+ */
+export type CreateClassUsersRequest = {
+  roles: CreateClassUserRequest[];
+}
+
+/**
+ * Create multiple class users.
+ */
+export const createClassUsers = async (f: Fetcher, classId: number, data: CreateClassUsersRequest) => {
+  const url = `class/${classId}/user`;
+  return await POST(f, url, data);
+}
+
+/**
+ * Parameters for updating a class user.
+ */
+export type UpdateClassUserRequest = {
+  role: string;
+  title: string;
+}
+
+/**
+ * Update a class user.
+ */
+export const updateClassUser = async (f: Fetcher, classId: number, userId: number, data: UpdateClassUserRequest) => {
+  const url = `class/${classId}/user/${userId}`;
+  return await PUT(f, url, data);
+}
+
+/**
  * Parameters for creating a new thread.
  */
 export type CreateThreadRequest = {
@@ -357,4 +404,24 @@ export const loginWithMagicLink = async (f: Fetcher, email: string) => {
  */
 export const languageModels = [
     "gpt-4-1106-preview",
+];
+
+/**
+ * List of available roles. These map to the API.
+ */
+export const ROLES = new Map([
+  ["admin", "Admin"],
+  ["write", "Write"],
+  ["read", "Read"],
+  ]);
+
+/**
+ * Titles for users. These are arbitary.
+ */
+export const TITLES = [
+  "Owner",
+  "Admin",
+  "Professor",
+  "Course Assistant",
+  "Student",
 ];
