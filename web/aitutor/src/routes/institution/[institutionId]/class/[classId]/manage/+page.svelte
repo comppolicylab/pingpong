@@ -5,6 +5,7 @@
   import * as api from '$lib/api';
   import { Modal, Listgroup, GradientButton, Secondary, Span, List, Li, Card, MultiSelect, Textarea, Accordion, AccordionItem, Dropzone, Heading, Button, Label, Input } from "flowbite-svelte";
   import ManageUser from "$lib/components/ManageUser.svelte";
+  import BulkAddUsers from "$lib/components/BulkAddUsers.svelte";
   import ViewUser from "$lib/components/ViewUser.svelte";
   import ManageAssistant from "$lib/components/ManageAssistant.svelte";
   import ViewAssistant from "$lib/components/ViewAssistant.svelte";
@@ -142,7 +143,11 @@
       <GradientButton color="cyanToBlue" on:click={() => studentModal = true}>Invite students</GradientButton>
       {#if studentModal}
         <Modal bind:open={studentModal} title="Manage students">
-          <ManageUser user={typeof studentModal === 'boolean' ? null : studentModal} on:cancel={() => studentModal = false} />
+          {#if typeof studentModal === 'boolean'}
+            <BulkAddUsers on:cancel={() => studentModal = false} role="read" title="Student" />
+          {:else}
+            <ManageUser on:cancel={() => studentModal = false} user={studentModal} />
+          {/if}
         </Modal>
       {/if}
     </div>

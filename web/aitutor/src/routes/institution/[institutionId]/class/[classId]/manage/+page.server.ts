@@ -12,6 +12,30 @@ export const actions = {
   },
 
   /**
+   * Bulk add users to a class.
+   */
+  createUsers: async (event) => {
+    const body = await event.request.formData();
+    const emails = body.get('emails');
+    // Split emails by newlines or commas.
+    const emailList = emails.split(/[\n,]+/).map(e => e.trim()).filter(e => e.length > 0);
+
+    if (emailList.length === 0) {
+      throw new Error("No emails provided");
+    }
+
+    const data: api.CreateClassUsersRequest = {
+      roles: emailList.map(e => ({
+        email: e,
+        role: body.get('role'),
+        title: body.get('title'),
+      })),
+    };
+
+    return await api.createClassUsers(event.fetch, event.params.classId, data);
+  },
+
+  /**
    * Update a user in a class.
    */
   updateUser: async (event) => {
