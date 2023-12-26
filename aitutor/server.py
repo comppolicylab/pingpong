@@ -698,11 +698,12 @@ async def delete_assistant(
     return {"status": "ok"}
 
 
-@v1.get("/me")
+@v1.get(
+    "/me",
+    response_model=schemas.SessionState,
+)
 async def get_me(request: Request):
     """Get the session information."""
-    print("\n\n\n\nME:", request.state.session)
-    print("\n\n\n")
     return request.state.session
 
 
