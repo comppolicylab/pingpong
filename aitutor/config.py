@@ -6,13 +6,15 @@ import tomllib
 import weakref
 from pathlib import Path
 from threading import RLock
-from typing import Any, Callable, Generic, TypeVar
+from typing import Any, Callable, Generic, Literal, TypeVar, Union
 
 import requests
 from pydantic import Extra, Field, PrivateAttr, model_serializer
 from pydantic.v1.utils import deep_update
 from pydantic_settings import BaseSettings
 from sentry_sdk import capture_message
+
+from .email import AzureEmailSender, GmailEmailSender
 
 logger = logging.getLogger(__name__)
 
@@ -147,15 +149,32 @@ class Ref(BaseSettings, Generic[RefT], extra=Extra.allow):  # type: ignore[call-
             return Path(self.ref__path__).read_text()
 
 
-class EmailSettings(BaseSettings):
+class AzureEmailSettings(BaseSettings):
+    type: Literal["azure"]
     from_address: str
-    from_name: str = Field("AI Tutor")
     endpoint: str
     access_key: str
 
     @property
+    def sender(self) -> AzureEmailSender:
+        return AzureEmailSender(self.from_address, self.connection_string)
+
+    @property
     def connection_string(self) -> str:
         return f"endpoint={self.endpoint};accessKey={self.access_key}"
+
+
+class GmailEmailSettings(BaseSettings):
+    type: Literal["gmail"]
+    from_address: str
+    password: str
+
+    @property
+    def sender(self) -> GmailEmailSender:
+        return GmailEmailSender(self.from_address, self.password)
+
+
+EmailSettings = Union[AzureEmailSettings, GmailEmailSettings]
 
 
 class OpenAISettings(BaseSettings):

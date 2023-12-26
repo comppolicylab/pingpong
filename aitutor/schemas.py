@@ -163,7 +163,7 @@ class UserState(Enum):
 
 class User(BaseModel):
     id: int
-    name: str
+    name: str | None
     email: str
     state: UserState
     classes: list["UserClassRole"]

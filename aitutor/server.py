@@ -30,7 +30,7 @@ from .auth import (
 )
 from .config import config
 from .db import async_session
-from .email import get_default_sender, send_invite
+from .email import send_invite
 from .errors import sentry
 from .metrics import metrics
 from .permission import CanManage, CanRead, CanWrite, IsSuper, LoggedIn
@@ -137,8 +137,7 @@ async def login(request: Request):
             raise HTTPException(status_code=401, detail="User does not exist")
     magic_link = generate_auth_link(user.id)
 
-    sender = get_default_sender()
-    await sender.send(
+    await config.email.sender.send(
         email,
         "Your AI Tutor login link!",
         f"Click this link to log in to the AI Tutor: {magic_link}",
@@ -305,8 +304,8 @@ async def add_users_to_class(class_id: str, request: Request, tasks: BackgroundT
 
     # Send emails to new users in the background
     for invite in new_:
-        sender = get_default_sender()
-        tasks.add_task(send_invite, sender, invite)
+        # TODO - should send magic link?
+        tasks.add_task(send_invite, config.email.sender, invite, config.link("/login"))
 
     return {"roles": result}
 
