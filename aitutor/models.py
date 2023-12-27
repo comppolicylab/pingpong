@@ -183,10 +183,26 @@ class Institution(Base):
     async def can_read(
         cls, session: AsyncSession, institution_id: int, user: User
     ) -> bool:
+        # Check for explicit association
         stmt = select(UserInstitutionRole).where(
             and_(
                 UserInstitutionRole.user_id == user.id,
                 UserInstitutionRole.institution_id == institution_id,
+            )
+        )
+        result = await session.scalar(stmt)
+        if result is not None:
+            return True
+
+        # Check for implicit association
+        stmt = (
+            select(UserClassRole)
+            .options(joinedload(UserClassRole.class_).joinedload(Class.institution))
+            .where(
+                and_(
+                    UserClassRole.user_id == user.id,
+                    Class.institution_id == institution_id,
+                )
             )
         )
         result = await session.scalar(stmt)
@@ -228,12 +244,31 @@ class Institution(Base):
 
     @classmethod
     async def visible(cls, session: AsyncSession, user: User) -> List["Institution"]:
+        # Institutions where user has an explicit assignment
         stmt = (
             select(Institution)
             .join(UserInstitutionRole)
             .where(UserInstitutionRole.user_id == user.id)
         )
-        return await session.scalars(stmt)
+        ids = set[int]()
+        all_ = list[Institution]()
+        for inst in await session.scalars(stmt):
+            ids.add(inst.id)
+            all_.append(inst)
+
+        # Institutions where user has an explicit association via classes.
+        stmt2 = (
+            select(UserClassRole)
+            .options(joinedload(UserClassRole.class_).joinedload(Class.institution))
+            .where(UserClassRole.user_id == user.id)
+        )
+
+        for ucr in await session.scalars(stmt2):
+            if ucr.class_.institution.id not in ids:
+                all_.append(ucr.class_.institution)
+                ids.add(ucr.class_.institution.id)
+
+        return all_
 
     @classmethod
     async def get_by_id(cls, session: AsyncSession, id: int) -> "Institution":
@@ -481,7 +516,7 @@ class Class(Base):
         # Match the class._users to the given user by id:
         for user_class in class_.users:
             if user_class.user_id == user.id:
-                return True
+                return user_class.role is not None
 
         return False
 

@@ -357,7 +357,7 @@ async def get_class_api_key(class_id: str, request: Request):
     "/class/{class_id}/thread/{thread_id}",
     dependencies=[
         Depends(
-            CanManage(models.Class, "class_id")
+            CanWrite(models.Class, "class_id")
             | CanRead(models.Thread, "thread_id")
             | IsSuper()
         )
@@ -398,7 +398,7 @@ async def get_thread(
     "/class/{class_id}/thread/{thread_id}/last_run",
     dependencies=[
         Depends(
-            CanManage(models.Class, "class_id")
+            CanWrite(models.Class, "class_id")
             | CanRead(models.Thread, "thread_id")
             | IsSuper()
         )
@@ -446,7 +446,7 @@ async def get_last_run(
 
 @v1.get(
     "/class/{class_id}/threads",
-    dependencies=[Depends(CanRead(models.Thread, "class_id") | IsSuper())],
+    dependencies=[Depends(CanRead(models.Class, "class_id") | IsSuper())],
     response_model=schemas.Threads,
 )
 async def list_threads(class_id: str, request: Request):
@@ -464,7 +464,7 @@ async def list_threads(class_id: str, request: Request):
 
 @v1.post(
     "/class/{class_id}/thread",
-    dependencies=[Depends(IsSuper() | CanWrite(models.Class, "class_id"))],
+    dependencies=[Depends(IsSuper() | CanRead(models.Class, "class_id"))],
     response_model=schemas.ThreadRun,
 )
 async def create_thread(class_id: str, request: Request, openai_client: OpenAIClient):
@@ -517,7 +517,13 @@ async def create_thread(class_id: str, request: Request, openai_client: OpenAICl
 
 @v1.post(
     "/class/{class_id}/thread/{thread_id}",
-    dependencies=[Depends(IsSuper() | CanWrite(models.Class, "class_id"))],
+    dependencies=[
+        Depends(
+            IsSuper()
+            | CanWrite(models.Class, "class_id")
+            | CanRead(models.Thread, "thread_id")
+        )
+    ],
     response_model=schemas.ThreadRun,
 )
 async def send_message(
@@ -544,7 +550,7 @@ async def send_message(
 
 @v1.post(
     "/class/{class_id}/file",
-    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    dependencies=[Depends(IsSuper() | CanWrite(models.Class, "class_id"))],
     response_model=schemas.File,
 )
 async def create_file(
@@ -569,7 +575,7 @@ async def create_file(
 
 @v1.get(
     "/class/{class_id}/files",
-    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    dependencies=[Depends(IsSuper() | CanRead(models.Class, "class_id"))],
     response_model=schemas.Files,
 )
 async def list_files(class_id: str, request: Request):
@@ -579,7 +585,7 @@ async def list_files(class_id: str, request: Request):
 
 @v1.get(
     "/class/{class_id}/assistants",
-    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    dependencies=[Depends(IsSuper() | CanRead(models.Class, "class_id"))],
     response_model=schemas.Assistants,
 )
 async def list_assistants(class_id: str, request: Request):
@@ -598,7 +604,7 @@ async def list_assistants(class_id: str, request: Request):
 
 @v1.post(
     "/class/{class_id}/assistant",
-    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    dependencies=[Depends(IsSuper() | CanRead(models.Class, "class_id"))],
     response_model=schemas.Assistant,
 )
 async def create_assistant(
@@ -643,7 +649,7 @@ async def publish_assistant(
 
 @v1.put(
     "/class/{class_id}/assistant/{assistant_id}",
-    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    dependencies=[Depends(IsSuper() | CanManage(models.Assistant, "assistant_id"))],
     response_model=schemas.Assistant,
 )
 async def update_assistant(
@@ -685,7 +691,13 @@ async def update_assistant(
 
 @v1.delete(
     "/class/{class_id}/assistant/{assistant_id}",
-    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    dependencies=[
+        Depends(
+            IsSuper()
+            | CanManage(models.Class, "class_id")
+            | CanManage(models.Assistant, "assistant_id")
+        )
+    ],
     response_model=schemas.GenericStatus,
 )
 async def delete_assistant(

@@ -23,7 +23,7 @@
   <Heading tag="h3">Classes</Heading>
 
   <div class="flex flex-wrap mt-8 gap-4">
-    {#each data.classes as class_}
+    {#each (data.classes || []) as class_}
       <Card horizontal class="w-80 h-40" href="/institution/{data.institution.id}/class/{class_.id}">
         <Heading tag="h4">{class_.name}</Heading>
       </Card>
