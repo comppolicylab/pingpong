@@ -224,6 +224,7 @@ export type CreateAssistantRequest = {
   model: string;
   tools: Tool[];
   file_ids: string[];
+  published?: boolean;
 }
 
 /**
@@ -235,6 +236,7 @@ export type UpdateAssistantRequest = {
   model?: string;
   tools?: Tool[];
   file_ids?: string[];
+  published?: boolean;
 }
 
 /**
@@ -243,22 +245,6 @@ export type UpdateAssistantRequest = {
 export const createAssistant = async (f: Fetcher, classId: number, data: CreateAssistantRequest) => {
   const url = `class/${classId}/assistant`;
   return await POST(f, url, data);
-}
-
-/**
- * Publish an assistant.
- */
-export const publishAssistant = async (f: Fetcher, classId: number, assistantId: number) => {
-  const url = `class/${classId}/assistant/${assistantId}/publish`;
-  return await POST(f, url);
-}
-
-/**
- * Unpublish an assistant.
- */
-export const unpublishAssistant = async (f: Fetcher, classId: number, assistantId: number) => {
-  const url = `class/${classId}/assistant/${assistantId}/publish`;
-  return await DELETE(f, url);
 }
 
 /**

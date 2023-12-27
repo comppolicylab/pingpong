@@ -71,6 +71,7 @@ class CreateAssistant(BaseModel):
     instructions: str
     model: str
     tools: list[Tool]
+    published: bool = False
 
 
 class Assistants(BaseModel):

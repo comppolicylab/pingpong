@@ -17,6 +17,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse, RedirectResponse
 from jwt.exceptions import PyJWTError
+from sqlalchemy.sql import func
 
 import aitutor.models as models
 import aitutor.schemas as schemas
@@ -636,28 +637,6 @@ async def create_assistant(
         raise e
 
 
-@v1.post(
-    "/class/{class_id}/assistant/{assistant_id}/publish",
-    dependencies=[Depends(IsSuper() | CanManage(models.Assistant, "assistant_id"))],
-    response_model=schemas.Assistant,
-)
-async def publish_assistant(
-    class_id: str, assistant_id: str, request: Request, openai_client: OpenAIClient
-):
-    return await models.Assistant.publish(request.state.db, int(assistant_id))
-
-
-@v1.delete(
-    "/class/{class_id}/assistant/{assistant_id}/publish",
-    dependencies=[Depends(IsSuper() | CanManage(models.Assistant, "assistant_id"))],
-    response_model=schemas.Assistant,
-)
-async def unpublish_assistant(
-    class_id: str, assistant_id: str, request: Request, openai_client: OpenAIClient
-):
-    return await models.Assistant.unpublish(request.state.db, int(assistant_id))
-
-
 @v1.put(
     "/class/{class_id}/assistant/{assistant_id}",
     dependencies=[Depends(IsSuper() | CanManage(models.Assistant, "assistant_id"))],
@@ -690,8 +669,12 @@ async def update_assistant(
     if "tools" in data:
         openai_update["tools"] = data["tools"]
         asst.tools = json.dumps(data["tools"])
+    if "published" in data:
+        asst.published = func.now() if data["published"] else None
 
     request.state.db.add(asst)
+    await request.state.db.flush()
+    await request.state.db.refresh(asst)
 
     await openai_client.beta.assistants.update(
         assistant_id=asst.assistant_id, **openai_update

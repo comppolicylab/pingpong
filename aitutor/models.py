@@ -147,8 +147,8 @@ class User(Base):
             return existing
         user = User(email=email, state=initial_state)
         session.add(user)
-        session.flush()
-        session.refresh(user)
+        await session.flush()
+        await session.refresh(user)
         return user
 
     @classmethod
@@ -407,33 +407,13 @@ class Assistant(Base):
         params["class_id"] = class_id
         params["creator_id"] = user_id
         params["assistant_id"] = assistant_id
-        params["published"] = None
+        params["published"] = func.now() if data.published else None
 
         assistant = Assistant(**params)
         session.add(assistant)
         await session.flush()
         await session.refresh(assistant)
         return assistant
-
-    @classmethod
-    async def publish(cls, session: AsyncSession, assistant_id: int) -> "Assistant":
-        stmt = (
-            update(Assistant)
-            .where(Assistant.id == assistant_id)
-            .values(published=func.now())
-            .returning(Assistant)
-        )
-        return await session.scalar(stmt)
-
-    @classmethod
-    async def unpublish(cls, session: AsyncSession, assistant_id: int) -> "Assistant":
-        stmt = (
-            update(Assistant)
-            .where(Assistant.id == assistant_id)
-            .values(published=None)
-            .returning(Assistant)
-        )
-        return await session.scalar(stmt)
 
 
 class Class(Base):

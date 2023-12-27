@@ -2,7 +2,7 @@
   import * as api from "$lib/api";
   import {goto} from "$app/navigation";
   import {page} from "$app/stores";
-  import {Button, Select, Checkbox, Label, MultiSelect, Input, Textarea, GradientButton} from "flowbite-svelte";
+  import {Helper, Button, Select, Checkbox, Label, MultiSelect, Input, Textarea, GradientButton} from "flowbite-svelte";
   import { enhance } from "$app/forms";
 
   export let files;
@@ -35,16 +35,26 @@
   </div>
   <div class="col-span-2">
     <Label for="instructions">Instructions</Label>
+      <Helper>This is the prompt the language model will use to generate responses.</Helper>
       <Textarea label="instructions" id="instructions" name="instructions" value={assistant?.instructions} />
   </div>
-  <div>
+  <div class="col-span-2">
     <Label for="model">Tools</Label>
+      <Helper>Select tools available to the assistant when generating a response.</Helper>
       <MultiSelect name="tools" items="{tools}" value={assistant?.tools || []} />
   </div>
 
   <div class="col-span-2">
     <Label for="model">Files</Label>
+    <Helper>Select any files the assistant should have access to when generating a response.</Helper>
       <MultiSelect name="files" items="{fileOptions}" value={selectedFiles} />
+  </div>
+
+  <div class="col-span-2">
+    <Label for="published">Publish
+    <Checkbox label="published" id="published" name="published" value={assistant?.published} />
+    </Label>
+    <Helper>By default only you can see and interact with this assistant. If you would like to share the assistant with the rest of your class, select this option.</Helper>
   </div>
 
   <input type="hidden" name="assistantId" value={assistant?.id} />
@@ -56,16 +66,3 @@
       {/if}
   </div>
 </form>
-{#if assistant}
-  {#if assistant.published}
-    <form action="?/unpublishAssistant" method="POST" use:enhance>
-      <input type="hidden" name="assistantId" value={assistant.id} />
-      <Button color="alternative" type="submit">Unpublish</Button>
-    </form>
-  {:else}
-    <form action="?/publishAssistant" method="POST" use:enhance>
-      <input type="hidden" name="assistantId" value={assistant.id} />
-      <Button color="alternative" type="submit">Publish</Button>
-    </form>
-  {/if}
-{/if}

@@ -79,6 +79,7 @@ export const actions = {
       model: body.get('model'),
       tools,
       file_ids,
+      published: body.get('published') === "on",
     };
 
     return await api.createAssistant(event.fetch, event.params.classId, data);
@@ -101,30 +102,11 @@ export const actions = {
       model: body.get('model'),
       tools,
       file_ids,
+      published: body.get('published') === "on",
     };
 
     const response = await api.updateAssistant(event.fetch, event.params.classId, body.get("assistantId"), data);
     throw redirect(307, `${event.url.pathname}?save`);
-  },
-
-  /**
-   * Publish an assistant.
-   */
-  publishAssistant: async (event) => {
-    const body = await event.request.formData();
-    const classId = parseInt(event.params.classId);
-    const assistantId = parseInt(body.get("assistantId"));
-    return await api.publishAssistant(event.fetch, classId, assistantId);
-  },
-
-  /**
-   * Unpublish an assistant.
-   */
-  unpublishAssistant: async (event) => {
-    const body = await event.request.formData();
-    const classId = parseInt(event.params.classId);
-    const assistantId = parseInt(body.get("assistantId"));
-    return await api.unpublishAssistant(event.fetch, classId, assistantId);
   },
 
   /**
