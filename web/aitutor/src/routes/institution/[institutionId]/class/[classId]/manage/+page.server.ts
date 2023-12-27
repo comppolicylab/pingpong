@@ -108,6 +108,26 @@ export const actions = {
   },
 
   /**
+   * Publish an assistant.
+   */
+  publishAssistant: async (event) => {
+    const body = await event.request.formData();
+    const classId = parseInt(event.params.classId);
+    const assistantId = parseInt(body.get("assistantId"));
+    return await api.publishAssistant(event.fetch, classId, assistantId);
+  },
+
+  /**
+   * Unpublish an assistant.
+   */
+  unpublishAssistant: async (event) => {
+    const body = await event.request.formData();
+    const classId = parseInt(event.params.classId);
+    const assistantId = parseInt(body.get("assistantId"));
+    return await api.unpublishAssistant(event.fetch, classId, assistantId);
+  },
+
+  /**
    * Update the API key for a class.
    */
   updateApiKey: async (event) => {

@@ -644,7 +644,18 @@ async def create_assistant(
 async def publish_assistant(
     class_id: str, assistant_id: str, request: Request, openai_client: OpenAIClient
 ):
-    return await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    return await models.Assistant.publish(request.state.db, int(assistant_id))
+
+
+@v1.delete(
+    "/class/{class_id}/assistant/{assistant_id}/publish",
+    dependencies=[Depends(IsSuper() | CanManage(models.Assistant, "assistant_id"))],
+    response_model=schemas.Assistant,
+)
+async def unpublish_assistant(
+    class_id: str, assistant_id: str, request: Request, openai_client: OpenAIClient
+):
+    return await models.Assistant.unpublish(request.state.db, int(assistant_id))
 
 
 @v1.put(

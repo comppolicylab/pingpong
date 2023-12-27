@@ -21,4 +21,6 @@
       <Li>{file.name}</Li>
     {/each}
   </List>
+  <Label>Published</Label>
+  <span>{assistant.published ? "Yes" : "No"}</span>
 </div>

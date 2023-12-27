@@ -425,6 +425,16 @@ class Assistant(Base):
         )
         return await session.scalar(stmt)
 
+    @classmethod
+    async def unpublish(cls, session: AsyncSession, assistant_id: int) -> "Assistant":
+        stmt = (
+            update(Assistant)
+            .where(Assistant.id == assistant_id)
+            .values(published=None)
+            .returning(Assistant)
+        )
+        return await session.scalar(stmt)
+
 
 class Class(Base):
     __tablename__ = "classes"

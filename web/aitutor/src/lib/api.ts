@@ -254,6 +254,14 @@ export const publishAssistant = async (f: Fetcher, classId: number, assistantId:
 }
 
 /**
+ * Unpublish an assistant.
+ */
+export const unpublishAssistant = async (f: Fetcher, classId: number, assistantId: number) => {
+  const url = `class/${classId}/assistant/${assistantId}/publish`;
+  return await DELETE(f, url);
+}
+
+/**
  * Update an existing assistant.
  */
 export const updateAssistant = async (f: Fetcher, classId: number, assistantId: number, data: UpdateAssistantRequest) => {

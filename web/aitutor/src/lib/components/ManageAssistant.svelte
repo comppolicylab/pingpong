@@ -52,7 +52,20 @@
   <div class="border-t pt-4 mt-4 flex items-center col-span-2 ">
     <GradientButton color="cyanToBlue" type="submit">Save</GradientButton>
       {#if assistant}
-        <Button href="/manageAssistants" color="alternative" class="ml-4" on:click={reset}>Cancel</Button>
+        <Button href="/manageAssistants" color="red" class="ml-4" on:click={reset}>Cancel</Button>
       {/if}
   </div>
 </form>
+{#if assistant}
+  {#if assistant.published}
+    <form action="?/unpublishAssistant" method="POST" use:enhance>
+      <input type="hidden" name="assistantId" value={assistant.id} />
+      <Button color="alternative" type="submit">Unpublish</Button>
+    </form>
+  {:else}
+    <form action="?/publishAssistant" method="POST" use:enhance>
+      <input type="hidden" name="assistantId" value={assistant.id} />
+      <Button color="alternative" type="submit">Publish</Button>
+    </form>
+  {/if}
+{/if}
