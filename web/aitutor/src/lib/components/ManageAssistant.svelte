@@ -52,7 +52,7 @@
 
   <div class="col-span-2">
     <Label for="published">Publish
-    <Checkbox label="published" id="published" name="published" value={assistant?.published} />
+    <Checkbox label="published" id="published" name="published" checked={!!assistant?.published} />
     </Label>
     <Helper>By default only you can see and interact with this assistant. If you would like to share the assistant with the rest of your class, select this option.</Helper>
   </div>
