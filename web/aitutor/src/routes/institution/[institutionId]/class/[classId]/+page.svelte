@@ -13,10 +13,6 @@
 
   $: isConfigured = data?.hasAssistants && data?.hasBilling;
 
-  $: {
-    console.log("DATA", data);
-  }
-
   // Handle form submission
   const handleSubmit = () => {
     $loading = true;

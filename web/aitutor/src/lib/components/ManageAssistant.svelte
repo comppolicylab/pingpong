@@ -31,7 +31,7 @@
   </div>
   <div>
     <Label for="model">Model</Label>
-      <Select items={models} label="model" id="model" name="model" value={assistant?.model} />
+      <Select items={models} label="model" id="model" name="model" value={assistant?.model || models[0].value} />
   </div>
   <div class="col-span-2">
     <Label for="instructions">Instructions</Label>

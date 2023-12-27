@@ -24,6 +24,8 @@
   $: files = data?.files || [];
   $: students = (data?.classUsers || []).filter(u => u.title.toLowerCase() === 'student');
   $: tt = (data?.classUsers || []).filter(u => u.title.toLowerCase() !== 'student');
+  $: classRole = (data?.me?.user?.classes || []).find(c => c.class_id === data.class.id)?.role || '';
+  $: hasElevatedPerms = ['write', 'admin'].includes(classRole.toLowerCase());
 
   // Check if we are editing an assistant and prompt if so.
   beforeNavigate((nav) => {
@@ -45,6 +47,7 @@
 
 <div class="container py-8 space-y-12 divide-y divide-gray-200 dark:divide-gray-700">
   <Heading tag="h2"><Span gradient>Manage Class</Span></Heading>
+    {#if hasElevatedPerms}
     <form action="?/updateClass" class="pt-6" method="POST">
     <div class="grid grid-cols-3 gap-x-6 gap-y-8">
       <div>
@@ -180,6 +183,7 @@
       </List>
     </div>
   </div>
+    {/if}
 
   <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
     <div>

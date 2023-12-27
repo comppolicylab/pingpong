@@ -597,9 +597,9 @@ class Thread(Base):
             return False
 
         if thread.private:
-            return user in thread.users
+            return user.id in {u.id for u in thread.users}
         else:
-            return user in thread.class_.users
+            return user.id in {u.id for u in thread.class_.users}
 
     @classmethod
     async def all(cls, session: AsyncSession, class_id: int) -> List["Thread"]:

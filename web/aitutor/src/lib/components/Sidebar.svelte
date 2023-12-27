@@ -61,11 +61,9 @@
             <BookOutline class="text-gray-400" size="sm" />
           </svelte:fragment>
           <span>{currentClass.name}</span>
-          {#if canManageClass}
-            <a href={`/institution/${currentInstId}/class/${currentClassId}/manage`}>
-              <CogOutline size="sm" />
-            </a>
-          {/if}
+          <a href={`/institution/${currentInstId}/class/${currentClassId}/manage`}>
+            <CogOutline size="sm" />
+          </a>
         </BreadcrumbItem>
       </Breadcrumb>
     </SidebarGroup>
