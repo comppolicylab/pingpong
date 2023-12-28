@@ -7,5 +7,7 @@ volumes:
       o: bind
 
 secrets:
-  bot_config:
+  app_config:
     file: /opt/aitutor/config.toml
+  web_env:
+    file: /opt/aitutor/.env

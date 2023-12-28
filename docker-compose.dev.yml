@@ -1,0 +1,18 @@
+volumes:
+  dbdata:
+    driver: local
+    driver_opts:
+      type: none
+      device: ./.db
+      o: bind
+
+services:
+  web:
+    build:
+      context: ./web/aitutor
+      dockerfile: Dockerfile
+
+  srv:
+    build:
+      context: ./
+      dockerfile: Dockerfile

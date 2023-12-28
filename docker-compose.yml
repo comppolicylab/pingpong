@@ -1,16 +1,28 @@
 version: "3.9"
 
 services:
-  aitutor:
+  web:
     platform: linux/amd64
-    image: aitutor.azurecr.io/aitutor:latest
+    image: aitutor.azurecr.io/web:latest
+    restart: always
+    networks: [main]
+    expose: [3000]
+    ports: ["3000:3000"]
+    secrets:
+      - source: web_env
+        target: /app/.env
+        mode: 0400
+
+  srv:
+    platform: linux/amd64
+    image: aitutor.azurecr.io/srv:latest
     restart: always
     networks: [main]
     # Expose metrics port for scraping
-    expose: [8008]
-    ports: ["8008:8008"]
+    expose: [8000]
+    ports: ["8000:8000"]
     secrets:
-      - source: bot_config
+      - source: app_config
         target: /code/config.toml
         mode: 0400
     volumes:
@@ -26,5 +38,7 @@ volumes:
 
 # Use local config in dev
 secrets:
-  bot_config:
+  app_config:
     file: ./config.toml
+  web_env:
+    file: ./web/aitutor/.env

@@ -1,3 +1,14 @@
 *.yml
 config.toml
 config.*.toml
+.vscode
+node_modules
+.git
+.gitattributes
+.prettierrc
+.prettierignore
+.eslintignore
+.eslintrc.cjs
+README.md
+Dockerfile
+*.sqlite3

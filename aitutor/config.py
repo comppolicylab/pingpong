@@ -177,12 +177,6 @@ class GmailEmailSettings(BaseSettings):
 EmailSettings = Union[AzureEmailSettings, GmailEmailSettings]
 
 
-class OpenAISettings(BaseSettings):
-    """OpenAI API settings."""
-
-    api_key: str
-
-
 class SentrySettings(BaseSettings):
     """Sentry settings."""
 
@@ -217,7 +211,6 @@ class Config(BaseSettings):
 
     development: bool = Field(False, env="DEVELOPMENT")
     auth: AuthSettings
-    openai: OpenAISettings
     email: EmailSettings
     sentry: SentrySettings
     metrics: MetricsSettings = Field(MetricsSettings())
