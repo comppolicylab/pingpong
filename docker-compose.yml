@@ -1,11 +1,31 @@
 version: "3.9"
 
 services:
+
+  nginx:
+    platform: linux/amd64
+    image: nginx:1.25.3
+    networks: [back, front]
+    expose: [80, 443]
+    ports: ["80:80", "443:443"]
+    #secrets:
+    #- source: nginxcrt
+    #  target: /etc/nginx/cert/site.crt
+    #  mode: 0400
+    #- source: nginxkey
+    #  target: /etc/nginx/cert/site.key
+    #  mode: 0400
+    volumes:
+      - type: bind
+        source: ./nginx.conf
+        target: /etc/nginx/nginx.conf
+      - logs:/logs
+
   web:
     platform: linux/amd64
     image: aitutor.azurecr.io/web:latest
     restart: always
-    networks: [main]
+    networks: [back]
     expose: [3000]
     ports: ["3000:3000"]
     secrets:
@@ -17,7 +37,7 @@ services:
     platform: linux/amd64
     image: aitutor.azurecr.io/srv:latest
     restart: always
-    networks: [main]
+    networks: [back]
     # Expose metrics port for scraping
     expose: [8000]
     ports: ["8000:8000"]
@@ -29,11 +49,14 @@ services:
       - dbdata:/db
 
 networks:
-  main:
+  front:
+  back:
 
 # Use ephemeral volume in dev
 volumes:
   dbdata:
+    driver_opts: {}
+  logs:
     driver_opts: {}
 
 # Use local config in dev
@@ -42,3 +65,7 @@ secrets:
     file: ./config.toml
   web_env:
     file: ./web/aitutor/.env
+  #nginxcrt:
+  #   file: ./cert/demo.crt
+  #nginxkey:
+  #  file: ./cert/demo.key

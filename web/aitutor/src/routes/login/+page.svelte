@@ -5,12 +5,16 @@
   import {EnvelopeSolid} from 'flowbite-svelte-icons';
 
   export let form;
+
   let loggingIn = false;
-  $: {
-    if (form) {
+
+  const login = () => {
+    loggingIn = true;
+    return async ({update}) => {
       loggingIn = false;
+      return update();
     }
-}
+  }
 </script>
 
 <div class="h-screen v-screen flex items-center justify-center bg-sky-800">
@@ -23,14 +27,14 @@
       {#if form?.success}
         <div class="text-green-300">Success! Follow the link in your email to finish signing in.</div>
       {:else}
-      <form action="/login?/loginWithMagicLink" method="POST" use:enhance>
+        <form action="/login?/loginWithMagicLink" method="POST" use:enhance={login}>
           <Label for="email" class="mb-2 text-white">Log in with your school email address:</Label>
             <ButtonGroup class="w-full">
               <InputAddon>
               <EnvelopeSolid />
               </InputAddon>
-              <Input value={form?.email ?? ''} type="email" readonly={loggingIn || null} placeholder="you@school.edu" name="email" id="email"></Input>
-                <GradientButton type="submit" color="cyanToBlue" disabled={loggingIn} on:click={() => loggingIn = true}>Login</GradientButton>
+              <Input value={form?.email ?? ''} readonly={loggingIn || null} type="email" placeholder="you@school.edu" name="email" id="email"></Input>
+                <GradientButton type="submit" color="cyanToBlue" disabled={loggingIn}>Login</GradientButton>
             </ButtonGroup>
           {#if form?.error}
             <div class="text-red-500 p-2">

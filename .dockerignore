@@ -4,6 +4,7 @@ config.*.toml
 .vscode
 node_modules
 .git
+.github
 .gitattributes
 .prettierrc
 .prettierignore
@@ -12,3 +13,6 @@ node_modules
 README.md
 Dockerfile
 *.sqlite3
+.env
+.env.*
+.db/

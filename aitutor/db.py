@@ -11,7 +11,7 @@ from .models import Base
 def _get_db_path():
     db_dir = config.db_dir
     # Ensure directory exists
-    db_dir.mkdir(parents=True, exist_ok=True)
+    os.makedirs(db_dir, exist_ok=True)
     return os.path.join(db_dir, "db.sqlite3")
 
 

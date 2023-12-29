@@ -1,7 +1,3 @@
-import {PUBLIC_API_HOST} from "$env/static/public";
-
-const apiHost = (PUBLIC_API_HOST || '').replace(/\/$/, '');
-
 /**
  * HTTP methods.
  */
@@ -26,10 +22,13 @@ const _fetch = async (f: Fetcher, method: Method, path: string, headers?: Record
 
   while (attempt < retries) {
     try {
-      const res = await f(`${apiHost}/api/v1/${path}`, {
+      const fullPath = `/api/v1/${path}`;
+      const res = await f(fullPath, {
         method,
         headers,
         body,
+        credentials: "include",
+        mode: "cors",
       });
 
       const data = await res.json();
