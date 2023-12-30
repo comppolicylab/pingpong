@@ -20,6 +20,7 @@
   $: apiKey = data.apiKey || '';
   $: apiKeyBlur = apiKey.substring(0,6) + '**************' + apiKey.substring(Math.max(6, apiKey.length - 6));
   $: editingAssistant = parseInt($page.url.searchParams.get('edit-assistant') || '0', 10);
+  $: creators = data?.assistantCreators || {};
   $: assistants = data?.assistants || [];
   $: files = data?.files || [];
   $: students = (data?.classUsers || []).filter(u => u.title.toLowerCase() === 'student');
@@ -197,8 +198,8 @@
             <ManageAssistant {files} {assistant} />
           </Card>
           {:else}
-          <Card class="w-full max-w-full space-y-2" href={`${$page.url.pathname}?edit-assistant=${assistant.id}`}>
-            <ViewAssistant {assistant} />
+          <Card class="w-full max-w-full space-y-2" href={assistant.creator_id === data.me.user.id ?`${$page.url.pathname}?edit-assistant=${assistant.id}` : null}>
+            <ViewAssistant {assistant} creator={creators[assistant.creator_id]} />
           </Card>
           {/if}
         {/each}

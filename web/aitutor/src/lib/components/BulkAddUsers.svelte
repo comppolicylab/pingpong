@@ -16,7 +16,7 @@
   <div class="space-y-2">
     <Label for="emails">Emails</Label>
     <Helper>Enter email addresses separated by commas or newlines.</Helper>
-    <Textarea id="users" name="users" rows="3" />
+    <Textarea id="emails" name="emails" rows="3" />
 
     <Label for="role">Role</Label>
     <Select id="role" name="role" value="{role}" items="{roles}" />

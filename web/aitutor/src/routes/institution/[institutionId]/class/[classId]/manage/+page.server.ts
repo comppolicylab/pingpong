@@ -53,7 +53,7 @@ export const actions = {
    * Update the class metadata
    */
   updateClass: async (event) => {
-    return await forwardRequest((f, d) => api.updateClassUser(f, event.params.classId, d), event);
+    return await forwardRequest((f, d) => api.updateClass(f, event.params.classId, d), event);
   },
 
   /**
@@ -91,8 +91,13 @@ export const actions = {
   updateAssistant: async (event) => {
     const body = await event.request.formData();
 
+    const tools: api.Tool[] = [{"type": "retrieval"}];
     const rawTools = body.get('tools');
-    const tools = rawTools ? rawTools.split(",").map(t => ({type: t})) : [];
+    if (rawTools) {
+      for (const tool of rawTools.split(",")) {
+        tools.push({type: tool});
+      }
+    }
     const rawFiles = body.get('files');
     const file_ids = rawFiles ? rawFiles.split(",") : [];
 

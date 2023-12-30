@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   import {page} from '$app/stores';
   import {
     CogOutline,
@@ -21,8 +21,10 @@
     Heading, NavBrand,
   } from 'flowbite-svelte';
   import Logo from "$lib/components/Logo.svelte";
+  import dayjs from "$lib/time";
 
   export let data;
+
 
   $: avatar = data?.me?.profile?.image_url;
   $: name = data?.me?.user?.name || data?.me?.user?.email;
@@ -79,11 +81,15 @@
     <SidebarGroup border class="overflow-y-auto">
       {#each threads as thread}
         <SidebarItem
-          class="text-sm p-1"
+          class="text-sm p-1 flex gap-2"
+          spanClass="flex-1 truncate"
           href={`/institution/${currentInstId}/class/${currentClassId}/thread/${thread.id}`}
           label={thread.name || "Undefined"}>
           <svelte:fragment slot="icon">
-            <EyeSlashOutline size="sm" class="text-gray-400" />
+            <EyeSlashOutline size="sm" class={`text-gray-400 ${thread.private ? 'visible' : 'invisible'}`} />
+          </svelte:fragment>
+          <svelte:fragment slot="subtext">
+            <span class="text-xs text-gray-400 ml-auto">{dayjs.utc(thread.updated).fromNow()}</span>
           </svelte:fragment>
         </SidebarItem>
       {/each}

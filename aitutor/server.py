@@ -306,7 +306,7 @@ async def add_users_to_class(class_id: str, request: Request, tasks: BackgroundT
     # Send emails to new users in the background
     for invite in new_:
         # TODO - should send magic link?
-        tasks.add_task(send_invite, config.email.sender, invite, config.link("/login"))
+        tasks.add_task(send_invite, config.email.sender, invite, config.url("/login"))
 
     return {"roles": result}
 

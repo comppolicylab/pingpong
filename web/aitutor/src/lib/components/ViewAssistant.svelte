@@ -1,10 +1,13 @@
 <script lang="ts">
   import {Heading, Label, List, Li} from "flowbite-svelte";
   export let assistant;
+  export let creator;
 </script>
 
 <div class="flex flex-col gap-2">
   <Heading tag="h4" class="pb-3">{assistant.name}</Heading>
+  <Label>Author</Label>
+  <span>{creator.email}</span>
   <Label>Instructions</Label>
   <span>{assistant.instructions}</span>
   <Label>Model</Label>

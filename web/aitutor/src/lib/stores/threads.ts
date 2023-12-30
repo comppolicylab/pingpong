@@ -67,8 +67,15 @@ class ThreadPoller {
     const t0 = Date.now();
 
     while (Date.now() - t0 < timeout) {
-      const lastRun = await api.getLastThreadRun(this.fetcher, this.classId, this.threadId);
-      if (api.finished(lastRun.run)) {
+      try {
+        const lastRun = await api.getLastThreadRun(this.fetcher, this.classId, this.threadId);
+        if (lastRun.$status >= 400) {
+          break;
+        }
+        if (api.finished(lastRun.run)) {
+          break;
+        }
+      } catch (e) {
         break;
       }
     }

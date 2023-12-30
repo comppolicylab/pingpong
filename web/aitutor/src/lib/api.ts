@@ -16,32 +16,26 @@ export type BaseData = Record<string, any>;
 /**
  * Common fetch method.
  */
-const _fetch = async (f: Fetcher, method: Method, path: string, headers?: Record<string, string>, body?: string | FormData, retries: number = 5, backoff: number = 2) => {
-  let attempt = 0;
-  let lastError: unknown | undefined;
+const _fetch = async (f: Fetcher, method: Method, path: string, headers?: Record<string, string>, body?: string | FormData) => {
+    path = path.replace(/^\/+/, "");
+    const fullPath = `/api/v1/${path}`;
+    const res = await f(fullPath, {
+      method,
+      headers,
+      body,
+      credentials: "include",
+      mode: "cors",
+    });
 
-  while (attempt < retries) {
+    let data: {} = {};
+
     try {
-      path = path.replace(/^\/+/, "");
-      const fullPath = `/api/v1/${path}`;
-      const res = await f(fullPath, {
-        method,
-        headers,
-        body,
-        credentials: "include",
-        mode: "cors",
-      });
-
-      const data = await res.json();
-      return {"$status": res.status, ...data};
+      data = await res.json();
     } catch (e) {
-      attempt++;
-      lastError = e;
-      await new Promise((resolve) => setTimeout(resolve, Math.pow(backoff, attempt) * 1000));
+      // Do nothing
     }
-  }
 
-  return {"$status": 500, "$error": lastError};
+    return {"$status": res.status, ...data};
 }
 
 /**

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import {error} from "@sveltejs/kit";
   import {writable} from "svelte/store";
   import * as api from '$lib/api';
   import { blur } from 'svelte/transition';
@@ -20,7 +21,7 @@
   $: messages = ($thread?.messages || []).sort((a, b) => a.created_at - b.created_at);
   $: participants = $thread?.participants || {};
   $: loading = !$thread && data?.thread?.loading;
-  $: priv = !!$thread?.thread.private;
+  $: priv = !!$thread?.thread?.private;
 
   let waiting = writable(false);
   $: {
@@ -85,6 +86,16 @@
 </script>
 
 <div class="relative py-8 h-full w-full">
+  {#if $thread?.$status >= 400}
+    <div class="absolute top-0 left-0 flex h-full w-full items-center">
+      <div class="m-auto">
+        <div class="text-center">
+          <div class="text-2xl font-bold text-gray-600">Error loading thread.</div>
+          <div class="text-gray-400">{$thread?.detail || "An unknown error occurred."}</div>
+        </div>
+      </div>
+    </div>
+  {/if}
   {#if loading}
     <div class="absolute top-0 left-0 flex h-full w-full items-center">
       <div class="m-auto" transition:blur={{amount: 10}}>
@@ -115,9 +126,9 @@
    {/if}
   </div>
   {#if priv}
-  <div class="absolute top-0 left-0 flex gap-2 px-4 py-2 items-center w-full bg-gradient-to-t from-transparent to-white text-sm">
+  <div class="absolute top-0 left-0 flex gap-2 px-4 py-2 items-center w-full bg-amber-200 text-sm">
     <EyeSlashOutline size="sm" class="text-gray-400" />
-    <Span class="text-gray-400">This thread is private to:</Span>
+    <Span class="text-gray-400">This thread is private to</Span>
     <Span class="text-gray-600">{($thread?.thread?.users || []).map(u => u.email).join(", ")}</Span>
   </div>
   {/if}
