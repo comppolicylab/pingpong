@@ -7,12 +7,20 @@ from sqlalchemy.orm import sessionmaker
 from .config import config
 from .models import Base
 
+# TODO - refactor to support additional databases beyond SQLite.
+
 
 def _get_db_path():
+    # TODO - only relevant for sqlite
     db_dir = config.db_dir
     # Ensure directory exists
     os.makedirs(db_dir, exist_ok=True)
     return os.path.join(db_dir, "db.sqlite3")
+
+
+async def has_db():
+    # TODO - this only works for sqlite
+    return os.path.exists(_get_db_path())
 
 
 async def init_db(drop_first: bool = False):

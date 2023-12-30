@@ -560,7 +560,9 @@ class Thread(Base):
         lazy="selectin",
     )
     created = Column(Integer, server_default=func.now())
-    updated = Column(Integer, index=True, onupdate=func.now())
+    updated = Column(
+        Integer, index=True, server_default=func.now(), onupdate=func.now()
+    )
 
     async def delete(self, session: AsyncSession) -> None:
         stmt = delete(Thread).where(Thread.id == self.id)

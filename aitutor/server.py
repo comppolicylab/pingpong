@@ -30,7 +30,7 @@ from .auth import (
     generate_auth_link,
 )
 from .config import config
-from .db import async_session
+from .db import async_session, has_db, init_db
 from .email import send_invite
 from .errors import sentry
 from .metrics import metrics
@@ -546,6 +546,11 @@ async def send_message(
         assistant_id=asst.assistant_id,
     )
 
+    thread.updated = func.now()
+    request.state.db.add(thread)
+    await request.state.db.commit()
+    await request.state.db.refresh(thread)
+
     return {"thread": thread, "run": run}
 
 
@@ -714,6 +719,10 @@ async def get_me(request: Request):
 
 async def lifespan(app: FastAPI):
     """Run services in the background."""
+    if not await has_db():
+        logger.warning("Creating a new database since none exists.")
+        await init_db()
+
     with sentry(), metrics():
         yield
 
