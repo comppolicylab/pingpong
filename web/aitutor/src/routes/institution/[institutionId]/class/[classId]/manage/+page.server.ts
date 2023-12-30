@@ -70,8 +70,7 @@ export const actions = {
       }
     }
 
-    const rawFiles = body.get('files');
-    const file_ids = rawFiles ? rawFiles.split(",") : [];
+    const file_ids = body.getAll('files');
 
     const data: api.CreateAssistantRequest = {
       name: body.get('name'),
@@ -98,8 +97,7 @@ export const actions = {
         tools.push({type: tool});
       }
     }
-    const rawFiles = body.get('files');
-    const file_ids = rawFiles ? rawFiles.split(",") : [];
+    const file_ids = body.getAll('files');
 
     const data: api.UpdateAssistantRequest = {
       name: body.get('name'),

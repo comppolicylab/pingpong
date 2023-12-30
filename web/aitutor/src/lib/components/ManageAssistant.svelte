@@ -10,12 +10,12 @@
 
   const action = assistant ? "?/updateAssistant" : "?/createAssistant";
 
+  let selectedFiles = (assistant?.files || []).map((file) => file.file_id);
   const models = api.languageModels.map((model) => ({ value: model, name: model }));
   const tools = [
     { value: "code_interpreter", name: "Code Interpreter" },
   ];
   $: fileOptions = (files || []).map((file) => ({ value: file.file_id, name: file.name }));
-  $: selectedFiles = (assistant?.files || []).map((file) => file.file_id);
 
   // Revert edits
   const reset = (e) => {
@@ -47,7 +47,7 @@
   <div class="col-span-2">
     <Label for="model">Files</Label>
     <Helper>Select any files the assistant should have access to when generating a response.</Helper>
-      <MultiSelect name="files" items="{fileOptions}" value={selectedFiles} />
+      <MultiSelect name="files" items="{fileOptions}" bind:value={selectedFiles} />
   </div>
 
   <div class="col-span-2">

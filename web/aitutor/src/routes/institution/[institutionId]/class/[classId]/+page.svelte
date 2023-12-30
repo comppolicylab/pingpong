@@ -10,6 +10,7 @@
 
   let loading = writable(false);
   let assistant = writable(data?.assistants[0] || {});
+  let aiSelectOpen = false;
 
   $: isConfigured = data?.hasAssistants && data?.hasBilling;
 
@@ -26,16 +27,21 @@
       }
     };
   };
+
+  const selectAi = (asst) => {
+    $assistant = asst;
+    aiSelectOpen = false;
+  };
 </script>
 
 <div class="v-full h-full flex items-center">
   <div class="m-auto w-9/12">
     {#if isConfigured}
       <div class="text-center my-2 w-full">
-        <GradientButton color="tealToLime">{$assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></GradientButton>
-        <Dropdown>
+        <GradientButton color="tealToLime" on:click={() => aiSelectOpen = true}>{$assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></GradientButton>
+          <Dropdown bind:open={aiSelectOpen}>
           {#each data.assistants as asst}
-            <DropdownItem on:click={() => $assistant = asst}>
+            <DropdownItem on:click={() => selectAi(asst)}>
               {asst.name}
               <Helper class="text-xs">{data.assistantCreators[asst.creator_id].email}</Helper>
             </DropdownItem>
