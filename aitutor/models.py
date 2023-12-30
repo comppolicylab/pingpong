@@ -424,15 +424,17 @@ class Class(Base):
     institution_id = Column(Integer, ForeignKey("institutions.id"))
     institution = relationship("Institution", back_populates="classes")
     assistants: Mapped[List["Assistant"]] = relationship(
-        "Assistant", back_populates="class_", lazy="selectin"
+        "Assistant",
+        back_populates="class_",
     )
     term = Column(String)
     api_key = Column(String, nullable=True)
     users: Mapped[List["UserClassRole"]] = relationship(
-        "UserClassRole", back_populates="class_", lazy="selectin"
+        "UserClassRole",
+        back_populates="class_",
     )
     files: Mapped[List["File"]] = relationship("File", back_populates="class_")
-    threads = relationship("Thread", back_populates="class_", lazy="selectin")
+    threads = relationship("Thread", back_populates="class_")
     created = Column(Integer, server_default=func.now())
     updated = Column(Integer, index=True, onupdate=func.now())
 
@@ -470,7 +472,9 @@ class Class(Base):
 
     @classmethod
     async def can_manage(cls, session: AsyncSession, class_id: int, user: User) -> bool:
-        class_ = await session.scalar(select(Class).where(Class.id == class_id))
+        class_ = await session.scalar(
+            select(Class).options(joinedload(Class.users)).where(Class.id == class_id)
+        )
 
         if not class_:
             return False
@@ -484,7 +488,9 @@ class Class(Base):
 
     @classmethod
     async def can_write(cls, session: AsyncSession, class_id: int, user: User) -> bool:
-        class_ = await session.scalar(select(Class).where(Class.id == class_id))
+        class_ = await session.scalar(
+            select(Class).options(joinedload(Class.users)).where(Class.id == class_id)
+        )
 
         if not class_:
             return False
@@ -498,7 +504,9 @@ class Class(Base):
 
     @classmethod
     async def can_read(cls, session: AsyncSession, class_id: int, user: User) -> bool:
-        class_ = await session.scalar(select(Class).where(Class.id == class_id))
+        class_ = await session.scalar(
+            select(Class).options(joinedload(Class.users)).where(Class.id == class_id)
+        )
 
         if not class_:
             return False

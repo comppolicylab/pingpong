@@ -60,7 +60,7 @@ export async function load({fetch, url, params}: { fetch: api.Fetcher, url: URL,
     const results = await Promise.all(promises);
     additionalState.institutions = results[0].institutions;
     additionalState.classes = results[1]?.classes;
-    additionalState.threads = results[2]?.threads;
+    additionalState.threads = results[3]?.threads;
   }
 
   return {

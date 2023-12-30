@@ -217,9 +217,6 @@ class Class(BaseModel):
     name: str
     term: str
     institution_id: int
-    assistants: list[Assistant]
-    threads: list[Thread]
-    users: list[UserClassRole]
     created: str
     updated: str | None
     api_key: SecretStr | None
