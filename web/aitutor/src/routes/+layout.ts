@@ -13,7 +13,6 @@ export async function load({fetch, url, params}: { fetch: api.Fetcher, url: URL,
   // Fetch the current user
   const me = await api.me(fetch);
   const authed = me.status === "valid";
-  console.log("ME", me)
 
   if (url.pathname === LOGIN) {
     // If the user is logged in, go to the home page.

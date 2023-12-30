@@ -22,6 +22,7 @@ const _fetch = async (f: Fetcher, method: Method, path: string, headers?: Record
 
   while (attempt < retries) {
     try {
+      path = path.replace(/^\/+/, "");
       const fullPath = `/api/v1/${path}`;
       const res = await f(fullPath, {
         method,
@@ -352,7 +353,7 @@ export const createThread = async (f: Fetcher, classId: number, data: CreateThre
  * Get a thread by ID.
  */
 export const getThread = async (f: Fetcher, classId: number, threadId: number) => {
-  const url = `/class/${classId}/thread/${threadId}`;
+  const url = `class/${classId}/thread/${threadId}`;
   return await GET(f, url);
 }
 
@@ -360,7 +361,7 @@ export const getThread = async (f: Fetcher, classId: number, threadId: number) =
  * Post a new message to the thread.
  */
 export const postMessage = async (f: Fetcher, classId: number, threadId: number, data: {}) => {
-  const url = `/class/${classId}/thread/${threadId}`;
+  const url = `class/${classId}/thread/${threadId}`;
   return await POST(f, url, data);
 }
 
@@ -368,7 +369,7 @@ export const postMessage = async (f: Fetcher, classId: number, threadId: number,
  * Get the last run of a thread.
  */
 export const getLastThreadRun = async (f: Fetcher, classId: number, threadId: number) => {
-  const url = `/class/${classId}/thread/${threadId}/last_run`;
+  const url = `class/${classId}/thread/${threadId}/last_run`;
   return await GET(f, url);
 }
 
