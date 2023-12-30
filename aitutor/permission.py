@@ -32,6 +32,9 @@ class Expression:
     def __rand__(self, other):
         return And(other, self)
 
+    def __str__(self):
+        return f"{self.__class__.__name__}()"
+
 
 class Or(Expression):
     def __init__(self, *args: Expression):
@@ -42,6 +45,9 @@ class Or(Expression):
             if await arg.test(request):
                 return True
         return False
+
+    def __str__(self):
+        return f"Or({', '.join(str(arg) for arg in self.args)})"
 
 
 class And(Expression):
@@ -54,6 +60,9 @@ class And(Expression):
                 return False
         return True
 
+    def __str__(self):
+        return f"And({', '.join(str(arg) for arg in self.args)})"
+
 
 class Not(Expression):
     def __init__(self, arg: Expression):
@@ -61,6 +70,9 @@ class Not(Expression):
 
     async def test(self, request: Request) -> bool:
         return not await self.arg.test(request)
+
+    def __str__(self):
+        return f"Not({self.arg})"
 
 
 class IsSuper(Expression):
@@ -81,6 +93,9 @@ class CanRead(Expression):
             request.state.db, model_id, request.state.session.user
         )
 
+    def __str__(self):
+        return f"CanRead({self.model.__name__}, {self.id_field})"
+
 
 class CanWrite(Expression):
     def __init__(self, model, id_field):
@@ -94,6 +109,9 @@ class CanWrite(Expression):
         return await self.model.can_write(
             request.state.db, model_id, request.state.session.user
         )
+
+    def __str__(self):
+        return f"CanWrite({self.model.__name__}, {self.id_field})"
 
 
 class CanManage(Expression):
@@ -109,7 +127,13 @@ class CanManage(Expression):
             request.state.db, model_id, request.state.session.user
         )
 
+    def __str__(self):
+        return f"CanManage({self.model.__name__}, {self.id_field})"
+
 
 class LoggedIn(Expression):
     async def test(self, request: Request) -> bool:
         return request.state.session.status == SessionStatus.VALID
+
+    def __str__(self):
+        return "LoggedIn()"
