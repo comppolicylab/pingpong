@@ -260,10 +260,12 @@ class ConfigLoader:
         logging.basicConfig(level=self.config.log_level)
         # Shut up some noisy libraries
         logging.getLogger("azure.monitor.opentelemetry").setLevel(logging.WARNING)
+        logging.getLogger("urllib3").setLevel(logging.WARNING)
         logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
             logging.WARNING
         )
-        logging.getLogger("urllib3").setLevel(logging.WARNING)
+        if self.config.log_level != "DEBUG":
+            logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
         if new_hash != self._last_hash:
             self._last_hash = new_hash

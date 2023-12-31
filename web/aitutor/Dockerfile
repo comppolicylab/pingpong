@@ -7,16 +7,19 @@ COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
 ARG node_env=production
+ARG api_proto=http
 ARG api_host=srv:8000
 ARG host=0.0.0.0
 ARG port=3000
+ARG origin=https://localhost
 
 COPY . .
+ENV API_PROTO=$api_proto
 ENV API_HOST=$api_host
 ENV NODE_ENV=$node_env
 ENV HOST=$host
 ENV PORT=$port
-ENV ORIGIN=http://localhost
+ENV ORIGIN=$origin
 ENV PROTOCOL_HEADER=x-forwarded-proto
 ENV HOST_HEADER=x-forwarded-host
 RUN pnpm build

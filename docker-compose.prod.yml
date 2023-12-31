@@ -6,8 +6,17 @@ volumes:
       device: /opt/aitutor/db
       o: bind
 
+services:
+  web:
+    build:
+      args:
+        node_env: production
+        origin: https://aitutor.hks.harvard.edu
+
 secrets:
   app_config:
-    file: /opt/aitutor/config.toml
-  web_env:
-    file: /opt/aitutor/.env
+    file: /opt/aitutor/config.prod.toml
+  nginxcrt:
+    file: /opt/aitutor/cert/hks.aitutor.harvard.edu.cer
+  nginxkey:
+    file: /opt/aitutor/cert/hks.aitutor.harvard.edu.key

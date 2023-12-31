@@ -166,6 +166,9 @@ config.json
 config.*.json
 .db/
 !.db/.gitkeep
+cert/
+!cert/README.md
+!cert/dev.*
 *.db
 cache/
 chroma/

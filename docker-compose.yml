@@ -8,13 +8,16 @@ services:
     networks: [back, front]
     expose: [80, 443]
     ports: ["80:80", "443:443"]
-    #secrets:
-    #- source: nginxcrt
-    #  target: /etc/nginx/cert/site.crt
-    #  mode: 0400
-    #- source: nginxkey
-    #  target: /etc/nginx/cert/site.key
-    #  mode: 0400
+    depends_on:
+      - web
+      - srv
+    secrets:
+    - source: nginxcrt
+      target: /etc/ssl/srv.crt
+      mode: 0400
+    - source: nginxkey
+      target: /etc/ssl/srv.key
+      mode: 0400
     volumes:
       - type: bind
         source: ./nginx.conf
@@ -24,18 +27,20 @@ services:
   web:
     platform: linux/amd64
     image: aitutor.azurecr.io/web:latest
+    build:
+      context: ./web/aitutor
+      dockerfile: Dockerfile
     restart: always
     networks: [back]
     expose: [3000]
     ports: ["3000:3000"]
-    secrets:
-      - source: web_env
-        target: /app/.env
-        mode: 0400
 
   srv:
     platform: linux/amd64
     image: aitutor.azurecr.io/srv:latest
+    build:
+      context: ./
+      dockerfile: Dockerfile
     restart: always
     networks: [back]
     # Expose metrics port for scraping
@@ -62,10 +67,8 @@ volumes:
 # Use local config in dev
 secrets:
   app_config:
-    file: ./config.toml
-  web_env:
-    file: ./web/aitutor/.env
-  #nginxcrt:
-  #   file: ./cert/demo.crt
-  #nginxkey:
-  #  file: ./cert/demo.key
+    file: ./config.dev.toml
+  nginxcrt:
+     file: ./cert/dev.crt
+  nginxkey:
+    file: ./cert/dev.key
