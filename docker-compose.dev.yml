@@ -1,0 +1,7 @@
+volumes:
+  dbdata:
+    driver: local
+    driver_opts:
+      type: none
+      device: ./.db
+      o: bind

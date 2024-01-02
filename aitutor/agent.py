@@ -5,9 +5,7 @@ from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
 
-from .chat import AiChat
 from .claim import claim_message
-from .config import SlackSettings
 from .metrics import event_count, in_flight, inbound_messages, replies, reply_duration
 from .reaction import react
 from .thread import SlackThread, client_user_id
@@ -41,7 +39,8 @@ async def reply(client: SocketModeClient, payload: dict) -> bool:
             user=thread.user_id,
         ).inc()
 
-        await AiChat(thread).reply(client)
+        # TODO(jnu): generate response
+        # Used to call AiChat.reply here ... need to call new assistants api
 
         replies.labels(
             workspace=thread.team_id,
@@ -111,9 +110,7 @@ async def handle_message_impl(client: SocketModeClient, req: SocketModeRequest) 
     return did_process
 
 
-async def handle_message(
-    slack_app: SlackSettings, client: SocketModeClient, req: SocketModeRequest
-):
+async def handle_message(slack_app, client: SocketModeClient, req: SocketModeRequest):
     """Process incoming messages.
 
     Args:

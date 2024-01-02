@@ -1,30 +1,74 @@
 version: "3.9"
 
 services:
-  aitutor:
+
+  nginx:
     platform: linux/amd64
-    image: aitutor.azurecr.io/aitutor:latest
-    restart: always
-    networks: [main]
-    # Expose metrics port for scraping
-    expose: [8008]
-    ports: ["8008:8008"]
+    image: nginx:1.25.3
+    networks: [back, front]
+    expose: [80, 443]
+    ports: ["80:80", "443:443"]
+    depends_on:
+      - web
+      - srv
     secrets:
-      - source: bot_config
+    - source: nginxcrt
+      target: /etc/ssl/srv.crt
+      mode: 0400
+    - source: nginxkey
+      target: /etc/ssl/srv.key
+      mode: 0400
+    volumes:
+      - type: bind
+        source: ./nginx.conf
+        target: /etc/nginx/nginx.conf
+      - logs:/logs
+
+  web:
+    platform: linux/amd64
+    image: aitutor.azurecr.io/web:latest
+    build:
+      context: ./web/aitutor
+      dockerfile: Dockerfile
+    restart: always
+    networks: [back]
+    expose: [3000]
+    ports: ["127.0.0.1:3000:3000"]
+
+  srv:
+    platform: linux/amd64
+    image: aitutor.azurecr.io/srv:latest
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    restart: always
+    networks: [back]
+    # Expose metrics port for scraping
+    expose: [8000]
+    ports: ["127.0.0.1:8000:8000"]
+    secrets:
+      - source: app_config
         target: /code/config.toml
         mode: 0400
     volumes:
       - dbdata:/db
 
 networks:
-  main:
+  front:
+  back:
 
 # Use ephemeral volume in dev
 volumes:
   dbdata:
     driver_opts: {}
+  logs:
+    driver_opts: {}
 
 # Use local config in dev
 secrets:
-  bot_config:
-    file: ./config.toml
+  app_config:
+    file: ./config.dev.toml
+  nginxcrt:
+     file: ./cert/dev.crt
+  nginxkey:
+    file: ./cert/dev.key

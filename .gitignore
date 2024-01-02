@@ -14,7 +14,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -163,9 +162,21 @@ cython_debug/
 *.swp
 config.toml
 config.*.toml
+config.json
+config.*.json
 .db/
 !.db/.gitkeep
+cert/
+!cert/README.md
+!cert/dev.*
 *.db
 cache/
 chroma/
 .DS_Store
+
+# Node.js / JavaScript stuff
+node_modules/
+
+# SQLite database files
+*.sqlite3
+docker.env
