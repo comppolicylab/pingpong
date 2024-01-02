@@ -17,6 +17,6 @@ secrets:
   app_config:
     file: /opt/aitutor/config.prod.toml
   nginxcrt:
-    file: /opt/aitutor/cert/hks.aitutor.harvard.edu.cer
+    file: /opt/aitutor/cert/aitutor.hks.harvard.edu.cer
   nginxkey:
-    file: /opt/aitutor/cert/hks.aitutor.harvard.edu.key
+    file: /opt/aitutor/cert/aitutor.hks.harvard.edu.key

@@ -1,4 +1,9 @@
+.DS_Store
+LICENSE
 *.yml
+nginx.conf
+deploy.sh
+cert/
 config.toml
 config.*.toml
 .vscode
@@ -16,3 +21,5 @@ Dockerfile
 .env
 .env.*
 .db/
+docker.env
+*.swp

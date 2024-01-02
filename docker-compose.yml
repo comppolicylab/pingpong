@@ -33,7 +33,7 @@ services:
     restart: always
     networks: [back]
     expose: [3000]
-    ports: ["3000:3000"]
+    ports: ["127.0.0.1:3000:3000"]
 
   srv:
     platform: linux/amd64
@@ -45,7 +45,7 @@ services:
     networks: [back]
     # Expose metrics port for scraping
     expose: [8000]
-    ports: ["8000:8000"]
+    ports: ["127.0.0.1:8000:8000"]
     secrets:
       - source: app_config
         target: /code/config.toml
