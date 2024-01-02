@@ -1,8 +1,0 @@
-team_id = "T05NEFS0ATT" # API 318
-variables = { focus = "thinking analytically, understand the world around them, make smarter personal and professional decisions, achieve better outcomes, and ultimately lead a more fulfilling life" }
-[[models]]
-name = "api-318-general"
-[[models]]
-name = "api-318-quiz"
-[[models]]
-name = "api-318-search"
