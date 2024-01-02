@@ -4,6 +4,7 @@ LICENSE
 nginx.conf
 deploy.sh
 cert/
+docs/
 config.toml
 config.*.toml
 .vscode
