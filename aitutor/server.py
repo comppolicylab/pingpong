@@ -609,17 +609,17 @@ async def list_assistants(class_id: str, request: Request):
     include_private = await IsSuper().test(request) or await CanWrite(
         models.Class, "class_id"
     ).test(request)
-    class_assts = await models.Assistant.for_class(
-        request.state.db, int(class_id), include_private=include_private
+
+    assts = await models.Assistant.for_class(
+        request.state.db,
+        int(class_id),
+        user_id=request.state.session.user.id,
+        include_all_private=include_private,
     )
-    my_assts = await models.Assistant.for_user(
-        request.state.db, request.state.session.user.id
-    )
-    creator_ids = {a.creator_id for a in class_assts + my_assts}
+    creator_ids = {a.creator_id for a in assts}
     creators = await models.User.get_all_by_id(request.state.db, list(creator_ids))
     return {
-        "class_assistants": class_assts,
-        "my_assistants": my_assts,
+        "assistants": assts,
         "creators": {c.id: schemas.Profile.from_email(c.email) for c in creators},
     }
 

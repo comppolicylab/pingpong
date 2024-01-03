@@ -75,8 +75,7 @@ class CreateAssistant(BaseModel):
 
 
 class Assistants(BaseModel):
-    my_assistants: list[Assistant]
-    class_assistants: list[Assistant]
+    assistants: list[Assistant]
     creators: dict[int, Profile]
 
     class Config:
