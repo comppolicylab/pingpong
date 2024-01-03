@@ -453,7 +453,7 @@ class Class(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String)
     institution_id = Column(Integer, ForeignKey("institutions.id"))
-    institution = relationship("Institution", back_populates="classes")
+    institution = relationship("Institution", back_populates="classes", lazy="selectin")
     assistants: Mapped[List["Assistant"]] = relationship(
         "Assistant",
         back_populates="class_",
@@ -551,13 +551,39 @@ class Class(Base):
 
     @classmethod
     async def visible(cls, session: AsyncSession, user: User) -> List["Class"]:
-        stmt = (
-            select(Class)
-            .options(joinedload(Class.users), joinedload(Class.institution))
-            .where(UserClassRole.user_id == user.id)
+        if user.super_admin:
+            return list(await session.scalars(select(Class)))
+
+        # Classes the user has a specific assignment to
+        stmt = select(Class).join(UserClassRole).where(UserClassRole.user_id == user.id)
+
+        ids = set[int]()
+        all_ = list[Class]()
+        for class_ in await session.scalars(stmt):
+            ids.add(class_.id)
+            all_.append(class_)
+
+        # Find institutions where user has elevated privileges
+        stmt2 = select(UserInstitutionRole).where(
+            UserInstitutionRole.user_id == user.id,
+            # Role is either admin or write
+            or_(
+                UserInstitutionRole.role == schemas.Role.ADMIN,
+                UserInstitutionRole.role == schemas.Role.WRITE,
+            ),
         )
-        result = await session.execute(stmt)
-        return [row.Class for row in result.unique()]
+
+        insts = [inst.institution_id for inst in await session.scalars(stmt2)]
+        if not insts:
+            return all_
+
+        # Find all classes in those institutions
+        stmt3 = select(Class).where(Class.institution_id.in_(insts))
+        for class_ in await session.scalars(stmt3):
+            if class_.id not in ids:
+                all_.append(class_)
+
+        return all_
 
     @classmethod
     async def create(cls, session: AsyncSession, data: schemas.CreateClass) -> "Class":
