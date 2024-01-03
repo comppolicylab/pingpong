@@ -8,15 +8,6 @@ export async function load({ fetch, params }) {
   const {creators: assistantCreators, my_assistants: myAssistants, class_assistants: classAssistants} = await api.getAssistants(fetch, params.classId);
   const {files} = await api.getClassFiles(fetch, params.classId);
 
-  // Make sure that the class is in the correct institution
-  if (classData?.institution_id !== parseInt(params.institutionId, 10)) {
-    if (browser) {
-      goto("/");
-    } else {
-      throw redirect(307, "/");
-    }
-  }
-
   // Dedupe the assistants
   const classAssistantsIds = classAssistants.map((a) => a.id);
   const assistants = [...classAssistants, ...myAssistants.filter((a) => !classAssistantsIds.includes(a.id))];
@@ -30,6 +21,5 @@ export async function load({ fetch, params }) {
     classAssistants,
     assistantCreators,
     files,
-    "institutionId": params.institutionId,
   }
 }

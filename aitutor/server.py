@@ -239,6 +239,16 @@ async def create_class(institution_id: str, request: Request):
 
 
 @v1.get(
+    "/classes",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.Classes,
+)
+async def get_my_classes(request: Request):
+    classes = await models.Class.visible(request.state.db, request.state.session.user)
+    return {"classes": classes}
+
+
+@v1.get(
     "/class/{class_id}",
     dependencies=[Depends(IsSuper() | CanRead(models.Class, "class_id"))],
     response_model=schemas.Class,

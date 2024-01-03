@@ -127,6 +127,13 @@ export const getClasses = async (f: Fetcher, id: string) => {
 }
 
 /**
+ * Get classes visible to the current user.
+ */
+export const getMyClasses = async (f: Fetcher) => {
+  return await GET(f, `classes`);
+}
+
+/**
  * Parameters for creating a new class.
  */
 export type CreateClassRequest = {

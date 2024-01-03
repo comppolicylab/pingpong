@@ -9,7 +9,7 @@ const HOME = "/";
 /**
  * Load the current user and redirect if they are not logged in.
  */
-export async function load({fetch, url, params}: { fetch: api.Fetcher, url: URL, params: { institutionId?: string, classId?: string } }) {
+export async function load({fetch, url, params}: { fetch: api.Fetcher, url: URL, params: { threadId?: string, classId?: string } }) {
   // Fetch the current user
   const me = await api.me(fetch);
   const authed = me.status === "valid";
@@ -34,33 +34,24 @@ export async function load({fetch, url, params}: { fetch: api.Fetcher, url: URL,
     }
   }
 
-  // Fetch the available institutions
+  // Fetch class / thread data (needed to render the sidebar)
   // TODO - should move this elsewhere? into shared store?
   const additionalState = {
-    institutions: [],
     classes: [],
     threads: [],
   };
 
   if (authed) {
     const promises = [];
-    promises.push(api.getInstitutions(fetch));
-    const instId = params.institutionId;
-
-    if (instId) {
-      promises.push(api.getClasses(fetch, instId));
-    }
-
+    promises.push(api.getMyClasses(fetch));
     const classId = params.classId ? parseInt(params.classId, 10) : null;
     if (classId) {
-      promises.push(api.getClass(fetch, classId));
       promises.push(api.getClassThreads(fetch, classId));
     }
 
     const results = await Promise.all(promises);
-    additionalState.institutions = results[0].institutions;
-    additionalState.classes = results[1]?.classes;
-    additionalState.threads = results[3]?.threads;
+    additionalState.classes = results[0]?.classes;
+    additionalState.threads = results[1]?.threads;
   }
 
   return {

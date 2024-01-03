@@ -20,7 +20,7 @@
 
     return ({result, update}) => {
       if (result.type === "success") {
-        goto(`/institution/${data.institutionId}/class/${result.data.thread.class_id}/thread/${result.data.thread.id}`);
+        goto(`/class/${result.data.thread.class_id}/thread/${result.data.thread.id}`);
       } else {
         $loading = false;
         alert("Chat failed! Please try again.");

@@ -523,6 +523,16 @@ class Class(Base):
         return False
 
     @classmethod
+    async def visible(cls, session: AsyncSession, user: User) -> List["Class"]:
+        stmt = (
+            select(Class)
+            .options(joinedload(Class.users), joinedload(Class.institution))
+            .where(UserClassRole.user_id == user.id)
+        )
+        result = await session.execute(stmt)
+        return [row.Class for row in result.unique()]
+
+    @classmethod
     async def create(cls, session: AsyncSession, data: schemas.CreateClass) -> "Class":
         class_ = Class(**data.dict())
         session.add(class_)

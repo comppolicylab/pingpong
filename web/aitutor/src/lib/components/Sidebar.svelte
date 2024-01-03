@@ -25,16 +25,12 @@
 
   export let data;
 
-
   $: avatar = data?.me?.profile?.image_url;
   $: name = data?.me?.user?.name || data?.me?.user?.email;
-  $: institutions = data?.institutions || [];
   $: classes = data?.classes || [];
   $: threads = (data?.threads || []).sort((a, b) => a.created > b.created ? -1 : 1);
-  $: currentInstId = parseInt($page.params.institutionId, 10);
   $: currentClassId = parseInt($page.params.classId, 10);
   $: currentThreadId = parseInt($page.params.threadId, 10);
-  $: currentInst = institutions.find(inst => inst.id === currentInstId);
   $: currentClass = classes.find(class_ => class_.id === currentClassId);
   $: canManageClass = !!currentClass && data?.me?.user?.super_admin;
 </script>
@@ -50,20 +46,13 @@
 
     {#if currentClassId}
     <SidebarGroup>
-      <Breadcrumb>
-        <BreadcrumbItem href={`/institution/${currentInstId}`}>
-          <svelte:fragment slot="icon">
-            <BuildingOutline class="text-gray-400" size="sm" />
-          </svelte:fragment>
-      {currentInst.name}</BreadcrumbItem>
-      </Breadcrumb>
       <Breadcrumb class="pr-2 w-full" olClass="w-full">
         <BreadcrumbItem spanClass="ms-1 text-sm font-medium text-gray-500 md:ms-2 dark:text-gray-400 flex items-center justify-between w-full" class="inline-flex items-center w-full">
           <svelte:fragment slot="icon">
             <BookOutline class="text-gray-400" size="sm" />
           </svelte:fragment>
           <span>{currentClass.name}</span>
-          <a href={`/institution/${currentInstId}/class/${currentClassId}/manage`}>
+          <a href={`/class/${currentClassId}/manage`}>
             <CogOutline size="sm" />
           </a>
         </BreadcrumbItem>
@@ -71,7 +60,7 @@
     </SidebarGroup>
 
     <SidebarGroup border>
-      <SidebarItem href={`/institution/${currentInstId}/class/${currentClassId}`} label="New Thread" class="text-amber-800">
+      <SidebarItem href={`/class/${currentClassId}`} label="New Thread" class="text-amber-800">
         <svelte:fragment slot="icon">
           <FilePenOutline size="sm" />
         </svelte:fragment>
@@ -83,7 +72,7 @@
         <SidebarItem
           class="text-sm p-1 flex gap-2"
           spanClass="flex-1 truncate"
-          href={`/institution/${currentInstId}/class/${currentClassId}/thread/${thread.id}`}
+          href={`/class/${currentClassId}/thread/${thread.id}`}
           label={thread.name || "Undefined"}>
           <svelte:fragment slot="icon">
             <EyeSlashOutline size="sm" class={`text-gray-400 ${thread.private ? 'visible' : 'invisible'}`} />
@@ -97,18 +86,9 @@
     {:else}
 
     <SidebarGroup>
-      {#each institutions as institution}
-        {#if institution.id === currentInstId}
-          <SidebarDropdownWrapper label={institution.name} isOpen={true} class="bg-gray-200">
-            {#each classes as class_}
-              <SidebarDropdownItem
-                href={`/institution/${institution.id}/class/${class_.id}`}
-                label={class_.name} />
-            {/each}
-          </SidebarDropdownWrapper>
-        {:else}
-          <SidebarItem label={institution.name} href={`/institution/${institution.id}`} />
-        {/if}
+      <Heading tag="h2" class="text-sm font-medium text-gray-500 md:ms-2 dark:text-gray-400">Classes</Heading>
+      {#each classes as cls}
+        <SidebarItem label={cls.name} href={`/class/${cls.id}`} />
       {/each}
     </SidebarGroup>
     {/if}
