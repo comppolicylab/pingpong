@@ -4,7 +4,7 @@
   import { enhance } from "$app/forms";
   import ChatInput from "$lib/components/ChatInput.svelte";
   import {Helper, GradientButton, Dropdown, DropdownItem, Label} from 'flowbite-svelte';
-  import { ChevronDownSolid } from 'flowbite-svelte-icons';
+  import { EyeSlashOutline, ChevronDownSolid } from 'flowbite-svelte-icons';
 
   export let data;
 
@@ -42,6 +42,9 @@
           <Dropdown bind:open={aiSelectOpen}>
           {#each data.assistants as asst}
             <DropdownItem on:click={() => selectAi(asst)}>
+              {#if !asst.published}
+              <EyeSlashOutline size="sm" class="inline-block mr-2 text-gray-400" />
+              {/if}
               {asst.name}
               <Helper class="text-xs">{data.assistantCreators[asst.creator_id].email}</Helper>
             </DropdownItem>
