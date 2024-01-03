@@ -538,6 +538,7 @@ class Class(Base):
         session.add(class_)
         await session.flush()
         await session.refresh(class_)
+        await class_.awaitable_attrs.institution
         return class_
 
     @classmethod

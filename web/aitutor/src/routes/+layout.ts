@@ -39,19 +39,34 @@ export async function load({fetch, url, params}: { fetch: api.Fetcher, url: URL,
   const additionalState = {
     classes: [],
     threads: [],
+    institutions: [],
   };
 
   if (authed) {
-    const promises = [];
-    promises.push(api.getMyClasses(fetch));
+    const promises = new Map<keyof typeof additionalState, Promise<any>>();
+
+    promises.set("classes", api.getMyClasses(fetch).then(({classes}) => classes));
     const classId = params.classId ? parseInt(params.classId, 10) : null;
     if (classId) {
-      promises.push(api.getClassThreads(fetch, classId));
+      promises.set("threads", api.getClassThreads(fetch, classId).then(({threads}) => threads));
+    } else {
+      promises.set("threads", Promise.resolve([]));
     }
 
-    const results = await Promise.all(promises);
-    additionalState.classes = results[0]?.classes;
-    additionalState.threads = results[1]?.threads;
+    if (me.user.super_admin) {
+      promises.set("institutions", api.getInstitutions(fetch).then(({institutions}) => institutions));
+    } else {
+      promises.set("institutions", Promise.resolve([]));
+    }
+
+    const entries = Array.from(promises.entries());
+    const keys = entries.map(([key]) => key);
+    const values = entries.map(([, value]) => value);
+    const results = await Promise.all(values);
+
+    for (let i = 0; i < keys.length; i++) {
+      additionalState[keys[i]] = results[i];
+    }
   }
 
   return {

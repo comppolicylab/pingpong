@@ -10,7 +10,9 @@
   const close = () => goto("/");
 
   $: console.log("DATA", data);
+  $: console.log("FORM", form);
   $: isCreatingClass = $page.url.searchParams.has("new-class");
+  $: institutions = data?.institutions || [];
   $: {
     if (form?.$status < 300 && isCreatingClass) {
       close();
@@ -23,8 +25,15 @@
     <div class="flex flex-wrap mt-8 gap-4">
       {#each data?.classes as cls}
         <Card horizontal img={cls.logo} class="w-80 h-40" href={`/class/${cls.id}`}>
+          <div class="flex flex-col w-full justify-between">
+          <div class="flex flex-row justify-between">
           <Heading tag="h3" color="text-gray-900">{cls.name}</Heading>
-          <P>{cls.description}</P>
+          <P class="text-gray-400">{cls.term}</P>
+          </div>
+          <div class="text-amber-500 text-lg">
+            {cls.institution.name}
+          </div>
+          </div>
         </Card>
       {/each}
       {#if data?.me?.user?.super_admin}
@@ -37,5 +46,8 @@
 </div>
 
 <Modal bind:open={isCreatingClass} dismissable={false}>
-  <CreateClass on:close={close} />
+  <CreateClass institutions={institutions} on:close={close} />
+  {#if form?.$status >= 300}
+    <P class="text-red-600">Error: {form?.message || `unknown (${form.$status})`}</P>
+  {/if}
 </Modal>
