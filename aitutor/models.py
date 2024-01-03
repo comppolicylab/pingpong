@@ -15,6 +15,7 @@ from sqlalchemy import (
     select,
     update,
 )
+from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
 from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -64,11 +65,17 @@ class UserClassRole(Base):
         class_id: int,
         ucr: schemas.CreateUserClassRole,
     ) -> "UserClassRole":
-        user_class_role = UserClassRole(
-            user_id=user_id, class_id=class_id, title=ucr.title, role=ucr.role
+        # TODO(jnu): dialect-agnostic upsert!
+        stmt = (
+            sqlite_upsert(UserClassRole)
+            .values(user_id=user_id, class_id=class_id, title=ucr.title, role=ucr.role)
+            .on_conflict_do_update(
+                index_elements=[UserClassRole.user_id, UserClassRole.class_id],
+                set_={"title": ucr.title, "role": ucr.role},
+            )
+            .returning(UserClassRole)
         )
-        session.add(user_class_role)
-        return user_class_role
+        return await session.scalar(stmt)
 
     @classmethod
     async def delete(cls, session: AsyncSession, user_id: int, class_id: int) -> None:
