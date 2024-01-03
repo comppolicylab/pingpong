@@ -369,9 +369,9 @@ export const postMessage = async (f: Fetcher, classId: number, threadId: number,
 /**
  * Get the last run of a thread.
  */
-export const getLastThreadRun = async (f: Fetcher, classId: number, threadId: number) => {
+export const getLastThreadRun = async (f: Fetcher, classId: number, threadId: number, block: boolean = true) => {
   const url = `class/${classId}/thread/${threadId}/last_run`;
-  return await GET(f, url);
+  return await GET(f, url, {block});
 }
 
 /**

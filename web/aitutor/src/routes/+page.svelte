@@ -9,8 +9,6 @@
 
   const close = () => goto("/");
 
-  $: console.log("DATA", data);
-  $: console.log("FORM", form);
   $: isCreatingClass = $page.url.searchParams.has("new-class");
   $: institutions = data?.institutions || [];
   $: {
