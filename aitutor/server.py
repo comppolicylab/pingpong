@@ -595,7 +595,13 @@ async def list_files(class_id: str, request: Request):
     response_model=schemas.Assistants,
 )
 async def list_assistants(class_id: str, request: Request):
-    class_assts = await models.Assistant.for_class(request.state.db, int(class_id))
+    # TODO - optimize this check
+    include_private = await IsSuper().test(request) or await CanWrite(
+        models.Class, "class_id"
+    ).test(request)
+    class_assts = await models.Assistant.for_class(
+        request.state.db, int(class_id), include_private=include_private
+    )
     my_assts = await models.Assistant.for_user(
         request.state.db, request.state.session.user.id
     )
