@@ -5,12 +5,12 @@ import requests
 from locust import HttpUser, between, events, task
 
 from aitutor.auth import encode_auth_token
+from aitutor.config import config
 
 TEST_INST = None
 
 
 class WebUser(HttpUser):
-    host = "http://localhost:8000"
     wait_time = between(1, 5)
 
     @task(5)
@@ -170,11 +170,13 @@ class TestInstance:
 
 @events.test_start.add_listener
 def on_test_start(**kwargs):
+    print("Starting test", kwargs)
     global TEST_INST
-    TEST_INST = TestInstance("http://localhost:8000", encode_auth_token(1))
+    TEST_INST = TestInstance(config.public_url, encode_auth_token(1))
 
 
 @events.test_stop.add_listener
 def on_test_stop(**kwargs):
+    print("Stopping test", kwargs)
     global TEST_INST
     TEST_INST.cleanup()
