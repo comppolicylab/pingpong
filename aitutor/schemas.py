@@ -129,6 +129,7 @@ class CreateUserClassRole(BaseModel):
 
 class CreateUserClassRoles(BaseModel):
     roles: list[CreateUserClassRole]
+    silent: bool = False
 
 
 class UserClassRole(BaseModel):
