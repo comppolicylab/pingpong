@@ -163,6 +163,9 @@
       <Info>Manage files used by the automated tutors.</Info>
     </div>
     <div class="col-span-2">
+      {#if !apiKey}
+        <div class="text-gray-400 mb-4">You need to set an API key before you can upload files.</div>
+      {:else}
       <List tag="ul" list="none" class="w-full divide-y divide-gray-200 dark:divide-gray-700">
         {#each files as file}
           <Li class="py-3 sm:py-4">
@@ -182,6 +185,7 @@
           </form>
         </Li>
       </List>
+      {/if}
     </div>
   </div>
     {/if}
@@ -192,6 +196,9 @@
       <Info>Manage AI assistants.</Info>
     </div>
     <div class="col-span-2 flex flex-wrap gap-4">
+      {#if !apiKey}
+        <div class="text-gray-400 mb-4">You need to set an API key before you can create AI assistants.</div>
+      {:else}
         {#each assistants as assistant}
           {#if assistant.id == editingAssistant}
           <Card class="w-full max-w-full">
@@ -209,6 +216,7 @@
           <ManageAssistant {files} />
         </Card>
         {/if}
+      {/if}
     </div>
   </div>
 </div>
