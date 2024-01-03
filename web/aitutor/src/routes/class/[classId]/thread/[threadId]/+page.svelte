@@ -16,7 +16,6 @@
   } from 'flowbite-svelte-icons';
 
   export let data;
-  export let form;
 
   let submitting = writable(false);
   $: thread = data?.thread?.store;
