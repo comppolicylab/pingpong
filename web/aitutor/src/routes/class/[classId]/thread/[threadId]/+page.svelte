@@ -69,6 +69,10 @@
   }
 
   const handleSubmit = () => {
+    if ($waiting) {
+      alert("A response to the previous message is being generated. Please wait before sending a new message.");
+      return;
+    }
     $submitting = true;
     return async ({result, update}) => {
       if (result.type !== "success") {
@@ -143,7 +147,7 @@
   {/if}
   <div class="absolute w-full bottom-8 bg-gradient-to-t from-white to-transparent">
     <form class="w-9/12 mx-auto" action="?/newMessage" method="POST" use:enhance={handleSubmit}>
-      <ChatInput loading={$submitting} />
+      <ChatInput loading={$submitting || $waiting} />
     </form>
   </div>
 </div>

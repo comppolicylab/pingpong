@@ -1,5 +1,6 @@
 import os
 import random
+from threading import Lock
 
 import requests
 from locust import HttpUser, between, events, task
@@ -38,14 +39,24 @@ class WebUser(HttpUser):
         )
 
         thread_id = resp.json()["thread"]["id"]
-        self.threads.append(thread_id)
-
-        self.client.get(f"/api/v1/class/{TEST_INST.cls_id}/thread/{thread_id}/last_run")
+        with self.thread_lock(thread_id):
+            self.threads.append(thread_id)
+            self.client.get(
+                f"/api/v1/class/{TEST_INST.cls_id}/thread/{thread_id}/last_run"
+            )
 
     @task(2)
     def add_to_thread(self):
         if not self.threads:
             return
+
+        lock = self.thread_lock(random.choice(self.threads))
+        if lock.locked():
+            # Just return empty if the thread is running. This is similar to
+            # what the UI will do if somehow the user tries to bypass the lock
+            # on the input field and submit a message before a response comes.
+            return
+
         thread_id = random.choice(self.threads)
         self.client.post(
             f"/api/v1/class/{TEST_INST.cls_id}/thread/{thread_id}",
@@ -63,15 +74,20 @@ class WebUser(HttpUser):
         if not self.threads:
             return
         some_thread = random.choice(self.threads)
-        self.client.get(
-            f"/api/v1/class/{TEST_INST.cls_id}/thread/{some_thread}/last_run"
-        )
+        with self.thread_lock(some_thread):
+            self.client.get(
+                f"/api/v1/class/{TEST_INST.cls_id}/thread/{some_thread}/last_run"
+            )
+
+    def thread_lock(self, thread_id):
+        return self.thread_locks.setdefault(thread_id, Lock())
 
     def on_start(self):
         user = TEST_INST.create_test_user()
         self.user = user
         self.client.cookies.set("session", user["token"])
         self.threads = []
+        self.thread_locks = {}
 
 
 class Session(requests.Session):
