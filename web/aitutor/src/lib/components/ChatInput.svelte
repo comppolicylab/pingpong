@@ -18,5 +18,5 @@
   <Input id="message" autocomplete="off" name="message" placeholder="Ask me anything" let:props>
     <input type="text" use:init={$page.params.threadId} disabled={loading} {...props} />
   </Input>
-  <GradientButton type="submit" color="cyanToBlue" class={loading ? "animate-pulse" : undefined}>Send</GradientButton>
+  <GradientButton type="submit" color="cyanToBlue" class={loading ? "animate-pulse cursor-progress" : undefined}>Send</GradientButton>
 </ButtonGroup>
