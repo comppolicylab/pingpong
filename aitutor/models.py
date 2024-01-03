@@ -374,10 +374,14 @@ class Assistant(Base):
         return [row.Assistant for row in result]
 
     @classmethod
-    async def for_class(cls, session: AsyncSession, class_id: int) -> list["Assistant"]:
-        stmt = select(Assistant).where(
-            and_(Assistant.class_id == class_id, Assistant.published.is_not(None))
-        )
+    async def for_class(
+        cls, session: AsyncSession, class_id: int, include_private: bool = False
+    ) -> list["Assistant"]:
+        condition = Assistant.class_id == class_id
+        if not include_private:
+            condition = and_(condition, Assistant.published.is_not(None))
+
+        stmt = select(Assistant).where(condition)
         result = await session.execute(stmt)
         return [row.Assistant for row in result]
 
