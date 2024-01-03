@@ -30,6 +30,8 @@ services:
     build:
       context: ./web/aitutor
       dockerfile: Dockerfile
+      args:
+        port: 3000
     restart: always
     networks: [back]
     expose: [3000]

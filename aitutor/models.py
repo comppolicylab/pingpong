@@ -435,6 +435,10 @@ class Assistant(Base):
         await session.refresh(assistant)
         return assistant
 
+    async def delete(self, session: AsyncSession):
+        session.delete(self)
+        await session.flush()
+
 
 class Class(Base):
     __tablename__ = "classes"
