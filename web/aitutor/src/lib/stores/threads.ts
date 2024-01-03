@@ -82,8 +82,10 @@ class ThreadPoller {
     // TODO write last run to store
   }
 
-  public async refresh() {
-    await this._getThreadRun();
+  public async refresh(block: boolean = true) {
+    if (block) {
+      await this._getThreadRun();
+    }
     await this._getThread();
   }
 

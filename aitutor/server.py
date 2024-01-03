@@ -417,7 +417,11 @@ async def get_thread(
     response_model=schemas.ThreadRun,
 )
 async def get_last_run(
-    class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
+    class_id: str,
+    thread_id: str,
+    request: Request,
+    openai_client: OpenAIClient,
+    block: bool = True,
 ):
     TIMEOUT = 60  # seconds
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
@@ -435,6 +439,9 @@ async def get_last_run(
         return {"thread": thread, "run": None}
 
     last_run = runs[0]
+
+    if not block:
+        return {"thread": thread, "run": last_run}
 
     t0 = time.monotonic()
     while last_run.status not in {"completed", "failed", "expired", "cancelled"}:

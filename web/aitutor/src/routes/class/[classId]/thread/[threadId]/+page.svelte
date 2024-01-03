@@ -6,7 +6,8 @@
   import { enhance } from "$app/forms";
   import {browser} from '$app/environment';
   import {invalidateAll} from '$app/navigation';
-  import {Span, Avatar, Spinner} from "flowbite-svelte";
+  import {Span, Avatar } from "flowbite-svelte";
+  import { Pulse, SyncLoader } from 'svelte-loading-spinners';
   import SvelteMarkdown from "svelte-markdown";
   import Logo from '$lib/components/Logo.svelte';
   import ChatInput from "$lib/components/ChatInput.svelte";
@@ -15,6 +16,7 @@
   } from 'flowbite-svelte-icons';
 
   export let data;
+  export let form;
 
   let submitting = writable(false);
   $: thread = data?.thread?.store;
@@ -68,19 +70,25 @@
 
   const handleSubmit = () => {
     $submitting = true;
-    return ({result, update}) => {
-      $submitting = false;
-      $waiting = !api.finished(result.data.run);
-
-      data.thread.refresh().then(() => {
-        $waiting = false;
-      });
-
-      if (result.type === "success") {
-        update();
-      } else {
+    return async ({result, update}) => {
+      if (result.type !== "success") {
         alert("Chat failed! Please try again.");
+        return;
       }
+
+      $waiting = true;
+
+      await data.thread.refresh(false);
+      update();
+
+      $submitting = false;
+
+      // Do a blocking refresh if the completion is still running
+      if (!api.finished($thread.run)) {
+        await data.thread.refresh(true);
+      }
+
+      $waiting = false;
     };
   };
 </script>
@@ -99,7 +107,7 @@
   {#if loading}
     <div class="absolute top-0 left-0 flex h-full w-full items-center">
       <div class="m-auto" transition:blur={{amount: 10}}>
-        <Spinner color="blue" />
+        <Pulse color="#d97706" />
       </div>
     </div>
   {/if}
@@ -122,7 +130,8 @@
       </div>
     {/each}
   {#if $waiting}
-    <div class="text-center w-full" transition:blur={{amount: 10}}><Spinner color="blue" /></div>
+    <div class="w-full flex justify-center" transition:blur={{amount: 10}}><SyncLoader color="#d97706" size="40" /></div>
+
    {/if}
   </div>
   {#if priv}

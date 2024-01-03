@@ -1,1 +1,0 @@
-<div>New thread</div>
