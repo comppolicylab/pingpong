@@ -375,11 +375,27 @@ class Assistant(Base):
 
     @classmethod
     async def for_class(
-        cls, session: AsyncSession, class_id: int, include_private: bool = False
+        cls,
+        session: AsyncSession,
+        class_id: int,
+        include_all_private: bool = False,
+        user_id: int | None = None,
     ) -> list["Assistant"]:
-        condition = Assistant.class_id == class_id
-        if not include_private:
-            condition = and_(condition, Assistant.published.is_not(None))
+        if include_all_private:
+            condition = Assistant.class_id == class_id
+        elif user_id:
+            condition = and_(
+                Assistant.class_id == class_id,
+                or_(
+                    Assistant.creator_id == user_id,
+                    Assistant.published.is_not(None),
+                ),
+            )
+        else:
+            condition = and_(
+                Assistant.class_id == class_id,
+                Assistant.published.is_not(None),
+            )
 
         stmt = select(Assistant).where(condition)
         result = await session.execute(stmt)
@@ -523,11 +539,22 @@ class Class(Base):
         return False
 
     @classmethod
+    async def visible(cls, session: AsyncSession, user: User) -> List["Class"]:
+        stmt = (
+            select(Class)
+            .options(joinedload(Class.users), joinedload(Class.institution))
+            .where(UserClassRole.user_id == user.id)
+        )
+        result = await session.execute(stmt)
+        return [row.Class for row in result.unique()]
+
+    @classmethod
     async def create(cls, session: AsyncSession, data: schemas.CreateClass) -> "Class":
         class_ = Class(**data.dict())
         session.add(class_)
         await session.flush()
         await session.refresh(class_)
+        await class_.awaitable_attrs.institution
         return class_
 
     @classmethod
@@ -544,13 +571,19 @@ class Class(Base):
     async def get_by_institution(
         cls, session: AsyncSession, institution_id: int
     ) -> List["Class"]:
-        stmt = select(Class).where(Class.institution_id == institution_id)
+        stmt = (
+            select(Class)
+            .options(joinedload(Class.institution))
+            .where(Class.institution_id == institution_id)
+        )
         result = await session.execute(stmt)
         return [row.Class for row in result]
 
     @classmethod
     async def get_by_id(cls, session: AsyncSession, id: int) -> "Class":
-        stmt = select(Class).where(Class.id == id)
+        stmt = (
+            select(Class).options(joinedload(Class.institution)).where(Class.id == id)
+        )
         return await session.scalar(stmt)
 
 

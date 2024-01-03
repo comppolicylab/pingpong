@@ -75,8 +75,7 @@ class CreateAssistant(BaseModel):
 
 
 class Assistants(BaseModel):
-    my_assistants: list[Assistant]
-    class_assistants: list[Assistant]
+    assistants: list[Assistant]
     creators: dict[int, Profile]
 
     class Config:
@@ -217,6 +216,7 @@ class Class(BaseModel):
     name: str
     term: str
     institution_id: int
+    institution: Institution | None = None
     created: str
     updated: str | None
     api_key: SecretStr | None

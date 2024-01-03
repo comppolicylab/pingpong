@@ -9,7 +9,7 @@ const HOME = "/";
 /**
  * Load the current user and redirect if they are not logged in.
  */
-export async function load({fetch, url, params}: { fetch: api.Fetcher, url: URL, params: { institutionId?: string, classId?: string } }) {
+export async function load({fetch, url, params}: { fetch: api.Fetcher, url: URL, params: { threadId?: string, classId?: string } }) {
   // Fetch the current user
   const me = await api.me(fetch);
   const authed = me.status === "valid";
@@ -34,33 +34,39 @@ export async function load({fetch, url, params}: { fetch: api.Fetcher, url: URL,
     }
   }
 
-  // Fetch the available institutions
+  // Fetch class / thread data (needed to render the sidebar)
   // TODO - should move this elsewhere? into shared store?
   const additionalState = {
-    institutions: [],
     classes: [],
     threads: [],
+    institutions: [],
   };
 
   if (authed) {
-    const promises = [];
-    promises.push(api.getInstitutions(fetch));
-    const instId = params.institutionId;
+    const promises = new Map<keyof typeof additionalState, Promise<any>>();
 
-    if (instId) {
-      promises.push(api.getClasses(fetch, instId));
-    }
-
+    promises.set("classes", api.getMyClasses(fetch).then(({classes}) => classes));
     const classId = params.classId ? parseInt(params.classId, 10) : null;
     if (classId) {
-      promises.push(api.getClass(fetch, classId));
-      promises.push(api.getClassThreads(fetch, classId));
+      promises.set("threads", api.getClassThreads(fetch, classId).then(({threads}) => threads));
+    } else {
+      promises.set("threads", Promise.resolve([]));
     }
 
-    const results = await Promise.all(promises);
-    additionalState.institutions = results[0].institutions;
-    additionalState.classes = results[1]?.classes;
-    additionalState.threads = results[3]?.threads;
+    if (me.user.super_admin) {
+      promises.set("institutions", api.getInstitutions(fetch).then(({institutions}) => institutions));
+    } else {
+      promises.set("institutions", Promise.resolve([]));
+    }
+
+    const entries = Array.from(promises.entries());
+    const keys = entries.map(([key]) => key);
+    const values = entries.map(([, value]) => value);
+    const results = await Promise.all(values);
+
+    for (let i = 0; i < keys.length; i++) {
+      additionalState[keys[i]] = results[i];
+    }
   }
 
   return {
