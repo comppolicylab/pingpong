@@ -9,7 +9,7 @@
 
   const done = () => dispatch("close");
 
-  let selectedInst = institutions[0]?.id || "0";
+  let selectedInst = "";
 </script>
 
 <Heading tag="h2">Create a new class</Heading>
