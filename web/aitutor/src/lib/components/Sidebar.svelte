@@ -51,7 +51,7 @@
           <svelte:fragment slot="icon">
             <BookOutline class="text-gray-400" size="sm" />
           </svelte:fragment>
-          <span>{currentClass.name}</span>
+          <a href={`/class/${currentClassId}`}>{currentClass.name}</a>
           <a href={`/class/${currentClassId}/manage`}>
             <CogOutline size="sm" />
           </a>
@@ -85,7 +85,7 @@
     </SidebarGroup>
     {:else}
 
-    <SidebarGroup>
+    <SidebarGroup class="overflow-y-auto overflow-x-hidden">
       <Heading tag="h2" class="text-sm font-medium text-gray-500 md:ms-2 dark:text-gray-400">Classes</Heading>
       {#each classes as cls}
         <SidebarItem label={cls.name} href={`/class/${cls.id}`} />
