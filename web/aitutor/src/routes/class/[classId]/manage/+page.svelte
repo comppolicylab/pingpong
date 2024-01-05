@@ -27,6 +27,8 @@
   $: tt = (data?.classUsers || []).filter(u => u.title.toLowerCase() !== 'student');
   $: classRole = (data?.me?.user?.classes || []).find(c => c.class_id === data.class.id)?.role || '';
   $: hasElevatedPerms = ['write', 'admin'].includes(classRole.toLowerCase());
+  $: hasApiKey = !!data?.class?.api_key;
+
 
   // Check if we are editing an assistant and prompt if so.
   beforeNavigate((nav) => {
@@ -86,7 +88,7 @@
           <Input autocomplete="off" class={$blurred ? 'cursor-pointer' : undefined} label="API Key" id="apiKey" name="apiKey" value="{apiKey}" on:blur={() => $blurred = true} on:focus={() => $blurred = false} />
           {#if $blurred}
             <div class="cursor-pointer flex items-center gap-2 w-full h-full absolute top-0 left-0 bg-white font-mono pointer-events-none">
-              {#if apiKey}
+              {#if hasApiKey}
                 <span>{apiKeyBlur}</span>
               {:else}
                 <span class="text-gray-400">No API key set</span>
@@ -163,7 +165,7 @@
       <Info>Manage files used by the automated tutors.</Info>
     </div>
     <div class="col-span-2">
-      {#if !apiKey}
+      {#if !hasApiKey}
         <div class="text-gray-400 mb-4">You need to set an API key before you can upload files.</div>
       {:else}
       <List tag="ul" list="none" class="w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -196,7 +198,7 @@
       <Info>Manage AI assistants.</Info>
     </div>
     <div class="col-span-2 flex flex-wrap gap-4">
-      {#if !apiKey}
+      {#if !hasApiKey}
         <div class="text-gray-400 mb-4">You need to set an API key before you can create AI assistants.</div>
       {:else}
         {#each assistants as assistant}
