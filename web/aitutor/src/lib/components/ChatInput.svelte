@@ -1,5 +1,5 @@
 <script lang="ts">
-  import {ButtonGroup, Input, GradientButton} from "flowbite-svelte";
+  import {ButtonGroup, Textarea, GradientButton} from "flowbite-svelte";
   import {page} from "$app/stores";
 
   export let loading = false;
@@ -15,8 +15,8 @@
 </script>
 
 <ButtonGroup class="w-full">
-  <Input id="message" autocomplete="off" name="message" placeholder="Ask me anything" let:props>
-    <input type="text" use:init={$page.params.threadId} disabled={loading} {...props} />
-  </Input>
+  <Textarea id="message" rows="1" name="message" placeholder="Ask me anything" let:props>
+    <textarea use:init={$page.params.threadId} disabled={loading} {...props} />
+  </Textarea>
   <GradientButton type="submit" color="cyanToBlue" class={loading ? "animate-pulse cursor-progress" : undefined}>Send</GradientButton>
 </ButtonGroup>
