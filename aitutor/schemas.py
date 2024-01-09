@@ -152,6 +152,7 @@ class UpdateUserClassRole(BaseModel):
 
 
 class CreateInvite(BaseModel):
+    user_id: int
     email: str
     class_name: str
 

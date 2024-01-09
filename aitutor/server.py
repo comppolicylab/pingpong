@@ -136,7 +136,7 @@ async def login(request: Request):
             await request.state.db.refresh(user)
         else:
             raise HTTPException(status_code=401, detail="User does not exist")
-    magic_link = generate_auth_link(user.id)
+    magic_link = generate_auth_link(user.id, expiry=86_400)
 
     await config.email.sender.send(
         email,
@@ -160,7 +160,7 @@ async def auth(request: Request, response: Response):
         raise HTTPException(status_code=500, detail=str(e))
 
     # Create a token for the user with more information.
-    session_dur = 86_400
+    session_dur = 86_400 * 30
     session_token = encode_session_token(int(auth_token.sub), expiry=session_dur)
 
     response = RedirectResponse(config.url(dest), status_code=303)
@@ -307,6 +307,7 @@ async def add_users_to_class(class_id: str, request: Request, tasks: BackgroundT
             )
             new_.append(
                 schemas.CreateInvite(
+                    user_id=user.id,
                     email=user.email,
                     class_name=class_.name,
                 )
@@ -315,12 +316,12 @@ async def add_users_to_class(class_id: str, request: Request, tasks: BackgroundT
 
     # Send emails to new users in the background
     for invite in new_:
-        # TODO - should send magic link?
+        magic_link = generate_auth_link(invite.user_id, expiry=86_400)
         tasks.add_task(
             send_invite,
             config.email.sender,
             invite,
-            config.url("/login"),
+            magic_link,
             new_ucr.silent,
         )
 
