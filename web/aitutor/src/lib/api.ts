@@ -402,6 +402,7 @@ export const loginWithMagicLink = async (f: Fetcher, email: string) => {
  * List of available language models.
  */
 export const languageModels = [
+    "gpt-4-vision-preview",
     "gpt-4-1106-preview",
 ];
 

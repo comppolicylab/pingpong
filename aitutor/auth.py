@@ -100,7 +100,7 @@ def decode_auth_token(token: str) -> AuthToken:
     raise ValueError("invalid token")
 
 
-def generate_auth_link(user_id: int, redirect: str = "/") -> str:
+def generate_auth_link(user_id: int, redirect: str = "/", expiry: int = 600) -> str:
     """Generates the link to log in.
 
     Args:
@@ -110,5 +110,5 @@ def generate_auth_link(user_id: int, redirect: str = "/") -> str:
     Returns:
         str: Auth Link
     """
-    tok = encode_auth_token(user_id)
+    tok = encode_auth_token(user_id, expiry=expiry)
     return config.url(f"/api/v1/auth?token={tok}&redirect={redirect}")
