@@ -316,7 +316,7 @@ async def add_users_to_class(class_id: str, request: Request, tasks: BackgroundT
 
     # Send emails to new users in the background
     for invite in new_:
-        magic_link = generate_auth_link(invite.user_id, expiry=86_400)
+        magic_link = generate_auth_link(invite.user_id, expiry=86_400 * 7)
         tasks.add_task(
             send_invite,
             config.email.sender,
