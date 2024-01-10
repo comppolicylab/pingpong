@@ -139,7 +139,7 @@ class User(Base):
 
     @classmethod
     async def get_by_email(cls, session: AsyncSession, email: str) -> "User":
-        stmt = select(User).where(User.email == email)
+        stmt = select(User).where(func.lower(User.email) == func.lower(email))
         return await session.scalar(stmt)
 
     @classmethod
