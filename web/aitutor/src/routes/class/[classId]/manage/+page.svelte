@@ -118,11 +118,11 @@
       {:else}
         <div class="mb-4">
         <Listgroup items={tt} let:item>
-          <ViewUser user={item} on:click={() => ttModal = item} />
+          <ViewUser user={item} on:click={() => ttModal = item} on:touchstart={() => ttModal = item} />
         </Listgroup>
         </div>
       {/if}
-      <GradientButton color="cyanToBlue" on:click={() => ttModal = true}>Invite teaching team</GradientButton>
+      <GradientButton color="cyanToBlue" on:click={() => ttModal = true} on:touchstart={() => ttModal = true}>Invite teaching team</GradientButton>
       {#if ttModal}
         <Modal bind:open={ttModal} title="Manage the teaching team">
           <ManageUser on:cancel={() => ttModal = false} user={typeof ttModal === 'boolean' ? null : ttModal} />
@@ -142,11 +142,11 @@
       {:else}
       <div class="mb-4">
         <Listgroup active items={students} let:item>
-          <ViewUser user={item} on:click={() => studentModal = item} />
+          <ViewUser user={item} on:click={() => studentModal = item} on:touchstart={() => studentModal = item} />
       </Listgroup>
       </div>
       {/if}
-      <GradientButton color="cyanToBlue" on:click={() => studentModal = true}>Invite students</GradientButton>
+      <GradientButton color="cyanToBlue" on:click={() => studentModal = true} on:touchstart={() => studentModal = true}>Invite students</GradientButton>
       {#if studentModal}
         <Modal bind:open={studentModal} title="Manage students">
           {#if typeof studentModal === 'boolean'}

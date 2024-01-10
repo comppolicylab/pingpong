@@ -32,16 +32,20 @@
     $assistant = asst;
     aiSelectOpen = false;
   };
+
+  const openDropdown = () => {
+    aiSelectOpen = true;
+  };
 </script>
 
 <div class="v-full h-full flex items-center">
   <div class="m-auto w-9/12">
     {#if isConfigured}
       <div class="text-center my-2 w-full">
-        <GradientButton color="tealToLime" on:click={() => aiSelectOpen = true}>{$assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></GradientButton>
+        <GradientButton color="tealToLime" on:click={() => openDropdown()} on:touchstart={() => openDropdown()}>{$assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></GradientButton>
           <Dropdown bind:open={aiSelectOpen}>
           {#each data.assistants as asst}
-            <DropdownItem on:click={() => selectAi(asst)}>
+            <DropdownItem on:click={() => selectAi(asst)} on:touchstart={() => selectAi(asst)}>
               {#if !asst.published}
               <EyeSlashOutline size="sm" class="inline-block mr-2 text-gray-400" />
               {/if}

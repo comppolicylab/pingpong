@@ -43,6 +43,6 @@
   </div>
   <div class="flex items-center">
     <GradientButton color="cyanToBlue" type="submit">Create</GradientButton>
-    <GradientButton color="grayToGray" type="reset" on:click={done}>Close</GradientButton>
+      <GradientButton color="grayToGray" type="reset" on:click={done} on:touchstart={done}>Close</GradientButton>
   </div>
 </form>
