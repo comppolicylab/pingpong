@@ -29,7 +29,7 @@
 
   <div>
     <GradientButton type="submit" color="cyanToBlue">Save</GradientButton>
-    <Button type="button" color="red" on:click="{() => dispatch('cancel')}">Cancel</Button>
+      <Button type="button" color="red" on:click="{() => dispatch('cancel')}" on:touchstart={() => dispatch('cancel')}>Cancel</Button>
   </div>
 
 </form>

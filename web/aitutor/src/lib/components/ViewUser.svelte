@@ -7,7 +7,7 @@
   export let user;
 </script>
 
-<div class="cursor-pointer w-full" on:click={() => dispatch('click')}>
+<div class="cursor-pointer w-full" on:click={() => dispatch('click')} on:touchstart={() => dispatch('click')}>
   <Heading tag="h5" customSize="text-lg">{user.email}</Heading>
   <div class="flex justify-between pointer-events-none w-full">
     <div>{user.title}</div>
