@@ -47,7 +47,9 @@
 
   <div class="col-span-2">
     <Label for="model">Files</Label>
-    <Helper>Select any files the assistant should have access to when generating a response.</Helper>
+      <Helper>
+        Select which files this assistant should use for grounding.
+      </Helper>
       <MultiSelect name="files" items="{fileOptions}" bind:value={selectedFiles} />
   </div>
 

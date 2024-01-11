@@ -162,7 +162,9 @@
   <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
     <div>
       <Heading tag="h3" customSize="text-xl font-bold"><Secondary class="text-xl">Files</Secondary></Heading>
-      <Info>Manage files used by the automated tutors.</Info>
+        <Info>Upload files for use in assistants.
+        Files must be under 512MB. See the <a href="https://platform.openai.com/docs/api-reference/files/create" rel="noopener noreferrer" target="_blank">OpenAI API docs</a> for more information.
+        </Info>
     </div>
     <div class="col-span-2">
       {#if !hasApiKey}
