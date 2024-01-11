@@ -39,7 +39,7 @@
 </script>
 
 <div class="v-full h-full flex items-center">
-  <div class="m-auto w-9/12">
+  <div class="m-auto w-10/12">
     {#if isConfigured}
       <div class="text-center my-2 w-full">
         <GradientButton color="tealToLime" on:click={() => openDropdown()} on:touchstart={() => openDropdown()}>{$assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></GradientButton>
