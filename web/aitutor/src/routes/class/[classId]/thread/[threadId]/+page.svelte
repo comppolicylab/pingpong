@@ -114,7 +114,8 @@
       </div>
     </div>
   {/if}
-  <div class="w-full h-full overflow-y-auto pb-12 px-12" use:scroll={messages}>
+  <div class="w-full h-full flex flex-col justify-between">
+  <div class="overflow-y-auto pb-4 px-12" use:scroll={messages}>
     {#each messages as message}
       <div class="py-4 px-6 flex gap-x-3">
         <div>
@@ -137,6 +138,17 @@
 
    {/if}
   </div>
+
+  {#if !loading}
+  <div class="w-full bottom-8 bg-gradient-to-t from-white to-transparent">
+    <form class="w-11/12 mx-auto" action="?/newMessage" method="POST" use:enhance={handleSubmit}>
+      <ChatInput loading={$submitting || $waiting} />
+    </form>
+  </div>
+  {/if}
+  </div>
+
+
   {#if priv}
   <div class="absolute top-0 left-0 flex gap-2 px-4 py-2 items-center w-full bg-amber-200 text-sm">
     <EyeSlashOutline size="sm" class="text-gray-400" />
@@ -144,9 +156,4 @@
     <Span class="text-gray-600">{($thread?.thread?.users || []).map(u => u.email).join(", ")}</Span>
   </div>
   {/if}
-  <div class="absolute w-full bottom-8 bg-gradient-to-t from-white to-transparent">
-    <form class="w-9/12 mx-auto" action="?/newMessage" method="POST" use:enhance={handleSubmit}>
-      <ChatInput loading={$submitting || $waiting} />
-    </form>
-  </div>
 </div>
