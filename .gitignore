@@ -166,7 +166,6 @@ config.json
 config.*.json
 .db/
 !.db/.gitkeep
-!.db/pg/.gitkeep
 cert/
 !cert/README.md
 !cert/dev.*
