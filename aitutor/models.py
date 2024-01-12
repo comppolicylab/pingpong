@@ -15,6 +15,7 @@ from sqlalchemy import (
     select,
     update,
 )
+from sqlalchemy.dialects.postgresql import insert as postgres_upsert
 from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
 from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession
 from sqlalchemy.orm import (
@@ -28,6 +29,18 @@ from sqlalchemy.sql import func
 from sqlalchemy.sql.expression import false
 
 import aitutor.schemas as schemas
+
+
+def _get_upsert_stmt(session: AsyncSession):
+    """Get the appropriate upsert statement for the current database."""
+    dialect = session.bind.dialect.name
+    match dialect:
+        case "postgresql":
+            return postgres_upsert
+        case "sqlite":
+            return sqlite_upsert
+        case _:
+            raise NotImplementedError(f"Upsert not implemented for {dialect}")
 
 
 class Base(AsyncAttrs, DeclarativeBase):
@@ -65,9 +78,8 @@ class UserClassRole(Base):
         class_id: int,
         ucr: schemas.CreateUserClassRole,
     ) -> "UserClassRole":
-        # TODO(jnu): dialect-agnostic upsert!
         stmt = (
-            sqlite_upsert(UserClassRole)
+            _get_upsert_stmt(session)(UserClassRole)
             .values(user_id=user_id, class_id=class_id, title=ucr.title, role=ucr.role)
             .on_conflict_do_update(
                 index_elements=[UserClassRole.user_id, UserClassRole.class_id],
@@ -422,7 +434,7 @@ class Assistant(Base):
         *,
         class_id: int,
         user_id: int,
-        assistant_id: str
+        assistant_id: str,
     ) -> "Assistant":
         params = data.dict()
         file_ids = params.pop("file_ids", [])

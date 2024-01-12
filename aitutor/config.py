@@ -4,6 +4,7 @@ import os
 import time
 import tomllib
 import weakref
+from functools import cached_property
 from pathlib import Path
 from threading import RLock
 from typing import Any, Callable, Generic, Literal, TypeVar, Union
@@ -14,6 +15,7 @@ from pydantic.v1.utils import deep_update
 from pydantic_settings import BaseSettings
 from sentry_sdk import capture_message
 
+from .db import PostgresDriver
 from .email import AzureEmailSender, GmailEmailSender
 
 logger = logging.getLogger(__name__)
@@ -200,6 +202,25 @@ class AuthSettings(BaseSettings):
     secret_keys: list[SecretKey]
 
 
+class PostgresSettings(BaseSettings):
+    """Settings for connecting to Postgres."""
+
+    engine: Literal["postgres"]
+    host: str = Field("localhost")
+    port: int = Field(5432)
+    user: str = Field("postgres")
+    password: str
+    database: str = Field("aitutor")
+
+    @cached_property
+    def driver(self) -> PostgresDriver:
+        url = f"{self.user}:{self.password}@{self.host}" f":{self.port}/{self.database}"
+        return PostgresDriver(url)
+
+
+DbSettings = PostgresSettings
+
+
 class Config(BaseSettings):
     """Stats Chat Bot config."""
 
@@ -207,9 +228,9 @@ class Config(BaseSettings):
 
     reload: int = Field(0)
     public_url: str = Field("http://localhost:8000")
-    db_dir: str = Field(".db")
 
     development: bool = Field(False, env="DEVELOPMENT")
+    db: DbSettings
     auth: AuthSettings
     email: EmailSettings
     sentry: SentrySettings

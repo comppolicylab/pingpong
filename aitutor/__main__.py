@@ -5,8 +5,7 @@ import click
 
 from .auth import encode_auth_token
 from .config import config
-from .db import async_session, init_db
-from .models import User
+from .models import Base, User
 
 
 @click.group()
@@ -25,7 +24,7 @@ def auth() -> None:
 @click.option("--super-user/--no-super-user", default=False)
 def login(email: str, redirect: str, super_user: bool) -> None:
     async def _get_or_create(email) -> int:
-        async with async_session() as session:
+        async with config.db.driver.async_session() as session:
             user = await User.get_by_email(session, email)
             if not user:
                 user = User(email=email)
@@ -53,6 +52,11 @@ def db() -> None:
 @db.command("init")
 @click.option("--clean/--no-clean", default=False)
 def db_init(clean) -> None:
+    async def init_db(drop_first: bool = False) -> None:
+        if not await config.db.driver.exists():
+            await config.db.driver.create()
+        await config.db.driver.init(Base, drop_first=drop_first)
+
     asyncio.run(init_db(drop_first=clean))
 
 

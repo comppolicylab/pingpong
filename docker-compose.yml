@@ -52,8 +52,6 @@ services:
       - source: app_config
         target: /code/config.toml
         mode: 0400
-    volumes:
-      - dbdata:/db
 
 networks:
   front:
