@@ -1,6 +1,4 @@
-from sqlalchemy import Engine, create_engine
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from .base import DbDriver
 
@@ -10,11 +8,10 @@ class PostgresDriver(DbDriver):
 
     url: str
 
-    debug: bool
-
-    def __init__(self, url: str, debug: bool = False) -> None:
+    def __init__(self, url: str, **kwargs) -> None:
+        """Initialize the driver."""
+        super().__init__(**kwargs)
         self.url = url
-        self.debug = debug
 
     async def exists(self) -> bool:
         """Check if the database exists."""
@@ -43,24 +40,15 @@ class PostgresDriver(DbDriver):
             await conn.execute(f"CREATE DATABASE {db_name}")
         await engine.dispose()
 
-    async def init(self, base: DeclarativeBase, drop_first: bool = False) -> None:
-        """Initialize the database."""
-        engine = self.get_async_engine()
-        async with engine.begin() as conn:
-            if drop_first:
-                await conn.run_sync(base.metadata.drop_all)
-            await conn.run_sync(base.metadata.create_all)
-        await engine.dispose()
+    @property
+    def async_uri(self) -> str:
+        """Async connection string."""
+        return f"postgresql+asyncpg://{self.url}"
 
-    def get_async_engine(self) -> AsyncEngine:
-        """Get an async engine."""
-        full_url = f"postgresql+asyncpg://{self.url}"
-        return create_async_engine(full_url, echo=self.debug)
-
-    def get_sync_engine(self) -> Engine:
-        """Get a sync engine."""
-        full_url = f"postgresql://{self.url}"
-        return create_engine(full_url, echo=self.debug)
+    @property
+    def sync_uri(self) -> str:
+        """Sync connection stringe."""
+        return f"postgresql://{self.url}"
 
     def _split_url(self) -> tuple[str, str]:
         """Split the url on the last / to get base url & db name."""

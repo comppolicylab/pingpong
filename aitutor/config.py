@@ -15,7 +15,7 @@ from pydantic.v1.utils import deep_update
 from pydantic_settings import BaseSettings
 from sentry_sdk import capture_message
 
-from .db import PostgresDriver
+from .db import PostgresDriver, SqliteDriver
 from .email import AzureEmailSender, GmailEmailSender
 
 logger = logging.getLogger(__name__)
@@ -218,7 +218,18 @@ class PostgresSettings(BaseSettings):
         return PostgresDriver(url)
 
 
-DbSettings = PostgresSettings
+class SqliteSettings(BaseSettings):
+    """Settings for connecting to SQLite."""
+
+    engine: Literal["sqlite"]
+    path: str = Field("db.sqlite3")
+
+    @cached_property
+    def driver(self) -> SqliteDriver:
+        return SqliteDriver(self.path)
+
+
+DbSettings = Union[PostgresSettings, SqliteSettings]
 
 
 class Config(BaseSettings):
