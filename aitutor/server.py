@@ -30,7 +30,6 @@ from .auth import (
     generate_auth_link,
 )
 from .config import config
-from .db import async_session, has_db, init_db
 from .email import send_invite
 from .errors import sentry
 from .metrics import metrics
@@ -101,7 +100,7 @@ async def parse_session_token(request: Request, call_next):
 @v1.middleware("http")
 async def begin_db_session(request: Request, call_next):
     """Create a database session for the request."""
-    async with async_session() as db:
+    async with config.db.driver.async_session() as db:
         request.state.db = db
         try:
             result = await call_next(request)
@@ -749,9 +748,10 @@ async def get_me(request: Request):
 
 async def lifespan(app: FastAPI):
     """Run services in the background."""
-    if not await has_db():
+    if not await config.db.driver.exists():
         logger.warning("Creating a new database since none exists.")
-        await init_db()
+        await config.db.driver.create()
+        await config.db.driver.init(models.Base)
 
     with sentry(), metrics():
         yield

@@ -1,11 +1,3 @@
-volumes:
-  dbdata:
-    driver: local
-    driver_opts:
-      type: none
-      device: /opt/aitutor/db
-      o: bind
-
 services:
   web:
     build:

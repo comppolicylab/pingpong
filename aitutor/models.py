@@ -1,7 +1,7 @@
 import json
 from typing import List, Optional
 
-from sqlalchemy import Boolean, Column
+from sqlalchemy import Boolean, Column, DateTime
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
     ForeignKey,
@@ -15,6 +15,7 @@ from sqlalchemy import (
     select,
     update,
 )
+from sqlalchemy.dialects.postgresql import insert as postgres_upsert
 from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
 from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession
 from sqlalchemy.orm import (
@@ -28,6 +29,18 @@ from sqlalchemy.sql import func
 from sqlalchemy.sql.expression import false
 
 import aitutor.schemas as schemas
+
+
+def _get_upsert_stmt(session: AsyncSession):
+    """Get the appropriate upsert statement for the current database."""
+    dialect = session.bind.dialect.name
+    match dialect:
+        case "postgresql":
+            return postgres_upsert
+        case "sqlite":
+            return sqlite_upsert
+        case _:
+            raise NotImplementedError(f"Upsert not implemented for {dialect}")
 
 
 class Base(AsyncAttrs, DeclarativeBase):
@@ -53,7 +66,10 @@ class UserClassRole(Base):
         cls, session: AsyncSession, user_id: int, class_id: int
     ) -> Optional["UserClassRole"]:
         stmt = select(UserClassRole).where(
-            and_(UserClassRole.user_id == user_id, UserClassRole.class_id == class_id)
+            and_(
+                UserClassRole.user_id == int(user_id),
+                UserClassRole.class_id == int(class_id),
+            )
         )
         return await session.scalar(stmt)
 
@@ -65,10 +81,14 @@ class UserClassRole(Base):
         class_id: int,
         ucr: schemas.CreateUserClassRole,
     ) -> "UserClassRole":
-        # TODO(jnu): dialect-agnostic upsert!
         stmt = (
-            sqlite_upsert(UserClassRole)
-            .values(user_id=user_id, class_id=class_id, title=ucr.title, role=ucr.role)
+            _get_upsert_stmt(session)(UserClassRole)
+            .values(
+                user_id=int(user_id),
+                class_id=int(class_id),
+                title=ucr.title,
+                role=ucr.role,
+            )
             .on_conflict_do_update(
                 index_elements=[UserClassRole.user_id, UserClassRole.class_id],
                 set_={"title": ucr.title, "role": ucr.role},
@@ -80,7 +100,10 @@ class UserClassRole(Base):
     @classmethod
     async def delete(cls, session: AsyncSession, user_id: int, class_id: int) -> None:
         stmt = delete(UserClassRole).where(
-            and_(UserClassRole.user_id == user_id, UserClassRole.class_id == class_id)
+            and_(
+                UserClassRole.user_id == int(user_id),
+                UserClassRole.class_id == int(class_id),
+            )
         )
         await session.execute(stmt)
         return None
@@ -130,8 +153,8 @@ class User(Base):
     threads = relationship(
         "Thread", secondary=user_thread_association, back_populates="users"
     )
-    created = Column(Integer, server_default=func.now())
-    updated = Column(Integer, index=True, onupdate=func.now())
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     async def verify(self, session: AsyncSession) -> None:
         self.state = schemas.UserState.VERIFIED
@@ -159,15 +182,15 @@ class User(Base):
         return user
 
     @classmethod
-    async def get_by_id(cls, session: AsyncSession, id: int) -> "User":
-        stmt = select(User).where(User.id == id)
+    async def get_by_id(cls, session: AsyncSession, id_: int) -> "User":
+        stmt = select(User).where(User.id == int(id_))
         return await session.scalar(stmt)
 
     @classmethod
     async def get_all_by_id(cls, session: AsyncSession, ids: List[int]) -> List["User"]:
         if not ids:
             return []
-        stmt = select(User).where(User.id.in_(ids))
+        stmt = select(User).where(User.id.in_([int(id_) for id_ in ids]))
         result = await session.execute(stmt)
         return [row.User for row in result]
 
@@ -183,8 +206,8 @@ class Institution(Base):
     users: Mapped[List["UserInstitutionRole"]] = relationship(
         "UserInstitutionRole", back_populates="institution"
     )
-    created = Column(Integer, server_default=func.now())
-    updated = Column(Integer, index=True, onupdate=func.now())
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     @classmethod
     async def can_read(
@@ -194,7 +217,7 @@ class Institution(Base):
         stmt = select(UserInstitutionRole).where(
             and_(
                 UserInstitutionRole.user_id == user.id,
-                UserInstitutionRole.institution_id == institution_id,
+                UserInstitutionRole.institution_id == int(institution_id),
             )
         )
         result = await session.scalar(stmt)
@@ -222,7 +245,7 @@ class Institution(Base):
         stmt = select(UserInstitutionRole).where(
             and_(
                 UserInstitutionRole.user_id == user.id,
-                UserInstitutionRole.institution_id == institution_id,
+                UserInstitutionRole.institution_id == int(institution_id),
                 UserInstitutionRole.role == schemas.Role.ADMIN,
             )
         )
@@ -278,8 +301,8 @@ class Institution(Base):
         return all_
 
     @classmethod
-    async def get_by_id(cls, session: AsyncSession, id: int) -> "Institution":
-        stmt = select(Institution).where(Institution.id == id)
+    async def get_by_id(cls, session: AsyncSession, id_: int) -> "Institution":
+        stmt = select(Institution).where(Institution.id == int(id_))
         return await session.scalar(stmt)
 
 
@@ -305,8 +328,8 @@ class File(Base):
         "Assistant", secondary=file_assistant_association, back_populates="files"
     )
 
-    created = Column(Integer, server_default=func.now())
-    updated = Column(Integer, index=True, onupdate=func.now())
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     @classmethod
     async def create(cls, session: AsyncSession, data: dict) -> "File":
@@ -318,7 +341,7 @@ class File(Base):
 
     @classmethod
     async def for_class(cls, session: AsyncSession, class_id: int) -> list["File"]:
-        stmt = select(File).where(File.class_id == class_id)
+        stmt = select(File).where(File.class_id == int(class_id))
         result = await session.execute(stmt)
         return [row.File for row in result]
 
@@ -326,7 +349,7 @@ class File(Base):
     async def get_all_by_file_id(
         cls, session: AsyncSession, ids: List[str]
     ) -> List["File"]:
-        stmt = select(File).where(File.file_id.in_(ids))
+        stmt = select(File).where(File.file_id.in_([int(id_) for id_ in ids]))
         result = await session.execute(stmt)
         return [row.File for row in result]
 
@@ -351,15 +374,15 @@ class Assistant(Base):
     )
     creator_id = Column(Integer, ForeignKey("users.id"))
     creator = relationship("User", back_populates="assistants")
-    published = Column(Integer, index=True, nullable=True)
-    created = Column(Integer, server_default=func.now())
-    updated = Column(Integer, index=True, onupdate=func.now())
+    published = Column(DateTime(timezone=True), index=True, nullable=True)
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     @classmethod
     async def can_manage(
         cls, session: AsyncSession, assistant_id: int, user: User
     ) -> bool:
-        asst = await cls.get_by_id(session, assistant_id)
+        asst = await cls.get_by_id(session, int(assistant_id))
         if not asst:
             return False
 
@@ -367,7 +390,7 @@ class Assistant(Base):
 
     @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "Assistant":
-        stmt = select(Assistant).where(Assistant.id == id_)
+        stmt = select(Assistant).where(Assistant.id == int(id_))
         return await session.scalar(stmt)
 
     @classmethod
@@ -376,7 +399,7 @@ class Assistant(Base):
     ) -> List["Assistant"]:
         if not ids:
             return []
-        stmt = select(Assistant).where(Assistant.id.in_(ids))
+        stmt = select(Assistant).where(Assistant.id.in_([int(id_) for id_ in ids]))
         result = await session.execute(stmt)
         return [row.Assistant for row in result]
 
@@ -389,18 +412,18 @@ class Assistant(Base):
         user_id: int | None = None,
     ) -> list["Assistant"]:
         if include_all_private:
-            condition = Assistant.class_id == class_id
+            condition = Assistant.class_id == int(class_id)
         elif user_id:
             condition = and_(
-                Assistant.class_id == class_id,
+                Assistant.class_id == int(class_id),
                 or_(
-                    Assistant.creator_id == user_id,
+                    Assistant.creator_id == int(user_id),
                     Assistant.published.is_not(None),
                 ),
             )
         else:
             condition = and_(
-                Assistant.class_id == class_id,
+                Assistant.class_id == int(class_id),
                 Assistant.published.is_not(None),
             )
 
@@ -410,7 +433,7 @@ class Assistant(Base):
 
     @classmethod
     async def for_user(cls, session: AsyncSession, user_id: int) -> list["Assistant"]:
-        stmt = select(Assistant).where(Assistant.creator_id == user_id)
+        stmt = select(Assistant).where(Assistant.creator_id == int(user_id))
         result = await session.execute(stmt)
         return [row.Assistant for row in result]
 
@@ -422,7 +445,7 @@ class Assistant(Base):
         *,
         class_id: int,
         user_id: int,
-        assistant_id: str
+        assistant_id: str,
     ) -> "Assistant":
         params = data.dict()
         file_ids = params.pop("file_ids", [])
@@ -431,8 +454,8 @@ class Assistant(Base):
             files = await File.get_all_by_file_id(session, file_ids)
         params["files"] = files
         params["tools"] = json.dumps(params["tools"])
-        params["class_id"] = class_id
-        params["creator_id"] = user_id
+        params["class_id"] = int(class_id)
+        params["creator_id"] = int(user_id)
         params["assistant_id"] = assistant_id
         params["published"] = func.now() if data.published else None
 
@@ -466,8 +489,8 @@ class Class(Base):
     )
     files: Mapped[List["File"]] = relationship("File", back_populates="class_")
     threads = relationship("Thread", back_populates="class_")
-    created = Column(Integer, server_default=func.now())
-    updated = Column(Integer, index=True, onupdate=func.now())
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     @classmethod
     async def get_users(
@@ -476,7 +499,7 @@ class Class(Base):
         stmt = (
             select(UserClassRole)
             .options(joinedload(UserClassRole.user))
-            .where(UserClassRole.class_id == class_id)
+            .where(UserClassRole.class_id == int(class_id))
         )
         result = await session.execute(stmt)
         return [
@@ -492,19 +515,23 @@ class Class(Base):
         ]
 
     @classmethod
-    async def get_api_key(cls, session: AsyncSession, id: int) -> str | None:
-        stmt = select(Class.api_key).where(Class.id == id)
+    async def get_api_key(cls, session: AsyncSession, id_: int) -> str | None:
+        stmt = select(Class.api_key).where(Class.id == int(id_))
         return await session.scalar(stmt)
 
     @classmethod
-    async def update_api_key(cls, session: AsyncSession, id: int, api_key: str) -> None:
-        stmt = update(Class).where(Class.id == id).values(api_key=api_key)
+    async def update_api_key(
+        cls, session: AsyncSession, id_: int, api_key: str
+    ) -> None:
+        stmt = update(Class).where(Class.id == int(id_)).values(api_key=api_key)
         await session.execute(stmt)
 
     @classmethod
     async def can_manage(cls, session: AsyncSession, class_id: int, user: User) -> bool:
         class_ = await session.scalar(
-            select(Class).options(joinedload(Class.users)).where(Class.id == class_id)
+            select(Class)
+            .options(joinedload(Class.users))
+            .where(Class.id == int(class_id))
         )
 
         if not class_:
@@ -520,7 +547,9 @@ class Class(Base):
     @classmethod
     async def can_write(cls, session: AsyncSession, class_id: int, user: User) -> bool:
         class_ = await session.scalar(
-            select(Class).options(joinedload(Class.users)).where(Class.id == class_id)
+            select(Class)
+            .options(joinedload(Class.users))
+            .where(Class.id == int(class_id))
         )
 
         if not class_:
@@ -536,7 +565,9 @@ class Class(Base):
     @classmethod
     async def can_read(cls, session: AsyncSession, class_id: int, user: User) -> bool:
         class_ = await session.scalar(
-            select(Class).options(joinedload(Class.users)).where(Class.id == class_id)
+            select(Class)
+            .options(joinedload(Class.users))
+            .where(Class.id == int(class_id))
         )
 
         if not class_:
@@ -596,13 +627,15 @@ class Class(Base):
 
     @classmethod
     async def update(
-        cls, session: AsyncSession, id: int, data: schemas.UpdateClass
+        cls, session: AsyncSession, id_: int, data: schemas.UpdateClass
     ) -> "Class":
         stmt = (
-            update(Class).where(Class.id == id).values(**data.dict(exclude_none=True))
+            update(Class)
+            .where(Class.id == int(id_))
+            .values(**data.dict(exclude_none=True))
         )
         await session.execute(stmt)
-        return await cls.get_by_id(session, id)
+        return await cls.get_by_id(session, int(id_))
 
     @classmethod
     async def get_by_institution(
@@ -611,15 +644,17 @@ class Class(Base):
         stmt = (
             select(Class)
             .options(joinedload(Class.institution))
-            .where(Class.institution_id == institution_id)
+            .where(Class.institution_id == int(institution_id))
         )
         result = await session.execute(stmt)
         return [row.Class for row in result]
 
     @classmethod
-    async def get_by_id(cls, session: AsyncSession, id: int) -> "Class":
+    async def get_by_id(cls, session: AsyncSession, id_: int) -> "Class":
         stmt = (
-            select(Class).options(joinedload(Class.institution)).where(Class.id == id)
+            select(Class)
+            .options(joinedload(Class.institution))
+            .where(Class.id == int(id_))
         )
         return await session.scalar(stmt)
 
@@ -641,9 +676,12 @@ class Thread(Base):
         back_populates="threads",
         lazy="selectin",
     )
-    created = Column(Integer, server_default=func.now())
+    created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(
-        Integer, index=True, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        index=True,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
     async def delete(self, session: AsyncSession) -> None:
@@ -659,13 +697,13 @@ class Thread(Base):
         return thread
 
     @classmethod
-    async def get_by_id(cls, session: AsyncSession, id: int) -> "Thread":
-        stmt = select(Thread).where(Thread.id == id)
+    async def get_by_id(cls, session: AsyncSession, id_: int) -> "Thread":
+        stmt = select(Thread).where(Thread.id == int(id_))
         return await session.scalar(stmt)
 
     @classmethod
     async def can_read(self, session: AsyncSession, thread_id: int, user: User) -> bool:
-        thread = await session.scalar(select(Thread).where(Thread.id == thread_id))
+        thread = await session.scalar(select(Thread).where(Thread.id == int(thread_id)))
 
         if not thread:
             return False
@@ -677,7 +715,7 @@ class Thread(Base):
 
     @classmethod
     async def all(cls, session: AsyncSession, class_id: int) -> List["Thread"]:
-        stmt = select(Thread).where(Thread.class_id == class_id)
+        stmt = select(Thread).where(Thread.class_id == int(class_id))
         result = await session.execute(stmt)
         return [row.Thread for row in result]
 
