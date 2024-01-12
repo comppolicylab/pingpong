@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum, StrEnum, auto
 
 from openai.types.beta.assistant_create_params import Tool
@@ -34,8 +35,8 @@ class File(BaseModel):
     content_type: str
     file_id: str
     class_id: int
-    created: str
-    updated: str | None
+    created: datetime
+    updated: datetime | None
 
     class Config:
         from_attributes = True
@@ -57,9 +58,9 @@ class Assistant(BaseModel):
     class_id: int
     creator_id: int
     files: list[File]
-    published: str | None
-    created: str
-    updated: str | None
+    published: datetime | None
+    created: datetime
+    updated: datetime | None
 
     class Config:
         from_attributes = True
@@ -95,8 +96,8 @@ class Thread(BaseModel):
     assistant_id: int
     private: bool
     users: list["UserPlaceholder"]
-    created: str
-    updated: str | None
+    created: datetime
+    updated: datetime | None
 
     class Config:
         from_attributes = True
@@ -171,8 +172,8 @@ class User(BaseModel):
     classes: list["UserClassRole"]
     institutions: list["Institution"]
     super_admin: bool
-    created: str
-    updated: str | None
+    created: datetime
+    updated: datetime | None
 
     class Config:
         from_attributes = True
@@ -199,8 +200,8 @@ class Institution(BaseModel):
     name: str
     description: str | None
     logo: str | None
-    created: str
-    updated: str | None
+    created: datetime
+    updated: datetime | None
 
     class Config:
         from_attributes = True
@@ -219,8 +220,8 @@ class Class(BaseModel):
     term: str
     institution_id: int
     institution: Institution | None = None
-    created: str
-    updated: str | None
+    created: datetime
+    updated: datetime | None
     api_key: SecretStr | None
 
     class Config:

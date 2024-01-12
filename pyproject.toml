@@ -29,6 +29,7 @@ python-multipart = "^0.0.6"
 websockets = "^12.0"
 azure-communication-email = "^1.0.0"
 aiosmtplib = "^3.0.1"
+asyncpg = "^0.29.0"
 
 
 [tool.poetry.group.dev.dependencies]

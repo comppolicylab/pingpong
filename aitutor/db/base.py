@@ -53,7 +53,7 @@ class DbDriver(ABC):
         return create_engine(self.sync_uri, echo=self.debug)
 
     @cached_property
-    def get_async_session(self) -> AsyncSession:
+    def async_session(self) -> AsyncSession:
         """Get an async session."""
         return async_sessionmaker(self.get_async_engine(), expire_on_commit=False)
 

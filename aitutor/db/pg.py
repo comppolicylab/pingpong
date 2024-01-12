@@ -1,4 +1,5 @@
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.sql import text
 
 from .base import DbDriver
 
@@ -23,7 +24,7 @@ class PostgresDriver(DbDriver):
         exists = False
         async with engine.connect() as conn:
             result = await conn.execute(
-                "SELECT 1 FROM pg_catalog.pg_database WHERE datname = :db_name",
+                text("SELECT 1 FROM pg_catalog.pg_database WHERE datname = :db_name"),
                 {"db_name": db_name},
             )
             exists = bool(result.first())

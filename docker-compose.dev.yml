@@ -1,15 +1,14 @@
 services:
-
   db:
     platform: linux/amd64
     image: postgres:15.5
     networks: [back]
     ports: ["5432:5432"]
-  environment:
-    - POSTGRES_USER=aitutor
-    - POSTGRES_PASSWORD=aitutor
-  volumes:
-    - dbdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: aitutor
+      POSTGRES_PASSWORD: aitutor
+    volumes:
+      - dbdata:/var/lib/postgresql/data
 
 
 volumes:
@@ -17,5 +16,5 @@ volumes:
     driver: local
     driver_opts:
       type: none
-      device: ./.db
+      device: ./.db/pg
       o: bind
