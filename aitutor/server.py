@@ -30,8 +30,8 @@ from .auth import (
     generate_auth_link,
 )
 from .config import config
-from .email import send_invite
 from .errors import sentry
+from .invite import send_invite
 from .metrics import metrics
 from .permission import CanManage, CanRead, CanWrite, IsSuper, LoggedIn
 

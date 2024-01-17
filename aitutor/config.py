@@ -16,7 +16,7 @@ from pydantic_settings import BaseSettings
 from sentry_sdk import capture_message
 
 from .db import PostgresDriver, SqliteDriver
-from .email import AzureEmailSender, GmailEmailSender
+from .email import AzureEmailSender, GmailEmailSender, SmtpEmailSender
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +176,32 @@ class GmailEmailSettings(BaseSettings):
         return GmailEmailSender(self.from_address, self.password)
 
 
-EmailSettings = Union[AzureEmailSettings, GmailEmailSettings]
+class SmtpEmailSettings(BaseSettings):
+    type: Literal["smtp"]
+    from_address: str
+    host: str
+    port: int = Field(587)
+    username: str | None = Field(None)
+    password: str | None = Field(None)
+    use_tls: bool = Field(True)
+    start_tls: bool = Field(False)
+    use_ssl: bool = Field(False)
+
+    @property
+    def sender(self) -> SmtpEmailSender:
+        return SmtpEmailSender(
+            self.from_address,
+            host=self.host,
+            port=self.port,
+            user=self.username,
+            pw=self.password,
+            use_tls=self.use_tls,
+            start_tls=self.start_tls,
+            use_ssl=self.use_ssl,
+        )
+
+
+EmailSettings = Union[AzureEmailSettings, GmailEmailSettings, SmtpEmailSettings]
 
 
 class SentrySettings(BaseSettings):
