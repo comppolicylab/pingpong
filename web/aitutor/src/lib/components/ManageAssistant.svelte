@@ -15,7 +15,8 @@
   const tools = [
     { value: "code_interpreter", name: "Code Interpreter" },
   ];
-  const defaultTools = ["code_interpreter"];
+  const defaultTools = [{type: "code_interpreter"}];
+  const selectedTools = (assistant?.tools ? JSON.parse(assistant.tools) : defaultTools).map(t => t.type);
   $: fileOptions = (files || []).map((file) => ({ value: file.file_id, name: file.name }));
 
   // Revert edits
@@ -46,7 +47,7 @@
   <div class="col-span-2">
     <Label for="model">Tools</Label>
       <Helper>Select tools available to the assistant when generating a response.</Helper>
-      <MultiSelect name="tools" items="{tools}" value={assistant?.tools || defaultTools} />
+      <MultiSelect name="tools" items="{tools}" value={selectedTools} />
   </div>
 
   <div class="col-span-2">
