@@ -7,6 +7,7 @@
 
   export let files;
   export let assistant = null;
+  export let canPublish = true;
 
   const action = assistant ? "?/updateAssistant" : "?/createAssistant";
 
@@ -59,7 +60,7 @@
   </div>
 
   <div class="col-span-2">
-    <Checkbox label="published" id="published" name="published" checked={!!assistant?.published}>Publish</Checkbox>
+    <Checkbox label="published" id="published" disabled={!canPublish && !assistant?.published} name="published" checked={!!assistant?.published}>Publish</Checkbox>
     <Helper>By default only you can see and interact with this assistant. If you would like to share the assistant with the rest of your class, select this option.</Helper>
   </div>
 
