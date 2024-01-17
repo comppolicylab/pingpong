@@ -695,6 +695,11 @@ async def update_assistant(
         asst.files = await models.File.get_all_by_file_id(
             request.state.db, req.file_ids
         )
+    if req.use_latex is not None:
+        openai_update["instructions"] = format_instructions(
+            asst.instructions, use_latex=req.use_latex
+        )
+        asst.use_latex = req.use_latex
     if req.instructions is not None:
         use_latex = req.use_latex if req.use_latex is not None else asst.use_latex
         openai_update["instructions"] = format_instructions(

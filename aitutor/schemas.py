@@ -58,7 +58,7 @@ class Assistant(BaseModel):
     class_id: int
     creator_id: int
     files: list[File]
-    use_latex: bool
+    use_latex: bool | None
     published: datetime | None
     created: datetime
     updated: datetime | None

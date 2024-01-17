@@ -51,10 +51,10 @@ def format_instructions(instructions: str, use_latex: bool = False) -> str:
             "\n"
             "---Formatting: LaTeX---"
             "Always use LaTeX with math mode delimiters when outputting "
-            "mathematical tokens. Use the single dollar sign `$` to delimit "
-            "inline math. For block-level math, use double dollar signs `$$` "
+            "mathematical tokens. Use the single dollar sign $ to delimit "
+            "inline math. For block-level math, use double dollar signs $$ "
             "with newlines before and after them as the opening and closing "
-            "delimiter."
+            "delimiter. Do not use LaTeX inside backticks."
         )
     return instructions
 

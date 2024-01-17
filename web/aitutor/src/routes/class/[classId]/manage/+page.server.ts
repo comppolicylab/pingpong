@@ -79,6 +79,7 @@ export const actions = {
       tools,
       file_ids,
       published: body.get('published') === "on",
+      use_latex: body.get('use_latex') === "on",
     };
 
     return await api.createAssistant(event.fetch, event.params.classId, data);
@@ -106,6 +107,7 @@ export const actions = {
       tools,
       file_ids,
       published: body.get('published') === "on",
+      use_latex: body.get('use_latex') === "on",
     };
 
     const response = await api.updateAssistant(event.fetch, event.params.classId, body.get("assistantId"), data);
