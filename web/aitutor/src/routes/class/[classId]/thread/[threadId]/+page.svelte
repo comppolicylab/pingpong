@@ -9,10 +9,13 @@
   import {Span, Avatar } from "flowbite-svelte";
   import { Pulse, SyncLoader } from 'svelte-loading-spinners';
   import SvelteMarkdown from "svelte-markdown";
+  import Markdown from "$lib/components/Markdown.svelte";
   import Logo from '$lib/components/Logo.svelte';
   import ChatInput from "$lib/components/ChatInput.svelte";
   import CodeRenderer from "$lib/components/CodeRenderer.svelte";
   import CodeSpanRenderer from "$lib/components/CodeSpanRenderer.svelte";
+  import ParagraphRenderer from "$lib/components/ParagraphRenderer.svelte";
+  import ListItemRenderer from "$lib/components/ListItemRenderer.svelte";
   import {
     EyeSlashOutline,
   } from 'flowbite-svelte-icons';
@@ -33,6 +36,7 @@
     if (!loading && $thread && $thread.run) {
       waiting.set(!api.finished($thread.run));
     }
+    console.log(messages[messages.length - 1].content)
   }
 
   // Get the name of the participant in the chat thread.
@@ -103,6 +107,8 @@
   const customRenderers = {
     code: CodeRenderer,
     codespan: CodeSpanRenderer,
+    paragraph: ParagraphRenderer,
+    listitem: ListItemRenderer,
   };
 </script>
 
@@ -139,7 +145,7 @@
           <div class="font-bold text-gray-400">{getName(message)}</div>
           {#each message.content as content}
             {#if content.type == "text"}
-              <div class="leading-7"><SvelteMarkdown source="{content.text.value}" /></div>
+              <div class="leading-7"><Markdown content="{content.text.value}" /></div>
             {:else if content.type == "image_file"}
               <div class="leading-7"><img src="/api/v1/class/{classId}/image/{content.image_file.file_id}" /></div>
             {:else}
@@ -172,3 +178,12 @@
   </div>
   {/if}
 </div>
+
+<style lang="css">
+  :global(.katex) {
+    font-size: 1.2em;
+  }
+  :global(.katex-html) {
+    display: none;
+  }
+</style>
