@@ -8,7 +8,7 @@
   import {invalidateAll} from '$app/navigation';
   import {Span, Avatar } from "flowbite-svelte";
   import { Pulse, SyncLoader } from 'svelte-loading-spinners';
-  import SvelteMarkdown from "svelte-markdown";
+  import Markdown from "$lib/components/Markdown.svelte";
   import Logo from '$lib/components/Logo.svelte';
   import ChatInput from "$lib/components/ChatInput.svelte";
   import {
@@ -127,11 +127,11 @@
             <Logo size="8" />
           {/if}
         </div>
-        <div>
+        <div class="max-w-full">
           <div class="font-bold text-gray-400">{getName(message)}</div>
           {#each message.content as content}
             {#if content.type == "text"}
-              <div class="leading-7"><SvelteMarkdown source="{content.text.value}" /></div>
+              <div class="leading-7"><Markdown content="{content.text.value}" /></div>
             {:else if content.type == "image_file"}
               <div class="leading-7"><img src="/api/v1/class/{classId}/image/{content.image_file.file_id}" /></div>
             {:else}
@@ -156,7 +156,6 @@
   {/if}
   </div>
 
-
   {#if priv}
   <div class="absolute top-0 left-0 flex gap-2 px-4 py-2 items-center w-full bg-amber-200 text-sm">
     <EyeSlashOutline size="sm" class="text-gray-400" />
@@ -165,3 +164,12 @@
   </div>
   {/if}
 </div>
+
+<style lang="css">
+  :global(.katex) {
+    font-size: 1.2em;
+  }
+  :global(.katex-html) {
+    display: none;
+  }
+</style>

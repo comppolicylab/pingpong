@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Annotated
+from typing import Annotated, Any
 
 import jwt
 import openai
@@ -22,7 +22,7 @@ from sqlalchemy.sql import func
 import aitutor.models as models
 import aitutor.schemas as schemas
 
-from .ai import generate_name, get_openai_client, hash_thread
+from .ai import format_instructions, generate_name, get_openai_client, hash_thread
 from .auth import (
     decode_auth_token,
     decode_session_token,
@@ -651,7 +651,7 @@ async def create_assistant(
     creator_id = request.state.session.user.id
 
     new_asst = await openai_client.beta.assistants.create(
-        instructions=req.instructions,
+        instructions=format_instructions(req.instructions, use_latex=req.use_latex),
         model=req.model,
         tools=req.tools,
         metadata={"class_id": class_id_int, "creator_id": creator_id},
@@ -680,6 +680,7 @@ async def update_assistant(
     class_id: str, assistant_id: str, request: Request, openai_client: OpenAIClient
 ):
     data = await request.json()
+    req = schemas.UpdateAssistant(**data)
 
     # Get the existing assistant.
     asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
@@ -687,24 +688,34 @@ async def update_assistant(
     if not data:
         return asst
 
-    openai_update = {}
+    openai_update: dict[str, Any] = {}
     # Update the assistant
-    if "file_ids" in data:
-        openai_update["file_ids"] = data["file_ids"]
+    if req.file_ids is not None:
+        openai_update["file_ids"] = req.file_ids
         asst.files = await models.File.get_all_by_file_id(
-            request.state.db, data["file_ids"]
+            request.state.db, req.file_ids
         )
-    if "instructions" in data:
-        openai_update["instructions"] = data["instructions"]
-        asst.instructions = data["instructions"]
-    if "model" in data:
-        openai_update["model"] = data["model"]
-        asst.model = data["model"]
-    if "tools" in data:
-        openai_update["tools"] = data["tools"]
-        asst.tools = json.dumps(data["tools"])
-    if "published" in data:
-        asst.published = func.now() if data["published"] else None
+    if req.use_latex is not None:
+        openai_update["instructions"] = format_instructions(
+            asst.instructions, use_latex=req.use_latex
+        )
+        asst.use_latex = req.use_latex
+    if req.instructions is not None:
+        use_latex = req.use_latex if req.use_latex is not None else asst.use_latex
+        openai_update["instructions"] = format_instructions(
+            req.instructions, use_latex=use_latex
+        )
+        asst.instructions = req.instructions
+    if req.model is not None:
+        openai_update["model"] = req.model
+        asst.model = req.model
+    if req.tools is not None:
+        openai_update["tools"] = req.tools
+        asst.tools = json.dumps(req.tools)
+    if req.published is not None:
+        asst.published = func.now() if req.published else None
+    if req.name is not None:
+        asst.name = req.name
 
     request.state.db.add(asst)
     await request.state.db.flush()

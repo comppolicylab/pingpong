@@ -40,6 +40,10 @@
       <Textarea label="instructions" id="instructions" name="instructions" value={assistant?.instructions} />
   </div>
   <div class="col-span-2">
+    <Checkbox label="use_latex" id="use_latex" name="use_latex" checked={!!assistant?.use_latex}>Use LaTeX</Checkbox>
+    <Helper>Enable LaTeX formatting for assistant responses.</Helper>
+  </div>
+  <div class="col-span-2">
     <Label for="model">Tools</Label>
       <Helper>Select tools available to the assistant when generating a response.</Helper>
       <MultiSelect name="tools" items="{tools}" value={assistant?.tools || defaultTools} />

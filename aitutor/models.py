@@ -361,6 +361,7 @@ class Assistant(Base):
     name = Column(String)
     instructions = Column(String)
     assistant_id = Column(String)
+    use_latex = Column(Boolean)
     tools = Column(String)
     model = Column(String)
     class_id = Column(Integer, ForeignKey("classes.id"))
@@ -457,7 +458,9 @@ class Assistant(Base):
         params["class_id"] = int(class_id)
         params["creator_id"] = int(user_id)
         params["assistant_id"] = assistant_id
+
         params["published"] = func.now() if data.published else None
+        params["use_latex"] = data.use_latex
 
         assistant = Assistant(**params)
         session.add(assistant)
