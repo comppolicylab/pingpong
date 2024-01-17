@@ -11,6 +11,8 @@
   import SvelteMarkdown from "svelte-markdown";
   import Logo from '$lib/components/Logo.svelte';
   import ChatInput from "$lib/components/ChatInput.svelte";
+  import CodeRenderer from "$lib/components/CodeRenderer.svelte";
+  import CodeSpanRenderer from "$lib/components/CodeSpanRenderer.svelte";
   import {
     EyeSlashOutline,
   } from 'flowbite-svelte-icons';
@@ -96,6 +98,12 @@
       $waiting = false;
     };
   };
+
+  // Supply a custom renderer for certain tags.
+  const customRenderers = {
+    code: CodeRenderer,
+    codespan: CodeSpanRenderer,
+  };
 </script>
 
 <div class="relative py-8 h-full w-full">
@@ -155,7 +163,6 @@
   </div>
   {/if}
   </div>
-
 
   {#if priv}
   <div class="absolute top-0 left-0 flex gap-2 px-4 py-2 items-center w-full bg-amber-200 text-sm">
