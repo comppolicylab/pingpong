@@ -19,8 +19,9 @@ async def generate_name(
             {
                 "role": "user",
                 "content": (
-                    "Come up with a short (few word) title for a chat thread "
-                    f"that begins with the following message:\n{prompt}"
+                    "Come up with a short (few word) title for a chat thread. "
+                    "Do not use quotation marks, keep it simple. "
+                    f"The first message of the thread is as follows:\n\n{prompt}"
                 ),
             }
         ],
@@ -41,6 +42,21 @@ def hash_thread(messages, runs) -> str:
         mpart = f"{messages.first_id}-{messages.last_id}"
 
     return hashlib.md5(f"{mpart}-{rpart}".encode("utf-8")).hexdigest()
+
+
+def format_instructions(instructions: str, use_latex: bool = False) -> str:
+    """Format instructions for a prompt."""
+    if use_latex:
+        return instructions + (
+            "\n"
+            "---Formatting: LaTeX---"
+            "Always use LaTeX with math mode delimiters when outputting "
+            "mathematical tokens. Use the single dollar sign `$` to delimit "
+            "inline math. For block-level math, use double dollar signs `$$` "
+            "with newlines before and after them as the opening and closing "
+            "delimiter."
+        )
+    return instructions
 
 
 @functools.cache

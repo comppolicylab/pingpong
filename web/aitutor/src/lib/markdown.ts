@@ -11,7 +11,7 @@ const marked = new Marked(
       return hljs.highlight(code, { language }).value;
     },
   }),
-  //markedKatex(),
+  markedKatex(),
 );
 
 export const markdown = (markdown: string) => {

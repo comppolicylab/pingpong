@@ -8,14 +8,9 @@
   import {invalidateAll} from '$app/navigation';
   import {Span, Avatar } from "flowbite-svelte";
   import { Pulse, SyncLoader } from 'svelte-loading-spinners';
-  import SvelteMarkdown from "svelte-markdown";
   import Markdown from "$lib/components/Markdown.svelte";
   import Logo from '$lib/components/Logo.svelte';
   import ChatInput from "$lib/components/ChatInput.svelte";
-  import CodeRenderer from "$lib/components/CodeRenderer.svelte";
-  import CodeSpanRenderer from "$lib/components/CodeSpanRenderer.svelte";
-  import ParagraphRenderer from "$lib/components/ParagraphRenderer.svelte";
-  import ListItemRenderer from "$lib/components/ListItemRenderer.svelte";
   import {
     EyeSlashOutline,
   } from 'flowbite-svelte-icons';
@@ -36,7 +31,6 @@
     if (!loading && $thread && $thread.run) {
       waiting.set(!api.finished($thread.run));
     }
-    console.log(messages[messages.length - 1].content)
   }
 
   // Get the name of the participant in the chat thread.
@@ -101,14 +95,6 @@
 
       $waiting = false;
     };
-  };
-
-  // Supply a custom renderer for certain tags.
-  const customRenderers = {
-    code: CodeRenderer,
-    codespan: CodeSpanRenderer,
-    paragraph: ParagraphRenderer,
-    listitem: ListItemRenderer,
   };
 </script>
 

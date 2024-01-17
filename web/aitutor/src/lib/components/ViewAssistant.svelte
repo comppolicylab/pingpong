@@ -23,6 +23,10 @@
   <span>{assistant.instructions}</span>
   <Label>Model</Label>
   <span>{assistant.model}</span>
+  <Label>Formatting</Label>
+    <List>
+      <Li>Latex: {assistant.use_latex || false}</Li>
+    </List>
   <Label>Tools</Label>
   <List>
     {#each JSON.parse(assistant.tools) as tool}
