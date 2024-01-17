@@ -738,6 +738,21 @@ async def delete_assistant(
 
 
 @v1.get(
+    "/class/{class_id}/image/{file_id}",
+    # TODO ideally need to check thread permission too!
+    dependencies=[Depends(IsSuper() | CanRead(models.Class, "class_id"))],
+)
+async def get_image(file_id: str, request: Request, openai_client: OpenAIClient):
+    response = await openai_client.files.with_raw_response.retrieve_content(file_id)
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail="An error occurred fetching the requested file",
+        )
+    return Response(content=response.content, media_type="image/png")
+
+
+@v1.get(
     "/me",
     response_model=schemas.SessionState,
 )
