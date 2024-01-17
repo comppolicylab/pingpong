@@ -26,7 +26,7 @@
   };
 </script>
 
-<div class="markdown" use:renderMarkdownNode={content}>
+<div class="markdown max-w-full" use:renderMarkdownNode={content}>
   {@html markdown(content)}
 </div>
 
@@ -39,5 +39,9 @@
 
   :global(.markdown p) {
     margin-bottom: 1rem;
+  }
+
+  :global(.markdown code) {
+    border-radius: 0.25rem;
   }
 </style>

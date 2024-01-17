@@ -127,7 +127,7 @@
             <Logo size="8" />
           {/if}
         </div>
-        <div>
+        <div class="max-w-full">
           <div class="font-bold text-gray-400">{getName(message)}</div>
           {#each message.content as content}
             {#if content.type == "text"}
