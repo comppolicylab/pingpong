@@ -19,9 +19,8 @@ async def generate_name(
             {
                 "role": "user",
                 "content": (
-                    "Come up with a short (few word) title for a chat thread. "
-                    "Do not use quotation marks, keep it simple. "
-                    f"The first message of the thread is as follows:\n\n{prompt}"
+                    "Summarize the intent of the following message in a couple of words:\n\n"
+                    f"{prompt}"
                 ),
             }
         ],
@@ -50,8 +49,9 @@ def format_instructions(instructions: str, use_latex: bool = False) -> str:
         return instructions + (
             "\n"
             "---Formatting: LaTeX---"
-            "Always use LaTeX with math mode delimiters when outputting "
-            "mathematical tokens. Use the single dollar sign $ to delimit "
+            "Use LaTeX with math mode delimiters when outputting "
+            "mathematical tokens. Use the single dollar sign $ with spaces "
+            "surrounding it to delimit "
             "inline math. For block-level math, use double dollar signs $$ "
             "with newlines before and after them as the opening and closing "
             "delimiter. Do not use LaTeX inside backticks."

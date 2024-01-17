@@ -1,5 +1,4 @@
 import {Marked} from 'marked';
-import markedKatex from 'marked-katex-extension';
 import { markedHighlight } from 'marked-highlight';
 import hljs from 'highlight.js';
 
@@ -11,7 +10,6 @@ const marked = new Marked(
       return hljs.highlight(code, { language }).value;
     },
   }),
-  markedKatex(),
 );
 
 export const markdown = (markdown: string) => {
