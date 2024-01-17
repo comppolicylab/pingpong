@@ -24,6 +24,8 @@
   $: loading = !$thread && data?.thread?.loading;
   $: priv = !!$thread?.thread?.private;
 
+  $: classId = $thread?.thread?.class_id;
+
   let waiting = writable(false);
   $: {
     if (!loading && $thread && $thread.run) {
@@ -128,7 +130,13 @@
         <div>
           <div class="font-bold text-gray-400">{getName(message)}</div>
           {#each message.content as content}
-            <div class="leading-7"><SvelteMarkdown source="{content.text.value}" /></div>
+            {#if content.type == "text"}
+              <div class="leading-7"><SvelteMarkdown source="{content.text.value}" /></div>
+            {:else if content.type == "image_file"}
+              <div class="leading-7"><img src="/api/v1/class/{classId}/image/{content.image_file.file_id}" /></div>
+            {:else}
+              <div class="leading-7"><pre>{JSON.stringify(content, null, 2)}</pre></div>
+            {/if}
           {/each}
         </div>
       </div>
