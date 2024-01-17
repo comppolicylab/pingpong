@@ -244,11 +244,15 @@ class CreateClass(BaseModel):
     name: str
     term: str
     institution_id: int
+    any_can_create_assistant: bool = False
+    any_can_publish_assistant: bool = False
 
 
 class UpdateClass(BaseModel):
     name: str | None = None
     term: str | None = None
+    any_can_create_assistant: bool | None = None
+    any_can_publish_assistant: bool | None = None
 
 
 class UpdateApiKey(BaseModel):

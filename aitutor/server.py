@@ -647,7 +647,27 @@ async def create_assistant(
 ):
     data = await request.json()
     req = schemas.CreateAssistant(**data)
+
     class_id_int = int(class_id)
+    cls = await models.Class.get_by_id(request.state.db, class_id_int)
+
+    # Check additional permissions
+    if not cls.any_can_create_assistant or not cls.any_can_publish_assistant:
+        can_override = await IsSuper()(request) or await CanWrite(
+            models.Class, "class_id"
+        )(request)
+        if not can_override:
+            if not cls.any_can_create_assistant:
+                raise HTTPException(
+                    status_code=403,
+                    detail="You are not allowed to create assistants for this class.",
+                )
+            if not cls.any_can_publish_assistant and req.published:
+                raise HTTPException(
+                    status_code=403,
+                    detail="You are not allowed to publish assistants for this class.",
+                )
+
     creator_id = request.state.session.user.id
 
     new_asst = await openai_client.beta.assistants.create(
@@ -684,6 +704,19 @@ async def update_assistant(
 
     # Get the existing assistant.
     asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+
+    # Check additional permissions
+    if not asst.published:
+        cls = await models.Class.get_by_id(request.state.db, asst.class_id)
+        if not cls.any_can_publish_assistant and req.published:
+            can_override = await IsSuper()(request) or await CanWrite(
+                models.Class, "class_id"
+            )(request)
+            if not can_override:
+                raise HTTPException(
+                    status_code=403,
+                    detail="You are not allowed to publish assistants for this class.",
+                )
 
     if not data:
         return asst
