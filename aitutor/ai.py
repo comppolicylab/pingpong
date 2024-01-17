@@ -19,7 +19,7 @@ async def generate_name(
             {
                 "role": "user",
                 "content": (
-                    "Summarize the intent of the following message in a couple of words:\n\n"
+                    "Summarize what the user is seeking help with in a couple of words:\n\n"
                     f"{prompt}"
                 ),
             }
