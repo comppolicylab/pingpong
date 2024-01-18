@@ -277,7 +277,7 @@ class Config(BaseSettings):
     email: EmailSettings
     sentry: SentrySettings
     metrics: MetricsSettings = Field(MetricsSettings())
-    superusers: InitSettings = Field(InitSettings())
+    init: InitSettings = Field(InitSettings())
 
     def url(self, path: str | None) -> str:
         """Return a URL relative to the public URL."""
