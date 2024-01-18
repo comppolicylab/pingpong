@@ -44,6 +44,9 @@
           <P>
         You can also send us a quick message with this form and we will try to get back to you soon!
           </P>
+          <P class="m-4 p-2 bg-amber-100 rounded" color="text-gray-600">
+            Please note that if you choose to share your personal information (name, email) with us, we will only use it to respond to your message. We will not share it with anyone else.
+          </P>
           <div class="mt-6">
           {#if form?.success}
             <P class="text-green-500">Your message has been sent, thanks for the feedback!</P>
