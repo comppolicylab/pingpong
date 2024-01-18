@@ -1,6 +1,7 @@
 <script lang="ts">
   import {writable} from "svelte/store";
   import { goto } from "$app/navigation";
+  import { page } from "$app/stores";
   import { enhance } from "$app/forms";
   import ChatInput from "$lib/components/ChatInput.svelte";
   import {Helper, GradientButton, Dropdown, DropdownItem, Label} from 'flowbite-svelte';
@@ -13,6 +14,15 @@
   let aiSelectOpen = false;
 
   $: isConfigured = data?.hasAssistants && data?.hasBilling;
+  $: linkedAssistant = parseInt($page.url.searchParams.get('assistant') || '0', 10);
+  $: {
+    if (linkedAssistant && data?.assistants) {
+      const selectedAssistant = data.assistants.find((asst) => asst.id === linkedAssistant);
+      if (selectedAssistant) {
+        $assistant = selectedAssistant;
+      }
+    }
+  }
 
   // Handle form submission
   const handleSubmit = () => {

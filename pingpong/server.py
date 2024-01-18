@@ -175,7 +175,7 @@ async def auth(request: Request, response: Response):
 async def list_institutions(request: Request):
     inst = list[models.Institution]()
 
-    if await IsSuper().test(request):
+    if await IsSuper().test_with_cache(request):
         inst = await models.Institution.all(request.state.db)
     else:
         inst = await models.Institution.visible(
@@ -476,7 +476,7 @@ async def get_last_run(
 async def list_threads(class_id: str, request: Request):
     threads = list[models.Thread]()
 
-    if await IsSuper().test(request):
+    if await IsSuper().test_with_cache(request):
         threads = await models.Thread.all(request.state.db, int(class_id))
     else:
         threads = await models.Thread.visible(
@@ -618,10 +618,9 @@ async def list_files(class_id: str, request: Request):
     response_model=schemas.Assistants,
 )
 async def list_assistants(class_id: str, request: Request):
-    # TODO - optimize this check
-    include_private = await IsSuper().test(request) or await CanWrite(
+    include_private = await IsSuper().test_with_cache(request) or await CanWrite(
         models.Class, "class_id"
-    ).test(request)
+    ).test_with_cache(request)
 
     assts = await models.Assistant.for_class(
         request.state.db,
@@ -653,9 +652,9 @@ async def create_assistant(
 
     # Check additional permissions
     if not cls.any_can_create_assistant or not cls.any_can_publish_assistant:
-        can_override = await IsSuper()(request) or await CanWrite(
+        can_override = await IsSuper().test_with_cache(request) or await CanWrite(
             models.Class, "class_id"
-        )(request)
+        ).test_with_cache(request)
         if not can_override:
             if not cls.any_can_create_assistant:
                 raise HTTPException(
@@ -709,9 +708,9 @@ async def update_assistant(
     if not asst.published:
         cls = await models.Class.get_by_id(request.state.db, asst.class_id)
         if not cls.any_can_publish_assistant and req.published:
-            can_override = await IsSuper()(request) or await CanWrite(
+            can_override = await IsSuper().test_with_cache(request) or await CanWrite(
                 models.Class, "class_id"
-            )(request)
+            ).test_with_cache(request)
             if not can_override:
                 raise HTTPException(
                     status_code=403,
