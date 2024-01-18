@@ -1,7 +1,7 @@
 <script lang="ts">
   import {enhance} from "$app/forms";
   import Logo from '$lib/components/Logo.svelte';
-  import {P, A, InputAddon, Input, Label, GradientButton, Button, Heading, ButtonGroup} from 'flowbite-svelte';
+  import {P, A, InputAddon, Input, Helper, GradientButton, Button, Heading, ButtonGroup} from 'flowbite-svelte';
   import {EnvelopeSolid} from 'flowbite-svelte-icons';
 
   export let form;
@@ -21,14 +21,13 @@
   <div class="flex items-center justify-center flex-col">
     <div><Logo size="20" extraClass="fill-amber-600" /></div>
     <div class="mt-4">
-      <Heading tag="h1" class="text-amber-500">PingPong</Heading>
+      <Heading tag="h1" class="text-amber-500 logo">PingPong</Heading>
     </div>
     <div class="mt-8 w-90">
       {#if form?.success}
         <div class="text-green-300">Success! Follow the link in your email to finish signing in.</div>
       {:else}
         <form action="/login?/loginWithMagicLink" method="POST" use:enhance={login}>
-          <Label for="email" class="mb-2 text-white">Log in with your school email address:</Label>
             <ButtonGroup class="w-full">
               <InputAddon>
               <EnvelopeSolid />
@@ -44,6 +43,8 @@
               <P>Please make sure you are using the correct email address and try again.
               </P>
             </div>
+          {:else}
+            <Helper class="my-2 text-white text-sm">Log in with your school email address.</Helper>
           {/if}
           </form>
       {/if}
