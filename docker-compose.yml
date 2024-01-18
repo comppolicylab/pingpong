@@ -28,7 +28,7 @@ services:
     platform: linux/amd64
     image: aitutor.azurecr.io/web:latest
     build:
-      context: ./web/aitutor
+      context: ./web/pingpong
       dockerfile: Dockerfile
       args:
         port: 3000

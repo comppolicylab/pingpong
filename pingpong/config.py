@@ -235,7 +235,7 @@ class PostgresSettings(BaseSettings):
     port: int = Field(5432)
     user: str = Field("postgres")
     password: str
-    database: str = Field("aitutor")
+    database: str = Field("pingpong")
 
     @cached_property
     def driver(self) -> PostgresDriver:

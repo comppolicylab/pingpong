@@ -3,42 +3,42 @@
 set -e
 
 source ./docker.env
-docker login --username $AITUTOR_DOCKER_USER --password $AITUTOR_DOCKER_PW aitutor.azurecr.io
+docker login --username $PINGPONG_DOCKER_USER --password $PINGPONG_DOCKER_PW aitutor.azurecr.io
 
 docker compose -f docker-compose.yml -f docker-compose.prod.yml build
 docker push aitutor.azurecr.io/srv:latest
 docker push aitutor.azurecr.io/web:latest
 
-scp docker.env aitutor:~/
-scp docker-compose.yml aitutor:~/
-scp docker-compose.prod.yml aitutor:~/
-scp config.prod.toml aitutor:~/
-scp nginx.conf aitutor:~/
-scp cert/aitutor.hks.harvard.edu.cer aitutor:~/
-scp cert/aitutor.hks.harvard.edu.key aitutor:~/
-ssh -T aitutor << EOF
+scp docker.env pingpong:~/
+scp docker-compose.yml pingpong:~/
+scp docker-compose.prod.yml pingpong:~/
+scp config.prod.toml pingpong:~/
+scp nginx.conf pingpong:~/
+scp cert/aitutor.hks.harvard.edu.cer pingpong:~/
+scp cert/aitutor.hks.harvard.edu.key pingpong:~/
+ssh -T pingpong << EOF
   source ./docker.env
 
-  sudo useradd -m -s /bin/bash aitutor || true
-  sudo groupadd -f aitutor
-  sudo usermod -aG aitutor aitutor
+  sudo useradd -m -s /bin/bash pingpong || true
+  sudo groupadd -f pingpong
+  sudo usermod -aG pingpong pingpong
 
-  sudo mkdir -p /opt/aitutor
-  sudo mkdir -p /opt/aitutor/cert
-  sudo mkdir -p /opt/aitutor/db
+  sudo mkdir -p /opt/pingpong
+  sudo mkdir -p /opt/pingpong/cert
+  sudo mkdir -p /opt/pingpong/db
 
-  sudo cp docker-compose.yml /opt/aitutor/
-  sudo cp docker-compose.prod.yml /opt/aitutor/
-  sudo cp config.prod.toml /opt/aitutor/
-  sudo cp nginx.conf /opt/aitutor/
-  sudo cp aitutor.hks.harvard.edu.cer /opt/aitutor/cert/
-  sudo cp aitutor.hks.harvard.edu.key /opt/aitutor/cert/
+  sudo cp docker-compose.yml /opt/pingpong/
+  sudo cp docker-compose.prod.yml /opt/pingpong/
+  sudo cp config.prod.toml /opt/pingpong/
+  sudo cp nginx.conf /opt/pingpong/
+  sudo cp aitutor.hks.harvard.edu.cer /opt/pingpong/cert/
+  sudo cp aitutor.hks.harvard.edu.key /opt/pingpong/cert/
 
-  sudo chown -R aitutor:aitutor /opt/aitutor
+  sudo chown -R pingpong:pingpong /opt/pingpong
 
-  cd /opt/aitutor
+  cd /opt/pingpong
   sudo systemctl start docker
-  sudo docker login --username $AITUTOR_DOCKER_USER --password $AITUTOR_DOCKER_PW aitutor.azurecr.io
+  sudo docker login --username $PINGPONG_DOCKER_USER --password $PINGPONG_DOCKER_PW aitutor.azurecr.io
   sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml down
   sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
   sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml up --no-build -d

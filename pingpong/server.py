@@ -19,8 +19,8 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from jwt.exceptions import PyJWTError
 from sqlalchemy.sql import func
 
-import aitutor.models as models
-import aitutor.schemas as schemas
+import pingpong.models as models
+import pingpong.schemas as schemas
 
 from .ai import format_instructions, generate_name, get_openai_client, hash_thread
 from .auth import (

@@ -39,8 +39,8 @@
   <SidebarWrapper class="h-full flex flex-col">
     <SidebarGroup class="mb-4">
       <NavBrand href="/" class="mx-4">
-        <Logo size="8" extraClass="fill-amber-600" />
-        <Heading tag="h1" class="text-amber-500 px-4" customSize="text-xl">AI Tutor</Heading>
+        <Logo size="10" extraClass="fill-amber-600" />
+        <Heading tag="h1" class="text-amber-500 px-5 logo" customSize="text-3xl">PingPong</Heading>
       </NavBrand>
     </SidebarGroup>
 
@@ -119,3 +119,12 @@
     <span>Logout</span>
   </DropdownItem>
 </Dropdown>
+
+
+<style lang="css">
+  :global(.logo) {
+    font-family: "Rubik Doodle Shadow", system-ui;
+    font-weight: 400;
+    font-style: normal;
+  }
+</style>
