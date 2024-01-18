@@ -147,6 +147,8 @@ export type CreateClassRequest = {
 export type UpdateClassRequest = {
   name?: string;
   term?: string;
+  any_can_create_assistant?: string;
+  any_can_update_assistant?: string;
 }
 
 /**

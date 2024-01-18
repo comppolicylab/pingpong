@@ -235,6 +235,8 @@ class Class(BaseModel):
     created: datetime
     updated: datetime | None
     api_key: SecretStr | None
+    any_can_create_assistant: bool | None = None
+    any_can_publish_assistant: bool | None = None
 
     class Config:
         from_attributes = True

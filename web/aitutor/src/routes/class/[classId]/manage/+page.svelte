@@ -3,7 +3,7 @@
   import {page} from '$app/stores';
   import {beforeNavigate} from '$app/navigation';
   import * as api from '$lib/api';
-  import { Modal, Listgroup, GradientButton, Secondary, Span, List, Li, Card, MultiSelect, Textarea, Accordion, AccordionItem, Dropzone, Heading, Button, Label, Input } from "flowbite-svelte";
+  import { Checkbox, Helper, Modal, Listgroup, GradientButton, Secondary, Span, List, Li, Card, MultiSelect, Textarea, Accordion, AccordionItem, Dropzone, Heading, Button, Label, Input } from "flowbite-svelte";
   import ManageUser from "$lib/components/ManageUser.svelte";
   import BulkAddUsers from "$lib/components/BulkAddUsers.svelte";
   import ViewUser from "$lib/components/ViewUser.svelte";
@@ -30,7 +30,6 @@
   $: hasApiKey = !!data?.class?.api_key;
   $: canCreateAssistant = hasElevatedPerms || data?.class?.any_can_create_assistant;
   $: canPublishAssistant = hasElevatedPerms || data?.class?.any_can_publish_assistant;
-
 
   // Check if we are editing an assistant and prompt if so.
   beforeNavigate((nav) => {
@@ -70,14 +69,15 @@
       </div>
 
       <div>
+      </div>
         <Checkbox id="any_can_create_assistant" name="any_can_create_assistant" checked="{data.class.any_can_create_assistant}">Allow anyone to create assistants</Checkbox>
         <Helper>When this is enabled, anyone in the class can create assistants. Otherwise, only teachers and admins can create assistants.</Helper>
-      </div>
 
       <div>
-        <Checkbox id="any_can_publish_assistant" name="any_can_publish_assistant" checked="{data.class.any_can_publish_assistant}">Allow anyone to publish assistants</Checkbox>
-          <Helper>When this is enabled, anyone in the class can share assistants with the rest of the class. Otherwise, only teachers and admins can share assistants.</Helper>
       </div>
+        <Checkbox id="any_can_publish_assistant" name="any_can_publish_assistant" checked="{data.class.any_can_publish_assistant}">Allow anyone to publish assistants</Checkbox>
+
+          <Helper>When this is enabled, anyone in the class can share their own assistants with the rest of the class. Otherwise, only teachers and admins can share assistants.</Helper>
 
 
       <div></div>
