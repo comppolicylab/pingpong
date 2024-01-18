@@ -40,7 +40,7 @@
     <SidebarGroup class="mb-4">
       <NavBrand href="/" class="mx-4">
         <Logo size="8" extraClass="fill-amber-600" />
-        <Heading tag="h1" class="text-amber-500 px-4" customSize="text-xl">AI Tutor</Heading>
+        <Heading tag="h1" class="text-amber-500 px-4" customSize="text-xl">PingPong</Heading>
       </NavBrand>
     </SidebarGroup>
 

@@ -19,7 +19,7 @@
 </script>
 
 <div class="container py-8">
-  <Heading tag="h2">Welcome to AI Tutor</Heading>
+  <Heading tag="h2">Welcome to PingPong!</Heading>
     <div class="flex flex-wrap mt-8 gap-4">
       {#each data?.classes as cls}
         <Card horizontal img={cls.logo} class="w-80 h-40" href={`/class/${cls.id}`}>

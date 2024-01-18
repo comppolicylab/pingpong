@@ -39,7 +39,7 @@
       const participant = participants.user[message?.metadata?.user_id];
       return participant?.name || participant?.email;
     } else {
-      return participants.assistant[$thread.thread.assistant_id] || "AI Tutor";
+      return participants.assistant[$thread.thread.assistant_id] || "PingPong Bot";
     }
   }
 

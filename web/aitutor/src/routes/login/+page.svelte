@@ -21,7 +21,7 @@
   <div class="flex items-center justify-center flex-col">
     <div><Logo size="20" extraClass="fill-amber-600" /></div>
     <div class="mt-4">
-      <Heading tag="h1" class="text-amber-500">AI Tutor</Heading>
+      <Heading tag="h1" class="text-amber-500">PingPong</Heading>
     </div>
     <div class="mt-8 w-90">
       {#if form?.success}
