@@ -140,7 +140,7 @@ async def login(request: Request):
     await config.email.sender.send(
         email,
         "Your PingPong login link!",
-        f"Click this link to log in to the PingPong: {magic_link}",
+        f"Click this link to log in to PingPong: {magic_link}",
     )
 
     return {"status": "ok"}
