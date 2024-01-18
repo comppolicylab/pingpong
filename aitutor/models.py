@@ -486,6 +486,8 @@ class Class(Base):
     )
     term = Column(String)
     api_key = Column(String, nullable=True)
+    any_can_create_assistant = Column(Boolean, default=False)
+    any_can_publish_assistant = Column(Boolean, default=False)
     users: Mapped[List["UserClassRole"]] = relationship(
         "UserClassRole",
         back_populates="class_",
@@ -632,6 +634,7 @@ class Class(Base):
     async def update(
         cls, session: AsyncSession, id_: int, data: schemas.UpdateClass
     ) -> "Class":
+        print("UPDATING CLASS", id_, data)
         stmt = (
             update(Class)
             .where(Class.id == int(id_))

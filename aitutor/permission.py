@@ -10,8 +10,18 @@ class Expression:
         if request.state.session.status != SessionStatus.VALID:
             raise HTTPException(status_code=403, detail="Missing session token")
 
-        if not await self.test(request):
+        if not await self.test_with_cache(request):
             raise HTTPException(status_code=403, detail="Missing required role")
+
+    async def test_with_cache(self, request: Request) -> bool:
+        if not hasattr(request.state, "permissions"):
+            request.state.permissions = dict[str, bool]()
+
+        key = str(self)
+        if key not in request.state.permissions:
+            request.state.permissions[key] = await self.test(request)
+
+        return request.state.permissions[key]
 
     @abstractmethod
     async def test(self, request: Request) -> bool:

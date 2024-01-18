@@ -53,7 +53,7 @@ export const actions = {
    * Update the class metadata
    */
   updateClass: async (event) => {
-    return await forwardRequest((f, d) => api.updateClass(f, event.params.classId, d), event);
+    return await forwardRequest((f, d) => api.updateClass(f, event.params.classId, d), event, {checkboxes: ['any_can_create_assistant', 'any_can_publish_assistant']});
   },
 
   /**
