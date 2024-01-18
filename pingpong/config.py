@@ -257,6 +257,12 @@ class SqliteSettings(BaseSettings):
 DbSettings = Union[PostgresSettings, SqliteSettings]
 
 
+class InitSettings(BaseSettings):
+    """Settings for first-time app init."""
+
+    super_users: list[str] = Field([])
+
+
 class Config(BaseSettings):
     """Stats Chat Bot config."""
 
@@ -271,6 +277,7 @@ class Config(BaseSettings):
     email: EmailSettings
     sentry: SentrySettings
     metrics: MetricsSettings = Field(MetricsSettings())
+    superusers: InitSettings = Field(InitSettings())
 
     def url(self, path: str | None) -> str:
         """Return a URL relative to the public URL."""

@@ -8,7 +8,7 @@ async def send_invite(
     """Send an email invitation for a user to join a class."""
     subject = f"You've been invited to join {invite.class_name}!"
     message = f"""\
-Hello! You've been invited to join {invite.class_name} on AI Tutor. \
+Hello! You've been invited to join {invite.class_name} on PingPong. \
 To join, click the link below:
 
 {link}\

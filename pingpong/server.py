@@ -139,8 +139,8 @@ async def login(request: Request):
 
     await config.email.sender.send(
         email,
-        "Your AI Tutor login link!",
-        f"Click this link to log in to the AI Tutor: {magic_link}",
+        "Your PingPong login link!",
+        f"Click this link to log in to the PingPong: {magic_link}",
     )
 
     return {"status": "ok"}
@@ -810,6 +810,13 @@ async def lifespan(app: FastAPI):
         logger.warning("Creating a new database since none exists.")
         await config.db.driver.create()
         await config.db.driver.init(models.Base)
+
+        logger.info("Creating superusers ...")
+        async with config.db.driver.async_session() as session:
+            for superuser in config.superusers:
+                user = models.User(email=superuser, super_admin=True)
+                session.add(user)
+            await session.commit()
 
     with sentry(), metrics():
         yield
