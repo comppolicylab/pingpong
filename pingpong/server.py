@@ -813,7 +813,7 @@ async def lifespan(app: FastAPI):
 
         logger.info("Creating superusers ...")
         async with config.db.driver.async_session() as session:
-            for superuser in config.superusers:
+            for superuser in config.init.super_users:
                 user = models.User(email=superuser, super_admin=True)
                 session.add(user)
             await session.commit()
