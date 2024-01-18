@@ -3,12 +3,12 @@ services:
     build:
       args:
         node_env: production
-        origin: https://aitutor.hks.harvard.edu
+        origin: https://pingpong.hks.harvard.edu
 
 secrets:
   app_config:
-    file: /opt/aitutor/config.prod.toml
+    file: /opt/pingpong/config.prod.toml
   nginxcrt:
-    file: /opt/aitutor/cert/aitutor.hks.harvard.edu.cer
+    file: /opt/pingpong/cert/aitutor.hks.harvard.edu.cer
   nginxkey:
-    file: /opt/aitutor/cert/aitutor.hks.harvard.edu.key
+    file: /opt/pingpong/cert/aitutor.hks.harvard.edu.key

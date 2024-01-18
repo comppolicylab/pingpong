@@ -5,8 +5,8 @@ from threading import Lock
 import requests
 from locust import HttpUser, between, events, task
 
-from aitutor.auth import encode_auth_token
-from aitutor.config import config
+from pingpong.auth import encode_auth_token
+from pingpong.config import config
 
 TEST_INST = None
 

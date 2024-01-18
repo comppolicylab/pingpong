@@ -5,8 +5,8 @@ services:
     networks: [back]
     ports: ["5432:5432"]
     environment:
-      POSTGRES_USER: aitutor
-      POSTGRES_PASSWORD: aitutor
+      POSTGRES_USER: pingpong
+      POSTGRES_PASSWORD: pingpong
     volumes:
       - dbdata:/var/lib/postgresql/data
 

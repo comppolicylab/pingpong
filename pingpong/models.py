@@ -28,7 +28,7 @@ from sqlalchemy.orm import (
 from sqlalchemy.sql import func
 from sqlalchemy.sql.expression import false
 
-import aitutor.schemas as schemas
+import pingpong.schemas as schemas
 
 
 def _get_upsert_stmt(session: AsyncSession):
