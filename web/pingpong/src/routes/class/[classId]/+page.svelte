@@ -17,7 +17,7 @@
   $: linkedAssistant = parseInt($page.url.searchParams.get('assistant') || '0', 10);
   $: {
     if (linkedAssistant && data?.assistants) {
-      const selectedAssistant = data.assistants.find((asst) => asst.id === linkedAssistant);
+      const selectedAssistant = (data?.assistants || []).find((asst) => asst.id === linkedAssistant);
       if (selectedAssistant) {
         $assistant = selectedAssistant;
       }
@@ -39,7 +39,7 @@
   };
 
   const selectAi = (asst) => {
-    $assistant = asst;
+    goto(`/class/${data.class.id}/?assistant=${asst.id}`);
     aiSelectOpen = false;
   };
 
