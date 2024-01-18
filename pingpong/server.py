@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import time
+from datetime import datetime
 from typing import Annotated, Any
 
 import jwt
@@ -802,6 +803,42 @@ async def get_image(file_id: str, request: Request, openai_client: OpenAIClient)
 async def get_me(request: Request):
     """Get the session information."""
     return request.state.session
+
+
+@v1.get(
+    "/support",
+    response_model=schemas.Support,
+)
+async def get_support(request: Request):
+    """Get the support information."""
+    return {
+        "blurb": config.support.blurb(),
+        "can_post": bool(config.support.driver),
+    }
+
+
+@v1.post(
+    "/support",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.GenericStatus,
+)
+async def post_support(
+    request: Request,
+):
+    """Post a support request."""
+    if not config.support.driver:
+        raise HTTPException(status_code=403, detail="Support is not available.")
+
+    data = await request.json()
+    req = schemas.SupportRequest(**data)
+    try:
+        await config.support.driver.post(
+            req, host=request.client.host, ts=datetime.utcnow()
+        )
+        return {"status": "ok"}
+    except Exception as e:
+        logger.exception(e)
+        raise HTTPException(status_code=500, detail="Failed to post support request.")
 
 
 async def lifespan(app: FastAPI):

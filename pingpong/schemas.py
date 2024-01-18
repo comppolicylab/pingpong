@@ -325,3 +325,15 @@ class SessionState(BaseModel):
     token: SessionToken | None = None
     user: User | None = None
     profile: Profile | None = None
+
+
+class Support(BaseModel):
+    blurb: str
+    can_post: bool
+
+
+class SupportRequest(BaseModel):
+    email: str | None = None
+    name: str | None = None
+    category: str | None = None
+    message: str

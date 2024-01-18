@@ -14,9 +14,23 @@ export type Fetcher = (input: RequestInfo, init?: RequestInit) => Promise<Respon
 export type BaseData = Record<string, any>;
 
 /**
+ * Base Response type for all API responses.
+ */
+export type BaseResponse = {
+  $status: number;
+}
+
+/**
+ * Generic response returned by some API endpoints.
+ */
+export type GenericStatus = {
+  status: string;
+};
+
+/**
  * Common fetch method.
  */
-const _fetch = async (f: Fetcher, method: Method, path: string, headers?: Record<string, string>, body?: string | FormData) => {
+const _fetch = async <R extends BaseData>(f: Fetcher, method: Method, path: string, headers?: Record<string, string>, body?: string | FormData): Promise<R & BaseResponse> => {
     path = path.replace(/^\/+/, "");
     const fullPath = `/api/v1/${path}`;
     const res = await f(fullPath, {
@@ -27,7 +41,7 @@ const _fetch = async (f: Fetcher, method: Method, path: string, headers?: Record
       mode: "cors",
     });
 
-    let data: {} = {};
+    let data: BaseData = {};
 
     try {
       data = await res.json();
@@ -35,53 +49,53 @@ const _fetch = async (f: Fetcher, method: Method, path: string, headers?: Record
       // Do nothing
     }
 
-    return {"$status": res.status, ...data};
+    return {"$status": res.status, ...data} as R & BaseResponse;
 }
 
 /**
  * Method that passes data in the query string.
  */
-const _qmethod = async <T extends BaseData>(f: Fetcher, method: "GET" | "DELETE", path: string, data?: T) => {
+const _qmethod = async <T extends BaseData, R extends BaseData>(f: Fetcher, method: "GET" | "DELETE", path: string, data?: T) => {
   const params = new URLSearchParams(data as Record<string, string>);
   path = `${path}?${params}`;
-  return await _fetch(f, method, path);
+  return await _fetch<R>(f, method, path);
 }
 
 /**
  * Method that passes data in the body.
  */
-const _bmethod = async <T extends BaseData>(f: Fetcher, method: "POST" | "PUT", path: string, data?: T) => {
+const _bmethod = async <T extends BaseData, R extends BaseData>(f: Fetcher, method: "POST" | "PUT", path: string, data?: T) => {
   const body = JSON.stringify(data);
   const headers = {"Content-Type": "application/json"};
-  return await _fetch(f, method, path, headers, body);
+  return await _fetch<R>(f, method, path, headers, body);
 }
 
 /**
  * Query with GET.
  */
-const GET = async <T extends BaseData>(f: Fetcher, path: string, data?: T) => {
-  return await _qmethod(f, "GET", path, data);
+const GET = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T) => {
+  return await _qmethod<T, R>(f, "GET", path, data);
 }
 
 /**
  * Query with DELETE.
  */
-const DELETE = async <T extends BaseData>(f: Fetcher, path: string, data?: T) => {
-  return await _qmethod(f, "DELETE", path, data);
+const DELETE = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T) => {
+  return await _qmethod<T, R>(f, "DELETE", path, data);
 }
 
 /**
  * Query with POST.
  */
-const POST = async <T extends BaseData>(f: Fetcher, path: string, data?: T) => {
-  return await _bmethod(f, "POST", path, data);
+const POST = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T) => {
+  return await _bmethod<T, R>(f, "POST", path, data);
 }
 
 /**
  * Query with PUT.
  */
-const PUT = async <T extends BaseData>(f: Fetcher, path: string, data?: T) => {
-  return await _bmethod(f, "PUT", path, data);
+const PUT = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T) => {
+  return await _bmethod<T, R>(f, "PUT", path, data);
 }
 
 /**
@@ -374,6 +388,40 @@ export const postMessage = async (f: Fetcher, classId: number, threadId: number,
 export const getLastThreadRun = async (f: Fetcher, classId: number, threadId: number, block: boolean = true) => {
   const url = `class/${classId}/thread/${threadId}/last_run`;
   return await GET(f, url, {block});
+}
+
+/**
+ * Information about getting help with the app.
+ */
+export type SupportInfo = {
+  blurb: string;
+  can_post: boolean;
+}
+
+/**
+ * Get information about support.
+ */
+export const getSupportInfo = async (f: Fetcher) => {
+  const url = `support`;
+  return await GET<{}, SupportInfo>(f, url);
+}
+
+/**
+ * Parameters for creating a support request.
+ */
+export type SupportRequest = {
+  email?: string
+  name?: string;
+  category?: string;
+  message: string;
+}
+
+/**
+ * Create a new support request.
+ */
+export const postSupportRequest = async (f: Fetcher, data: SupportRequest) => {
+  const url = `support`;
+  return await POST<SupportRequest, GenericStatus>(f, url, data);
 }
 
 /**
