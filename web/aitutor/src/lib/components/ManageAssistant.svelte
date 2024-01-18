@@ -42,7 +42,7 @@
       <Textarea label="instructions" id="instructions" name="instructions" value={assistant?.instructions} />
   </div>
   <div class="col-span-2">
-    <Checkbox label="use_latex" id="use_latex" name="use_latex" checked={!!assistant?.use_latex}>Use LaTeX</Checkbox>
+    <Checkbox label="use_latex" id="use_latex" name="use_latex" checked={assistant ? assistant.use_latex: true}>Use LaTeX</Checkbox>
     <Helper>Enable LaTeX formatting for assistant responses.</Helper>
   </div>
   <div class="col-span-2">
@@ -61,7 +61,11 @@
 
   <div class="col-span-2">
     <Checkbox label="published" id="published" disabled={!canPublish && !assistant?.published} name="published" checked={!!assistant?.published}>Publish</Checkbox>
-    <Helper>By default only you can see and interact with this assistant. If you would like to share the assistant with the rest of your class, select this option.</Helper>
+    {#if !canPublish}
+      <Helper>Publishing assistants has been disabled for this class. Contact your admin if you need to share this assistant.</Helper>
+    {:else}
+      <Helper>By default only you can see and interact with this assistant. If you would like to share the assistant with the rest of your class, select this option.</Helper>
+    {/if}
   </div>
 
   <input type="hidden" name="assistantId" value={assistant?.id} />
