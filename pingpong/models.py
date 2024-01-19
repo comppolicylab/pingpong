@@ -349,7 +349,7 @@ class File(Base):
     async def get_all_by_file_id(
         cls, session: AsyncSession, ids: List[str]
     ) -> List["File"]:
-        stmt = select(File).where(File.file_id.in_([int(id_) for id_ in ids]))
+        stmt = select(File).where(File.file_id.in_(ids))
         result = await session.execute(stmt)
         return [row.File for row in result]
 
