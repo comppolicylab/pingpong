@@ -360,6 +360,7 @@ class Assistant(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String)
     instructions = Column(String)
+    description = Column(String)
     assistant_id = Column(String)
     use_latex = Column(Boolean)
     tools = Column(String)
