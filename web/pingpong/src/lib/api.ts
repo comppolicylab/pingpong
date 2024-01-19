@@ -241,11 +241,14 @@ export type Tool = {
  */
 export type CreateAssistantRequest = {
   name: string;
+  description: string;
   instructions: string;
   model: string;
   tools: Tool[];
   file_ids: string[];
   published?: boolean;
+  use_latex?: boolean;
+  hide_prompt?: boolean;
 }
 
 /**
@@ -253,11 +256,14 @@ export type CreateAssistantRequest = {
  */
 export type UpdateAssistantRequest = {
   name?: string;
+  description?: string;
   instructions?: string;
   model?: string;
   tools?: Tool[];
   file_ids?: string[];
   published?: boolean;
+  use_latex?: boolean;
+  hide_prompt?: boolean;
 }
 
 /**

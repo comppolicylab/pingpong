@@ -40,6 +40,8 @@
   </Heading>
   <Label>Author</Label>
   <span>{creator.email}</span>
+  <Label>Description</Label>
+  <span>{assistant.description || "(None provided)"}</span>
   <Label>Instructions</Label>
   <span>{assistant.instructions}</span>
   <Label>Model</Label>

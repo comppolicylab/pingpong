@@ -631,6 +631,19 @@ async def list_assistants(class_id: str, request: Request):
     )
     creator_ids = {a.creator_id for a in assts}
     creators = await models.User.get_all_by_id(request.state.db, list(creator_ids))
+
+    # Hide the prompt if requested and the user doesn't have elevated permissions.
+    has_elevated_permissions = await IsSuper().test_with_cache(
+        request
+    ) or await CanWrite(models.Class, "class_id").test_with_cache(request)
+    for asst in assts:
+        if (
+            asst.hide_prompt
+            and not has_elevated_permissions
+            and asst.creator_id != request.state.session.user.id
+        ):
+            asst.prompt = ""
+
     return {
         "assistants": assts,
         "creators": {c.id: schemas.Profile.from_email(c.email) for c in creators},
@@ -733,6 +746,8 @@ async def update_assistant(
             asst.instructions, use_latex=req.use_latex
         )
         asst.use_latex = req.use_latex
+    if req.hide_prompt is not None:
+        asst.hide_prompt = req.hide_prompt
     if req.instructions is not None:
         use_latex = req.use_latex if req.use_latex is not None else asst.use_latex
         openai_update["instructions"] = format_instructions(
@@ -742,6 +757,8 @@ async def update_assistant(
     if req.model is not None:
         openai_update["model"] = req.model
         asst.model = req.model
+    if req.description is not None:
+        asst.description = req.description
     if req.tools is not None:
         openai_update["tools"] = req.tools
         asst.tools = json.dumps(req.tools)

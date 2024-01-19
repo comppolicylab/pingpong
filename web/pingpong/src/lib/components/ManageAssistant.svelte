@@ -37,9 +37,18 @@
       <Select items={models} label="model" id="model" name="model" value={assistant?.model || models[0].value} />
   </div>
   <div class="col-span-2">
+    <Label for="description">Description</Label>
+      <Helper>Describe what this assistant does. This information is <strong>not</strong> included in the prompt, but <strong>is</strong> shown to users.</Helper>
+      <Textarea label="description" id="description" name="description" value={assistant?.description} />
+  </div>
+  <div class="col-span-2">
     <Label for="instructions">Instructions</Label>
       <Helper>This is the prompt the language model will use to generate responses.</Helper>
-      <Textarea label="instructions" id="instructions" name="instructions" value={assistant?.instructions} />
+        <Textarea label="instructions" id="instructions" name="instructions" rows="6" value={assistant?.instructions} />
+  </div>
+  <div class="col-span-2">
+    <Checkbox id="hide_prompt" name="hide_prompt" checked={assistant ? assistant.hide_prompt : false}>Hide Prompt</Checkbox>
+    <Helper>Hide the prompt from other users. When checked, only the teaching team and the assistant's creator will be able to see this prompt.</Helper>
   </div>
   <div class="col-span-2">
     <Checkbox label="use_latex" id="use_latex" name="use_latex" checked={assistant ? assistant.use_latex: true}>Use LaTeX</Checkbox>

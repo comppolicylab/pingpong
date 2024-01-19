@@ -53,12 +53,14 @@ class Assistant(BaseModel):
     id: int
     name: str
     instructions: str
+    description: str | None
     tools: str
     model: str
     class_id: int
     creator_id: int
     files: list[File]
     use_latex: bool | None
+    hide_prompt: bool | None
     published: datetime | None
     created: datetime
     updated: datetime | None
@@ -71,20 +73,24 @@ class CreateAssistant(BaseModel):
     name: str
     file_ids: list[str]
     instructions: str
+    description: str
     model: str
     tools: list[Tool]
     published: bool = False
     use_latex: bool = False
+    hide_prompt: bool = False
 
 
 class UpdateAssistant(BaseModel):
     name: str | None = None
     file_ids: list[str] | None = None
     instructions: str | None = None
+    description: str | None = None
     model: str | None = None
     tools: list[Tool] | None = None
     published: bool | None = None
     use_latex: bool | None = None
+    hide_prompt: bool | None = None
 
 
 class Assistants(BaseModel):
