@@ -74,12 +74,14 @@ export const actions = {
 
     const data: api.CreateAssistantRequest = {
       name: body.get('name'),
+      description: body.get('description'),
       instructions: body.get('instructions'),
       model: body.get('model'),
       tools,
       file_ids,
       published: body.get('published') === "on",
       use_latex: body.get('use_latex') === "on",
+      hide_prompt: body.get('hide_prompt') === "on",
     };
 
     return await api.createAssistant(event.fetch, event.params.classId, data);
@@ -102,12 +104,14 @@ export const actions = {
 
     const data: api.UpdateAssistantRequest = {
       name: body.get('name'),
+      description: body.get('description'),
       instructions: body.get('instructions'),
       model: body.get('model'),
       tools,
       file_ids,
       published: body.get('published') === "on",
       use_latex: body.get('use_latex') === "on",
+      hide_prompt: body.get('hide_prompt') === "on",
     };
 
     const response = await api.updateAssistant(event.fetch, event.params.classId, body.get("assistantId"), data);

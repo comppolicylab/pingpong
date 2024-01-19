@@ -363,6 +363,7 @@ class Assistant(Base):
     description = Column(String)
     assistant_id = Column(String)
     use_latex = Column(Boolean)
+    hide_prompt = Column(Boolean, default=False)
     tools = Column(String)
     model = Column(String)
     class_id = Column(Integer, ForeignKey("classes.id"))
