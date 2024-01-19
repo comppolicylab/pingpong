@@ -1,0 +1,89 @@
+<svg width="89" height="54" viewBox="0 0 89 54" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<title>Group 3</title>
+<desc>Created using Figma</desc>
+<g id="Canvas" transform="translate(-4074 310)">
+<g id="Group 3">
+<g id="Group">
+<g id="Rectangle 2">
+<use xlink:href="#path0_fill" transform="translate(4097.02 -271.231)" fill="#FFFFFF"/>
+<mask id="mask0_outline_ins">
+<use xlink:href="#path0_fill" fill="white" transform="translate(4097.02 -271.231)"/>
+</mask>
+<g mask="url(#mask0_outline_ins)">
+<use xlink:href="#path1_stroke_2x" transform="translate(4097.02 -271.231)" fill="#FFFFFF"/>
+</g>
+</g>
+<g id="Rectangle 2.1">
+<use xlink:href="#path0_fill" transform="translate(4097.02 -295.955)" fill="#FFFFFF"/>
+<mask id="mask1_outline_ins">
+<use xlink:href="#path0_fill" fill="white" transform="translate(4097.02 -295.955)"/>
+</mask>
+<g mask="url(#mask1_outline_ins)">
+<use xlink:href="#path1_stroke_2x" transform="translate(4097.02 -295.955)" fill="#FFFFFF"/>
+</g>
+</g>
+<g id="Rectangle 3">
+<use xlink:href="#path2_fill" transform="translate(4099.99 -290.657)" fill="#FFFFFF"/>
+<mask id="mask2_outline_ins">
+<use xlink:href="#path2_fill" fill="white" transform="translate(4099.99 -290.657)"/>
+</mask>
+<g mask="url(#mask2_outline_ins)">
+<use xlink:href="#path3_stroke_2x" transform="translate(4099.99 -290.657)" fill="#FFFFFF"/>
+</g>
+</g>
+<g id="Rectangle 3.1">
+<use xlink:href="#path2_fill" transform="translate(4110.87 -290.657)" fill="#FFFFFF"/>
+<mask id="mask3_outline_ins">
+<use xlink:href="#path2_fill" fill="white" transform="translate(4110.87 -290.657)"/>
+</mask>
+<g mask="url(#mask3_outline_ins)">
+<use xlink:href="#path3_stroke_2x" transform="translate(4110.87 -290.657)" fill="#FFFFFF"/>
+</g>
+</g>
+<g id="Rectangle 3.3">
+<use xlink:href="#path2_fill" transform="translate(4121.76 -290.657)" fill="#FFFFFF"/>
+<mask id="mask4_outline_ins">
+<use xlink:href="#path2_fill" fill="white" transform="translate(4121.76 -290.657)"/>
+</mask>
+<g mask="url(#mask4_outline_ins)">
+<use xlink:href="#path3_stroke_2x" transform="translate(4121.76 -290.657)" fill="#FFFFFF"/>
+</g>
+</g>
+<g id="Rectangle 3.2">
+<use xlink:href="#path2_fill" transform="translate(4132.65 -290.657)" fill="#FFFFFF"/>
+<mask id="mask5_outline_ins">
+<use xlink:href="#path2_fill" fill="white" transform="translate(4132.65 -290.657)"/>
+</mask>
+<g mask="url(#mask5_outline_ins)">
+<use xlink:href="#path3_stroke_2x" transform="translate(4132.65 -290.657)" fill="#FFFFFF"/>
+</g>
+</g>
+<g id="Polygon">
+<use xlink:href="#path4_fill" transform="translate(4097.02 -303.019)" fill="#FFFFFF"/>
+<mask id="mask6_outline_ins">
+<use xlink:href="#path4_fill" fill="white" transform="translate(4097.02 -303.019)"/>
+</mask>
+<g mask="url(#mask6_outline_ins)">
+<use xlink:href="#path5_stroke_2x" transform="translate(4097.02 -303.019)" fill="#FFFFFF"/>
+</g>
+</g>
+</g>
+<g id="{">
+<use xlink:href="#path6_fill" transform="translate(4074 -310)" fill="#FFFFFF"/>
+</g>
+<g id="}">
+<use xlink:href="#path7_fill" transform="translate(4144.38 -310)" fill="#FFFFFF"/>
+</g>
+</g>
+</g>
+<defs>
+<path id="path0_fill" d="M 0 0L 43.5565 0L 43.5565 4.41492L 0 4.41492L 0 0Z"/>
+<path id="path1_stroke_2x" d="M 0 0L 0 -0.5L -0.5 -0.5L -0.5 0L 0 0ZM 43.5565 0L 44.0565 0L 44.0565 -0.5L 43.5565 -0.5L 43.5565 0ZM 43.5565 4.41492L 43.5565 4.91492L 44.0565 4.91492L 44.0565 4.41492L 43.5565 4.41492ZM 0 4.41492L -0.5 4.41492L -0.5 4.91492L 0 4.91492L 0 4.41492ZM 0 0.5L 43.5565 0.5L 43.5565 -0.5L 0 -0.5L 0 0.5ZM 43.0565 0L 43.0565 4.41492L 44.0565 4.41492L 44.0565 0L 43.0565 0ZM 43.5565 3.91492L 0 3.91492L 0 4.91492L 43.5565 4.91492L 43.5565 3.91492ZM 0.5 4.41492L 0.5 0L -0.5 0L -0.5 4.41492L 0.5 4.41492Z"/>
+<path id="path2_fill" d="M 0 0L 4.9496 0L 4.9496 18.5427L 0 18.5427L 0 0Z"/>
+<path id="path3_stroke_2x" d="M 0 0L 0 -0.5L -0.5 -0.5L -0.5 0L 0 0ZM 4.9496 0L 5.4496 0L 5.4496 -0.5L 4.9496 -0.5L 4.9496 0ZM 4.9496 18.5427L 4.9496 19.0427L 5.4496 19.0427L 5.4496 18.5427L 4.9496 18.5427ZM 0 18.5427L -0.5 18.5427L -0.5 19.0427L 0 19.0427L 0 18.5427ZM 0 0.5L 4.9496 0.5L 4.9496 -0.5L 0 -0.5L 0 0.5ZM 4.4496 0L 4.4496 18.5427L 5.4496 18.5427L 5.4496 0L 4.4496 0ZM 4.9496 18.0427L 0 18.0427L 0 19.0427L 4.9496 19.0427L 4.9496 18.0427ZM 0.5 18.5427L 0.5 0L -0.5 0L -0.5 18.5427L 0.5 18.5427Z"/>
+<path id="path4_fill" d="M 21.7782 0L 40.6387 5.96014L 2.91773 5.96014L 21.7782 0Z"/>
+<path id="path5_stroke_2x" d="M 21.7782 0L 21.9289 -0.476761L 21.7782 -0.524372L 21.6276 -0.476761L 21.7782 0ZM 40.6387 5.96014L 40.6387 6.46014L 40.7894 5.48338L 40.6387 5.96014ZM 2.91773 5.96014L 2.76707 5.48338L 2.91773 6.46014L 2.91773 5.96014ZM 21.6276 0.476761L 40.4881 6.4369L 40.7894 5.48338L 21.9289 -0.476761L 21.6276 0.476761ZM 40.6387 5.46014L 2.91773 5.46014L 2.91773 6.46014L 40.6387 6.46014L 40.6387 5.46014ZM 3.06839 6.4369L 21.9289 0.476761L 21.6276 -0.476761L 2.76707 5.48338L 3.06839 6.4369Z"/>
+<path id="path6_fill" d="M 17.1071 54C 9.82702 52.1788 6.11482 48.0307 5.97046 41.5554L 5.97046 35.6781C 5.97046 31.5391 3.9803 29.4696 0 29.4696L 0 24.558C 3.9803 24.558 5.97046 22.4793 5.97046 18.3219L 5.97046 12.4722C 6.03233 9.16096 6.99131 6.48441 8.84741 4.44251C 10.7241 2.40061 13.4773 0.919775 17.1071 0L 18.5919 3.86306C 15.0241 4.8932 13.1783 7.70772 13.0546 12.3066L 13.0546 18.2667C 13.0546 22.4057 11.2707 25.3122 7.70282 26.9862C 11.2707 28.6786 13.0546 31.6127 13.0546 35.7885L 13.0546 41.6658C 13.1783 46.2647 15.0241 49.0792 18.5919 50.1094L 17.1071 54Z"/>
+<path id="path7_fill" d="M 0 50.1094C 3.62971 49.0608 5.48581 46.1911 5.5683 41.5003L 5.5683 35.7609C 5.5683 31.5115 7.44502 28.5958 11.1985 27.0138C 7.44502 25.4318 5.5683 22.4885 5.5683 18.184L 5.5683 12.4722C 5.48581 7.7813 3.62971 4.9116 0 3.86306L 1.48488 0C 5.23833 0.938171 8.03279 2.465 9.86827 4.58048C 11.7037 6.67757 12.6215 9.4277 12.6215 12.8309L 12.6215 18.3495C 12.6215 22.4885 14.6219 24.558 18.6229 24.558L 18.6229 29.4696C 14.6219 29.4696 12.6215 31.5391 12.6215 35.6781L 12.6215 41.1139C 12.6215 44.5539 11.6934 47.3224 9.83733 49.4195C 8.00185 51.535 5.2177 53.0618 1.48488 54L 0 50.1094Z"/>
+</defs>
+</svg>

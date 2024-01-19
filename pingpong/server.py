@@ -833,7 +833,7 @@ async def post_support(
     req = schemas.SupportRequest(**data)
     try:
         await config.support.driver.post(
-            req, host=request.client.host, ts=datetime.utcnow()
+            req, env=config.public_url, ts=datetime.utcnow()
         )
         return {"status": "ok"}
     except Exception as e:
