@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from jwt.exceptions import PyJWTError
 from sqlalchemy.sql import func
 
+import pingpong.metrics as metrics
 import pingpong.models as models
 import pingpong.schemas as schemas
 
@@ -33,7 +34,6 @@ from .auth import (
 from .config import config
 from .errors import sentry
 from .invite import send_invite
-from .metrics import metrics
 from .permission import CanManage, CanRead, CanWrite, IsSuper, LoggedIn
 
 logger = logging.getLogger(__name__)
@@ -110,6 +110,34 @@ async def begin_db_session(request: Request, call_next):
         except Exception as e:
             await db.rollback()
             raise e
+
+
+@v1.middleware("http")
+async def log_request(request: Request, call_next):
+    """Log the request."""
+    metrics.in_flight.inc(app=config.public_url)
+    start_time = time.monotonic()
+    result = None
+    try:
+        result = await call_next(request)
+        return result
+    finally:
+        metrics.in_flight.dec(app=config.public_url)
+        status = result.status_code if result else 500
+        duration = time.monotonic() - start_time
+        metrics.api_requests.inc(
+            app=config.public_url,
+            route=request.url.path,
+            method=request.method,
+            status=status,
+        )
+        metrics.api_request_duration.observe(
+            duration,
+            app=config.public_url,
+            route=request.url.path,
+            method=request.method,
+            status=status,
+        )
 
 
 @v1.get("/config", dependencies=[Depends(IsSuper())])
@@ -570,6 +598,13 @@ async def send_message(
         assistant_id=asst.assistant_id,
     )
 
+    metrics.inbound_messages.inc(
+        app=config.public_url,
+        class_=int(class_id),
+        user=request.state.session.user.id,
+        thread=thread.thread_id,
+    )
+
     thread.updated = func.now()
     request.state.db.add(thread)
     await request.state.db.commit()
@@ -872,7 +907,7 @@ async def lifespan(app: FastAPI):
                 session.add(user)
             await session.commit()
 
-    with sentry(), metrics():
+    with sentry(), metrics.metrics():
         yield
 
 
