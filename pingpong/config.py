@@ -17,6 +17,7 @@ from sentry_sdk import capture_message
 
 from .db import PostgresDriver, SqliteDriver
 from .email import AzureEmailSender, GmailEmailSender, SmtpEmailSender
+from .support import DiscordSupportDriver
 
 logger = logging.getLogger(__name__)
 
@@ -263,6 +264,39 @@ class InitSettings(BaseSettings):
     super_users: list[str] = Field([])
 
 
+class DiscordSettings(BaseSettings):
+    """Settings for getting help with Discord."""
+
+    type: Literal["discord"]
+    webhook: str
+    invite: str
+
+    def blurb(self) -> str:
+        return (
+            f'We run a <a href="{self.invite}" '
+            'rel="noopener noreferrer" target="_blank">'
+            "Discord server</a> where you can get help with PingPong."
+        )
+
+    @cached_property
+    def driver(self) -> DiscordSupportDriver:
+        return DiscordSupportDriver(self.webhook)
+
+
+class NoSupportSettings(BaseSettings):
+    type: Literal["none"]
+
+    def blurb(self) -> str:
+        return "We sadly cannot offer additional support for this app right now."
+
+    @cached_property
+    def driver(self) -> None:
+        return None
+
+
+SupportSettings = Union[DiscordSettings, NoSupportSettings]
+
+
 class Config(BaseSettings):
     """Stats Chat Bot config."""
 
@@ -278,6 +312,7 @@ class Config(BaseSettings):
     sentry: SentrySettings
     metrics: MetricsSettings = Field(MetricsSettings())
     init: InitSettings = Field(InitSettings())
+    support: SupportSettings = Field(NoSupportSettings(type="none"))
 
     def url(self, path: str | None) -> str:
         """Return a URL relative to the public URL."""
