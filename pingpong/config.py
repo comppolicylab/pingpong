@@ -237,11 +237,12 @@ class PostgresSettings(BaseSettings):
     user: str = Field("postgres")
     password: str
     database: str = Field("pingpong")
+    maintenance_db: str | None = Field(None)
 
     @cached_property
     def driver(self) -> PostgresDriver:
-        url = f"{self.user}:{self.password}@{self.host}" f":{self.port}/{self.database}"
-        return PostgresDriver(url)
+        url = f"{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+        return PostgresDriver(url, maintenance_db=self.maintenance_db)
 
 
 class SqliteSettings(BaseSettings):
