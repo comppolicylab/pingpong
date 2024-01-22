@@ -8,3 +8,6 @@ vite.config.ts.timestamp-*
 .env
 .env.*
 !env.example
+
+# Sentry Config File
+.sentryclirc
