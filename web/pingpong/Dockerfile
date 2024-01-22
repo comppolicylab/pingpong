@@ -14,6 +14,7 @@ ARG port=3000
 ARG origin=https://localhost
 
 COPY . .
+ENV VITE_SENTRY_DSN=$sentry_dsn
 ENV API_PROTO=$api_proto
 ENV API_HOST=$api_host
 ENV NODE_ENV=$node_env

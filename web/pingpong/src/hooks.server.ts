@@ -2,7 +2,7 @@ import {sequence} from '@sveltejs/kit/hooks';
 import * as Sentry from '@sentry/sveltekit';
 import {API_HOST, API_PROTO} from '$env/static/private';
 
-const SENTRY_DSN = process.env.SENTRY_DSN;
+const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN;
 if (SENTRY_DSN) {
   Sentry.init({
     dsn: SENTRY_DSN,
