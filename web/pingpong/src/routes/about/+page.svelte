@@ -34,7 +34,7 @@
     <P>
       We collect usage information to monitor abuse, maintain our infrastructure, and improve the app. Our technical team and app admins have access to the information described below.
     </P>
-    <P>All data we collect may be stored for up to 12 months.</P>
+    <P>All data we collect may be stored indefinitely.</P>
     <P class="m-4 p-2 bg-amber-100 rounded" color="text-gray-600">
       Please note we do not share any of this information with third parties.
     </P>
@@ -61,7 +61,7 @@
       <li class="my-2">We are monitoring the app for signs of abuse and will take action if we see it.</li>
       <li class="my-2">"Abuse" includes prompt injection, or any activity that could compromise the performance or integrity of our app, or anything else inconsistent with the app's intended use.</li>
       <li class="my-2">You must adhere to <a href="https://policy.security.harvard.edu/policies" rel="noopener noreferrer" target="_blank">Harvard's Information Security Policy</a> while using this app.</li>
-      <li class="my-2">This is an experimental, beta version of the app. We are actively developing this project, and while we are doing our best to ensure uptime and reliability, we make not guarantees at this time!</li>
+      <li class="my-2">This is an experimental, beta version of the app. We are actively developing this project, and while we are doing our best to ensure uptime and reliability, we make no guarantees at this time!</li>
       <li class="my-2">This is <strong>not</strong> a confidential or secure app. Do not use it to process sensitive information.</li>
     </ol>
   </div>

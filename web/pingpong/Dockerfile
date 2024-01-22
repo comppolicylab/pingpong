@@ -22,7 +22,7 @@ ENV PORT=$port
 ENV ORIGIN=$origin
 ENV PROTOCOL_HEADER=x-forwarded-proto
 ENV HOST_HEADER=x-forwarded-host
-ENV BODY_SIZE_LIMIT=512mb
+ENV BODY_SIZE_LIMIT=512000000
 RUN pnpm build
 
 EXPOSE $port
