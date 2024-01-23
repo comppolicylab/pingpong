@@ -41,17 +41,17 @@ export const actions: Actions = {
     const emailList = emails.split(/[\n,]+/).map(e => e.trim()).filter(e => e.length > 0);
 
     if (emailList.length === 0) {
-      throw invalid("emails", "Emails are required");
+      return invalid("emails", "Emails are required");
     }
 
     const role = body.get('role') as string | undefined;
     if (!role) {
-      throw invalid("role", "Role is required");
+      return invalid("role", "Role is required");
     }
 
     const title = body.get('title') as string | undefined;
     if (!title) {
-      throw invalid("title", "Title is required");
+      return invalid("title", "Title is required");
     }
 
     const data: api.CreateClassUsersRequest = {
@@ -121,19 +121,19 @@ export const actions: Actions = {
 
     const name = body.get('name') as string | undefined;
     if (!name) {
-      throw invalid("name", "Name is required");
+      return invalid("name", "Name is required");
     }
 
     const description = (body.get('description') as string | undefined) || '';
 
     const instructions = body.get('instructions') as string | undefined
     if (!instructions) {
-      throw invalid("instructions", "Instructions are required");
+      return invalid("instructions", "Instructions are required");
     }
 
     const model = body.get('model') as string | undefined;
     if (!model) {
-      throw invalid("model", "Model is required");
+      return invalid("model", "Model is required");
     }
 
 
@@ -175,19 +175,19 @@ export const actions: Actions = {
 
     const name = body.get('name') as string | undefined;
     if (!name) {
-      throw invalid("name", "Name is required");
+      return invalid("name", "Name is required");
     }
 
     const description = (body.get('description') as string | undefined) || '';
 
     const instructions = body.get('instructions') as string | undefined
     if (!instructions) {
-      throw invalid("instructions", "Instructions are required");
+      return invalid("instructions", "Instructions are required");
     }
 
     const model = body.get('model') as string | undefined;
     if (!model) {
-      throw invalid("model", "Model is required");
+      return invalid("model", "Model is required");
     }
 
     const data: api.UpdateAssistantRequest = {
@@ -205,7 +205,7 @@ export const actions: Actions = {
     const classId = parseInt(event.params.classId, 10);
     const assistantId = parseInt((body.get("assistantId") as string) || '0', 10);
     if (!assistantId) {
-      throw invalid("assistantId", "Assistant ID is required");
+      return invalid("assistantId", "Assistant ID is required");
     }
 
     const response = await api.updateAssistant(event.fetch, classId, assistantId, data);
@@ -229,9 +229,10 @@ export const actions: Actions = {
   uploadFile: async (event) => {
     const body = await event.request.formData();
     const file = body.get('file') as File | undefined;
-    if (!file) {
-      throw invalid("file", "File is required");
+    if (!file?.name || !file?.size) {
+      return invalid("file", "File is required");
     }
+
     const classId = parseInt(event.params.classId, 10);
     return await api.uploadFile(event.fetch, classId, file);
   },

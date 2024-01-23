@@ -45,7 +45,7 @@
 
 <Modal bind:open={isCreatingClass} dismissable={false}>
   <CreateClass institutions={institutions} on:close={close} />
-  {#if form?.$status >= 300}
-    <P class="text-red-600">Error: {form?.message || `unknown (${form.$status})`}</P>
+  {#if form && !form.success}
+    <P class="text-red-600">Error: {form?.detail || `unknown (${form.$status})`}</P>
   {/if}
 </Modal>

@@ -36,23 +36,28 @@ export const forwardRequest = async <T extends ((f: Fetcher, r: Record<string, a
     } catch (e) {
       if (!e) {
         return fail(500, {
+          $status: 500,
           success: false,
-          error: "Unknown error",
+          detail: "Unknown error",
         });
       } else if (e.hasOwnProperty("$status")) {
         return fail((e as any).$status, {
+          $status: (e as any).$status,
           success: false,
-          error: (e as any).detail || "Unknown error",
+          field: (e as any).field || undefined,
+          detail: (e as any).detail || "Unknown error",
         });
       } else if (e instanceof Error) {
         return fail(500, {
+          $status: 500,
           success: false,
-          error: e.message,
+          detail: e.message,
         });
       } else {
         return fail(500, {
+          $status: 500,
           success: false,
-          error: JSON.stringify(e),
+          detail: JSON.stringify(e),
         });
       }
     }

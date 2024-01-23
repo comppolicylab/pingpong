@@ -44,7 +44,6 @@
 </script>
 
 <form class="grid grid-cols-2 gap-2" {action} method="POST" use:enhance={submit}>
-  <fieldset disabled={loading}>
   <div>
     <Label for="name">Name</Label>
       <Input label="name" id="name" name="name" value={assistant?.name} />
@@ -102,5 +101,4 @@
         <Button disabled={loading} href="/manageAssistants" color="red" class="ml-4" on:click={reset} on:touchstart={reset}>Cancel</Button>
       {/if}
   </div>
-  </fieldset>
 </form>
