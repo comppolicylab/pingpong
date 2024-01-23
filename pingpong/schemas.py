@@ -127,6 +127,10 @@ class CreateThread(BaseModel):
     assistant_id: int
 
 
+class NewThreadMessage(BaseModel):
+    message: str
+
+
 class Threads(BaseModel):
     threads: list[Thread]
 

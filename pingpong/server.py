@@ -618,14 +618,16 @@ async def create_thread(class_id: str, request: Request, openai_client: OpenAICl
 async def send_message(
     class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
 ):
-    data = await request.json()
+    req = await request.json()
+    data = schemas.NewThreadMessage(**req)
+
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
     asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
 
     await openai_client.beta.threads.messages.create(
         thread.thread_id,
         role="user",
-        content=data["message"],
+        content=data.message,
         metadata={"user_id": request.state.session.user.id},
     )
 
