@@ -217,7 +217,7 @@ export const actions: Actions = {
    */
   updateApiKey: async (event) => {
     const body = await event.request.formData();
-    const apiKey = (body.get('apiKey') as string || undefined) || '';
+    const apiKey = (body.get('apiKey') as string | undefined) || '';
     const classId = parseInt(event.params.classId, 10);
 
     return await api.updateApiKey(event.fetch, classId, apiKey);
