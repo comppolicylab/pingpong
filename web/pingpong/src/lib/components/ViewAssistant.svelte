@@ -43,7 +43,15 @@
   <Label>Description</Label>
   <span>{assistant.description || "(None provided)"}</span>
   <Label>Instructions</Label>
-  <span>{assistant.instructions}</span>
+    {#if assistant.hide_prompt}
+      <span>(Hidden)</span>
+    {:else if !assistant.instructions}
+      <span>(None provided)</span>
+    {:else}
+      <span>{assistant.instructions}</span>
+    {/if}
+  <Label>Instructions visibility</Label>
+  <span>{assistant.hide_prompt ? "Hidden" : "Visible"}</span>
   <Label>Model</Label>
   <span>{assistant.model}</span>
   <Label>Formatting</Label>

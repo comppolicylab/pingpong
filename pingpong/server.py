@@ -677,7 +677,7 @@ async def list_assistants(class_id: str, request: Request):
             and not has_elevated_permissions
             and asst.creator_id != request.state.session.user.id
         ):
-            asst.prompt = ""
+            asst.instructions = ""
 
     return {
         "assistants": assts,
