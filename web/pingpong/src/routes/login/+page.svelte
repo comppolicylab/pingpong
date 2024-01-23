@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type {SubmitFunction} from "@sveltejs/kit";
   import {enhance} from "$app/forms";
   import Logo from '$lib/components/Logo.svelte';
   import {P, A, InputAddon, Input, Helper, GradientButton, Button, Heading, ButtonGroup} from 'flowbite-svelte';
@@ -6,9 +7,16 @@
 
   export let form;
 
+  $: console.log(form);
+
   let loggingIn = false;
 
-  const login = () => {
+  const login: SubmitFunction = (e) => {
+    if (!e.formData.get('email') || loggingIn) {
+      e.cancel();
+      return;
+    }
+
     loggingIn = true;
     return async ({update}) => {
       loggingIn = false;
@@ -33,14 +41,14 @@
               <EnvelopeSolid />
               </InputAddon>
               <Input value={form?.email ?? ''} readonly={loggingIn || null} type="email" placeholder="you@school.edu" name="email" id="email"></Input>
-                <GradientButton type="submit" color="cyanToBlue" disabled={loggingIn}>Login</GradientButton>
+              <GradientButton type="submit" color="cyanToBlue" disabled={loggingIn}>Login</GradientButton>
             </ButtonGroup>
           {#if form?.error}
-            <div class="text-red-500 p-2">
-              <P>
+            <div class="p-2">
+              <P class="text-red-500">
                 We could not sign you in.
               </P>
-              <P>Please make sure you are using the correct email address and try again.
+              <P class="text-red-500">Please make sure you are using the correct email address and try again.
               </P>
             </div>
           {:else}
