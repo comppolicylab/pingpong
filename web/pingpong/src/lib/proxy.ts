@@ -1,10 +1,6 @@
-/**
- * Options
- */
-export interface ForwardRequestEvent {
-  fetch: any;
-  request: any;
-}
+import {fail} from "@sveltejs/kit";
+import type {RequestEvent} from "@sveltejs/kit";
+import type {Fetcher, BaseData, BaseResponse} from "./api";
 
 export interface ForwardRequestOptions {
   checkboxes?: string[];
@@ -12,9 +8,7 @@ export interface ForwardRequestOptions {
 
 type FormBody = [string, any][];
 
-export type ForwardRequestThunk = <T extends Record<string, any>>(fetch: any, reqData: T) => Promise<any>;
-
-export const forwardRequest = async (thunk: ForwardRequestThunk, { fetch, request}: ForwardRequestEvent, opts?: ForwardRequestOptions) => {
+export const forwardRequest = async <T extends ((f: Fetcher, r: Record<string, any>) => Promise<BaseData & BaseResponse>)>(thunk: T, { fetch, request}: RequestEvent, opts?: ForwardRequestOptions) => {
     const formData = await request.formData();
     const body = Array.from(formData.entries()) as FormBody;
 
@@ -36,5 +30,30 @@ export const forwardRequest = async (thunk: ForwardRequestThunk, { fetch, reques
       }
     }
 
-    return await thunk(fetch, reqData)
+    try {
+      const result = await thunk(fetch, reqData)
+      return result;
+    } catch (e) {
+      if (!e) {
+        return fail(500, {
+          success: false,
+          error: "Unknown error",
+        });
+      } else if (e.hasOwnProperty("$status")) {
+        return fail((e as any).$status, {
+          success: false,
+          error: (e as any).detail || "Unknown error",
+        });
+      } else if (e instanceof Error) {
+        return fail(500, {
+          success: false,
+          error: e.message,
+        });
+      } else {
+        return fail(500, {
+          success: false,
+          error: JSON.stringify(e),
+        });
+      }
+    }
 }

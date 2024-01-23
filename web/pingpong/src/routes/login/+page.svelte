@@ -7,8 +7,6 @@
 
   export let form;
 
-  $: console.log(form);
-
   let loggingIn = false;
 
   const login: SubmitFunction = (e) => {

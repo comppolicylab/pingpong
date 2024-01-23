@@ -1,9 +1,12 @@
-import type {Actions} from "@sveltejs/kit";
+import type {Actions} from "./$types";
 import { fail } from "@sveltejs/kit";
 import * as api from "$lib/api";
 
 export const actions: Actions = {
 
+  /**
+   * Send a login link to the user's email.
+   */
   loginWithMagicLink: async (event) => {
     const body = await event.request.formData();
     const email = body.get("email") as string | undefined;

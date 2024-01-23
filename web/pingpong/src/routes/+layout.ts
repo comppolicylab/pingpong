@@ -2,6 +2,7 @@ import {goto} from "$app/navigation";
 import {redirect} from "@sveltejs/kit";
 import {browser} from "$app/environment";
 import * as api from "$lib/api";
+import type {LayoutLoad} from "./$types";
 
 const LOGIN = "/login";
 const HOME = "/";
@@ -9,7 +10,7 @@ const HOME = "/";
 /**
  * Load the current user and redirect if they are not logged in.
  */
-export async function load({fetch, url, params}: { fetch: api.Fetcher, url: URL, params: { threadId?: string, classId?: string } }) {
+export const load: LayoutLoad = async ({fetch, url, params}) => {
   // Fetch the current user
   const me = await api.me(fetch);
   const authed = me.status === "valid";

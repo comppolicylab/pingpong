@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type {SubmitFunction} from "@sveltejs/kit";
   import * as api from "$lib/api";
   import {goto} from "$app/navigation";
   import {page} from "$app/stores";
@@ -9,6 +10,8 @@
   export let assistant = null;
   export let canPublish = true;
   export let models = [];
+
+  let loading = true;
 
   const action = assistant ? "?/updateAssistant" : "?/createAssistant";
 
@@ -21,14 +24,27 @@
   $: models = (models || []).map((model) => ({ value: model.id, name: model.id }));
   $: fileOptions = (files || []).map((file) => ({ value: file.file_id, name: file.name }));
 
+  // Submit form
+  const submit: SubmitFunction = (e) => {
+    loading = true;
+    return async ({update}) => {
+      loading = false;
+      return update();
+    };
+  }
+
   // Revert edits
   const reset = (e) => {
     e.preventDefault();
+    if (loading) {
+      return;
+    }
     goto($page.url.pathname);
   };
 </script>
 
-<form class="grid grid-cols-2 gap-2" {action} method="POST" use:enhance>
+<form class="grid grid-cols-2 gap-2" {action} method="POST" use:enhance={submit}>
+  <fieldset disabled={loading}>
   <div>
     <Label for="name">Name</Label>
       <Input label="name" id="name" name="name" value={assistant?.name} />
@@ -83,7 +99,8 @@
   <div class="border-t pt-4 mt-4 flex items-center col-span-2 ">
     <GradientButton color="cyanToBlue" type="submit">Save</GradientButton>
       {#if assistant}
-        <Button href="/manageAssistants" color="red" class="ml-4" on:click={reset} on:touchstart={reset}>Cancel</Button>
+        <Button disabled={loading} href="/manageAssistants" color="red" class="ml-4" on:click={reset} on:touchstart={reset}>Cancel</Button>
       {/if}
   </div>
+  </fieldset>
 </form>
