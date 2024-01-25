@@ -1,4 +1,14 @@
 services:
+
+  web:
+    labels:
+      - "traefik.http.routers.pingpong_web.rule=Host(`pingpong.localhost`)"
+
+  srv:
+    labels:
+      - "traefik.http.routers.pingpong_api.rule=Host(`pingpong.localhost`) && PathPrefix(`/api`)"
+
+
   db:
     platform: linux/amd64
     image: postgres:15.5

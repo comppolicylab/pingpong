@@ -169,6 +169,8 @@ config.*.json
 cert/
 !cert/README.md
 !cert/dev.*
+!cert/DevRootCA.*
+!cert/domains.ext
 *.db
 cache/
 chroma/

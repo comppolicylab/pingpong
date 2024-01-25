@@ -1,15 +1,25 @@
 services:
+
   web:
+    labels:
+      - "traefik.http.routers.pingpong_web.rule=Host(`pingpong.hks.harvard.edu`)"
     build:
       args:
         sentry_dsn: https://54d1c8a998bf4cb271881a47e10f8070@o702726.ingest.sentry.io/4506613819506688
         node_env: production
         origin: https://pingpong.hks.harvard.edu
 
+  srv:
+    labels:
+      - "traefik.http.routers.pingpong_api.rule=Host(`pingpong.hks.harvard.edu`) && PathPrefix(`/api`)"
+
+
 secrets:
   app_config:
     file: /opt/pingpong/config.prod.toml
-  nginxcrt:
+  webcrt:
     file: /opt/pingpong/cert/aitutor.hks.harvard.edu.cer
-  nginxkey:
+  webkey:
     file: /opt/pingpong/cert/aitutor.hks.harvard.edu.key
+  traefikcrtcfg:
+    file: /opt/pingpong/traefik-crt.yml
