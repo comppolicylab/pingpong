@@ -636,7 +636,6 @@ class Class(Base):
     async def update(
         cls, session: AsyncSession, id_: int, data: schemas.UpdateClass
     ) -> "Class":
-        print("UPDATING CLASS", id_, data)
         stmt = (
             update(Class)
             .where(Class.id == int(id_))
