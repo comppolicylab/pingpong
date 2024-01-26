@@ -141,4 +141,16 @@ export const actions = {
     return await api.uploadFile(event.fetch, event.params.classId, file);
   },
 
+  /**
+   * Delete a file.
+   */
+  deleteFile: async (event) => {
+    const body = await event.request.formData();
+    const resp = await api.deleteFile(event.fetch, event.params.classId, body.get("fileId"));
+    if (resp.$status >= 400) {
+      return fail(resp.$status, resp);
+    }
+    return resp;
+  },
+
 };

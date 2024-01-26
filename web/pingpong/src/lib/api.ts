@@ -309,6 +309,14 @@ export const uploadFile = async (f: Fetcher, classId: number, file: File) => {
 }
 
 /**
+ * Delete a file.
+ */
+export const deleteFile = async (f: Fetcher, classId: number, fileId: string) => {
+  const url = `class/${classId}/file/${fileId}`;
+  return await DELETE(f, url);
+}
+
+/**
  * Fetch users in a class.
  */
 export const getClassUsers = async (f: Fetcher, classId: number) => {

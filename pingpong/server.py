@@ -18,6 +18,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse, RedirectResponse
 from jwt.exceptions import PyJWTError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql import func
 
 import pingpong.metrics as metrics
@@ -672,6 +673,28 @@ async def create_file(
     except Exception as e:
         await openai_client.files.delete(new_f.id)
         raise e
+
+
+@v1.delete(
+    "/class/{class_id}/file/{file_id}",
+    # TODO: file-level permissions
+    dependencies=[Depends(IsSuper() | CanWrite(models.Class, "class_id"))],
+    response_model=schemas.GenericStatus,
+)
+async def delete_file(
+    class_id: str, file_id: str, request: Request, openai_client: OpenAIClient
+):
+    file = await models.File.get_by_id(request.state.db, int(file_id))
+    remote_file_id = file.file_id
+    try:
+        await models.File.delete(request.state.db, int(file_id))
+    except IntegrityError:
+        raise HTTPException(
+            status_code=403,
+            detail="File is in use. Remove it from all assistants before deleting!",
+        )
+    await openai_client.files.delete(remote_file_id)
+    return {"status": "ok"}
 
 
 @v1.get(

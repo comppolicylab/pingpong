@@ -340,6 +340,16 @@ class File(Base):
         return file
 
     @classmethod
+    async def get_by_id(cls, session: AsyncSession, id_: int) -> "File":
+        stmt = select(File).where(File.id == int(id_))
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def delete(cls, session: AsyncSession, id_: int) -> None:
+        stmt = delete(File).where(File.id == int(id_))
+        await session.execute(stmt)
+
+    @classmethod
     async def for_class(cls, session: AsyncSession, class_id: int) -> list["File"]:
         stmt = select(File).where(File.class_id == int(class_id))
         result = await session.execute(stmt)
