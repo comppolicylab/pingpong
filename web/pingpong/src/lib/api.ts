@@ -198,6 +198,14 @@ export const getApiKey = async (f: Fetcher, classId: number) => {
 }
 
 /**
+ * Get models available with the api key for the class.
+ */
+export const getModels = async (f: Fetcher, classId: number) => {
+  const url = `class/${classId}/models`;
+  return await GET(f, url);
+}
+
+/**
  * Fetch a class by ID.
  */
 export const getClass = async (f: Fetcher, classId: number) => {
@@ -453,14 +461,6 @@ export const loginWithMagicLink = async (f: Fetcher, email: string) => {
   const url = `login/magic`;
   return await POST(f, url, {email});
 }
-
-/**
- * List of available language models.
- */
-export const languageModels = [
-    // "gpt-4-vision-preview",
-    "gpt-4-1106-preview",
-];
 
 /**
  * List of available roles. These map to the API.

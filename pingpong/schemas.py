@@ -271,6 +271,16 @@ class ApiKey(BaseModel):
     api_key: str | None
 
 
+class AssistantModel(BaseModel):
+    id: str
+    created: datetime
+    owner: str
+
+
+class AssistantModels(BaseModel):
+    models: list[AssistantModel]
+
+
 class Classes(BaseModel):
     classes: list[Class]
 
