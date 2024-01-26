@@ -2,26 +2,43 @@ version: "3.9"
 
 services:
 
-  nginx:
+  traefik:
     platform: linux/amd64
-    image: nginx:1.25.3
+    image: traefik:2.10.7
+    container_name: pingpong-traefik
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.file.directory=/etc/traefik/dynamic"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      - "--entrypoints.web.http.redirections.entryPoint.permanent=true"
+      - "--entrypoints.websecure.address=:443"
+      - "--ping"
+      - "--accesslog=true"
     networks: [back, front]
     expose: [80, 443]
     ports: ["80:80", "443:443"]
-    depends_on:
-      - web
-      - srv
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     secrets:
-    - source: nginxcrt
+    - source: webcrt
       target: /etc/ssl/srv.crt
       mode: 0400
-    - source: nginxkey
+    - source: webkey
       target: /etc/ssl/srv.key
       mode: 0400
+    - source: traefikcrtcfg
+      target: /etc/traefik/dynamic/traefik-crt.yml
+      mode: 0400
     volumes:
-      - type: bind
-        source: ./nginx.conf
-        target: /etc/nginx/nginx.conf
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
       - logs:/logs
 
   web:
@@ -34,8 +51,23 @@ services:
         port: 3000
     restart: always
     networks: [back]
-    expose: [3000]
-    ports: ["127.0.0.1:3000:3000"]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.cors.headers.accesscontrolallowmethods=*"
+      - "traefik.http.middlewares.cors.headers.addvaryheader=true"
+      - "traefik.http.middlewares.cors.headers.accesscontrolallowheaders=*"
+      - "traefik.http.middlewares.cors.headers.accesscontrolmaxage=600"
+      - "traefik.http.middlewares.cors.headers.accesscontrolallowcredentials=true"
+      - "traefik.http.routers.pingpong_web.entrypoints=websecure"
+      - "traefik.http.routers.pingpong_web.tls=true"
+      - "traefik.http.routers.pingpong_web.middlewares=cors"
+      - "traefik.http.services.web-pingpong.loadbalancer.server.port=3000"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   srv:
     platform: linux/amd64
@@ -45,13 +77,27 @@ services:
       dockerfile: Dockerfile
     restart: always
     networks: [back]
-    # Expose metrics port for scraping
-    expose: [8000]
-    ports: ["127.0.0.1:8000:8000"]
     secrets:
       - source: app_config
         target: /code/config.toml
         mode: 0400
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.cors.headers.accesscontrolallowmethods=*"
+      - "traefik.http.middlewares.cors.headers.addvaryheader=true"
+      - "traefik.http.middlewares.cors.headers.accesscontrolallowheaders=*"
+      - "traefik.http.middlewares.cors.headers.accesscontrolmaxage=600"
+      - "traefik.http.middlewares.cors.headers.accesscontrolallowcredentials=true"
+      - "traefik.http.routers.pingpong_api.entrypoints=websecure"
+      - "traefik.http.routers.pingpong_api.tls=true"
+      - "traefik.http.routers.pingpong_api.middlewares=cors"
+      - "traefik.http.services.srv-pingpong.loadbalancer.server.port=8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 networks:
   front:
@@ -68,7 +114,9 @@ volumes:
 secrets:
   app_config:
     file: ./config.dev.toml
-  nginxcrt:
+  webcrt:
      file: ./cert/dev.crt
-  nginxkey:
+  webkey:
     file: ./cert/dev.key
+  traefikcrtcfg:
+    file: ./traefik-crt.yml

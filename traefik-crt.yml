@@ -1,0 +1,6 @@
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/ssl/srv.crt
+        keyFile: /etc/ssl/srv.key

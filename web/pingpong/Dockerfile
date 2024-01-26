@@ -26,6 +26,4 @@ ENV HOST_HEADER=x-forwarded-host
 ENV BODY_SIZE_LIMIT=512000000
 RUN pnpm build
 
-EXPOSE $port
-
 CMD ["node", "-r", "dotenv/config", "build"]

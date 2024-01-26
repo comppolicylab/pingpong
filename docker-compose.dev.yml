@@ -1,4 +1,25 @@
 services:
+
+  traefik:
+    # Make the dashboard available as well for debugging.
+    # In prod it will be accessible only within the container!
+    ports: ["80:80", "443:443", "8080:8080"]
+
+  web:
+    build:
+      args:
+        origin: https://pingpong.local
+        node_env: development
+    labels:
+      - "traefik.http.middlewares.cors.headers.accesscontrolalloworiginlist=https://pingpong.local"
+      - "traefik.http.routers.pingpong_web.rule=Host(`pingpong.local`)"
+
+  srv:
+    labels:
+      - "traefik.http.middlewares.cors.headers.accesscontrolalloworiginlist=https://pingpong.local"
+      - "traefik.http.routers.pingpong_api.rule=Host(`pingpong.local`) && PathPrefix(`/api`)"
+
+
   db:
     platform: linux/amd64
     image: postgres:15.5

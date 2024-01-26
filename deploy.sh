@@ -13,7 +13,7 @@ scp docker.env pingpong:~/
 scp docker-compose.yml pingpong:~/
 scp docker-compose.prod.yml pingpong:~/
 scp config.prod.toml pingpong:~/
-scp nginx.conf pingpong:~/
+scp traefik-crt.yml pingpong:~/
 scp cert/aitutor.hks.harvard.edu.cer pingpong:~/
 scp cert/aitutor.hks.harvard.edu.key pingpong:~/
 ssh -T pingpong << EOF
@@ -30,7 +30,7 @@ ssh -T pingpong << EOF
   sudo cp docker-compose.yml /opt/pingpong/
   sudo cp docker-compose.prod.yml /opt/pingpong/
   sudo cp config.prod.toml /opt/pingpong/
-  sudo cp nginx.conf /opt/pingpong/
+  sudo cp traefik-crt.yml /opt/pingpong/
   sudo cp aitutor.hks.harvard.edu.cer /opt/pingpong/cert/
   sudo cp aitutor.hks.harvard.edu.key /opt/pingpong/cert/
 
@@ -39,7 +39,13 @@ ssh -T pingpong << EOF
   cd /opt/pingpong
   sudo systemctl start docker
   sudo docker login --username $PINGPONG_DOCKER_USER --password $PINGPONG_DOCKER_PW aitutor.azurecr.io
-  sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml down
   sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
-  sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml up --no-build -d
 EOF
+
+echo
+echo "Done staging the deployment!"
+echo
+echo "NOTE: the deployment is NOT live yet! You need to run the following command to start the deployment:"
+echo "./rollout.sh [srv|web]"
+echo
+echo "(With additional commands, as needed, such as database migrations.)"
