@@ -1,6 +1,6 @@
 import * as api from '$lib/api';
 import {forwardRequest} from '$lib/proxy';
-import {redirect} from "@sveltejs/kit";
+import {fail, redirect} from "@sveltejs/kit";
 
 export const actions = {
 
@@ -84,7 +84,12 @@ export const actions = {
       hide_prompt: body.get('hide_prompt') === "on",
     };
 
-    return await api.createAssistant(event.fetch, event.params.classId, data);
+    const resp = await api.createAssistant(event.fetch, event.params.classId, data);
+    if (resp.$status >= 400) {
+      return fail(resp.$status, resp);
+    }
+
+    return resp;
   },
 
   /**

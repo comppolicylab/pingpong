@@ -8,16 +8,17 @@
   export let files;
   export let assistant = null;
   export let canPublish = true;
+  export let models = [];
 
   const action = assistant ? "?/updateAssistant" : "?/createAssistant";
 
   let selectedFiles = (assistant?.files || []).map((file) => file.file_id);
-  const models = api.languageModels.map((model) => ({ value: model, name: model }));
   const tools = [
     { value: "code_interpreter", name: "Code Interpreter" },
   ];
   const defaultTools = [{type: "code_interpreter"}];
   const selectedTools = (assistant?.tools ? JSON.parse(assistant.tools) : defaultTools).map(t => t.type);
+  $: models = (models || []).map((model) => ({ value: model.id, name: model.id }));
   $: fileOptions = (files || []).map((file) => ({ value: file.file_id, name: file.name }));
 
   // Revert edits

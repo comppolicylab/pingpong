@@ -400,6 +400,30 @@ async def get_class_api_key(class_id: str, request: Request):
 
 
 @v1.get(
+    "/class/{class_id}/models",
+    dependencies=[Depends(IsSuper() | CanRead(models.Class, "class_id"))],
+    response_model=schemas.AssistantModels,
+)
+async def list_class_models(
+    class_id: str, request: Request, openai_client: OpenAIClient
+):
+    """List available models for the class assistants."""
+    all_models = await openai_client.models.list()
+    # Only GPT-* models are currently available for assistants.
+    # TODO - there might be other filters we need.
+    filtered = [
+        {
+            "id": m.id,
+            "created": datetime.fromtimestamp(m.created),
+            "owner": m.owned_by,
+        }
+        for m in all_models.data
+        if m.id.startswith("gpt-")
+    ]
+    return {"models": filtered}
+
+
+@v1.get(
     "/class/{class_id}/thread/{thread_id}",
     dependencies=[
         Depends(
@@ -723,13 +747,16 @@ async def create_assistant(
 
     creator_id = request.state.session.user.id
 
-    new_asst = await openai_client.beta.assistants.create(
-        instructions=format_instructions(req.instructions, use_latex=req.use_latex),
-        model=req.model,
-        tools=req.tools,
-        metadata={"class_id": class_id_int, "creator_id": creator_id},
-        file_ids=req.file_ids,
-    )
+    try:
+        new_asst = await openai_client.beta.assistants.create(
+            instructions=format_instructions(req.instructions, use_latex=req.use_latex),
+            model=req.model,
+            tools=req.tools,
+            metadata={"class_id": class_id_int, "creator_id": creator_id},
+            file_ids=req.file_ids,
+        )
+    except openai.BadRequestError as e:
+        raise HTTPException(400, e.message or "OpenAI rejected this request")
 
     try:
         return await models.Assistant.create(

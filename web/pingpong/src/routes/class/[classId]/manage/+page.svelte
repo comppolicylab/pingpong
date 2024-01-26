@@ -11,8 +11,26 @@
   import ViewAssistant from "$lib/components/ViewAssistant.svelte";
   import Info from "$lib/components/Info.svelte";
   import {PenOutline} from "flowbite-svelte-icons";
+  import {toast} from "@zerodevx/svelte-toast";
 
   export let data;
+  export let form;
+
+  $: {
+    // Show an error if the form failed
+    // TODO -- more universal way of showing validation errors
+    if (form?.$status >= 400) {
+      toast.push(form?.detail || "An unknown error occurred", {
+        duration: 5000,
+        theme: {
+          // Error color
+          '--toastBackground': '#F87171',
+          '--toastBarBackground': '#EF4444',
+          '--toastColor': '#fff',
+        },
+      })
+    }
+  }
 
   let ttModal = false;
   let studentModal = false;
@@ -22,6 +40,7 @@
   $: editingAssistant = parseInt($page.url.searchParams.get('edit-assistant') || '0', 10);
   $: creators = data?.assistantCreators || {};
   $: assistants = data?.assistants || [];
+  $: models = data?.models || [];
   $: files = data?.files || [];
   $: students = (data?.classUsers || []).filter(u => u.title.toLowerCase() === 'student');
   $: tt = (data?.classUsers || []).filter(u => u.title.toLowerCase() !== 'student');
@@ -219,7 +238,7 @@
         {#each assistants as assistant}
           {#if assistant.id == editingAssistant}
           <Card class="w-full max-w-full">
-            <ManageAssistant {files} {assistant} canPublish={canPublishAssistant} />
+            <ManageAssistant {files} {assistant} {models} canPublish={canPublishAssistant} />
           </Card>
           {:else}
           <Card class="w-full max-w-full space-y-2" href={assistant.creator_id === data.me.user.id && canCreateAssistant ?`${$page.url.pathname}?edit-assistant=${assistant.id}` : null}>
@@ -230,7 +249,7 @@
         {#if !editingAssistant && canCreateAssistant}
         <Card class="w-full max-w-full">
           <Heading tag="h4" class="pb-3">Add new AI assistant</Heading>
-          <ManageAssistant {files} canPublish={canPublishAssistant} />
+          <ManageAssistant {files} {models} canPublish={canPublishAssistant} />
         </Card>
         {/if}
       {/if}
