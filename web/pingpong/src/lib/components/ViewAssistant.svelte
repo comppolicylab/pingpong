@@ -44,11 +44,7 @@
   <span>{assistant.description || "(None provided)"}</span>
   <Label>Instructions</Label>
     {#if !assistant.instructions}
-      {#if assistant.hide_prompt}
-      <span>(Hidden)</span>
-      {:else}
-      <span>(None provided)</span>
-      {/if}
+      <span>(None available)</span>
     {:else}
       <span>{assistant.instructions}</span>
     {/if}
