@@ -11,8 +11,6 @@ export async function load({ fetch, params }) {
   const {creators: assistantCreators, assistants} = await api.getAssistants(fetch, params.classId);
   const {files} = await api.getClassFiles(fetch, params.classId);
 
-  console.log("Assistants", assistants, classData);
-
   return {
     hasAssistants: !!assistants && assistants.length > 0,
     hasBilling: !!classData?.api_key,
