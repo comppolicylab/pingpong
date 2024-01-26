@@ -311,7 +311,7 @@ export const uploadFile = async (f: Fetcher, classId: number, file: File) => {
 /**
  * Delete a file.
  */
-export const deleteFile = async (f: Fetcher, classId: number, fileId: string) => {
+export const deleteFile = async (f: Fetcher, classId: number, fileId: number) => {
   const url = `class/${classId}/file/${fileId}`;
   return await DELETE(f, url);
 }
