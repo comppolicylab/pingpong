@@ -39,7 +39,13 @@ ssh -T pingpong << EOF
   cd /opt/pingpong
   sudo systemctl start docker
   sudo docker login --username $PINGPONG_DOCKER_USER --password $PINGPONG_DOCKER_PW aitutor.azurecr.io
-  sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml down
   sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
-  sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml up --no-build -d
 EOF
+
+echo
+echo "Done staging the deployment!"
+echo
+echo "NOTE: the deployment is NOT live yet! You need to run the following command to start the deployment:"
+echo "./rollout.sh [srv|web]"
+echo
+echo "(With additional commands, as needed, such as database migrations.)"

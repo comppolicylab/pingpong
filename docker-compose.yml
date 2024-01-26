@@ -51,8 +51,6 @@ services:
         port: 3000
     restart: always
     networks: [back]
-    expose: [3000]
-    ports: ["127.0.0.1:3000:3000"]
     labels:
       - "traefik.enable=true"
       - "traefik.http.middlewares.cors.headers.accesscontrolallowmethods=*"
@@ -63,6 +61,7 @@ services:
       - "traefik.http.routers.pingpong_web.entrypoints=websecure"
       - "traefik.http.routers.pingpong_web.tls=true"
       - "traefik.http.routers.pingpong_web.middlewares=cors"
+      - "traefik.http.services.web-pingpong.loadbalancer.server.port=3000"
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
       interval: 5s
@@ -78,8 +77,6 @@ services:
       dockerfile: Dockerfile
     restart: always
     networks: [back]
-    expose: [8000]
-    ports: ["127.0.0.1:8000:8000"]
     secrets:
       - source: app_config
         target: /code/config.toml
@@ -94,6 +91,7 @@ services:
       - "traefik.http.routers.pingpong_api.entrypoints=websecure"
       - "traefik.http.routers.pingpong_api.tls=true"
       - "traefik.http.routers.pingpong_api.middlewares=cors"
+      - "traefik.http.services.srv-pingpong.loadbalancer.server.port=8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 5s

@@ -936,3 +936,8 @@ app.mount("/api/v1", v1)
 async def health():
     """Health check."""
     return {"status": "ok"}
+
+
+@app.get("/api/rollout")
+async def rollout():
+    return {"status": "woo"}
