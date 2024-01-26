@@ -777,17 +777,12 @@ async def update_assistant(
             request.state.db, req.file_ids
         )
     if req.use_latex is not None:
-        openai_update["instructions"] = format_instructions(
-            asst.instructions, use_latex=req.use_latex
-        )
         asst.use_latex = req.use_latex
     if req.hide_prompt is not None:
         asst.hide_prompt = req.hide_prompt
     if req.instructions is not None:
-        use_latex = req.use_latex if req.use_latex is not None else asst.use_latex
-        openai_update["instructions"] = format_instructions(
-            req.instructions, use_latex=use_latex
-        )
+        if not req.instructions:
+            raise HTTPException(400, "Instructions cannot be empty.")
         asst.instructions = req.instructions
     if req.model is not None:
         openai_update["model"] = req.model
@@ -805,6 +800,12 @@ async def update_assistant(
     request.state.db.add(asst)
     await request.state.db.flush()
     await request.state.db.refresh(asst)
+
+    if not asst.instructions:
+        raise HTTPException(500, "Instructions cannot be empty.")
+    openai_update["instructions"] = format_instructions(
+        asst.instructions, use_latex=asst.use_latex
+    )
 
     await openai_client.beta.assistants.update(
         assistant_id=asst.assistant_id, **openai_update
