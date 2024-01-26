@@ -1,4 +1,5 @@
-![PingPong](assets/owl@256px.png) PingPong
+![PingPong](assets/owl@256px.png)
+PingPong
 ===
 
 A web app that helps students out with class assignments and logistics.
@@ -17,7 +18,11 @@ Bring up all docker services:
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
-This will make the site available on `https://pingpong.localhost`.
+This will serve the site on `https://pingpong.local`.
+You should add the following line to your `/etc/hosts` file to resolve it:
+```
+127.0.0.1   pingpong.local
+```
 
 
 ### SSL
@@ -29,7 +34,7 @@ To do so, in your browser's security settings, import the `cert/DevRootCA.crt` f
 Then you can use `https://pingpong.localhost` without issue.
 
 
-In order to
-
 The (obviously insecure) dev CA and keys are checked into the repo in plaintext.
 See [cert/README.md](the cert directory) for more information.
+
+To use a real certificate in production, just override the `webcrt` and `webkey` secrets with the appropriate files.

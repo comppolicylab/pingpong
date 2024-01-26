@@ -930,3 +930,9 @@ async def handle_exception(request: Request, exc: Exception):
 
 
 app.mount("/api/v1", v1)
+
+
+@app.get("/health")
+async def health():
+    """Health check."""
+    return {"status": "ok"}

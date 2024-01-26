@@ -31,11 +31,11 @@ The CA uses the `cert/domains.ext` file to describe covered domains.
 
 ## Dev certificate
 
-The development certificate for `pingpong.localhost` was generated with these commands:
+The development certificate for `pingpong.local` was generated with these commands:
 
 ```
 # Generate a signing request for the fake CA
-openssl req -new -nodes -newkey rsa:2048 -keyout cert/dev.key -out cert/dev.csr -subj "/C=US/ST=MA/L=Cambridge/O=Harvard Kennedy School/CN=pingpong.localhost"
+openssl req -new -nodes -newkey rsa:2048 -keyout cert/dev.key -out cert/dev.csr -subj "/C=US/ST=MA/L=Cambridge/O=Harvard Kennedy School/CN=pingpong.local"
 
 # Generate the certificate from the CSR
 openssl x509 -req -sha256 -days 3650 -in cert/dev.csr -CA cert/DevRootCA.pem -CAkey cert/DevRootCA.key -CAcreateserial -extfile cert/domains.ext -out cert/dev.crt

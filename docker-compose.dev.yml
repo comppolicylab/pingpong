@@ -1,12 +1,18 @@
 services:
 
   web:
+    build:
+      args:
+        origin: https://pingpong.local
+        node_env: development
     labels:
-      - "traefik.http.routers.pingpong_web.rule=Host(`pingpong.localhost`)"
+      - "traefik.http.middlewares.cors.headers.accesscontrolalloworiginlist=https://pingpong.local"
+      - "traefik.http.routers.pingpong_web.rule=Host(`pingpong.local`)"
 
   srv:
     labels:
-      - "traefik.http.routers.pingpong_api.rule=Host(`pingpong.localhost`) && PathPrefix(`/api`)"
+      - "traefik.http.middlewares.cors.headers.accesscontrolalloworiginlist=https://pingpong.local"
+      - "traefik.http.routers.pingpong_api.rule=Host(`pingpong.local`) && PathPrefix(`/api`)"
 
 
   db:

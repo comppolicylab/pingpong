@@ -16,9 +16,17 @@ services:
       - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
       - "--entrypoints.web.http.redirections.entryPoint.permanent=true"
       - "--entrypoints.websecure.address=:443"
+      - "--ping"
+      - "--accesslog=true"
     networks: [back, front]
     expose: [80, 443]
     ports: ["80:80", "443:443", "8080:8080"]
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     secrets:
     - source: webcrt
       target: /etc/ssl/srv.crt
@@ -47,8 +55,20 @@ services:
     ports: ["127.0.0.1:3000:3000"]
     labels:
       - "traefik.enable=true"
+      - "traefik.http.middlewares.cors.headers.accesscontrolallowmethods=*"
+      - "traefik.http.middlewares.cors.headers.addvaryheader=true"
+      - "traefik.http.middlewares.cors.headers.accesscontrolallowheaders=*"
+      - "traefik.http.middlewares.cors.headers.accesscontrolmaxage=600"
+      - "traefik.http.middlewares.cors.headers.accesscontrolallowcredentials=true"
       - "traefik.http.routers.pingpong_web.entrypoints=websecure"
       - "traefik.http.routers.pingpong_web.tls=true"
+      - "traefik.http.routers.pingpong_web.middlewares=cors"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   srv:
     platform: linux/amd64
@@ -66,8 +86,20 @@ services:
         mode: 0400
     labels:
       - "traefik.enable=true"
+      - "traefik.http.middlewares.cors.headers.accesscontrolallowmethods=*"
+      - "traefik.http.middlewares.cors.headers.addvaryheader=true"
+      - "traefik.http.middlewares.cors.headers.accesscontrolallowheaders=*"
+      - "traefik.http.middlewares.cors.headers.accesscontrolmaxage=600"
+      - "traefik.http.middlewares.cors.headers.accesscontrolallowcredentials=true"
       - "traefik.http.routers.pingpong_api.entrypoints=websecure"
       - "traefik.http.routers.pingpong_api.tls=true"
+      - "traefik.http.routers.pingpong_api.middlewares=cors"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 networks:
   front:
