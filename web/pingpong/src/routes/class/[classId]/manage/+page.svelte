@@ -1,4 +1,5 @@
 <script>
+  import { onMount} from 'svelte';
   import {writable} from 'svelte/store';
   import {page} from '$app/stores';
   import {beforeNavigate} from '$app/navigation';
@@ -16,7 +17,7 @@
   export let data;
   export let form;
 
-  $: {
+  onMount(() => {
     // Show an error if the form failed
     // TODO -- more universal way of showing validation errors
     if (form?.$status >= 400) {
@@ -29,8 +30,18 @@
           '--toastColor': '#fff',
         },
       })
+    } else if (form?.$status >= 200 && form?.$status < 300) {
+      toast.push("Success!", {
+        duration: 5000,
+        theme: {
+          // Success color
+          '--toastBackground': '#A7F3D0',
+          '--toastBarBackground': '#22C55E',
+          '--toastColor': '#000',
+        },
+      })
     }
-  }
+  });
 
   let ttModal = false;
   let studentModal = false;
@@ -205,10 +216,16 @@
       <List tag="ul" list="none" class="w-full divide-y divide-gray-200 dark:divide-gray-700">
         {#each files as file}
           <Li class="py-3 sm:py-4">
-            <div class="flex flex-row">
+            <div class="flex flex-row justify-between gap-4 items-center">
               <div class="flex-1 basis-3/4 flex-grow font-bold">{file.name}</div>
               <div class="flex-1 basis-1/4 max-w-sm flex-shrink text-gray-400 text-right">
                 {file.content_type}
+              </div>
+              <div>
+                <form action="?/deleteFile" method="POST">
+                  <input type="hidden" name="fileId" value="{file.id}" />
+                  <GradientButton color="pinkToOrange" size="xs" type="submit">Delete</GradientButton>
+                </form>
               </div>
             </div>
           </Li>
