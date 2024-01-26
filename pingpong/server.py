@@ -409,6 +409,13 @@ async def list_class_models(
 ):
     """List available models for the class assistants."""
     all_models = await openai_client.models.list()
+    # Models known to work with file_retrieval, which we always have on.
+    known_models = {
+        "gpt-4-0125-preview",
+        "gpt-4-1106-preview",
+        "gpt-4-turbo-preview",
+        "gpt-3.5-turbo-1106",
+    }
     # Only GPT-* models are currently available for assistants.
     # TODO - there might be other filters we need.
     filtered = [
@@ -418,7 +425,7 @@ async def list_class_models(
             "owner": m.owned_by,
         }
         for m in all_models.data
-        if m.id.startswith("gpt-")
+        if m.id in known_models
     ]
     return {"models": filtered}
 
@@ -839,9 +846,12 @@ async def update_assistant(
         asst.instructions, use_latex=asst.use_latex
     )
 
-    await openai_client.beta.assistants.update(
-        assistant_id=asst.assistant_id, **openai_update
-    )
+    try:
+        await openai_client.beta.assistants.update(
+            assistant_id=asst.assistant_id, **openai_update
+        )
+    except openai.BadRequestError as e:
+        raise HTTPException(400, e.message or "OpenAI rejected this request")
 
     return asst
 
