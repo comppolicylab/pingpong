@@ -671,16 +671,21 @@ async def list_assistants(class_id: str, request: Request):
     has_elevated_permissions = await IsSuper().test_with_cache(
         request
     ) or await CanWrite(models.Class, "class_id").test_with_cache(request)
+
+    ret_assistants = list[schemas.Assistant]()
+
     for asst in assts:
+        cur_asst = schemas.Assistant.from_orm(asst)
         if (
             asst.hide_prompt
             and not has_elevated_permissions
             and asst.creator_id != request.state.session.user.id
         ):
-            asst.instructions = ""
+            cur_asst.instructions = ""
+        ret_assistants.append(cur_asst)
 
     return {
-        "assistants": assts,
+        "assistants": ret_assistants,
         "creators": {c.id: schemas.Profile.from_email(c.email) for c in creators},
     }
 
