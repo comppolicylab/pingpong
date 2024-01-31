@@ -45,7 +45,9 @@
 
   let ttModal = false;
   let studentModal = false;
+  let anyCanCreate = data?.class?.any_can_create_assistant;
   const blurred = writable(true);
+  $: publishOptMakesSense = anyCanCreate;
   $: apiKey = data.apiKey || '';
   $: apiKeyBlur = apiKey.substring(0,6) + '**************' + apiKey.substring(Math.max(6, apiKey.length - 6));
   $: editingAssistant = parseInt($page.url.searchParams.get('edit-assistant') || '0', 10);
@@ -100,15 +102,21 @@
 
       <div>
       </div>
-        <Checkbox id="any_can_create_assistant" name="any_can_create_assistant" checked="{data.class.any_can_create_assistant}">Allow anyone to create assistants</Checkbox>
+      <Checkbox id="any_can_create_assistant" name="any_can_create_assistant" bind:checked="{anyCanCreate}">Allow anyone to create assistants</Checkbox>
         <Helper>When this is enabled, anyone in the class can create assistants. Otherwise, only teachers and admins can create assistants.</Helper>
 
       <div>
       </div>
-        <Checkbox id="any_can_publish_assistant" name="any_can_publish_assistant" checked="{data.class.any_can_publish_assistant}">Allow anyone to publish assistants</Checkbox>
-
+      {#if publishOptMakesSense}
+        <Checkbox id="any_can_publish_assistant" name="any_can_publish_assistant" checked="{data.class.any_can_publish_assistant}">
+          Allow anyone to publish assistants
+        </Checkbox>
+      {:else}
+        <Checkbox id="any_can_publish_assistant" name="any_can_publish_assistant" checked="{false}" disabled>
+          Allow anyone to publish assistants
+        </Checkbox>
+      {/if}
           <Helper>When this is enabled, anyone in the class can share their own assistants with the rest of the class. Otherwise, only teachers and admins can share assistants.</Helper>
-
 
       <div></div>
       <div></div>

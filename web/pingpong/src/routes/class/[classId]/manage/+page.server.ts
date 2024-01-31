@@ -99,6 +99,15 @@ export const actions: Actions = {
   updateClass: async (event) => {
     return await forwardRequest((f, d) => {
       const classId = parseInt(event.params.classId, 10);
+
+      if (!d.name) {
+        throw invalid("name", "Name is required");
+      }
+
+      if (!d.term) {
+        throw invalid("term", "Term is required");
+      }
+
       return api.updateClass(f, classId, d);
     }, event, {checkboxes: ['any_can_create_assistant', 'any_can_publish_assistant']});
   },
