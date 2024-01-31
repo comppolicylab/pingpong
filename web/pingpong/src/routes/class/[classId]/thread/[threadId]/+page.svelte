@@ -23,6 +23,7 @@
   $: participants = $thread?.participants || {};
   $: loading = !$thread && data?.thread?.loading;
   $: priv = !!$thread?.thread?.private;
+  $: canSubmit = !!participants.user && !!participants.user[data?.me?.user?.id];
 
   $: classId = $thread?.thread?.class_id;
 
@@ -150,7 +151,7 @@
   {#if !loading}
   <div class="w-full bottom-8 bg-gradient-to-t from-white to-transparent">
     <form class="w-11/12 mx-auto" action="?/newMessage" method="POST" use:enhance={handleSubmit}>
-      <ChatInput loading={$submitting || $waiting} />
+      <ChatInput disabled={!canSubmit} loading={$submitting || $waiting} />
     </form>
   </div>
   {/if}

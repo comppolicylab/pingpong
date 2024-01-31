@@ -537,7 +537,11 @@ async def get_last_run(
 async def list_threads(class_id: str, request: Request):
     threads = list[models.Thread]()
 
-    if await IsSuper().test_with_cache(request):
+    perm_coros = [
+        IsSuper().test_with_cache(request),
+        CanManage(models.Class, "class_id").test_with_cache(request),
+    ]
+    if any(await asyncio.gather(*perm_coros)):
         threads = await models.Thread.all(request.state.db, int(class_id))
     else:
         threads = await models.Thread.visible(
