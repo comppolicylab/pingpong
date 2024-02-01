@@ -6,7 +6,7 @@ export type Method = "GET" | "POST" | "PUT" | "DELETE";
 /**
  * General fetcher type.
  */
-export type Fetcher = (input: RequestInfo, init?: RequestInit) => Promise<Response>;
+export type Fetcher = typeof fetch;
 
 /**
  * Base data type for all API responses.
@@ -394,6 +394,13 @@ export const createThread = async (f: Fetcher, classId: number, data: CreateThre
 export const getThread = async (f: Fetcher, classId: number, threadId: number) => {
   const url = `class/${classId}/thread/${threadId}`;
   return await GET(f, url);
+}
+
+/**
+ * Data for posting a new message to a thread.
+ */
+export type NewThreadMessageRequest = {
+  message: string;
 }
 
 /**

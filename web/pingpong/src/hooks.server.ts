@@ -1,7 +1,9 @@
+import type {Handle, HandleFetch} from "@sveltejs/kit";
 import {sequence} from '@sveltejs/kit/hooks';
 import * as Sentry from '@sentry/sveltekit';
 import {API_HOST, API_PROTO} from '$env/static/private';
 
+// Instantiate Sentry if a DSN is provided.
 const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN;
 if (SENTRY_DSN) {
   Sentry.init({
@@ -10,7 +12,10 @@ if (SENTRY_DSN) {
   });
 }
 
-export async function handleFetch({ request, fetch, event }) {
+/**
+ * Override default fetcher to redirect API requests to the API server.
+ */
+export const handleFetch: HandleFetch = async ({ request, fetch, event }) => {
   // The server needs to redirect API requests to the API server, keeping
   // cookies intact along the way.
   const url = new URL(request.url);
@@ -18,10 +23,15 @@ export async function handleFetch({ request, fetch, event }) {
     url.protocol = API_PROTO;
     url.host = API_HOST;
     request = new Request(url.toString(), request);
-    request.headers.set('cookie', event.request.headers.get('cookie'));
+    const cookie = event.request.headers.get('cookie');
+    if (cookie) {
+      request.headers.set('cookie', cookie);
+    }
   }
 
   return fetch(request);
 }
+
 export const handleError = Sentry.handleErrorWithSentry();
+
 export const handle = sequence(Sentry.sentryHandle());

@@ -220,9 +220,8 @@ async def list_institutions(request: Request):
     dependencies=[Depends(IsSuper())],
     response_model=schemas.Institution,
 )
-async def create_institution(request: Request):
-    data = await request.json()
-    return await models.Institution.create(request.state.db, data)
+async def create_institution(create: schemas.CreateInstitution, request: Request):
+    return await models.Institution.create(request.state.db, create)
 
 
 @v1.get(
@@ -251,10 +250,10 @@ async def get_institution_classes(institution_id: str, request: Request):
     dependencies=[Depends(IsSuper() | CanWrite(models.Institution, "institution_id"))],
     response_model=schemas.Class,
 )
-async def create_class(institution_id: str, request: Request):
-    data = await request.json()
-    data["institution_id"] = int(institution_id)
-    new_class = await models.Class.create(request.state.db, schemas.CreateClass(**data))
+async def create_class(
+    institution_id: str, create: schemas.CreateClass, request: Request
+):
+    new_class = await models.Class.create(request.state.db, int(institution_id), create)
 
     # Create an entry for the creator as the owner
     ucr = models.UserClassRole(
@@ -310,9 +309,12 @@ async def list_class_users(class_id: str, request: Request):
     dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
     response_model=schemas.UserClassRoles,
 )
-async def add_users_to_class(class_id: str, request: Request, tasks: BackgroundTasks):
-    data = await request.json()
-    new_ucr = schemas.CreateUserClassRoles(**data)
+async def add_users_to_class(
+    class_id: str,
+    new_ucr: schemas.CreateUserClassRoles,
+    request: Request,
+    tasks: BackgroundTasks,
+):
     cid = int(class_id)
     class_ = await models.Class.get_by_id(request.state.db, cid)
     result: list[schemas.UserClassRole] = []
@@ -383,9 +385,9 @@ async def update_user_class_role(
     dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
     response_model=schemas.ApiKey,
 )
-async def update_class_api_key(class_id: str, request: Request):
-    data = await request.json()
-    update = schemas.UpdateApiKey(**data)
+async def update_class_api_key(
+    class_id: str, update: schemas.UpdateApiKey, request: Request
+):
     await models.Class.update_api_key(request.state.db, int(class_id), update.api_key)
     return {"api_key": update.api_key}
 
@@ -556,10 +558,12 @@ async def list_threads(class_id: str, request: Request):
     dependencies=[Depends(IsSuper() | CanRead(models.Class, "class_id"))],
     response_model=schemas.ThreadRun,
 )
-async def create_thread(class_id: str, request: Request, openai_client: OpenAIClient):
-    data = await request.json()
-    req = schemas.CreateThread(**data)
-
+async def create_thread(
+    class_id: str,
+    req: schemas.CreateThread,
+    request: Request,
+    openai_client: OpenAIClient,
+):
     parties = list[models.User]()
     if req.parties:
         parties = await models.User.get_all_by_id(request.state.db, req.parties)
@@ -616,16 +620,19 @@ async def create_thread(class_id: str, request: Request, openai_client: OpenAICl
     response_model=schemas.ThreadRun,
 )
 async def send_message(
-    class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
+    class_id: str,
+    thread_id: str,
+    data: schemas.NewThreadMessage,
+    request: Request,
+    openai_client: OpenAIClient,
 ):
-    data = await request.json()
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
     asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
 
     await openai_client.beta.threads.messages.create(
         thread.thread_id,
         role="user",
-        content=data["message"],
+        content=data.message,
         metadata={"user_id": request.state.session.user.id},
     )
 
@@ -759,11 +766,11 @@ async def list_assistants(class_id: str, request: Request):
     response_model=schemas.Assistant,
 )
 async def create_assistant(
-    class_id: str, request: Request, openai_client: OpenAIClient
+    class_id: str,
+    req: schemas.CreateAssistant,
+    request: Request,
+    openai_client: OpenAIClient,
 ):
-    data = await request.json()
-    req = schemas.CreateAssistant(**data)
-
     class_id_int = int(class_id)
     cls = await models.Class.get_by_id(request.state.db, class_id_int)
 
@@ -816,11 +823,12 @@ async def create_assistant(
     response_model=schemas.Assistant,
 )
 async def update_assistant(
-    class_id: str, assistant_id: str, request: Request, openai_client: OpenAIClient
+    class_id: str,
+    assistant_id: str,
+    req: schemas.UpdateAssistant,
+    request: Request,
+    openai_client: OpenAIClient,
 ):
-    data = await request.json()
-    req = schemas.UpdateAssistant(**data)
-
     # Get the existing assistant.
     asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
 
@@ -837,7 +845,7 @@ async def update_assistant(
                     detail="You are not allowed to publish assistants for this class.",
                 )
 
-    if not data:
+    if not req.dict():
         return asst
 
     openai_update: dict[str, Any] = {}
@@ -950,14 +958,13 @@ async def get_support(request: Request):
     response_model=schemas.GenericStatus,
 )
 async def post_support(
+    req: schemas.SupportRequest,
     request: Request,
 ):
     """Post a support request."""
     if not config.support.driver:
         raise HTTPException(status_code=403, detail="Support is not available.")
 
-    data = await request.json()
-    req = schemas.SupportRequest(**data)
     try:
         await config.support.driver.post(
             req, env=config.public_url, ts=datetime.utcnow()

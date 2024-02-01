@@ -4,7 +4,7 @@ from enum import Enum, StrEnum, auto
 from openai.types.beta.assistant_create_params import Tool
 from openai.types.beta.threads import Run as OpenAIRun
 from openai.types.beta.threads import ThreadMessage as OpenAIMessage
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel, Field, SecretStr
 
 from .gravatar import get_email_hash, get_gravatar_image
 
@@ -70,11 +70,11 @@ class Assistant(BaseModel):
 
 
 class CreateAssistant(BaseModel):
-    name: str
+    name: str = Field(..., min_length=3, max_length=100)
     file_ids: list[str]
-    instructions: str
+    instructions: str = Field(..., min_length=3)
     description: str
-    model: str
+    model: str = Field(..., min_length=3)
     tools: list[Tool]
     published: bool = False
     use_latex: bool = False
@@ -82,11 +82,11 @@ class CreateAssistant(BaseModel):
 
 
 class UpdateAssistant(BaseModel):
-    name: str | None = None
+    name: str | None = Field(None, min_length=3, max_length=100)
     file_ids: list[str] | None = None
-    instructions: str | None = None
+    instructions: str | None = Field(None, min_length=3)
     description: str | None = None
-    model: str | None = None
+    model: str | None = Field(None, min_length=3)
     tools: list[Tool] | None = None
     published: bool | None = None
     use_latex: bool | None = None
@@ -123,8 +123,12 @@ class Thread(BaseModel):
 
 class CreateThread(BaseModel):
     parties: list[int] = []
-    message: str
+    message: str = Field(..., min_length=1)
     assistant_id: int
+
+
+class NewThreadMessage(BaseModel):
+    message: str = Field(..., min_length=1)
 
 
 class Threads(BaseModel):
@@ -141,9 +145,9 @@ class Role(Enum):
 
 
 class CreateUserClassRole(BaseModel):
-    email: str
+    email: str = Field(..., min_length=3, max_length=100)
     role: Role
-    title: str
+    title: str = Field(..., min_length=3, max_length=24)
 
 
 class CreateUserClassRoles(BaseModel):
@@ -167,13 +171,13 @@ class UserClassRoles(BaseModel):
 
 class UpdateUserClassRole(BaseModel):
     role: Role
-    title: str
+    title: str = Field(..., min_length=3, max_length=24)
 
 
 class CreateInvite(BaseModel):
     user_id: int
-    email: str
-    class_name: str
+    email: str = Field(..., min_length=3, max_length=100)
+    class_name: str = Field(..., min_length=3, max_length=100)
 
 
 class UserState(Enum):
@@ -213,6 +217,10 @@ class ClassUsers(BaseModel):
         from_attributes = True
 
 
+class CreateInstitution(BaseModel):
+    name: str = Field(..., min_length=3, max_length=100)
+
+
 class Institution(BaseModel):
     id: int
     name: str
@@ -249,16 +257,15 @@ class Class(BaseModel):
 
 
 class CreateClass(BaseModel):
-    name: str
-    term: str
-    institution_id: int
+    name: str = Field(..., min_length=3, max_length=100)
+    term: str = Field(..., min_length=1, max_length=100)
     any_can_create_assistant: bool = False
     any_can_publish_assistant: bool = False
 
 
 class UpdateClass(BaseModel):
-    name: str | None = None
-    term: str | None = None
+    name: str | None = Field(None, min_length=3, max_length=100)
+    term: str | None = Field(None, min_length=1, max_length=100)
     any_can_create_assistant: bool | None = None
     any_can_publish_assistant: bool | None = None
 
@@ -352,4 +359,4 @@ class SupportRequest(BaseModel):
     email: str | None = None
     name: str | None = None
     category: str | None = None
-    message: str
+    message: str = Field(..., min_length=1, max_length=1000)

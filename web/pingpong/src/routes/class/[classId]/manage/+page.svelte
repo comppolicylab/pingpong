@@ -21,7 +21,11 @@
     // Show an error if the form failed
     // TODO -- more universal way of showing validation errors
     if (form?.$status >= 400) {
-      toast.push(form?.detail || "An unknown error occurred", {
+      let msg = form?.detail || "An unknown error occurred";
+      if (form?.field) {
+        msg += ` (${form.field})`;
+      }
+      toast.push(msg, {
         duration: 5000,
         theme: {
           // Error color
@@ -45,12 +49,18 @@
 
   let ttModal = false;
   let studentModal = false;
+  let anyCanCreate = data?.class?.any_can_create_assistant;
+  let assistants = [];
   const blurred = writable(true);
+  $: publishOptMakesSense = anyCanCreate;
   $: apiKey = data.apiKey || '';
   $: apiKeyBlur = apiKey.substring(0,6) + '**************' + apiKey.substring(Math.max(6, apiKey.length - 6));
   $: editingAssistant = parseInt($page.url.searchParams.get('edit-assistant') || '0', 10);
   $: creators = data?.assistantCreators || {};
-  $: assistants = data?.assistants || [];
+  $: {
+    assistants = data?.assistants || [];
+    assistants.sort((a, b) => a.id - b.id);
+  }
   $: models = data?.models || [];
   $: files = data?.files || [];
   $: students = (data?.classUsers || []).filter(u => u.title.toLowerCase() === 'student');
@@ -100,15 +110,21 @@
 
       <div>
       </div>
-        <Checkbox id="any_can_create_assistant" name="any_can_create_assistant" checked="{data.class.any_can_create_assistant}">Allow anyone to create assistants</Checkbox>
+      <Checkbox id="any_can_create_assistant" name="any_can_create_assistant" bind:checked="{anyCanCreate}">Allow anyone to create assistants</Checkbox>
         <Helper>When this is enabled, anyone in the class can create assistants. Otherwise, only teachers and admins can create assistants.</Helper>
 
       <div>
       </div>
-        <Checkbox id="any_can_publish_assistant" name="any_can_publish_assistant" checked="{data.class.any_can_publish_assistant}">Allow anyone to publish assistants</Checkbox>
-
+      {#if publishOptMakesSense}
+        <Checkbox id="any_can_publish_assistant" name="any_can_publish_assistant" checked="{data.class.any_can_publish_assistant}">
+          Allow anyone to publish assistants
+        </Checkbox>
+      {:else}
+        <Checkbox id="any_can_publish_assistant" name="any_can_publish_assistant" checked="{false}" disabled>
+          Allow anyone to publish assistants
+        </Checkbox>
+      {/if}
           <Helper>When this is enabled, anyone in the class can share their own assistants with the rest of the class. Otherwise, only teachers and admins can share assistants.</Helper>
-
 
       <div></div>
       <div></div>
@@ -128,7 +144,7 @@
       <div class="col-span-2">
         <Label for="apiKey">API Key</Label>
           <div class="w-full relative" class:cursor-pointer={$blurred}>
-          <Input autocomplete="off" class={$blurred ? 'cursor-pointer' : undefined} label="API Key" id="apiKey" name="apiKey" value="{apiKey}" on:blur={() => $blurred = true} on:focus={() => $blurred = false} />
+            <Input autocomplete="off" class={$blurred ? 'cursor-pointer' : undefined} label="API Key" id="apiKey" name="apiKey" value="{apiKey}" on:blur={() => $blurred = true} on:focus={() => $blurred = false} />
           {#if $blurred}
             <div class="cursor-pointer flex items-center gap-2 w-full h-full absolute top-0 left-0 bg-white font-mono pointer-events-none">
               {#if hasApiKey}
@@ -140,12 +156,16 @@
             </div>
           {/if}
         </div>
+
+        {#if apiKey && !$blurred}
+          <Helper>Note: changing the API key will break all threads and assistants in the class, so it is not currently supported.</Helper>
+        {/if}
       </div>
 
       <div></div>
       <div></div>
       <div>
-        <GradientButton type="submit" color="cyanToBlue">Save</GradientButton>
+        <GradientButton type="submit" disabled={!!apiKey} color="cyanToBlue">Save</GradientButton>
       </div>
     </div>
   </form>
@@ -255,7 +275,9 @@
         {#each assistants as assistant}
           {#if assistant.id == editingAssistant}
           <Card class="w-full max-w-full">
-            <ManageAssistant {files} {assistant} {models} canPublish={canPublishAssistant} />
+            <form class="grid grid-cols-2 gap-2" action="?/updateAssistant" method="POST">
+              <ManageAssistant {files} {assistant} {models} canPublish={canPublishAssistant} />
+            </form>
           </Card>
           {:else}
           <Card class="w-full max-w-full space-y-2" href={assistant.creator_id === data.me.user.id && canCreateAssistant ?`${$page.url.pathname}?edit-assistant=${assistant.id}` : null}>
@@ -266,7 +288,9 @@
         {#if !editingAssistant && canCreateAssistant}
         <Card class="w-full max-w-full">
           <Heading tag="h4" class="pb-3">Add new AI assistant</Heading>
-          <ManageAssistant {files} {models} canPublish={canPublishAssistant} />
+          <form class="grid grid-cols-2 gap-2" action="?/createAssistant" method="POST">
+            <ManageAssistant {files} {models} canPublish={canPublishAssistant} />
+          </form>
         </Card>
         {/if}
       {/if}
