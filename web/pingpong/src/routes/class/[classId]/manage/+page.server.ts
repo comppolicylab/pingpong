@@ -89,7 +89,7 @@ export const actions: Actions = {
       instructions: d.instructions,
       model: d.model,
       tools,
-      file_ids: d.files as string[],
+      file_ids: (d.files || []) as string[],
       published: d.published as boolean,
       use_latex: d.use_latex as boolean,
       hide_prompt: d.hide_prompt as boolean,
@@ -97,7 +97,7 @@ export const actions: Actions = {
 
     const classId = parseInt(event.params.classId, 10);
     return api.createAssistant(f, classId, data);
-  }, {checkboxes: ['published', 'use_latex', 'hide_prompt']}),
+  }, {checkboxes: ['published', 'use_latex', 'hide_prompt'], lists: ['files']}),
 
   /**
    * Update a class assistant.
@@ -117,7 +117,7 @@ export const actions: Actions = {
       instructions: d.instructions,
       model: d.model,
       tools,
-      file_ids: d.files as string[],
+      file_ids: (d.files || []) as string[],
       published: d.published as boolean,
       use_latex: d.use_latex as boolean,
       hide_prompt: d.hide_prompt as boolean,
@@ -130,7 +130,7 @@ export const actions: Actions = {
     }
 
     return api.updateAssistant(event.fetch, classId, assistantId, data);
-  }, {checkboxes: ['published', 'use_latex', 'hide_prompt']}),
+  }, {checkboxes: ['published', 'use_latex', 'hide_prompt'], lists: ['files']}),
 
   /**
    * Update the API key for a class.

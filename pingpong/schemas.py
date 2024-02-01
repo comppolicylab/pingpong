@@ -217,6 +217,10 @@ class ClassUsers(BaseModel):
         from_attributes = True
 
 
+class CreateInstitution(BaseModel):
+    name: str = Field(..., min_length=3, max_length=100)
+
+
 class Institution(BaseModel):
     id: int
     name: str
@@ -255,7 +259,6 @@ class Class(BaseModel):
 class CreateClass(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
     term: str = Field(..., min_length=1, max_length=100)
-    institution_id: int
     any_can_create_assistant: bool = False
     any_can_publish_assistant: bool = False
 

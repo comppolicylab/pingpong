@@ -4,6 +4,7 @@ import type {Fetcher, BaseData, BaseResponse} from "./api";
 
 export interface ForwardRequestOptions {
   checkboxes?: string[];
+  lists?: string[];
 }
 
 type FormBody = [string, any][];
@@ -21,15 +22,16 @@ export const forwardRequest = async <E extends RequestEvent, T extends Thunk<E>>
     const body = Array.from(formData.entries()) as FormBody;
 
     const booleanFields = opts?.checkboxes || [];
+    const lists = opts?.lists || [];
 
     const reqData = body.reduce((agg, cur) => {
       const key = cur[0];
       const val = booleanFields.includes(key) ? cur[1] === "on" : cur[1];
-      if (agg.hasOwnProperty(key)) {
-        if (Array.isArray(agg[key])) {
+      if (lists.includes(key)) {
+        if (agg.hasOwnProperty(key)) {
           (agg[key] as any[]).push(val);
         } else {
-          agg[key] = [agg[key], val];
+          agg[key] = [val];
         }
       } else {
         agg[key] = val;

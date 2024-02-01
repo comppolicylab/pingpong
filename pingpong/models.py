@@ -259,8 +259,10 @@ class Institution(Base):
         return False
 
     @classmethod
-    async def create(cls, session: AsyncSession, data: dict) -> "Institution":
-        institution = Institution(**data)
+    async def create(
+        cls, session: AsyncSession, data: schemas.CreateInstitution
+    ) -> "Institution":
+        institution = Institution(**data.dict())
         session.add(institution)
         await session.flush()
         await session.refresh(institution)
@@ -634,8 +636,10 @@ class Class(Base):
         return all_
 
     @classmethod
-    async def create(cls, session: AsyncSession, data: schemas.CreateClass) -> "Class":
-        class_ = Class(**data.dict())
+    async def create(
+        cls, session: AsyncSession, inst_id: int, data: schemas.CreateClass
+    ) -> "Class":
+        class_ = Class(institution_id=inst_id, **data.dict())
         session.add(class_)
         await session.flush()
         await session.refresh(class_)
