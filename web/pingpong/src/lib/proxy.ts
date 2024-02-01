@@ -58,11 +58,14 @@ export const forwardRequest = async <E extends RequestEvent, T extends Thunk<E>>
           detail: "Unknown error",
         });
       } else if (e.hasOwnProperty("$status")) {
+        const detail = (e as any).detail;
+        const field = Array.isArray(detail) ? detail[0].loc.join(".") : (e as any).field || undefined;
+        const msg = Array.isArray(detail) ? detail[0].msg : detail || "Unknown error";
         return fail((e as any).$status, {
           $status: (e as any).$status,
           success: false,
-          field: (e as any).field || undefined,
-          detail: (e as any).detail || "Unknown error",
+          field,
+          detail: msg,
         });
       } else if (e instanceof Error) {
         return fail(500, {

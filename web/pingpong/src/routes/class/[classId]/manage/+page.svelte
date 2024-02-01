@@ -21,7 +21,11 @@
     // Show an error if the form failed
     // TODO -- more universal way of showing validation errors
     if (form?.$status >= 400) {
-      toast.push(form?.detail || "An unknown error occurred", {
+      let msg = form?.detail || "An unknown error occurred";
+      if (form?.field) {
+        msg += ` (${form.field})`;
+      }
+      toast.push(msg, {
         duration: 5000,
         theme: {
           // Error color

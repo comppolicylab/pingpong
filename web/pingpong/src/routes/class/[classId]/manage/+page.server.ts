@@ -1,5 +1,5 @@
 import * as api from '$lib/api';
-import {handler, forwardRequest} from '$lib/proxy';
+import {handler} from '$lib/proxy';
 import {fail, redirect} from "@sveltejs/kit";
 import {invalid} from "$lib/validate";
 import type {Actions} from "./$types";
@@ -11,23 +11,7 @@ export const actions: Actions = {
    */
   createUser: handler((f, d, event) => {
       const classId = parseInt(event.params.classId, 10);
-
-      const email = d.email;
-      if (!email) {
-        throw invalid("email", "Email is required");
-      }
-
-      const role = d.role;
-      if (!role) {
-        throw invalid("role", "Role is required");
-      }
-
-      const title = d.title;
-      if (!title) {
-        throw invalid("title", "Title is required");
-      }
-
-      return api.createClassUser(f, classId, {email, role, title});
+      return api.createClassUser(f, classId, {email: d.email, role: d.role, title: d.title});
     }),
 
   /**
@@ -75,18 +59,8 @@ export const actions: Actions = {
         throw invalid("user_id", "User ID is required");
       }
 
-      const role = d.role;
-      if (!role) {
-        throw invalid("role", "Role is required");
-      }
-
-      const title = d.title;
-      if (!title) {
-        throw invalid("title", "Title is required");
-      }
-
       const classId = parseInt(event.params.classId, 10);
-      return api.updateClassUser(f, classId, userId, {role, title});
+      return api.updateClassUser(f, classId, userId, {role: d.role, title: d.title});
     }),
 
   /**
@@ -94,15 +68,6 @@ export const actions: Actions = {
    */
   updateClass: handler((f, d, event) => {
       const classId = parseInt(event.params.classId, 10);
-
-      if (!d.name) {
-        throw invalid("name", "Name is required");
-      }
-
-      if (!d.term) {
-        throw invalid("term", "Term is required");
-      }
-
       return api.updateClass(f, classId, d);
     }, {checkboxes: ['any_can_create_assistant', 'any_can_publish_assistant']}),
 
@@ -118,32 +83,13 @@ export const actions: Actions = {
       }
     }
 
-    const file_ids = d.files as string[];
-
-    const name = d.name as string | undefined;
-    if (!name) {
-      throw invalid("name", "Name is required");
-    }
-
-    const description = (d.description as string | undefined) || '';
-
-    const instructions = d.instructions as string | undefined
-    if (!instructions) {
-      throw invalid("instructions", "Instructions are required");
-    }
-
-    const model = d.model as string | undefined;
-    if (!model) {
-      throw invalid("model", "Model is required");
-    }
-
     const data: api.CreateAssistantRequest = {
-      name,
-      description,
-      instructions,
-      model,
+      name: d.name,
+      description: d.description,
+      instructions: d.instructions,
+      model: d.model,
       tools,
-      file_ids,
+      file_ids: d.files as string[],
       published: d.published as boolean,
       use_latex: d.use_latex as boolean,
       hide_prompt: d.hide_prompt as boolean,
@@ -164,32 +110,14 @@ export const actions: Actions = {
         tools.push({type: tool});
       }
     }
-    const file_ids = d.files as string[];
-
-    const name = d.name as string | undefined;
-    if (!name) {
-      throw invalid("name", "Name is required");
-    }
-
-    const description = (d.description as string | undefined) || '';
-
-    const instructions = d.instructions as string | undefined
-    if (!instructions) {
-      throw invalid("instructions", "Instructions are required");
-    }
-
-    const model = d.model as string | undefined;
-    if (!model) {
-      throw invalid("model", "Model is required");
-    }
 
     const data: api.UpdateAssistantRequest = {
-      name,
-      description,
-      instructions,
-      model,
+      name: d.name,
+      description: d.description,
+      instructions: d.instructions,
+      model: d.model,
       tools,
-      file_ids,
+      file_ids: d.files as string[],
       published: d.published as boolean,
       use_latex: d.use_latex as boolean,
       hide_prompt: d.hide_prompt as boolean,
