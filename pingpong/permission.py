@@ -90,6 +90,14 @@ class IsSuper(Expression):
         return request.state.session.user.super_admin
 
 
+class IsUser(Expression):
+    def __init__(self, user_id_field):
+        self.user_id_field = user_id_field
+
+    async def test(self, request: Request) -> bool:
+        return request.state.session.user.id == request.path_params[self.user_id_field]
+
+
 class CanRead(Expression):
     def __init__(self, model, id_field):
         self.model = model

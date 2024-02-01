@@ -35,7 +35,7 @@ from .auth import (
 from .config import config
 from .errors import sentry
 from .invite import send_invite
-from .permission import CanManage, CanRead, CanWrite, IsSuper, LoggedIn
+from .permission import CanManage, CanRead, CanWrite, IsSuper, IsUser, LoggedIn
 
 logger = logging.getLogger(__name__)
 
@@ -657,6 +657,44 @@ async def send_message(
 
 
 @v1.post(
+    "/class/{class_id}/user/{user_id}/file",
+    dependencies=[
+        Depends(IsSuper() | (IsUser("user_id") & CanRead(models.Class, "class_id")))
+    ],
+    response_model=schemas.ThreadRun,
+)
+async def create_user_file(
+    class_id: str,
+    user_id: str,
+    request: Request,
+    upload: UploadFile,
+    openai_client: OpenAIClient,
+):
+    # TODO refactor with other upload fn
+    new_f = await openai_client.files.create(
+        # NOTE(jnu): the client tries to infer the filename, which doesn't
+        # work on this file that exists as bytes in memory. There's an
+        # undocumented way to specify name, content, and content_type which
+        # we use here to force correctness.
+        file=(upload.filename, upload.file, upload.content_type),
+        purpose="assistants",
+    )
+    data = {
+        "file_id": new_f.id,
+        "class_id": int(class_id),
+        "private": True,
+        "name": upload.filename,
+        "content_type": upload.content_type,
+        "uploader_id": request.state.session.user.id,
+    }
+    try:
+        await models.File.create(request.state.db, data)
+    except Exception as e:
+        await openai_client.files.delete(new_f.id)
+        raise e
+
+
+@v1.post(
     "/class/{class_id}/file",
     dependencies=[Depends(IsSuper() | CanWrite(models.Class, "class_id"))],
     response_model=schemas.File,
@@ -676,8 +714,10 @@ async def create_file(
     data = {
         "file_id": new_f.id,
         "class_id": int(class_id),
+        "private": False,
         "name": upload.filename,
         "content_type": upload.content_type,
+        "uploader_id": request.state.session.user.id,
     }
     try:
         return await models.File.create(request.state.db, data)

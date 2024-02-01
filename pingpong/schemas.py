@@ -35,6 +35,8 @@ class File(BaseModel):
     content_type: str
     file_id: str
     class_id: int
+    private: bool | None
+    uploader_id: int | None
     created: datetime
     updated: datetime | None
 

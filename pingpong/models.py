@@ -11,6 +11,7 @@ from sqlalchemy import (
     Table,
     and_,
     delete,
+    not_,
     or_,
     select,
     update,
@@ -325,6 +326,8 @@ class File(Base):
     content_type = Column(String)
     file_id = Column(String)
     class_id = Column(Integer, ForeignKey("classes.id"))
+    uploader_id = Column(Integer, ForeignKey("users.id"), nullable=True, default=None)
+    private = Column(Boolean, default=False)
     class_ = relationship("Class", back_populates="files")
     assistants = relationship(
         "Assistant", secondary=file_assistant_association, back_populates="files"
@@ -353,7 +356,8 @@ class File(Base):
 
     @classmethod
     async def for_class(cls, session: AsyncSession, class_id: int) -> list["File"]:
-        stmt = select(File).where(File.class_id == int(class_id))
+        # Get files for a class that aren't tied to a specific thread.
+        stmt = select(File).where(File.class_id == int(class_id), not_(File.private))
         result = await session.execute(stmt)
         return [row.File for row in result]
 
