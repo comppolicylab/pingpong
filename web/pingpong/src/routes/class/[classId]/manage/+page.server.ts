@@ -1,5 +1,5 @@
 import * as api from '$lib/api';
-import {forwardRequest} from '$lib/proxy';
+import {handler, forwardRequest} from '$lib/proxy';
 import {fail, redirect} from "@sveltejs/kit";
 import {invalid} from "$lib/validate";
 import type {Actions} from "./$types";
@@ -9,9 +9,9 @@ export const actions: Actions = {
   /**
    * Create a user-class association.
    */
-  createUser: async (event) => {
-    return await forwardRequest((f, d) => {
+  createUser: handler((f, d, event) => {
       const classId = parseInt(event.params.classId, 10);
+
       const email = d.email;
       if (!email) {
         throw invalid("email", "Email is required");
@@ -28,49 +28,46 @@ export const actions: Actions = {
       }
 
       return api.createClassUser(f, classId, {email, role, title});
-    }, event);
-  },
+    }),
 
   /**
    * Bulk add users to a class.
    */
-  createUsers: async (event) => {
-    const body = await event.request.formData();
-    const emails = (body.get('emails') as string) || '';
-    // Split emails by newlines or commas.
-    const emailList = emails.split(/[\n,]+/).map(e => e.trim()).filter(e => e.length > 0);
+  createUsers: handler((f, d, event) => {
+      const emails = (d.emails as string) || '';
+      // Split emails by newlines or commas.
+      const emailList = emails.split(/[\n,]+/).map(e => e.trim()).filter(e => e.length > 0);
 
-    if (emailList.length === 0) {
-      return invalid("emails", "Emails are required");
-    }
+      if (emailList.length === 0) {
+        throw invalid("emails", "Emails are required");
+      }
 
-    const role = body.get('role') as string | undefined;
-    if (!role) {
-      return invalid("role", "Role is required");
-    }
+      const role = d.role as string | undefined;
+      if (!role) {
+        throw invalid("role", "Role is required");
+      }
 
-    const title = body.get('title') as string | undefined;
-    if (!title) {
-      return invalid("title", "Title is required");
-    }
+      const title = d.title as string | undefined;
+      if (!title) {
+        throw invalid("title", "Title is required");
+      }
 
-    const data: api.CreateClassUsersRequest = {
-      roles: emailList.map(e => ({
-        email: e,
-        role,
-        title,
-      })),
-    };
+      const data: api.CreateClassUsersRequest = {
+        roles: emailList.map(e => ({
+          email: e,
+          role,
+          title,
+        })),
+      };
 
-    const classId = parseInt(event.params.classId, 10);
-    return await api.createClassUsers(event.fetch, classId, data);
-  },
+      const classId = parseInt(event.params.classId, 10);
+      return api.createClassUsers(f, classId, data);
+    }),
 
   /**
    * Update a user in a class.
    */
-  updateUser: async (event) => {
-    return await forwardRequest((f, d) => {
+  updateUser: handler((f, d, event) => {
       // User ID is in the URL, not the body.
       const userId = parseInt(d.user_id);
 
@@ -90,14 +87,12 @@ export const actions: Actions = {
 
       const classId = parseInt(event.params.classId, 10);
       return api.updateClassUser(f, classId, userId, {role, title});
-    }, event);
-  },
+    }),
 
   /**
    * Update the class metadata
    */
-  updateClass: async (event) => {
-    return await forwardRequest((f, d) => {
+  updateClass: handler((f, d, event) => {
       const classId = parseInt(event.params.classId, 10);
 
       if (!d.name) {
@@ -109,16 +104,13 @@ export const actions: Actions = {
       }
 
       return api.updateClass(f, classId, d);
-    }, event, {checkboxes: ['any_can_create_assistant', 'any_can_publish_assistant']});
-  },
+    }, {checkboxes: ['any_can_create_assistant', 'any_can_publish_assistant']}),
 
   /**
    * Create a new class assistant.
    */
-  createAssistant: async (event) => {
-    const body = await event.request.formData();
-
-    const rawTools = (body.get('tools') as string | undefined) || '';
+  createAssistant: handler((f, d, event) => {
+    const rawTools = (d.tools as string | undefined) || '';
     const tools: api.Tool[] = [{"type": "retrieval"}];
     if (rawTools) {
       for (const tool of rawTools.split(",")) {
@@ -126,25 +118,24 @@ export const actions: Actions = {
       }
     }
 
-    const file_ids = body.getAll('files') as string[];
+    const file_ids = d.files as string[];
 
-    const name = body.get('name') as string | undefined;
+    const name = d.name as string | undefined;
     if (!name) {
-      return invalid("name", "Name is required");
+      throw invalid("name", "Name is required");
     }
 
-    const description = (body.get('description') as string | undefined) || '';
+    const description = (d.description as string | undefined) || '';
 
-    const instructions = body.get('instructions') as string | undefined
+    const instructions = d.instructions as string | undefined
     if (!instructions) {
-      return invalid("instructions", "Instructions are required");
+      throw invalid("instructions", "Instructions are required");
     }
 
-    const model = body.get('model') as string | undefined;
+    const model = d.model as string | undefined;
     if (!model) {
-      return invalid("model", "Model is required");
+      throw invalid("model", "Model is required");
     }
-
 
     const data: api.CreateAssistantRequest = {
       name,
@@ -153,50 +144,43 @@ export const actions: Actions = {
       model,
       tools,
       file_ids,
-      published: body.get('published') === "on",
-      use_latex: body.get('use_latex') === "on",
-      hide_prompt: body.get('hide_prompt') === "on",
+      published: d.published as boolean,
+      use_latex: d.use_latex as boolean,
+      hide_prompt: d.hide_prompt as boolean,
     };
 
     const classId = parseInt(event.params.classId, 10);
-    const resp = await api.createAssistant(event.fetch, classId, data);
-    if (resp.$status >= 400) {
-      return fail(resp.$status, resp);
-    }
-
-    return resp;
-  },
+    return api.createAssistant(f, classId, data);
+  }, {checkboxes: ['published', 'use_latex', 'hide_prompt']}),
 
   /**
    * Update a class assistant.
    */
-  updateAssistant: async (event) => {
-    const body = await event.request.formData();
-
+  updateAssistant: handler((f, d, event) => {
     const tools: api.Tool[] = [{"type": "retrieval"}];
-    const rawTools = (body.get('tools') as string | undefined) || '';
+    const rawTools = (d.tools as string | undefined) || '';
     if (rawTools) {
       for (const tool of rawTools.split(",")) {
         tools.push({type: tool});
       }
     }
-    const file_ids = body.getAll('files') as string[];
+    const file_ids = d.files as string[];
 
-    const name = body.get('name') as string | undefined;
+    const name = d.name as string | undefined;
     if (!name) {
-      return invalid("name", "Name is required");
+      throw invalid("name", "Name is required");
     }
 
-    const description = (body.get('description') as string | undefined) || '';
+    const description = (d.description as string | undefined) || '';
 
-    const instructions = body.get('instructions') as string | undefined
+    const instructions = d.instructions as string | undefined
     if (!instructions) {
-      return invalid("instructions", "Instructions are required");
+      throw invalid("instructions", "Instructions are required");
     }
 
-    const model = body.get('model') as string | undefined;
+    const model = d.model as string | undefined;
     if (!model) {
-      return invalid("model", "Model is required");
+      throw invalid("model", "Model is required");
     }
 
     const data: api.UpdateAssistantRequest = {
@@ -206,61 +190,53 @@ export const actions: Actions = {
       model,
       tools,
       file_ids,
-      published: body.get('published') === "on",
-      use_latex: body.get('use_latex') === "on",
-      hide_prompt: body.get('hide_prompt') === "on",
+      published: d.published as boolean,
+      use_latex: d.use_latex as boolean,
+      hide_prompt: d.hide_prompt as boolean,
     };
 
     const classId = parseInt(event.params.classId, 10);
-    const assistantId = parseInt((body.get("assistantId") as string) || '0', 10);
+    const assistantId = parseInt((d.assistantId as string) || '0', 10);
     if (!assistantId) {
-      return invalid("assistantId", "Assistant ID is required");
+      throw invalid("assistantId", "Assistant ID is required");
     }
 
-    const response = await api.updateAssistant(event.fetch, classId, assistantId, data);
-    throw redirect(307, `${event.url.pathname}?save`);
-  },
+    return api.updateAssistant(event.fetch, classId, assistantId, data);
+  }, {checkboxes: ['published', 'use_latex', 'hide_prompt']}),
 
   /**
    * Update the API key for a class.
    */
-  updateApiKey: async (event) => {
-    const body = await event.request.formData();
-    const apiKey = (body.get('apiKey') as string | undefined) || '';
+  updateApiKey: handler((f, d, event) => {
+    const apiKey = (d.apiKey as string | undefined) || '';
     const classId = parseInt(event.params.classId, 10);
 
-    return await api.updateApiKey(event.fetch, classId, apiKey);
-  },
+    return api.updateApiKey(f, classId, apiKey);
+  }),
 
   /**
    * Upload a file.
    */
-  uploadFile: async (event) => {
-    const body = await event.request.formData();
-    const file = body.get('file') as File | undefined;
+  uploadFile: handler((f, d, event) => {
+    const file = d.file as File | undefined;
     if (!file?.name || !file?.size) {
-      return invalid("file", "File is required");
+      throw invalid("file", "File is required");
     }
 
     const classId = parseInt(event.params.classId, 10);
-    return await api.uploadFile(event.fetch, classId, file);
-  },
+    return api.uploadFile(f, classId, file);
+  }),
 
   /**
    * Delete a file.
    */
-  deleteFile: async (event) => {
-    const body = await event.request.formData();
+  deleteFile: handler((f, d, event) => {
     const classId = parseInt(event.params.classId, 10);
-    const fileId = parseInt((body.get("fileId") as string) || '0', 10);
+    const fileId = parseInt((d.fileId as string) || '0', 10);
     if (!fileId) {
       throw invalid("fileId", "File ID is required");
     }
-    const resp = await api.deleteFile(event.fetch, classId, fileId);
-    if (resp.$status >= 400) {
-      return fail(resp.$status, resp);
-    }
-    return resp;
-  },
+    return api.deleteFile(f, classId, fileId);
+  }),
 
 };

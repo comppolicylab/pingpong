@@ -8,17 +8,31 @@ export interface ForwardRequestOptions {
 
 type FormBody = [string, any][];
 
-export const forwardRequest = async <T extends ((f: Fetcher, r: Record<string, any>) => Promise<BaseData & BaseResponse>)>(thunk: T, { fetch, request}: RequestEvent, opts?: ForwardRequestOptions) => {
-    const formData = await request.formData();
+type Thunk<E extends RequestEvent> = (f: Fetcher, r: Record<string, any>, event: E) => Promise<BaseData & BaseResponse>;
+
+export const handler = <E extends RequestEvent, T extends Thunk<E>>(thunk: T, opts?: ForwardRequestOptions) => {
+  return async (event: E) => {
+    return await forwardRequest(thunk, event, opts);
+  };
+};
+
+export const forwardRequest = async <E extends RequestEvent, T extends Thunk<E>>(thunk: T, event: E, opts?: ForwardRequestOptions) => {
+    const formData = await event.request.formData();
     const body = Array.from(formData.entries()) as FormBody;
 
     const booleanFields = opts?.checkboxes || [];
 
     const reqData = body.reduce((agg, cur) => {
-      if (booleanFields.includes(cur[0])) {
-        agg[cur[0]] = cur[1] === "on";
+      const key = cur[0];
+      const val = booleanFields.includes(key) ? cur[1] === "on" : cur[1];
+      if (agg.hasOwnProperty(key)) {
+        if (Array.isArray(agg[key])) {
+          (agg[key] as any[]).push(val);
+        } else {
+          agg[key] = [agg[key], val];
+        }
       } else {
-        agg[cur[0]] = cur[1];
+        agg[key] = val;
       }
       return agg;
     }, {} as Record<string, any>);
@@ -31,7 +45,10 @@ export const forwardRequest = async <T extends ((f: Fetcher, r: Record<string, a
     }
 
     try {
-      const result = await thunk(fetch, reqData)
+      const result = await thunk(event.fetch, reqData, event)
+      if (result.$status >= 400) {
+        throw result;
+      }
       return result;
     } catch (e) {
       if (!e) {
