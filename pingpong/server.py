@@ -18,7 +18,6 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse, RedirectResponse
 from jwt.exceptions import PyJWTError
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql import func
 
 import pingpong.metrics as metrics
@@ -34,6 +33,7 @@ from .auth import (
 )
 from .config import config
 from .errors import sentry
+from .files import handle_create_file, handle_delete_file
 from .invite import send_invite
 from .permission import CanManage, CanRead, CanWrite, IsSuper, IsUser, LoggedIn
 
@@ -659,6 +659,24 @@ async def send_message(
 
 
 @v1.post(
+    "/class/{class_id}/file",
+    dependencies=[Depends(IsSuper() | CanWrite(models.Class, "class_id"))],
+    response_model=schemas.File,
+)
+async def create_file(
+    class_id: str, request: Request, upload: UploadFile, openai_client: OpenAIClient
+):
+    return await handle_create_file(
+        request.state.db,
+        openai_client,
+        upload=upload,
+        class_id=int(class_id),
+        uploader_id=request.state.session.user.id,
+        private=False,
+    )
+
+
+@v1.post(
     "/class/{class_id}/user/{user_id}/file",
     dependencies=[
         Depends(IsSuper() | (IsUser("user_id") & CanRead(models.Class, "class_id")))
@@ -672,61 +690,14 @@ async def create_user_file(
     upload: UploadFile,
     openai_client: OpenAIClient,
 ):
-    # TODO refactor with other upload fn
-    new_f = await openai_client.files.create(
-        # NOTE(jnu): the client tries to infer the filename, which doesn't
-        # work on this file that exists as bytes in memory. There's an
-        # undocumented way to specify name, content, and content_type which
-        # we use here to force correctness.
-        file=(upload.filename, upload.file, upload.content_type),
-        purpose="assistants",
+    return await handle_create_file(
+        request.state.db,
+        openai_client,
+        upload=upload,
+        class_id=int(class_id),
+        uploader_id=request.state.session.user.id,
+        private=True,
     )
-    data = {
-        "file_id": new_f.id,
-        "class_id": int(class_id),
-        "private": True,
-        "name": upload.filename,
-        "content_type": upload.content_type,
-        "uploader_id": request.state.session.user.id,
-    }
-    try:
-        r = await models.File.create(request.state.db, data)
-        return r
-    except Exception as e:
-        await openai_client.files.delete(new_f.id)
-        raise e
-
-
-@v1.post(
-    "/class/{class_id}/file",
-    dependencies=[Depends(IsSuper() | CanWrite(models.Class, "class_id"))],
-    response_model=schemas.File,
-)
-async def create_file(
-    class_id: str, request: Request, upload: UploadFile, openai_client: OpenAIClient
-):
-    new_f = await openai_client.files.create(
-        # NOTE(jnu): the client tries to infer the filename, which doesn't
-        # work on this file that exists as bytes in memory. There's an
-        # undocumented way to specify name, content, and content_type which
-        # we use here to force correctness.
-        # https://github.com/stanford-policylab/pingpong/issues/147
-        file=(upload.filename, upload.file, upload.content_type),
-        purpose="assistants",
-    )
-    data = {
-        "file_id": new_f.id,
-        "class_id": int(class_id),
-        "private": False,
-        "name": upload.filename,
-        "content_type": upload.content_type,
-        "uploader_id": request.state.session.user.id,
-    }
-    try:
-        return await models.File.create(request.state.db, data)
-    except Exception as e:
-        await openai_client.files.delete(new_f.id)
-        raise e
 
 
 @v1.delete(
@@ -738,17 +709,24 @@ async def create_file(
 async def delete_file(
     class_id: str, file_id: str, request: Request, openai_client: OpenAIClient
 ):
-    file = await models.File.get_by_id(request.state.db, int(file_id))
-    remote_file_id = file.file_id
-    try:
-        await models.File.delete(request.state.db, int(file_id))
-    except IntegrityError:
-        raise HTTPException(
-            status_code=403,
-            detail="File is in use. Remove it from all assistants before deleting!",
-        )
-    await openai_client.files.delete(remote_file_id)
-    return {"status": "ok"}
+    return await handle_delete_file(request.state.db, openai_client, int(file_id))
+
+
+@v1.delete(
+    "/class/{class_id}/user/{user_id}/file/{file_id}",
+    dependencies=[
+        Depends(IsSuper() | (IsUser("user_id") & CanRead(models.Class, "class_id")))
+    ],
+    response_model=schemas.GenericStatus,
+)
+async def delete_user_file(
+    class_id: str,
+    user_id: str,
+    file_id: str,
+    request: Request,
+    openai_client: OpenAIClient,
+):
+    return await handle_delete_file(request.state.db, openai_client, int(file_id))
 
 
 @v1.get(
