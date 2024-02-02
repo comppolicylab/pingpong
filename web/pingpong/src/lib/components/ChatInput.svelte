@@ -76,7 +76,6 @@
       e.preventDefault();
       if (!disabled) {
         e.target.form.requestSubmit();
-        resetFilesList(e);
       }
     }
   };
@@ -115,12 +114,6 @@
       }).catch(() => { /* no-op */});
     }
   };
-
-  // Reset the list of files.
-  const resetFilesList = () => {
-    $files = [];
-    fixFileListHeight();
-  };
 </script>
 
 <div
@@ -143,6 +136,8 @@
       name="message"
       class="w-full !outline-none focus:ring-0 resize-none border-none bg-transparent pt-[12px] pb-[8px]"
       placeholder="Ask me anything"
+      class:text-gray-700={disabled}
+      class:animate-pulse={loading}
       disabled={loading || disabled}
       on:keydown={maybeSubmit}
       on:input={e => fixHeight(e.target)}
@@ -159,11 +154,9 @@
       on:change={handleFilesChange}
       />
     <GradientButton
-      on:click={resetFilesList}
-      on:touchend={resetFilesList}
       type="submit"
       color="cyanToBlue"
-      class={`${loading ? "animate-pulse cursor-progress" : ""} p-2 absolute bottom-3 right-2.5`}
+      class={`${loading ? "animate-pulse cursor-progress" : ""} w-8 h-8 p-2 absolute bottom-3 right-2.5`}
       disabled={uploading || loading || disabled}
       >
       <ChevronUpSolid size="xs" />

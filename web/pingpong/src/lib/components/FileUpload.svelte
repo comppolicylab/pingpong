@@ -62,11 +62,50 @@
     $files = [...curFiles, ...newFiles];
     dispatch("change", files);
   };
+
+  // Make sure the input resets when the form submits.
+  const bindToForm = (el: HTMLInputElement) => {
+    const reset = () => {
+      // Clear the file list after the form is reset or submitted.
+      setTimeout(() => {
+        $files = [];
+        dispatch("change", files);
+      }, 0);
+    };
+    const form = el.form;
+    form.addEventListener("reset", reset);
+    form.addEventListener("submit", reset);
+
+    return {
+      destroy() {
+        if (!form) {
+          return;
+        }
+        form.removeEventListener("reset", reset);
+        form.removeEventListener("submit", reset);
+      },
+    };
+  };
 </script>
 
 <label class="{wrapperClass}">
-  <input type="file" multiple accept={ACCEPT_MIME_TYPE} style="display: none;" bind:this={uploadRef} on:change={autoupload} />
-  <Button outline type="button" color="blue" disabled={disabled} class="p-2" on:click={() => uploadRef.click()}>
+  <input
+    type="file"
+    multiple
+    accept={ACCEPT_MIME_TYPE}
+    style="display: none;"
+    bind:this={uploadRef}
+    on:change={autoupload}
+    use:bindToForm
+    />
+  <Button
+    outline
+    type="button"
+    color="blue"
+    disabled={disabled}
+    class="p-2 w-8 h-8"
+    on:click={() => uploadRef.click()}
+    >
     <PaperClipOutline size="sm" />
   </Button>
 </label>
