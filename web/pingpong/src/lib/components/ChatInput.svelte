@@ -2,20 +2,39 @@
   import {writable} from "svelte/store";
   import {ButtonGroup, Textarea, GradientButton} from "flowbite-svelte";
   import {page} from "$app/stores";
-  import {ChevronUpSolid, PaperClipOutline} from 'flowbite-svelte-icons';
-  import type {FileUploadInfo} from "$lib/api";
+  import {ChevronUpSolid} from 'flowbite-svelte-icons';
+  import type {FileRemover, FileUploader, FileUploadInfo} from "$lib/api";
   import FilePlaceholder from "$lib/components/FilePlaceholder.svelte";
+  import FileUpload from "$lib/components/FileUpload.svelte";
 
+  /**
+   * Whether to allow sending.
+   */
   export let disabled = false;
+  /**
+   * Whether we're waiting for an in-flight request.
+   */
   export let loading = false;
+  /**
+   * The maximum height of the container before scrolling.
+   */
   export let maxHeight = 200;
-  export let upload: ((file: File, progress: (p: number) => void) => FileUploadInfo) | null = null;
+  /**
+   * Function to call for uploading files, if uploading is allowed.
+   */
+  export let upload: FileUploader | null = null;
+  /**
+   * Function to call for deleting files.
+   */
+  export let remove: FileRemover | null = null;
 
+  // Text area reference for fixing height.
   let ref;
-  let uploadRef;
+  // Container for the list of files, for calculating height.
   let fileListRef;
 
-  const files = writable<FileUploadInfo[]>([]);
+  // The list of files being uploaded.
+  let files = writable<FileUploadInfo[]>([]);
   $: uploading = $files.some(f => f.state === "pending");
   $: fileIds = $files.filter(f => f.state === "success").map(f => f.response.file_id).join(",");
 
@@ -61,38 +80,6 @@
     }
   };
 
-  // Automatically upload files when they are selected.
-  const autoupload = () => {
-    if (!upload) {
-      return;
-    }
-
-    // Run upload for every newly added file.
-    const newFiles = Array.from(uploadRef.files).map(f => {
-      const fp = upload(f, (progress) => {
-        const idx = $files.findIndex(file => file.file === f);
-        if (idx !== -1) {
-          $files[idx].progress = progress;
-        }
-      });
-
-      // Update the file list when the upload is complete.
-      fp.promise.then((result) => {
-        const idx = $files.findIndex(file => file.file === f);
-        if (idx !== -1) {
-          $files[idx].response = result;
-          $files[idx].state = "success";
-          $files[idx].id = result.id;
-        }
-      });
-
-      return fp;
-    });
-
-    const curFiles = $files;
-    $files = [...curFiles, ...newFiles];
-  };
-
   // Fix the height of the container when the file list changes.
   const fixFileListHeight = () => {
     const update = () => {
@@ -101,13 +88,39 @@
     };
     return {update};
   };
+
+  // Handle updates from the file upload component.
+  const handleFilesChange = (e) => {
+    files = e.detail;
+  };
+
+  // Remove a file from the list / the server.
+  const removeFile = (evt) => {
+    const file = evt.detail;
+    if (file.state === "pending") {
+      return;
+    } else if (file.state === "error") {
+      files.update((f) => f.filter((x) => x !== file));
+    } else {
+      files.update((f) => {
+        const idx = f.indexOf(file);
+        if (idx >= 0) {
+          f[idx].state = "deleting";
+        }
+        return f;
+      });
+      remove(file.response.id).then(() => {
+        files.update((f) => f.filter((x) => x !== file));
+      }).catch(() => { /* no-op */});
+    }
+  };
 </script>
 
 <div use:init={$page.params.threadId} class="w-full relative rounded-lg border-[1px] border-solid border-cyan-500">
   <input type="hidden" name="file_ids" bind:value={fileIds} />
-  <div class="absolute top-0 p-2 flex gap-2" use:fixFileListHeight={$files} bind:this={fileListRef}>
+  <div class="z-10 absolute top-0 p-2 flex gap-2" use:fixFileListHeight={$files} bind:this={fileListRef}>
     {#each $files as file}
-      <FilePlaceholder info={file} />
+      <FilePlaceholder info={file} on:delete={removeFile} />
     {/each}
   </div>
   <div class="relative top-[2px]">
@@ -117,12 +130,12 @@
                                                  style={`height: 48px; max-height: ${maxHeight}px; padding-right: 3rem; padding-left: 3.5rem; font-size: 1rem; line-height: 1.5rem;`}
       />
     <textarea bind:this={ref} style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px" />
-    <label class="absolute bottom-3 left-2.5">
-      <input type="file" multiple style="display: none;" bind:this={uploadRef} on:change={autoupload} />
-      <GradientButton type="button" color="cyanToBlue" disabled={loading || disabled} class="p-2" on:click={() => uploadRef.click()}>
-        <PaperClipOutline size="sm" />
-      </GradientButton>
-    </label>
+    <FileUpload
+      wrapperClass="absolute bottom-3 left-2.5"
+      disabled={loading || disabled || !upload}
+      upload={upload || (() => {})}
+      on:change={handleFilesChange}
+      />
     <GradientButton type="submit" color="cyanToBlue" class={`${loading ? "animate-pulse cursor-progress" : ""} p-2 absolute bottom-3 right-2.5`} disabled={uploading || loading || disabled}><ChevronUpSolid size="xs" /></GradientButton>
     </div>
 </div>

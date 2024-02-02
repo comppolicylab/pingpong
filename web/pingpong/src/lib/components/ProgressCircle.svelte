@@ -7,7 +7,7 @@
   $: angle = 360 * (progress / 100);
 	$: background = `radial-gradient(white 50%, transparent 51%),
     conic-gradient(transparent 0deg ${angle}deg, gainsboro ${angle}deg 360deg),
-    conic-gradient(orange 0deg, yellow 90deg, lightgreen 180deg, green);`;
+    conic-gradient(#7dd3fc 0deg, #0ea5e9 90deg, #0284c7 180deg, #075985);`;
 	$: cssVarStyles = `--background:${background}`
 </script>
 

@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   import { onMount} from 'svelte';
   import {writable} from 'svelte/store';
   import {page} from '$app/stores';
@@ -12,7 +12,7 @@
   import ViewAssistant from "$lib/components/ViewAssistant.svelte";
   import Info from "$lib/components/Info.svelte";
   import {PenOutline} from "flowbite-svelte-icons";
-  import {toast} from "@zerodevx/svelte-toast";
+  import {sadToast, happyToast} from "$lib/toast";
 
   export let data;
   export let form;
@@ -25,25 +25,9 @@
       if (form?.field) {
         msg += ` (${form.field})`;
       }
-      toast.push(msg, {
-        duration: 5000,
-        theme: {
-          // Error color
-          '--toastBackground': '#F87171',
-          '--toastBarBackground': '#EF4444',
-          '--toastColor': '#fff',
-        },
-      })
+      sadToast(msg);
     } else if (form?.$status >= 200 && form?.$status < 300) {
-      toast.push("Success!", {
-        duration: 5000,
-        theme: {
-          // Success color
-          '--toastBackground': '#A7F3D0',
-          '--toastBarBackground': '#22C55E',
-          '--toastColor': '#000',
-        },
-      })
+      happyToast(msg);
     }
   });
 

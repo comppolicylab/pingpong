@@ -363,10 +363,24 @@ export type FileUploadResult = UploadedFile | FileUploadFailure;
 export interface FileUploadInfo {
   file: File;
   promise: Promise<FileUploadResult>;
-  state: "pending" | "success" | "error";
+  state: "pending" | "success" | "error" | "deleting";
   response: FileUploadResult | null;
   progress: number;
 }
+
+/**
+ * Wrapper function to call the file uploader more easily.
+ *
+ * Does not need to be used, but helpful for the UI.
+ */
+export type FileUploader = (file: File, progress: (p: number) => void) => FileUploadInfo;
+
+/**
+ * Wrapper function to call the file deleter more easily.
+ *
+ * Does not need to be used, but helpful for the UI.
+ */
+export type FileRemover = (fileId: number) => Promise<void>;
 
 /**
  * Upload a file to the given endpoint.
@@ -428,6 +442,14 @@ const _doUpload = (url: string, file: File, opts?: UploadOptions): FileUploadInf
  */
 export const deleteFile = async (f: Fetcher, classId: number, fileId: number) => {
   const url = `class/${classId}/file/${fileId}`;
+  return await DELETE(f, url);
+}
+
+/**
+ * Delete a user file.
+ */
+export const deleteUserFile = async (f: Fetcher, classId: number, userId: number, fileId: number) => {
+  const url = `class/${classId}/user/${userId}/file/${fileId}`;
   return await DELETE(f, url);
 }
 
@@ -613,3 +635,228 @@ export const TITLES = [
   "Course Assistant",
   "Student",
 ];
+
+/**
+ * Information about file types and support.
+ */
+export type FileTypeInfo = {
+  name: string;
+  mimeType: string;
+  retrieval: boolean;
+  codeInterpreter: boolean;
+  extensions: string[];
+};
+
+// Support information comes from:
+// https://platform.openai.com/docs/assistants/tools/supported-files
+const FILE_TYPES: FileTypeInfo[] = [
+  {
+    mimeType: "text/x-c",
+    name: "C",
+    retrieval: true,
+    codeInterpreter: true,
+    extensions: ["c"],
+  },
+  {
+    mimeType: "text/x-c++",
+    name: "C++",
+    retrieval: true,
+    codeInterpreter: true,
+    extensions: ["cpp", "cc", "cxx", "c++"],
+  },
+  {
+    mimeType: "text/csv",
+    name: "CSV",
+    retrieval: false,
+    codeInterpreter: true,
+    extensions: ["csv"],
+  },
+  {
+    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    name: "Word Doc",
+    retrieval: true,
+    codeInterpreter: true,
+    extensions: ["docx"],
+  },
+  {
+    mimeType: "text/html",
+    name: "HTML",
+    retrieval: true,
+    codeInterpreter: true,
+    extensions: ["html", "htm"],
+  },
+  {
+    mimeType: "text/x-java",
+    name: "Java",
+    retrieval: true,
+    codeInterpreter: true,
+    extensions: ["java"],
+  },
+  {
+    mimeType: "application/json",
+    name: "JSON",
+    retrieval: true,
+    codeInterpreter: true,
+    extensions: ["json"],
+  },
+  {
+    mimeType: "text/markdown",
+    name: "Markdown",
+    retrieval: true,
+    codeInterpreter: true,
+    extensions: ["md", "markdown"],
+  },
+  {
+    mimeType: "application/pdf",
+    name: "PDF",
+    retrieval: true,
+    codeInterpreter: true,
+    extensions: ["pdf"],
+  },
+  {
+    mimeType: "text/php",
+    name: "PHP",
+    retrieval: true,
+    codeInterpreter: true,
+    extensions: ["php"],
+  },
+  {
+    mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    name: "PowerPoint",
+    retrieval: true,
+    codeInterpreter: true,
+    extensions: ["pptx"],
+  },
+  {
+    mimeType: "text/x-python",
+    name: "Python",
+    retrieval: true,
+    codeInterpreter: true,
+    extensions: ["py"],
+  },
+  {
+    mimeType: "text/x-script.python",
+    name: "Python",
+    retrieval: true,
+    codeInterpreter: true,
+    extensions: ["py"],
+  },
+  {
+    mimeType: "text/x-ruby",
+    name: "Ruby",
+    retrieval: true,
+    codeInterpreter: true,
+    extensions: ["rb"],
+  },
+  {
+    mimeType: "text/x-tex",
+    name: "LaTeX",
+    retrieval: true,
+    codeInterpreter: true,
+    extensions: ["tex"],
+  },
+  {
+    mimeType: "text/plain",
+    name: "Text",
+    retrieval: true,
+    codeInterpreter: true,
+    extensions: ["txt"],
+  },
+  {
+    mimeType: "text/css",
+    name: "CSS",
+    retrieval: false,
+    codeInterpreter: true,
+    extensions: ["css"],
+  },
+  {
+    mimeType: "image/jpeg",
+    name: "JPEG",
+    retrieval: false,
+    codeInterpreter: true,
+    extensions: ["jpeg", "jpg"],
+  },
+  {
+    mimeType: "text/javascript",
+    name: "JavaScript",
+    retrieval: false,
+    codeInterpreter: true,
+    extensions: ["js"],
+  },
+  {
+    mimeType: "image/gif",
+    name: "GIF",
+    retrieval: false,
+    codeInterpreter: true,
+    extensions: ["gif"],
+  },
+  {
+    mimeType: "image/png",
+    name: "PNG",
+    retrieval: false,
+    codeInterpreter: true,
+    extensions: ["png"],
+  },
+  {
+    mimeType: "application/x-tar",
+    name: "Tarball",
+    retrieval: false,
+    codeInterpreter: true,
+    extensions: ["tar"],
+  },
+  {
+    mimeType: "application/typescript",
+    name: "TypeScript",
+    retrieval: false,
+    codeInterpreter: true,
+    extensions: ["ts"],
+  },
+  {
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    name: "Excel",
+    retrieval: false,
+    codeInterpreter: true,
+    extensions: ["xlsx"],
+  },
+  {
+    mimeType: "application/xml",
+    name: "XML",
+    retrieval: false,
+    codeInterpreter: true,
+    extensions: ["xml"],
+  },
+  {
+    mimeType: "text/xml",
+    name: "XML",
+    retrieval: false,
+    codeInterpreter: true,
+    extensions: ["xml"],
+  },
+  {
+    mimeType: "application/zip",
+    name: "Zip Archive",
+    retrieval: false,
+    codeInterpreter: true,
+    extensions: ["zip"],
+  },
+];
+
+// Create a lookup table for mime types.
+const _mimeTypeLookup = new Map<string, FileTypeInfo>();
+FILE_TYPES.forEach((ft) => {
+  _mimeTypeLookup.set(ft.mimeType.toLowerCase(), ft);
+});
+
+/**
+ * String describing accepted mime types.
+ */
+export const ACCEPT_MIME_TYPE = FILE_TYPES.filter((ft) => ft.retrieval).map((ft) => ft.mimeType).join(",");
+
+
+/**
+ * Lookup information about supported mimetypes.
+ */
+export const mimeType = (mime: string) => {
+  const slug = mime.toLowerCase().split(";")[0].trim();
+  return _mimeTypeLookup.get(slug);
+};
