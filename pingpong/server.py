@@ -576,6 +576,7 @@ async def create_thread(
                 "metadata": {"user_id": request.state.session.user.id},
                 "role": "user",
                 "content": req.message,
+                "file_ids": req.file_ids,
             }
         ]
     )
@@ -633,6 +634,7 @@ async def send_message(
         thread.thread_id,
         role="user",
         content=data.message,
+        file_ids=data.file_ids,
         metadata={"user_id": request.state.session.user.id},
     )
 
@@ -661,7 +663,7 @@ async def send_message(
     dependencies=[
         Depends(IsSuper() | (IsUser("user_id") & CanRead(models.Class, "class_id")))
     ],
-    response_model=schemas.ThreadRun,
+    response_model=schemas.File,
 )
 async def create_user_file(
     class_id: str,
@@ -688,7 +690,8 @@ async def create_user_file(
         "uploader_id": request.state.session.user.id,
     }
     try:
-        await models.File.create(request.state.db, data)
+        r = await models.File.create(request.state.db, data)
+        return r
     except Exception as e:
         await openai_client.files.delete(new_f.id)
         raise e
