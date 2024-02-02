@@ -76,6 +76,7 @@
       e.preventDefault();
       if (!disabled) {
         e.target.form.requestSubmit();
+        resetFilesList(e);
       }
     }
   };
@@ -114,28 +115,58 @@
       }).catch(() => { /* no-op */});
     }
   };
+
+  // Reset the list of files.
+  const resetFilesList = () => {
+    $files = [];
+    fixFileListHeight();
+  };
 </script>
 
-<div use:init={$page.params.threadId} class="w-full relative rounded-lg border-[1px] border-solid border-cyan-500">
+<div
+  use:init={$page.params.threadId}
+  class="w-full relative rounded-lg border-[1px] border-solid border-cyan-500">
   <input type="hidden" name="file_ids" bind:value={fileIds} />
-  <div class="z-10 absolute top-0 p-2 flex gap-2" use:fixFileListHeight={$files} bind:this={fileListRef}>
+  <div
+    class="z-10 absolute top-0 p-2 flex gap-2"
+    use:fixFileListHeight={$files}
+    bind:this={fileListRef}
+    >
     {#each $files as file}
       <FilePlaceholder info={file} on:delete={removeFile} />
     {/each}
   </div>
   <div class="relative top-[2px]">
-    <textarea id="message" rows="1" name="message"
-                                  class="w-full !outline-none focus:ring-0 resize-none border-none bg-transparent pt-[12px] pb-[8px]"
-                                  placeholder="Ask me anything" disabled={loading || disabled} on:keydown={maybeSubmit} on:input={e => fixHeight(e.target)}
-                                                 style={`height: 48px; max-height: ${maxHeight}px; padding-right: 3rem; padding-left: 3.5rem; font-size: 1rem; line-height: 1.5rem;`}
+    <textarea
+      id="message"
+      rows="1"
+      name="message"
+      class="w-full !outline-none focus:ring-0 resize-none border-none bg-transparent pt-[12px] pb-[8px]"
+      placeholder="Ask me anything"
+      disabled={loading || disabled}
+      on:keydown={maybeSubmit}
+      on:input={e => fixHeight(e.target)}
+      style={`height: 48px; max-height: ${maxHeight}px; padding-right: 3rem; padding-left: 3.5rem; font-size: 1rem; line-height: 1.5rem;`}
       />
-    <textarea bind:this={ref} style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px" />
+    <textarea
+      bind:this={ref}
+      style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
+      />
     <FileUpload
       wrapperClass="absolute bottom-3 left-2.5"
       disabled={loading || disabled || !upload}
       upload={upload || (() => {})}
       on:change={handleFilesChange}
       />
-    <GradientButton type="submit" color="cyanToBlue" class={`${loading ? "animate-pulse cursor-progress" : ""} p-2 absolute bottom-3 right-2.5`} disabled={uploading || loading || disabled}><ChevronUpSolid size="xs" /></GradientButton>
-    </div>
+    <GradientButton
+      on:click={resetFilesList}
+      on:touchend={resetFilesList}
+      type="submit"
+      color="cyanToBlue"
+      class={`${loading ? "animate-pulse cursor-progress" : ""} p-2 absolute bottom-3 right-2.5`}
+      disabled={uploading || loading || disabled}
+      >
+      <ChevronUpSolid size="xs" />
+    </GradientButton>
+  </div>
 </div>

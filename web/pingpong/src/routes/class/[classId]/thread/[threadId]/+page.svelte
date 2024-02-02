@@ -2,6 +2,7 @@
   import {error} from "@sveltejs/kit";
   import {writable} from "svelte/store";
   import * as api from '$lib/api';
+  import {sadToast} from "$lib/toast";
   import { blur } from 'svelte/transition';
   import { enhance } from "$app/forms";
   import {browser} from '$app/environment';
@@ -70,15 +71,17 @@
     }
   }
 
+  // Handle sending a message
   const handleSubmit = () => {
     if ($waiting) {
-      alert("A response to the previous message is being generated. Please wait before sending a new message.");
+      sadToast("A response to the previous message is being generated. Please wait before sending a new message.");
       return;
     }
     $submitting = true;
+
     return async ({result, update}) => {
       if (result.type !== "success") {
-        alert("Chat failed! Please try again.");
+        sadToast("Chat failed! Please try again.");
         return;
       }
 
@@ -97,6 +100,20 @@
       $waiting = false;
     };
   };
+
+  // Handle file upload
+  const handleUpload = (f: File, onProgress: (p: number) => void) => {
+    return api.uploadUserFile(data.class.id, data.me.user.id, f, {onProgress});
+  }
+
+  // Handle file removal
+  const handleRemove = async (fileId: number) => {
+    const result = await api.deleteUserFile(fetch, data.class.id, data.me.user.id, fileId);
+    if (result.$status >= 300) {
+      sadToast(`Failed to delete file. Error: ${result.detail || "unknown error"}`);
+      throw new Error(result.detail || "unknown error");
+    }
+  }
 </script>
 
 <div class="relative py-8 h-full w-full">
@@ -151,7 +168,7 @@
   {#if !loading}
   <div class="w-full bottom-8 bg-gradient-to-t from-white to-transparent">
     <form class="w-11/12 mx-auto" action="?/newMessage" method="POST" use:enhance={handleSubmit}>
-      <ChatInput disabled={!canSubmit} loading={$submitting || $waiting} />
+      <ChatInput disabled={!canSubmit} loading={$submitting || $waiting} upload={handleUpload} remove={handleRemove} />
     </form>
   </div>
   {/if}
