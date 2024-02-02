@@ -6,6 +6,7 @@
   import ChatInput from "$lib/components/ChatInput.svelte";
   import {Helper, GradientButton, Dropdown, DropdownItem, Label} from 'flowbite-svelte';
   import { EyeSlashOutline, ChevronDownSolid } from 'flowbite-svelte-icons';
+  import * as api from "$lib/api";
 
   export let data;
 
@@ -22,6 +23,11 @@
         $assistant = selectedAssistant;
       }
     }
+  }
+
+  // Handle file upload
+  const handleUpload = (f: File, onProgress: (p: number) => void) => {
+    return api.uploadUserFile(data.class.id, data.me.user.id, f, {onProgress});
   }
 
   // Handle form submission
@@ -66,7 +72,7 @@
         </Dropdown>
       </div>
       <form action="?/newThread" method="POST" use:enhance={handleSubmit}>
-        <ChatInput loading={$loading} />
+        <ChatInput loading={$loading} upload={handleUpload} />
         <input type="hidden" name="assistant_id" bind:value={$assistant.id} />
         <input type="hidden" name="parties" bind:value={data.me.user.id} />
       </form>

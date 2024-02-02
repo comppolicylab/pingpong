@@ -21,6 +21,8 @@ export const actions: Actions = {
         throw {$status: 400, detail: "Assistant is required"};
       }
 
+      const file_ids = d['file_ids'] ? (d['file_ids'] as string).split(',') : [];
+
       const classId = parseInt(event.params.classId, 10);
       const parties = d['parties'] ? (d['parties'] as string).split(',').map((p) => parseInt(p)) : [];
 
@@ -28,6 +30,7 @@ export const actions: Actions = {
         message,
         assistant_id: assistantId,
         parties,
+        file_ids,
       });
     }, event);
   }
