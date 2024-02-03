@@ -1,20 +1,30 @@
 <script lang="ts">
   import { onMount} from 'svelte';
-  import {writable} from 'svelte/store';
+  import {get, writable} from 'svelte/store';
   import {page} from '$app/stores';
   import {beforeNavigate} from '$app/navigation';
   import * as api from '$lib/api';
+  import type {FileUploadInfo} from '$lib/api';
   import { Checkbox, Helper, Modal, Listgroup, GradientButton, Secondary, Span, List, Li, Card, MultiSelect, Textarea, Accordion, AccordionItem, Dropzone, Heading, Button, Label, Input } from "flowbite-svelte";
   import ManageUser from "$lib/components/ManageUser.svelte";
   import BulkAddUsers from "$lib/components/BulkAddUsers.svelte";
   import ViewUser from "$lib/components/ViewUser.svelte";
   import ManageAssistant from "$lib/components/ManageAssistant.svelte";
   import ViewAssistant from "$lib/components/ViewAssistant.svelte";
+  import FileUpload from '$lib/components/FileUpload.svelte';
+  import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import Info from "$lib/components/Info.svelte";
   import {PenOutline} from "flowbite-svelte-icons";
   import {sadToast, happyToast} from "$lib/toast";
 
+  /**
+   * Application data.
+   */
   export let data;
+
+  /**
+   * Form submission.
+   */
   export let form;
 
   onMount(() => {
@@ -36,6 +46,8 @@
   let anyCanCreate = data?.class?.any_can_create_assistant;
   let assistants = [];
   const blurred = writable(true);
+  let uploads = writable<FileUploadInfo[]>([]);
+  const trashFiles = writable<number[]>([]);
   $: publishOptMakesSense = anyCanCreate;
   $: apiKey = data.apiKey || '';
   $: apiKeyBlur = apiKey.substring(0,6) + '**************' + apiKey.substring(Math.max(6, apiKey.length - 6));
@@ -47,6 +59,15 @@
   }
   $: models = data?.models || [];
   $: files = data?.files || [];
+  $: allFiles = [...$uploads, ...files.map(f => ({
+    state: "success",
+    progress: 100,
+    file: { type: f.content_type, name: f.name },
+    response: f,
+    promise: Promise.resolve(f),
+  }))].filter(f => !$trashFiles.includes(f.response?.id));
+  $: asstFiles = allFiles.filter(f => f.state === "success").map(f => f.response);
+  $: console.log(asstFiles)
   $: students = (data?.classUsers || []).filter(u => u.title.toLowerCase() === 'student');
   $: tt = (data?.classUsers || []).filter(u => u.title.toLowerCase() !== 'student');
   $: classRole = (data?.me?.user?.classes || []).find(c => c.class_id === data.class.id)?.role || '';
@@ -71,6 +92,31 @@
       }
     }
   });
+
+  // Handle file deletion.
+  const removeFile = async (evt) => {
+    const file = evt.detail;
+    if (file.state === "pending" || file.state === "deleting") {
+      return;
+    } else if (file.state === "error") {
+      uploads.update(u => u.filter(f => f !== file));
+    } else {
+      $trashFiles = [...$trashFiles, file.response.id];
+      const result = await api.deleteFile(fetch, data.class.id, file.response.id);
+      if (result.$status >= 300) {
+        $trashFiles = $trashFiles.filter(f => f !== file.response.id);
+        sadToast(`Failed to delete file: ${result.detail || "unknown error"}`);
+      }
+    }
+  };
+
+  // Handle adding new files
+  const handleNewFiles = (evt) => {uploads = evt.detail; };
+  // Submit file upload
+  const uploadFile = (f: File, onProgress: (p: number) => void) => {
+    return api.uploadFile(data.class.id, f, {onProgress});
+  }
+
 </script>
 
 <div class="container py-8 space-y-12 divide-y divide-gray-200 dark:divide-gray-700">
@@ -217,31 +263,14 @@
       {#if !hasApiKey}
         <div class="text-gray-400 mb-4">You need to set an API key before you can upload files.</div>
       {:else}
-      <List tag="ul" list="none" class="w-full divide-y divide-gray-200 dark:divide-gray-700">
-        {#each files as file}
-          <Li class="py-3 sm:py-4">
-            <div class="flex flex-row justify-between gap-4 items-center">
-              <div class="flex-1 basis-3/4 flex-grow font-bold">{file.name}</div>
-              <div class="flex-1 basis-1/4 max-w-sm flex-shrink text-gray-400 text-right">
-                {file.content_type}
-              </div>
-              <div>
-                <form action="?/deleteFile" method="POST">
-                  <input type="hidden" name="fileId" value="{file.id}" />
-                  <GradientButton color="pinkToOrange" size="xs" type="submit">Delete</GradientButton>
-                </form>
-              </div>
-            </div>
-          </Li>
-        {/each}
-        <Li class="py-3 sm:py-4">
-          <form action="?/uploadFile" method="POST" enctype="multipart/form-data">
-            <Label for="file">Upload file</Label>
-            <Input type="file" id="file" name="file" />
-            <GradientButton color="cyanToBlue" type="submit">Upload</GradientButton>
-          </form>
-        </Li>
-      </List>
+        <div class="my-4">
+          <FileUpload upload={uploadFile} on:change={handleNewFiles} />
+        </div>
+        <div class="flex gap-2 flex-wrap">
+          {#each allFiles as file}
+            <FilePlaceholder info={file} on:delete={removeFile} />
+          {/each}
+        </div>
       {/if}
     </div>
   </div>
@@ -260,7 +289,7 @@
           {#if assistant.id == editingAssistant}
           <Card class="w-full max-w-full">
             <form class="grid grid-cols-2 gap-2" action="?/updateAssistant" method="POST">
-              <ManageAssistant {files} {assistant} {models} canPublish={canPublishAssistant} />
+              <ManageAssistant files={asstFiles} {assistant} {models} canPublish={canPublishAssistant} />
             </form>
           </Card>
           {:else}
@@ -273,7 +302,7 @@
         <Card class="w-full max-w-full">
           <Heading tag="h4" class="pb-3">Add new AI assistant</Heading>
           <form class="grid grid-cols-2 gap-2" action="?/createAssistant" method="POST">
-            <ManageAssistant {files} {models} canPublish={canPublishAssistant} />
+            <ManageAssistant files={asstFiles} {models} canPublish={canPublishAssistant} />
           </form>
         </Card>
         {/if}

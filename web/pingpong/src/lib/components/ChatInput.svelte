@@ -97,7 +97,7 @@
   // Remove a file from the list / the server.
   const removeFile = (evt) => {
     const file = evt.detail;
-    if (file.state === "pending") {
+    if (file.state === "pending" || file.state === "deleting") {
       return;
     } else if (file.state === "error") {
       files.update((f) => f.filter((x) => x !== file));

@@ -318,7 +318,7 @@ export interface UploadOptions {
  * Upload a file to a class.
  */
 export const uploadFile = (classId: number, file: File, opts?: UploadOptions) => {
-  const url = `class/${classId}/file`;
+  const url = _fullPath(`class/${classId}/file`);
   return _doUpload(url, file, opts);
 }
 

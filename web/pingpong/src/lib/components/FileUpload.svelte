@@ -64,6 +64,7 @@
   };
 
   // Make sure the input resets when the form submits.
+  // The component can be used outside of a form, too.
   const bindToForm = (el: HTMLInputElement) => {
     const reset = () => {
       // Clear the file list after the form is reset or submitted.
@@ -73,8 +74,10 @@
       }, 0);
     };
     const form = el.form;
-    form.addEventListener("reset", reset);
-    form.addEventListener("submit", reset);
+    if (form) {
+      form.addEventListener("reset", reset);
+      form.addEventListener("submit", reset);
+    }
 
     return {
       destroy() {
