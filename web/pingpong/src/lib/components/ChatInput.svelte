@@ -6,6 +6,7 @@
   import type {FileRemover, FileUploader, FileUploadInfo} from "$lib/api";
   import FilePlaceholder from "$lib/components/FilePlaceholder.svelte";
   import FileUpload from "$lib/components/FileUpload.svelte";
+  import {sadToast} from "$lib/toast";
 
   /**
    * Whether to allow sending.
@@ -148,9 +149,11 @@
       style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
       />
     <FileUpload
+      maxSize={10 * 1024 * 1024}
       wrapperClass="absolute bottom-3 left-2.5"
       disabled={loading || disabled || !upload}
       upload={upload || (() => {})}
+      on:error={e => sadToast(e.detail.message)}
       on:change={handleFilesChange}
       />
     <GradientButton

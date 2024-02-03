@@ -264,7 +264,13 @@
         <div class="text-gray-400 mb-4">You need to set an API key before you can upload files.</div>
       {:else}
         <div class="my-4">
-          <FileUpload upload={uploadFile} on:change={handleNewFiles} />
+          <FileUpload
+            maxSize={512 * 1024 * 1024}
+            upload={uploadFile}
+            on:change={handleNewFiles}
+            on:error={e => sadToast(e.detail.message)}>
+            <span slot="label" class="ml-2 text-gray-800">Upload files for use in the assistants.</span>
+          </FileUpload>
         </div>
         <div class="flex gap-2 flex-wrap">
           {#each allFiles as file}

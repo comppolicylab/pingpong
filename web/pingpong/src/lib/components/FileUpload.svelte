@@ -21,6 +21,11 @@
    */
   export let wrapperClass: string = "";
 
+  /**
+   * Max upload size in bytes.
+   */
+  export let maxSize = 0;
+
   // Event dispatcher for custom events.
   const dispatch = createEventDispatcher();
 
@@ -38,6 +43,11 @@
 
     // Run upload for every newly added file.
     const newFiles = Array.from(uploadRef.files).map(f => {
+      if (maxSize && f.size > maxSize) {
+        dispatch("error", {file: f, message: `File is too large. Max size is ${maxSize} bytes.`});
+        return;
+      }
+
       const fp = upload(f, (progress) => {
         const idx = $files.findIndex(file => file.file === f);
         if (idx !== -1) {
@@ -91,7 +101,7 @@
   };
 </script>
 
-<label class="{wrapperClass}">
+<label class="{wrapperClass} flex items-center">
   <input
     type="file"
     multiple
@@ -109,6 +119,9 @@
     class="p-2 w-8 h-8"
     on:click={() => uploadRef.click()}
     >
-    <PaperClipOutline size="sm" />
+    <slot name="icon">
+      <PaperClipOutline size="sm" />
+    </slot>
   </Button>
+  <slot name="label"></slot>
 </label>
