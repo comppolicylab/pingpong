@@ -1,6 +1,5 @@
 <script lang="ts">
   import {createEventDispatcher} from "svelte";
-  import {mimeType} from "$lib/api";
   import type {FileUploadInfo} from "$lib/api";
   import {CloseCircleSolid, FileSolid, ExclamationCircleOutline} from "flowbite-svelte-icons";
   import {Button} from "flowbite-svelte";
@@ -11,6 +10,8 @@
    * Information about a file that is being uploaded.
    */
   export let info: FileUploadInfo;
+
+  export let mimeType: (type: string) => string;
 
   // Custom events
   const dispatch = createEventDispatcher();

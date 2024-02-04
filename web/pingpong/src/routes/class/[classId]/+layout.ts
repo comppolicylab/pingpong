@@ -15,6 +15,7 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
   }
   const {creators: assistantCreators, assistants} = await api.getAssistants(fetch, classId);
   const {files} = await api.getClassFiles(fetch, classId);
+  const uploadInfo = await api.getClassUploadInfo(fetch, classId);
 
   return {
     hasAssistants: !!assistants && assistants.length > 0,
@@ -23,5 +24,6 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
     assistants,
     assistantCreators,
     files,
+    uploadInfo,
   }
 }

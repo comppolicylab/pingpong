@@ -298,6 +298,13 @@ class NoSupportSettings(BaseSettings):
 SupportSettings = Union[DiscordSettings, NoSupportSettings]
 
 
+class UploadSettings(BaseSettings):
+    """Settings for file uploads."""
+
+    private_file_max_size: int = Field(10 * 1024 * 1024)  # 10 MB
+    class_file_max_size: int = Field(512 * 1024 * 1024)  # 512 MB
+
+
 class Config(BaseSettings):
     """Stats Chat Bot config."""
 
@@ -314,6 +321,7 @@ class Config(BaseSettings):
     metrics: MetricsSettings = Field(MetricsSettings())
     init: InitSettings = Field(InitSettings())
     support: SupportSettings = Field(NoSupportSettings(type="none"))
+    upload: UploadSettings = Field(UploadSettings())
 
     def url(self, path: str | None) -> str:
         """Return a URL relative to the public URL."""

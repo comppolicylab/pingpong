@@ -33,7 +33,7 @@ from .auth import (
 )
 from .config import config
 from .errors import sentry
-from .files import handle_create_file, handle_delete_file
+from .files import FILE_TYPES, handle_create_file, handle_delete_file
 from .invite import send_invite
 from .permission import CanManage, CanRead, CanWrite, IsSuper, IsUser, LoggedIn
 
@@ -283,6 +283,20 @@ async def get_my_classes(request: Request):
 )
 async def get_class(class_id: str, request: Request):
     return await models.Class.get_by_id(request.state.db, int(class_id))
+
+
+@v1.get(
+    "/class/{class_id}/upload_info",
+    dependencies=[Depends(IsSuper() | CanRead(models.Class, "class_id"))],
+    response_model=schemas.FileUploadSupport,
+)
+async def get_class_upload_info(class_id: str, request: Request):
+    return {
+        "types": FILE_TYPES,
+        "allow_private": True,
+        "private_file_max_size": config.upload.private_file_max_size,
+        "class_file_max_size": config.upload.class_file_max_size,
+    }
 
 
 @v1.put(
@@ -666,6 +680,12 @@ async def send_message(
 async def create_file(
     class_id: str, request: Request, upload: UploadFile, openai_client: OpenAIClient
 ):
+    if upload.size > config.upload.class_file_max_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Max size is {config.upload.class_file_max_size} bytes.",
+        )
+
     return await handle_create_file(
         request.state.db,
         openai_client,
@@ -690,6 +710,12 @@ async def create_user_file(
     upload: UploadFile,
     openai_client: OpenAIClient,
 ):
+    if upload.size > config.upload.private_file_max_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Max size is {config.upload.private_file_max_size} bytes.",
+        )
+
     return await handle_create_file(
         request.state.db,
         openai_client,
@@ -954,7 +980,6 @@ async def get_image(file_id: str, request: Request, openai_client: OpenAIClient)
 
 @v1.get(
     "/me",
-    response_model=schemas.SessionState,
 )
 async def get_me(request: Request):
     """Get the session information."""

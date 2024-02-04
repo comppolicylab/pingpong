@@ -4,7 +4,6 @@
   import {writable} from "svelte/store";
   import {Button} from "flowbite-svelte";
   import type {FileUploader, FileUploadInfo} from "$lib/api";
-  import {ACCEPT_MIME_TYPE} from "$lib/api";
 
   /**
    * Whether to allow uploading.
@@ -20,6 +19,11 @@
    * Additional classes to apply to wrapper.
    */
   export let wrapperClass: string = "";
+
+  /**
+   * File types to accept.
+   */
+  export let accept = "*/*";
 
   /**
    * Max upload size in bytes.
@@ -105,7 +109,7 @@
   <input
     type="file"
     multiple
-    accept={ACCEPT_MIME_TYPE}
+    accept={accept}
     style="display: none;"
     bind:this={uploadRef}
     on:change={autoupload}

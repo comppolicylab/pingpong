@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import File
-from .schemas import GenericStatus
+from .schemas import FileTypeInfo, GenericStatus
 
 
 async def handle_delete_file(
@@ -78,3 +78,198 @@ async def handle_create_file(
     except Exception as e:
         await oai_client.files.delete(new_f.id)
         raise e
+
+
+# Support information comes from:
+# https://platform.openai.com/docs/assistants/tools/supported-files
+FILE_TYPES = [
+    FileTypeInfo(
+        mime_type="text/x-c",
+        name="C",
+        retrieval=True,
+        code_interpreter=True,
+        extensions=["c"],
+    ),
+    FileTypeInfo(
+        mime_type="text/x-c++",
+        name="C++",
+        retrieval=True,
+        code_interpreter=True,
+        extensions=["cpp", "cc", "cxx", "c++"],
+    ),
+    FileTypeInfo(
+        mime_type="text/csv",
+        name="CSV",
+        retrieval=False,
+        code_interpreter=True,
+        extensions=["csv"],
+    ),
+    FileTypeInfo(
+        mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        name="Word Doc",
+        retrieval=True,
+        code_interpreter=True,
+        extensions=["docx"],
+    ),
+    FileTypeInfo(
+        mime_type="text/html",
+        name="HTML",
+        retrieval=True,
+        code_interpreter=True,
+        extensions=["html", "htm"],
+    ),
+    FileTypeInfo(
+        mime_type="text/x-java",
+        name="Java",
+        retrieval=True,
+        code_interpreter=True,
+        extensions=["java"],
+    ),
+    FileTypeInfo(
+        mime_type="application/json",
+        name="JSON",
+        retrieval=True,
+        code_interpreter=True,
+        extensions=["json"],
+    ),
+    FileTypeInfo(
+        mime_type="text/markdown",
+        name="Markdown",
+        retrieval=True,
+        code_interpreter=True,
+        extensions=["md", "markdown"],
+    ),
+    FileTypeInfo(
+        mime_type="application/pdf",
+        name="PDF",
+        retrieval=True,
+        code_interpreter=True,
+        extensions=["pdf"],
+    ),
+    FileTypeInfo(
+        mime_type="text/php",
+        name="PHP",
+        retrieval=True,
+        code_interpreter=True,
+        extensions=["php"],
+    ),
+    FileTypeInfo(
+        mime_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        name="PowerPoint",
+        retrieval=True,
+        code_interpreter=True,
+        extensions=["pptx"],
+    ),
+    FileTypeInfo(
+        mime_type="text/x-python",
+        name="Python",
+        retrieval=True,
+        code_interpreter=True,
+        extensions=["py"],
+    ),
+    FileTypeInfo(
+        mime_type="text/x-script.python",
+        name="Python",
+        retrieval=True,
+        code_interpreter=True,
+        extensions=["py"],
+    ),
+    FileTypeInfo(
+        mime_type="text/x-ruby",
+        name="Ruby",
+        retrieval=True,
+        code_interpreter=True,
+        extensions=["rb"],
+    ),
+    FileTypeInfo(
+        mime_type="text/x-tex",
+        name="LaTeX",
+        retrieval=True,
+        code_interpreter=True,
+        extensions=["tex"],
+    ),
+    FileTypeInfo(
+        mime_type="text/plain",
+        name="Text",
+        retrieval=True,
+        code_interpreter=True,
+        extensions=["txt"],
+    ),
+    FileTypeInfo(
+        mime_type="text/css",
+        name="CSS",
+        retrieval=False,
+        code_interpreter=True,
+        extensions=["css"],
+    ),
+    FileTypeInfo(
+        mime_type="image/jpeg",
+        name="JPEG",
+        retrieval=False,
+        code_interpreter=True,
+        extensions=["jpeg", "jpg"],
+    ),
+    FileTypeInfo(
+        mime_type="text/javascript",
+        name="JavaScript",
+        retrieval=False,
+        code_interpreter=True,
+        extensions=["js"],
+    ),
+    FileTypeInfo(
+        mime_type="image/gif",
+        name="GIF",
+        retrieval=False,
+        code_interpreter=True,
+        extensions=["gif"],
+    ),
+    FileTypeInfo(
+        mime_type="image/png",
+        name="PNG",
+        retrieval=False,
+        code_interpreter=True,
+        extensions=["png"],
+    ),
+    FileTypeInfo(
+        mime_type="application/x-tar",
+        name="Tarball",
+        retrieval=False,
+        code_interpreter=True,
+        extensions=["tar"],
+    ),
+    FileTypeInfo(
+        mime_type="application/typescript",
+        name="TypeScript",
+        retrieval=False,
+        code_interpreter=True,
+        extensions=["ts"],
+    ),
+    FileTypeInfo(
+        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        name="Excel",
+        retrieval=False,
+        code_interpreter=True,
+        extensions=["xlsx"],
+    ),
+    FileTypeInfo(
+        mime_type="application/xml",
+        name="XML",
+        retrieval=False,
+        code_interpreter=True,
+        extensions=["xml"],
+    ),
+    FileTypeInfo(
+        mime_type="text/xml",
+        name="XML",
+        retrieval=False,
+        code_interpreter=True,
+        extensions=["xml"],
+    ),
+    FileTypeInfo(
+        mime_type="application/zip",
+        name="Zip Archive",
+        retrieval=False,
+        code_interpreter=True,
+        extensions=["zip"],
+    ),
+]

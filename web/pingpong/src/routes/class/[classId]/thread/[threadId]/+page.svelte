@@ -168,7 +168,14 @@
   {#if !loading}
   <div class="w-full bottom-8 bg-gradient-to-t from-white to-transparent">
     <form class="w-11/12 mx-auto" action="?/newMessage" method="POST" use:enhance={handleSubmit}>
-      <ChatInput disabled={!canSubmit} loading={$submitting || $waiting} upload={handleUpload} remove={handleRemove} />
+      <ChatInput
+        mimeType={data.uploadInfo.mimeType}
+        maxSize={data.uploadInfo.private_file_max_size}
+        accept={data.uploadInfo.acceptString}
+        disabled={!canSubmit}
+        loading={$submitting || $waiting}
+        upload={handleUpload}
+        remove={handleRemove} />
     </form>
   </div>
   {/if}

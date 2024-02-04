@@ -641,222 +641,59 @@ export const TITLES = [
  */
 export type FileTypeInfo = {
   name: string;
-  mimeType: string;
+  mime_type: string;
   retrieval: boolean;
-  codeInterpreter: boolean;
+  code_interpreter: boolean;
   extensions: string[];
 };
 
-// Support information comes from:
-// https://platform.openai.com/docs/assistants/tools/supported-files
-const FILE_TYPES: FileTypeInfo[] = [
-  {
-    mimeType: "text/x-c",
-    name: "C",
-    retrieval: true,
-    codeInterpreter: true,
-    extensions: ["c"],
-  },
-  {
-    mimeType: "text/x-c++",
-    name: "C++",
-    retrieval: true,
-    codeInterpreter: true,
-    extensions: ["cpp", "cc", "cxx", "c++"],
-  },
-  {
-    mimeType: "text/csv",
-    name: "CSV",
-    retrieval: false,
-    codeInterpreter: true,
-    extensions: ["csv"],
-  },
-  {
-    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    name: "Word Doc",
-    retrieval: true,
-    codeInterpreter: true,
-    extensions: ["docx"],
-  },
-  {
-    mimeType: "text/html",
-    name: "HTML",
-    retrieval: true,
-    codeInterpreter: true,
-    extensions: ["html", "htm"],
-  },
-  {
-    mimeType: "text/x-java",
-    name: "Java",
-    retrieval: true,
-    codeInterpreter: true,
-    extensions: ["java"],
-  },
-  {
-    mimeType: "application/json",
-    name: "JSON",
-    retrieval: true,
-    codeInterpreter: true,
-    extensions: ["json"],
-  },
-  {
-    mimeType: "text/markdown",
-    name: "Markdown",
-    retrieval: true,
-    codeInterpreter: true,
-    extensions: ["md", "markdown"],
-  },
-  {
-    mimeType: "application/pdf",
-    name: "PDF",
-    retrieval: true,
-    codeInterpreter: true,
-    extensions: ["pdf"],
-  },
-  {
-    mimeType: "text/php",
-    name: "PHP",
-    retrieval: true,
-    codeInterpreter: true,
-    extensions: ["php"],
-  },
-  {
-    mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    name: "PowerPoint",
-    retrieval: true,
-    codeInterpreter: true,
-    extensions: ["pptx"],
-  },
-  {
-    mimeType: "text/x-python",
-    name: "Python",
-    retrieval: true,
-    codeInterpreter: true,
-    extensions: ["py"],
-  },
-  {
-    mimeType: "text/x-script.python",
-    name: "Python",
-    retrieval: true,
-    codeInterpreter: true,
-    extensions: ["py"],
-  },
-  {
-    mimeType: "text/x-ruby",
-    name: "Ruby",
-    retrieval: true,
-    codeInterpreter: true,
-    extensions: ["rb"],
-  },
-  {
-    mimeType: "text/x-tex",
-    name: "LaTeX",
-    retrieval: true,
-    codeInterpreter: true,
-    extensions: ["tex"],
-  },
-  {
-    mimeType: "text/plain",
-    name: "Text",
-    retrieval: true,
-    codeInterpreter: true,
-    extensions: ["txt"],
-  },
-  {
-    mimeType: "text/css",
-    name: "CSS",
-    retrieval: false,
-    codeInterpreter: true,
-    extensions: ["css"],
-  },
-  {
-    mimeType: "image/jpeg",
-    name: "JPEG",
-    retrieval: false,
-    codeInterpreter: true,
-    extensions: ["jpeg", "jpg"],
-  },
-  {
-    mimeType: "text/javascript",
-    name: "JavaScript",
-    retrieval: false,
-    codeInterpreter: true,
-    extensions: ["js"],
-  },
-  {
-    mimeType: "image/gif",
-    name: "GIF",
-    retrieval: false,
-    codeInterpreter: true,
-    extensions: ["gif"],
-  },
-  {
-    mimeType: "image/png",
-    name: "PNG",
-    retrieval: false,
-    codeInterpreter: true,
-    extensions: ["png"],
-  },
-  {
-    mimeType: "application/x-tar",
-    name: "Tarball",
-    retrieval: false,
-    codeInterpreter: true,
-    extensions: ["tar"],
-  },
-  {
-    mimeType: "application/typescript",
-    name: "TypeScript",
-    retrieval: false,
-    codeInterpreter: true,
-    extensions: ["ts"],
-  },
-  {
-    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    name: "Excel",
-    retrieval: false,
-    codeInterpreter: true,
-    extensions: ["xlsx"],
-  },
-  {
-    mimeType: "application/xml",
-    name: "XML",
-    retrieval: false,
-    codeInterpreter: true,
-    extensions: ["xml"],
-  },
-  {
-    mimeType: "text/xml",
-    name: "XML",
-    retrieval: false,
-    codeInterpreter: true,
-    extensions: ["xml"],
-  },
-  {
-    mimeType: "application/zip",
-    name: "Zip Archive",
-    retrieval: false,
-    codeInterpreter: true,
-    extensions: ["zip"],
-  },
-];
 
-// Create a lookup table for mime types.
-const _mimeTypeLookup = new Map<string, FileTypeInfo>();
-FILE_TYPES.forEach((ft) => {
-  _mimeTypeLookup.set(ft.mimeType.toLowerCase(), ft);
-});
-
-/**
- * String describing accepted mime types.
- */
-export const ACCEPT_MIME_TYPE = FILE_TYPES.filter((ft) => ft.retrieval).map((ft) => ft.mimeType).join(",");
 
 
 /**
- * Lookup information about supported mimetypes.
+ * Information about upload support.
  */
-export const mimeType = (mime: string) => {
-  const slug = mime.toLowerCase().split(";")[0].trim();
-  return _mimeTypeLookup.get(slug);
-};
+export type UploadInfo = {
+  types: FileTypeInfo[];
+  allow_private: boolean;
+  private_file_max_size: number;
+  class_file_max_size: number;
+}
+
+
+/**
+ * Generate the string used for the "accept" attribute in file inputs.
+ */
+const _getAcceptString = (types: FileTypeInfo[]) => {
+  return types.filter((ft) => ft.retrieval).map((ft) => ft.mime_type).join(",");
+}
+
+
+/**
+ * Get information about uploading files.
+ */
+export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
+  const url = `class/${classId}/upload_info`;
+  const info = await GET<{}, UploadInfo>(f, url);
+
+  // Create a lookup table for mime types.
+  const _mimeTypeLookup = new Map<string, FileTypeInfo>();
+  info.types.forEach((ft) => {
+    _mimeTypeLookup.set(ft.mime_type.toLowerCase(), ft);
+  });
+
+  return {
+    ...info,
+    /**
+     * Lookup information about supported mimetypes.
+     */
+    mimeType: (mime: string) => {
+      const slug = mime.toLowerCase().split(";")[0].trim();
+      return _mimeTypeLookup.get(slug);
+    },
+    /**
+     * String describing accepted mime types.
+     */
+    acceptString: _getAcceptString(info.types),
+  };
+}

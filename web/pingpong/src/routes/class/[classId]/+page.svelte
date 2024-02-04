@@ -92,7 +92,13 @@
         </Dropdown>
       </div>
       <form action="?/newThread" method="POST" use:enhance={handleSubmit}>
-        <ChatInput loading={$loading} upload={handleUpload} remove={handleRemove} />
+        <ChatInput
+          mimeType={data.uploadInfo.mimeType}
+          maxSize={data.uploadInfo.private_file_max_size}
+          accept={data.uploadInfo.acceptString}
+          loading={$loading}
+          upload={handleUpload}
+          remove={handleRemove} />
         <input type="hidden" name="assistant_id" bind:value={$assistant.id} />
         <input type="hidden" name="parties" bind:value={data.me.user.id} />
       </form>

@@ -16,6 +16,7 @@
   import Info from "$lib/components/Info.svelte";
   import {PenOutline} from "flowbite-svelte-icons";
   import {sadToast, happyToast} from "$lib/toast";
+  import {humanSize} from "$lib/size";
 
   /**
    * Application data.
@@ -26,6 +27,11 @@
    * Form submission.
    */
   export let form;
+
+  /**
+   * Max upload size as a nice string.
+   */
+  $: maxUploadSize = humanSize(data.uploadInfo.class_file_max_size);
 
   onMount(() => {
     // Show an error if the form failed
@@ -256,7 +262,7 @@
     <div>
       <Heading tag="h3" customSize="text-xl font-bold"><Secondary class="text-xl">Files</Secondary></Heading>
         <Info>Upload files for use in assistants.
-        Files must be under 512MB. See the <a href="https://platform.openai.com/docs/api-reference/files/create" rel="noopener noreferrer" target="_blank">OpenAI API docs</a> for more information.
+          Files must be under {maxUploadSize}. See the <a href="https://platform.openai.com/docs/api-reference/files/create" rel="noopener noreferrer" target="_blank">OpenAI API docs</a> for more information.
         </Info>
     </div>
     <div class="col-span-2">
@@ -265,7 +271,8 @@
       {:else}
         <div class="my-4">
           <FileUpload
-            maxSize={512 * 1024 * 1024}
+            accept={data.uploadInfo.acceptString}
+            maxSize={data.uploadInfo.class_file_max_size}
             upload={uploadFile}
             on:change={handleNewFiles}
             on:error={e => sadToast(e.detail.message)}>
@@ -274,7 +281,7 @@
         </div>
         <div class="flex gap-2 flex-wrap">
           {#each allFiles as file}
-            <FilePlaceholder info={file} on:delete={removeFile} />
+            <FilePlaceholder mimeType={data.uploadInfo.mimeType} info={file} on:delete={removeFile} />
           {/each}
         </div>
       {/if}
