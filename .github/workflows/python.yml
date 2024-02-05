@@ -3,8 +3,10 @@ name: Python
 on:
   push:
     branches: [main]
+    paths: [pingpong/**, conftest.py, poetry.lock, pyproject.toml]
   pull_request:
     branches: [main]
+    paths: [pingpong/**, conftest.py, poetry.lock, pyproject.toml]
 
 jobs:
   build:
