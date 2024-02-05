@@ -193,11 +193,20 @@ class Config(BaseSettings):
         return f"{self.public_url.rstrip('/')}/{path.lstrip('/')}"
 
 
-# Find default location for config file.
-_cfg_path = os.environ.get("CONFIG_PATH", "config.toml")
+def _load_config():
+    """Load the config from the config file."""
+    # Find default location for config file.
+    _cfg_path = os.environ.get("CONFIG_PATH", "config.toml")
 
-# Read the raw config file.
-_raw_cfg = Path(_cfg_path).read_text()
+    # Read the raw config file.
+    _raw_cfg = Path(_cfg_path).read_text()
+
+    try:
+        return Config.parse_obj(tomllib.loads(_raw_cfg))
+    except Exception as e:
+        logger.error(f"Error loading config: {e}")
+        raise
+
 
 # Globally available config object.
-config = Config.parse_obj(tomllib.loads(_raw_cfg))
+config = _load_config()
