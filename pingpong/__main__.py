@@ -76,5 +76,17 @@ def db_migrate(revision: str, alembic_config: str) -> None:
     alembic.command.upgrade(al_cfg, revision)
 
 
+@db.command("set-version")
+@click.argument("version")
+@click.option("--alembic-config", default="alembic.ini")
+def db_set_version(version: str, alembic_config: str) -> None:
+    # Load the Alembic config from `alembic.ini`
+    al_cfg = alembic.config.Config(alembic_config)
+    # Use the Alembic config from `alembic.ini` but override the URL for the db
+    al_cfg.set_main_option("sqlalchemy.url", config.db.driver.sync_uri)
+    # Run the Alembic upgrade command
+    alembic.command.stamp(al_cfg, version)
+
+
 if __name__ == "__main__":
     cli()
