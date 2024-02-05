@@ -81,7 +81,7 @@
   // Focus textarea when component is mounted. Since we can only use `use` on
   // native DOM elements, we need to wrap the textarea in a div and then
   // access its child to imperatively focus it.
-  const init = () => {
+  const init = (node: HTMLDivElement, newThreadId: string) => {
     document.getElementById('message')?.focus();
     return {
       update: () => {
@@ -102,7 +102,7 @@
   };
 
   // Fix the height of the container when the file list changes.
-  const fixFileListHeight = () => {
+  const fixFileListHeight = (node: HTMLDivElement, newFiles: FileUploadInfo[]) => {
     const update = () => {
       const el = document.getElementById('message');
       if (!el) {

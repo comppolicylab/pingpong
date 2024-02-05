@@ -351,8 +351,8 @@ export type CreateClassRequest = {
 export type UpdateClassRequest = {
   name?: string;
   term?: string;
-  any_can_create_assistant?: string;
-  any_can_publish_assistant?: string;
+  any_can_create_assistant?: boolean;
+  any_can_publish_assistant?: boolean;
 };
 
 /**

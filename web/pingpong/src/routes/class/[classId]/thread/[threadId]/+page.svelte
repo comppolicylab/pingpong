@@ -72,7 +72,7 @@
   };
 
   // Scroll to the bottom of the chat thread.
-  const scroll = (el: HTMLDivElement) => {
+  const scroll = (el: HTMLDivElement, messageList: api.OpenAIMessage[]) => {
     // Scroll to the bottom of the element.
     return {
       // TODO - would be good to figure out how to do this without a timeout.

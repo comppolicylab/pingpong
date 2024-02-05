@@ -15,7 +15,7 @@
     });
   };
 
-  const renderMarkdownNode = (node: HTMLElement) => {
+  const renderMarkdownNode = (node: HTMLElement, newContent: string) => {
     renderKatex(node);
 
     return {

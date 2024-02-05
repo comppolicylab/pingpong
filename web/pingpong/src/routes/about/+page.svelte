@@ -140,7 +140,7 @@
         <div class="mt-6">
           {#if form?.success}
             <P class="text-green-500">Your message has been sent, thanks for the feedback!</P>
-          {:else if form?.error}
+          {:else if form && !form.success}
             <P class="text-red-500"
               >There was an error sending your message, please try again later.</P
             >
