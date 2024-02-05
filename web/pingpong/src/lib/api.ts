@@ -1,3 +1,5 @@
+import { browser } from '$app/environment';
+
 /**
  * HTTP methods.
  */
@@ -28,11 +30,18 @@ export type GenericStatus = {
 };
 
 /**
+ * Get full API route.
+ */
+const _fullPath = (path: string) => {
+    path = path.replace(/^\/+/, "");
+    return `/api/v1/${path}`;
+}
+
+/**
  * Common fetch method.
  */
 const _fetch = async <R extends BaseData>(f: Fetcher, method: Method, path: string, headers?: Record<string, string>, body?: string | FormData): Promise<R & BaseResponse> => {
-    path = path.replace(/^\/+/, "");
-    const fullPath = `/api/v1/${path}`;
+    const fullPath = _fullPath(path);
     const res = await f(fullPath, {
       method,
       headers,
@@ -299,13 +308,133 @@ export const deleteAssistant = async (f: Fetcher, classId: number, assistantId: 
 };
 
 /**
+ * file upload options.
+ */
+export interface UploadOptions {
+  onProgress?: (percent: number) => void;
+}
+
+/**
  * Upload a file to a class.
  */
-export const uploadFile = async (f: Fetcher, classId: number, file: File) => {
-  const url = `class/${classId}/file`;
+export const uploadFile = (classId: number, file: File, opts?: UploadOptions) => {
+  const url = _fullPath(`class/${classId}/file`);
+  return _doUpload(url, file, opts);
+}
+
+/**
+ * Upload a private file to a class for the given user.
+ */
+export const uploadUserFile = (classId: number, userId: number, file: File, opts?: UploadOptions) => {
+  const url = _fullPath(`class/${classId}/user/${userId}/file`);
+  return _doUpload(url, file, opts);
+}
+
+/**
+ * Server representation of a file.
+ */
+export interface UploadedFile {
+  id: number;
+  name: string;
+  file_id: string;
+  content_type: string;
+  class_id: number;
+  private: boolean;
+  uploader_id: number;
+  created: string;
+  updated: string | null;
+}
+
+/**
+ * File upload error.
+ */
+export interface FileUploadFailure {
+  error: string;
+}
+
+/**
+ * Result of a file upload.
+ */
+export type FileUploadResult = UploadedFile | FileUploadFailure;
+
+/**
+ * Info about the file upload.
+ */
+export interface FileUploadInfo {
+  file: File;
+  promise: Promise<FileUploadResult>;
+  state: "pending" | "success" | "error" | "deleting";
+  response: FileUploadResult | null;
+  progress: number;
+}
+
+/**
+ * Wrapper function to call the file uploader more easily.
+ *
+ * Does not need to be used, but helpful for the UI.
+ */
+export type FileUploader = (file: File, progress: (p: number) => void) => FileUploadInfo;
+
+/**
+ * Wrapper function to call the file deleter more easily.
+ *
+ * Does not need to be used, but helpful for the UI.
+ */
+export type FileRemover = (fileId: number) => Promise<void>;
+
+/**
+ * Upload a file to the given endpoint.
+ */
+const _doUpload = (url: string, file: File, opts?: UploadOptions): FileUploadInfo => {
+  if (!browser) {
+    throw new Error("File uploads are not supported in this environment.");
+  }
+
+  const xhr = new XMLHttpRequest();
+
+  const info: Omit<FileUploadInfo, "promise"> = {
+    file,
+    state: "pending",
+    response: null,
+    progress: 0,
+  };
+
+  // Callback for upload progress updates.
+  const onProgress = (e: ProgressEvent) => {
+    if (e.lengthComputable) {
+      const percent = (e.loaded / e.total) * 100;
+      info.progress = percent;
+      if (opts?.onProgress) {
+        opts.onProgress(percent);
+      }
+    }
+  };
+
+  // Don't use the normal fetch because this only works with xhr, and we want
+  // to be able to track progress.
+  const promise = new Promise<FileUploadResult>((resolve, reject) => {
+    xhr.open("POST", url, true);
+    xhr.setRequestHeader("Accept", "application/json");
+    xhr.upload.onprogress = onProgress;
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState === 4) {
+        if (xhr.status < 300) {
+          info.state = "success";
+          info.response = JSON.parse(xhr.responseText) as UploadedFile;
+          resolve(info.response);
+        } else {
+          info.state = "error";
+          info.response = {error: xhr.responseText};
+          reject(info.response);
+        }
+      }
+    };
+  });
   const formData = new FormData();
   formData.append("upload", file);
-  return await _fetch(f, "POST", url, {}, formData);
+  xhr.send(formData);
+
+  return {...info, promise};
 }
 
 /**
@@ -313,6 +442,14 @@ export const uploadFile = async (f: Fetcher, classId: number, file: File) => {
  */
 export const deleteFile = async (f: Fetcher, classId: number, fileId: number) => {
   const url = `class/${classId}/file/${fileId}`;
+  return await DELETE(f, url);
+}
+
+/**
+ * Delete a user file.
+ */
+export const deleteUserFile = async (f: Fetcher, classId: number, userId: number, fileId: number) => {
+  const url = `class/${classId}/user/${userId}/file/${fileId}`;
   return await DELETE(f, url);
 }
 
@@ -378,6 +515,7 @@ export type CreateThreadRequest = {
   message: string;
   assistant_id: number;
   parties?: number[];
+  file_ids?: string[];
 };
 
 /**
@@ -401,6 +539,7 @@ export const getThread = async (f: Fetcher, classId: number, threadId: number) =
  */
 export type NewThreadMessageRequest = {
   message: string;
+  file_ids?: string[];
 }
 
 /**
@@ -496,3 +635,65 @@ export const TITLES = [
   "Course Assistant",
   "Student",
 ];
+
+/**
+ * Information about file types and support.
+ */
+export type FileTypeInfo = {
+  name: string;
+  mime_type: string;
+  retrieval: boolean;
+  code_interpreter: boolean;
+  extensions: string[];
+};
+
+
+
+
+/**
+ * Information about upload support.
+ */
+export type UploadInfo = {
+  types: FileTypeInfo[];
+  allow_private: boolean;
+  private_file_max_size: number;
+  class_file_max_size: number;
+}
+
+
+/**
+ * Generate the string used for the "accept" attribute in file inputs.
+ */
+const _getAcceptString = (types: FileTypeInfo[]) => {
+  return types.filter((ft) => ft.retrieval).map((ft) => ft.mime_type).join(",");
+}
+
+
+/**
+ * Get information about uploading files.
+ */
+export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
+  const url = `class/${classId}/upload_info`;
+  const info = await GET<{}, UploadInfo>(f, url);
+
+  // Create a lookup table for mime types.
+  const _mimeTypeLookup = new Map<string, FileTypeInfo>();
+  info.types.forEach((ft) => {
+    _mimeTypeLookup.set(ft.mime_type.toLowerCase(), ft);
+  });
+
+  return {
+    ...info,
+    /**
+     * Lookup information about supported mimetypes.
+     */
+    mimeType: (mime: string) => {
+      const slug = mime.toLowerCase().split(";")[0].trim();
+      return _mimeTypeLookup.get(slug);
+    },
+    /**
+     * String describing accepted mime types.
+     */
+    acceptString: _getAcceptString(info.types),
+  };
+}

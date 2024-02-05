@@ -16,7 +16,8 @@ export const actions: Actions = {
         if (!message) {
           throw invalid("message", "Message is required");
         }
-        return api.postMessage(f, classId, threadId, {message});
+        const file_ids = d['file_ids'] ? (d['file_ids'] as string).split(',') : [];
+        return api.postMessage(f, classId, threadId, {message, file_ids});
       }, event);
     },
 

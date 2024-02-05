@@ -6,14 +6,24 @@
   import ChatInput from "$lib/components/ChatInput.svelte";
   import {Helper, GradientButton, Dropdown, DropdownItem, Label} from 'flowbite-svelte';
   import { EyeSlashOutline, ChevronDownSolid } from 'flowbite-svelte-icons';
+  import {sadToast} from "$lib/toast";
+  import * as api from "$lib/api";
 
+  /**
+   * Application data.
+   */
   export let data;
 
+  // Whether the app is currently loading.
   let loading = writable(false);
+  // Currently selected assistant.
   let assistant = writable(data?.assistants[0] || {});
+  // State of the dropdown picker.
   let aiSelectOpen = false;
 
+  // Whether billing is set up for the class (which controls everything).
   $: isConfigured = data?.hasAssistants && data?.hasBilling;
+  // The assistant ID from the URL.
   $: linkedAssistant = parseInt($page.url.searchParams.get('assistant') || '0', 10);
   $: {
     if (linkedAssistant && data?.assistants) {
@@ -21,6 +31,20 @@
       if (selectedAssistant) {
         $assistant = selectedAssistant;
       }
+    }
+  }
+
+  // Handle file upload
+  const handleUpload = (f: File, onProgress: (p: number) => void) => {
+    return api.uploadUserFile(data.class.id, data.me.user.id, f, {onProgress});
+  }
+
+  // Handle file removal
+  const handleRemove = async (fileId: number) => {
+    const result = await api.deleteUserFile(fetch, data.class.id, data.me.user.id, fileId);
+    if (result.$status >= 300) {
+      sadToast(`Failed to delete file. Error: ${result.detail || "unknown error"}`);
+      throw new Error(result.detail || "unknown error");
     }
   }
 
@@ -33,16 +57,18 @@
         goto(`/class/${result.data.thread.class_id}/thread/${result.data.thread.id}`);
       } else {
         $loading = false;
-        alert("Chat failed! Please try again.");
+        sadToast(`Chat failed! Please try again. Error: ${result.detail || "unknown"}`);
       }
     };
   };
 
+  // Set the new assistant selection.
   const selectAi = (asst) => {
     goto(`/class/${data.class.id}/?assistant=${asst.id}`);
     aiSelectOpen = false;
   };
 
+  // Toggle the assistant selection dropdown.
   const openDropdown = () => {
     aiSelectOpen = true;
   };
@@ -66,7 +92,13 @@
         </Dropdown>
       </div>
       <form action="?/newThread" method="POST" use:enhance={handleSubmit}>
-        <ChatInput loading={$loading} />
+        <ChatInput
+          mimeType={data.uploadInfo.mimeType}
+          maxSize={data.uploadInfo.private_file_max_size}
+          accept={data.uploadInfo.acceptString}
+          loading={$loading}
+          upload={handleUpload}
+          remove={handleRemove} />
         <input type="hidden" name="assistant_id" bind:value={$assistant.id} />
         <input type="hidden" name="parties" bind:value={data.me.user.id} />
       </form>

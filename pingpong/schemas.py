@@ -35,6 +35,8 @@ class File(BaseModel):
     content_type: str
     file_id: str
     class_id: int
+    private: bool | None
+    uploader_id: int | None
     created: datetime
     updated: datetime | None
 
@@ -125,10 +127,12 @@ class CreateThread(BaseModel):
     parties: list[int] = []
     message: str = Field(..., min_length=1)
     assistant_id: int
+    file_ids: list[str] = Field([], min_items=0, max_items=10)
 
 
 class NewThreadMessage(BaseModel):
     message: str = Field(..., min_length=1)
+    file_ids: list[str] = Field([], min_items=0, max_items=10)
 
 
 class Threads(BaseModel):
@@ -360,3 +364,18 @@ class SupportRequest(BaseModel):
     name: str | None = None
     category: str | None = None
     message: str = Field(..., min_length=1, max_length=1000)
+
+
+class FileTypeInfo(BaseModel):
+    name: str
+    mime_type: str
+    retrieval: bool
+    code_interpreter: bool
+    extensions: list[str]
+
+
+class FileUploadSupport(BaseModel):
+    types: list[FileTypeInfo]
+    allow_private: bool
+    private_file_max_size: int
+    class_file_max_size: int
