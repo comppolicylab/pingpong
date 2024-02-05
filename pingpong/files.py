@@ -54,6 +54,11 @@ async def handle_create_file(
         uploader_id (int): Uploader ID
         private (bool): File privacy
     """
+    if not _is_retrieval_supported(upload.content_type.lower()):
+        raise HTTPException(
+            status_code=403, detail="File type not supported for retrieval by OpenAI!"
+        )
+
     new_f = await oai_client.files.create(
         # NOTE(jnu): the client tries to infer the filename, which doesn't
         # work on this file that exists as bytes in memory. There's an
@@ -273,3 +278,10 @@ FILE_TYPES = [
         extensions=["zip"],
     ),
 ]
+
+_SUPPORTED_RETRIEVAL_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES if ft.retrieval}
+
+
+def _is_retrieval_supported(content_type: str) -> bool:
+    """Check if the content type is supported for retrieval."""
+    return content_type in _SUPPORTED_RETRIEVAL_TYPE
