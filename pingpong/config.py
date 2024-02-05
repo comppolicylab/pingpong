@@ -9,10 +9,18 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 from .db import PostgresDriver, SqliteDriver
-from .email import AzureEmailSender, GmailEmailSender, SmtpEmailSender
+from .email import AzureEmailSender, GmailEmailSender, MockEmailSender, SmtpEmailSender
 from .support import DiscordSupportDriver
 
 logger = logging.getLogger(__name__)
+
+
+class MockEmailSettings(BaseSettings):
+    type: Literal["mock"]
+
+    @property
+    def sender(self) -> MockEmailSender:
+        return MockEmailSender()
 
 
 class AzureEmailSettings(BaseSettings):
@@ -65,13 +73,15 @@ class SmtpEmailSettings(BaseSettings):
         )
 
 
-EmailSettings = Union[AzureEmailSettings, GmailEmailSettings, SmtpEmailSettings]
+EmailSettings = Union[
+    AzureEmailSettings, GmailEmailSettings, SmtpEmailSettings, MockEmailSettings
+]
 
 
 class SentrySettings(BaseSettings):
     """Sentry settings."""
 
-    dsn: str
+    dsn: str = Field("")
 
 
 class MetricsSettings(BaseSettings):
@@ -180,7 +190,7 @@ class Config(BaseSettings):
     db: DbSettings
     auth: AuthSettings
     email: EmailSettings
-    sentry: SentrySettings
+    sentry: SentrySettings = Field(SentrySettings())
     metrics: MetricsSettings = Field(MetricsSettings())
     init: InitSettings = Field(InitSettings())
     support: SupportSettings = Field(NoSupportSettings(type="none"))
