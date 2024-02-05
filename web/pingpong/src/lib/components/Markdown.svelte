@@ -15,7 +15,7 @@
     });
   };
 
-  const renderMarkdownNode = (node: HTMLElement) => {
+  const renderMarkdownNode = (node: HTMLElement, newContent: string) => {
     renderKatex(node);
 
     return {
@@ -27,6 +27,7 @@
 </script>
 
 <div class="markdown max-w-full" use:renderMarkdownNode={content}>
+  <!-- eslint-disable-next-line svelte/no-at-html-tags -->
   {@html markdown(content)}
 </div>
 

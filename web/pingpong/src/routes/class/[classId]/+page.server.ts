@@ -1,20 +1,26 @@
 import * as api from '$lib/api';
 import { forwardRequest } from '$lib/proxy';
-import { fail } from '@sveltejs/kit';
 import type { Actions } from './$types';
+
+export type NewThreadForm = {
+  message: string;
+  assistant_id: string;
+  file_ids: string;
+  parties: string;
+};
 
 export const actions: Actions = {
   /**
    * Create a new conversation thread.
    */
   newThread: async (event) => {
-    return await forwardRequest((f, d) => {
+    return await forwardRequest<typeof event, NewThreadForm>((f, d) => {
       const message = d['message'];
       if (!message) {
         throw { $status: 400, detail: 'Message is required' };
       }
 
-      const assistantId = parseInt(d['assistant_id'], 10);
+      const assistantId = parseInt(d.assistant_id, 10);
 
       if (!assistantId) {
         throw { $status: 400, detail: 'Assistant is required' };

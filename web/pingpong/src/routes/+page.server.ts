@@ -1,15 +1,21 @@
 import type { Actions } from './$types';
-import { fail } from '@sveltejs/kit';
 import * as api from '$lib/api';
 import { forwardRequest } from '$lib/proxy';
 import { invalid } from '$lib/validate';
+
+export type CreateClassForm = {
+  name: string;
+  term: string;
+  institution: string;
+  newInstitution: string;
+};
 
 export const actions: Actions = {
   /**
    * Create a new class.
    */
   createClass: async (event) => {
-    return await forwardRequest(async (f, d) => {
+    return await forwardRequest<typeof event, CreateClassForm>(async (f, d) => {
       if (!d.name) {
         throw invalid('name', 'Class name is required');
       }

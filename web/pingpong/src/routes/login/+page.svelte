@@ -4,12 +4,10 @@
   import Logo from '$lib/components/Logo.svelte';
   import {
     P,
-    A,
     InputAddon,
     Input,
     Helper,
     GradientButton,
-    Button,
     Heading,
     ButtonGroup
   } from 'flowbite-svelte';

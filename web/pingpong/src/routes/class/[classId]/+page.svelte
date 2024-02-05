@@ -4,10 +4,12 @@
   import { page } from '$app/stores';
   import { enhance } from '$app/forms';
   import ChatInput from '$lib/components/ChatInput.svelte';
-  import { Helper, GradientButton, Dropdown, DropdownItem, Label } from 'flowbite-svelte';
+  import { Helper, GradientButton, Dropdown, DropdownItem } from 'flowbite-svelte';
   import { EyeSlashOutline, ChevronDownSolid } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
+  import type { Assistant, Thread } from '$lib/api';
+  import type { SubmitFunction } from '@sveltejs/kit';
 
   /**
    * Application data.
@@ -23,6 +25,7 @@
 
   // Whether billing is set up for the class (which controls everything).
   $: isConfigured = data?.hasAssistants && data?.hasBilling;
+  $: parties = data.me.user?.id || '';
   // The assistant ID from the URL.
   $: linkedAssistant = parseInt($page.url.searchParams.get('assistant') || '0', 10);
   $: {
@@ -38,34 +41,35 @@
 
   // Handle file upload
   const handleUpload = (f: File, onProgress: (p: number) => void) => {
-    return api.uploadUserFile(data.class.id, data.me.user.id, f, { onProgress });
+    return api.uploadUserFile(data.class.id, data.me.user!.id, f, { onProgress });
   };
 
   // Handle file removal
   const handleRemove = async (fileId: number) => {
-    const result = await api.deleteUserFile(fetch, data.class.id, data.me.user.id, fileId);
-    if (result.$status >= 300) {
+    const result = await api.deleteUserFile(fetch, data.class.id, data.me.user!.id, fileId);
+    if (api.isErrorResponse(result)) {
       sadToast(`Failed to delete file. Error: ${result.detail || 'unknown error'}`);
       throw new Error(result.detail || 'unknown error');
     }
   };
 
   // Handle form submission
-  const handleSubmit = () => {
+  const handleSubmit: SubmitFunction = () => {
     $loading = true;
 
-    return ({ result, update }) => {
+    return ({ result }) => {
       if (result.type === 'success') {
-        goto(`/class/${result.data.thread.class_id}/thread/${result.data.thread.id}`);
+        const data = result.data as { thread: Thread };
+        goto(`/class/${data.thread.class_id}/thread/${data.thread.id}`);
       } else {
         $loading = false;
-        sadToast(`Chat failed! Please try again. Error: ${result.detail || 'unknown'}`);
+        sadToast(`Chat failed! Please try again. Error: ${JSON.stringify(result)}`);
       }
     };
   };
 
   // Set the new assistant selection.
-  const selectAi = (asst) => {
+  const selectAi = (asst: Assistant) => {
     goto(`/class/${data.class.id}/?assistant=${asst.id}`);
     aiSelectOpen = false;
   };
@@ -108,7 +112,7 @@
           remove={handleRemove}
         />
         <input type="hidden" name="assistant_id" bind:value={$assistant.id} />
-        <input type="hidden" name="parties" bind:value={data.me.user.id} />
+        <input type="hidden" name="parties" bind:value={parties} />
       </form>
     {:else}
       <div class="text-center">

@@ -13,6 +13,10 @@ class GenericStatus(BaseModel):
     status: str
 
 
+class MagicLoginRequest(BaseModel):
+    email: str
+
+
 class Profile(BaseModel):
     email: str
     gravatar_id: str

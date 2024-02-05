@@ -57,7 +57,8 @@
     }
 
     // Run upload for every newly added file.
-    const newFiles = toUpload.map((f) => {
+    const newFiles: FileUploadInfo[] = [];
+    toUpload.forEach((f) => {
       if (maxSize && f.size > maxSize) {
         dispatch('error', { file: f, message: `File is too large. Max size is ${maxSize} bytes.` });
         return;
@@ -77,7 +78,6 @@
           if (idx !== -1) {
             $files[idx].response = result;
             $files[idx].state = 'success';
-            $files[idx].id = result.id;
           }
         })
         .catch((error) => {
@@ -88,7 +88,7 @@
           }
         });
 
-      return fp;
+      newFiles.push(fp);
     });
 
     const curFiles = $files;
@@ -186,7 +186,8 @@
 
 <div
   bind:this={dropzone}
-  ondragover={(e) => e.preventDefault()}
+  role="region"
+  on:dragover={(e) => e.preventDefault()}
   class={`${wrapperClass} ${drop ? 'border-dashed border-2 rounded-lg p-4' : ''} ${
     dropzoneActive ? 'bg-gray-200 border-cyan-500' : drop ? 'bg-gray-100 border-gray-300' : ''
   }`}

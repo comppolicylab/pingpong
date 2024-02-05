@@ -2,17 +2,18 @@
   import { page } from '$app/stores';
   import { copy } from 'svelte-copy';
   import { toast } from '@zerodevx/svelte-toast';
-  import { Heading, Label, Button, List, Li } from 'flowbite-svelte';
+  import { Heading, Label, List, Li } from 'flowbite-svelte';
   import { EyeOutline, EyeSlashOutline, LinkOutline } from 'flowbite-svelte-icons';
+  import type { Assistant } from '$lib/api';
 
-  export let assistant;
-  export let creator;
+  export let assistant: Assistant;
+  export let creator: { email: string };
 
   // Get the full URL to use the assistant
   $: assistantLink = `${$page.url.protocol}//${$page.url.host}/class/${assistant.class_id}?assistant=${assistant.id}`;
 
   // Show info that we copied the link to the clipboard
-  const showCopiedLink = (e) => {
+  const showCopiedLink = (e: Event) => {
     e.preventDefault();
     e.stopPropagation();
     toast.push('Copied link to clipboard', {

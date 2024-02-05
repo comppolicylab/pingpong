@@ -1,6 +1,6 @@
 <script>
   import '../app.pcss';
-  import Sidebar from '$lib/components/Sidebar.svelte';
+  import Sidebar from './Sidebar.svelte';
   import Main from '$lib/components/Main.svelte';
   import { SvelteToast } from '@zerodevx/svelte-toast';
 

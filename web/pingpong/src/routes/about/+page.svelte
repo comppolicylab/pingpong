@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Hr, Select, Label, Input, GradientButton, Textarea, Heading, P } from 'flowbite-svelte';
+  import { Select, Label, Input, GradientButton, Textarea, Heading, P } from 'flowbite-svelte';
 
   export let data;
   export let form;
@@ -124,6 +124,7 @@
   <div>
     <Heading tag="h3" class="my-4">How can I get help?</Heading>
     <P>
+      <!-- eslint-disable-next-line svelte/no-at-html-tags -->
       {@html data.supportInfo.blurb}
     </P>
     {#if data.supportInfo.can_post}
@@ -139,7 +140,7 @@
         <div class="mt-6">
           {#if form?.success}
             <P class="text-green-500">Your message has been sent, thanks for the feedback!</P>
-          {:else if form?.error}
+          {:else if form && !form.success}
             <P class="text-red-500"
               >There was an error sending your message, please try again later.</P
             >

@@ -1,12 +1,10 @@
 <script lang="ts">
-  import { error } from '@sveltejs/kit';
+  import type { SubmitFunction } from '@sveltejs/kit';
   import { writable } from 'svelte/store';
   import * as api from '$lib/api';
   import { sadToast } from '$lib/toast';
   import { blur } from 'svelte/transition';
   import { enhance } from '$app/forms';
-  import { browser } from '$app/environment';
-  import { invalidateAll } from '$app/navigation';
   import { Span, Avatar } from 'flowbite-svelte';
   import { Pulse, SyncLoader } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
@@ -17,44 +15,68 @@
   export let data;
 
   let submitting = writable(false);
-  $: thread = data?.thread?.store;
-  $: messages = ($thread?.messages || []).sort((a, b) => a.created_at - b.created_at);
-  $: participants = $thread?.participants || {};
-  $: loading = !$thread && data?.thread?.loading;
-  $: priv = !!$thread?.thread?.private;
-  $: canSubmit = !!participants.user && !!participants.user[data?.me?.user?.id];
-
-  $: classId = $thread?.thread?.class_id;
-
+  let messages: api.OpenAIMessage[] = [];
+  let participants: api.ThreadParticipants = { user: {}, assistant: {} };
+  let priv = false;
+  let classId = 0;
   let waiting = writable(false);
+  $: thread = data?.thread?.store;
+  $: threadStatus = $thread?.$status || 0;
+  $: threadUsers = ($thread as api.ThreadWithMeta)?.thread?.users || [];
   $: {
-    if (!loading && $thread && $thread.run) {
-      waiting.set(!api.finished($thread.run));
+    if ($thread && Object.hasOwn($thread, 'messages')) {
+      const t = $thread as api.ThreadWithMeta;
+      messages = t.messages.sort((a, b) => a.created_at - b.created_at);
+      participants = t.participants;
+      priv = t.thread.private;
+      classId = t.thread.class_id;
+      if (!loading) {
+        waiting.set(!api.finished(t.run));
+      }
+    } else {
+      messages = [];
+      participants = { user: {}, assistant: {} };
+      priv = false;
+      classId = 0;
     }
   }
+  $: loading = !$thread && data?.thread?.loading;
+  $: canSubmit =
+    !!participants.user && data?.me?.user?.id && !!participants.user[data?.me?.user?.id];
 
   // Get the name of the participant in the chat thread.
-  const getName = (message) => {
+  const getName = (message: api.OpenAIMessage) => {
     if (message.role === 'user') {
-      const participant = participants.user[message?.metadata?.user_id];
-      return participant?.name || participant?.email;
+      const userId = message?.metadata?.user_id as number | undefined;
+      if (!userId) {
+        return 'Unknown';
+      }
+      const participant = participants.user[userId];
+      return participant?.email || 'Unknown';
     } else {
-      return participants.assistant[$thread.thread.assistant_id] || 'PingPong Bot';
+      return (
+        participants.assistant[($thread as api.ThreadWithMeta).thread.assistant_id] ||
+        'PingPong Bot'
+      );
     }
   };
 
   // Get the avatar URL of the participant in the chat thread.
-  const getImage = (message) => {
+  const getImage = (message: api.OpenAIMessage) => {
     if (message.role === 'user') {
-      return participants[message?.metadata?.user_id]?.image_url;
+      const userId = message?.metadata?.user_id as number | undefined;
+      if (!userId) {
+        return '';
+      }
+      return participants.user[userId]?.image_url;
     }
-    // TODO - image for the assistant
+    // TODO - custom image for the assistant
 
     return '';
   };
 
   // Scroll to the bottom of the chat thread.
-  const scroll = (el) => {
+  const scroll = (el: HTMLDivElement, messageList: api.OpenAIMessage[]) => {
     // Scroll to the bottom of the element.
     return {
       // TODO - would be good to figure out how to do this without a timeout.
@@ -70,7 +92,7 @@
   };
 
   // Handle sending a message
-  const handleSubmit = () => {
+  const handleSubmit: SubmitFunction = () => {
     if ($waiting) {
       sadToast(
         'A response to the previous message is being generated. Please wait before sending a new message.'
@@ -93,7 +115,7 @@
       $submitting = false;
 
       // Do a blocking refresh if the completion is still running
-      if (!api.finished($thread.run)) {
+      if (!api.finished(($thread as api.ThreadWithMeta).run)) {
         await data.thread.refresh(true);
       }
 
@@ -103,12 +125,12 @@
 
   // Handle file upload
   const handleUpload = (f: File, onProgress: (p: number) => void) => {
-    return api.uploadUserFile(data.class.id, data.me.user.id, f, { onProgress });
+    return api.uploadUserFile(data.class.id, data.me.user!.id, f, { onProgress });
   };
 
   // Handle file removal
   const handleRemove = async (fileId: number) => {
-    const result = await api.deleteUserFile(fetch, data.class.id, data.me.user.id, fileId);
+    const result = await api.deleteUserFile(fetch, data.class.id, data.me.user!.id, fileId);
     if (result.$status >= 300) {
       sadToast(`Failed to delete file. Error: ${result.detail || 'unknown error'}`);
       throw new Error(result.detail || 'unknown error');
@@ -117,7 +139,7 @@
 </script>
 
 <div class="relative py-8 h-full w-full">
-  {#if $thread?.$status >= 400}
+  {#if threadStatus >= 400}
     <div class="absolute top-0 left-0 flex h-full w-full items-center">
       <div class="m-auto">
         <div class="text-center">
@@ -152,7 +174,10 @@
                 <div class="leading-7"><Markdown content={content.text.value} /></div>
               {:else if content.type == 'image_file'}
                 <div class="leading-7">
-                  <img src="/api/v1/class/{classId}/image/{content.image_file.file_id}" />
+                  <img
+                    src="/api/v1/class/{classId}/image/{content.image_file.file_id}"
+                    alt="File icon"
+                  />
                 </div>
               {:else}
                 <div class="leading-7"><pre>{JSON.stringify(content, null, 2)}</pre></div>
@@ -196,9 +221,7 @@
     >
       <EyeSlashOutline size="sm" class="text-gray-400" />
       <Span class="text-gray-400">This thread is private to</Span>
-      <Span class="text-gray-600"
-        >{($thread?.thread?.users || []).map((u) => u.email).join(', ')}</Span
-      >
+      <Span class="text-gray-600">{threadUsers.map((u) => u.email).join(', ')}</Span>
     </div>
   {/if}
 </div>

@@ -2,6 +2,7 @@ import { goto } from '$app/navigation';
 import { redirect } from '@sveltejs/kit';
 import { browser } from '$app/environment';
 import * as api from '$lib/api';
+import type { Class, Institution, Thread } from '$lib/api';
 import type { LayoutLoad } from './$types';
 
 const LOGIN = '/login';
@@ -38,45 +39,30 @@ export const load: LayoutLoad = async ({ fetch, url, params }) => {
   // Fetch class / thread data (needed to render the sidebar)
   // TODO - should move this elsewhere? into shared store?
   const additionalState = {
-    classes: [],
-    threads: [],
-    institutions: []
+    classes: [] as Class[],
+    threads: [] as Thread[],
+    institutions: [] as Institution[]
   };
 
   if (authed) {
-    const promises = new Map<keyof typeof additionalState, Promise<any>>();
+    const classes = api.getMyClasses(fetch).then(({ classes }) => classes);
+    let threads: Promise<Thread[]> = Promise.resolve([]);
+    let institutions: Promise<Institution[]> = Promise.resolve([]);
 
-    promises.set(
-      'classes',
-      api.getMyClasses(fetch).then(({ classes }) => classes)
-    );
     const classId = params.classId ? parseInt(params.classId, 10) : null;
+
     if (classId) {
-      promises.set(
-        'threads',
-        api.getClassThreads(fetch, classId).then(({ threads }) => threads)
-      );
-    } else {
-      promises.set('threads', Promise.resolve([]));
+      threads = api.getClassThreads(fetch, classId).then(({ threads }) => threads);
     }
 
-    if (me.user.super_admin) {
-      promises.set(
-        'institutions',
-        api.getInstitutions(fetch).then(({ institutions }) => institutions)
-      );
-    } else {
-      promises.set('institutions', Promise.resolve([]));
+    if (me.user?.super_admin) {
+      institutions = api.getInstitutions(fetch).then(({ institutions }) => institutions);
     }
 
-    const entries = Array.from(promises.entries());
-    const keys = entries.map(([key]) => key);
-    const values = entries.map(([, value]) => value);
-    const results = await Promise.all(values);
-
-    for (let i = 0; i < keys.length; i++) {
-      additionalState[keys[i]] = results[i];
-    }
+    // After all requests have fired / returned, set the state.
+    additionalState.classes = await classes;
+    additionalState.threads = await threads;
+    additionalState.institutions = await institutions;
   }
 
   return {

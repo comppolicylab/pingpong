@@ -6,5 +6,6 @@
 </script>
 
 <div class="w-{size} {extraClass}">
+  <!-- eslint-disable-next-line svelte/no-at-html-tags -->
   {@html logo}
 </div>

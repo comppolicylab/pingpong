@@ -3,8 +3,8 @@
   import * as api from '$lib/api';
   import { Select, Helper, Button, GradientButton, Label, Textarea, Hr } from 'flowbite-svelte';
 
-  export let role;
-  export let title;
+  export let role: string;
+  export let title: string;
 
   const dispatch = createEventDispatcher();
 

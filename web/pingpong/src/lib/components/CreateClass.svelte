@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { Select, GradientButton, Textarea, Label, Input, Heading } from 'flowbite-svelte';
+  import { Select, GradientButton, Label, Input, Heading } from 'flowbite-svelte';
   import { enhance } from '$app/forms';
   import { createEventDispatcher } from 'svelte';
+  import type { Institution } from '$lib/api';
 
-  export let institutions = [];
+  export let institutions: Institution[] = [];
 
   const dispatch = createEventDispatcher();
 
@@ -39,7 +40,7 @@
   </div>
   <div class="flex items-center">
     <GradientButton color="cyanToBlue" type="submit">Create</GradientButton>
-    <GradientButton color="grayToGray" type="reset" on:click={done} on:touchstart={done}
+    <GradientButton color="pinkToOrange" type="reset" on:click={done} on:touchstart={done}
       >Close</GradientButton
     >
   </div>
