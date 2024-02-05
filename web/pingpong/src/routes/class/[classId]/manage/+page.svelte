@@ -3,7 +3,6 @@
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
   import { page } from '$app/stores';
-  import { enhance } from '$app/forms';
   import { beforeNavigate } from '$app/navigation';
   import * as api from '$lib/api';
   import type { FileUploadInfo, Assistant, ServerFile, ClassUser } from '$lib/api';
@@ -30,7 +29,6 @@
   import { PenOutline, CloudArrowUpOutline } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
-  import type { SubmitFunction } from '@sveltejs/kit';
 
   /**
    * Application data.
@@ -453,7 +451,12 @@
         {#each assistants as assistant}
           {#if assistant.id == editingAssistant}
             <Card class="w-full max-w-full">
-              <form class="grid grid-cols-2 gap-2" action="?/updateAssistant" method="POST" on:submit={() => savingAssistant = true}>
+              <form
+                class="grid grid-cols-2 gap-2"
+                action="?/updateAssistant"
+                method="POST"
+                on:submit={() => (savingAssistant = true)}
+              >
                 <ManageAssistant
                   files={asstFiles}
                   {assistant}
@@ -476,7 +479,12 @@
         {#if !editingAssistant && canCreateAssistant}
           <Card class="w-full max-w-full">
             <Heading tag="h4" class="pb-3">Add new AI assistant</Heading>
-            <form class="grid grid-cols-2 gap-2" action="?/createAssistant" method="POST" on:submit={() => savingAssistant = true}>
+            <form
+              class="grid grid-cols-2 gap-2"
+              action="?/createAssistant"
+              method="POST"
+              on:submit={() => (savingAssistant = true)}
+            >
               <ManageAssistant
                 files={asstFiles}
                 {models}
