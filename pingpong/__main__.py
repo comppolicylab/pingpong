@@ -3,6 +3,10 @@ import webbrowser
 
 import click
 
+import alembic
+import alembic.command
+import alembic.config
+
 from .auth import encode_auth_token
 from .config import config
 from .models import Base, User
@@ -58,6 +62,18 @@ def db_init(clean) -> None:
         await config.db.driver.init(Base, drop_first=drop_first)
 
     asyncio.run(init_db(drop_first=clean))
+
+
+@db.command("migrate")
+@click.argument("revision", default="head")
+@click.option("--alembic-config", default="alembic.ini")
+def db_migrate(revision: str, alembic_config: str) -> None:
+    # Load the Alembic config from `alembic.ini`
+    al_cfg = alembic.config.Config(alembic_config)
+    # Use the Alembic config from `alembic.ini` but override the URL for the db
+    al_cfg.set_main_option("sqlalchemy.url", config.db.driver.sync_uri)
+    # Run the Alembic upgrade command
+    alembic.command.upgrade(al_cfg, revision)
 
 
 if __name__ == "__main__":
