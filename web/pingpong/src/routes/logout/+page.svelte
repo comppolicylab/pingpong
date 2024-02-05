@@ -1,3 +1,1 @@
-<div>
-  Logging you out ...
-</div>
+<div>Logging you out ...</div>

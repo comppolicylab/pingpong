@@ -11,4 +11,4 @@ export const humanSize = (size: number, precision: number = 0): string => {
   }
 
   return size.toFixed(precision) + ' ' + units[unit];
-}
+};

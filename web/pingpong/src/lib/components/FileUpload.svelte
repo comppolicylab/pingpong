@@ -1,9 +1,9 @@
 <script lang="ts">
-  import {PaperClipOutline} from 'flowbite-svelte-icons';
-  import {createEventDispatcher} from "svelte";
-  import {writable} from "svelte/store";
-  import {Button} from "flowbite-svelte";
-  import type {FileUploader, FileUploadInfo} from "$lib/api";
+  import { PaperClipOutline } from 'flowbite-svelte-icons';
+  import { createEventDispatcher } from 'svelte';
+  import { writable } from 'svelte/store';
+  import { Button } from 'flowbite-svelte';
+  import type { FileUploader, FileUploadInfo } from '$lib/api';
 
   /**
    * Whether to allow uploading.
@@ -18,12 +18,12 @@
   /**
    * Additional classes to apply to wrapper.
    */
-  export let wrapperClass: string = "";
+  export let wrapperClass: string = '';
 
   /**
    * File types to accept.
    */
-  export let accept = "*/*";
+  export let accept = '*/*';
 
   /**
    * Max upload size in bytes.
@@ -57,41 +57,43 @@
     }
 
     // Run upload for every newly added file.
-    const newFiles = toUpload.map(f => {
+    const newFiles = toUpload.map((f) => {
       if (maxSize && f.size > maxSize) {
-        dispatch("error", {file: f, message: `File is too large. Max size is ${maxSize} bytes.`});
+        dispatch('error', { file: f, message: `File is too large. Max size is ${maxSize} bytes.` });
         return;
       }
 
       const fp = upload(f, (progress) => {
-        const idx = $files.findIndex(file => file.file === f);
+        const idx = $files.findIndex((file) => file.file === f);
         if (idx !== -1) {
           $files[idx].progress = progress;
         }
       });
 
       // Update the file list when the upload is complete.
-      fp.promise.then((result) => {
-        const idx = $files.findIndex(file => file.file === f);
-        if (idx !== -1) {
-          $files[idx].response = result;
-          $files[idx].state = "success";
-          $files[idx].id = result.id;
-        }
-      }).catch((error) => {
-        const idx = $files.findIndex(file => file.file === f);
-        if (idx !== -1) {
-          $files[idx].response = error;
-          $files[idx].state = "error";
-        }
-      });
+      fp.promise
+        .then((result) => {
+          const idx = $files.findIndex((file) => file.file === f);
+          if (idx !== -1) {
+            $files[idx].response = result;
+            $files[idx].state = 'success';
+            $files[idx].id = result.id;
+          }
+        })
+        .catch((error) => {
+          const idx = $files.findIndex((file) => file.file === f);
+          if (idx !== -1) {
+            $files[idx].response = error;
+            $files[idx].state = 'error';
+          }
+        });
 
       return fp;
     });
 
     const curFiles = $files;
     $files = [...curFiles, ...newFiles];
-    dispatch("change", files);
+    dispatch('change', files);
   };
 
   // Make sure the input resets when the form submits.
@@ -101,13 +103,13 @@
       // Clear the file list after the form is reset or submitted.
       setTimeout(() => {
         $files = [];
-        dispatch("change", files);
+        dispatch('change', files);
       }, 0);
     };
     const form = el.form;
     if (form) {
-      form.addEventListener("reset", reset);
-      form.addEventListener("submit", reset);
+      form.addEventListener('reset', reset);
+      form.addEventListener('submit', reset);
     }
 
     return {
@@ -115,9 +117,9 @@
         if (!form) {
           return;
         }
-        form.removeEventListener("reset", reset);
-        form.removeEventListener("submit", reset);
-      },
+        form.removeEventListener('reset', reset);
+        form.removeEventListener('submit', reset);
+      }
     };
   };
 
@@ -185,33 +187,37 @@
 <div
   bind:this={dropzone}
   ondragover={(e) => e.preventDefault()}
-  class={`${wrapperClass} ${drop ? "border-dashed border-2 rounded-lg p-4" : ""} ${dropzoneActive ? "bg-gray-200 border-cyan-500" : drop ? "bg-gray-100 border-gray-300" : ""}`}
+  class={`${wrapperClass} ${drop ? 'border-dashed border-2 rounded-lg p-4' : ''} ${
+    dropzoneActive ? 'bg-gray-200 border-cyan-500' : drop ? 'bg-gray-100 border-gray-300' : ''
+  }`}
   on:drop={dropHandler}
   on:dragenter={dropenterHandler}
   on:dragleave={dropleaveHandler}
-  >
-<label class="flex items-center justify-center cursor-pointer">
-  <input
-    type="file"
-    multiple
-    accept={accept}
-    style="display: none;"
-    bind:this={uploadRef}
-    on:change={handleFileInputChange}
-    use:bindToForm
+>
+  <label class="flex items-center justify-center cursor-pointer">
+    <input
+      type="file"
+      multiple
+      {accept}
+      style="display: none;"
+      bind:this={uploadRef}
+      on:change={handleFileInputChange}
+      use:bindToForm
     />
-  <Button
-    outline={!drop}
-    type="button"
-    color={drop ? "alternative" : "blue"}
-    disabled={disabled}
-    class={`p-2 w-8 h-8 rounded-full ${drop ? "bg-transparent border-transparent" : ""} ${dropzoneActive ? "animate-bounce" : ""}`}
-    on:click={() => uploadRef.click()}
+    <Button
+      outline={!drop}
+      type="button"
+      color={drop ? 'alternative' : 'blue'}
+      {disabled}
+      class={`p-2 w-8 h-8 rounded-full ${drop ? 'bg-transparent border-transparent' : ''} ${
+        dropzoneActive ? 'animate-bounce' : ''
+      }`}
+      on:click={() => uploadRef.click()}
     >
-    <slot name="icon">
-      <PaperClipOutline size="sm" />
-    </slot>
-  </Button>
-  <slot name="label"></slot>
-</label>
+      <slot name="icon">
+        <PaperClipOutline size="sm" />
+      </slot>
+    </Button>
+    <slot name="label" />
+  </label>
 </div>

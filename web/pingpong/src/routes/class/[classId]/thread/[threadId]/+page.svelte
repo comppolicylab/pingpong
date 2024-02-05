@@ -1,20 +1,18 @@
 <script lang="ts">
-  import {error} from "@sveltejs/kit";
-  import {writable} from "svelte/store";
+  import { error } from '@sveltejs/kit';
+  import { writable } from 'svelte/store';
   import * as api from '$lib/api';
-  import {sadToast} from "$lib/toast";
+  import { sadToast } from '$lib/toast';
   import { blur } from 'svelte/transition';
-  import { enhance } from "$app/forms";
-  import {browser} from '$app/environment';
-  import {invalidateAll} from '$app/navigation';
-  import {Span, Avatar } from "flowbite-svelte";
+  import { enhance } from '$app/forms';
+  import { browser } from '$app/environment';
+  import { invalidateAll } from '$app/navigation';
+  import { Span, Avatar } from 'flowbite-svelte';
   import { Pulse, SyncLoader } from 'svelte-loading-spinners';
-  import Markdown from "$lib/components/Markdown.svelte";
+  import Markdown from '$lib/components/Markdown.svelte';
   import Logo from '$lib/components/Logo.svelte';
-  import ChatInput from "$lib/components/ChatInput.svelte";
-  import {
-    EyeSlashOutline,
-  } from 'flowbite-svelte-icons';
+  import ChatInput from '$lib/components/ChatInput.svelte';
+  import { EyeSlashOutline } from 'flowbite-svelte-icons';
 
   export let data;
 
@@ -37,23 +35,23 @@
 
   // Get the name of the participant in the chat thread.
   const getName = (message) => {
-    if (message.role === "user") {
+    if (message.role === 'user') {
       const participant = participants.user[message?.metadata?.user_id];
       return participant?.name || participant?.email;
     } else {
-      return participants.assistant[$thread.thread.assistant_id] || "PingPong Bot";
+      return participants.assistant[$thread.thread.assistant_id] || 'PingPong Bot';
     }
-  }
+  };
 
   // Get the avatar URL of the participant in the chat thread.
   const getImage = (message) => {
-    if (message.role === "user") {
+    if (message.role === 'user') {
       return participants[message?.metadata?.user_id]?.image_url;
     }
     // TODO - image for the assistant
 
-    return "";
-  }
+    return '';
+  };
 
   // Scroll to the bottom of the chat thread.
   const scroll = (el) => {
@@ -68,20 +66,22 @@
           });
         }, 250);
       }
-    }
-  }
+    };
+  };
 
   // Handle sending a message
   const handleSubmit = () => {
     if ($waiting) {
-      sadToast("A response to the previous message is being generated. Please wait before sending a new message.");
+      sadToast(
+        'A response to the previous message is being generated. Please wait before sending a new message.'
+      );
       return;
     }
     $submitting = true;
 
-    return async ({result, update}) => {
-      if (result.type !== "success") {
-        sadToast("Chat failed! Please try again.");
+    return async ({ result, update }) => {
+      if (result.type !== 'success') {
+        sadToast('Chat failed! Please try again.');
         return;
       }
 
@@ -103,17 +103,17 @@
 
   // Handle file upload
   const handleUpload = (f: File, onProgress: (p: number) => void) => {
-    return api.uploadUserFile(data.class.id, data.me.user.id, f, {onProgress});
-  }
+    return api.uploadUserFile(data.class.id, data.me.user.id, f, { onProgress });
+  };
 
   // Handle file removal
   const handleRemove = async (fileId: number) => {
     const result = await api.deleteUserFile(fetch, data.class.id, data.me.user.id, fileId);
     if (result.$status >= 300) {
-      sadToast(`Failed to delete file. Error: ${result.detail || "unknown error"}`);
-      throw new Error(result.detail || "unknown error");
+      sadToast(`Failed to delete file. Error: ${result.detail || 'unknown error'}`);
+      throw new Error(result.detail || 'unknown error');
     }
-  }
+  };
 </script>
 
 <div class="relative py-8 h-full w-full">
@@ -122,71 +122,84 @@
       <div class="m-auto">
         <div class="text-center">
           <div class="text-2xl font-bold text-gray-600">Error loading thread.</div>
-          <div class="text-gray-400">{$thread?.detail || "An unknown error occurred."}</div>
+          <div class="text-gray-400">{$thread?.detail || 'An unknown error occurred.'}</div>
         </div>
       </div>
     </div>
   {/if}
   {#if loading}
     <div class="absolute top-0 left-0 flex h-full w-full items-center">
-      <div class="m-auto" transition:blur={{amount: 10}}>
+      <div class="m-auto" transition:blur={{ amount: 10 }}>
         <Pulse color="#d97706" />
       </div>
     </div>
   {/if}
   <div class="w-full h-full flex flex-col justify-between">
-  <div class="overflow-y-auto pb-4 px-12" use:scroll={messages}>
-    {#each messages as message}
-      <div class="py-4 px-6 flex gap-x-3">
-        <div>
-          {#if message.role === "user"}
-            <Avatar size="sm" src={getImage(message)} />
-          {:else}
-            <Logo size="8" />
-          {/if}
-        </div>
-        <div class="max-w-full">
-          <div class="font-bold text-gray-400">{getName(message)}</div>
-          {#each message.content as content}
-            {#if content.type == "text"}
-              <div class="leading-7"><Markdown content="{content.text.value}" /></div>
-            {:else if content.type == "image_file"}
-              <div class="leading-7"><img src="/api/v1/class/{classId}/image/{content.image_file.file_id}" /></div>
+    <div class="overflow-y-auto pb-4 px-12" use:scroll={messages}>
+      {#each messages as message}
+        <div class="py-4 px-6 flex gap-x-3">
+          <div>
+            {#if message.role === 'user'}
+              <Avatar size="sm" src={getImage(message)} />
             {:else}
-              <div class="leading-7"><pre>{JSON.stringify(content, null, 2)}</pre></div>
+              <Logo size={8} />
             {/if}
-          {/each}
+          </div>
+          <div class="max-w-full">
+            <div class="font-bold text-gray-400">{getName(message)}</div>
+            {#each message.content as content}
+              {#if content.type == 'text'}
+                <div class="leading-7"><Markdown content={content.text.value} /></div>
+              {:else if content.type == 'image_file'}
+                <div class="leading-7">
+                  <img src="/api/v1/class/{classId}/image/{content.image_file.file_id}" />
+                </div>
+              {:else}
+                <div class="leading-7"><pre>{JSON.stringify(content, null, 2)}</pre></div>
+              {/if}
+            {/each}
+          </div>
         </div>
+      {/each}
+      {#if $waiting}
+        <div class="w-full flex justify-center" transition:blur={{ amount: 10 }}>
+          <SyncLoader color="#d97706" size="40" />
+        </div>
+      {/if}
+    </div>
+
+    {#if !loading}
+      <div class="w-full bottom-8 bg-gradient-to-t from-white to-transparent">
+        <form
+          class="w-11/12 mx-auto"
+          action="?/newMessage"
+          method="POST"
+          use:enhance={handleSubmit}
+        >
+          <ChatInput
+            mimeType={data.uploadInfo.mimeType}
+            maxSize={data.uploadInfo.private_file_max_size}
+            accept={data.uploadInfo.acceptString}
+            disabled={!canSubmit}
+            loading={$submitting || $waiting}
+            upload={handleUpload}
+            remove={handleRemove}
+          />
+        </form>
       </div>
-    {/each}
-  {#if $waiting}
-    <div class="w-full flex justify-center" transition:blur={{amount: 10}}><SyncLoader color="#d97706" size="40" /></div>
-
-   {/if}
-  </div>
-
-  {#if !loading}
-  <div class="w-full bottom-8 bg-gradient-to-t from-white to-transparent">
-    <form class="w-11/12 mx-auto" action="?/newMessage" method="POST" use:enhance={handleSubmit}>
-      <ChatInput
-        mimeType={data.uploadInfo.mimeType}
-        maxSize={data.uploadInfo.private_file_max_size}
-        accept={data.uploadInfo.acceptString}
-        disabled={!canSubmit}
-        loading={$submitting || $waiting}
-        upload={handleUpload}
-        remove={handleRemove} />
-    </form>
-  </div>
-  {/if}
+    {/if}
   </div>
 
   {#if priv}
-  <div class="absolute top-0 left-0 flex gap-2 px-4 py-2 items-center w-full bg-amber-200 text-sm">
-    <EyeSlashOutline size="sm" class="text-gray-400" />
-    <Span class="text-gray-400">This thread is private to</Span>
-    <Span class="text-gray-600">{($thread?.thread?.users || []).map(u => u.email).join(", ")}</Span>
-  </div>
+    <div
+      class="absolute top-0 left-0 flex gap-2 px-4 py-2 items-center w-full bg-amber-200 text-sm"
+    >
+      <EyeSlashOutline size="sm" class="text-gray-400" />
+      <Span class="text-gray-400">This thread is private to</Span>
+      <Span class="text-gray-600"
+        >{($thread?.thread?.users || []).map((u) => u.email).join(', ')}</Span
+      >
+    </div>
   {/if}
 </div>
 

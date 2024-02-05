@@ -1,13 +1,13 @@
 <script lang="ts">
-  import {writable} from "svelte/store";
-  import { goto } from "$app/navigation";
-  import { page } from "$app/stores";
-  import { enhance } from "$app/forms";
-  import ChatInput from "$lib/components/ChatInput.svelte";
-  import {Helper, GradientButton, Dropdown, DropdownItem, Label} from 'flowbite-svelte';
+  import { writable } from 'svelte/store';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
+  import { enhance } from '$app/forms';
+  import ChatInput from '$lib/components/ChatInput.svelte';
+  import { Helper, GradientButton, Dropdown, DropdownItem, Label } from 'flowbite-svelte';
   import { EyeSlashOutline, ChevronDownSolid } from 'flowbite-svelte-icons';
-  import {sadToast} from "$lib/toast";
-  import * as api from "$lib/api";
+  import { sadToast } from '$lib/toast';
+  import * as api from '$lib/api';
 
   /**
    * Application data.
@@ -27,7 +27,9 @@
   $: linkedAssistant = parseInt($page.url.searchParams.get('assistant') || '0', 10);
   $: {
     if (linkedAssistant && data?.assistants) {
-      const selectedAssistant = (data?.assistants || []).find((asst) => asst.id === linkedAssistant);
+      const selectedAssistant = (data?.assistants || []).find(
+        (asst) => asst.id === linkedAssistant
+      );
       if (selectedAssistant) {
         $assistant = selectedAssistant;
       }
@@ -36,28 +38,28 @@
 
   // Handle file upload
   const handleUpload = (f: File, onProgress: (p: number) => void) => {
-    return api.uploadUserFile(data.class.id, data.me.user.id, f, {onProgress});
-  }
+    return api.uploadUserFile(data.class.id, data.me.user.id, f, { onProgress });
+  };
 
   // Handle file removal
   const handleRemove = async (fileId: number) => {
     const result = await api.deleteUserFile(fetch, data.class.id, data.me.user.id, fileId);
     if (result.$status >= 300) {
-      sadToast(`Failed to delete file. Error: ${result.detail || "unknown error"}`);
-      throw new Error(result.detail || "unknown error");
+      sadToast(`Failed to delete file. Error: ${result.detail || 'unknown error'}`);
+      throw new Error(result.detail || 'unknown error');
     }
-  }
+  };
 
   // Handle form submission
   const handleSubmit = () => {
     $loading = true;
 
-    return ({result, update}) => {
-      if (result.type === "success") {
+    return ({ result, update }) => {
+      if (result.type === 'success') {
         goto(`/class/${result.data.thread.class_id}/thread/${result.data.thread.id}`);
       } else {
         $loading = false;
-        sadToast(`Chat failed! Please try again. Error: ${result.detail || "unknown"}`);
+        sadToast(`Chat failed! Please try again. Error: ${result.detail || 'unknown'}`);
       }
     };
   };
@@ -78,12 +80,17 @@
   <div class="m-auto w-10/12">
     {#if isConfigured}
       <div class="text-center my-2 w-full">
-        <GradientButton color="tealToLime" on:click={() => openDropdown()} on:touchstart={() => openDropdown()}>{$assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></GradientButton>
-          <Dropdown bind:open={aiSelectOpen}>
+        <GradientButton
+          color="tealToLime"
+          on:click={() => openDropdown()}
+          on:touchstart={() => openDropdown()}
+          >{$assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></GradientButton
+        >
+        <Dropdown bind:open={aiSelectOpen}>
           {#each data.assistants as asst}
             <DropdownItem on:click={() => selectAi(asst)} on:touchstart={() => selectAi(asst)}>
               {#if !asst.published}
-              <EyeSlashOutline size="sm" class="inline-block mr-2 text-gray-400" />
+                <EyeSlashOutline size="sm" class="inline-block mr-2 text-gray-400" />
               {/if}
               {asst.name}
               <Helper class="text-xs">{data.assistantCreators[asst.creator_id].email}</Helper>
@@ -98,12 +105,13 @@
           accept={data.uploadInfo.acceptString}
           loading={$loading}
           upload={handleUpload}
-          remove={handleRemove} />
+          remove={handleRemove}
+        />
         <input type="hidden" name="assistant_id" bind:value={$assistant.id} />
         <input type="hidden" name="parties" bind:value={data.me.user.id} />
       </form>
     {:else}
-        <div class="text-center">
+      <div class="text-center">
         {#if !data.hasAssistants}
           <h1 class="text-2xl font-bold">No assistants configured.</h1>
         {:else if !data.hasBilling}
@@ -111,7 +119,7 @@
         {:else}
           <h1 class="text-2xl font-bold">Class is not configured.</h1>
         {/if}
-        </div>
+      </div>
     {/if}
   </div>
 </div>

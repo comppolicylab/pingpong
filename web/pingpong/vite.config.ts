@@ -1,23 +1,26 @@
-import { sentrySvelteKit } from "@sentry/sveltekit";
+import { sentrySvelteKit } from '@sentry/sveltekit';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
-	plugins: [sentrySvelteKit({
+  plugins: [
+    sentrySvelteKit({
       sourceMapsUploadOptions: {
-        org: "stanford-cpl",
-        project: "javascript-sveltekit"
+        org: 'stanford-cpl',
+        project: 'javascript-sveltekit'
       }
-    }), sveltekit()],
-	test: {
-		include: ['src/**/*.{test,spec}.{js,ts}']
-	},
+    }),
+    sveltekit()
+  ],
+  test: {
+    include: ['src/**/*.{test,spec}.{js,ts}']
+  },
   server: {
     proxy: {
-      "/api": {
-        target: "http://localhost:8000",
-        secure: false,
-      },
-    },
-  },
+      '/api': {
+        target: 'http://localhost:8000',
+        secure: false
+      }
+    }
+  }
 });

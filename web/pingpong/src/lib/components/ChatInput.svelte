@@ -1,12 +1,12 @@
 <script lang="ts">
-  import {writable} from "svelte/store";
-  import {ButtonGroup, Textarea, GradientButton} from "flowbite-svelte";
-  import {page} from "$app/stores";
-  import {ChevronUpSolid} from 'flowbite-svelte-icons';
-  import type {FileRemover, FileUploader, FileUploadInfo} from "$lib/api";
-  import FilePlaceholder from "$lib/components/FilePlaceholder.svelte";
-  import FileUpload from "$lib/components/FileUpload.svelte";
-  import {sadToast} from "$lib/toast";
+  import { writable } from 'svelte/store';
+  import { ButtonGroup, Textarea, GradientButton } from 'flowbite-svelte';
+  import { page } from '$app/stores';
+  import { ChevronUpSolid } from 'flowbite-svelte-icons';
+  import type { FileRemover, FileUploader, FileUploadInfo } from '$lib/api';
+  import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
+  import FileUpload from '$lib/components/FileUpload.svelte';
+  import { sadToast } from '$lib/toast';
 
   /**
    * Whether to allow sending.
@@ -32,12 +32,12 @@
   /**
    * Files to accept.
    */
-  export let accept: string;
+  export let accept: string = '*/*';
 
   /**
    * Max upload size.
    */
-  export let maxSize: string;
+  export let maxSize: number = 0;
 
   /**
    * Mime type lookup function.
@@ -51,8 +51,11 @@
 
   // The list of files being uploaded.
   let files = writable<FileUploadInfo[]>([]);
-  $: uploading = $files.some(f => f.state === "pending");
-  $: fileIds = $files.filter(f => f.state === "success").map(f => f.response.file_id).join(",");
+  $: uploading = $files.some((f) => f.state === 'pending');
+  $: fileIds = $files
+    .filter((f) => f.state === 'success')
+    .map((f) => f.response.file_id)
+    .join(',');
 
   // Fix the height of the textarea to match the content.
   // The technique is to render an off-screen textarea with a scrollheight,
@@ -63,7 +66,7 @@
     if (!ref) {
       return;
     }
-    ref.style.visibility = "hidden";
+    ref.style.visibility = 'hidden';
     ref.style.paddingRight = el.style.paddingRight;
     ref.style.paddingLeft = el.style.paddingLeft;
     ref.style.width = `${el.clientWidth}px`;
@@ -78,17 +81,17 @@
   // native DOM elements, we need to wrap the textarea in a div and then
   // access its child to imperatively focus it.
   const init = (el) => {
-    document.getElementById("message").focus();
+    document.getElementById('message').focus();
     return {
       update: () => {
-        document.getElementById("message").focus();
-      },
+        document.getElementById('message').focus();
+      }
     };
   };
 
   // Submit form when Enter (but not Shift+Enter) is pressed in textarea
   const maybeSubmit = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (!disabled) {
         e.target.form.requestSubmit();
@@ -99,10 +102,10 @@
   // Fix the height of the container when the file list changes.
   const fixFileListHeight = () => {
     const update = () => {
-      const el = document.getElementById("message");
+      const el = document.getElementById('message');
       fixHeight(el);
     };
-    return {update};
+    return { update };
   };
 
   // Handle updates from the file upload component.
@@ -113,39 +116,41 @@
   // Remove a file from the list / the server.
   const removeFile = (evt) => {
     const file = evt.detail;
-    if (file.state === "pending" || file.state === "deleting") {
+    if (file.state === 'pending' || file.state === 'deleting') {
       return;
-    } else if (file.state === "error") {
+    } else if (file.state === 'error') {
       files.update((f) => f.filter((x) => x !== file));
     } else {
       files.update((f) => {
         const idx = f.indexOf(file);
         if (idx >= 0) {
-          f[idx].state = "deleting";
+          f[idx].state = 'deleting';
         }
         return f;
       });
-      remove(file.response.id).then(() => {
-        files.update((f) => f.filter((x) => x !== file));
-      }).catch(() => { /* no-op */});
+      remove(file.response.id)
+        .then(() => {
+          files.update((f) => f.filter((x) => x !== file));
+        })
+        .catch(() => {
+          /* no-op */
+        });
     }
   };
 </script>
 
 <div
   use:init={$page.params.threadId}
-  class="w-full relative rounded-lg border-[1px] border-solid border-cyan-500">
+  class="w-full relative rounded-lg border-[1px] border-solid border-cyan-500"
+>
   <input type="hidden" name="file_ids" bind:value={fileIds} />
   <div
     class="z-10 absolute top-0 p-2 flex gap-2"
     use:fixFileListHeight={$files}
     bind:this={fileListRef}
-    >
+  >
     {#each $files as file}
-      <FilePlaceholder
-        mimeType={mimeType}
-        info={file}
-        on:delete={removeFile} />
+      <FilePlaceholder {mimeType} info={file} on:delete={removeFile} />
     {/each}
   </div>
   <div class="relative top-[2px]">
@@ -159,28 +164,30 @@
       class:animate-pulse={loading}
       disabled={loading || disabled}
       on:keydown={maybeSubmit}
-      on:input={e => fixHeight(e.target)}
+      on:input={(e) => fixHeight(e.target)}
       style={`height: 48px; max-height: ${maxHeight}px; padding-right: 3rem; padding-left: 3.5rem; font-size: 1rem; line-height: 1.5rem;`}
-      />
+    />
     <textarea
       bind:this={ref}
       style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
-      />
+    />
     <FileUpload
-      maxSize={maxSize}
-      accept={accept}
+      {maxSize}
+      {accept}
       wrapperClass="absolute bottom-3 left-2.5"
       disabled={loading || disabled || !upload}
       upload={upload || (() => {})}
-      on:error={e => sadToast(e.detail.message)}
+      on:error={(e) => sadToast(e.detail.message)}
       on:change={handleFilesChange}
-      />
+    />
     <GradientButton
       type="submit"
       color="cyanToBlue"
-      class={`${loading ? "animate-pulse cursor-progress" : ""} w-8 h-8 p-2 absolute bottom-3 right-2.5`}
+      class={`${
+        loading ? 'animate-pulse cursor-progress' : ''
+      } w-8 h-8 p-2 absolute bottom-3 right-2.5`}
       disabled={uploading || loading || disabled}
-      >
+    >
       <ChevronUpSolid size="xs" />
     </GradientButton>
   </div>

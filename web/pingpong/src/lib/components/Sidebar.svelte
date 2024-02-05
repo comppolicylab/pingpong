@@ -1,5 +1,5 @@
 <script lang="ts">
-  import {page} from '$app/stores';
+  import { page } from '$app/stores';
   import {
     CogOutline,
     BookOutline,
@@ -8,30 +8,39 @@
     UserSettingsOutline,
     QuestionCircleOutline,
     ArrowRightFromBracketSolid,
-    EyeSlashOutline,
+    EyeSlashOutline
   } from 'flowbite-svelte-icons';
 
   import {
     Li,
-    Dropdown, DropdownItem, DropdownDivider,
+    Dropdown,
+    DropdownItem,
+    DropdownDivider,
     Avatar,
-    Breadcrumb, BreadcrumbItem,
-    Sidebar, SidebarBrand, SidebarWrapper, SidebarItem, SidebarGroup,
-    SidebarDropdownWrapper, SidebarDropdownItem,
-    Heading, NavBrand,
+    Breadcrumb,
+    BreadcrumbItem,
+    Sidebar,
+    SidebarBrand,
+    SidebarWrapper,
+    SidebarItem,
+    SidebarGroup,
+    SidebarDropdownWrapper,
+    SidebarDropdownItem,
+    Heading,
+    NavBrand
   } from 'flowbite-svelte';
-  import Logo from "$lib/components/Logo.svelte";
-  import dayjs from "$lib/time";
+  import Logo from '$lib/components/Logo.svelte';
+  import dayjs from '$lib/time';
 
   export let data;
 
   $: avatar = data?.me?.profile?.image_url;
   $: name = data?.me?.user?.name || data?.me?.user?.email;
   $: classes = data?.classes || [];
-  $: threads = (data?.threads || []).sort((a, b) => a.created > b.created ? -1 : 1);
+  $: threads = (data?.threads || []).sort((a, b) => (a.created > b.created ? -1 : 1));
   $: currentClassId = parseInt($page.params.classId, 10);
   $: currentThreadId = parseInt($page.params.threadId, 10);
-  $: currentClass = classes.find(class_ => class_.id === currentClassId);
+  $: currentClass = classes.find((class_) => class_.id === currentClassId);
   $: canManageClass = !!currentClass && data?.me?.user?.super_admin;
 </script>
 
@@ -45,57 +54,69 @@
     </SidebarGroup>
 
     {#if currentClassId}
-    <SidebarGroup>
-      <Breadcrumb class="pr-2 w-full" olClass="w-full">
-        <BreadcrumbItem spanClass="ms-1 text-sm font-medium text-gray-500 md:ms-2 dark:text-gray-400 flex items-center justify-between w-full" class="inline-flex items-center w-full">
-          <svelte:fragment slot="icon">
-            <BookOutline class="text-gray-400" size="sm" />
-          </svelte:fragment>
-          <a href={`/class/${currentClassId}`}>{currentClass.name}</a>
-          <a href={`/class/${currentClassId}/manage`}>
-            <CogOutline size="sm" />
-          </a>
-        </BreadcrumbItem>
-      </Breadcrumb>
-    </SidebarGroup>
+      <SidebarGroup>
+        <Breadcrumb class="pr-2 w-full" olClass="w-full">
+          <BreadcrumbItem
+            spanClass="ms-1 text-sm font-medium text-gray-500 md:ms-2 dark:text-gray-400 flex items-center justify-between w-full"
+            class="inline-flex items-center w-full"
+          >
+            <svelte:fragment slot="icon">
+              <BookOutline class="text-gray-400" size="sm" />
+            </svelte:fragment>
+            <a href={`/class/${currentClassId}`}>{currentClass.name}</a>
+            <a href={`/class/${currentClassId}/manage`}>
+              <CogOutline size="sm" />
+            </a>
+          </BreadcrumbItem>
+        </Breadcrumb>
+      </SidebarGroup>
 
-    <SidebarGroup border>
-      <SidebarItem href={`/class/${currentClassId}`} label="New Thread" class="text-amber-800">
-        <svelte:fragment slot="icon">
-          <FilePenOutline size="sm" />
-        </svelte:fragment>
-      </SidebarItem>
-    </SidebarGroup>
-
-    <SidebarGroup border class="overflow-y-auto">
-      {#each threads as thread}
-        <SidebarItem
-          class="text-sm p-1 flex gap-2"
-          spanClass="flex-1 truncate"
-          href={`/class/${currentClassId}/thread/${thread.id}`}
-          label={thread.name || "Undefined"}>
+      <SidebarGroup border>
+        <SidebarItem href={`/class/${currentClassId}`} label="New Thread" class="text-amber-800">
           <svelte:fragment slot="icon">
-            <EyeSlashOutline size="sm" class={`text-gray-400 ${thread.private ? 'visible' : 'invisible'}`} />
-          </svelte:fragment>
-          <svelte:fragment slot="subtext">
-            <span class="text-xs text-gray-400 ml-auto">{dayjs.utc(thread.updated).fromNow()}</span>
+            <FilePenOutline size="sm" />
           </svelte:fragment>
         </SidebarItem>
-      {/each}
-    </SidebarGroup>
-    {:else}
+      </SidebarGroup>
 
-    <SidebarGroup class="overflow-y-auto overflow-x-hidden">
-      <Heading tag="h2" class="text-sm font-medium text-gray-500 md:ms-2 dark:text-gray-400">Classes</Heading>
-      {#each classes as cls}
-        <SidebarItem label={cls.name} href={`/class/${cls.id}`} />
-      {/each}
-    </SidebarGroup>
+      <SidebarGroup border class="overflow-y-auto">
+        {#each threads as thread}
+          <SidebarItem
+            class="text-sm p-1 flex gap-2"
+            spanClass="flex-1 truncate"
+            href={`/class/${currentClassId}/thread/${thread.id}`}
+            label={thread.name || 'Undefined'}
+          >
+            <svelte:fragment slot="icon">
+              <EyeSlashOutline
+                size="sm"
+                class={`text-gray-400 ${thread.private ? 'visible' : 'invisible'}`}
+              />
+            </svelte:fragment>
+            <svelte:fragment slot="subtext">
+              <span class="text-xs text-gray-400 ml-auto"
+                >{dayjs.utc(thread.updated).fromNow()}</span
+              >
+            </svelte:fragment>
+          </SidebarItem>
+        {/each}
+      </SidebarGroup>
+    {:else}
+      <SidebarGroup class="overflow-y-auto overflow-x-hidden">
+        <Heading tag="h2" class="text-sm font-medium text-gray-500 md:ms-2 dark:text-gray-400"
+          >Classes</Heading
+        >
+        {#each classes as cls}
+          <SidebarItem label={cls.name} href={`/class/${cls.id}`} />
+        {/each}
+      </SidebarGroup>
     {/if}
 
     <SidebarGroup class="mt-auto" border>
       <Li>
-        <div class="user cursor-pointer flex items-center p-2 text-base font-normal text-gray-900 rounded-lg dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700">
+        <div
+          class="user cursor-pointer flex items-center p-2 text-base font-normal text-gray-900 rounded-lg dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
+        >
           <Avatar src={avatar} alt={name} />
           <span class="ml-3">{name}</span>
         </div>
@@ -120,10 +141,9 @@
   </DropdownItem>
 </Dropdown>
 
-
 <style lang="css">
   :global(.logo) {
-    font-family: "Rubik Doodle Shadow", system-ui;
+    font-family: 'Rubik Doodle Shadow', system-ui;
     font-weight: 400;
     font-style: normal;
   }

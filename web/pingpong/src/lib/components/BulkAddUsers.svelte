@@ -1,7 +1,7 @@
 <script lang="ts">
-  import {createEventDispatcher} from 'svelte';
+  import { createEventDispatcher } from 'svelte';
   import * as api from '$lib/api';
-  import {Select, Helper, Button, GradientButton, Label, Textarea, Hr} from "flowbite-svelte";
+  import { Select, Helper, Button, GradientButton, Label, Textarea, Hr } from 'flowbite-svelte';
 
   export let role;
   export let title;
@@ -19,14 +19,19 @@
     <Textarea id="emails" name="emails" rows="3" />
 
     <Label for="role">Role</Label>
-    <Select id="role" name="role" value="{role}" items="{roles}" />
+    <Select id="role" name="role" value={role} items={roles} />
 
     <Label for="title">Title</Label>
-    <Select id="title" name="title" value="{title}" items="{titles}" />
+    <Select id="title" name="title" value={title} items={titles} />
   </div>
   <Hr />
   <div>
     <GradientButton type="submit" color="cyanToBlue">Add Users</GradientButton>
-      <Button type="button" color="red" on:click="{() => dispatch('cancel')}" on:touchstart={() => dispatch('cancel')}>Cancel</Button>
+    <Button
+      type="button"
+      color="red"
+      on:click={() => dispatch('cancel')}
+      on:touchstart={() => dispatch('cancel')}>Cancel</Button
+    >
   </div>
 </form>

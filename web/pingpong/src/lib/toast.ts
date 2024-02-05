@@ -1,4 +1,4 @@
-import {toast} from "@zerodevx/svelte-toast";
+import { toast } from '@zerodevx/svelte-toast';
 
 /**
  * Show an error message as a toast.
@@ -10,9 +10,9 @@ export const sadToast = (message: string) => {
       // Error color
       '--toastBackground': '#F87171',
       '--toastBarBackground': '#EF4444',
-      '--toastColor': '#fff',
-    },
-  })
+      '--toastColor': '#fff'
+    }
+  });
 };
 
 /**
@@ -25,7 +25,7 @@ export const happyToast = (message: string) => {
       // Success color
       '--toastBackground': '#A7F3D0',
       '--toastBarBackground': '#22C55E',
-      '--toastColor': '#000',
-    },
-  })
+      '--toastColor': '#000'
+    }
+  });
 };
