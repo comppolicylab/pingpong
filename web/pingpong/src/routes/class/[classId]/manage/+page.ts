@@ -8,12 +8,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
   const classId = parseInt(params.classId, 10);
   const {api_key}= await api.getApiKey(fetch, classId);
   const {users} = await api.getClassUsers(fetch, classId);
-
-  let models = [];
-  if (api_key) {
-    const modelResponse = await api.getModels(fetch, classId);
-    models = modelResponse.models;
-  }
+  const {models} = await api.getModels(fetch, classId);
 
   return {
     models,
