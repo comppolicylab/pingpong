@@ -14,7 +14,7 @@
   import FileUpload from '$lib/components/FileUpload.svelte';
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import Info from "$lib/components/Info.svelte";
-  import {PenOutline} from "flowbite-svelte-icons";
+  import {PenOutline, CloudArrowUpOutline} from "flowbite-svelte-icons";
   import {sadToast, happyToast} from "$lib/toast";
   import {humanSize} from "$lib/size";
 
@@ -43,7 +43,7 @@
       }
       sadToast(msg);
     } else if (form?.$status >= 200 && form?.$status < 300) {
-      happyToast(msg);
+      happyToast("Success!");
     }
   });
 
@@ -71,9 +71,12 @@
     file: { type: f.content_type, name: f.name },
     response: f,
     promise: Promise.resolve(f),
-  }))].filter(f => !$trashFiles.includes(f.response?.id));
+  }))].filter(f => !$trashFiles.includes(f.response?.id)).sort((a, b) => {
+    const aName = a.file?.name || a.response?.name || '';
+    const bName = b.file?.name || b.response?.name || '';
+    return aName.localeCompare(bName);
+  });
   $: asstFiles = allFiles.filter(f => f.state === "success").map(f => f.response);
-  $: console.log(asstFiles)
   $: students = (data?.classUsers || []).filter(u => u.title.toLowerCase() === 'student');
   $: tt = (data?.classUsers || []).filter(u => u.title.toLowerCase() !== 'student');
   $: classRole = (data?.me?.user?.classes || []).find(c => c.class_id === data.class.id)?.role || '';
@@ -271,12 +274,14 @@
       {:else}
         <div class="my-4">
           <FileUpload
+            drop
             accept={data.uploadInfo.acceptString}
             maxSize={data.uploadInfo.class_file_max_size}
             upload={uploadFile}
             on:change={handleNewFiles}
             on:error={e => sadToast(e.detail.message)}>
-            <span slot="label" class="ml-2 text-gray-800">Upload files for use in the assistants.</span>
+            <CloudArrowUpOutline size="lg" slot="icon" class="text-gray-500" />
+            <span slot="label" class="ml-2 text-gray-500">Click or drag & drop to upload files.</span>
           </FileUpload>
         </div>
         <div class="flex gap-2 flex-wrap">

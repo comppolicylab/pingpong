@@ -2,7 +2,7 @@
   import {createEventDispatcher} from "svelte";
   import type {FileUploadInfo} from "$lib/api";
   import {CloseCircleSolid, FileSolid, ExclamationCircleOutline} from "flowbite-svelte-icons";
-  import {Button} from "flowbite-svelte";
+  import {Tooltip, Button} from "flowbite-svelte";
   import ProgressCircle from "./ProgressCircle.svelte";
   import {Jumper} from "svelte-loading-spinners";
 
@@ -26,6 +26,7 @@
   $: type = nameForMimeType(info.file.type);
   $: name = info.file.name;
   $: state = info.state;
+  $: error = info.state === "error" ? info.response.error : "";
 
   // Delete button clicked.
   const deleteFile = () => {
@@ -47,6 +48,7 @@
       <FileSolid class="w-6 h-6 text-green-500" />
     {:else}
       <ExclamationCircleOutline class="w-6 h-6 text-red-500" />
+      <Tooltip>{error}</Tooltip>
     {/if}
   </div>
   <div class="flex flex-col p-2">
