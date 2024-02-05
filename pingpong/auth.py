@@ -1,24 +1,28 @@
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import cast
 
 import jwt
 from jwt.exceptions import PyJWTError
 
 from .config import config
+from .now import NowFn, utcnow
 from .schemas import AuthToken, SessionToken
 
 
-def encode_session_token(user_id: int, expiry: int = 86_400) -> str:
+def encode_session_token(
+    user_id: int, expiry: int = 86_400, nowfn: NowFn = utcnow
+) -> str:
     """Encodes the session token as a JWT.
 
     Args:
         user_id (int): User ID
         expiry (int, optional): Expiry in seconds. Defaults to 86400 (1 day).
+        nowfn (NowFn, optional): Function to get the current time. Defaults to utcnow.
 
     Returns:
         str: Encoded session token JWT
     """
-    return encode_auth_token(user_id, expiry)
+    return encode_auth_token(user_id, expiry, nowfn=nowfn)
 
 
 def decode_session_token(token: str) -> SessionToken:
@@ -34,12 +38,13 @@ def decode_session_token(token: str) -> SessionToken:
     return SessionToken(**auth_token.dict())
 
 
-def encode_auth_token(user_id: int, expiry: int = 600) -> str:
+def encode_auth_token(user_id: int, expiry: int = 600, nowfn: NowFn = utcnow) -> str:
     """Generates the Auth Token.
 
     Args:
         user_id (int): User ID
         expiry (int, optional): Expiry in seconds. Defaults to 600.
+        nowfn (NowFn, optional): Function to get the current time. Defaults to utcnow.
 
     Returns:
         str: Auth Token
@@ -47,7 +52,7 @@ def encode_auth_token(user_id: int, expiry: int = 600) -> str:
     if expiry < 1:
         raise ValueError("expiry must be greater than 1 second")
 
-    now = datetime.utcnow().replace(tzinfo=timezone.utc)
+    now = nowfn()
     exp = now + timedelta(seconds=expiry)
     tok = AuthToken(
         iat=int(now.timestamp()),

@@ -1,0 +1,18 @@
+log_level = "DEBUG"
+public_url = "http://localhost:5173"
+development = true
+
+[db]
+engine = "postgres"
+host = "localhost"
+user = "pingpong"
+password = "pingpong"
+database = "pingpong"
+
+[auth]
+
+[[auth.secret_keys]]
+key = "test env"
+
+[email]
+type = "mock"
