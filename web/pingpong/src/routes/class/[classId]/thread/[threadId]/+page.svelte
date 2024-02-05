@@ -160,7 +160,7 @@
     <div class="overflow-y-auto pb-4 px-12" use:scroll={messages}>
       {#each messages as message}
         <div class="py-4 px-6 flex gap-x-3">
-          <div>
+          <div class="shrink-0">
             {#if message.role === 'user'}
               <Avatar size="sm" src={getImage(message)} />
             {:else}
