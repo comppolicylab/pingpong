@@ -27,6 +27,7 @@
 </script>
 
 <div class="markdown max-w-full" use:renderMarkdownNode={content}>
+  <!-- eslint-disable-next-line svelte/no-at-html-tags -->
   {@html markdown(content)}
 </div>
 

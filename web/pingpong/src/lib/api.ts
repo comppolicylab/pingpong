@@ -171,14 +171,14 @@ export const createInstitution = async (f: Fetcher, data: CreateInstitutionReque
  * Get all institutions.
  */
 export const getInstitutions = async (f: Fetcher) => {
-  return await GET<{}, Institutions>(f, 'institutions');
+  return await GET<never, Institutions>(f, 'institutions');
 };
 
 /**
  * Get an institution by ID.
  */
 export const getInstitution = async (f: Fetcher, id: string) => {
-  return await GET<{}, Institution>(f, `institution/${id}`);
+  return await GET<never, Institution>(f, `institution/${id}`);
 };
 
 /**
@@ -208,14 +208,14 @@ export type Classes = {
  * Get all the classes at an institution.
  */
 export const getClasses = async (f: Fetcher, id: string) => {
-  return await GET<{}, Classes>(f, `institution/${id}/classes`);
+  return await GET<never, Classes>(f, `institution/${id}/classes`);
 };
 
 /**
  * Get classes visible to the current user.
  */
 export const getMyClasses = async (f: Fetcher) => {
-  return await GET<{}, Classes>(f, `classes`);
+  return await GET<never, Classes>(f, `classes`);
 };
 
 /**
@@ -780,7 +780,7 @@ export type ThreadWithMeta = {
  */
 export const getThread = async (f: Fetcher, classId: number, threadId: number) => {
   const url = `class/${classId}/thread/${threadId}`;
-  return await GET<{}, ThreadWithMeta>(f, url);
+  return await GET<never, ThreadWithMeta>(f, url);
 };
 
 /**
@@ -792,11 +792,31 @@ export type NewThreadMessageRequest = {
 };
 
 /**
+ * Thread with run information.
+ */
+export type ThreadRun = {
+  thread: Thread;
+  run: OpenAIRun;
+};
+
+/**
  * Post a new message to the thread.
  */
-export const postMessage = async (f: Fetcher, classId: number, threadId: number, data: {}) => {
+export const postMessage = async (
+  f: Fetcher,
+  classId: number,
+  threadId: number,
+  data: NewThreadMessageRequest
+) => {
   const url = `class/${classId}/thread/${threadId}`;
-  return await POST(f, url, data);
+  return await POST<NewThreadMessageRequest, ThreadRun>(f, url, data);
+};
+
+/**
+ * Query parameters for getting the last run of a thread.
+ */
+export type GetLastRunParams = {
+  block?: boolean;
 };
 
 /**
@@ -809,7 +829,7 @@ export const getLastThreadRun = async (
   block: boolean = true
 ) => {
   const url = `class/${classId}/thread/${threadId}/last_run`;
-  return await GET(f, url, { block });
+  return await GET<GetLastRunParams, ThreadRun>(f, url, { block });
 };
 
 /**
@@ -825,7 +845,7 @@ export type SupportInfo = {
  */
 export const getSupportInfo = async (f: Fetcher) => {
   const url = `support`;
-  return await GET<{}, SupportInfo>(f, url);
+  return await GET<never, SupportInfo>(f, url);
 };
 
 /**
@@ -920,7 +940,7 @@ const _getAcceptString = (types: FileTypeInfo[]) => {
  */
 export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/upload_info`;
-  const info = await GET<{}, UploadInfo>(f, url);
+  const info = await GET<never, UploadInfo>(f, url);
 
   // Create a lookup table for mime types.
   const _mimeTypeLookup = new Map<string, FileTypeInfo>();

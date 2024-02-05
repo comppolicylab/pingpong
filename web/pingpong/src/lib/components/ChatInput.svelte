@@ -1,6 +1,6 @@
 <script lang="ts">
   import { writable } from 'svelte/store';
-  import { ButtonGroup, Textarea, GradientButton } from 'flowbite-svelte';
+  import { GradientButton } from 'flowbite-svelte';
   import { page } from '$app/stores';
   import { ChevronUpSolid } from 'flowbite-svelte-icons';
   import type { FileRemover, FileUploader, FileUploadInfo } from '$lib/api';
@@ -80,7 +80,7 @@
   // Focus textarea when component is mounted. Since we can only use `use` on
   // native DOM elements, we need to wrap the textarea in a div and then
   // access its child to imperatively focus it.
-  const init = (el) => {
+  const init = () => {
     document.getElementById('message').focus();
     return {
       update: () => {

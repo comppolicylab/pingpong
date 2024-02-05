@@ -3,7 +3,6 @@
   import {
     CogOutline,
     BookOutline,
-    BuildingOutline,
     FilePenOutline,
     UserSettingsOutline,
     QuestionCircleOutline,
@@ -20,12 +19,9 @@
     Breadcrumb,
     BreadcrumbItem,
     Sidebar,
-    SidebarBrand,
     SidebarWrapper,
     SidebarItem,
     SidebarGroup,
-    SidebarDropdownWrapper,
-    SidebarDropdownItem,
     Heading,
     NavBrand
   } from 'flowbite-svelte';
@@ -39,9 +35,7 @@
   $: classes = data?.classes || [];
   $: threads = (data?.threads || []).sort((a, b) => (a.created > b.created ? -1 : 1));
   $: currentClassId = parseInt($page.params.classId, 10);
-  $: currentThreadId = parseInt($page.params.threadId, 10);
   $: currentClass = classes.find((class_) => class_.id === currentClassId);
-  $: canManageClass = !!currentClass && data?.me?.user?.super_admin;
 </script>
 
 <Sidebar asideClass="shrink-0 grow-0 w-80" activeUrl={$page.url.pathname}>

@@ -186,6 +186,7 @@
 
 <div
   bind:this={dropzone}
+  role="region"
   ondragover={(e) => e.preventDefault()}
   class={`${wrapperClass} ${drop ? 'border-dashed border-2 rounded-lg p-4' : ''} ${
     dropzoneActive ? 'bg-gray-200 border-cyan-500' : drop ? 'bg-gray-100 border-gray-300' : ''

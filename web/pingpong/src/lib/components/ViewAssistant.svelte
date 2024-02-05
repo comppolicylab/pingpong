@@ -2,7 +2,7 @@
   import { page } from '$app/stores';
   import { copy } from 'svelte-copy';
   import { toast } from '@zerodevx/svelte-toast';
-  import { Heading, Label, Button, List, Li } from 'flowbite-svelte';
+  import { Heading, Label, List, Li } from 'flowbite-svelte';
   import { EyeOutline, EyeSlashOutline, LinkOutline } from 'flowbite-svelte-icons';
 
   export let assistant;

@@ -1,6 +1,4 @@
 <script lang="ts">
-  import type { SubmitFunction } from '@sveltejs/kit';
-  import * as api from '$lib/api';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import {
@@ -14,7 +12,6 @@
     Textarea,
     GradientButton
   } from 'flowbite-svelte';
-  import { enhance } from '$app/forms';
 
   export let files;
   export let assistant = null;
