@@ -44,6 +44,7 @@ jobs:
             ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
+        working-directory: ${{env.wd}}
         run: pnpm install
 
       - name: Linting
