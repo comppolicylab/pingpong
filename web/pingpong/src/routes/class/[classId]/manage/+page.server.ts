@@ -1,6 +1,5 @@
 import * as api from '$lib/api';
 import { handler } from '$lib/proxy';
-import { fail, redirect } from '@sveltejs/kit';
 import { invalid } from '$lib/validate';
 import type { Actions } from './$types';
 
@@ -151,30 +150,5 @@ export const actions: Actions = {
     const classId = parseInt(event.params.classId, 10);
 
     return api.updateApiKey(f, classId, apiKey);
-  }),
-
-  /**
-   * Upload a file.
-   */
-  uploadFile: handler((f, d, event) => {
-    const file = d.file as File | undefined;
-    if (!file?.name || !file?.size) {
-      throw invalid('file', 'File is required');
-    }
-
-    const classId = parseInt(event.params.classId, 10);
-    return api.uploadFile(f, classId, file);
-  }),
-
-  /**
-   * Delete a file.
-   */
-  deleteFile: handler((f, d, event) => {
-    const classId = parseInt(event.params.classId, 10);
-    const fileId = parseInt((d.fileId as string) || '0', 10);
-    if (!fileId) {
-      throw invalid('fileId', 'File ID is required');
-    }
-    return api.deleteFile(f, classId, fileId);
   })
 };

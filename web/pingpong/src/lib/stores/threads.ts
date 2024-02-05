@@ -1,13 +1,14 @@
 import { writable } from 'svelte/store';
 import type { Writable } from 'svelte/store';
 import * as api from '$lib/api';
+import type { ThreadWithMeta } from '$lib/api';
 
 class ThreadPoller {
   public classId: number;
 
   public threadId: number;
 
-  public store: Writable<any>;
+  public store: Writable<ThreadWithMeta | null>;
 
   private fetcher: api.Fetcher;
 

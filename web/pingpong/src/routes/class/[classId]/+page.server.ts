@@ -1,6 +1,5 @@
 import * as api from '$lib/api';
 import { forwardRequest } from '$lib/proxy';
-import { fail } from '@sveltejs/kit';
 import type { Actions } from './$types';
 
 export const actions: Actions = {

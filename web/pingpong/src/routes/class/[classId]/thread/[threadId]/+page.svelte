@@ -1,12 +1,9 @@
 <script lang="ts">
-  import { error } from '@sveltejs/kit';
   import { writable } from 'svelte/store';
   import * as api from '$lib/api';
   import { sadToast } from '$lib/toast';
   import { blur } from 'svelte/transition';
   import { enhance } from '$app/forms';
-  import { browser } from '$app/environment';
-  import { invalidateAll } from '$app/navigation';
   import { Span, Avatar } from 'flowbite-svelte';
   import { Pulse, SyncLoader } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
@@ -152,7 +149,10 @@
                 <div class="leading-7"><Markdown content={content.text.value} /></div>
               {:else if content.type == 'image_file'}
                 <div class="leading-7">
-                  <img src="/api/v1/class/{classId}/image/{content.image_file.file_id}" />
+                  <img
+                    src="/api/v1/class/{classId}/image/{content.image_file.file_id}"
+                    alt="File icon"
+                  />
                 </div>
               {:else}
                 <div class="leading-7"><pre>{JSON.stringify(content, null, 2)}</pre></div>

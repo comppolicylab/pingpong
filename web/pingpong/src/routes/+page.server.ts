@@ -1,5 +1,4 @@
 import type { Actions } from './$types';
-import { fail } from '@sveltejs/kit';
 import * as api from '$lib/api';
 import { forwardRequest } from '$lib/proxy';
 import { invalid } from '$lib/validate';

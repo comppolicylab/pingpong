@@ -7,14 +7,17 @@ export interface ForwardRequestOptions {
   lists?: string[];
 }
 
-type FormBody = [string, any][];
+type FormBody = [string, unknown][];
 
 type Thunk<E extends RequestEvent> = (
   f: Fetcher,
-  r: Record<string, any>,
+  r: Record<string, unknown>,
   event: E
 ) => Promise<BaseData & BaseResponse>;
 
+/**
+ * Server-side request handler.
+ */
 export const handler = <E extends RequestEvent, T extends Thunk<E>>(
   thunk: T,
   opts?: ForwardRequestOptions
@@ -40,8 +43,8 @@ export const forwardRequest = async <E extends RequestEvent, T extends Thunk<E>>
       const key = cur[0];
       const val = booleanFields.includes(key) ? cur[1] === 'on' : cur[1];
       if (lists.includes(key)) {
-        if (agg.hasOwnProperty(key)) {
-          (agg[key] as any[]).push(val);
+        if (Object.hasOwn(agg, key)) {
+          (agg[key] as unknown[]).push(val);
         } else {
           agg[key] = [val];
         }
@@ -50,7 +53,7 @@ export const forwardRequest = async <E extends RequestEvent, T extends Thunk<E>>
       }
       return agg;
     },
-    {} as Record<string, any>
+    {} as Record<string, unknown>
   );
 
   // Ensure all boolean fields are set
@@ -73,12 +76,14 @@ export const forwardRequest = async <E extends RequestEvent, T extends Thunk<E>>
         success: false,
         detail: 'Unknown error'
       });
-    } else if (e.hasOwnProperty('$status')) {
-      const detail = (e as any).detail;
-      const field = Array.isArray(detail) ? detail[0].loc.join('.') : (e as any).field || undefined;
+    } else if (Object.hasOwn(e, '$status')) {
+      const detail = (e as { detail: unknown }).detail;
+      const field = Array.isArray(detail)
+        ? detail[0].loc.join('.')
+        : (e as { field: unknown }).field || undefined;
       const msg = Array.isArray(detail) ? detail[0].msg : detail || 'Unknown error';
-      return fail((e as any).$status, {
-        $status: (e as any).$status,
+      return fail((e as { $status: number }).$status, {
+        $status: (e as { $status: number }).$status,
         success: false,
         field,
         detail: msg

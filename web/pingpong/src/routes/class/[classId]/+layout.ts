@@ -1,7 +1,5 @@
 import * as api from '$lib/api';
-import { goto } from '$app/navigation';
-import { error, redirect } from '@sveltejs/kit';
-import { browser } from '$app/environment';
+import { error } from '@sveltejs/kit';
 import type { LayoutLoad } from './$types';
 
 /**

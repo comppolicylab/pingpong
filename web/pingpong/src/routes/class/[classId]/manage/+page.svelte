@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { get, writable } from 'svelte/store';
+  import { writable } from 'svelte/store';
   import { page } from '$app/stores';
   import { beforeNavigate } from '$app/navigation';
   import * as api from '$lib/api';
@@ -13,16 +13,8 @@
     GradientButton,
     Secondary,
     Span,
-    List,
-    Li,
     Card,
-    MultiSelect,
-    Textarea,
-    Accordion,
-    AccordionItem,
-    Dropzone,
     Heading,
-    Button,
     Label,
     Input
   } from 'flowbite-svelte';

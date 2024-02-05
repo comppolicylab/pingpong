@@ -13,7 +13,7 @@ export type Fetcher = typeof fetch;
 /**
  * Base data type for all API responses.
  */
-export type BaseData = Record<string, any>;
+export type BaseData = Record<string, unknown>;
 
 /**
  * Base Response type for all API responses.
@@ -135,6 +135,25 @@ export const me = async (f: Fetcher) => {
 };
 
 /**
+ * Information about an institution.
+ */
+export type Institution = {
+  id: number;
+  name: string;
+  description: string | null;
+  logo: string | null;
+  created: string;
+  updated: string | null;
+};
+
+/**
+ * List of institutions.
+ */
+export type Institutions = {
+  institutions: Institution[];
+};
+
+/**
  * Parameters for a new institution.
  */
 export type CreateInstitutionRequest = {
@@ -145,35 +164,58 @@ export type CreateInstitutionRequest = {
  * Create a new institution.
  */
 export const createInstitution = async (f: Fetcher, data: CreateInstitutionRequest) => {
-  return await POST(f, 'institution', data);
+  return await POST<CreateInstitutionRequest, Institution>(f, 'institution', data);
 };
 
 /**
  * Get all institutions.
  */
 export const getInstitutions = async (f: Fetcher) => {
-  return await GET(f, 'institutions');
+  return await GET<{}, Institutions>(f, 'institutions');
 };
 
 /**
  * Get an institution by ID.
  */
 export const getInstitution = async (f: Fetcher, id: string) => {
-  return await GET(f, `institution/${id}`);
+  return await GET<{}, Institution>(f, `institution/${id}`);
+};
+
+/**
+ * Information about an individual class.
+ */
+export type Class = {
+  id: number;
+  name: string;
+  term: string;
+  institution_id: number;
+  institution: Institution | null;
+  created: string;
+  updated: string | null;
+  api_key: string | null;
+  any_can_create_assistant: boolean | null;
+  any_can_update_assistant: boolean | null;
+};
+
+/**
+ * List of classes.
+ */
+export type Classes = {
+  classes: Class[];
 };
 
 /**
  * Get all the classes at an institution.
  */
 export const getClasses = async (f: Fetcher, id: string) => {
-  return await GET(f, `institution/${id}/classes`);
+  return await GET<{}, Classes>(f, `institution/${id}/classes`);
 };
 
 /**
  * Get classes visible to the current user.
  */
 export const getMyClasses = async (f: Fetcher) => {
-  return await GET(f, `classes`);
+  return await GET<{}, Classes>(f, `classes`);
 };
 
 /**
@@ -199,7 +241,7 @@ export type UpdateClassRequest = {
  */
 export const createClass = async (f: Fetcher, instId: number, data: CreateClassRequest) => {
   const url = `institution/${instId}/class`;
-  return await POST(f, url, data);
+  return await POST<CreateClassRequest, Class>(f, url, data);
 };
 
 /**
@@ -207,7 +249,7 @@ export const createClass = async (f: Fetcher, instId: number, data: CreateClassR
  */
 export const updateClass = async (f: Fetcher, classId: number, data: UpdateClassRequest) => {
   const url = `class/${classId}`;
-  return await PUT(f, url, data);
+  return await PUT<UpdateClassRequest, Class>(f, url, data);
 };
 
 /**
@@ -571,11 +613,166 @@ export type CreateThreadRequest = {
 };
 
 /**
+ * Simplified user object.
+ */
+export type UserPlaceholder = {
+  id: number;
+  email: string;
+};
+
+/**
+ * Thread information.
+ */
+export type Thread = {
+  id: number;
+  name: string;
+  thread_id: string;
+  class_id: number;
+  assistant_id: number;
+  private: boolean;
+  users: UserPlaceholder[];
+  created: string;
+  updated: string | null;
+};
+
+/**
  * Create a new conversation thread.
  */
 export const createThread = async (f: Fetcher, classId: number, data: CreateThreadRequest) => {
   const url = `class/${classId}/thread`;
-  return await POST(f, url, data);
+  return await POST<CreateThreadRequest, Thread>(f, url, data);
+};
+
+type LastError = {
+  code: 'server_error' | 'rate_limit_exceeded';
+  message: string;
+};
+
+type RequiredAction = {
+  submit_tool_outputs: unknown;
+  type: 'submit_tool_outputs';
+};
+
+/**
+ * Type of a thread run, per the OpenAI library.
+ */
+export type OpenAIRun = {
+  id: string;
+  assistant_id: string;
+  cancelled_at: number | null;
+  completed_at: number | null;
+  created_at: number;
+  expires_at: number;
+  failed_at: number | null;
+  file_ids: string[];
+  instruction: string;
+  last_error: LastError | null;
+  metadata: Record<string, unknown>;
+  model: string;
+  object: 'thread.run';
+  required_action: RequiredAction | null;
+  started_at: number | null;
+  status:
+    | 'queued'
+    | 'in_progress'
+    | 'requires_action'
+    | 'cancelling'
+    | 'cancelled'
+    | 'failed'
+    | 'completed'
+    | 'expired';
+  thread_id: string;
+  tools: unknown[];
+  usage: unknown | null;
+};
+
+export type TextAnnotationFilePathFilePath = {
+  file_id: string;
+};
+
+export type TextAnnotationFilePath = {
+  end_index: number;
+  file_path: TextAnnotationFilePathFilePath;
+  start_index: number;
+  text: string;
+  type: 'file_path';
+};
+
+export type TextAnnotationFileCitationFileCitation = {
+  file_id: string;
+  quote: string;
+};
+
+export type TextAnnotationFileCitation = {
+  end_index: number;
+  file_citation: TextAnnotationFileCitationFileCitation;
+  start_index: number;
+  text: string;
+  type: 'file_citation';
+};
+
+export type TextAnnotation = TextAnnotationFilePath | TextAnnotationFileCitation;
+
+export type Text = {
+  annotations: TextAnnotation[];
+  value: string;
+};
+
+export type MessageContentText = {
+  text: Text;
+  type: 'text';
+};
+
+export type ImageFile = {
+  file_id: string;
+};
+
+export type MessageContentImageFile = {
+  image_file: ImageFile;
+  type: 'image_file';
+};
+
+export type Content = MessageContentImageFile | MessageContentText;
+
+export type OpenAIMessage = {
+  id: string;
+  assistant_id: string | null;
+  content: Content[];
+  created_at: number;
+  file_ids: string[];
+  metadata: Record<string, unknown> | null;
+  object: 'thread.message';
+  role: 'user' | 'assistant';
+  run_id: string | null;
+  thread_id: string;
+};
+
+/**
+ * Email with image.
+ */
+export type Profile = {
+  email: string;
+  gravatar_id: string;
+  image_url: string;
+};
+
+/**
+ * Accounting of individuals in a thread.
+ */
+export type ThreadParticipants = {
+  user: { [id: number]: Profile };
+  assistant: { [id: number]: string };
+};
+
+/**
+ * Thread object with additional metadata.
+ */
+export type ThreadWithMeta = {
+  thread: Thread;
+  hash: string;
+  run: OpenAIRun | null;
+  messages: OpenAIMessage[];
+  participants: ThreadParticipants;
 };
 
 /**
@@ -583,7 +780,7 @@ export const createThread = async (f: Fetcher, classId: number, data: CreateThre
  */
 export const getThread = async (f: Fetcher, classId: number, threadId: number) => {
   const url = `class/${classId}/thread/${threadId}`;
-  return await GET(f, url);
+  return await GET<{}, ThreadWithMeta>(f, url);
 };
 
 /**

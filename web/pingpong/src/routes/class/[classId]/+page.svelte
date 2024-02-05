@@ -4,7 +4,7 @@
   import { page } from '$app/stores';
   import { enhance } from '$app/forms';
   import ChatInput from '$lib/components/ChatInput.svelte';
-  import { Helper, GradientButton, Dropdown, DropdownItem, Label } from 'flowbite-svelte';
+  import { Helper, GradientButton, Dropdown, DropdownItem } from 'flowbite-svelte';
   import { EyeSlashOutline, ChevronDownSolid } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
@@ -54,7 +54,7 @@
   const handleSubmit = () => {
     $loading = true;
 
-    return ({ result, update }) => {
+    return ({ result }) => {
       if (result.type === 'success') {
         goto(`/class/${result.data.thread.class_id}/thread/${result.data.thread.id}`);
       } else {
