@@ -1,4 +1,5 @@
 import * as api from '$lib/api';
+import type { ErrorResponse } from '$lib/api';
 import { error } from '@sveltejs/kit';
 import type { LayoutLoad } from './$types';
 
@@ -9,7 +10,7 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
   const classId = parseInt(params.classId, 10);
   const classData = await api.getClass(fetch, classId);
   if (classData.$status >= 300) {
-    throw error(classData.$status, classData.detail || 'Unknown error');
+    throw error(classData.$status, (classData as ErrorResponse).detail || 'Unknown error');
   }
   const { creators: assistantCreators, assistants } = await api.getAssistants(fetch, classId);
   const { files } = await api.getClassFiles(fetch, classId);

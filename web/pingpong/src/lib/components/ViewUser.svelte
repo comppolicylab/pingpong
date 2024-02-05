@@ -1,10 +1,11 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import { Heading } from 'flowbite-svelte';
+  import type {ClassUser} from '$lib/api';
 
   const dispatch = createEventDispatcher();
 
-  export let user;
+  export let user: ClassUser;
 </script>
 
 <div

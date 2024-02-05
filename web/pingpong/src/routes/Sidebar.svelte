@@ -27,8 +27,9 @@
   } from 'flowbite-svelte';
   import Logo from '$lib/components/Logo.svelte';
   import dayjs from '$lib/time';
+  import type { LayoutData } from './$types';
 
-  export let data;
+  export let data: LayoutData;
 
   $: avatar = data?.me?.profile?.image_url;
   $: name = data?.me?.user?.name || data?.me?.user?.email;
@@ -42,7 +43,7 @@
   <SidebarWrapper class="h-full flex flex-col">
     <SidebarGroup class="mb-4">
       <NavBrand href="/" class="mx-4">
-        <Logo size="10" extraClass="fill-amber-600" />
+        <Logo size={10} extraClass="fill-amber-600" />
         <Heading tag="h1" class="text-amber-500 px-5 logo" customSize="text-3xl">PingPong</Heading>
       </NavBrand>
     </SidebarGroup>
@@ -57,7 +58,7 @@
             <svelte:fragment slot="icon">
               <BookOutline class="text-gray-400" size="sm" />
             </svelte:fragment>
-            <a href={`/class/${currentClassId}`}>{currentClass.name}</a>
+            <a href={`/class/${currentClassId}`}>{currentClass?.name}</a>
             <a href={`/class/${currentClassId}/manage`}>
               <CogOutline size="sm" />
             </a>

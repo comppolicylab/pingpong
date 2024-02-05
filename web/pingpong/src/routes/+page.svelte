@@ -12,7 +12,7 @@
   $: isCreatingClass = $page.url.searchParams.has('new-class');
   $: institutions = data?.institutions || [];
   $: {
-    if (form?.$status < 300 && isCreatingClass) {
+    if (form?.$status && form?.$status < 300 && isCreatingClass) {
       close();
     }
   }
@@ -22,14 +22,14 @@
   <Heading tag="h2">Welcome to PingPong!</Heading>
   <div class="flex flex-wrap mt-8 gap-4">
     {#each data?.classes as cls}
-      <Card horizontal img={cls.logo} class="w-80 h-40" href={`/class/${cls.id}`}>
+      <Card horizontal class="w-80 h-40" href={`/class/${cls.id}`}>
         <div class="flex flex-col w-full justify-between">
           <div class="flex flex-row justify-between">
             <Heading tag="h3" color="text-gray-900">{cls.name}</Heading>
             <P class="text-gray-400">{cls.term}</P>
           </div>
           <div class="text-amber-500 text-lg">
-            {cls.institution.name}
+            {cls.institution?.name || 'Unknown institution'}
           </div>
         </div>
       </Card>

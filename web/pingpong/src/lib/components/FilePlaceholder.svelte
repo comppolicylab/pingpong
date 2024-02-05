@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { FileUploadInfo } from '$lib/api';
+  import type { MimeTypeLookupFn, FileUploadInfo, FileUploadFailure } from '$lib/api';
   import { CloseCircleSolid, FileSolid, ExclamationCircleOutline } from 'flowbite-svelte-icons';
   import { Tooltip, Button } from 'flowbite-svelte';
   import ProgressCircle from './ProgressCircle.svelte';
@@ -11,7 +11,7 @@
    */
   export let info: FileUploadInfo;
 
-  export let mimeType: (type: string) => string;
+  export let mimeType: MimeTypeLookupFn;
 
   // Custom events
   const dispatch = createEventDispatcher();
@@ -26,7 +26,7 @@
   $: type = nameForMimeType(info.file.type);
   $: name = info.file.name;
   $: state = info.state;
-  $: error = info.state === 'error' ? info.response.error : '';
+  $: error = info.state === 'error' ? (info.response as FileUploadFailure).error : '';
 
   // Delete button clicked.
   const deleteFile = () => {

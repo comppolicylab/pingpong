@@ -7,19 +7,19 @@ export interface ForwardRequestOptions {
   lists?: string[];
 }
 
-type FormBody = [string, unknown][];
+type FormBody = [string, string][];
 
-type Thunk<E extends RequestEvent> = (
+type Thunk<E extends RequestEvent, D extends Record<string, unknown>> = (
   f: Fetcher,
-  r: Record<string, unknown>,
+  r: D,
   event: E
 ) => Promise<BaseData & BaseResponse>;
 
 /**
  * Server-side request handler.
  */
-export const handler = <E extends RequestEvent, T extends Thunk<E>>(
-  thunk: T,
+export const handler = <E extends RequestEvent, D extends Record<string, unknown>>(
+  thunk: Thunk<E, D>,
   opts?: ForwardRequestOptions
 ) => {
   return async (event: E) => {
@@ -27,8 +27,8 @@ export const handler = <E extends RequestEvent, T extends Thunk<E>>(
   };
 };
 
-export const forwardRequest = async <E extends RequestEvent, T extends Thunk<E>>(
-  thunk: T,
+export const forwardRequest = async <E extends RequestEvent, D extends Record<string, unknown>>(
+  thunk: Thunk<E, D>,
   event: E,
   opts?: ForwardRequestOptions
 ) => {
@@ -64,7 +64,7 @@ export const forwardRequest = async <E extends RequestEvent, T extends Thunk<E>>
   }
 
   try {
-    const result = await thunk(event.fetch, reqData, event);
+    const result = await thunk(event.fetch, reqData as D, event);
     if (result.$status >= 400) {
       throw result;
     }

@@ -1,13 +1,88 @@
 import * as api from '$lib/api';
 import { handler } from '$lib/proxy';
 import { invalid } from '$lib/validate';
-import type { Actions } from './$types';
+import type { Actions, RequestEvent } from './$types';
+
+/**
+ * Fields for creating a user in the UI.
+ */
+export type CreateUserForm = {
+  email: string;
+  role: string;
+  title: string;
+};
+
+/**
+ * Manage multiple users form.
+ */
+export type CreateUsersForm = {
+  emails: string;
+  role: string;
+  title: string;
+};
+
+/**
+ * Update user form.
+ */
+export type UpdateUserForm = {
+  user_id: string;
+  role: string;
+  title: string;
+}
+
+/**
+ * UI for updating a class.
+ */
+export type UpdateClassForm = {
+  name: string;
+  term: string;
+  any_can_create_assistant: boolean;
+  any_can_publish_assistant: boolean;
+};
+
+/**
+ * Create assistant form.
+ */
+export type CreateAssistantForm = {
+  name: string;
+  description: string;
+  instructions: string;
+  model: string;
+  tools: string;
+  files: string[];
+  published: boolean;
+  use_latex: boolean;
+  hide_prompt: boolean;
+};
+
+/**
+ * Update assistant form.
+ */
+export type UpdateAssistantForm = {
+  assistantId: string;
+  name: string;
+  description: string;
+  instructions: string;
+  model: string;
+  tools: string;
+  files: string[];
+  published: boolean;
+  use_latex: boolean;
+  hide_prompt: boolean;
+};
+
+/**
+ * Update API key form.
+ */
+export type UpdateApiKeyForm = {
+  apiKey: string;
+};
 
 export const actions: Actions = {
   /**
    * Create a user-class association.
    */
-  createUser: handler((f, d, event) => {
+  createUser: handler<RequestEvent, CreateUserForm>((f, d, event) => {
     const classId = parseInt(event.params.classId, 10);
     return api.createClassUser(f, classId, { email: d.email, role: d.role, title: d.title });
   }),
@@ -15,7 +90,7 @@ export const actions: Actions = {
   /**
    * Bulk add users to a class.
    */
-  createUsers: handler((f, d, event) => {
+  createUsers: handler<RequestEvent, CreateUsersForm>((f, d, event) => {
     const emails = (d.emails as string) || '';
     // Split emails by newlines or commas.
     const emailList = emails
@@ -52,7 +127,7 @@ export const actions: Actions = {
   /**
    * Update a user in a class.
    */
-  updateUser: handler((f, d, event) => {
+  updateUser: handler<RequestEvent, UpdateUserForm>((f, d, event) => {
     // User ID is in the URL, not the body.
     const userId = parseInt(d.user_id);
 
@@ -67,7 +142,7 @@ export const actions: Actions = {
   /**
    * Update the class metadata
    */
-  updateClass: handler(
+  updateClass: handler<RequestEvent, UpdateClassForm>(
     (f, d, event) => {
       const classId = parseInt(event.params.classId, 10);
       return api.updateClass(f, classId, d);
@@ -78,7 +153,7 @@ export const actions: Actions = {
   /**
    * Create a new class assistant.
    */
-  createAssistant: handler(
+  createAssistant: handler<RequestEvent, CreateAssistantForm>(
     (f, d, event) => {
       const rawTools = (d.tools as string | undefined) || '';
       const tools: api.Tool[] = [{ type: 'retrieval' }];
@@ -109,7 +184,7 @@ export const actions: Actions = {
   /**
    * Update a class assistant.
    */
-  updateAssistant: handler(
+  updateAssistant: handler<RequestEvent, UpdateAssistantForm>(
     (f, d, event) => {
       const tools: api.Tool[] = [{ type: 'retrieval' }];
       const rawTools = (d.tools as string | undefined) || '';
@@ -145,7 +220,7 @@ export const actions: Actions = {
   /**
    * Update the API key for a class.
    */
-  updateApiKey: handler((f, d, event) => {
+  updateApiKey: handler<RequestEvent, UpdateApiKeyForm>((f, d, event) => {
     const apiKey = (d.apiKey as string | undefined) || '';
     const classId = parseInt(event.params.classId, 10);
 

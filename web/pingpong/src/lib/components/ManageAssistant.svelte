@@ -12,24 +12,25 @@
     Textarea,
     GradientButton
   } from 'flowbite-svelte';
+  import type { ServerFile, Assistant, AssistantModel, Tool } from '$lib/api';
 
-  export let files;
-  export let assistant = null;
+  export let files: ServerFile[];
+  export let assistant: Assistant | null = null;
   export let canPublish = true;
-  export let models = [];
+  export let models: AssistantModel[] = [];
   export let loading = false;
 
   let selectedFiles = (assistant?.files || []).map((file) => file.file_id);
   const tools = [{ value: 'code_interpreter', name: 'Code Interpreter' }];
   const defaultTools = [{ type: 'code_interpreter' }];
-  const selectedTools = (assistant?.tools ? JSON.parse(assistant.tools) : defaultTools).map(
+  const selectedTools = (assistant?.tools ? JSON.parse(assistant.tools) as Tool[] : defaultTools).map(
     (t) => t.type
   );
-  $: models = (models || []).map((model) => ({ value: model.id, name: model.id }));
+  $: modelOptions = (models || []).map((model) => ({ value: model.id, name: model.id }));
   $: fileOptions = (files || []).map((file) => ({ value: file.file_id, name: file.name }));
 
   // Revert edits
-  const reset = (e) => {
+  const reset = (e: Event) => {
     e.preventDefault();
     if (loading) {
       return;
@@ -45,11 +46,11 @@
 <div>
   <Label for="model">Model</Label>
   <Select
-    items={models}
+    items={modelOptions}
     label="model"
     id="model"
     name="model"
-    value={assistant?.model || models[0].value}
+    value={assistant?.model || modelOptions[0].value}
   />
 </div>
 <div class="col-span-2">
@@ -77,7 +78,7 @@
   />
 </div>
 <div class="col-span-2">
-  <Checkbox id="hide_prompt" name="hide_prompt" checked={assistant ? assistant.hide_prompt : false}
+  <Checkbox id="hide_prompt" name="hide_prompt" checked={(assistant ? assistant.hide_prompt : false) || false}
     >Hide Prompt</Checkbox
   >
   <Helper
@@ -90,7 +91,7 @@
     label="use_latex"
     id="use_latex"
     name="use_latex"
-    checked={assistant ? assistant.use_latex : true}>Use LaTeX</Checkbox
+    checked={(assistant ? assistant.use_latex : true) || false}>Use LaTeX</Checkbox
   >
   <Helper>Enable LaTeX formatting for assistant responses.</Helper>
 </div>

@@ -1,8 +1,9 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import * as api from '$lib/api';
+  import type { ClassUser } from '$lib/api';
   import { Hr, GradientButton, Label, Select, Input, Button } from 'flowbite-svelte';
-  export let user = null;
+  export let user: ClassUser | null = null;
 
   const dispatch = createEventDispatcher();
 

@@ -1,9 +1,10 @@
 <script lang="ts">
   import { writable } from 'svelte/store';
+  import type {Writable} from 'svelte/store';
   import { GradientButton } from 'flowbite-svelte';
   import { page } from '$app/stores';
   import { ChevronUpSolid } from 'flowbite-svelte-icons';
-  import type { FileRemover, FileUploader, FileUploadInfo } from '$lib/api';
+  import type { MimeTypeLookupFn, FileRemover, FileUploader, FileUploadInfo, ServerFile } from '$lib/api';
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import FileUpload from '$lib/components/FileUpload.svelte';
   import { sadToast } from '$lib/toast';
@@ -42,19 +43,19 @@
   /**
    * Mime type lookup function.
    */
-  export let mimeType: (t: string) => string;
+  export let mimeType: MimeTypeLookupFn;
 
   // Text area reference for fixing height.
-  let ref;
+  let ref: HTMLTextAreaElement;
   // Container for the list of files, for calculating height.
-  let fileListRef;
+  let fileListRef: HTMLDivElement;
 
   // The list of files being uploaded.
   let files = writable<FileUploadInfo[]>([]);
   $: uploading = $files.some((f) => f.state === 'pending');
   $: fileIds = $files
     .filter((f) => f.state === 'success')
-    .map((f) => f.response.file_id)
+    .map((f) => (f.response as ServerFile).file_id)
     .join(',');
 
   // Fix the height of the textarea to match the content.
@@ -81,20 +82,21 @@
   // native DOM elements, we need to wrap the textarea in a div and then
   // access its child to imperatively focus it.
   const init = () => {
-    document.getElementById('message').focus();
+    document.getElementById('message')?.focus();
     return {
       update: () => {
-        document.getElementById('message').focus();
+        document.getElementById('message')?.focus();
       }
     };
   };
 
   // Submit form when Enter (but not Shift+Enter) is pressed in textarea
-  const maybeSubmit = (e) => {
+  const maybeSubmit = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (!disabled) {
-        e.target.form.requestSubmit();
+        const target = e.target as HTMLTextAreaElement | undefined;
+        target?.form?.requestSubmit();
       }
     }
   };
@@ -103,18 +105,24 @@
   const fixFileListHeight = () => {
     const update = () => {
       const el = document.getElementById('message');
-      fixHeight(el);
+      if (!el) {
+        return;
+      }
+      fixHeight(el as HTMLTextAreaElement);
     };
     return { update };
   };
 
   // Handle updates from the file upload component.
-  const handleFilesChange = (e) => {
+  const handleFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
     files = e.detail;
   };
 
   // Remove a file from the list / the server.
-  const removeFile = (evt) => {
+  const removeFile = (evt: CustomEvent<FileUploadInfo>) => {
+    if (!remove) {
+      return;
+    }
     const file = evt.detail;
     if (file.state === 'pending' || file.state === 'deleting') {
       return;
@@ -128,7 +136,7 @@
         }
         return f;
       });
-      remove(file.response.id)
+      remove((file.response as ServerFile).id)
         .then(() => {
           files.update((f) => f.filter((x) => x !== file));
         })
@@ -136,6 +144,11 @@
           /* no-op */
         });
     }
+  };
+
+  const handleTextAreaInput = (e: Event) => {
+    const target = e.target as HTMLTextAreaElement;
+    fixHeight(target);
   };
 </script>
 
@@ -164,22 +177,24 @@
       class:animate-pulse={loading}
       disabled={loading || disabled}
       on:keydown={maybeSubmit}
-      on:input={(e) => fixHeight(e.target)}
+      on:input={handleTextAreaInput}
       style={`height: 48px; max-height: ${maxHeight}px; padding-right: 3rem; padding-left: 3.5rem; font-size: 1rem; line-height: 1.5rem;`}
     />
     <textarea
       bind:this={ref}
       style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
     />
+    {#if upload}
     <FileUpload
       {maxSize}
       {accept}
       wrapperClass="absolute bottom-3 left-2.5"
       disabled={loading || disabled || !upload}
-      upload={upload || (() => {})}
+      upload={upload}
       on:error={(e) => sadToast(e.detail.message)}
       on:change={handleFilesChange}
     />
+    {/if}
     <GradientButton
       type="submit"
       color="cyanToBlue"

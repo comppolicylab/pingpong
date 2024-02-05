@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { writable } from 'svelte/store';
+  import type {Writable} from 'svelte/store';
   import { page } from '$app/stores';
   import { beforeNavigate } from '$app/navigation';
   import * as api from '$lib/api';
-  import type { FileUploadInfo } from '$lib/api';
+  import type { FileUploadInfo, Assistant, ServerFile, ClassUser } from '$lib/api';
   import {
     Checkbox,
     Helper,
@@ -48,21 +49,28 @@
   onMount(() => {
     // Show an error if the form failed
     // TODO -- more universal way of showing validation errors
-    if (form?.$status >= 400) {
-      let msg = form?.detail || 'An unknown error occurred';
+    if (!form || !form.$status) {
+      return;
+    }
+
+    if (form.$status >= 400) {
+      let msg = form.detail || 'An unknown error occurred';
       if (form?.field) {
         msg += ` (${form.field})`;
       }
       sadToast(msg);
-    } else if (form?.$status >= 200 && form?.$status < 300) {
+    } else if (form.$status >= 200 && form.$status < 300) {
       happyToast('Success!');
     }
   });
 
-  let ttModal = false;
-  let studentModal = false;
-  let anyCanCreate = data?.class?.any_can_create_assistant;
-  let assistants = [];
+  let ttModal: ClassUser | null = null;
+  let ttModalOpen = false;
+  let studentModal: ClassUser | null = null;
+  let studentModalOpen = false;
+  let anyCanCreate = data?.class?.any_can_create_assistant || false;
+  let anyCanPublish = data.class.any_can_publish_assistant || false;
+  let assistants: Assistant[] = [];
   const blurred = writable(true);
   let uploads = writable<FileUploadInfo[]>([]);
   const trashFiles = writable<number[]>([]);
@@ -88,13 +96,13 @@
       promise: Promise.resolve(f)
     }))
   ]
-    .filter((f) => !$trashFiles.includes(f.response?.id))
+    .filter((f) => !$trashFiles.includes((f.response as ServerFile)?.id))
     .sort((a, b) => {
-      const aName = a.file?.name || a.response?.name || '';
-      const bName = b.file?.name || b.response?.name || '';
+      const aName = a.file?.name || (a.response as {name: string})?.name || '';
+      const bName = b.file?.name || (b.response as {name: string})?.name || '';
       return aName.localeCompare(bName);
-    });
-  $: asstFiles = allFiles.filter((f) => f.state === 'success').map((f) => f.response);
+    }) as FileUploadInfo[];
+  $: asstFiles = allFiles.filter((f) => f.state === 'success').map((f) => f.response) as ServerFile[];
   $: students = (data?.classUsers || []).filter((u) => u.title.toLowerCase() === 'student');
   $: tt = (data?.classUsers || []).filter((u) => u.title.toLowerCase() !== 'student');
   $: classRole =
@@ -106,10 +114,10 @@
 
   // Check if we are editing an assistant and prompt if so.
   beforeNavigate((nav) => {
-    const isSaved = nav.to.url.searchParams.has('save');
+    const isSaved = nav.to?.url.searchParams.has('save');
 
     if (isSaved) {
-      nav.to.url.searchParams.delete('save');
+      nav.to?.url.searchParams.delete('save');
       return;
     }
 
@@ -124,24 +132,24 @@
   });
 
   // Handle file deletion.
-  const removeFile = async (evt) => {
+  const removeFile = async (evt: CustomEvent<FileUploadInfo>) => {
     const file = evt.detail;
     if (file.state === 'pending' || file.state === 'deleting') {
       return;
     } else if (file.state === 'error') {
       uploads.update((u) => u.filter((f) => f !== file));
     } else {
-      $trashFiles = [...$trashFiles, file.response.id];
-      const result = await api.deleteFile(fetch, data.class.id, file.response.id);
+      $trashFiles = [...$trashFiles, (file.response as ServerFile).id];
+      const result = await api.deleteFile(fetch, data.class.id, (file.response as ServerFile).id);
       if (result.$status >= 300) {
-        $trashFiles = $trashFiles.filter((f) => f !== file.response.id);
+        $trashFiles = $trashFiles.filter((f) => f !== (file.response as ServerFile).id);
         sadToast(`Failed to delete file: ${result.detail || 'unknown error'}`);
       }
     }
   };
 
   // Handle adding new files
-  const handleNewFiles = (evt) => {
+  const handleNewFiles = (evt: CustomEvent<Writable<FileUploadInfo[]>>) => {
     uploads = evt.detail;
   };
   // Submit file upload
@@ -187,7 +195,7 @@
           <Checkbox
             id="any_can_publish_assistant"
             name="any_can_publish_assistant"
-            checked={data.class.any_can_publish_assistant}
+            checked={anyCanPublish}
           >
             Allow anyone to publish assistants
           </Checkbox>
@@ -278,25 +286,42 @@
           <div class="text-gray-400 mb-4">Teaching team has not been configured yet.</div>
         {:else}
           <div class="mb-4">
-            <Listgroup items={tt} let:item>
+            <div>
+              {#each tt as item}
               <ViewUser
                 user={item}
-                on:click={() => (ttModal = item)}
-                on:touchstart={() => (ttModal = item)}
+                on:click={() => {
+                  ttModal = item;
+                  ttModalOpen = true;
+                }}
+                on:touchstart={() => {
+                  ttModal = item;
+                  ttModalOpen = true;
+                }}
               />
-            </Listgroup>
+              {/each}
+            </div>
           </div>
         {/if}
         <GradientButton
           color="cyanToBlue"
-          on:click={() => (ttModal = true)}
-          on:touchstart={() => (ttModal = true)}>Invite teaching team</GradientButton
+          on:click={() => {
+            ttModal = null;
+            ttModalOpen = true;
+          }}
+          on:touchstart={() => {
+            ttModal = null;
+            ttModalOpen = true;
+          }}>Invite teaching team</GradientButton
         >
-        {#if ttModal}
-          <Modal bind:open={ttModal} title="Manage the teaching team">
+        {#if ttModalOpen}
+          <Modal bind:open={ttModalOpen} title="Manage the teaching team">
             <ManageUser
-              on:cancel={() => (ttModal = false)}
-              user={typeof ttModal === 'boolean' ? null : ttModal}
+              on:cancel={() => {
+                ttModal = null;
+                ttModalOpen = false;
+              }}
+              user={ttModal}
             />
           </Modal>
         {/if}
@@ -315,26 +340,40 @@
           <div class="text-gray-400 mb-4">No students have been invited yet.</div>
         {:else}
           <div class="mb-4">
-            <Listgroup active items={students} let:item>
+            <div>
+              {#each students as item}
               <ViewUser
                 user={item}
-                on:click={() => (studentModal = item)}
-                on:touchstart={() => (studentModal = item)}
+                on:click={() => {
+                  studentModal = item;
+                  studentModalOpen = true;
+                }}
+                on:touchstart={() => {
+                  studentModal = item;
+                  studentModalOpen = true;
+                }}
               />
-            </Listgroup>
+              {/each}
+            </div>
           </div>
         {/if}
         <GradientButton
           color="cyanToBlue"
-          on:click={() => (studentModal = true)}
-          on:touchstart={() => (studentModal = true)}>Invite students</GradientButton
+          on:click={() => {
+            studentModal = null;
+            studentModalOpen = true;
+          }}
+          on:touchstart={() => {
+            studentModal = null;
+            studentModalOpen = true;
+          }}>Invite students</GradientButton
         >
-        {#if studentModal}
-          <Modal bind:open={studentModal} title="Manage students">
-            {#if typeof studentModal === 'boolean'}
-              <BulkAddUsers on:cancel={() => (studentModal = false)} role="read" title="Student" />
+        {#if studentModalOpen}
+          <Modal bind:open={studentModalOpen} title="Manage students">
+            {#if !studentModal}
+              <BulkAddUsers on:cancel={() => (studentModalOpen = false)} role="read" title="Student" />
             {:else}
-              <ManageUser on:cancel={() => (studentModal = false)} user={studentModal} />
+              <ManageUser on:cancel={() => (studentModalOpen = false)} user={studentModal} />
             {/if}
           </Modal>
         {/if}
@@ -411,14 +450,14 @@
                   files={asstFiles}
                   {assistant}
                   {models}
-                  canPublish={canPublishAssistant}
+                  canPublish={canPublishAssistant || false}
                 />
               </form>
             </Card>
           {:else}
             <Card
               class="w-full max-w-full space-y-2"
-              href={assistant.creator_id === data.me.user.id && canCreateAssistant
+              href={assistant.creator_id === data.me.user?.id && canCreateAssistant
                 ? `${$page.url.pathname}?edit-assistant=${assistant.id}`
                 : null}
             >
@@ -430,7 +469,7 @@
           <Card class="w-full max-w-full">
             <Heading tag="h4" class="pb-3">Add new AI assistant</Heading>
             <form class="grid grid-cols-2 gap-2" action="?/createAssistant" method="POST">
-              <ManageAssistant files={asstFiles} {models} canPublish={canPublishAssistant} />
+              <ManageAssistant files={asstFiles} {models} canPublish={canPublishAssistant || false} />
             </form>
           </Card>
         {/if}

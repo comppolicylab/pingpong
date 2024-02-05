@@ -147,11 +147,10 @@ def get_config(request: Request):
 
 
 @v1.post("/login/magic", response_model=schemas.GenericStatus)
-async def login(request: Request):
+async def login(body: schemas.MagicLoginRequest, request: Request):
     """Provide a magic link to the auth endpoint."""
     # Get the email from the request.
-    body = await request.json()
-    email = body["email"]
+    email = body.email
     # Look up the user by email
     user = await models.User.get_by_email(request.state.db, email)
     # Throw an error if the user does not exist.

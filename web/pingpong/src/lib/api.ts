@@ -20,6 +20,26 @@ export type BaseData = Record<string, unknown>;
  */
 export type BaseResponse = {
   $status: number;
+  detail?: string;
+};
+
+/**
+ * Error data.
+ */
+export type Error = {
+  detail?: string;
+}
+
+/**
+ * Error response. The $status will be >= 400.
+ */
+export type ErrorResponse = Error & BaseResponse;
+
+/**
+ * Check whether a response is an error.
+ */
+export const isErrorResponse = (r: unknown): r is ErrorResponse => {
+  return !!r && Object.hasOwn(r, "$status") && (r as BaseResponse).$status >= 400;
 };
 
 /**
@@ -127,12 +147,6 @@ const PUT = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: str
   return await _bmethod<T, R>(f, 'PUT', path, data);
 };
 
-/**
- * Get the current user.
- */
-export const me = async (f: Fetcher) => {
-  return await GET(f, 'me');
-};
 
 /**
  * Information about an institution.
@@ -144,6 +158,109 @@ export type Institution = {
   logo: string | null;
   created: string;
   updated: string | null;
+};
+
+
+/**
+ * Overall status of the session.
+ */
+export type SessionStatus = "valid" | "invalid" | "missing" | "error";
+
+
+/**
+ * Token information.
+ */
+export type SessionToken = {
+  sub: string;
+  exp: number;
+  iat: number;
+}
+
+/**
+ * Email with image.
+ */
+export type Profile = {
+  email: string;
+  gravatar_id: string;
+  image_url: string;
+};
+
+/**
+ * User activation state.
+ */
+export type UserState = "unverified" | "verified" | "banned";
+
+/**
+ * Mapping from user to class, with extra information.
+ */
+export type UserClassRole = {
+  user_id: number;
+  class_id: number;
+  role: string;
+  title: string;
+}
+
+/**
+ * List of user roles in a class.
+ */
+export type UserClassRoles = {
+  roles: UserClassRole[];
+  silent: boolean;
+}
+
+/**
+ * User information.
+ */
+export type AppUser = {
+  id: number;
+  name: string | null;
+  email: string;
+  state: UserState;
+  classes: UserClassRole[];
+  institutions: Institution[];
+  super_admin: boolean;
+  created: string;
+  updated: string | null;
+}
+
+/**
+ * Information about the current session.
+ */
+export type SessionState = {
+  status: SessionStatus;
+  error: string | null;
+  token: SessionToken | null;
+  user: AppUser | null;
+  profile: Profile | null;
+}
+
+/**
+ * Information about a file uploaded to the server.
+ */
+export type ServerFile = {
+  id: number;
+  name: string;
+  file_id: string;
+  content_type: string;
+  class_id: number;
+  private: boolean | null;
+  uploader_id: number | null;
+  created: string;
+  updated: string | null;
+}
+
+/**
+ * List of files.
+ */
+export type ServerFiles = {
+  files: ServerFile[];
+}
+
+/**
+ * Get the current user.
+ */
+export const me = async (f: Fetcher) => {
+  return await GET<never, SessionState>(f, 'me');
 };
 
 /**
@@ -194,7 +311,7 @@ export type Class = {
   updated: string | null;
   api_key: string | null;
   any_can_create_assistant: boolean | null;
-  any_can_update_assistant: boolean | null;
+  any_can_publish_assistant: boolean | null;
 };
 
 /**
@@ -224,6 +341,8 @@ export const getMyClasses = async (f: Fetcher) => {
 export type CreateClassRequest = {
   name: string;
   term: string;
+  any_can_create_assistant?: boolean;
+  any_can_publish_assistant?: boolean;
 };
 
 /**
@@ -233,7 +352,7 @@ export type UpdateClassRequest = {
   name?: string;
   term?: string;
   any_can_create_assistant?: string;
-  any_can_update_assistant?: string;
+  any_can_publish_assistant?: string;
 };
 
 /**
@@ -253,11 +372,18 @@ export const updateClass = async (f: Fetcher, classId: number, data: UpdateClass
 };
 
 /**
+ * Api key from the server.
+ */
+export type ApiKey = {
+  api_key: string;
+};
+
+/**
  * Update the API key for a class.
  */
 export const updateApiKey = async (f: Fetcher, classId: number, apiKey: string) => {
   const url = `class/${classId}/api_key`;
-  return await PUT(f, url, { api_key: apiKey });
+  return await PUT<ApiKey, ApiKey>(f, url, { api_key: apiKey });
 };
 
 /**
@@ -265,15 +391,31 @@ export const updateApiKey = async (f: Fetcher, classId: number, apiKey: string) 
  */
 export const getApiKey = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/api_key`;
-  return await GET(f, url);
+  return await GET<never, ApiKey>(f, url);
 };
+
+/**
+ * Language model information.
+ */
+export type AssistantModel = {
+  id: string;
+  created: string;
+  owner: string;
+}
+
+/**
+ * List of language models.
+ */
+export type AssistantModels = {
+  models: AssistantModel[];
+}
 
 /**
  * Get models available with the api key for the class.
  */
 export const getModels = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/models`;
-  return await GET(f, url);
+  return await GET<never, AssistantModels>(f, url);
 };
 
 /**
@@ -281,7 +423,7 @@ export const getModels = async (f: Fetcher, classId: number) => {
  */
 export const getClass = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}`;
-  return await GET(f, url);
+  return await GET<never, Class>(f, url);
 };
 
 /**
@@ -289,7 +431,14 @@ export const getClass = async (f: Fetcher, classId: number) => {
  */
 export const getClassFiles = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/files`;
-  return await GET(f, url);
+  return await GET<never, ServerFiles>(f, url);
+};
+
+/**
+ * List of threads.
+ */
+export type Threads = {
+  threads: Thread[];
 };
 
 /**
@@ -297,15 +446,43 @@ export const getClassFiles = async (f: Fetcher, classId: number) => {
  */
 export const getClassThreads = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/threads`;
-  return await GET(f, url);
+  return await GET<never, Threads>(f, url);
 };
+
+/**
+ * Information about an assistant.
+ */
+export type Assistant = {
+  id: number;
+  name: string;
+  description: string | null;
+  instructions: string;
+  model: string;
+  tools: string;
+  class_id: number;
+  creator_id: number;
+  files: ServerFile[];
+  published: string | null;
+  use_latex: boolean | null;
+  hide_prompt: boolean | null;
+  created: string;
+  updated: string | null;
+};
+
+/**
+ * Information about multiple assistants, plus metadata about creators.
+ */
+export type Assistants = {
+  assistants: Assistant[];
+  creators: { [id: number]: Profile };
+}
 
 /**
  * Fetch all assistants for a class.
  */
 export const getAssistants = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/assistants`;
-  return await GET(f, url);
+  return await GET<never, Assistants>(f, url);
 };
 
 /**
@@ -354,7 +531,7 @@ export const createAssistant = async (
   data: CreateAssistantRequest
 ) => {
   const url = `class/${classId}/assistant`;
-  return await POST(f, url, data);
+  return await POST<CreateAssistantRequest, Assistant>(f, url, data);
 };
 
 /**
@@ -367,7 +544,7 @@ export const updateAssistant = async (
   data: UpdateAssistantRequest
 ) => {
   const url = `class/${classId}/assistant/${assistantId}`;
-  return await PUT(f, url, data);
+  return await PUT<UpdateAssistantRequest, Assistant>(f, url, data);
 };
 
 /**
@@ -375,7 +552,7 @@ export const updateAssistant = async (
  */
 export const deleteAssistant = async (f: Fetcher, classId: number, assistantId: number) => {
   const url = `class/${classId}/assistant/${assistantId}`;
-  return await DELETE(f, url);
+  return await DELETE<never, GenericStatus>(f, url);
 };
 
 /**
@@ -407,21 +584,6 @@ export const uploadUserFile = (
 };
 
 /**
- * Server representation of a file.
- */
-export interface UploadedFile {
-  id: number;
-  name: string;
-  file_id: string;
-  content_type: string;
-  class_id: number;
-  private: boolean;
-  uploader_id: number;
-  created: string;
-  updated: string | null;
-}
-
-/**
  * File upload error.
  */
 export interface FileUploadFailure {
@@ -431,7 +593,7 @@ export interface FileUploadFailure {
 /**
  * Result of a file upload.
  */
-export type FileUploadResult = UploadedFile | FileUploadFailure;
+export type FileUploadResult = ServerFile | FileUploadFailure;
 
 /**
  * Info about the file upload.
@@ -496,7 +658,7 @@ const _doUpload = (url: string, file: File, opts?: UploadOptions): FileUploadInf
       if (xhr.readyState === 4) {
         if (xhr.status < 300) {
           info.state = 'success';
-          info.response = JSON.parse(xhr.responseText) as UploadedFile;
+          info.response = JSON.parse(xhr.responseText) as ServerFile;
           resolve(info.response);
         } else {
           info.state = 'error';
@@ -518,7 +680,7 @@ const _doUpload = (url: string, file: File, opts?: UploadOptions): FileUploadInf
  */
 export const deleteFile = async (f: Fetcher, classId: number, fileId: number) => {
   const url = `class/${classId}/file/${fileId}`;
-  return await DELETE(f, url);
+  return await DELETE<never, GenericStatus>(f, url);
 };
 
 /**
@@ -531,15 +693,35 @@ export const deleteUserFile = async (
   fileId: number
 ) => {
   const url = `class/${classId}/user/${userId}/file/${fileId}`;
-  return await DELETE(f, url);
+  return await DELETE<never, GenericStatus>(f, url);
 };
+
+
+/**
+ * Information about a user inside of a class.
+ */
+export type ClassUser = {
+  id: number;
+  name: string | null;
+  email: string;
+  role: string;
+  title: string;
+  state: UserState;
+}
+
+/**
+ * List of users in a class.
+ */
+export type ClassUsers = {
+  users: ClassUser[];
+}
 
 /**
  * Fetch users in a class.
  */
 export const getClassUsers = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/users`;
-  return await GET(f, url);
+  return await GET<never, ClassUsers>(f, url);
 };
 
 /**
@@ -578,7 +760,7 @@ export const createClassUsers = async (
   data: CreateClassUsersRequest
 ) => {
   const url = `class/${classId}/user`;
-  return await POST(f, url, data);
+  return await POST<CreateClassUsersRequest, UserClassRoles>(f, url, data);
 };
 
 /**
@@ -599,7 +781,7 @@ export const updateClassUser = async (
   data: UpdateClassUserRequest
 ) => {
   const url = `class/${classId}/user/${userId}`;
-  return await PUT(f, url, data);
+  return await PUT<UpdateClassUserRequest, UserClassRole>(f, url, data);
 };
 
 /**
@@ -748,15 +930,6 @@ export type OpenAIMessage = {
 };
 
 /**
- * Email with image.
- */
-export type Profile = {
-  email: string;
-  gravatar_id: string;
-  image_url: string;
-};
-
-/**
  * Accounting of individuals in a thread.
  */
 export type ThreadParticipants = {
@@ -874,7 +1047,7 @@ const TERMINAL_STATES = new Set(['expired', 'completed', 'failed', 'cancelled'])
 /**
  * Check if a run is in a terminal state.
  */
-export const finished = (run: { status: string }) => {
+export const finished = (run: OpenAIRun | null | undefined) => {
   if (!run) {
     return false;
   }
@@ -883,11 +1056,18 @@ export const finished = (run: { status: string }) => {
 };
 
 /**
+ * Request for logging in via magic link sent to email.
+ */
+export type MagicLoginRequest = {
+  email: string;
+}
+
+/**
  * Perform a login sending a magic link.
  */
 export const loginWithMagicLink = async (f: Fetcher, email: string) => {
   const url = `login/magic`;
-  return await POST(f, url, { email });
+  return await POST<MagicLoginRequest, GenericStatus>(f, url, { email });
 };
 
 /**
@@ -914,6 +1094,11 @@ export type FileTypeInfo = {
   code_interpreter: boolean;
   extensions: string[];
 };
+
+/**
+ * Lookup function for file types.
+ */
+export type MimeTypeLookupFn = (t: string) => FileTypeInfo | undefined;
 
 /**
  * Information about upload support.

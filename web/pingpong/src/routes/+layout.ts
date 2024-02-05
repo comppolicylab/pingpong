@@ -55,7 +55,7 @@ export const load: LayoutLoad = async ({ fetch, url, params }) => {
       threads = api.getClassThreads(fetch, classId).then(({ threads }) => threads);
     }
 
-    if (me.user.super_admin) {
+    if (me.user?.super_admin) {
       institutions = api.getInstitutions(fetch).then(({ institutions }) => institutions);
     }
 
