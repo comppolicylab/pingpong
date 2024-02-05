@@ -1,4 +1,4 @@
-import { handleErrorWithSentry, Replay } from "@sentry/sveltekit";
+import { handleErrorWithSentry, Replay } from '@sentry/sveltekit';
 import * as Sentry from '@sentry/sveltekit';
 
 const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN;
@@ -17,10 +17,9 @@ if (SENTRY_DSN) {
     replaysOnErrorSampleRate: 1.0,
 
     // If you don't want to use Session Replay, just remove the line below:
-    integrations: [new Replay()],
+    integrations: [new Replay()]
   });
 }
-
 
 // If you have a custom error handler, pass it to `handleErrorWithSentry`
 export const handleError = handleErrorWithSentry();

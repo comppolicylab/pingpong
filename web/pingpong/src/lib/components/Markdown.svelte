@@ -1,17 +1,17 @@
 <script lang="ts">
-  import {markdown} from "$lib/markdown";
-  import autoRender from "katex/contrib/auto-render";
+  import { markdown } from '$lib/markdown';
+  import autoRender from 'katex/contrib/auto-render';
 
-  export let content = "";
+  export let content = '';
 
   const renderKatex = (node: HTMLElement) => {
     autoRender(node, {
-       delimiters: [
-        {left: '$$', right: '$$', display: true},
-        {left: '$', right: '$', display: false},
-        {left: '\\(', right: '\\)', display: false},
-        {left: '\\[', right: '\\]', display: true}
-      ],
+      delimiters: [
+        { left: '$$', right: '$$', display: true },
+        { left: '$', right: '$', display: false },
+        { left: '\\(', right: '\\)', display: false },
+        { left: '\\[', right: '\\]', display: true }
+      ]
     });
   };
 
@@ -22,7 +22,7 @@
       update() {
         renderKatex(node);
       }
-    }
+    };
   };
 </script>
 

@@ -1,5 +1,5 @@
 <script>
-  import "../app.pcss";
+  import '../app.pcss';
   import Sidebar from '$lib/components/Sidebar.svelte';
   import Main from '$lib/components/Main.svelte';
   import { SvelteToast } from '@zerodevx/svelte-toast';
@@ -12,13 +12,12 @@
   <div class="flex h-screen">
     <Sidebar {data} />
     <Main>
-      <slot></slot>
+      <slot />
     </Main>
   </div>
 {:else}
-  <slot></slot>
+  <slot />
 {/if}
-
 
 <style lang="css">
   :root {

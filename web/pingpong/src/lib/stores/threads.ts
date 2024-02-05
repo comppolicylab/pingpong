@@ -1,11 +1,8 @@
-import {writable} from 'svelte/store';
-import type {Writable} from 'svelte/store';
+import { writable } from 'svelte/store';
+import type { Writable } from 'svelte/store';
 import * as api from '$lib/api';
 
-
-
 class ThreadPoller {
-
   public classId: number;
 
   public threadId: number;
@@ -88,7 +85,6 @@ class ThreadPoller {
     }
     await this._getThread();
   }
-
 }
 
 const _THREADS = new Map<number, ThreadPoller>();
@@ -100,4 +96,4 @@ export const threads = (fetcher: api.Fetcher, classId: number, threadId: number)
 
   const poller = _THREADS.get(threadId)!;
   return poller;
-}
+};

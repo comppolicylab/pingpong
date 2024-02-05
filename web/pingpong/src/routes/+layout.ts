@@ -1,19 +1,19 @@
-import {goto} from "$app/navigation";
-import {redirect} from "@sveltejs/kit";
-import {browser} from "$app/environment";
-import * as api from "$lib/api";
-import type {LayoutLoad} from "./$types";
+import { goto } from '$app/navigation';
+import { redirect } from '@sveltejs/kit';
+import { browser } from '$app/environment';
+import * as api from '$lib/api';
+import type { LayoutLoad } from './$types';
 
-const LOGIN = "/login";
-const HOME = "/";
+const LOGIN = '/login';
+const HOME = '/';
 
 /**
  * Load the current user and redirect if they are not logged in.
  */
-export const load: LayoutLoad = async ({fetch, url, params}) => {
+export const load: LayoutLoad = async ({ fetch, url, params }) => {
   // Fetch the current user
   const me = await api.me(fetch);
-  const authed = me.status === "valid";
+  const authed = me.status === 'valid';
 
   if (url.pathname === LOGIN) {
     // If the user is logged in, go to the home page.
@@ -40,24 +40,33 @@ export const load: LayoutLoad = async ({fetch, url, params}) => {
   const additionalState = {
     classes: [],
     threads: [],
-    institutions: [],
+    institutions: []
   };
 
   if (authed) {
     const promises = new Map<keyof typeof additionalState, Promise<any>>();
 
-    promises.set("classes", api.getMyClasses(fetch).then(({classes}) => classes));
+    promises.set(
+      'classes',
+      api.getMyClasses(fetch).then(({ classes }) => classes)
+    );
     const classId = params.classId ? parseInt(params.classId, 10) : null;
     if (classId) {
-      promises.set("threads", api.getClassThreads(fetch, classId).then(({threads}) => threads));
+      promises.set(
+        'threads',
+        api.getClassThreads(fetch, classId).then(({ threads }) => threads)
+      );
     } else {
-      promises.set("threads", Promise.resolve([]));
+      promises.set('threads', Promise.resolve([]));
     }
 
     if (me.user.super_admin) {
-      promises.set("institutions", api.getInstitutions(fetch).then(({institutions}) => institutions));
+      promises.set(
+        'institutions',
+        api.getInstitutions(fetch).then(({ institutions }) => institutions)
+      );
     } else {
-      promises.set("institutions", Promise.resolve([]));
+      promises.set('institutions', Promise.resolve([]));
     }
 
     const entries = Array.from(promises.entries());
@@ -72,6 +81,6 @@ export const load: LayoutLoad = async ({fetch, url, params}) => {
 
   return {
     me,
-    ...additionalState,
+    ...additionalState
   };
-}
+};

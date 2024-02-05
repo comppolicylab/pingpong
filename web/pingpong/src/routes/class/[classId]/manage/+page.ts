@@ -1,18 +1,18 @@
-import * as api from "$lib/api";
-import type { PageLoad } from "./$types";
+import * as api from '$lib/api';
+import type { PageLoad } from './$types';
 
 /**
  * Load additional data needed for managing the class.
  */
 export const load: PageLoad = async ({ fetch, params }) => {
   const classId = parseInt(params.classId, 10);
-  const {api_key}= await api.getApiKey(fetch, classId);
-  const {users} = await api.getClassUsers(fetch, classId);
-  const {models} = await api.getModels(fetch, classId);
+  const { api_key } = await api.getApiKey(fetch, classId);
+  const { users } = await api.getClassUsers(fetch, classId);
+  const { models } = await api.getModels(fetch, classId);
 
   return {
     models,
     apiKey: api_key || '',
-    classUsers: users,
+    classUsers: users
   };
-}
+};

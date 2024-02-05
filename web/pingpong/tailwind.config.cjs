@@ -1,18 +1,21 @@
 /** @type {import('tailwindcss').Config}*/
 const config = {
-	content: ['./src/**/*.{html,js,svelte,ts}', './node_modules/flowbite-svelte/**/*.{html,js,svelte,ts}'],
+  content: [
+    './src/**/*.{html,js,svelte,ts}',
+    './node_modules/flowbite-svelte/**/*.{html,js,svelte,ts}'
+  ],
 
   darkMode: 'class',
 
-	theme: {
+  theme: {
     container: {
       center: true,
-      padding: '2rem',
+      padding: '2rem'
     },
-		extend: {}
-	},
+    extend: {}
+  },
 
-	plugins: [require('flowbite/plugin')]
+  plugins: [require('flowbite/plugin')]
 };
 
 module.exports = config;
