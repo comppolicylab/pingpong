@@ -57,7 +57,7 @@
     }
 
     // Run upload for every newly added file.
-    const newFiles: FileUploadInfo[] = []
+    const newFiles: FileUploadInfo[] = [];
     toUpload.forEach((f) => {
       if (maxSize && f.size > maxSize) {
         dispatch('error', { file: f, message: `File is too large. Max size is ${maxSize} bytes.` });

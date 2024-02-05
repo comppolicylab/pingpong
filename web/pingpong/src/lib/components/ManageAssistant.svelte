@@ -23,9 +23,9 @@
   let selectedFiles = (assistant?.files || []).map((file) => file.file_id);
   const tools = [{ value: 'code_interpreter', name: 'Code Interpreter' }];
   const defaultTools = [{ type: 'code_interpreter' }];
-  const selectedTools = (assistant?.tools ? JSON.parse(assistant.tools) as Tool[] : defaultTools).map(
-    (t) => t.type
-  );
+  const selectedTools = (
+    assistant?.tools ? (JSON.parse(assistant.tools) as Tool[]) : defaultTools
+  ).map((t) => t.type);
   $: modelOptions = (models || []).map((model) => ({ value: model.id, name: model.id }));
   $: fileOptions = (files || []).map((file) => ({ value: file.file_id, name: file.name }));
 
@@ -78,8 +78,10 @@
   />
 </div>
 <div class="col-span-2">
-  <Checkbox id="hide_prompt" name="hide_prompt" checked={(assistant ? assistant.hide_prompt : false) || false}
-    >Hide Prompt</Checkbox
+  <Checkbox
+    id="hide_prompt"
+    name="hide_prompt"
+    checked={(assistant ? assistant.hide_prompt : false) || false}>Hide Prompt</Checkbox
   >
   <Helper
     >Hide the prompt from other users. When checked, only the teaching team and the assistant's

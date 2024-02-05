@@ -1,10 +1,16 @@
 <script lang="ts">
   import { writable } from 'svelte/store';
-  import type {Writable} from 'svelte/store';
+  import type { Writable } from 'svelte/store';
   import { GradientButton } from 'flowbite-svelte';
   import { page } from '$app/stores';
   import { ChevronUpSolid } from 'flowbite-svelte-icons';
-  import type { MimeTypeLookupFn, FileRemover, FileUploader, FileUploadInfo, ServerFile } from '$lib/api';
+  import type {
+    MimeTypeLookupFn,
+    FileRemover,
+    FileUploader,
+    FileUploadInfo,
+    ServerFile
+  } from '$lib/api';
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import FileUpload from '$lib/components/FileUpload.svelte';
   import { sadToast } from '$lib/toast';
@@ -185,15 +191,15 @@
       style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
     />
     {#if upload}
-    <FileUpload
-      {maxSize}
-      {accept}
-      wrapperClass="absolute bottom-3 left-2.5"
-      disabled={loading || disabled || !upload}
-      upload={upload}
-      on:error={(e) => sadToast(e.detail.message)}
-      on:change={handleFilesChange}
-    />
+      <FileUpload
+        {maxSize}
+        {accept}
+        wrapperClass="absolute bottom-3 left-2.5"
+        disabled={loading || disabled || !upload}
+        {upload}
+        on:error={(e) => sadToast(e.detail.message)}
+        on:change={handleFilesChange}
+      />
     {/if}
     <GradientButton
       type="submit"

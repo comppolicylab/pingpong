@@ -28,7 +28,7 @@ export type UpdateUserForm = {
   user_id: string;
   role: string;
   title: string;
-}
+};
 
 /**
  * UI for updating a class.

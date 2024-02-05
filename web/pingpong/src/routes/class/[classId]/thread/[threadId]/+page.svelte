@@ -16,7 +16,7 @@
 
   let submitting = writable(false);
   let messages: api.OpenAIMessage[] = [];
-  let participants: api.ThreadParticipants = {user: {}, assistant: {}};
+  let participants: api.ThreadParticipants = { user: {}, assistant: {} };
   let priv = false;
   let classId = 0;
   let waiting = writable(false);
@@ -24,7 +24,7 @@
   $: threadStatus = $thread?.$status || 0;
   $: threadUsers = ($thread as api.ThreadWithMeta)?.thread?.users || [];
   $: {
-    if ($thread && Object.hasOwn($thread, "messages")) {
+    if ($thread && Object.hasOwn($thread, 'messages')) {
       const t = $thread as api.ThreadWithMeta;
       messages = t.messages.sort((a, b) => a.created_at - b.created_at);
       participants = t.participants;
@@ -35,13 +35,14 @@
       }
     } else {
       messages = [];
-      participants = {user: {}, assistant: {}};
+      participants = { user: {}, assistant: {} };
       priv = false;
       classId = 0;
     }
   }
   $: loading = !$thread && data?.thread?.loading;
-  $: canSubmit = !!participants.user && data?.me?.user?.id && !!participants.user[data?.me?.user?.id];
+  $: canSubmit =
+    !!participants.user && data?.me?.user?.id && !!participants.user[data?.me?.user?.id];
 
   // Get the name of the participant in the chat thread.
   const getName = (message: api.OpenAIMessage) => {
@@ -53,7 +54,10 @@
       const participant = participants.user[userId];
       return participant?.email || 'Unknown';
     } else {
-      return participants.assistant[($thread as api.ThreadWithMeta).thread.assistant_id] || 'PingPong Bot';
+      return (
+        participants.assistant[($thread as api.ThreadWithMeta).thread.assistant_id] ||
+        'PingPong Bot'
+      );
     }
   };
 
@@ -217,9 +221,7 @@
     >
       <EyeSlashOutline size="sm" class="text-gray-400" />
       <Span class="text-gray-400">This thread is private to</Span>
-      <Span class="text-gray-600"
-        >{threadUsers.map((u) => u.email).join(', ')}</Span
-      >
+      <Span class="text-gray-600">{threadUsers.map((u) => u.email).join(', ')}</Span>
     </div>
   {/if}
 </div>

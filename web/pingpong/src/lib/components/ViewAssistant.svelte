@@ -4,7 +4,7 @@
   import { toast } from '@zerodevx/svelte-toast';
   import { Heading, Label, List, Li } from 'flowbite-svelte';
   import { EyeOutline, EyeSlashOutline, LinkOutline } from 'flowbite-svelte-icons';
-  import type {Assistant} from '$lib/api';
+  import type { Assistant } from '$lib/api';
 
   export let assistant: Assistant;
   export let creator: { email: string };

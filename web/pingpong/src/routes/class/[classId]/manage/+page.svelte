@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { writable } from 'svelte/store';
-  import type {Writable} from 'svelte/store';
+  import type { Writable } from 'svelte/store';
   import { page } from '$app/stores';
   import { beforeNavigate } from '$app/navigation';
   import * as api from '$lib/api';
@@ -10,7 +10,6 @@
     Checkbox,
     Helper,
     Modal,
-    Listgroup,
     GradientButton,
     Secondary,
     Span,
@@ -98,11 +97,13 @@
   ]
     .filter((f) => !$trashFiles.includes((f.response as ServerFile)?.id))
     .sort((a, b) => {
-      const aName = a.file?.name || (a.response as {name: string})?.name || '';
-      const bName = b.file?.name || (b.response as {name: string})?.name || '';
+      const aName = a.file?.name || (a.response as { name: string })?.name || '';
+      const bName = b.file?.name || (b.response as { name: string })?.name || '';
       return aName.localeCompare(bName);
     }) as FileUploadInfo[];
-  $: asstFiles = allFiles.filter((f) => f.state === 'success').map((f) => f.response) as ServerFile[];
+  $: asstFiles = allFiles
+    .filter((f) => f.state === 'success')
+    .map((f) => f.response) as ServerFile[];
   $: students = (data?.classUsers || []).filter((u) => u.title.toLowerCase() === 'student');
   $: tt = (data?.classUsers || []).filter((u) => u.title.toLowerCase() !== 'student');
   $: classRole =
@@ -288,17 +289,17 @@
           <div class="mb-4">
             <div>
               {#each tt as item}
-              <ViewUser
-                user={item}
-                on:click={() => {
-                  ttModal = item;
-                  ttModalOpen = true;
-                }}
-                on:touchstart={() => {
-                  ttModal = item;
-                  ttModalOpen = true;
-                }}
-              />
+                <ViewUser
+                  user={item}
+                  on:click={() => {
+                    ttModal = item;
+                    ttModalOpen = true;
+                  }}
+                  on:touchstart={() => {
+                    ttModal = item;
+                    ttModalOpen = true;
+                  }}
+                />
               {/each}
             </div>
           </div>
@@ -342,17 +343,17 @@
           <div class="mb-4">
             <div>
               {#each students as item}
-              <ViewUser
-                user={item}
-                on:click={() => {
-                  studentModal = item;
-                  studentModalOpen = true;
-                }}
-                on:touchstart={() => {
-                  studentModal = item;
-                  studentModalOpen = true;
-                }}
-              />
+                <ViewUser
+                  user={item}
+                  on:click={() => {
+                    studentModal = item;
+                    studentModalOpen = true;
+                  }}
+                  on:touchstart={() => {
+                    studentModal = item;
+                    studentModalOpen = true;
+                  }}
+                />
               {/each}
             </div>
           </div>
@@ -371,7 +372,11 @@
         {#if studentModalOpen}
           <Modal bind:open={studentModalOpen} title="Manage students">
             {#if !studentModal}
-              <BulkAddUsers on:cancel={() => (studentModalOpen = false)} role="read" title="Student" />
+              <BulkAddUsers
+                on:cancel={() => (studentModalOpen = false)}
+                role="read"
+                title="Student"
+              />
             {:else}
               <ManageUser on:cancel={() => (studentModalOpen = false)} user={studentModal} />
             {/if}
@@ -469,7 +474,11 @@
           <Card class="w-full max-w-full">
             <Heading tag="h4" class="pb-3">Add new AI assistant</Heading>
             <form class="grid grid-cols-2 gap-2" action="?/createAssistant" method="POST">
-              <ManageAssistant files={asstFiles} {models} canPublish={canPublishAssistant || false} />
+              <ManageAssistant
+                files={asstFiles}
+                {models}
+                canPublish={canPublishAssistant || false}
+              />
             </form>
           </Card>
         {/if}

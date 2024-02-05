@@ -14,7 +14,7 @@ export const actions = {
       message: message,
       email: body.get('email') as string | undefined,
       name: body.get('name') as string | undefined,
-      category: body.get('category') as string | undefined,
+      category: body.get('category') as string | undefined
     };
 
     const result = await api.postSupportRequest(fetch, data);

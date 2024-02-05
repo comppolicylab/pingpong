@@ -9,8 +9,7 @@
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
   import type { Assistant, Thread } from '$lib/api';
-  import type {SubmitFunction} from "@sveltejs/kit";
-
+  import type { SubmitFunction } from '@sveltejs/kit';
 
   /**
    * Application data.
@@ -26,7 +25,7 @@
 
   // Whether billing is set up for the class (which controls everything).
   $: isConfigured = data?.hasAssistants && data?.hasBilling;
-  $: parties = data.me.user?.id || "";
+  $: parties = data.me.user?.id || '';
   // The assistant ID from the URL.
   $: linkedAssistant = parseInt($page.url.searchParams.get('assistant') || '0', 10);
   $: {
@@ -60,7 +59,7 @@
 
     return ({ result }) => {
       if (result.type === 'success') {
-        const data = result.data as {thread: Thread};
+        const data = result.data as { thread: Thread };
         goto(`/class/${data.thread.class_id}/thread/${data.thread.id}`);
       } else {
         $loading = false;

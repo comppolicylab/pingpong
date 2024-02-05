@@ -28,7 +28,7 @@ export type BaseResponse = {
  */
 export type Error = {
   detail?: string;
-}
+};
 
 /**
  * Error response. The $status will be >= 400.
@@ -39,7 +39,7 @@ export type ErrorResponse = Error & BaseResponse;
  * Check whether a response is an error.
  */
 export const isErrorResponse = (r: unknown): r is ErrorResponse => {
-  return !!r && Object.hasOwn(r, "$status") && (r as BaseResponse).$status >= 400;
+  return !!r && Object.hasOwn(r, '$status') && (r as BaseResponse).$status >= 400;
 };
 
 /**
@@ -147,7 +147,6 @@ const PUT = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: str
   return await _bmethod<T, R>(f, 'PUT', path, data);
 };
 
-
 /**
  * Information about an institution.
  */
@@ -160,12 +159,10 @@ export type Institution = {
   updated: string | null;
 };
 
-
 /**
  * Overall status of the session.
  */
-export type SessionStatus = "valid" | "invalid" | "missing" | "error";
-
+export type SessionStatus = 'valid' | 'invalid' | 'missing' | 'error';
 
 /**
  * Token information.
@@ -174,7 +171,7 @@ export type SessionToken = {
   sub: string;
   exp: number;
   iat: number;
-}
+};
 
 /**
  * Email with image.
@@ -188,7 +185,7 @@ export type Profile = {
 /**
  * User activation state.
  */
-export type UserState = "unverified" | "verified" | "banned";
+export type UserState = 'unverified' | 'verified' | 'banned';
 
 /**
  * Mapping from user to class, with extra information.
@@ -198,7 +195,7 @@ export type UserClassRole = {
   class_id: number;
   role: string;
   title: string;
-}
+};
 
 /**
  * List of user roles in a class.
@@ -206,7 +203,7 @@ export type UserClassRole = {
 export type UserClassRoles = {
   roles: UserClassRole[];
   silent: boolean;
-}
+};
 
 /**
  * User information.
@@ -221,7 +218,7 @@ export type AppUser = {
   super_admin: boolean;
   created: string;
   updated: string | null;
-}
+};
 
 /**
  * Information about the current session.
@@ -232,7 +229,7 @@ export type SessionState = {
   token: SessionToken | null;
   user: AppUser | null;
   profile: Profile | null;
-}
+};
 
 /**
  * Information about a file uploaded to the server.
@@ -247,14 +244,14 @@ export type ServerFile = {
   uploader_id: number | null;
   created: string;
   updated: string | null;
-}
+};
 
 /**
  * List of files.
  */
 export type ServerFiles = {
   files: ServerFile[];
-}
+};
 
 /**
  * Get the current user.
@@ -401,14 +398,14 @@ export type AssistantModel = {
   id: string;
   created: string;
   owner: string;
-}
+};
 
 /**
  * List of language models.
  */
 export type AssistantModels = {
   models: AssistantModel[];
-}
+};
 
 /**
  * Get models available with the api key for the class.
@@ -475,7 +472,7 @@ export type Assistant = {
 export type Assistants = {
   assistants: Assistant[];
   creators: { [id: number]: Profile };
-}
+};
 
 /**
  * Fetch all assistants for a class.
@@ -696,7 +693,6 @@ export const deleteUserFile = async (
   return await DELETE<never, GenericStatus>(f, url);
 };
 
-
 /**
  * Information about a user inside of a class.
  */
@@ -707,14 +703,14 @@ export type ClassUser = {
   role: string;
   title: string;
   state: UserState;
-}
+};
 
 /**
  * List of users in a class.
  */
 export type ClassUsers = {
   users: ClassUser[];
-}
+};
 
 /**
  * Fetch users in a class.
@@ -1060,7 +1056,7 @@ export const finished = (run: OpenAIRun | null | undefined) => {
  */
 export type MagicLoginRequest = {
   email: string;
-}
+};
 
 /**
  * Perform a login sending a magic link.
