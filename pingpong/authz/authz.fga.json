@@ -1,0 +1,306 @@
+{
+  "schema_version": "1.1",
+  "type_definitions": [
+    {
+      "type": "user",
+      "relations": {},
+      "metadata": null
+    },
+    {
+      "type": "root",
+      "relations": {
+        "admin": {
+          "this": {}
+        },
+        "institution_creator": {
+          "union": {
+            "child": [
+              {
+                "this": {}
+              },
+              {
+                "computedUserset": {
+                  "relation": "admin"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "admin": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "institution_creator": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "institution",
+      "relations": {
+        "parent": {
+          "this": {}
+        },
+        "admin": {
+          "union": {
+            "child": [
+              {
+                "this": {}
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "admin"
+                  },
+                  "tupleset": {
+                    "relation": "parent"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "class_creator": {
+          "union": {
+            "child": [
+              {
+                "this": {}
+              },
+              {
+                "computedUserset": {
+                  "relation": "admin"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "parent": {
+            "directly_related_user_types": [
+              {
+                "type": "root"
+              }
+            ]
+          },
+          "admin": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "class_creator": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "class",
+      "relations": {
+        "parent": {
+          "this": {}
+        },
+        "admin": {
+          "union": {
+            "child": [
+              {
+                "this": {}
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "admin"
+                  },
+                  "tupleset": {
+                    "relation": "parent"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "teacher": {
+          "this": {}
+        },
+        "student": {
+          "this": {}
+        },
+        "member": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "admin"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "teacher"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "student"
+                }
+              }
+            ]
+          }
+        },
+        "thread_creator": {
+          "computedUserset": {
+            "relation": "member"
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "parent": {
+            "directly_related_user_types": [
+              {
+                "type": "institution"
+              }
+            ]
+          },
+          "admin": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "teacher": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "student": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "member": {
+            "directly_related_user_types": []
+          },
+          "thread_creator": {
+            "directly_related_user_types": []
+          }
+        }
+      }
+    },
+    {
+      "type": "thread",
+      "relations": {
+        "parent": {
+          "this": {}
+        },
+        "party": {
+          "this": {}
+        },
+        "viewer": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "party"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "member"
+                  },
+                  "tupleset": {
+                    "relation": "parent"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "chatter": {
+          "computedUserset": {
+            "relation": "party"
+          }
+        },
+        "deleter": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "party"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "admin"
+                  },
+                  "tupleset": {
+                    "relation": "parent"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "publisher": {
+          "computedUserset": {
+            "relation": "party"
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "parent": {
+            "directly_related_user_types": [
+              {
+                "type": "class"
+              }
+            ]
+          },
+          "party": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "viewer": {
+            "directly_related_user_types": []
+          },
+          "chatter": {
+            "directly_related_user_types": []
+          },
+          "deleter": {
+            "directly_related_user_types": []
+          },
+          "publisher": {
+            "directly_related_user_types": []
+          }
+        }
+      }
+    }
+  ]
+}

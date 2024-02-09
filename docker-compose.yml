@@ -41,6 +41,26 @@ services:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
       - logs:/logs
 
+
+  authz:
+    platform: linux/amd64
+    image: openfga/openfga:v1.4.3
+    container_name: pingpong-authz
+    networks: [back]
+    command: [run]
+    expose: [8080, 8081, 3000]
+    ports: ["8080:8080", "8081:8081", "3000:3000"]
+    secrets:
+    - source: openfgacfg
+      mode: 0400
+      target: /etc/openfga/config.yaml
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/grpc_health_probe", "-addr=authz:8081"]
+      interval: 5s
+      timeout: 30s
+      retries: 3
+
+
   web:
     platform: linux/amd64
     image: aitutor.azurecr.io/web:latest
@@ -120,3 +140,5 @@ secrets:
     file: ./cert/dev.key
   traefikcrtcfg:
     file: ./traefik-crt.yml
+  openfgacfg:
+    file: ./openfga-config.dev.yml

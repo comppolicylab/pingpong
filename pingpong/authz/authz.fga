@@ -1,0 +1,33 @@
+model
+  schema 1.1
+
+type user
+
+type root
+  relations
+    define admin: [user]
+    define institution_creator: [user] or admin
+
+type institution
+  relations
+    define parent: [root]
+    define admin: [user] or admin from parent
+    define class_creator: [user] or admin
+
+type class
+  relations
+    define parent: [institution]
+    define admin: [user] or admin from parent
+    define teacher: [user]
+    define student: [user]
+    define member: admin or teacher or student
+    define thread_creator: member
+
+type thread
+  relations
+    define parent: [class]
+    define party: [user]
+    define viewer: party or member from parent
+    define chatter: party
+    define deleter: party or admin from parent
+    define publisher: party

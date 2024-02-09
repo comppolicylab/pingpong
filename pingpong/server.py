@@ -1064,6 +1064,9 @@ async def lifespan(app: FastAPI):
                 session.add(user)
             await session.commit()
 
+    logger.info("Configuration authorization ...")
+    await config.authz.driver.init()
+
     with sentry(), metrics.metrics():
         yield
 

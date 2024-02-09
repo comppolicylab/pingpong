@@ -8,11 +8,37 @@ from typing import Literal, Union
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+from .authz import OpenFgaAuthzDriver
 from .db import PostgresDriver, SqliteDriver
 from .email import AzureEmailSender, GmailEmailSender, MockEmailSender, SmtpEmailSender
 from .support import DiscordSupportDriver
 
 logger = logging.getLogger(__name__)
+
+
+class OpenFgaAuthzSettings(BaseSettings):
+    """Settings for OpenFGA authorization."""
+
+    type: Literal["openfga"]
+    scheme: str = Field("http")
+    host: str = Field("localhost")
+    port: int = Field(8080)
+    store: str = Field("pingpong")
+    cfg: str = Field("authz.json")
+    key: str | None = Field(None)
+
+    @cached_property
+    def driver(self) -> OpenFgaAuthzDriver:
+        return OpenFgaAuthzDriver(
+            scheme=self.scheme,
+            host=f"{self.host}:{self.port}",
+            store=self.store,
+            key=self.key,
+            model_config=self.cfg,
+        )
+
+
+AuthzSettings = Union[OpenFgaAuthzSettings]
 
 
 class MockEmailSettings(BaseSettings):
@@ -189,6 +215,7 @@ class Config(BaseSettings):
     development: bool = Field(False, env="DEVELOPMENT")
     db: DbSettings
     auth: AuthSettings
+    authz: AuthzSettings
     email: EmailSettings
     sentry: SentrySettings = Field(SentrySettings())
     metrics: MetricsSettings = Field(MetricsSettings())
