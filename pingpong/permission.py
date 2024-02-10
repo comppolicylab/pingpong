@@ -95,7 +95,9 @@ class IsUser(Expression):
         self.user_id_field = user_id_field
 
     async def test(self, request: Request) -> bool:
-        return request.state.session.user.id == request.path_params[self.user_id_field]
+        return request.state.session.user.id == int(
+            request.path_params[self.user_id_field]
+        )
 
 
 class CanRead(Expression):
