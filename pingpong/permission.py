@@ -1,8 +1,12 @@
+import logging
 from abc import abstractmethod
 
 from fastapi import HTTPException, Request
 
+from .authz.openfga import Query
 from .schemas import SessionStatus
+
+logger = logging.getLogger(__name__)
 
 
 class Expression:
@@ -11,6 +15,9 @@ class Expression:
             raise HTTPException(status_code=403, detail="Missing session token")
 
         if not await self.test_with_cache(request):
+            logger.warning(
+                f"Permission denied for user {request.state.session.user.id} on {self}"
+            )
             raise HTTPException(status_code=403, detail="Missing required role")
 
     async def test_with_cache(self, request: Request) -> bool:
@@ -157,3 +164,21 @@ class LoggedIn(Expression):
 
     def __str__(self):
         return "LoggedIn()"
+
+
+class Authz(Expression):
+    def __init__(self, relation: str, target: str | None = None):
+        self.relation = relation
+        self.target = target
+
+    async def test(self, request: Request) -> bool:
+        try:
+            response = await request.state.authz.check(
+                Query(request.state.session.user.id, self.relation, self.target),
+            )
+            return response.allowed
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    def __str__(self):
+        return f"Authz({self.relation}, {self.target})"

@@ -35,7 +35,7 @@ from .config import config
 from .errors import sentry
 from .files import FILE_TYPES, handle_create_file, handle_delete_file
 from .invite import send_invite
-from .permission import CanManage, CanRead, CanWrite, IsSuper, IsUser, LoggedIn
+from .permission import Authz, CanManage, CanRead, CanWrite, IsSuper, IsUser, LoggedIn
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +100,16 @@ async def parse_session_token(request: Request, call_next):
 
 
 @v1.middleware("http")
+async def begin_authz_session(request: Request, call_next):
+    """Connect to authorization server."""
+    async with config.authz.driver.get_client() as c:
+        request.state.authz = c
+        response = await call_next(request)
+        await c.close()
+        return response
+
+
+@v1.middleware("http")
 async def begin_db_session(request: Request, call_next):
     """Create a database session for the request."""
     async with config.db.driver.async_session() as db:
@@ -141,7 +151,7 @@ async def log_request(request: Request, call_next):
         )
 
 
-@v1.get("/config", dependencies=[Depends(IsSuper())])
+@v1.get("/config", dependencies=[Depends(Authz("admin"))])
 def get_config(request: Request):
     return {"config": config.dict(), "headers": dict(request.headers)}
 
@@ -216,7 +226,7 @@ async def list_institutions(request: Request):
 
 @v1.post(
     "/institution",
-    dependencies=[Depends(IsSuper())],
+    dependencies=[Depends(Authz("institution_creator"))],
     response_model=schemas.Institution,
 )
 async def create_institution(create: schemas.CreateInstitution, request: Request):

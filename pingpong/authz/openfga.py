@@ -3,10 +3,19 @@ import logging
 
 from openfga_sdk import Configuration
 from openfga_sdk.client import OpenFgaClient
+from openfga_sdk.client.models import (
+    ClientCheckRequest,
+    ClientTuple,
+    ClientWriteRequest,
+)
 from openfga_sdk.credentials import CredentialConfiguration, Credentials
 from openfga_sdk.models import CreateStoreRequest
 
 logger = logging.getLogger(__name__)
+
+
+_ROOT = "root:0"
+"""Singleton root object."""
 
 
 class OpenFgaAuthzDriver:
@@ -44,13 +53,11 @@ class OpenFgaAuthzDriver:
             stores = await c.list_stores()
             for store in stores.stores:
                 if store.name == name:
-                    print(f"Found store {name} with id {store.id}")
                     logger.info(f"Found store {name} with id {store.id}")
                     return store.id
 
             req = CreateStoreRequest(name=name)
             resp = await c.create_store(req)
-            print(f"Created store {name} with id {resp.id}")
             logger.info(f"Created store {name} with id {resp.id}")
             await c.close()
             return resp.id
@@ -62,15 +69,51 @@ class OpenFgaAuthzDriver:
         async with self.get_client() as c:
             try:
                 latest = await c.read_latest_authorization_model()
-                self.config.model_id = latest.authorization_model.id
-                print(f"Using existing model with id {self.config.model_id}")
-                logger.info(f"Using existing model with id {self.config.model_id}")
+                self.config.authorization_model_id = latest.authorization_model.id
+                logger.info(
+                    f"Using existing model with id {self.config.authorization_model_id}"
+                )
             except IndexError:
                 with open(self.model_config) as f:
                     model = json.load(f)
                     resp = await c.write_authorization_model(model)
-                    self.config.model_id = resp.authorization_model_id
-                    print(f"Created model with id {self.config.model_id}")
-                    logger.info(f"Created model with id {self.config.model_id}")
+                    self.config.authorization_model_id = resp.authorization_model_id
+                    logger.info(
+                        f"Created model with id {self.config.authorization_model_id}"
+                    )
 
             await c.close()
+
+
+def CreateRootUser(user_id: int):
+    """Add a user to the root group.
+
+    Args:
+        cli (OpenFgaClient): OpenFgaClient instance
+        user_id (int): User ID
+    """
+    return ClientWriteRequest(
+        writes=[
+            ClientTuple(
+                user=f"user:{user_id}",
+                relation="admin",
+                object=_ROOT,
+            ),
+        ],
+    )
+
+
+def Query(user_id: int, relation: str, target: str | None = None):
+    """Query the authorization model.
+
+    Args:
+        cli (OpenFgaClient): OpenFgaClient instance
+        user_id (int): User ID
+        relation (str): Relation
+        target (str, optional): Target. Defaults to None.
+    """
+    return ClientCheckRequest(
+        user=f"user:{user_id}",
+        relation=relation,
+        object=target or _ROOT,
+    )
