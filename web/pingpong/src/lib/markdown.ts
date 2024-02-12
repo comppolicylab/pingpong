@@ -2,6 +2,9 @@ import { Marked } from 'marked';
 import { markedHighlight } from 'marked-highlight';
 import hljs from 'highlight.js';
 
+/**
+ * Markedown renderer with code support.
+ */
 const marked = new Marked(
   markedHighlight({
     langPrefix: 'hljs language-',
@@ -12,6 +15,9 @@ const marked = new Marked(
   })
 );
 
+/**
+ * Convert markdown to HTML.
+ */
 export const markdown = (markdown: string) => {
   return marked.parse(markdown);
 };

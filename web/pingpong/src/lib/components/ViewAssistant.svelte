@@ -4,6 +4,7 @@
   import { toast } from '@zerodevx/svelte-toast';
   import { Heading, Label, List, Li } from 'flowbite-svelte';
   import { EyeOutline, EyeSlashOutline, LinkOutline } from 'flowbite-svelte-icons';
+  import Markdown from './Markdown.svelte';
   import type { Assistant } from '$lib/api';
 
   export let assistant: Assistant;
@@ -50,7 +51,7 @@
   {#if !assistant.instructions}
     <span>(None available)</span>
   {:else}
-    <span>{assistant.instructions}</span>
+    <Markdown content={assistant.instructions} />
   {/if}
   <Label>Instructions visibility</Label>
   <span>{assistant.hide_prompt ? 'Hidden' : 'Visible'}</span>

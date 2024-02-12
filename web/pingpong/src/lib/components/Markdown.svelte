@@ -1,6 +1,7 @@
 <script lang="ts">
   import { markdown } from '$lib/markdown';
   import autoRender from 'katex/contrib/auto-render';
+  import Sanitize from './Sanitize.svelte';
 
   export let content = '';
 
@@ -27,22 +28,5 @@
 </script>
 
 <div class="markdown max-w-full" use:renderMarkdownNode={content}>
-  <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-  {@html markdown(content)}
+  <Sanitize html={markdown(content)} />
 </div>
-
-<style lang="css">
-  :global(.katex-display) {
-    display: block;
-    width: 100%;
-    margin: 1.5rem 0;
-  }
-
-  :global(.markdown p) {
-    margin-bottom: 1rem;
-  }
-
-  :global(.markdown code) {
-    border-radius: 0.25rem;
-  }
-</style>

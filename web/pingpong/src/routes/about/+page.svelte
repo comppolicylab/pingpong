@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Select, Label, Input, GradientButton, Textarea, Heading, P } from 'flowbite-svelte';
+  import Sanitize from '$lib/components/Sanitize.svelte';
 
   export let data;
   export let form;
@@ -124,8 +125,7 @@
   <div>
     <Heading tag="h3" class="my-4">How can I get help?</Heading>
     <P>
-      <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-      {@html data.supportInfo.blurb}
+      <Sanitize html={data.supportInfo.blurb} />
     </P>
     {#if data.supportInfo.can_post}
       <div>
