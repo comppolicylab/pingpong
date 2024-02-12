@@ -15,4 +15,16 @@ class MockEmailSender(EmailSender):
 
     async def send(self, to: str, subject: str, body: str):
         self.sent.append(MockEmail(to, subject, body))
-        logger.info(f"Mock email sent to {to} with subject {subject} and body {body}")
+        logger.info(f"Mock email sent to {to} with subject {subject}")
+        print(
+            """\
+=== MOCK EMAIL ===
+To: {to}
+Subject: {subject}
+====== BODY ======
+{body}
+==================
+""".format(
+                to=to, subject=subject, body=body
+            )
+        )
