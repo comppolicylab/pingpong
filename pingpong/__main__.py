@@ -48,6 +48,14 @@ def login(email: str, redirect: str, super_user: bool) -> None:
     webbrowser.open(url)
 
 
+def _load_alembic(alembic_config="alembic.ini") -> alembic.config.Config:
+    """Load the Alembic config."""
+    al_cfg = alembic.config.Config(alembic_config)
+    # Use the Alembic config from `alembic.ini` but override the URL for the db
+    al_cfg.set_main_option("sqlalchemy.url", config.db.driver.sync_uri)
+    return al_cfg
+
+
 @cli.group("db")
 def db() -> None:
     pass
@@ -55,7 +63,8 @@ def db() -> None:
 
 @db.command("init")
 @click.option("--clean/--no-clean", default=False)
-def db_init(clean) -> None:
+@click.option("--alembic-config", default="alembic.ini")
+def db_init(clean, alembic_config: str) -> None:
     async def init_db(drop_first: bool = False) -> None:
         if not await config.db.driver.exists():
             await config.db.driver.create()
@@ -63,15 +72,16 @@ def db_init(clean) -> None:
 
     asyncio.run(init_db(drop_first=clean))
 
+    # Stamp the revision as current so that future migrations will work.
+    al_cfg = _load_alembic(alembic_config)
+    alembic.command.stamp(al_cfg, "head")
+
 
 @db.command("migrate")
 @click.argument("revision", default="head")
 @click.option("--alembic-config", default="alembic.ini")
 def db_migrate(revision: str, alembic_config: str) -> None:
-    # Load the Alembic config from `alembic.ini`
-    al_cfg = alembic.config.Config(alembic_config)
-    # Use the Alembic config from `alembic.ini` but override the URL for the db
-    al_cfg.set_main_option("sqlalchemy.url", config.db.driver.sync_uri)
+    al_cfg = _load_alembic(alembic_config)
     # Run the Alembic upgrade command
     alembic.command.upgrade(al_cfg, revision)
 
@@ -80,10 +90,7 @@ def db_migrate(revision: str, alembic_config: str) -> None:
 @click.argument("version")
 @click.option("--alembic-config", default="alembic.ini")
 def db_set_version(version: str, alembic_config: str) -> None:
-    # Load the Alembic config from `alembic.ini`
-    al_cfg = alembic.config.Config(alembic_config)
-    # Use the Alembic config from `alembic.ini` but override the URL for the db
-    al_cfg.set_main_option("sqlalchemy.url", config.db.driver.sync_uri)
+    al_cfg = _load_alembic(alembic_config)
     # Run the Alembic upgrade command
     alembic.command.stamp(al_cfg, version)
 

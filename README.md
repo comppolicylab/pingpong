@@ -10,18 +10,51 @@ A web app that helps students out with class assignments and logistics.
 
 ## Running locally
 
-You can run the Python API and the front-end live-reload dev server locally:
+At a high level, you need four things to use the app locally:
+ - Postgres Database
+ - Python / Poetry to run the API
+ - Pnpm to run the FrontEnd.
+ - OpenAI API Key (for using the app)
+
+Docker is necessary for deployment, and can also simplify dev, but is not technically required.
+
 
 ### Database
-The following command starts a Postgres DB in Docker with a persistent volume:
+
+Assuming you have a Docker environment available,
+you can run a new database easily with the following command:
 
 ```
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up db
+./start-dev-db.sh
 ```
 
-Of course, you can run postgres15 another way if you choose.
+This creates a persistent volume at `./.db/pg` in this directory and starts Postgres with the settings in `docker-compose.dev.yml`.
+
+Of course, you can run Postgres-15 another way if you choose.
+
 We also support a SQLite backend if needed,
 although since prod uses Postgres it's best to use this in dev as well!
+
+#### Database setup / Migrations
+
+The first time you set up the database you will need to initialize it.
+(Make sure you have `python` / `poetry` set up, per instructions below!)
+
+You can use the `poetry run python -m pingpong db init` command for this.
+
+We use Alembic to manage database changes.
+
+If you need to modify the databaes, make your changes in the SQLAlchemy code, then run:
+
+```
+poetry run alembic revision --autogenerate -m "<description of change>"
+```
+
+Verify the migration is correct, check it into the repo, and apply it to the database by running:
+
+```
+poetry run python -m pingpong db migrate
+```
 
 
 ### Backend / API
