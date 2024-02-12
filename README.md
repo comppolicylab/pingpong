@@ -30,21 +30,21 @@ you can run a new database easily with the following command:
 
 This creates a persistent volume at `./.db/pg` in this directory and starts Postgres with the settings in `docker-compose.dev.yml`.
 
-Of course, you can run Postgres-15 another way if you choose.
+Of course, you can run Postgres-15 another way if you choose. Just make sure the app config settings match (user, pw, etc).
 
 We also support a SQLite backend if needed,
 although since prod uses Postgres it's best to use this in dev as well!
 
 #### Database setup / Migrations
 
-The first time you set up the database you will need to initialize it.
+The first time you start the database you will need to initialize it.
 (Make sure you have `python` / `poetry` set up, per instructions below!)
 
 You can use the `poetry run python -m pingpong db init` command for this.
 
 We use Alembic to manage database changes.
 
-If you need to modify the databaes, make your changes in the SQLAlchemy code, then run:
+If you need to modify the database, make your changes in the SQLAlchemy code, then run:
 
 ```
 poetry run alembic revision --autogenerate -m "<description of change>"
