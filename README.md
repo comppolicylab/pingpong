@@ -114,7 +114,7 @@ Then you can use `https://pingpong.localhost` without issue.
 
 
 The (obviously insecure) dev CA and keys are checked into the repo in plaintext.
-See [`cert/README.md`](the cert directory) for more information.
+See [the cert directory](cert/README.md) for more information.
 
 To use a real certificate in production, just override the `webcrt` and `webkey` secrets with the appropriate files.
 
