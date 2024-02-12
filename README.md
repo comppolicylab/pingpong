@@ -84,7 +84,7 @@ CONFIG_PATH=config.local.toml poetry run python ...
 
 ### Frontend / UI
 
-See the [`web/pingpong`](`web/pingpong/README.md`) directory for instructions.
+See the [`web/pingpong`](web/pingpong/README.md) directory for instructions.
 
 
 ## Docker Compose
@@ -114,7 +114,7 @@ Then you can use `https://pingpong.localhost` without issue.
 
 
 The (obviously insecure) dev CA and keys are checked into the repo in plaintext.
-See [cert/README.md](the cert directory) for more information.
+See [`cert/README.md`](the cert directory) for more information.
 
 To use a real certificate in production, just override the `webcrt` and `webkey` secrets with the appropriate files.
 
