@@ -1,0 +1,62 @@
+# Python Development Server Configuration
+#
+# This file is checked into the repo and is used to configure the development
+# server, in addition to documenting common config options.
+#
+# Not every config option is listed here. For a full list of options, see the
+# `pingpong/config.py` file in the server code.
+
+# Server logging level. In production this should be higher to reduce noise.
+# The default is `INFO`.
+log_level = "DEBUG"
+
+# The URL where the application can be accessed. This is used to generate
+# absolute URLs in emails and other places.
+# In development, this is the UI dev server (`pnpm dev`). In production it
+# should be the public URL of the server, like `https://pingpong.app/`.
+public_url = "http://localhost:5173"
+
+# Whether the server is running in development mode. Should be `false` in prod.
+development = true
+
+
+[db]
+# Database backends. Both `sqlite` and `postgres` are supported. Prefer to use
+# `postgres` since `sqlite` is too limited for production use.
+engine = "postgres"
+# Host for the postgres server.
+host = "localhost"
+# Port for the postgres server. Default is 5432; uncomment and change if using
+# a different port.
+# port = 5432
+# Username for the postgres user.
+user = "pingpong"
+# Password for the postgres user.
+password = "pingpong"
+# Name of the database to use.
+database = "pingpong"
+# Maintenance database to use when creating the main database. This is only
+# used when the database doesn't exist yet.
+# maintenance_db = "postgres"
+
+
+[auth]
+# Secrets used to secure the app.
+
+[[auth.secret_keys]]
+# List of secret keys used to sign JWTs. The first key is used to sign new
+# tokens, and the rest are used to verify tokens that may be old. When
+# rotating keys, add the new key to the top of the list and remove the oldest
+# key from the bottom after a reasonable amount of time has passed to let the
+# old tokens expire.
+key = "not actually a secret!"
+
+
+[email]
+# Email configuration. This is used to send emails from the server, for login
+# via magic link and for app invite notifications.
+#
+# In development the `mock` server prints emails to the console.
+# In production we generally will use `smtp`. See the `pingpong/config.py`
+# file for more details about backends.
+type = "mock"
