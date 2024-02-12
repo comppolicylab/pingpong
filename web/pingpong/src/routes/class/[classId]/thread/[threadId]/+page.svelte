@@ -168,7 +168,7 @@
             {/if}
           </div>
           <div class="max-w-full">
-            <div class="font-bold text-gray-400">{getName(message)}</div>
+            <div class="font-bold text-gray-400 mb-1">{getName(message)}</div>
             {#each message.content as content}
               {#if content.type == 'text'}
                 <div class="leading-7"><Markdown content={content.text.value} /></div>
