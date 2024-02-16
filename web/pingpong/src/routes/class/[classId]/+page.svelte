@@ -20,8 +20,6 @@
   let loading = writable(false);
   // Currently selected assistant.
   let assistant = writable(data?.assistants[0] || {});
-  // State of the dropdown picker.
-  let aiSelectOpen = false;
 
   // Whether billing is set up for the class (which controls everything).
   $: isConfigured = data?.hasAssistants && data?.hasBilling;
@@ -71,12 +69,6 @@
   // Set the new assistant selection.
   const selectAi = (asst: Assistant) => {
     goto(`/class/${data.class.id}/?assistant=${asst.id}`);
-    aiSelectOpen = false;
-  };
-
-  // Toggle the assistant selection dropdown.
-  const openDropdown = () => {
-    aiSelectOpen = true;
   };
 </script>
 
@@ -84,13 +76,10 @@
   <div class="m-auto w-10/12">
     {#if isConfigured}
       <div class="text-center my-2 w-full">
-        <GradientButton
-          color="tealToLime"
-          on:click={() => openDropdown()}
-          on:touchstart={() => openDropdown()}
+        <GradientButton color="tealToLime"
           >{$assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></GradientButton
         >
-        <Dropdown bind:open={aiSelectOpen}>
+        <Dropdown>
           {#each data.assistants as asst}
             <DropdownItem on:click={() => selectAi(asst)} on:touchstart={() => selectAi(asst)}>
               {#if !asst.published}
