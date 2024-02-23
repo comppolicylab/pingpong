@@ -978,6 +978,36 @@ async def get_image(file_id: str, request: Request, openai_client: OpenAIClient)
 
 
 @v1.get(
+    "/class/{class_id}/thread/{thread_id}/file/{file_id}",
+    dependencies=[Depends(IsSuper() | CanRead(models.Thread, "thread_id"))],
+)
+async def download_file(
+    class_id: str,
+    thread_id: str,
+    file_id: str,
+    request: Request,
+    openai_client: OpenAIClient,
+):
+    response = await openai_client.files.with_raw_response.retrieve_content(file_id)
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail="An error occurred fetching the requested file",
+        )
+    # Usually we can just proxy headers from the OpenAI response, but make sure we have
+    # defaults set just in case.
+    media_type = response.headers.get("content-type", "application/octet-stream")
+    disposition = response.headers.get(
+        "content-disposition", f"attachment; filename={file_id}"
+    )
+    headers = {
+        "Content-Type": media_type,
+        "Content-Disposition": disposition,
+    }
+    return Response(content=response.content, headers=headers)
+
+
+@v1.get(
     "/me",
 )
 async def get_me(request: Request):
