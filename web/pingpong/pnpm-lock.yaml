@@ -35,9 +35,6 @@ dependencies:
   marked-highlight:
     specifier: ^2.1.0
     version: 2.1.0(marked@11.1.1)
-  marked-katex-extension:
-    specifier: ^5.0.0
-    version: 5.0.0(katex@0.16.9)(marked@11.1.1)
   svelte-copy:
     specifier: ^1.4.1
     version: 1.4.1(svelte@4.2.7)
@@ -906,6 +903,7 @@ packages:
 
   /@types/katex@0.16.7:
     resolution: {integrity: sha512-HMwFiRujE5PjrgwHQ25+bsLJgowjGjm5Z8FVSf0N6PwgJrwxH0QxzHYDcKsTfV3wva0vzrpqMTJS2jXPr5BMEQ==}
+    dev: true
 
   /@types/node@20.9.4:
     resolution: {integrity: sha512-wmyg8HUhcn6ACjsn8oKYjkN/zUzQeNtMy44weTJSM6p4MMzEOuKbA3OjJ267uPCOW7Xex9dyrNTful8XTQYoDA==}
@@ -2407,17 +2405,6 @@ packages:
     peerDependencies:
       marked: '>=4 <12'
     dependencies:
-      marked: 11.1.1
-    dev: false
-
-  /marked-katex-extension@5.0.0(katex@0.16.9)(marked@11.1.1):
-    resolution: {integrity: sha512-koGhYnmKaF5Zobz+63tmoO+v7C0z9RWtdJonh8aLAFNp03uXIleV4OswV/OHrSiquKxBCmhAwBTCVgYRHHpwnQ==}
-    peerDependencies:
-      katex: '>=0.16 <0.17'
-      marked: '>=4 <12'
-    dependencies:
-      '@types/katex': 0.16.7
-      katex: 0.16.9
       marked: 11.1.1
     dev: false
 
