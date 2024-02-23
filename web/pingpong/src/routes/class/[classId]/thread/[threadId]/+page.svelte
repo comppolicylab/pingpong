@@ -20,6 +20,7 @@
   let priv = false;
   let classId = 0;
   let waiting = writable(false);
+  let fileTypes = '';
   $: thread = data?.thread?.store;
   $: threadStatus = $thread?.$status || 0;
   $: threadUsers = ($thread as api.ThreadWithMeta)?.thread?.users || [];
@@ -33,6 +34,10 @@
       if (!loading) {
         waiting.set(!api.finished(t.run));
       }
+
+      // Figure out the capabilities of assistants in the thread
+      const assts = data.assistants.filter((a) => Object.hasOwn(participants.assistant, a.id));
+      fileTypes = data.uploadInfo.fileTypesForAssistants(...assts);
     } else {
       messages = [];
       participants = { user: {}, assistant: {} };
@@ -204,7 +209,7 @@
           <ChatInput
             mimeType={data.uploadInfo.mimeType}
             maxSize={data.uploadInfo.private_file_max_size}
-            accept={data.uploadInfo.acceptString}
+            accept={fileTypes}
             disabled={!canSubmit}
             loading={$submitting || $waiting}
             upload={handleUpload}

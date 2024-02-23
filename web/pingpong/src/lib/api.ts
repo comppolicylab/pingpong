@@ -1106,15 +1106,41 @@ export type UploadInfo = {
   class_file_max_size: number;
 };
 
+type FileContentTypeAcceptFilters = {
+  retrieval: boolean;
+  code_interpreter: boolean;
+};
+
 /**
  * Generate the string used for the "accept" attribute in file inputs.
  */
-const _getAcceptString = (types: FileTypeInfo[]) => {
+const _getAcceptString = (
+  types: FileTypeInfo[],
+  filters: Partial<FileContentTypeAcceptFilters> = {}
+) => {
   return types
-    .filter((ft) => ft.retrieval)
+    .filter((ft) => {
+      // If retrieval is enabled, we can return everything that supports retrieval.
+      // If code_interpreter is enabled, we can also return everything that supports code_interpreter.
+      return (
+        (filters.retrieval && ft.retrieval) || (filters.code_interpreter && ft.code_interpreter)
+      );
+    })
     .map((ft) => ft.mime_type)
     .join(',');
 };
+
+/**
+ * Function to filter files based on their content type.
+ */
+export type FileSupportFilter = (file: ServerFile) => boolean;
+
+/**
+ * Function to get a filter for files based on their content type.
+ */
+export type GetFileSupportFilter = (
+  filters: Partial<FileContentTypeAcceptFilters>
+) => FileSupportFilter;
 
 /**
  * Get information about uploading files.
@@ -1129,18 +1155,57 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
     _mimeTypeLookup.set(ft.mime_type.toLowerCase(), ft);
   });
 
+  // Lookup function for mime types
+  const mimeType = (mime: string) => {
+    const slug = mime.toLowerCase().split(';')[0].trim();
+    return _mimeTypeLookup.get(slug);
+  };
+
   return {
     ...info,
     /**
      * Lookup information about supported mimetypes.
      */
-    mimeType: (mime: string) => {
-      const slug = mime.toLowerCase().split(';')[0].trim();
-      return _mimeTypeLookup.get(slug);
+    mimeType,
+    /**
+     * Get accept string based on capabilities.
+     */
+    fileTypes(filters: Partial<FileContentTypeAcceptFilters> = {}) {
+      return _getAcceptString(info.types, filters);
     },
     /**
-     * String describing accepted mime types.
+     * Get accept string for the given assistants based on their capabilities.
      */
-    acceptString: _getAcceptString(info.types)
+    fileTypesForAssistants(...assistants: Assistant[]) {
+      const capabilities = new Set<string>();
+      for (const a of assistants) {
+        const tools = JSON.parse(a.tools) as Tool[];
+        for (const t of tools) {
+          capabilities.add(t.type);
+        }
+      }
+
+      const filters = {
+        retrieval: capabilities.has('retrieval'),
+        code_interpreter: capabilities.has('code_interpreter')
+      };
+
+      return _getAcceptString(info.types, filters);
+    },
+    /**
+     * Get a filter function for file support based on capabilities.
+     */
+    getFileSupportFilter(filters: Partial<FileContentTypeAcceptFilters> = {}) {
+      return (file: ServerFile) => {
+        const support = mimeType(file.content_type);
+        if (!support) {
+          return false;
+        }
+        return (
+          (!!filters.retrieval && support.retrieval) ||
+          (!!filters.code_interpreter && support.code_interpreter)
+        );
+      };
+    }
   };
 };

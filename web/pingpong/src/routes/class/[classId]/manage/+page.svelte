@@ -160,7 +160,9 @@
   };
 </script>
 
-<div class="container py-8 space-y-12 divide-y divide-gray-200 dark:divide-gray-700 h-full overflow-y-auto">
+<div
+  class="container py-8 space-y-12 divide-y divide-gray-200 dark:divide-gray-700 h-full overflow-y-auto"
+>
   <Heading tag="h2"><Span gradient>Manage Class</Span></Heading>
   {#if hasElevatedPerms}
     <form action="?/updateClass" class="pt-6" method="POST">
@@ -409,7 +411,7 @@
           <div class="my-4">
             <FileUpload
               drop
-              accept={data.uploadInfo.acceptString}
+              accept={data.uploadInfo.fileTypes({ code_interpreter: true, retrieval: true })}
               maxSize={data.uploadInfo.class_file_max_size}
               upload={uploadFile}
               on:change={handleNewFiles}
@@ -459,6 +461,7 @@
               >
                 <ManageAssistant
                   files={asstFiles}
+                  getFileSupportFilter={data.uploadInfo.getFileSupportFilter}
                   {assistant}
                   {models}
                   canPublish={canPublishAssistant || false}

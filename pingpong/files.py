@@ -54,7 +54,7 @@ async def handle_create_file(
         uploader_id (int): Uploader ID
         private (bool): File privacy
     """
-    if not _is_retrieval_supported(upload.content_type.lower()):
+    if not _is_supported(upload.content_type.lower()):
         raise HTTPException(
             status_code=403, detail="File type not supported for retrieval by OpenAI!"
         )
@@ -279,9 +279,9 @@ FILE_TYPES = [
     ),
 ]
 
-_SUPPORTED_RETRIEVAL_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES if ft.retrieval}
+_SUPPORTED_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES}
 
 
-def _is_retrieval_supported(content_type: str) -> bool:
-    """Check if the content type is supported for retrieval."""
-    return content_type in _SUPPORTED_RETRIEVAL_TYPE
+def _is_supported(content_type: str) -> bool:
+    """Check if the content type is supported."""
+    return content_type in _SUPPORTED_TYPE

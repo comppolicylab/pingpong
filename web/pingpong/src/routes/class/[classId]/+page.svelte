@@ -36,6 +36,7 @@
       }
     }
   }
+  $: fileTypes = data.uploadInfo.fileTypesForAssistants($assistant);
 
   // Handle file upload
   const handleUpload = (f: File, onProgress: (p: number) => void) => {
@@ -95,7 +96,7 @@
         <ChatInput
           mimeType={data.uploadInfo.mimeType}
           maxSize={data.uploadInfo.private_file_max_size}
-          accept={data.uploadInfo.acceptString}
+          accept={fileTypes}
           loading={$loading}
           upload={handleUpload}
           remove={handleRemove}
