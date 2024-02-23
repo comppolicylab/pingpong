@@ -1106,12 +1106,21 @@ export type UploadInfo = {
   class_file_max_size: number;
 };
 
+type FileContentTypeAcceptFilters = {
+  retrieval: boolean;
+  code_interpreter: boolean;
+};
+
 /**
  * Generate the string used for the "accept" attribute in file inputs.
  */
-const _getAcceptString = (types: FileTypeInfo[]) => {
+const _getAcceptString = (types: FileTypeInfo[], filters: Partial<FileContentTypeAcceptFilters> = {}) => {
   return types
-    .filter((ft) => ft.retrieval)
+    .filter((ft) => {
+      // If retrieval is enabled, we can return everything that supports retrieval.
+      // If code_interpreter is enabled, we can also return everything that supports code_interpreter.
+      return (filters.retrieval && ft.retrieval) || (filters.code_interpreter && ft.code_interpreter);
+    })
     .map((ft) => ft.mime_type)
     .join(',');
 };
@@ -1141,6 +1150,6 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
     /**
      * String describing accepted mime types.
      */
-    acceptString: _getAcceptString(info.types)
+    acceptString: (filters: Partial<FileContentTypeAcceptFilters>) => _getAcceptString(info.types, filters)
   };
 };

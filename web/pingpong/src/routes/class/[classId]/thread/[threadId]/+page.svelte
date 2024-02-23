@@ -20,6 +20,7 @@
   let priv = false;
   let classId = 0;
   let waiting = writable(false);
+  let fileTypes = "";
   $: thread = data?.thread?.store;
   $: threadStatus = $thread?.$status || 0;
   $: threadUsers = ($thread as api.ThreadWithMeta)?.thread?.users || [];
@@ -33,6 +34,17 @@
       if (!loading) {
         waiting.set(!api.finished(t.run));
       }
+
+      // Figure out the capabilities of assistants in the thread
+      const assts = data.assistants.filter(a => Object.hasOwn(participants.assistant, a.id));
+      const capabilities = assts.map(a => JSON.parse(a.tools).map(at => at.type));
+      const hasRetrieval = capabilities.some(c => c.includes('retrieval'));
+      const hasCodeInterpreter = capabilities.some(c => c.includes('code_interpreter'));
+      fileTypes = data.uploadInfo.acceptString({
+        retrieval: hasRetrieval,
+        code_interpreter: hasCodeInterpreter
+      });
+      console.log("HAS RETRIEVAL", hasRetrieval, "HAS CODE INTERPRETER", hasCodeInterpreter, "FILE TYPES", fileTypes)
     } else {
       messages = [];
       participants = { user: {}, assistant: {} };
@@ -204,7 +216,7 @@
           <ChatInput
             mimeType={data.uploadInfo.mimeType}
             maxSize={data.uploadInfo.private_file_max_size}
-            accept={data.uploadInfo.acceptString}
+            accept={fileTypes}
             disabled={!canSubmit}
             loading={$submitting || $waiting}
             upload={handleUpload}
