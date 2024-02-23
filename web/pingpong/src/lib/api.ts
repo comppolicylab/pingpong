@@ -1148,15 +1148,18 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
     _mimeTypeLookup.set(ft.mime_type.toLowerCase(), ft);
   });
 
+  // Lookup function for mime types
+  const mimeType = (mime: string) => {
+    const slug = mime.toLowerCase().split(';')[0].trim();
+    return _mimeTypeLookup.get(slug);
+  };
+
   return {
     ...info,
     /**
      * Lookup information about supported mimetypes.
      */
-    mimeType(mime: string) {
-      const slug = mime.toLowerCase().split(';')[0].trim();
-      return _mimeTypeLookup.get(slug);
-    },
+    mimeType,
     /**
      * Get accept string based on capabilities.
      */
@@ -1186,7 +1189,6 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
      * Get a filter function for file support based on capabilities.
      */
     getFileSupportFilter(filters: Partial<FileContentTypeAcceptFilters> = {}) {
-      const mimeType = this.mimeType;
       return (file: ServerFile) => {
         const support = mimeType(file.content_type);
         if (!support) {
