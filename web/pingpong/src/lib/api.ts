@@ -1126,6 +1126,16 @@ const _getAcceptString = (types: FileTypeInfo[], filters: Partial<FileContentTyp
 };
 
 /**
+ * Function to filter files based on their content type.
+ */
+export type FileSupportFilter = (file: ServerFile) => boolean;
+
+/**
+ * Function to get a filter for files based on their content type.
+ */
+export type GetFileSupportFilter = (filters: Partial<FileContentTypeAcceptFilters>) => FileSupportFilter;
+
+/**
  * Get information about uploading files.
  */
 export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
@@ -1143,13 +1153,47 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
     /**
      * Lookup information about supported mimetypes.
      */
-    mimeType: (mime: string) => {
+    mimeType(mime: string) {
       const slug = mime.toLowerCase().split(';')[0].trim();
       return _mimeTypeLookup.get(slug);
     },
     /**
-     * String describing accepted mime types.
+     * Get accept string based on capabilities.
      */
-    acceptString: (filters: Partial<FileContentTypeAcceptFilters>) => _getAcceptString(info.types, filters)
+    fileTypes(filters: Partial<FileContentTypeAcceptFilters> = {}) {
+      return _getAcceptString(info.types, filters);
+    },
+    /**
+     * Get accept string for the given assistants based on their capabilities.
+     */
+    fileTypesForAssistants(...assistants: Assistant[]) {
+      const capabilities = new Set<string>();
+      for (const a of assistants) {
+        const tools = JSON.parse(a.tools) as Tool[];
+        for (const t of tools) {
+          capabilities.add(t.type);
+        }
+      }
+
+      const filters = {
+        retrieval: capabilities.has('retrieval'),
+        code_interpreter: capabilities.has('code_interpreter')
+      }
+
+      return _getAcceptString(info.types, filters);
+    },
+    /**
+     * Get a filter function for file support based on capabilities.
+     */
+    getFileSupportFilter(filters: Partial<FileContentTypeAcceptFilters> = {}) {
+      const mimeType = this.mimeType;
+      return (file: ServerFile) => {
+        const support = mimeType(file.content_type);
+        if (!support) {
+          return false;
+        }
+        return (!!filters.retrieval && support.retrieval) || (!!filters.code_interpreter && support.code_interpreter);
+      };
+    },
   };
 };

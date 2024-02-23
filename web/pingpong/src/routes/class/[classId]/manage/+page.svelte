@@ -409,7 +409,7 @@
           <div class="my-4">
             <FileUpload
               drop
-              accept={data.uploadInfo.acceptString}
+              accept={data.uploadInfo.fileTypes({code_interpreter: true, retrieval: true})}
               maxSize={data.uploadInfo.class_file_max_size}
               upload={uploadFile}
               on:change={handleNewFiles}
@@ -459,6 +459,7 @@
               >
                 <ManageAssistant
                   files={asstFiles}
+                  getFileSupportFilter={data.uploadInfo.getFileSupportFilter}
                   {assistant}
                   {models}
                   canPublish={canPublishAssistant || false}

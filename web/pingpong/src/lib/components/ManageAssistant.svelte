@@ -10,24 +10,33 @@
     MultiSelect,
     Input,
     Textarea,
-    GradientButton
+    GradientButton,
+    type SelectOptionType,
   } from 'flowbite-svelte';
-  import type { ServerFile, Assistant, AssistantModel, Tool } from '$lib/api';
+  import type { ServerFile, Assistant, AssistantModel, Tool, GetFileSupportFilter } from '$lib/api';
 
   export let files: ServerFile[];
   export let assistant: Assistant | null = null;
   export let canPublish = true;
   export let models: AssistantModel[] = [];
   export let loading = false;
+  export let getFileSupportFilter: GetFileSupportFilter = (_filters) => ((_file) => true);
 
   let selectedFiles = (assistant?.files || []).map((file) => file.file_id);
+  let fileOptions: SelectOptionType<string>[] = [];
   const tools = [{ value: 'code_interpreter', name: 'Code Interpreter' }];
   const defaultTools = [{ type: 'code_interpreter' }];
   const selectedTools = (
     assistant?.tools ? (JSON.parse(assistant.tools) as Tool[]) : defaultTools
   ).map((t) => t.type);
   $: modelOptions = (models || []).map((model) => ({ value: model.id, name: model.id }));
-  $: fileOptions = (files || []).map((file) => ({ value: file.file_id, name: file.name }));
+  $: {
+    const fileFilter = getFileSupportFilter({
+      code_interpreter: selectedTools.includes('code_interpreter'),
+      retrieval: true,
+    });
+    fileOptions = (files || []).filter(fileFilter).map((file) => ({ value: file.file_id, name: file.name }));
+  }
 
   // Revert edits
   const reset = (e: Event) => {

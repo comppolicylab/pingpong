@@ -37,14 +37,7 @@
 
       // Figure out the capabilities of assistants in the thread
       const assts = data.assistants.filter(a => Object.hasOwn(participants.assistant, a.id));
-      const capabilities = assts.map(a => JSON.parse(a.tools).map(at => at.type));
-      const hasRetrieval = capabilities.some(c => c.includes('retrieval'));
-      const hasCodeInterpreter = capabilities.some(c => c.includes('code_interpreter'));
-      fileTypes = data.uploadInfo.acceptString({
-        retrieval: hasRetrieval,
-        code_interpreter: hasCodeInterpreter
-      });
-      console.log("HAS RETRIEVAL", hasRetrieval, "HAS CODE INTERPRETER", hasCodeInterpreter, "FILE TYPES", fileTypes)
+      fileTypes = data.uploadInfo.fileTypesForAssistants(...assts);
     } else {
       messages = [];
       participants = { user: {}, assistant: {} };
