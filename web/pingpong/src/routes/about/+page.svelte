@@ -15,7 +15,7 @@
   ];
 </script>
 
-<div class="mx-12 my-12 flex flex-col gap-8 about">
+<div class="px-12 py-12 flex flex-col gap-8 about h-full overflow-y-auto">
   <div>
     <Heading tag="h2">About PingPong</Heading>
   </div>
