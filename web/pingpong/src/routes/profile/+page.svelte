@@ -2,7 +2,6 @@
   export let data;
 </script>
 
-<div>
-  <div>TKTK real profile page</div>
+<div class="overflow-y-auto h-full">
   <pre>{JSON.stringify(data, null, 2)}</pre>
 </div>

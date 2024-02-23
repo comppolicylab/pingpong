@@ -160,7 +160,7 @@
   };
 </script>
 
-<div class="container py-8 space-y-12 divide-y divide-gray-200 dark:divide-gray-700">
+<div class="container py-8 space-y-12 divide-y divide-gray-200 dark:divide-gray-700 h-full overflow-y-auto">
   <Heading tag="h2"><Span gradient>Manage Class</Span></Heading>
   {#if hasElevatedPerms}
     <form action="?/updateClass" class="pt-6" method="POST">
