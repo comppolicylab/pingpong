@@ -11,7 +11,7 @@
     Input,
     Textarea,
     GradientButton,
-    type SelectOptionType,
+    type SelectOptionType
   } from 'flowbite-svelte';
   import type { ServerFile, Assistant, AssistantModel, Tool, GetFileSupportFilter } from '$lib/api';
 
@@ -20,7 +20,7 @@
   export let canPublish = true;
   export let models: AssistantModel[] = [];
   export let loading = false;
-  export let getFileSupportFilter: GetFileSupportFilter = (_filters) => ((_file) => true);
+  export let getFileSupportFilter: GetFileSupportFilter = (_filters) => (_file) => true;
 
   let selectedFiles = (assistant?.files || []).map((file) => file.file_id);
   let fileOptions: SelectOptionType<string>[] = [];
@@ -33,9 +33,11 @@
   $: {
     const fileFilter = getFileSupportFilter({
       code_interpreter: selectedTools.includes('code_interpreter'),
-      retrieval: true,
+      retrieval: true
     });
-    fileOptions = (files || []).filter(fileFilter).map((file) => ({ value: file.file_id, name: file.name }));
+    fileOptions = (files || [])
+      .filter(fileFilter)
+      .map((file) => ({ value: file.file_id, name: file.name }));
   }
 
   // Revert edits

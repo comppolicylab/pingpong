@@ -1114,12 +1114,17 @@ type FileContentTypeAcceptFilters = {
 /**
  * Generate the string used for the "accept" attribute in file inputs.
  */
-const _getAcceptString = (types: FileTypeInfo[], filters: Partial<FileContentTypeAcceptFilters> = {}) => {
+const _getAcceptString = (
+  types: FileTypeInfo[],
+  filters: Partial<FileContentTypeAcceptFilters> = {}
+) => {
   return types
     .filter((ft) => {
       // If retrieval is enabled, we can return everything that supports retrieval.
       // If code_interpreter is enabled, we can also return everything that supports code_interpreter.
-      return (filters.retrieval && ft.retrieval) || (filters.code_interpreter && ft.code_interpreter);
+      return (
+        (filters.retrieval && ft.retrieval) || (filters.code_interpreter && ft.code_interpreter)
+      );
     })
     .map((ft) => ft.mime_type)
     .join(',');
@@ -1133,7 +1138,9 @@ export type FileSupportFilter = (file: ServerFile) => boolean;
 /**
  * Function to get a filter for files based on their content type.
  */
-export type GetFileSupportFilter = (filters: Partial<FileContentTypeAcceptFilters>) => FileSupportFilter;
+export type GetFileSupportFilter = (
+  filters: Partial<FileContentTypeAcceptFilters>
+) => FileSupportFilter;
 
 /**
  * Get information about uploading files.
@@ -1181,7 +1188,7 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
       const filters = {
         retrieval: capabilities.has('retrieval'),
         code_interpreter: capabilities.has('code_interpreter')
-      }
+      };
 
       return _getAcceptString(info.types, filters);
     },
@@ -1194,8 +1201,11 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
         if (!support) {
           return false;
         }
-        return (!!filters.retrieval && support.retrieval) || (!!filters.code_interpreter && support.code_interpreter);
+        return (
+          (!!filters.retrieval && support.retrieval) ||
+          (!!filters.code_interpreter && support.code_interpreter)
+        );
       };
-    },
+    }
   };
 };

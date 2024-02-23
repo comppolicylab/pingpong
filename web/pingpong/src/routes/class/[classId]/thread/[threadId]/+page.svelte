@@ -20,7 +20,7 @@
   let priv = false;
   let classId = 0;
   let waiting = writable(false);
-  let fileTypes = "";
+  let fileTypes = '';
   $: thread = data?.thread?.store;
   $: threadStatus = $thread?.$status || 0;
   $: threadUsers = ($thread as api.ThreadWithMeta)?.thread?.users || [];
@@ -36,7 +36,7 @@
       }
 
       // Figure out the capabilities of assistants in the thread
-      const assts = data.assistants.filter(a => Object.hasOwn(participants.assistant, a.id));
+      const assts = data.assistants.filter((a) => Object.hasOwn(participants.assistant, a.id));
       fileTypes = data.uploadInfo.fileTypesForAssistants(...assts);
     } else {
       messages = [];
