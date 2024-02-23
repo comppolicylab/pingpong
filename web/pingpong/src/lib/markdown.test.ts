@@ -45,7 +45,8 @@ const x = 1;
 
   it('should render inline LaTeX with punctuation after it', () => {
     expect(markdown(`This is $N$'s test.`)).toBe(
-      `<p>This is <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>N</mi></mrow><annotation encoding="application/x-tex">N</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span></span></span></span>&#39;s test.</p>`
+      `<p>This is <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>N</mi></mrow><annotation encoding="application/x-tex">N</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span></span></span></span>&#39;s test.</p>
+`
     );
   });
 
@@ -55,6 +56,30 @@ const x = 1;
 Test Math
 ===
 Inline math: $\\frac{1}{2}$
+`)
+    ).toMatchSnapshot();
+  });
+
+  it('should render block LaTeX', () => {
+    expect(
+      markdown(`
+Test Math
+===
+Here is Ohm's law:
+
+$$
+V = IR
+$$
+`)
+    ).toMatchSnapshot();
+  });
+
+  it('should render block LaTeX inside a list', () => {
+    expect(
+      markdown(`
+Test Math
+===
+- Here is Ohm's law: $$V = IR$$
 `)
     ).toMatchSnapshot();
   });
