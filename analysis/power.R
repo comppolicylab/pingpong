@@ -11,13 +11,13 @@ gen_data <- function(
   mean_effect_for_affected,
   sd_effect_for_affected
   ) {
-  
+
   # generate class sizes, fixed effects, and treatment assignments
   class_sizes <- rpois(num_classes, avg_num_students)
   class_fe <- rnorm(num_classes)
   treated <- rbinom(num_classes, 1, 0.5)
   num_students <- sum(class_sizes)
-  
+
   # generate the data
   sim_data <- tibble(
     class_id = as.factor(rep(1:num_classes, class_sizes)),
@@ -41,7 +41,7 @@ gen_sims <- function(
   mean_effect_for_affected,
   sd_effect_for_affected
   ) {
-  
+
   sim_result <- function() {
     # generate the data
     sim_data <- gen_data(
@@ -53,23 +53,23 @@ gen_sims <- function(
       mean_effect_for_affected = mean_effect_for_affected,
       sd_effect_for_affected = sd_effect_for_affected
     )
-    
+
     # estimate effect
-    model <- lm.cluster(post_test ~ treated + pre_test + class_id, 
+    model <- lm.cluster(post_test ~ treated + pre_test + class_id,
                         cluster = 'class_id',
                         data = sim_data)
-    
+
     treated_coef <- coef(model)['treated']
     treated_se <- sqrt(vcov(model)['treated', 'treated'])
     treated_t <- treated_coef / treated_se
-    
+
     results <- tibble(
       treated_coef = treated_coef,
       treated_se = treated_se,
       treated_t = treated_t
     )
   }
-  
+
  results <- map_dfr(1:num_sims, ~sim_result())
 }
 
@@ -91,4 +91,3 @@ power <- sims %>%
     coef = mean(treated_coef),
     power = mean(treated_t > 2)
   )
-
