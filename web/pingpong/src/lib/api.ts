@@ -50,11 +50,28 @@ export type GenericStatus = {
 };
 
 /**
+ * Join URL parts with a slash.
+ */
+export const join = (...parts: string[]) => {
+  let full = '';
+  for (const part of parts) {
+    if (full) {
+      if (!full.endsWith('/')) {
+        full += '/';
+      }
+      full += part.replace(/^\/+/, '');
+    } else {
+      full = part;
+    }
+  }
+  return full;
+};
+
+/**
  * Get full API route.
  */
-const _fullPath = (path: string) => {
-  path = path.replace(/^\/+/, '');
-  return `/api/v1/${path}`;
+export const fullPath = (path: string) => {
+  return join('/api/v1/', path);
 };
 
 /**
@@ -67,8 +84,8 @@ const _fetch = async <R extends BaseData>(
   headers?: Record<string, string>,
   body?: string | FormData
 ): Promise<R & BaseResponse> => {
-  const fullPath = _fullPath(path);
-  const res = await f(fullPath, {
+  const full = fullPath(path);
+  const res = await f(full, {
     method,
     headers,
     body,
@@ -563,7 +580,7 @@ export interface UploadOptions {
  * Upload a file to a class.
  */
 export const uploadFile = (classId: number, file: File, opts?: UploadOptions) => {
-  const url = _fullPath(`class/${classId}/file`);
+  const url = fullPath(`class/${classId}/file`);
   return _doUpload(url, file, opts);
 };
 
@@ -576,7 +593,7 @@ export const uploadUserFile = (
   file: File,
   opts?: UploadOptions
 ) => {
-  const url = _fullPath(`class/${classId}/user/${userId}/file`);
+  const url = fullPath(`class/${classId}/user/${userId}/file`);
   return _doUpload(url, file, opts);
 };
 
