@@ -225,12 +225,3 @@
     </div>
   {/if}
 </div>
-
-<style lang="css">
-  :global(.katex) {
-    font-size: 1.2em;
-  }
-  :global(.katex-html) {
-    display: none;
-  }
-</style>

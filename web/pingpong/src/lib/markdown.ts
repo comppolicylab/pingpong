@@ -1,9 +1,10 @@
 import { Marked } from 'marked';
 import { markedHighlight } from 'marked-highlight';
+import markedKatex from 'marked-katex-extension';
 import hljs from 'highlight.js';
 
 /**
- * Markedown renderer with code support.
+ * Markdown renderer with code support.
  */
 const marked = new Marked(
   markedHighlight({
@@ -12,7 +13,8 @@ const marked = new Marked(
       const language = hljs.getLanguage(lang) ? lang : 'plaintext';
       return hljs.highlight(code, { language }).value;
     }
-  })
+  }),
+  markedKatex({ throwOnError: false })
 );
 
 /**
