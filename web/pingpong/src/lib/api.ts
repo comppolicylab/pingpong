@@ -1196,7 +1196,7 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
     fileTypesForAssistants(...assistants: Assistant[]) {
       const capabilities = new Set<string>();
       for (const a of assistants) {
-        const tools = JSON.parse(a.tools) as Tool[];
+        const tools = (a.tools ? JSON.parse(a.tools) : []) as Tool[];
         for (const t of tools) {
           capabilities.add(t.type);
         }
