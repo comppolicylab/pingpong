@@ -3,7 +3,6 @@ from abc import abstractmethod
 
 from fastapi import HTTPException, Request
 
-from .authz.openfga import Query
 from .schemas import SessionStatus
 
 logger = logging.getLogger(__name__)
@@ -173,10 +172,11 @@ class Authz(Expression):
 
     async def test(self, request: Request) -> bool:
         try:
-            response = await request.state.authz.check(
-                Query(request.state.session.user.id, self.relation, self.target),
+            return await request.state.authz.test(
+                request.state.session.user.id,
+                self.relation,
+                self.target,
             )
-            return response.allowed
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 

@@ -8,12 +8,32 @@ from typing import Literal, Union
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
-from .authz import OpenFgaAuthzDriver
+from .authz import MockAuthzDriver, OpenFgaAuthzDriver
 from .db import PostgresDriver, SqliteDriver
 from .email import AzureEmailSender, GmailEmailSender, MockEmailSender, SmtpEmailSender
 from .support import DiscordSupportDriver
 
 logger = logging.getLogger(__name__)
+
+
+class MockAuthzSettings(BaseSettings):
+    """Mock authorization service."""
+
+    type: Literal["mock"] = "mock"
+    everyone_is_super: bool = False
+
+    @cached_property
+    def driver(self):
+        logger.warning(
+            "!!! You are using the mock authorization driver! "
+            "This should only be used in development !!!"
+        )
+        if self.everyone_is_super:
+            logger.warning(
+                "!!! Permissions are completely disabled right now -- "
+                "everyone is a super admin !!!"
+            )
+        return MockAuthzDriver(everyone_is_super=self.everyone_is_super)
 
 
 class OpenFgaAuthzSettings(BaseSettings):
@@ -28,7 +48,7 @@ class OpenFgaAuthzSettings(BaseSettings):
     key: str | None = Field(None)
 
     @cached_property
-    def driver(self) -> OpenFgaAuthzDriver:
+    def driver(self):
         return OpenFgaAuthzDriver(
             scheme=self.scheme,
             host=f"{self.host}:{self.port}",
@@ -38,7 +58,7 @@ class OpenFgaAuthzSettings(BaseSettings):
         )
 
 
-AuthzSettings = Union[OpenFgaAuthzSettings]
+AuthzSettings = Union[OpenFgaAuthzSettings, MockAuthzSettings]
 
 
 class MockEmailSettings(BaseSettings):
@@ -215,7 +235,7 @@ class Config(BaseSettings):
     development: bool = Field(False, env="DEVELOPMENT")
     db: DbSettings
     auth: AuthSettings
-    authz: AuthzSettings
+    authz: AuthzSettings = Field(MockAuthzSettings())
     email: EmailSettings
     sentry: SentrySettings = Field(SentrySettings())
     metrics: MetricsSettings = Field(MetricsSettings())

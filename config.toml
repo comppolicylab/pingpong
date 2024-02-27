@@ -52,6 +52,25 @@ database = "pingpong"
 key = "not actually a secret!"
 
 
+[authz]
+# Authorization service configuration (roles and permissions).
+
+# The "mock" authz service is a good place to start if you are developing on
+# features that don't relate to authorization.
+type = "mock"
+# When this is `true` everyone is a super admin. If you set it to `false` we
+# will use an ephemeral in-memory mock store to track permissions, which you
+# will need to grant manually.
+everyone_is_super = true
+# You can enable a real authorization server with the following settings:
+# type = "openfga"
+# scheme = "http"
+# host = "localhost"
+# store = "pingpong"
+# cfg = "./pingpong/authz/authz.fga.json"
+# key = "devkey"
+
+
 [email]
 # Email configuration. This is used to send emails from the server, for login
 # via magic link and for app invite notifications.

@@ -46,13 +46,15 @@ test_config.toml     -- App config for Python tests
 
 ## Running locally
 
-At a high level, you need four things to use the app locally:
+At a high level, you need these things to use the app locally:
  - Postgres Database
+ - Authz server (optional, can use dummy for dev)
  - Python / Poetry to run the API
  - Pnpm to run the FrontEnd.
  - OpenAI API Key (for using the app)
 
-Docker is necessary for deployment, and can also simplify dev, but is not technically required.
+Docker is necessary for deployment.
+You can also use Docker for running the Authz server and DB on dev, but is not technically required.
 
 
 ### Database
@@ -70,6 +72,7 @@ Of course, you can run Postgres-15 another way if you choose. Just make sure the
 
 We also support a SQLite backend if needed,
 although since prod uses Postgres it's best to use this in dev as well!
+
 
 #### Database setup / Migrations
 
@@ -91,6 +94,18 @@ Verify the migration is correct, check it into the repo, and apply it to the dat
 ```
 poetry run python -m pingpong db migrate
 ```
+
+### Authz
+
+The authorization server depends on the database and needs to be configured for use.
+
+TODO(jnu): refactor / automate / embed this in the `start-dev*.sh` script
+
+ 1. In PostgreSQL run `CREATE SCHEMA IF NOT EXISTS authz ;`
+ 2. Configure the DB tables for OpenFGA with `docker compose run authz migrate`
+ 3. Run the OpenFGA server with `docker compose up authz -d`
+
+Initialization of the rulesets will happen when the API server is started.
 
 
 ### Backend / API

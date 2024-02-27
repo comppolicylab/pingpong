@@ -8,7 +8,6 @@ import alembic.command
 import alembic.config
 
 from .auth import encode_auth_token
-from .authz.openfga import CreateRootUser
 from .config import config
 from .models import Base, User
 
@@ -31,7 +30,7 @@ def make_root(email: str) -> None:
         async with config.db.driver.async_session() as session:
             user = await User.get_by_email(session, email)
             async with config.authz.driver.get_client() as c:
-                await c.write(CreateRootUser(user.id))
+                await c.create_root_user(user.id)
 
             print(f"User {user.id} promoted to root")
 

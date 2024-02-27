@@ -11,6 +11,8 @@ from openfga_sdk.client.models import (
 from openfga_sdk.credentials import CredentialConfiguration, Credentials
 from openfga_sdk.models import CreateStoreRequest
 
+from .base import AuthzClient, AuthzDriver
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,7 +20,42 @@ _ROOT = "root:0"
 """Singleton root object."""
 
 
-class OpenFgaAuthzDriver:
+class OpenFgaAuthzClient(AuthzClient):
+    def __init__(self, config: Configuration):
+        self._cli = OpenFgaClient(config)
+
+    async def connect(self):
+        return
+
+    async def close(self):
+        return await self._cli.close()
+
+    async def test(self, user_id: int, relation: str, target: str | None) -> bool:
+        query = ClientCheckRequest(
+            user=f"user:{user_id}",
+            relation=relation,
+            object=target or _ROOT,
+        )
+        response = await self._cli.check(query)
+        return response.allowed
+
+    async def grant(self, user_id: int, relation: str, target: str):
+        query = ClientWriteRequest(
+            writes=[
+                ClientTuple(
+                    user=f"user:{user_id}",
+                    relation=relation,
+                    object=target,
+                ),
+            ],
+        )
+        await self._cli.write(query)
+
+    async def create_root_user(self, user_id: int):
+        return await self.grant(user_id, "admin", _ROOT)
+
+
+class OpenFgaAuthzDriver(AuthzDriver):
     def __init__(
         self,
         *,
@@ -46,10 +83,11 @@ class OpenFgaAuthzDriver:
         self.model_config = model_config
 
     def get_client(self):
-        return OpenFgaClient(self.config)
+        return OpenFgaAuthzClient(self.config)
 
     async def get_or_create_store_by_name(self, name: str):
-        async with self.get_client() as c:
+        async with self.get_client() as ac:
+            c = ac._cli
             stores = await c.list_stores()
             for store in stores.stores:
                 if store.name == name:
@@ -66,7 +104,8 @@ class OpenFgaAuthzDriver:
         store_id = await self.get_or_create_store_by_name(self.store)
         self.config.store_id = store_id
 
-        async with self.get_client() as c:
+        async with self.get_client() as ac:
+            c = ac._cli
             try:
                 latest = await c.read_latest_authorization_model()
                 self.config.authorization_model_id = latest.authorization_model.id
@@ -83,37 +122,3 @@ class OpenFgaAuthzDriver:
                     )
 
             await c.close()
-
-
-def CreateRootUser(user_id: int):
-    """Add a user to the root group.
-
-    Args:
-        cli (OpenFgaClient): OpenFgaClient instance
-        user_id (int): User ID
-    """
-    return ClientWriteRequest(
-        writes=[
-            ClientTuple(
-                user=f"user:{user_id}",
-                relation="admin",
-                object=_ROOT,
-            ),
-        ],
-    )
-
-
-def Query(user_id: int, relation: str, target: str | None = None):
-    """Query the authorization model.
-
-    Args:
-        cli (OpenFgaClient): OpenFgaClient instance
-        user_id (int): User ID
-        relation (str): Relation
-        target (str, optional): Target. Defaults to None.
-    """
-    return ClientCheckRequest(
-        user=f"user:{user_id}",
-        relation=relation,
-        object=target or _ROOT,
-    )
