@@ -1,17 +1,19 @@
 import json
 import logging
+from typing import List
 
 from openfga_sdk import Configuration
 from openfga_sdk.client import OpenFgaClient
 from openfga_sdk.client.models import (
     ClientCheckRequest,
+    ClientListObjectsRequest,
     ClientTuple,
     ClientWriteRequest,
 )
 from openfga_sdk.credentials import CredentialConfiguration, Credentials
 from openfga_sdk.models import CreateStoreRequest
 
-from .base import AuthzClient, AuthzDriver
+from .base import AuthzClient, AuthzDriver, Relation
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +22,26 @@ _ROOT = "root:0"
 """Singleton root object."""
 
 
+def _expand_relations(rx: List[Relation] | None) -> List[ClientTuple] | None:
+    if not rx:
+        return None
+    return [
+        ClientTuple(
+            user=entity,
+            relation=relation,
+            object=target,
+        )
+        for entity, relation, target in rx
+    ]
+
+
 class OpenFgaAuthzClient(AuthzClient):
     def __init__(self, config: Configuration):
         self._cli = OpenFgaClient(config)
+
+    @property
+    def root(self) -> str:
+        return _ROOT
 
     async def connect(self):
         return
@@ -30,29 +49,43 @@ class OpenFgaAuthzClient(AuthzClient):
     async def close(self):
         return await self._cli.close()
 
-    async def test(self, user_id: int, relation: str, target: str | None) -> bool:
-        query = ClientCheckRequest(
-            user=f"user:{user_id}",
+    async def list(self, entity: str, relation: str, type_: str) -> list[int]:
+        query = ClientListObjectsRequest(
+            user=entity,
             relation=relation,
-            object=target or _ROOT,
+            type=type_,
+        )
+        response = await self._cli.list_objects(query)
+        n = len(type_) + 1
+        return [int(slug[n:]) for slug in response.objects]
+
+    async def test(self, entity: str, relation: str, target: str) -> bool:
+        query = ClientCheckRequest(
+            user=entity,
+            relation=relation,
+            object=target,
         )
         response = await self._cli.check(query)
         return response.allowed
 
-    async def grant(self, user_id: int, relation: str, target: str):
+    async def write(
+        self,
+        grant: List[Relation] | None = None,
+        revoke: List[Relation] | None = None,
+    ):
+        if not grant and not revoke:
+            return
+        print(grant, revoke)
+
         query = ClientWriteRequest(
-            writes=[
-                ClientTuple(
-                    user=f"user:{user_id}",
-                    relation=relation,
-                    object=target,
-                ),
-            ],
+            writes=_expand_relations(grant),
+            deletes=_expand_relations(revoke),
         )
+
         await self._cli.write(query)
 
     async def create_root_user(self, user_id: int):
-        return await self.grant(user_id, "admin", _ROOT)
+        return await self.grant(f"user:{user_id}", "admin", self.root)
 
 
 class OpenFgaAuthzDriver(AuthzDriver):

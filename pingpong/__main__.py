@@ -43,6 +43,7 @@ def make_root(email: str) -> None:
 @click.option("--super-user/--no-super-user", default=False)
 def login(email: str, redirect: str, super_user: bool) -> None:
     async def _get_or_create(email) -> int:
+        await config.authz.driver.init()
         async with config.db.driver.async_session() as session:
             user = await User.get_by_email(session, email)
             if not user:
@@ -50,6 +51,8 @@ def login(email: str, redirect: str, super_user: bool) -> None:
                 user.name = input("Name: ").strip()
                 user.super_admin = super_user
                 session.add(user)
+                async with config.authz.driver.get_client() as c:
+                    await c.create_root_user(user.id)
                 await session.commit()
                 await session.refresh(user)
             return user.id

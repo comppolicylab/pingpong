@@ -91,72 +91,6 @@ class Not(Expression):
         return f"Not({self.arg})"
 
 
-class IsSuper(Expression):
-    async def test(self, request: Request) -> bool:
-        return request.state.session.user.super_admin
-
-
-class IsUser(Expression):
-    def __init__(self, user_id_field):
-        self.user_id_field = user_id_field
-
-    async def test(self, request: Request) -> bool:
-        return request.state.session.user.id == int(
-            request.path_params[self.user_id_field]
-        )
-
-
-class CanRead(Expression):
-    def __init__(self, model, id_field):
-        self.model = model
-        self.id_field = id_field
-
-    async def test(self, request: Request) -> bool:
-        # Get the model ID from the request path.
-        model_id = request.path_params[self.id_field]
-        # Get the model from the database.
-        return await self.model.can_read(
-            request.state.db, model_id, request.state.session.user
-        )
-
-    def __str__(self):
-        return f"CanRead({self.model.__name__}, {self.id_field})"
-
-
-class CanWrite(Expression):
-    def __init__(self, model, id_field):
-        self.model = model
-        self.id_field = id_field
-
-    async def test(self, request: Request) -> bool:
-        # Get the model ID from the request path.
-        model_id = request.path_params[self.id_field]
-        # Get the model from the database.
-        return await self.model.can_write(
-            request.state.db, model_id, request.state.session.user
-        )
-
-    def __str__(self):
-        return f"CanWrite({self.model.__name__}, {self.id_field})"
-
-
-class CanManage(Expression):
-    def __init__(self, model, id_field):
-        self.model = model
-        self.id_field = id_field
-
-    async def test(self, request: Request) -> bool:
-        # Get the model ID from the request path.
-        model_id = request.path_params[self.id_field]
-        # Get the model from the database.
-        return await self.model.can_manage(
-            request.state.db, model_id, request.state.session.user
-        )
-
-    def __str__(self):
-        return f"CanManage({self.model.__name__}, {self.id_field})"
-
-
 class LoggedIn(Expression):
     async def test(self, request: Request) -> bool:
         return request.state.session.status == SessionStatus.VALID
@@ -172,10 +106,16 @@ class Authz(Expression):
 
     async def test(self, request: Request) -> bool:
         try:
+            # Format the target with path params.
+            target = self.target
+            if target:
+                target = target.format_map(request.path_params or {})
+            else:
+                target = request.state.authz.root
             return await request.state.authz.test(
-                request.state.session.user.id,
+                f"user:{request.state.session.user.id}",
                 self.relation,
-                self.target,
+                target,
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))

@@ -6,13 +6,16 @@ type user
 type root
   relations
     define admin: [user]
-    define institution_creator: [user] or admin
+    define can_create_institution: [user] or admin
+    define can_do_reckless_things: [user]
 
 type institution
   relations
     define parent: [root]
     define admin: [user] or admin from parent
-    define class_creator: [user] or admin
+    define can_create_class: [user] or admin
+    define can_delete: admin from parent
+    define can_view: admin
 
 type class
   relations
@@ -20,14 +23,51 @@ type class
     define admin: [user] or admin from parent
     define teacher: [user]
     define student: [user]
+    define supervisor: admin or teacher
     define member: admin or teacher or student
-    define thread_creator: member
+    define can_view: member
+    define can_view_users: supervisor
+    define can_view_api_key: admin from parent
+    define can_delete: admin from parent
+    define can_edit_info: admin
+    define can_manage_users: supervisor
+    define can_create_thread: member
+    define can_create_assistants: [class#student] or supervisor
+    define can_publish_assistants: [class#student] or supervisor
+    define can_publish_threads: [class#student] or supervisor
+    define can_upload_class_files: supervisor
+    define can_upload_user_files: can_create_thread
 
 type thread
   relations
     define parent: [class]
     define party: [user]
-    define viewer: party or member from parent
-    define chatter: party
-    define deleter: party or admin from parent
-    define publisher: party
+    define can_view: [class#member] or party or supervisor from parent
+    define can_participate: party
+    define can_delete: party or admin from parent
+    define can_publish: party and can_publish_threads from parent
+
+type assistant
+  relations
+    define parent: [class]
+    define owner: [user]
+    define can_edit: owner or admin from parent
+    define can_delete: owner or admin from parent
+    define can_view: [class#member] or owner or admin from parent
+    define can_interact_with: can_view
+    define can_publish: owner and can_publish_assistants from parent
+
+type user_file
+  relations
+    define parent: [class]
+    define owner: [user]
+    define thread: [thread]
+    define can_delete: owner or admin from parent
+    define can_view: owner or admin from parent or can_view from thread
+
+type class_file
+  relations
+    define parent: [class]
+    define owner: [user]
+    define can_delete: owner or admin from parent
+    define can_view: member from parent

@@ -1,5 +1,9 @@
-from .base import AuthzClient, AuthzDriver
-from .mock import MockAuthzDriver
+from .base import AuthzClient, AuthzDriver, Relation
 from .openfga import OpenFgaAuthzDriver
 
-__all__ = ["OpenFgaAuthzDriver", "MockAuthzDriver", "AuthzDriver", "AuthzClient"]
+__all__ = [
+    "OpenFgaAuthzDriver",
+    "AuthzDriver",
+    "AuthzClient",
+    "Relation",
+]

@@ -1,14 +1,32 @@
-from abc import abstractmethod
-from typing import Protocol
+from abc import abstractmethod, abstractproperty
+from typing import List, Protocol, Tuple
+
+Relation = Tuple[str, str, str]
 
 
 class AuthzClient(Protocol):
-    @abstractmethod
-    async def test(self, user_id: int, relation: str, target: str | None) -> bool:
+    @abstractproperty
+    def root(self) -> str:
         ...
 
     @abstractmethod
-    async def grant(self, user_id: int, relation: str, target: str):
+    async def list(self, entity: str, relation: str, type_: str) -> list[int]:
+        ...
+
+    @abstractmethod
+    async def test(self, entity: str, relation: str, target: str) -> bool:
+        ...
+
+    async def revoke(self, entity: str, relation: str, target: str):
+        return await self.write(revoke=[(entity, relation, target)])
+
+    async def grant(self, entity: str, relation: str, target: str):
+        return await self.write(grant=[(entity, relation, target)])
+
+    @abstractmethod
+    async def write(
+        self, grant: List[Relation] | None = None, revoke: List[Relation] | None = None
+    ):
         ...
 
     @abstractmethod

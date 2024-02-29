@@ -11,8 +11,6 @@ from sqlalchemy import (
     Table,
     and_,
     delete,
-    not_,
-    or_,
     select,
     update,
 )
@@ -27,7 +25,6 @@ from sqlalchemy.orm import (
     relationship,
 )
 from sqlalchemy.sql import func
-from sqlalchemy.sql.expression import false
 
 import pingpong.schemas as schemas
 
@@ -211,55 +208,6 @@ class Institution(Base):
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     @classmethod
-    async def can_read(
-        cls, session: AsyncSession, institution_id: int, user: User
-    ) -> bool:
-        # Check for explicit association
-        stmt = select(UserInstitutionRole).where(
-            and_(
-                UserInstitutionRole.user_id == user.id,
-                UserInstitutionRole.institution_id == int(institution_id),
-            )
-        )
-        result = await session.scalar(stmt)
-        if result is not None:
-            return True
-
-        # Check for implicit association
-        stmt = (
-            select(UserClassRole)
-            .options(joinedload(UserClassRole.class_).joinedload(Class.institution))
-            .where(
-                and_(
-                    UserClassRole.user_id == user.id,
-                    Class.institution_id == institution_id,
-                )
-            )
-        )
-        result = await session.scalar(stmt)
-        return result is not None
-
-    @classmethod
-    async def can_write(
-        cls, session: AsyncSession, institution_id: int, user: User
-    ) -> bool:
-        stmt = select(UserInstitutionRole).where(
-            and_(
-                UserInstitutionRole.user_id == user.id,
-                UserInstitutionRole.institution_id == int(institution_id),
-                UserInstitutionRole.role == schemas.Role.ADMIN,
-            )
-        )
-        result = await session.scalar(stmt)
-        return result is not None
-
-    @classmethod
-    async def can_manage(
-        cls, session: AsyncSession, institution_id: int, user: User
-    ) -> bool:
-        return False
-
-    @classmethod
     async def create(
         cls, session: AsyncSession, data: schemas.CreateInstitution
     ) -> "Institution":
@@ -270,38 +218,14 @@ class Institution(Base):
         return institution
 
     @classmethod
-    async def all(cls, session: AsyncSession) -> List["Institution"]:
-        stmt = select(Institution)
+    async def get_all_by_id(
+        cls, session: AsyncSession, ids: list[int]
+    ) -> List["Institution"]:
+        if not ids:
+            return []
+        stmt = select(Institution).where(Institution.id.in_(ids))
         result = await session.execute(stmt)
         return [row.Institution for row in result]
-
-    @classmethod
-    async def visible(cls, session: AsyncSession, user: User) -> List["Institution"]:
-        # Institutions where user has an explicit assignment
-        stmt = (
-            select(Institution)
-            .join(UserInstitutionRole)
-            .where(UserInstitutionRole.user_id == user.id)
-        )
-        ids = set[int]()
-        all_ = list[Institution]()
-        for inst in await session.scalars(stmt):
-            ids.add(inst.id)
-            all_.append(inst)
-
-        # Institutions where user has an explicit association via classes.
-        stmt2 = (
-            select(UserClassRole)
-            .options(joinedload(UserClassRole.class_).joinedload(Class.institution))
-            .where(UserClassRole.user_id == user.id)
-        )
-
-        for ucr in await session.scalars(stmt2):
-            if ucr.class_.institution.id not in ids:
-                all_.append(ucr.class_.institution)
-                ids.add(ucr.class_.institution.id)
-
-        return all_
 
     @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "Institution":
@@ -355,9 +279,10 @@ class File(Base):
         await session.execute(stmt)
 
     @classmethod
-    async def for_class(cls, session: AsyncSession, class_id: int) -> list["File"]:
-        # Get files for a class that aren't tied to a specific thread.
-        stmt = select(File).where(File.class_id == int(class_id), not_(File.private))
+    async def get_all_by_id(cls, session: AsyncSession, ids: list[int]) -> list["File"]:
+        if not ids:
+            return []
+        stmt = select(File).where(File.id.in_(ids))
         result = await session.execute(stmt)
         return [row.File for row in result]
 
@@ -365,6 +290,8 @@ class File(Base):
     async def get_all_by_file_id(
         cls, session: AsyncSession, ids: List[str]
     ) -> List["File"]:
+        if not ids:
+            return []
         stmt = select(File).where(File.file_id.in_(ids))
         result = await session.execute(stmt)
         return [row.File for row in result]
@@ -398,16 +325,6 @@ class Assistant(Base):
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     @classmethod
-    async def can_manage(
-        cls, session: AsyncSession, assistant_id: int, user: User
-    ) -> bool:
-        asst = await cls.get_by_id(session, int(assistant_id))
-        if not asst:
-            return False
-
-        return asst.creator_id == user.id
-
-    @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "Assistant":
         stmt = select(Assistant).where(Assistant.id == int(id_))
         return await session.scalar(stmt)
@@ -419,40 +336,6 @@ class Assistant(Base):
         if not ids:
             return []
         stmt = select(Assistant).where(Assistant.id.in_([int(id_) for id_ in ids]))
-        result = await session.execute(stmt)
-        return [row.Assistant for row in result]
-
-    @classmethod
-    async def for_class(
-        cls,
-        session: AsyncSession,
-        class_id: int,
-        include_all_private: bool = False,
-        user_id: int | None = None,
-    ) -> list["Assistant"]:
-        if include_all_private:
-            condition = Assistant.class_id == int(class_id)
-        elif user_id:
-            condition = and_(
-                Assistant.class_id == int(class_id),
-                or_(
-                    Assistant.creator_id == int(user_id),
-                    Assistant.published.is_not(None),
-                ),
-            )
-        else:
-            condition = and_(
-                Assistant.class_id == int(class_id),
-                Assistant.published.is_not(None),
-            )
-
-        stmt = select(Assistant).where(condition)
-        result = await session.execute(stmt)
-        return [row.Assistant for row in result]
-
-    @classmethod
-    async def for_user(cls, session: AsyncSession, user_id: int) -> list["Assistant"]:
-        stmt = select(Assistant).where(Assistant.creator_id == int(user_id))
         result = await session.execute(stmt)
         return [row.Assistant for row in result]
 
@@ -550,96 +433,6 @@ class Class(Base):
         await session.execute(stmt)
 
     @classmethod
-    async def can_manage(cls, session: AsyncSession, class_id: int, user: User) -> bool:
-        class_ = await session.scalar(
-            select(Class)
-            .options(joinedload(Class.users))
-            .where(Class.id == int(class_id))
-        )
-
-        if not class_:
-            return False
-
-        # Match the class._users to the given user by id:
-        for user_class in class_.users:
-            if user_class.user_id == user.id:
-                return user_class.role == schemas.Role.ADMIN
-
-        return False
-
-    @classmethod
-    async def can_write(cls, session: AsyncSession, class_id: int, user: User) -> bool:
-        class_ = await session.scalar(
-            select(Class)
-            .options(joinedload(Class.users))
-            .where(Class.id == int(class_id))
-        )
-
-        if not class_:
-            return False
-
-        # Match the class._users to the given user by id:
-        for user_class in class_.users:
-            if user_class.user_id == user.id:
-                return user_class.role in (schemas.Role.ADMIN, schemas.Role.WRITE)
-
-        return False
-
-    @classmethod
-    async def can_read(cls, session: AsyncSession, class_id: int, user: User) -> bool:
-        class_ = await session.scalar(
-            select(Class)
-            .options(joinedload(Class.users))
-            .where(Class.id == int(class_id))
-        )
-
-        if not class_:
-            return False
-
-        # Match the class._users to the given user by id:
-        for user_class in class_.users:
-            if user_class.user_id == user.id:
-                return user_class.role is not None
-
-        return False
-
-    @classmethod
-    async def visible(cls, session: AsyncSession, user: User) -> List["Class"]:
-        if user.super_admin:
-            return list(await session.scalars(select(Class)))
-
-        # Classes the user has a specific assignment to
-        stmt = select(Class).join(UserClassRole).where(UserClassRole.user_id == user.id)
-
-        ids = set[int]()
-        all_ = list[Class]()
-        for class_ in await session.scalars(stmt):
-            ids.add(class_.id)
-            all_.append(class_)
-
-        # Find institutions where user has elevated privileges
-        stmt2 = select(UserInstitutionRole).where(
-            UserInstitutionRole.user_id == user.id,
-            # Role is either admin or write
-            or_(
-                UserInstitutionRole.role == schemas.Role.ADMIN,
-                UserInstitutionRole.role == schemas.Role.WRITE,
-            ),
-        )
-
-        insts = [inst.institution_id for inst in await session.scalars(stmt2)]
-        if not insts:
-            return all_
-
-        # Find all classes in those institutions
-        stmt3 = select(Class).where(Class.institution_id.in_(insts))
-        for class_ in await session.scalars(stmt3):
-            if class_.id not in ids:
-                all_.append(class_)
-
-        return all_
-
-    @classmethod
     async def create(
         cls, session: AsyncSession, inst_id: int, data: schemas.CreateClass
     ) -> "Class":
@@ -682,6 +475,20 @@ class Class(Base):
             .where(Class.id == int(id_))
         )
         return await session.scalar(stmt)
+
+    @classmethod
+    async def get_all_by_id(
+        cls, session: AsyncSession, ids: list[int]
+    ) -> list["Class"]:
+        if not ids:
+            return []
+        stmt = (
+            select(Class)
+            .options(joinedload(Class.institution))
+            .where(Class.id.in_(ids))
+        )
+        result = await session.execute(stmt)
+        return [row.Class for row in result]
 
 
 class Thread(Base):
@@ -727,47 +534,15 @@ class Thread(Base):
         return await session.scalar(stmt)
 
     @classmethod
-    async def can_read(self, session: AsyncSession, thread_id: int, user: User) -> bool:
-        thread = await session.scalar(select(Thread).where(Thread.id == int(thread_id)))
-
-        if not thread:
-            return False
-
-        if thread.private:
-            return user.id in {u.id for u in thread.users}
-        else:
-            return user.id in {u.id for u in thread.class_.users}
-
-    @classmethod
-    async def all(cls, session: AsyncSession, class_id: int) -> List["Thread"]:
-        stmt = select(Thread).where(Thread.class_id == int(class_id))
-        result = await session.execute(stmt)
-        return [row.Thread for row in result]
-
-    @classmethod
-    async def visible(
-        cls, session: AsyncSession, class_id: int, user: User
+    async def get_all_by_id(
+        cls,
+        session: AsyncSession,
+        ids: list[str],
     ) -> List["Thread"]:
-        # Get all non-private threads for the class_id,
-        # plus any threads that are private in the class but which the
-        # user is a participant of.
-
-        # Private threads
-        # Get IDs of private threads from the `user_thread_association` table
-        # where the user is a participant.
-        p_stmt = select(user_thread_association).where(
-            user_thread_association.c.user_id == user.id
-        )
-        result = await session.execute(p_stmt)
-        private_thread_ids = [row.thread_id for row in result]
-
-        # Now select all threads for the class that are either public or
-        # which are included in the visible private thread IDs list.
+        if not ids:
+            return []
         stmt = select(Thread).where(
-            and_(
-                Thread.class_id == class_id,
-                or_(Thread.private == false(), Thread.id.in_(private_thread_ids)),
-            )
+            Thread.id.in_(ids),
         )
         result = await session.execute(stmt)
         return [row.Thread for row in result]
