@@ -100,7 +100,7 @@
     <TableHeadCell></TableHeadCell>
   </TableHead>
   <TableBody>
-    {#each filteredUsers as user}
+    {#each filteredUsers as user (user.id)}
       <TableBodyRow>
         <TableBodyCell>{user.email}</TableBodyCell>
         {#each ROLES as role}
