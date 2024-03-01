@@ -166,7 +166,6 @@ class OpenFgaAuthzClient(AuthzClient):
         ops = [(True, op) for op in _expand_relations(grant)] + [
             (False, op) for op in _expand_relations(revoke)
         ]
-        print("OPS", ops)
 
         # Can only process 10 operations at a time.
         for i in range(0, len(ops), 10):

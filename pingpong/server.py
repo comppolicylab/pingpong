@@ -628,7 +628,7 @@ async def update_user_class_role(
 
 @v1.delete(
     "/class/{class_id}/user/{user_id}",
-    dependencies=[Depends(Authz("can_manage_users", "class:{class_id}"))],
+    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
 async def remove_user_from_class(class_id: str, user_id: str, request: Request):
@@ -639,20 +639,6 @@ async def remove_user_from_class(class_id: str, user_id: str, request: Request):
         raise HTTPException(
             status_code=403, detail="Cannot remove yourself from a class"
         )
-
-    is_admin = await request.state.authz.test(
-        f"user:{request.state.session.user.id}", "admin", f"class:{class_id}"
-    )
-
-    is_target_admin = await request.state.authz.test(
-        f"user:{uid}", "admin", f"class:{class_id}"
-    )
-    is_target_teacher = await request.state.authz.test(
-        f"user:{uid}", "teacher", f"class:{class_id}"
-    )
-
-    if not is_admin and (is_target_admin or is_target_teacher):
-        raise HTTPException(status_code=403, detail="Missing permission to remove user")
 
     existing = await models.UserClassRole.get(request.state.db, uid, cid)
     if not existing:
@@ -887,7 +873,7 @@ async def create_thread(
         grants = [
             (f"class:{class_id}", "parent", f"thread:{result.id}"),
         ] + [(f"user:{p.id}", "party", f"thread:{result.id}") for p in parties]
-        request.state.authz.write(grant=grants)
+        await request.state.authz.write(grant=grants)
 
         # Start a new thread run.
         run = await openai_client.beta.threads.runs.create(

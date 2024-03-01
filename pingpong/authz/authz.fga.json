@@ -774,7 +774,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "admin"
+                    "relation": "supervisor"
                   },
                   "tupleset": {
                     "relation": "parent"
