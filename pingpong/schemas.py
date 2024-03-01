@@ -147,6 +147,18 @@ class Threads(BaseModel):
         from_attributes = True
 
 
+class Role(Enum):
+    """Possible user roles.
+
+    @deprecated This role enum is deprecated. Use ClassUserRoles instead,
+    along with the new permissions system.
+    """
+
+    ADMIN = "admin"
+    WRITE = "write"
+    READ = "read"
+
+
 class ClassUserRoles(BaseModel):
     admin: bool
     teacher: bool

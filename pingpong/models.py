@@ -54,7 +54,7 @@ class UserClassRole(Base):
     class_id: Mapped[int] = mapped_column(
         ForeignKey("classes.id"), nullable=False, primary_key=True
     )
-    role = Mapped[Optional[str]]
+    role = Column(SQLEnum(schemas.Role), nullable=True)
     title: Mapped[Optional[str]]
     user = relationship("User", back_populates="classes")
     class_ = relationship("Class", back_populates="users")
@@ -112,7 +112,7 @@ class UserInstitutionRole(Base):
     institution_id: Mapped[int] = mapped_column(
         ForeignKey("institutions.id"), nullable=False, primary_key=True
     )
-    role = Mapped[Optional[str]]
+    role = Column(SQLEnum(schemas.Role), nullable=True)
     title: Mapped[Optional[str]]
     user = relationship("User", back_populates="institutions")
     institution = relationship("Institution", back_populates="users")
