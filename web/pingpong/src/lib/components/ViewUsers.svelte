@@ -1,7 +1,22 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import { CheckCircleOutline, CloseOutline, EnvelopeOutline, TrashBinOutline } from 'flowbite-svelte-icons';
-  import { Table, TableBody, TableBodyCell, TableBodyRow, TableHead, TableHeadCell, TableSearch, Toggle, Button } from 'flowbite-svelte';
+  import {
+    CheckCircleOutline,
+    CloseOutline,
+    EnvelopeOutline,
+    TrashBinOutline
+  } from 'flowbite-svelte-icons';
+  import {
+    Table,
+    TableBody,
+    TableBodyCell,
+    TableBodyRow,
+    TableHead,
+    TableHeadCell,
+    TableSearch,
+    Toggle,
+    Button
+  } from 'flowbite-svelte';
   import { ROLES, ROLE_LABELS } from '$lib/api';
   import type { ClassUser } from '$lib/api';
 
@@ -26,7 +41,7 @@
    * Grant a permission to the user.
    */
   const updateUserRole = (evt: Event) => {
-    const target = evt.target as HTMLInputElement
+    const target = evt.target as HTMLInputElement;
     // Find sibling "verdict" input
     const verdict = target.form?.querySelector('input[name="verdict"]') as HTMLInputElement;
     // Set the value of the verdict input to "on" or "off" based on the checked state of the toggle
@@ -73,7 +88,9 @@
         <TableBodyCell>
           <form action="?/removeUser" method="POST">
             <input type="hidden" name="user_id" value={user.id} />
-            <Button type="submit" on:click={deleteUser.bind(null, user.id)}><TrashBinOutline color="red" /></Button>
+            <Button type="submit" on:click={deleteUser.bind(null, user.id)}
+              ><TrashBinOutline color="red" /></Button
+            >
           </form>
         </TableBodyCell>
       </TableBodyRow>

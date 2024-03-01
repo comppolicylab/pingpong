@@ -101,7 +101,7 @@
   $: asstFiles = allFiles
     .filter((f) => f.state === 'success')
     .map((f) => f.response) as ServerFile[];
-  $: members = (data?.classUsers || []).sort((a, b) => a.email < b.email ? -1 : 1);
+  $: members = (data?.classUsers || []).sort((a, b) => (a.email < b.email ? -1 : 1));
 
   $: hasApiKey = !!data?.class?.api_key;
 
@@ -302,10 +302,7 @@
         >
         {#if usersModalOpen}
           <Modal bind:open={usersModalOpen} title="Manage users">
-              <BulkAddUsers
-                on:cancel={() => (usersModalOpen = false)}
-                role="student"
-              />
+            <BulkAddUsers on:cancel={() => (usersModalOpen = false)} role="student" />
           </Modal>
         {/if}
       </div>

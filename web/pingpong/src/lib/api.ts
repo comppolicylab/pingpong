@@ -324,15 +324,18 @@ export type NamedGrants = {
 /**
  * Get grants for the current user.
  */
-export const grants = async <T extends NamedGrantsQuery>(f: Fetcher, query: T): Promise<{[name in keyof T]: boolean}>  => {
+export const grants = async <T extends NamedGrantsQuery>(
+  f: Fetcher,
+  query: T
+): Promise<{ [name in keyof T]: boolean }> => {
   const grantNames = Object.keys(query);
   const grants = grantNames.map((name) => query[name]);
-  const results = await POST<GrantsQuery, Grants>(f, 'me/grants', {grants});
+  const results = await POST<GrantsQuery, Grants>(f, 'me/grants', { grants });
   const verdicts: NamedGrants = {};
   for (let i = 0; i < grantNames.length; i++) {
     verdicts[grantNames[i]] = results.grants[i].verdict;
   }
-  return verdicts as {[name in keyof T]: boolean};
+  return verdicts as { [name in keyof T]: boolean };
 };
 
 /**
@@ -880,7 +883,7 @@ export const updateClassUser = async (
 export const removeClassUser = async (f: Fetcher, classId: number, userId: number) => {
   const url = `class/${classId}/user/${userId}`;
   return await DELETE<never, GenericStatus>(f, url);
-}
+};
 
 /**
  * Parameters for creating a new thread.
@@ -1176,7 +1179,7 @@ export const ROLES = ['admin', 'teacher', 'student'] as const;
 /**
  * List of available roles. These map to the API.
  */
-export const ROLE_LABELS: Record<typeof ROLES[number], string> = {
+export const ROLE_LABELS: Record<(typeof ROLES)[number], string> = {
   admin: 'Administrator',
   teacher: 'Instructor',
   student: 'Student'

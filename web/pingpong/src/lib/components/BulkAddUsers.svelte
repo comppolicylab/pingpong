@@ -4,7 +4,7 @@
   import { Select, Helper, Button, GradientButton, Label, Textarea, Hr } from 'flowbite-svelte';
 
   export let role: string;
-  export let title: string = "";
+  export let title: string = '';
 
   const dispatch = createEventDispatcher();
 
@@ -20,12 +20,13 @@
 
     <Label for="role">Role</Label>
     <Helper>
-      <div>
-        Choose a role to grant permissions to these users to view the class.
-      </div>
+      <div>Choose a role to grant permissions to these users to view the class.</div>
       <ul>
         <li>Students will have permission to view the class and chat history.</li>
-        <li>Teachers will have permission to create new chats, view everyone's chat history, and perform some management tasks.</li>
+        <li>
+          Teachers will have permission to create new chats, view everyone's chat history, and
+          perform some management tasks.
+        </li>
         <li>Admins have full control to manage the class and also see everyone's chat history.</li>
       </ul>
     </Helper>
