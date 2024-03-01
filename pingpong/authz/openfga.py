@@ -203,7 +203,7 @@ class OpenFgaAuthzClient(AuthzClient):
                 filtered_grants.append((ent, rel, obj))
 
         for ent, rel, obj in revoke or []:
-            result = self._cli.read(
+            result = await self._cli.read(
                 TupleKey(
                     user=ent,
                     relation=rel,
