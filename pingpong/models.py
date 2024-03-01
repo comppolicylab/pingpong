@@ -77,19 +77,15 @@ class UserClassRole(Base):
         session: AsyncSession,
         user_id: int,
         class_id: int,
-        ucr: schemas.CreateUserClassRole,
     ) -> "UserClassRole":
         stmt = (
             _get_upsert_stmt(session)(UserClassRole)
             .values(
                 user_id=int(user_id),
                 class_id=int(class_id),
-                title=ucr.title,
-                role=ucr.roles.string(),
             )
-            .on_conflict_do_update(
+            .on_conflict_do_nothing(
                 index_elements=[UserClassRole.user_id, UserClassRole.class_id],
-                set_={"title": ucr.title, "role": ucr.roles.string()},
             )
             .returning(UserClassRole)
         )

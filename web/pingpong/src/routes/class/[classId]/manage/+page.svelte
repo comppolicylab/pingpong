@@ -5,7 +5,7 @@
   import { page } from '$app/stores';
   import { beforeNavigate } from '$app/navigation';
   import * as api from '$lib/api';
-  import type { FileUploadInfo, Assistant, ServerFile, ClassUser } from '$lib/api';
+  import type { FileUploadInfo, Assistant, ServerFile } from '$lib/api';
   import {
     Checkbox,
     Helper,
@@ -101,7 +101,7 @@
   $: asstFiles = allFiles
     .filter((f) => f.state === 'success')
     .map((f) => f.response) as ServerFile[];
-  $: members = (data?.classUsers || []).sort((a, b) => (a.email < b.email ? -1 : 1));
+  $: members = data?.classUsers || [];
 
   $: hasApiKey = !!data?.class?.api_key;
 

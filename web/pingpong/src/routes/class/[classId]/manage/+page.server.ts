@@ -9,7 +9,6 @@ import type { Actions, RequestEvent } from './$types';
 export type CreateUserForm = {
   email: string;
   role: string;
-  title: string;
 };
 
 /**
@@ -18,7 +17,6 @@ export type CreateUserForm = {
 export type CreateUsersForm = {
   emails: string;
   role: string;
-  title: string;
 };
 
 /**
@@ -27,7 +25,6 @@ export type CreateUsersForm = {
 export type UpdateUserForm = {
   user_id: string;
   role: 'admin' | 'teacher' | 'student';
-  title?: string;
   verdict: boolean;
 };
 
@@ -85,7 +82,14 @@ export const actions: Actions = {
    */
   createUser: handler<RequestEvent, CreateUserForm>((f, d, event) => {
     const classId = parseInt(event.params.classId, 10);
-    return api.createClassUser(f, classId, { email: d.email, role: d.role, title: d.title });
+    return api.createClassUser(f, classId, {
+      email: d.email,
+      roles: {
+        admin: d.role === 'admin',
+        teacher: d.role === 'teacher',
+        student: d.role === 'student'
+      }
+    });
   }),
 
   /**
@@ -108,16 +112,14 @@ export const actions: Actions = {
       throw invalid('role', 'Role is required');
     }
 
-    const title = d.title as string | undefined;
-    if (!title) {
-      throw invalid('title', 'Title is required');
-    }
-
     const data: api.CreateClassUsersRequest = {
       roles: emailList.map((e) => ({
         email: e,
-        role,
-        title
+        roles: {
+          admin: role === 'admin',
+          teacher: role === 'teacher',
+          student: role === 'student'
+        }
       }))
     };
 

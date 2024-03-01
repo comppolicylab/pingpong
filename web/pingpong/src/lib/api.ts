@@ -211,7 +211,6 @@ export type UserClassRole = {
   user_id: number;
   class_id: number;
   role: string;
-  title: string;
 };
 
 /**
@@ -822,8 +821,7 @@ export const getClassUsers = async (f: Fetcher, classId: number) => {
  */
 export type CreateClassUserRequest = {
   email: string;
-  role: string;
-  title: string;
+  roles: ClassUserRoles;
 };
 
 /**
@@ -1179,17 +1177,16 @@ export const ROLES = ['admin', 'teacher', 'student'] as const;
 /**
  * List of available roles. These map to the API.
  */
-export const ROLE_LABELS: Record<(typeof ROLES)[number], string> = {
+export type Role = (typeof ROLES)[number];
+
+/**
+ * List of available roles. These map to the API.
+ */
+export const ROLE_LABELS: Record<Role, string> = {
   admin: 'Administrator',
   teacher: 'Instructor',
   student: 'Student'
 };
-
-/**
- * Titles for users. These are arbitary names used to help identify roles.
- * They don't have any meaning in the API.
- */
-export const TITLES = ['Creator', 'Admin', 'Instructor', 'Student', 'Assistant', 'Other'];
 
 /**
  * Information about file types and support.

@@ -264,8 +264,6 @@ async def create_class(
     ucr = models.UserClassRole(
         user_id=request.state.session.user.id,
         class_id=new_class.id,
-        role="admin",
-        title="Creator",
     )
     request.state.db.add(ucr)
 
@@ -497,7 +495,14 @@ async def add_users_to_class(
 
     for ucr in new_ucr.roles:
         if not is_admin and ucr.roles.admin:
-            raise HTTPException(status_code=403, detail="permission to create admins!")
+            raise HTTPException(
+                status_code=403, detail="Lacking permission to add admins"
+            )
+
+        if not is_admin and ucr.roles.teacher:
+            raise HTTPException(
+                status_code=403, detail="Lacking permission to add teachers"
+            )
 
         user = await models.User.get_or_create_by_email(request.state.db, ucr.email)
         if is_admin and user.id == request.state.session.user.id:
@@ -526,7 +531,9 @@ async def add_users_to_class(
         else:
             # Make sure the user exists...
             added = await models.UserClassRole.create(
-                request.state.db, user.id, cid, ucr
+                request.state.db,
+                user.id,
+                cid,
             )
             new_.append(
                 schemas.CreateInvite(
@@ -574,9 +581,9 @@ async def update_user_class_role(
         f"user:{request.state.session.user.id}", "admin", f"class:{class_id}"
     )
 
-    if not is_admin and update.role == "admin":
+    if not is_admin and update.role != "student":
         raise HTTPException(
-            status_code=403, detail="Missing permission to manage admins"
+            status_code=403, detail=f"Missing permission to manage {update.role}"
         )
 
     if (
