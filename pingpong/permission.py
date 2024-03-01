@@ -11,7 +11,10 @@ logger = logging.getLogger(__name__)
 class Expression:
     async def __call__(self, request: Request):
         if request.state.session.status != SessionStatus.VALID:
-            raise HTTPException(status_code=403, detail="Missing session token")
+            raise HTTPException(
+                status_code=403,
+                detail=f"Missing valid session token: {request.state.session.status.value}",
+            )
 
         if not await self.test_with_cache(request):
             logger.warning(

@@ -18,9 +18,8 @@
     Label,
     Input
   } from 'flowbite-svelte';
-  import ManageUser from '$lib/components/ManageUser.svelte';
   import BulkAddUsers from '$lib/components/BulkAddUsers.svelte';
-  import ViewUser from '$lib/components/ViewUser.svelte';
+  import ViewUsers from '$lib/components/ViewUsers.svelte';
   import ManageAssistant from '$lib/components/ManageAssistant.svelte';
   import ViewAssistant from '$lib/components/ViewAssistant.svelte';
   import FileUpload from '$lib/components/FileUpload.svelte';
@@ -63,10 +62,7 @@
     }
   });
 
-  let ttModal: ClassUser | null = null;
-  let ttModalOpen = false;
-  let studentModal: ClassUser | null = null;
-  let studentModalOpen = false;
+  let usersModalOpen = false;
   let anyCanCreate = data?.class?.any_can_create_assistant || false;
   let anyCanPublish = data.class.any_can_publish_assistant || false;
   let assistants: Assistant[] = [];
@@ -105,14 +101,16 @@
   $: asstFiles = allFiles
     .filter((f) => f.state === 'success')
     .map((f) => f.response) as ServerFile[];
-  $: students = (data?.classUsers || []).filter((u) => u.title.toLowerCase() === 'student');
-  $: tt = (data?.classUsers || []).filter((u) => u.title.toLowerCase() !== 'student');
-  $: classRole =
-    (data?.me?.user?.classes || []).find((c) => c.class_id === data.class.id)?.role || '';
-  $: hasElevatedPerms = ['write', 'admin'].includes(classRole.toLowerCase());
+  $: members = (data?.classUsers || []).sort((a, b) => a.email < b.email ? -1 : 1);
+
   $: hasApiKey = !!data?.class?.api_key;
-  $: canCreateAssistant = hasElevatedPerms || data?.class?.any_can_create_assistant;
-  $: canPublishAssistant = hasElevatedPerms || data?.class?.any_can_publish_assistant;
+
+  $: canEditClassInfo = !!data?.grants?.canEditInfo;
+  $: canManageClassUsers = !!data?.grants?.canManageUsers;
+  $: canUploadClassFiles = !!data?.grants?.canUploadClassFiles;
+  $: canViewApiKey = !!data?.grants?.canViewApiKey;
+  $: canCreateAssistant = !!data?.grants?.canCreateAssistants;
+  $: canPublishAssistant = !!data?.grants?.canPublishAssistants;
 
   // Check if we are editing an assistant and prompt if so.
   beforeNavigate((nav) => {
@@ -164,7 +162,7 @@
   class="container py-8 space-y-12 divide-y divide-gray-200 dark:divide-gray-700 h-full overflow-y-auto"
 >
   <Heading tag="h2"><Span gradient>Manage Class</Span></Heading>
-  {#if hasElevatedPerms}
+  {#if canEditClassInfo}
     <form action="?/updateClass" class="pt-6" method="POST">
       <div class="grid grid-cols-3 gap-x-6 gap-y-8">
         <div>
@@ -225,7 +223,9 @@
         </div>
       </div>
     </form>
+  {/if}
 
+  {#if canViewApiKey}
     <form action="?/updateApiKey" class="pt-6" method="POST">
       <div class="grid grid-cols-3 gap-x-6 gap-y-8">
         <div>
@@ -277,117 +277,42 @@
         </div>
       </div>
     </form>
+  {/if}
 
+  {#if canManageClassUsers}
     <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
       <div>
         <Heading customSize="text-xl font-bold" tag="h3"
-          ><Secondary class="text-xl">Teaching Team</Secondary></Heading
+          ><Secondary class="text-xl">Users</Secondary></Heading
         >
-        <Info>Manage teacher and course assistants.</Info>
+        <Info>Manage users who have access to this class.</Info>
       </div>
       <div class="col-span-2">
-        {#if tt.length === 0}
-          <div class="text-gray-400 mb-4">Teaching team has not been configured yet.</div>
-        {:else}
-          <div class="mb-4">
-            <div>
-              {#each tt as item}
-                <ViewUser
-                  user={item}
-                  on:click={() => {
-                    ttModal = item;
-                    ttModalOpen = true;
-                  }}
-                  on:touchstart={() => {
-                    ttModal = item;
-                    ttModalOpen = true;
-                  }}
-                />
-              {/each}
-            </div>
-          </div>
-        {/if}
+        <div class="mb-4">
+          <ViewUsers users={members} />
+        </div>
         <GradientButton
           color="cyanToBlue"
           on:click={() => {
-            ttModal = null;
-            ttModalOpen = true;
+            usersModalOpen = true;
           }}
           on:touchstart={() => {
-            ttModal = null;
-            ttModalOpen = true;
-          }}>Invite teaching team</GradientButton
+            usersModalOpen = true;
+          }}>Invite new users</GradientButton
         >
-        {#if ttModalOpen}
-          <Modal bind:open={ttModalOpen} title="Manage the teaching team">
-            <ManageUser
-              on:cancel={() => {
-                ttModal = null;
-                ttModalOpen = false;
-              }}
-              user={ttModal}
-            />
-          </Modal>
-        {/if}
-      </div>
-    </div>
-
-    <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
-      <div>
-        <Heading customSize="text-xl font-bold" tag="h3"
-          ><Secondary class="text-xl">Students</Secondary></Heading
-        >
-        <Info>Manage students in the class.</Info>
-      </div>
-      <div class="col-span-2">
-        {#if students.length === 0}
-          <div class="text-gray-400 mb-4">No students have been invited yet.</div>
-        {:else}
-          <div class="mb-4">
-            <div>
-              {#each students as item}
-                <ViewUser
-                  user={item}
-                  on:click={() => {
-                    studentModal = item;
-                    studentModalOpen = true;
-                  }}
-                  on:touchstart={() => {
-                    studentModal = item;
-                    studentModalOpen = true;
-                  }}
-                />
-              {/each}
-            </div>
-          </div>
-        {/if}
-        <GradientButton
-          color="cyanToBlue"
-          on:click={() => {
-            studentModal = null;
-            studentModalOpen = true;
-          }}
-          on:touchstart={() => {
-            studentModal = null;
-            studentModalOpen = true;
-          }}>Invite students</GradientButton
-        >
-        {#if studentModalOpen}
-          <Modal bind:open={studentModalOpen} title="Manage students">
-            {#if !studentModal}
+        {#if usersModalOpen}
+          <Modal bind:open={usersModalOpen} title="Manage users">
               <BulkAddUsers
-                on:cancel={() => (studentModalOpen = false)}
-                role="read"
-                title="Student"
+                on:cancel={() => (usersModalOpen = false)}
+                role="student"
               />
-            {:else}
-              <ManageUser on:cancel={() => (studentModalOpen = false)} user={studentModal} />
-            {/if}
           </Modal>
         {/if}
       </div>
     </div>
+  {/if}
 
+  {#if canUploadClassFiles}
     <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
       <div>
         <Heading tag="h3" customSize="text-xl font-bold"

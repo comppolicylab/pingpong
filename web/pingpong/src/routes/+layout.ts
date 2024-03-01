@@ -55,9 +55,9 @@ export const load: LayoutLoad = async ({ fetch, url, params }) => {
       threads = api.getClassThreads(fetch, classId).then(({ threads }) => threads);
     }
 
-    if (me.user?.super_admin) {
-      institutions = api.getInstitutions(fetch).then(({ institutions }) => institutions);
-    }
+    institutions = api
+      .getInstitutions(fetch, 'can_create_class')
+      .then(({ institutions }) => institutions);
 
     // After all requests have fired / returned, set the state.
     additionalState.classes = await classes;

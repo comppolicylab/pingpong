@@ -31,7 +31,7 @@ from .auth import (
     encode_session_token,
     generate_auth_link,
 )
-from .authz import Relation
+from .authz import RelatedObject, Relation
 from .config import config
 from .errors import sentry
 from .files import FILE_TYPES, handle_create_file, handle_delete_file
@@ -71,7 +71,8 @@ async def parse_session_token(request: Request, call_next):
     else:
         try:
             token = decode_session_token(session_token)
-            user = await models.User.get_by_id(request.state.db, int(token.sub))
+            user_id = int(token.sub)
+            user = await models.User.get_by_id(request.state.db, user_id)
             if not user:
                 raise ValueError("User does not exist")
 
@@ -92,6 +93,7 @@ async def parse_session_token(request: Request, call_next):
                 error=str(e),
             )
         except Exception as e:
+            logger.error("Error parsing session token: %s", e)
             request.state.session = schemas.SessionState(
                 status=schemas.SessionStatus.ERROR,
                 error=str(e),
@@ -166,15 +168,7 @@ async def login(body: schemas.MagicLoginRequest, request: Request):
     user = await models.User.get_by_email(request.state.db, email)
     # Throw an error if the user does not exist.
     if not user:
-        if config.development:
-            user = models.User(email=email)
-            user.name = ""
-            user.super_admin = True
-            request.state.db.add(user)
-            await request.state.db.commit()
-            await request.state.db.refresh(user)
-        else:
-            raise HTTPException(status_code=401, detail="User does not exist")
+        raise HTTPException(status_code=401, detail="User does not exist")
     magic_link = generate_auth_link(user.id, expiry=86_400)
 
     await config.email.sender.send(
@@ -209,12 +203,12 @@ async def auth(request: Request, response: Response):
 
 @v1.get(
     "/institutions",
-    dependencies=[Depends(Authz("can_create_institution"))],
+    dependencies=[Depends(LoggedIn())],
     response_model=schemas.Institutions,
 )
-async def list_institutions(request: Request):
+async def list_institutions(request: Request, role: str = "can_view"):
     ids = await request.state.authz.list(
-        f"user:{request.state.session.user.id}", "can_view", "institution"
+        f"user:{request.state.session.user.id}", role, "institution"
     )
     inst = await models.Institution.get_all_by_id(request.state.db, ids)
     return {"institutions": inst}
@@ -270,8 +264,8 @@ async def create_class(
     ucr = models.UserClassRole(
         user_id=request.state.session.user.id,
         class_id=new_class.id,
-        role=schemas.Role.ADMIN,
-        title="Owner",
+        role="admin",
+        title="Creator",
     )
     request.state.db.add(ucr)
 
@@ -386,13 +380,96 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
 
 
 @v1.get(
+    "/class/{class_id}/users/audit",
+    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    response_model=schemas.ClassUsers,
+)
+async def audit_class_users(class_id: str, request: Request, depth: int = 1):
+    objs = await request.state.authz.expand(
+        f"class:{class_id}", "member", max_depth=depth
+    )
+    ids = {int(o.entity.split(":")[-1]) for o in objs if not o.is_group}
+
+    # One single entity can have multiple paths
+    paths = dict[int, list[RelatedObject]]()
+    for o in objs:
+        if not o.is_group:
+            id_ = int(o.entity.split(":")[-1])
+            if id_ not in paths:
+                paths[id_] = []
+            paths[id_].append(o)
+
+    users = await models.User.get_all_by_id(request.state.db, list(ids))
+
+    return {
+        "users": [
+            schemas.ClassUser(
+                id=u.id,
+                name=u.name,
+                email=u.email,
+                state=u.state,
+                roles=schemas.ClassUserRoles(
+                    # TODO batch recheck for roles
+                    admin=any(f"class:{class_id}#admin" in p.path for p in paths[u.id]),
+                    teacher=any(
+                        f"class:{class_id}#teacher" in p.path for p in paths[u.id]
+                    ),
+                    student=any(
+                        f"class:{class_id}#student" in p.path for p in paths[u.id]
+                    ),
+                ),
+                explanation=[p.path for p in paths[u.id]],
+            )
+            for u in users
+        ],
+        "groups": [
+            schemas.UserGroup(
+                name=g.entity,
+                explanation=[g.path],
+            )
+            for g in objs
+            if g.is_group
+        ],
+    }
+
+
+@v1.get(
     "/class/{class_id}/users",
     dependencies=[Depends(Authz("can_view_users", "class:{class_id}"))],
     response_model=schemas.ClassUsers,
 )
 async def list_class_users(class_id: str, request: Request):
-    users = await models.Class.get_users(request.state.db, int(class_id))
-    return {"users": users}
+    # Get hard-coded relations from DB. Everyone with an explicit role in the class.
+    # NOTE: this is *not* necessarily everyone who has permission to view the class;
+    # it's usually a subset, due to inherited permissions from parent objects.
+    # To get the full list of everyone with access, we need to use the `/audit` endpoint.
+    users = await models.Class.get_members(request.state.db, int(class_id))
+
+    batch = list[Relation]()
+    for u in users:
+        for role in ["admin", "teacher", "student"]:
+            batch.append((f"user:{u.user_id}", role, f"class:{class_id}"))
+
+    results = await request.state.authz.check(batch)
+
+    class_users = list[schemas.ClassUser]()
+    for i, u in enumerate(users):
+        class_users.append(
+            schemas.ClassUser(
+                id=u.user_id,
+                name=u.user.name,
+                email=u.user.email,
+                state=u.user.state,
+                roles=schemas.ClassUserRoles(
+                    admin=results[i * 3],
+                    teacher=results[i * 3 + 1],
+                    student=results[i * 3 + 2],
+                ),
+                explanation=[[]],
+            )
+        )
+
+    return {"users": class_users, "groups": []}
 
 
 @v1.post(
@@ -410,17 +487,41 @@ async def add_users_to_class(
     class_ = await models.Class.get_by_id(request.state.db, cid)
     result: list[schemas.UserClassRole] = []
     new_: list[schemas.CreateInvite] = []
+
+    grants = list[Relation]()
+    revokes = list[Relation]()
+
+    is_admin = await request.state.authz.test(
+        f"user:{request.state.session.user.id}", "admin", f"class:{class_id}"
+    )
+
     for ucr in new_ucr.roles:
+        if not is_admin and ucr.roles.admin:
+            raise HTTPException(status_code=403, detail="permission to create admins!")
+
         user = await models.User.get_or_create_by_email(request.state.db, ucr.email)
-        if user.id == request.state.session.user.id:
-            if ucr.role != schemas.Role.ADMIN:
-                raise HTTPException(status_code=403, detail="Cannot demote yourself")
+        if is_admin and user.id == request.state.session.user.id:
+            if not ucr.roles.admin:
+                raise HTTPException(
+                    status_code=403, detail="Cannot demote yourself from admin"
+                )
 
         existing = await models.UserClassRole.get(request.state.db, user.id, cid)
+        for role in ["admin", "teacher", "student"]:
+            if getattr(ucr.roles, role):
+                grants.append((f"user:{user.id}", role, f"class:{cid}"))
+            else:
+                revokes.append((f"user:{user.id}", role, f"class:{cid}"))
+
         if existing:
-            existing.role = ucr.role
-            existing.title = ucr.title
-            result.append(existing)
+            existing.role = ucr.roles.string()
+            result.append(
+                schemas.UserClassRole(
+                    user_id=existing.user_id,
+                    class_id=existing.class_id,
+                    roles=ucr.roles,
+                )
+            )
             request.state.db.add(existing)
         else:
             # Make sure the user exists...
@@ -434,7 +535,13 @@ async def add_users_to_class(
                     class_name=class_.name,
                 )
             )
-            result.append(added)
+            result.append(
+                schemas.UserClassRole(
+                    user_id=added.user_id,
+                    class_id=added.class_id,
+                    roles=ucr.roles,
+                )
+            )
 
     # Send emails to new users in the background
     for invite in new_:
@@ -446,6 +553,8 @@ async def add_users_to_class(
             magic_link,
             new_ucr.silent,
         )
+
+    await request.state.authz.write_safe(grant=grants, revoke=revokes)
 
     return {"roles": result}
 
@@ -460,15 +569,97 @@ async def update_user_class_role(
 ):
     cid = int(class_id)
     uid = int(user_id)
-    if uid == request.state.session.user.id and update.role != schemas.Role.ADMIN:
+
+    is_admin = await request.state.authz.test(
+        f"user:{request.state.session.user.id}", "admin", f"class:{class_id}"
+    )
+
+    if not is_admin and update.role == "admin":
+        raise HTTPException(
+            status_code=403, detail="Missing permission to manage admins"
+        )
+
+    if (
+        uid == request.state.session.user.id
+        and is_admin
+        and update.role == "admin"
+        and not update.verdict
+    ):
         raise HTTPException(status_code=403, detail="Cannot demote yourself")
+
     existing = await models.UserClassRole.get(request.state.db, uid, cid)
     if not existing:
         raise HTTPException(status_code=404, detail="User not found in class")
-    existing.role = update.role
-    existing.title = update.title
-    request.state.db.add(existing)
-    return existing
+
+    grants = list[Relation]()
+    revokes = list[Relation]()
+
+    if update.verdict:
+        grants.append((f"user:{uid}", update.role, f"class:{cid}"))
+    else:
+        revokes.append((f"user:{uid}", update.role, f"class:{cid}"))
+
+    await request.state.authz.write_safe(grant=grants, revoke=revokes)
+
+    return schemas.UserClassRole(
+        user_id=existing.user_id,
+        class_id=existing.class_id,
+        # TODO(jnu): optimize/batch these requests
+        roles=schemas.ClassUserRoles(
+            admin=await request.state.authz.test(
+                f"user:{uid}", "admin", f"class:{cid}"
+            ),
+            teacher=await request.state.authz.test(
+                f"user:{uid}", "teacher", f"class:{cid}"
+            ),
+            student=await request.state.authz.test(
+                f"user:{uid}", "student", f"class:{cid}"
+            ),
+        ),
+    )
+
+
+@v1.delete(
+    "/class/{class_id}/user/{user_id}",
+    dependencies=[Depends(Authz("can_manage_users", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def remove_user_from_class(class_id: str, user_id: str, request: Request):
+    cid = int(class_id)
+    uid = int(user_id)
+
+    if uid == request.state.session.user.id:
+        raise HTTPException(
+            status_code=403, detail="Cannot remove yourself from a class"
+        )
+
+    is_admin = await request.state.authz.test(
+        f"user:{request.state.session.user.id}", "admin", f"class:{class_id}"
+    )
+
+    is_target_admin = await request.state.authz.test(
+        f"user:{uid}", "admin", f"class:{class_id}"
+    )
+    is_target_teacher = await request.state.authz.test(
+        f"user:{uid}", "teacher", f"class:{class_id}"
+    )
+
+    if not is_admin and (is_target_admin or is_target_teacher):
+        raise HTTPException(status_code=403, detail="Missing permission to remove user")
+
+    existing = await models.UserClassRole.get(request.state.db, uid, cid)
+    if not existing:
+        raise HTTPException(status_code=404, detail="User not found in class")
+
+    await models.UserClassRole.delete(request.state.db, uid, cid)
+
+    revokes = list[Relation]()
+    for role in ["admin", "teacher", "student"]:
+        revokes.append((f"user:{uid}", role, f"class:{cid}"))
+
+    await request.state.authz.write_safe(revoke=revokes)
+
+    return {"status": "ok"}
 
 
 @v1.put(
@@ -961,7 +1152,7 @@ async def update_assistant(
 
     # Check additional permissions
     if not asst.published and req.published:
-        if not request.state.authz.test(
+        if not await request.state.authz.test(
             f"user:{request.state.session.user.id}",
             "can_publish",
             f"assistant:{assistant_id}",
@@ -1098,6 +1289,32 @@ async def get_me(request: Request):
     return request.state.session
 
 
+@v1.post(
+    "/me/grants",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.Grants,
+)
+async def get_grants(query: schemas.GrantsQuery, request: Request):
+    checks = list[Relation]()
+    user_id = f"user:{request.state.session.user.id}"
+    for grant in query.grants:
+        target = f"{grant.target_type}:{grant.target_id}"
+        checks.append(
+            (user_id, grant.relation, target),
+        )
+
+    results = await request.state.authz.check(checks)
+    return {
+        "grants": [
+            schemas.GrantDetail(
+                request=query.grants[i],
+                verdict=results[i],
+            )
+            for i in range(len(query.grants))
+        ],
+    }
+
+
 @v1.get(
     "/support",
     response_model=schemas.Support,
@@ -1139,13 +1356,6 @@ async def lifespan(app: FastAPI):
         logger.warning("Creating a new database since none exists.")
         await config.db.driver.create()
         await config.db.driver.init(models.Base)
-
-        logger.info("Creating superusers ...")
-        async with config.db.driver.async_session() as session:
-            for superuser in config.init.super_users:
-                user = models.User(email=superuser, super_admin=True)
-                session.add(user)
-            await session.commit()
 
     logger.info("Configuration authorization ...")
     await config.authz.driver.init()

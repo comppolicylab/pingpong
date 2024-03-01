@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import Enum, StrEnum, auto
+from typing import Literal
 
 from openai.types.beta.assistant_create_params import Tool
 from openai.types.beta.threads import Run as OpenAIRun
@@ -146,16 +147,18 @@ class Threads(BaseModel):
         from_attributes = True
 
 
-class Role(Enum):
-    ADMIN = "admin"
-    WRITE = "write"
-    READ = "read"
+class ClassUserRoles(BaseModel):
+    admin: bool
+    teacher: bool
+    student: bool
+
+    def string(self) -> str:
+        return f"admin={self.admin},teacher={self.teacher},student={self.student}"
 
 
 class CreateUserClassRole(BaseModel):
     email: str = Field(..., min_length=3, max_length=100)
-    role: Role
-    title: str = Field(..., min_length=3, max_length=24)
+    roles: ClassUserRoles
 
 
 class CreateUserClassRoles(BaseModel):
@@ -166,8 +169,7 @@ class CreateUserClassRoles(BaseModel):
 class UserClassRole(BaseModel):
     user_id: int
     class_id: int
-    role: Role
-    title: str
+    roles: ClassUserRoles
 
     class Config:
         from_attributes = True
@@ -178,8 +180,8 @@ class UserClassRoles(BaseModel):
 
 
 class UpdateUserClassRole(BaseModel):
-    role: Role
-    title: str = Field(..., min_length=3, max_length=24)
+    role: Literal["admin"] | Literal["teacher"] | Literal["student"]
+    verdict: bool
 
 
 class CreateInvite(BaseModel):
@@ -199,9 +201,6 @@ class User(BaseModel):
     name: str | None
     email: str
     state: UserState
-    classes: list["UserClassRole"]
-    institutions: list["Institution"]
-    super_admin: bool
     created: datetime
     updated: datetime | None
 
@@ -214,12 +213,18 @@ class ClassUser(BaseModel):
     name: str | None
     email: str
     state: UserState
-    role: Role
-    title: str
+    roles: ClassUserRoles
+    explanation: list[list[str]] | None
+
+
+class UserGroup(BaseModel):
+    name: str
+    explanation: list[list[str]] | None
 
 
 class ClassUsers(BaseModel):
     users: list[ClassUser]
+    groups: list[UserGroup]
 
     class Config:
         from_attributes = True
@@ -383,3 +388,22 @@ class FileUploadSupport(BaseModel):
     allow_private: bool
     private_file_max_size: int
     class_file_max_size: int
+
+
+class GrantQuery(BaseModel):
+    target_type: str
+    target_id: int
+    relation: str
+
+
+class GrantsQuery(BaseModel):
+    grants: list[GrantQuery]
+
+
+class GrantDetail(BaseModel):
+    request: GrantQuery
+    verdict: bool
+
+
+class Grants(BaseModel):
+    grants: list[GrantDetail]

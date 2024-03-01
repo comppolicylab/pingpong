@@ -26,8 +26,9 @@ export type CreateUsersForm = {
  */
 export type UpdateUserForm = {
   user_id: string;
-  role: string;
-  title: string;
+  role: "admin" | "teacher" | "student";
+  title?: string;
+  verdict: boolean;
 };
 
 /**
@@ -136,7 +137,20 @@ export const actions: Actions = {
     }
 
     const classId = parseInt(event.params.classId, 10);
-    return api.updateClassUser(f, classId, userId, { role: d.role, title: d.title });
+    return api.updateClassUser(f, classId, userId, { role: d.role, verdict: d.verdict });
+  }, {checkboxes: ['verdict']}),
+
+  /**
+   * Remove a user from a class.
+   */
+  removeUser: handler<RequestEvent, { user_id: string }>((f, d, event) => {
+    const userId = parseInt(d.user_id, 10);
+    if (!userId) {
+      throw invalid('user_id', 'User ID is required');
+    }
+
+    const classId = parseInt(event.params.classId, 10);
+    return api.removeClassUser(f, classId, userId);
   }),
 
   /**

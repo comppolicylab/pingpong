@@ -54,7 +54,7 @@ class UserClassRole(Base):
     class_id: Mapped[int] = mapped_column(
         ForeignKey("classes.id"), nullable=False, primary_key=True
     )
-    role = Column(SQLEnum(schemas.Role), nullable=True)
+    role = Mapped[Optional[str]]
     title: Mapped[Optional[str]]
     user = relationship("User", back_populates="classes")
     class_ = relationship("Class", back_populates="users")
@@ -85,11 +85,11 @@ class UserClassRole(Base):
                 user_id=int(user_id),
                 class_id=int(class_id),
                 title=ucr.title,
-                role=ucr.role,
+                role=ucr.roles.string(),
             )
             .on_conflict_do_update(
                 index_elements=[UserClassRole.user_id, UserClassRole.class_id],
-                set_={"title": ucr.title, "role": ucr.role},
+                set_={"title": ucr.title, "role": ucr.roles.string()},
             )
             .returning(UserClassRole)
         )
@@ -116,7 +116,7 @@ class UserInstitutionRole(Base):
     institution_id: Mapped[int] = mapped_column(
         ForeignKey("institutions.id"), nullable=False, primary_key=True
     )
-    role = Column(SQLEnum(schemas.Role), nullable=True)
+    role = Mapped[Optional[str]]
     title: Mapped[Optional[str]]
     user = relationship("User", back_populates="institutions")
     institution = relationship("Institution", back_populates="users")
@@ -399,26 +399,14 @@ class Class(Base):
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     @classmethod
-    async def get_users(
-        cls, session: AsyncSession, class_id: int
-    ) -> list[schemas.ClassUser]:
+    async def get_members(cls, session: AsyncSession, id_: int) -> List[UserClassRole]:
         stmt = (
             select(UserClassRole)
             .options(joinedload(UserClassRole.user))
-            .where(UserClassRole.class_id == int(class_id))
+            .where(UserClassRole.class_id == int(id_))
         )
         result = await session.execute(stmt)
-        return [
-            schemas.ClassUser(
-                id=row.UserClassRole.user_id,
-                name=row.UserClassRole.user.name,
-                email=row.UserClassRole.user.email,
-                state=row.UserClassRole.user.state,
-                role=row.UserClassRole.role,
-                title=row.UserClassRole.title,
-            )
-            for row in result
-        ]
+        return [row.UserClassRole for row in result]
 
     @classmethod
     async def get_api_key(cls, session: AsyncSession, id_: int) -> str | None:

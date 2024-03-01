@@ -1,4 +1,4 @@
-from .base import AuthzClient, AuthzDriver, Relation
+from .base import AuthzClient, AuthzDriver, RelatedObject, Relation
 from .openfga import OpenFgaAuthzDriver
 
 __all__ = [
@@ -6,4 +6,5 @@ __all__ = [
     "AuthzDriver",
     "AuthzClient",
     "Relation",
+    "RelatedObject",
 ]
