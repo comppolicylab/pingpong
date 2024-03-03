@@ -36,11 +36,17 @@ from .config import config
 from .errors import sentry
 from .files import FILE_TYPES, handle_create_file, handle_delete_file
 from .invite import send_invite
+from .now import NowFn, utcnow
 from .permission import Authz, LoggedIn
 
 logger = logging.getLogger(__name__)
 
 v1 = FastAPI()
+
+
+def get_now_fn(req: Request) -> NowFn:
+    """Get the current time function for the request."""
+    return getattr(req.app.state, "now", utcnow)
 
 
 async def get_openai_client_for_class(request: Request) -> openai.AsyncClient:
@@ -70,7 +76,7 @@ async def parse_session_token(request: Request, call_next):
         )
     else:
         try:
-            token = decode_session_token(session_token)
+            token = decode_session_token(session_token, nowfn=get_now_fn(request))
             user_id = int(token.sub)
             user = await models.User.get_by_id(request.state.db, user_id)
             if not user:
@@ -186,18 +192,24 @@ async def auth(request: Request, response: Response):
     dest = request.query_params.get("redirect")
     stok = request.query_params.get("token")
     try:
-        auth_token = decode_auth_token(stok)
+        auth_token = decode_auth_token(stok, nowfn=get_now_fn(request))
     except jwt.exceptions.PyJWTError as e:
         raise HTTPException(status_code=401, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+    nowfn = get_now_fn(request)
+
     # Create a token for the user with more information.
     session_dur = 86_400 * 30
-    session_token = encode_session_token(int(auth_token.sub), expiry=session_dur)
+    session_token = encode_session_token(
+        int(auth_token.sub), expiry=session_dur, nowfn=nowfn
+    )
 
     response = RedirectResponse(config.url(dest), status_code=303)
-    response.set_cookie(key="session", value=session_token, max_age=session_dur)
+    response.set_cookie(
+        key="session", value=session_token, max_age=session_dur, nowfn=nowfn
+    )
     return response
 
 

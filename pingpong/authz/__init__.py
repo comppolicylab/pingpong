@@ -1,4 +1,5 @@
 from .base import AuthzClient, AuthzDriver, RelatedObject, Relation
+from .mock import MockFgaAuthzServer
 from .openfga import OpenFgaAuthzDriver
 
 __all__ = [
@@ -7,4 +8,5 @@ __all__ = [
     "AuthzClient",
     "Relation",
     "RelatedObject",
+    "MockFgaAuthzServer",
 ]

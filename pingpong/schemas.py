@@ -132,12 +132,12 @@ class CreateThread(BaseModel):
     parties: list[int] = []
     message: str = Field(..., min_length=1)
     assistant_id: int
-    file_ids: list[str] = Field([], min_items=0, max_items=10)
+    file_ids: list[str] = Field([], min_length=0, max_length=10)
 
 
 class NewThreadMessage(BaseModel):
     message: str = Field(..., min_length=1)
-    file_ids: list[str] = Field([], min_items=0, max_items=10)
+    file_ids: list[str] = Field([], min_length=0, max_length=10)
 
 
 class Threads(BaseModel):
