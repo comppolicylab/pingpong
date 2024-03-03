@@ -96,7 +96,6 @@ async def test_me_with_valid_user(api, user, now):
             "session": encode_session_token(123, nowfn=offset(now, seconds=-5)),
         },
     )
-    print("\n\n\n\n\nSTATE\n\n\n\n\n", api.app.state.__dict__, "\n\n\n\n")
     assert response.status_code == 200
     assert response.json() == {
         "error": None,
