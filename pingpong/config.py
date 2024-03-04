@@ -8,18 +8,12 @@ from typing import Literal, Union
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
-from .authz import MockFgaAuthzServer, OpenFgaAuthzDriver
+from .authz import OpenFgaAuthzDriver
 from .db import PostgresDriver, SqliteDriver
 from .email import AzureEmailSender, GmailEmailSender, MockEmailSender, SmtpEmailSender
 from .support import DiscordSupportDriver
 
 logger = logging.getLogger(__name__)
-
-
-class MockFgaAuthzServerSettings(BaseSettings):
-    """Settings for the mock authz server."""
-
-    enabled: bool = Field(False)
 
 
 class OpenFgaAuthzSettings(BaseSettings):
@@ -32,16 +26,6 @@ class OpenFgaAuthzSettings(BaseSettings):
     store: str = Field("pingpong")
     cfg: str = Field("authz.json")
     key: str | None = Field(None)
-    mock: MockFgaAuthzServerSettings = Field(MockFgaAuthzServerSettings())
-
-    @cached_property
-    def mock_server(self):
-        return MockFgaAuthzServer(
-            scheme=self.scheme,
-            host=self.host,
-            port=self.port,
-            key=self.key,
-        )
 
     @cached_property
     def driver(self):

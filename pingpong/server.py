@@ -1362,7 +1362,7 @@ async def lifespan(app: FastAPI):
         await config.db.driver.create()
         await config.db.driver.init(models.Base)
 
-    logger.info("Configuration authorization ...")
+    logger.info("Configuring authorization ...")
     await config.authz.driver.init()
 
     with sentry(), metrics.metrics():

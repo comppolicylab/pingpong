@@ -29,12 +29,23 @@ def now(request):
 
 
 @pytest.fixture
-async def api(config, db, now):
+async def authz(request, config):
+    from pingpong.authz.mock import MockFgaAuthzServer
+
+    params = getattr(request, "param", None)
+    async with MockFgaAuthzServer(config.authz.driver, params) as server:
+        yield server
+
+
+@pytest.fixture
+async def api(config, db, now, authz):
     from pingpong.server import app, v1
 
     api = TestClient(app)
     api.app.state.now = now
     v1.state.now = now
+
+    await config.authz.driver.init()
     yield api
 
 
@@ -47,3 +58,11 @@ async def user(request, config, db):
         session.add(u)
         await session.commit()
     yield u
+
+
+@pytest.fixture
+async def valid_user_token(user, now):
+    from pingpong.auth import encode_session_token
+    from pingpong.now import offset
+
+    return encode_session_token(user.id, nowfn=offset(now, seconds=-60))

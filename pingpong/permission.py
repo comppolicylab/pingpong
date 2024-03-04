@@ -121,6 +121,7 @@ class Authz(Expression):
                 target,
             )
         except Exception as e:
+            logger.exception("Error evaluating expression %s: %s", self, e)
             raise HTTPException(status_code=500, detail=str(e))
 
     def __str__(self):

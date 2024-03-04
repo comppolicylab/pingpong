@@ -33,6 +33,7 @@ alembic = "^1.13.1"
 psycopg2-binary = "^2.9.9"
 discord-py = "^2.3.2"
 openfga-sdk = "^0.4.0"
+uvloop = "^0.19.0"
 
 
 [tool.poetry.group.dev.dependencies]

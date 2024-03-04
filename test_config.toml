@@ -22,6 +22,3 @@ port = "11800"
 store = "pingpong"
 cfg = "./pingpong/authz/authz.fga.json"
 key = "devkey"
-
-[authz.mock]
-enabled = true

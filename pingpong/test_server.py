@@ -1,13 +1,9 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pytest
 
 from .auth import encode_session_token
-from .now import NowFn
-
-
-def offset(now: NowFn, seconds: int = 0) -> NowFn:
-    return lambda: now() + timedelta(seconds=seconds)
+from .now import offset
 
 
 async def test_me_without_token(api):
@@ -78,43 +74,90 @@ async def test_me_with_valid_token_but_missing_user(api, now):
     }
 
 
-@pytest.mark.parametrize(
-    "user",
-    [
-        {
-            "id": 123,
-            "email": "me@org.test",
-            "created": datetime(2024, 3, 3, 7, 3, 53),
-        }
-    ],
-    indirect=True,
-)
-async def test_me_with_valid_user(api, user, now):
+def with_user(id: int, email: str | None = None, created: datetime | None = None):
+    return pytest.mark.parametrize(
+        "user",
+        [
+            {
+                "id": id,
+                "email": email or f"user_{id}@domain.test",
+                "created": created or datetime(2024, 1, 1, 0, 0, 0),
+            }
+        ],
+        indirect=True,
+    )
+
+
+def with_authz(grants=None):
+    return pytest.mark.parametrize(
+        "authz",
+        [
+            {
+                "grants": grants or [],
+            }
+        ],
+        indirect=True,
+    )
+
+
+@with_user(123)
+async def test_me_with_valid_user(api, user, now, valid_user_token):
     response = api.get(
         "/api/v1/me",
         cookies={
-            "session": encode_session_token(123, nowfn=offset(now, seconds=-5)),
+            "session": valid_user_token,
         },
     )
     assert response.status_code == 200
     assert response.json() == {
         "error": None,
         "profile": {
-            "email": "me@org.test",
-            "gravatar_id": "ef02b9c38dce132e881a81b17f8a16971754189e8294768b2d519e2c62f0f5ec",
+            "email": "user_123@domain.test",
+            "gravatar_id": "45d4d5ec84ab81529df672c3abf0def25df67c0c64859aea0559bc867ea64b19",
             "image_url": (
                 "https://www.gravatar.com/avatar/"
-                "ef02b9c38dce132e881a81b17f8a16971754189e8294768b2d519e2c62f0f5ec"
+                "45d4d5ec84ab81529df672c3abf0def25df67c0c64859aea0559bc867ea64b19"
             ),
         },
         "status": "valid",
-        "token": {"exp": 1704182395, "iat": 1704095995, "sub": "123"},
+        "token": {"exp": 1704182340, "iat": 1704095940, "sub": "123"},
         "user": {
-            "created": "2024-03-03T07:03:53",
-            "email": "me@org.test",
+            "created": "2024-01-01T00:00:00",
+            "email": "user_123@domain.test",
             "id": 123,
             "name": None,
             "state": "verified",
             "updated": None,
         },
     }
+
+
+@with_user(123)
+@with_authz(
+    grants=[],
+)
+async def test_config_no_permissions(api, valid_user_token):
+    response = api.get(
+        "/api/v1/config",
+        cookies={
+            "session": valid_user_token,
+        },
+    )
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Missing required role"}
+
+
+@with_user(123)
+@with_authz(
+    grants=[
+        ("user:123", "admin", "root:0"),
+    ],
+)
+async def test_config_correct_permissions(api, valid_user_token):
+    response = api.get(
+        "/api/v1/config",
+        cookies={
+            "session": valid_user_token,
+        },
+    )
+    assert response.status_code == 200
