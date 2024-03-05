@@ -1,9 +1,6 @@
-from datetime import datetime
-
-import pytest
-
 from .auth import encode_session_token
 from .now import offset
+from .testutil import with_authz, with_authz_series, with_user
 
 
 async def test_me_without_token(api):
@@ -74,32 +71,6 @@ async def test_me_with_valid_token_but_missing_user(api, now):
     }
 
 
-def with_user(id: int, email: str | None = None, created: datetime | None = None):
-    return pytest.mark.parametrize(
-        "user",
-        [
-            {
-                "id": id,
-                "email": email or f"user_{id}@domain.test",
-                "created": created or datetime(2024, 1, 1, 0, 0, 0),
-            }
-        ],
-        indirect=True,
-    )
-
-
-def with_authz(grants=None):
-    return pytest.mark.parametrize(
-        "authz",
-        [
-            {
-                "grants": grants or [],
-            }
-        ],
-        indirect=True,
-    )
-
-
 @with_user(123)
 async def test_me_with_valid_user(api, user, now, valid_user_token):
     response = api.get(
@@ -133,8 +104,14 @@ async def test_me_with_valid_user(api, user, now, valid_user_token):
 
 
 @with_user(123)
-@with_authz(
-    grants=[],
+@with_authz_series(
+    [
+        {"grants": []},
+        {"grants": [("user:123", "admin", "institution:1")]},
+        {"grants": [("user:123", "can_create_institution", "root:0")]},
+        {"grants": [("user:123", "can_create_class", "institution:1")]},
+        {"grants": [("user:122", "admin", "root:0")]},
+    ]
 )
 async def test_config_no_permissions(api, valid_user_token):
     response = api.get(

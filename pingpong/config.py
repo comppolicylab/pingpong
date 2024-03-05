@@ -1,3 +1,4 @@
+import base64
 import logging
 import os
 import tomllib
@@ -230,13 +231,32 @@ class Config(BaseSettings):
         return f"{self.public_url.rstrip('/')}/{path.lstrip('/')}"
 
 
-def _load_config():
-    """Load the config from the config file."""
-    # Find default location for config file.
+def _load_config() -> Config:
+    """Load the config either from a file or an environment variable.
+
+    Can read the config as a base64-encoded string from the CONFIG env variable,
+    or from the file specified in the CONFIG_PATH variable.
+
+    The CONFIG variable takes precedence over the CONFIG_PATH variable.
+
+    Returns:
+        Config: The loaded config.
+    """
+    _direct_cfg = os.environ.get("CONFIG", None)
     _cfg_path = os.environ.get("CONFIG_PATH", "config.toml")
 
-    # Read the raw config file.
-    _raw_cfg = Path(_cfg_path).read_text()
+    _raw_cfg: None | str = None
+
+    if _direct_cfg:
+        # If the config is provided directly, use it.
+        # It should be encoded as Base64.
+        _raw_cfg = base64.b64decode(_direct_cfg).decode("utf-8")
+    else:
+        # Otherwise read the config from the specified file.
+        _raw_cfg = Path(_cfg_path).read_text()
+
+    if not _raw_cfg:
+        raise ValueError("No config provided")
 
     try:
         return Config.model_validate(tomllib.loads(_raw_cfg))
