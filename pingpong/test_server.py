@@ -91,7 +91,7 @@ async def test_me_with_valid_user(api, user, now, valid_user_token):
             ),
         },
         "status": "valid",
-        "token": {"exp": 1704182340, "iat": 1704095940, "sub": "123"},
+        "token": {"exp": 1704153540, "iat": 1704067140, "sub": "123"},
         "user": {
             "created": "2024-01-01T00:00:00",
             "email": "user_123@domain.test",

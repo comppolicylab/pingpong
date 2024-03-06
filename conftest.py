@@ -2,6 +2,7 @@ import os
 from datetime import datetime
 
 import pytest
+import pytz
 from fastapi.testclient import TestClient
 
 os.environ["CONFIG_PATH"] = "test_config.toml"
@@ -24,7 +25,12 @@ async def db(config):
 
 @pytest.fixture
 def now(request):
-    dt = getattr(request, "param", datetime(2024, 1, 1, 0, 0, 0))
+    default_now = datetime(2024, 1, 1, 0, 0, 0)
+    dt = getattr(request, "param", default_now)
+    # Make sure to use a timezone-aware datetime. By default, the timezone is UTC.
+    # If we don't do this, the tests will fail when run in a different timezone.
+    if not dt.tzinfo:
+        dt = pytz.utc.localize(dt)
     return lambda: dt
 
 
