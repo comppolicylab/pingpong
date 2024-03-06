@@ -16,12 +16,12 @@ if (SENTRY_DSN) {
  * Override default route handler to provide a health check indicator.
  */
 export const handleHealthCheck: Handle = async ({ event, resolve }) => {
-	if (event.url.pathname === '/health') {
-		return new Response('ok');
-	}
+  if (event.url.pathname === '/health') {
+    return new Response('ok');
+  }
 
-	return await resolve(event);
-}
+  return await resolve(event);
+};
 
 /**
  * Override default fetcher to redirect API requests to the API server.
