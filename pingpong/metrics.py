@@ -1,8 +1,5 @@
 from contextlib import contextmanager
 
-from azure.monitor.opentelemetry import configure_azure_monitor
-
-from .config import config
 from .otel import Counter, Gauge, Histogram
 
 api_requests = Counter(
@@ -39,8 +36,5 @@ in_flight = Gauge(
 
 @contextmanager
 def metrics():
-    if config.metrics.connection_string:
-        configure_azure_monitor(
-            connection_string=config.metrics.connection_string,
-        )
+    # TODO - set up for AWS
     yield
