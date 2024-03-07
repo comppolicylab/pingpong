@@ -835,8 +835,14 @@ async def list_threads(class_id: str, request: Request):
         "can_view",
         "thread",
     )
+    class_ids = await request.state.authz.list(
+        f"class:{class_id}",
+        "parent",
+        "thread",
+    )
 
-    threads = await models.Thread.get_all_by_id(request.state.db, ids)
+    thread_ids = list(set(ids) & set(class_ids))
+    threads = await models.Thread.get_all_by_id(request.state.db, thread_ids)
 
     return {"threads": threads}
 
@@ -1042,7 +1048,14 @@ async def list_files(class_id: str, request: Request):
     ids = await request.state.authz.list(
         f"user:{request.state.session.user.id}", "can_view", "class_file"
     )
-    files = await models.File.get_all_by_id(request.state.db, ids)
+    class_ids = await request.state.authz.list(
+        f"class:{class_id}",
+        "parent",
+        "class_file",
+    )
+
+    file_ids = list(set(ids) & set(class_ids))
+    files = await models.File.get_all_by_id(request.state.db, file_ids)
     return {"files": files}
 
 
