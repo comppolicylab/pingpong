@@ -138,3 +138,39 @@ async def test_config_correct_permissions(api, valid_user_token):
         },
     )
     assert response.status_code == 200
+
+
+async def test_auth_with_invalid_token(api):
+    invalid_token = (
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+        "eyJzdWIiOiIxMjMiLCJleHAiOjE3MDk0NDg1MzQsImlhdCI6MTcwOTQ0ODUzM30."
+        "pRnnClaC1a6yIBFKMdA32pqoaJOcpHyY4lq_NU28gQ"
+    )
+    response = api.get(f"/api/v1/auth?token={invalid_token}")
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Signature verification failed"}
+
+
+async def test_auth_with_expired_token(api, now):
+    expired_token = encode_session_token(123, nowfn=offset(now, seconds=-100_000))
+    response = api.get(f"/api/v1/auth?token={expired_token}")
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Token expired"}
+
+
+async def test_auth_valid_token(api, now):
+    valid_token = encode_session_token(123, nowfn=offset(now, seconds=-5))
+    response = api.get(f"/api/v1/auth?token={valid_token}", allow_redirects=False)
+    assert response.status_code == 303
+    # Check where redirect goes
+    assert response.headers["location"] == "http://localhost:5173/"
+
+
+async def test_auth_valid_token_with_redirect(api, now):
+    valid_token = encode_session_token(123, nowfn=offset(now, seconds=-5))
+    response = api.get(
+        f"/api/v1/auth?token={valid_token}&redirect=/foo/bar", allow_redirects=False
+    )
+    assert response.status_code == 303
+    # Check where redirect goes
+    assert response.headers["location"] == "http://localhost:5173/foo/bar"

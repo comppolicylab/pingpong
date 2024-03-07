@@ -189,16 +189,15 @@ async def login(body: schemas.MagicLoginRequest, request: Request):
 @v1.get("/auth")
 async def auth(request: Request, response: Response):
     # Get the `token` query parameter from the request and store it in variable.
-    dest = request.query_params.get("redirect")
+    dest = request.query_params.get("redirect", "/")
     stok = request.query_params.get("token")
+    nowfn = get_now_fn(request)
     try:
-        auth_token = decode_auth_token(stok, nowfn=get_now_fn(request))
+        auth_token = decode_auth_token(stok, nowfn=nowfn)
     except jwt.exceptions.PyJWTError as e:
         raise HTTPException(status_code=401, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-    nowfn = get_now_fn(request)
 
     # Create a token for the user with more information.
     session_dur = 86_400 * 30
@@ -208,7 +207,9 @@ async def auth(request: Request, response: Response):
 
     response = RedirectResponse(config.url(dest), status_code=303)
     response.set_cookie(
-        key="session", value=session_token, max_age=session_dur, nowfn=nowfn
+        key="session",
+        value=session_token,
+        max_age=session_dur,
     )
     return response
 
