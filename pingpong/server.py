@@ -1057,11 +1057,16 @@ async def list_assistants(class_id: str, request: Request):
         "can_view",
         "assistant",
     )
-
-    assts = await models.Assistant.get_all_by_id(
-        request.state.db,
-        ids,
+    class_ids = await request.state.authz.list(
+        f"class:{class_id}",
+        "parent",
+        "assistant",
     )
+
+    # Only return assistants that are in the class and are visible to the current user.
+    asst_ids = list(set(ids) & set(class_ids))
+    assts = await models.Assistant.get_all_by_id(request.state.db, asst_ids)
+
     creator_ids = {a.creator_id for a in assts}
     creators = await models.User.get_all_by_id(request.state.db, list(creator_ids))
 
