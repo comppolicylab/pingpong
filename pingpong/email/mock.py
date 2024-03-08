@@ -11,7 +11,7 @@ MockEmail = NamedTuple("MockEmail", [("to", str), ("subject", str), ("body", str
 
 class MockEmailSender(EmailSender):
     def __init__(self):
-        self.sent: list[MockEmail] = []
+        self.sent = list[MockEmail]()
 
     async def send(self, to: str, subject: str, body: str):
         self.sent.append(MockEmail(to, subject, body))

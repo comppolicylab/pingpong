@@ -3,17 +3,31 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .authz import AuthzClient, Relation
 from .models import File
 from .schemas import FileTypeInfo, GenericStatus
 
 
+def _file_grants(file: File) -> list[Relation]:
+    target_type = "user_file" if file.private else "class_file"
+    target = f"{target_type}:{file.id}"
+    return [
+        (f"class:{file.class_id}", "parent", target),
+        (f"user:{file.uploader_id}", "owner", target),
+    ]
+
+
 async def handle_delete_file(
-    session: AsyncSession, oai_client: openai.AsyncClient, file_id: int
+    session: AsyncSession,
+    authz: AuthzClient,
+    oai_client: openai.AsyncClient,
+    file_id: int,
 ) -> GenericStatus:
     """Handle file deletion.
 
     Args:
         session (AsyncSession): Database session
+        authz (AuthzClient): Authorization client
         oai_client (openai.AsyncClient): OpenAI API client
         file_id (int): File ID to delete
 
@@ -26,6 +40,7 @@ async def handle_delete_file(
 
     try:
         await File.delete(session, int_file_id)
+        await authz.write(revoke=_file_grants(file))
     except IntegrityError:
         raise HTTPException(
             status_code=403,
@@ -37,6 +52,7 @@ async def handle_delete_file(
 
 async def handle_create_file(
     session: AsyncSession,
+    authz: AuthzClient,
     oai_client: openai.AsyncClient,
     *,
     upload: UploadFile,
@@ -48,6 +64,7 @@ async def handle_create_file(
 
     Args:
         session (AsyncSession): Database session
+        authz (AuthzClient): Authorization client
         oai_client (openai.AsyncClient): OpenAI API client
         upload (UploadFile): File to upload
         class_id (int): Class ID
@@ -79,7 +96,9 @@ async def handle_create_file(
     }
 
     try:
-        return await File.create(session, data)
+        f = await File.create(session, data)
+        await authz.write(grant=_file_grants(f))
+        return f
     except Exception as e:
         await oai_client.files.delete(new_f.id)
         raise e

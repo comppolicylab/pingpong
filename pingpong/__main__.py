@@ -8,6 +8,7 @@ import alembic.command
 import alembic.config
 
 from .auth import encode_auth_token
+from .authz.migrate import sync_db_to_openfga
 from .config import config
 from .models import Base, User
 
@@ -22,12 +23,42 @@ def auth() -> None:
     pass
 
 
+@auth.command("make_root")
+@click.argument("email")
+def make_root(email: str) -> None:
+    async def _make_root() -> None:
+        await config.authz.driver.init()
+        async with config.db.driver.async_session() as session:
+            user = await User.get_by_email(session, email)
+            async with config.authz.driver.get_client() as c:
+                await c.create_root_user(user.id)
+
+            print(f"User {user.id} promoted to root")
+
+    asyncio.run(_make_root())
+
+
+@auth.command("migrate")
+def migrate_authz() -> None:
+    async def _migrate() -> None:
+        print("Syncing permissions from database to OpenFga ...")
+        await config.authz.driver.init()
+        async with config.db.driver.async_session() as session:
+            async with config.authz.driver.get_client() as c:
+                await sync_db_to_openfga(session, c)
+
+        print("Migration finished!")
+
+    asyncio.run(_migrate())
+
+
 @auth.command("login")
 @click.argument("email")
 @click.argument("redirect", default="/")
 @click.option("--super-user/--no-super-user", default=False)
 def login(email: str, redirect: str, super_user: bool) -> None:
     async def _get_or_create(email) -> int:
+        await config.authz.driver.init()
         async with config.db.driver.async_session() as session:
             user = await User.get_by_email(session, email)
             if not user:
@@ -35,6 +66,8 @@ def login(email: str, redirect: str, super_user: bool) -> None:
                 user.name = input("Name: ").strip()
                 user.super_admin = super_user
                 session.add(user)
+                async with config.authz.driver.get_client() as c:
+                    await c.create_root_user(user.id)
                 await session.commit()
                 await session.refresh(user)
             return user.id

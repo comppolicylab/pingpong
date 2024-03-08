@@ -23,6 +23,7 @@ services:
   db:
     platform: linux/amd64
     image: postgres:15.5
+    container_name: pingpong-db
     networks: [back]
     ports: ["5432:5432"]
     environment:

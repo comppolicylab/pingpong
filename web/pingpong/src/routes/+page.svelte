@@ -34,7 +34,7 @@
         </div>
       </Card>
     {/each}
-    {#if data?.me?.user?.super_admin}
+    {#if institutions.length}
       <Card horizontal img="" class="w-80 h-40" href="/?new-class">
         <Heading tag="h3" color="text-gray-900">Create new</Heading>
         <P>Click here to create a new class</P>

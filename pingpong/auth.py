@@ -25,17 +25,18 @@ def encode_session_token(
     return encode_auth_token(user_id, expiry, nowfn=nowfn)
 
 
-def decode_session_token(token: str) -> SessionToken:
+def decode_session_token(token: str, nowfn: NowFn = utcnow) -> SessionToken:
     """Decodes the Session Token.
 
     Args:
         token (str): Encoded session token JWT
+        nowfn (NowFn, optional): Function to get the current time. Defaults to utcnow.
 
     Returns:
         SessionToken: Session Token
     """
-    auth_token = decode_auth_token(token)
-    return SessionToken(**auth_token.dict())
+    auth_token = decode_auth_token(token, nowfn=nowfn)
+    return SessionToken(**auth_token.model_dump())
 
 
 def encode_auth_token(user_id: int, expiry: int = 600, nowfn: NowFn = utcnow) -> str:
@@ -68,18 +69,19 @@ def encode_auth_token(user_id: int, expiry: int = 600, nowfn: NowFn = utcnow) ->
     return cast(
         str,
         jwt.encode(
-            tok.dict(),
+            tok.model_dump(),
             secret.key,
             algorithm=secret.algorithm,
         ),
     )
 
 
-def decode_auth_token(token: str) -> AuthToken:
+def decode_auth_token(token: str, nowfn: NowFn = utcnow) -> AuthToken:
     """Decodes the Auth Token.
 
     Args:
         token (str): Auth Token
+        nowfn (NowFn, optional): Function to get the current time. Defaults to utcnow.
 
     Returns:
         AuthToken: Auth Token
@@ -91,9 +93,30 @@ def decode_auth_token(token: str) -> AuthToken:
 
     for secret in config.auth.secret_keys:
         try:
-            return AuthToken(
-                **jwt.decode(token, secret.key, algorithms=[secret.algorithm])
+            tok = AuthToken(
+                **jwt.decode(
+                    token,
+                    secret.key,
+                    algorithms=[secret.algorithm],
+                    options={
+                        "verify_exp": False,
+                        "verify_nbf": False,
+                    },
+                )
             )
+
+            # Custom timestamp verification according to the nowfn
+            now = nowfn().timestamp()
+            nbf = getattr(tok, "nbf", None)
+            if nbf is not None and now < nbf:
+                raise PyJWTError("Token not valid yet")
+
+            exp = getattr(tok, "exp", None)
+            if exp is not None and now > exp:
+                raise PyJWTError("Token expired")
+
+            return tok
+
         except PyJWTError as e:
             exc = e
             continue
@@ -105,7 +128,9 @@ def decode_auth_token(token: str) -> AuthToken:
     raise ValueError("invalid token")
 
 
-def generate_auth_link(user_id: int, redirect: str = "/", expiry: int = 600) -> str:
+def generate_auth_link(
+    user_id: int, redirect: str = "/", expiry: int = 600, nowfn: NowFn = utcnow
+) -> str:
     """Generates the link to log in.
 
     Args:
@@ -115,5 +140,5 @@ def generate_auth_link(user_id: int, redirect: str = "/", expiry: int = 600) -> 
     Returns:
         str: Auth Link
     """
-    tok = encode_auth_token(user_id, expiry=expiry)
+    tok = encode_auth_token(user_id, expiry=expiry, nowfn=nowfn)
     return config.url(f"/api/v1/auth?token={tok}&redirect={redirect}")

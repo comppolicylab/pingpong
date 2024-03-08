@@ -52,6 +52,17 @@ database = "pingpong"
 key = "not actually a secret!"
 
 
+[authz]
+# Authorization service configuration (roles and permissions).
+
+type = "openfga"
+scheme = "http"
+host = "localhost"
+store = "pingpong"
+cfg = "./pingpong/authz/authz.fga.json"
+key = "devkey"
+
+
 [email]
 # Email configuration. This is used to send emails from the server, for login
 # via magic link and for app invite notifications.

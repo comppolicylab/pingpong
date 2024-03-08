@@ -1,0 +1,7 @@
+datastore:
+  engine: postgres
+  uri: postgres://pingpong:pingpong@db:5432/pingpong?search_path=authz
+authn:
+  method: preshared
+  preshared:
+    keys: ['devkey']

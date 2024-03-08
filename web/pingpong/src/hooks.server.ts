@@ -1,4 +1,4 @@
-import type { HandleFetch } from '@sveltejs/kit';
+import type { HandleFetch, Handle } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import * as Sentry from '@sentry/sveltekit';
 import { API_HOST, API_PROTO } from '$env/static/private';
@@ -11,6 +11,17 @@ if (SENTRY_DSN) {
     tracesSampleRate: 1
   });
 }
+
+/**
+ * Override default route handler to provide a health check indicator.
+ */
+export const handleHealthCheck: Handle = async ({ event, resolve }) => {
+  if (event.url.pathname === '/health') {
+    return new Response('ok');
+  }
+
+  return await resolve(event);
+};
 
 /**
  * Override default fetcher to redirect API requests to the API server.
@@ -34,4 +45,4 @@ export const handleFetch: HandleFetch = async ({ request, fetch, event }) => {
 
 export const handleError = Sentry.handleErrorWithSentry();
 
-export const handle = sequence(Sentry.sentryHandle());
+export const handle = sequence(handleHealthCheck, Sentry.sentryHandle());

@@ -9,7 +9,6 @@ import type { Actions, RequestEvent } from './$types';
 export type CreateUserForm = {
   email: string;
   role: string;
-  title: string;
 };
 
 /**
@@ -18,7 +17,6 @@ export type CreateUserForm = {
 export type CreateUsersForm = {
   emails: string;
   role: string;
-  title: string;
 };
 
 /**
@@ -26,8 +24,8 @@ export type CreateUsersForm = {
  */
 export type UpdateUserForm = {
   user_id: string;
-  role: string;
-  title: string;
+  role: 'admin' | 'teacher' | 'student';
+  verdict: boolean;
 };
 
 /**
@@ -84,7 +82,14 @@ export const actions: Actions = {
    */
   createUser: handler<RequestEvent, CreateUserForm>((f, d, event) => {
     const classId = parseInt(event.params.classId, 10);
-    return api.createClassUser(f, classId, { email: d.email, role: d.role, title: d.title });
+    return api.createClassUser(f, classId, {
+      email: d.email,
+      roles: {
+        admin: d.role === 'admin',
+        teacher: d.role === 'teacher',
+        student: d.role === 'student'
+      }
+    });
   }),
 
   /**
@@ -107,16 +112,14 @@ export const actions: Actions = {
       throw invalid('role', 'Role is required');
     }
 
-    const title = d.title as string | undefined;
-    if (!title) {
-      throw invalid('title', 'Title is required');
-    }
-
     const data: api.CreateClassUsersRequest = {
       roles: emailList.map((e) => ({
         email: e,
-        role,
-        title
+        roles: {
+          admin: role === 'admin',
+          teacher: role === 'teacher',
+          student: role === 'student'
+        }
       }))
     };
 
@@ -127,16 +130,32 @@ export const actions: Actions = {
   /**
    * Update a user in a class.
    */
-  updateUser: handler<RequestEvent, UpdateUserForm>((f, d, event) => {
-    // User ID is in the URL, not the body.
-    const userId = parseInt(d.user_id);
+  updateUser: handler<RequestEvent, UpdateUserForm>(
+    (f, d, event) => {
+      // User ID is in the URL, not the body.
+      const userId = parseInt(d.user_id);
 
+      if (!userId) {
+        throw invalid('user_id', 'User ID is required');
+      }
+
+      const classId = parseInt(event.params.classId, 10);
+      return api.updateClassUser(f, classId, userId, { role: d.role, verdict: d.verdict });
+    },
+    { checkboxes: ['verdict'] }
+  ),
+
+  /**
+   * Remove a user from a class.
+   */
+  removeUser: handler<RequestEvent, { user_id: string }>((f, d, event) => {
+    const userId = parseInt(d.user_id, 10);
     if (!userId) {
       throw invalid('user_id', 'User ID is required');
     }
 
     const classId = parseInt(event.params.classId, 10);
-    return api.updateClassUser(f, classId, userId, { role: d.role, title: d.title });
+    return api.removeClassUser(f, classId, userId);
   }),
 
   /**

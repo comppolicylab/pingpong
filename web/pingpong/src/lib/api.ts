@@ -211,7 +211,6 @@ export type UserClassRole = {
   user_id: number;
   class_id: number;
   role: string;
-  title: string;
 };
 
 /**
@@ -232,7 +231,6 @@ export type AppUser = {
   state: UserState;
   classes: UserClassRole[];
   institutions: Institution[];
-  super_admin: boolean;
   created: string;
   updated: string | null;
 };
@@ -278,6 +276,68 @@ export const me = async (f: Fetcher) => {
 };
 
 /**
+ * Permissions check request.
+ */
+export type GrantQuery = {
+  target_type: string;
+  target_id: number;
+  relation: string;
+};
+
+/**
+ * List of permissions check requests.
+ */
+export type GrantsQuery = {
+  grants: GrantQuery[];
+};
+
+/**
+ * Convenience type for giving grants names.
+ */
+export type NamedGrantsQuery = {
+  [name: string]: GrantQuery;
+};
+
+/**
+ * Information about a grant.
+ */
+export type GrantDetail = {
+  request: GrantQuery;
+  verdict: boolean;
+};
+
+/**
+ * Information about a series of grants.
+ */
+export type Grants = {
+  grants: GrantDetail[];
+};
+
+/**
+ * Convenience type for seeing named grant verdicts.
+ */
+export type NamedGrants = {
+  [name: string]: boolean;
+};
+
+/**
+ * Get grants for the current user.
+ */
+export const grants = async <T extends NamedGrantsQuery>(
+  f: Fetcher,
+  query: T
+): Promise<{ [name in keyof T]: boolean }> => {
+  const grantNames = Object.keys(query);
+  const grants = grantNames.map((name) => query[name]);
+  const results = await POST<GrantsQuery, Grants>(f, 'me/grants', { grants });
+  const verdicts: NamedGrants = {};
+  for (let i = 0; i < grantNames.length; i++) {
+    verdicts[grantNames[i]] = results.grants[i].verdict;
+  }
+  return verdicts as { [name in keyof T]: boolean };
+};
+
+/**
  * List of institutions.
  */
 export type Institutions = {
@@ -299,10 +359,21 @@ export const createInstitution = async (f: Fetcher, data: CreateInstitutionReque
 };
 
 /**
+ * Parameters for querying institutions.
+ */
+export type GetInstitutionsRequest = {
+  role?: string;
+};
+
+/**
  * Get all institutions.
  */
-export const getInstitutions = async (f: Fetcher) => {
-  return await GET<never, Institutions>(f, 'institutions');
+export const getInstitutions = async (f: Fetcher, role?: string) => {
+  const q: GetInstitutionsRequest = {};
+  if (role) {
+    q.role = role;
+  }
+  return await GET<GetInstitutionsRequest, Institutions>(f, 'institutions', q);
 };
 
 /**
@@ -711,14 +782,22 @@ export const deleteUserFile = async (
 };
 
 /**
+ * Information about a user's role in a class.
+ */
+export type ClassUserRoles = {
+  admin: boolean;
+  teacher: boolean;
+  student: boolean;
+};
+
+/**
  * Information about a user inside of a class.
  */
 export type ClassUser = {
   id: number;
   name: string | null;
   email: string;
-  role: string;
-  title: string;
+  roles: ClassUserRoles;
   state: UserState;
 };
 
@@ -742,8 +821,7 @@ export const getClassUsers = async (f: Fetcher, classId: number) => {
  */
 export type CreateClassUserRequest = {
   email: string;
-  role: string;
-  title: string;
+  roles: ClassUserRoles;
 };
 
 /**
@@ -781,7 +859,7 @@ export const createClassUsers = async (
  */
 export type UpdateClassUserRequest = {
   role: string;
-  title: string;
+  verdict: boolean;
 };
 
 /**
@@ -795,6 +873,14 @@ export const updateClassUser = async (
 ) => {
   const url = `class/${classId}/user/${userId}`;
   return await PUT<UpdateClassUserRequest, UserClassRole>(f, url, data);
+};
+
+/**
+ * Remove a user from a class.
+ */
+export const removeClassUser = async (f: Fetcher, classId: number, userId: number) => {
+  const url = `class/${classId}/user/${userId}`;
+  return await DELETE<never, GenericStatus>(f, url);
 };
 
 /**
@@ -1084,18 +1170,23 @@ export const loginWithMagicLink = async (f: Fetcher, email: string) => {
 };
 
 /**
- * List of available roles. These map to the API.
+ * Roles for users in a class.
  */
-export const ROLES = new Map([
-  ['admin', 'Admin'],
-  ['write', 'Write'],
-  ['read', 'Read']
-]);
+export const ROLES = ['admin', 'teacher', 'student'] as const;
 
 /**
- * Titles for users. These are arbitary.
+ * List of available roles. These map to the API.
  */
-export const TITLES = ['Owner', 'Admin', 'Professor', 'Course Assistant', 'Student'];
+export type Role = (typeof ROLES)[number];
+
+/**
+ * List of available roles. These map to the API.
+ */
+export const ROLE_LABELS: Record<Role, string> = {
+  admin: 'Administrator',
+  teacher: 'Instructor',
+  student: 'Student'
+};
 
 /**
  * Information about file types and support.

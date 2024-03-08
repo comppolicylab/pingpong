@@ -1,3 +1,4 @@
+import base64
 import logging
 import os
 import tomllib
@@ -8,6 +9,7 @@ from typing import Literal, Union
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+from .authz import OpenFgaAuthzDriver
 from .db import PostgresDriver, SqliteDriver
 from .email import AzureEmailSender, GmailEmailSender, MockEmailSender, SmtpEmailSender
 from .support import DiscordSupportDriver
@@ -15,10 +17,35 @@ from .support import DiscordSupportDriver
 logger = logging.getLogger(__name__)
 
 
+class OpenFgaAuthzSettings(BaseSettings):
+    """Settings for OpenFGA authorization."""
+
+    type: Literal["openfga"]
+    scheme: str = Field("http")
+    host: str = Field("localhost")
+    port: int = Field(8080)
+    store: str = Field("pingpong")
+    cfg: str = Field("authz.json")
+    key: str | None = Field(None)
+
+    @cached_property
+    def driver(self):
+        return OpenFgaAuthzDriver(
+            scheme=self.scheme,
+            host=f"{self.host}:{self.port}",
+            store=self.store,
+            key=self.key,
+            model_config=self.cfg,
+        )
+
+
+AuthzSettings = Union[OpenFgaAuthzSettings]
+
+
 class MockEmailSettings(BaseSettings):
     type: Literal["mock"]
 
-    @property
+    @cached_property
     def sender(self) -> MockEmailSender:
         return MockEmailSender()
 
@@ -122,7 +149,7 @@ class SqliteSettings(BaseSettings):
     """Settings for connecting to SQLite."""
 
     engine: Literal["sqlite"]
-    path: str = Field("db.sqlite3")
+    path: str = Field(":memory:")
 
     @cached_property
     def driver(self) -> SqliteDriver:
@@ -189,6 +216,7 @@ class Config(BaseSettings):
     development: bool = Field(False, env="DEVELOPMENT")
     db: DbSettings
     auth: AuthSettings
+    authz: AuthzSettings
     email: EmailSettings
     sentry: SentrySettings = Field(SentrySettings())
     metrics: MetricsSettings = Field(MetricsSettings())
@@ -203,16 +231,35 @@ class Config(BaseSettings):
         return f"{self.public_url.rstrip('/')}/{path.lstrip('/')}"
 
 
-def _load_config():
-    """Load the config from the config file."""
-    # Find default location for config file.
+def _load_config() -> Config:
+    """Load the config either from a file or an environment variable.
+
+    Can read the config as a base64-encoded string from the CONFIG env variable,
+    or from the file specified in the CONFIG_PATH variable.
+
+    The CONFIG variable takes precedence over the CONFIG_PATH variable.
+
+    Returns:
+        Config: The loaded config.
+    """
+    _direct_cfg = os.environ.get("CONFIG", None)
     _cfg_path = os.environ.get("CONFIG_PATH", "config.toml")
 
-    # Read the raw config file.
-    _raw_cfg = Path(_cfg_path).read_text()
+    _raw_cfg: None | str = None
+
+    if _direct_cfg:
+        # If the config is provided directly, use it.
+        # It should be encoded as Base64.
+        _raw_cfg = base64.b64decode(_direct_cfg).decode("utf-8")
+    else:
+        # Otherwise read the config from the specified file.
+        _raw_cfg = Path(_cfg_path).read_text()
+
+    if not _raw_cfg:
+        raise ValueError("No config provided")
 
     try:
-        return Config.parse_obj(tomllib.loads(_raw_cfg))
+        return Config.model_validate(tomllib.loads(_raw_cfg))
     except Exception as e:
         logger.error(f"Error loading config: {e}")
         raise
@@ -220,3 +267,15 @@ def _load_config():
 
 # Globally available config object.
 config = _load_config()
+
+
+# Configure logging, shutting up some noisy libraries
+logging.basicConfig(level=config.log_level)
+# Shut up some noisy libraries
+logging.getLogger("azure.monitor.opentelemetry").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
+    logging.WARNING
+)
+if config.log_level != "DEBUG":
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)

@@ -41,9 +41,29 @@ services:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
       - logs:/logs
 
+
+  authz:
+    platform: linux/amd64
+    image: openfga/openfga:v1.4.3
+    container_name: pingpong-authz
+    networks: [back]
+    command: [run]
+    expose: [8080, 8081, 3000]
+    ports: ["8080:8080", "8081:8081", "3000:3000"]
+    secrets:
+    - source: openfgacfg
+      mode: 0400
+      target: /etc/openfga/config.yaml
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/grpc_health_probe", "-addr=authz:8081"]
+      interval: 5s
+      timeout: 30s
+      retries: 3
+
+
   web:
     platform: linux/amd64
-    image: aitutor.azurecr.io/web:latest
+    image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-web:latest
     build:
       context: ./web/pingpong
       dockerfile: Dockerfile
@@ -63,7 +83,7 @@ services:
       - "traefik.http.routers.pingpong_web.middlewares=cors"
       - "traefik.http.services.web-pingpong.loadbalancer.server.port=3000"
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
       interval: 5s
       timeout: 5s
       retries: 3
@@ -71,7 +91,7 @@ services:
 
   srv:
     platform: linux/amd64
-    image: aitutor.azurecr.io/srv:latest
+    image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-srv:latest
     build:
       context: ./
       dockerfile: Dockerfile
@@ -120,3 +140,5 @@ secrets:
     file: ./cert/dev.key
   traefikcrtcfg:
     file: ./traefik-crt.yml
+  openfgacfg:
+    file: ./openfga-config.dev.yml

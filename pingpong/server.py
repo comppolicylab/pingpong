@@ -31,15 +31,22 @@ from .auth import (
     encode_session_token,
     generate_auth_link,
 )
+from .authz import RelatedObject, Relation
 from .config import config
 from .errors import sentry
 from .files import FILE_TYPES, handle_create_file, handle_delete_file
 from .invite import send_invite
-from .permission import CanManage, CanRead, CanWrite, IsSuper, IsUser, LoggedIn
+from .now import NowFn, utcnow
+from .permission import Authz, LoggedIn
 
 logger = logging.getLogger(__name__)
 
 v1 = FastAPI()
+
+
+def get_now_fn(req: Request) -> NowFn:
+    """Get the current time function for the request."""
+    return getattr(req.app.state, "now", utcnow)
 
 
 async def get_openai_client_for_class(request: Request) -> openai.AsyncClient:
@@ -69,8 +76,9 @@ async def parse_session_token(request: Request, call_next):
         )
     else:
         try:
-            token = decode_session_token(session_token)
-            user = await models.User.get_by_id(request.state.db, int(token.sub))
+            token = decode_session_token(session_token, nowfn=get_now_fn(request))
+            user_id = int(token.sub)
+            user = await models.User.get_by_id(request.state.db, user_id)
             if not user:
                 raise ValueError("User does not exist")
 
@@ -91,12 +99,23 @@ async def parse_session_token(request: Request, call_next):
                 error=str(e),
             )
         except Exception as e:
+            logger.error("Error parsing session token: %s", e)
             request.state.session = schemas.SessionState(
                 status=schemas.SessionStatus.ERROR,
                 error=str(e),
             )
 
     return await call_next(request)
+
+
+@v1.middleware("http")
+async def begin_authz_session(request: Request, call_next):
+    """Connect to authorization server."""
+    async with config.authz.driver.get_client() as c:
+        request.state.authz = c
+        response = await call_next(request)
+        await c.close()
+        return response
 
 
 @v1.middleware("http")
@@ -141,7 +160,7 @@ async def log_request(request: Request, call_next):
         )
 
 
-@v1.get("/config", dependencies=[Depends(IsSuper())])
+@v1.get("/config", dependencies=[Depends(Authz("admin"))])
 def get_config(request: Request):
     return {"config": config.dict(), "headers": dict(request.headers)}
 
@@ -155,16 +174,9 @@ async def login(body: schemas.MagicLoginRequest, request: Request):
     user = await models.User.get_by_email(request.state.db, email)
     # Throw an error if the user does not exist.
     if not user:
-        if config.development:
-            user = models.User(email=email)
-            user.name = ""
-            user.super_admin = True
-            request.state.db.add(user)
-            await request.state.db.commit()
-            await request.state.db.refresh(user)
-        else:
-            raise HTTPException(status_code=401, detail="User does not exist")
-    magic_link = generate_auth_link(user.id, expiry=86_400)
+        raise HTTPException(status_code=401, detail="User does not exist")
+    nowfn = get_now_fn(request)
+    magic_link = generate_auth_link(user.id, expiry=86_400, nowfn=nowfn)
 
     await config.email.sender.send(
         email,
@@ -178,10 +190,11 @@ async def login(body: schemas.MagicLoginRequest, request: Request):
 @v1.get("/auth")
 async def auth(request: Request, response: Response):
     # Get the `token` query parameter from the request and store it in variable.
-    dest = request.query_params.get("redirect")
+    dest = request.query_params.get("redirect", "/")
     stok = request.query_params.get("token")
+    nowfn = get_now_fn(request)
     try:
-        auth_token = decode_auth_token(stok)
+        auth_token = decode_auth_token(stok, nowfn=nowfn)
     except jwt.exceptions.PyJWTError as e:
         raise HTTPException(status_code=401, detail=str(e))
     except Exception as e:
@@ -189,10 +202,16 @@ async def auth(request: Request, response: Response):
 
     # Create a token for the user with more information.
     session_dur = 86_400 * 30
-    session_token = encode_session_token(int(auth_token.sub), expiry=session_dur)
+    session_token = encode_session_token(
+        int(auth_token.sub), expiry=session_dur, nowfn=nowfn
+    )
 
     response = RedirectResponse(config.url(dest), status_code=303)
-    response.set_cookie(key="session", value=session_token, max_age=session_dur)
+    response.set_cookie(
+        key="session",
+        value=session_token,
+        max_age=session_dur,
+    )
     return response
 
 
@@ -201,31 +220,32 @@ async def auth(request: Request, response: Response):
     dependencies=[Depends(LoggedIn())],
     response_model=schemas.Institutions,
 )
-async def list_institutions(request: Request):
-    inst = list[models.Institution]()
-
-    if await IsSuper().test_with_cache(request):
-        inst = await models.Institution.all(request.state.db)
-    else:
-        inst = await models.Institution.visible(
-            request.state.db, request.state.session.user
-        )
-
+async def list_institutions(request: Request, role: str = "can_view"):
+    ids = await request.state.authz.list(
+        f"user:{request.state.session.user.id}", role, "institution"
+    )
+    inst = await models.Institution.get_all_by_id(request.state.db, ids)
     return {"institutions": inst}
 
 
 @v1.post(
     "/institution",
-    dependencies=[Depends(IsSuper())],
+    dependencies=[Depends(Authz("can_create_institution"))],
     response_model=schemas.Institution,
 )
 async def create_institution(create: schemas.CreateInstitution, request: Request):
-    return await models.Institution.create(request.state.db, create)
+    inst = await models.Institution.create(request.state.db, create)
+    await request.state.authz.grant(
+        request.state.authz.root,
+        "parent",
+        f"institution:{inst.id}",
+    )
+    return inst
 
 
 @v1.get(
     "/institution/{institution_id}",
-    dependencies=[Depends(IsSuper() | CanRead(models.Institution, "institution_id"))],
+    dependencies=[Depends(Authz("can_view", "institution:{institution_id}"))],
     response_model=schemas.Institution,
 )
 async def get_institution(institution_id: str, request: Request):
@@ -234,7 +254,7 @@ async def get_institution(institution_id: str, request: Request):
 
 @v1.get(
     "/institution/{institution_id}/classes",
-    dependencies=[Depends(IsSuper() | CanRead(models.Institution, "institution_id"))],
+    dependencies=[Depends(Authz("can_view", "institution:{institution_id}"))],
     response_model=schemas.Classes,
 )
 async def get_institution_classes(institution_id: str, request: Request):
@@ -246,7 +266,7 @@ async def get_institution_classes(institution_id: str, request: Request):
 
 @v1.post(
     "/institution/{institution_id}/class",
-    dependencies=[Depends(IsSuper() | CanWrite(models.Institution, "institution_id"))],
+    dependencies=[Depends(Authz("can_create_class", "institution:{institution_id}"))],
     response_model=schemas.Class,
 )
 async def create_class(
@@ -258,10 +278,34 @@ async def create_class(
     ucr = models.UserClassRole(
         user_id=request.state.session.user.id,
         class_id=new_class.id,
-        role=schemas.Role.ADMIN,
-        title="Owner",
     )
     request.state.db.add(ucr)
+
+    grants = [
+        (f"institution:{institution_id}", "parent", f"class:{new_class.id}"),
+        (f"user:{request.state.session.user.id}", "admin", f"class:{new_class.id}"),
+    ]
+
+    if new_class.any_can_create_assistant:
+        grants.append(
+            (
+                f"class:{new_class.id}#student",
+                "can_create_assistants",
+                f"class:{new_class.id}",
+            )
+        )
+
+    if new_class.any_can_publish_assistant:
+        grants.append(
+            (
+                f"class:{new_class.id}#student",
+                "can_publish_assistants",
+                f"class:{new_class.id}",
+            )
+        )
+
+    await request.state.authz.write(grant=grants)
+
     return new_class
 
 
@@ -271,13 +315,18 @@ async def create_class(
     response_model=schemas.Classes,
 )
 async def get_my_classes(request: Request):
-    classes = await models.Class.visible(request.state.db, request.state.session.user)
+    ids = await request.state.authz.list(
+        f"user:{request.state.session.user.id}",
+        "can_view",
+        "class",
+    )
+    classes = await models.Class.get_all_by_id(request.state.db, ids)
     return {"classes": classes}
 
 
 @v1.get(
     "/class/{class_id}",
-    dependencies=[Depends(IsSuper() | CanRead(models.Class, "class_id"))],
+    dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
     response_model=schemas.Class,
 )
 async def get_class(class_id: str, request: Request):
@@ -286,7 +335,7 @@ async def get_class(class_id: str, request: Request):
 
 @v1.get(
     "/class/{class_id}/upload_info",
-    dependencies=[Depends(IsSuper() | CanRead(models.Class, "class_id"))],
+    dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
     response_model=schemas.FileUploadSupport,
 )
 async def get_class_upload_info(class_id: str, request: Request):
@@ -300,26 +349,144 @@ async def get_class_upload_info(class_id: str, request: Request):
 
 @v1.put(
     "/class/{class_id}",
-    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.Class,
 )
 async def update_class(class_id: str, update: schemas.UpdateClass, request: Request):
-    return await models.Class.update(request.state.db, int(class_id), update)
+    cls = await models.Class.update(request.state.db, int(class_id), update)
+
+    grants = []
+    revokes = []
+    can_create_asst = (
+        f"class:{class_id}#student",
+        "can_create_assistants",
+        f"class:{class_id}",
+    )
+    can_pub_asst = (
+        f"class:{class_id}#student",
+        "can_publish_assistants",
+        f"class:{class_id}",
+    )
+
+    # The permissions API is not idempotent, so we need to check the current state
+    # before granting/revoking new permissions.
+    can_create = await request.state.authz.test(*can_create_asst)
+    if cls.any_can_create_assistant:
+        if not can_create:
+            grants.append(can_create_asst)
+    else:
+        if can_create:
+            revokes.append(can_create_asst)
+
+    can_publish = await request.state.authz.test(*can_pub_asst)
+    if cls.any_can_publish_assistant:
+        if not can_publish:
+            grants.append(can_pub_asst)
+    else:
+        if can_publish:
+            revokes.append(can_pub_asst)
+
+    await request.state.authz.write(grant=grants, revoke=revokes)
+
+    return cls
+
+
+@v1.get(
+    "/class/{class_id}/users/audit",
+    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    response_model=schemas.ClassUsers,
+)
+async def audit_class_users(class_id: str, request: Request, depth: int = 1):
+    objs = await request.state.authz.expand(
+        f"class:{class_id}", "member", max_depth=depth
+    )
+    ids = {int(o.entity.split(":")[-1]) for o in objs if not o.is_group}
+
+    # One single entity can have multiple paths
+    paths = dict[int, list[RelatedObject]]()
+    for o in objs:
+        if not o.is_group:
+            id_ = int(o.entity.split(":")[-1])
+            if id_ not in paths:
+                paths[id_] = []
+            paths[id_].append(o)
+
+    users = await models.User.get_all_by_id(request.state.db, list(ids))
+
+    return {
+        "users": [
+            schemas.ClassUser(
+                id=u.id,
+                name=u.name,
+                email=u.email,
+                state=u.state,
+                roles=schemas.ClassUserRoles(
+                    # TODO batch recheck for roles
+                    admin=any(f"class:{class_id}#admin" in p.path for p in paths[u.id]),
+                    teacher=any(
+                        f"class:{class_id}#teacher" in p.path for p in paths[u.id]
+                    ),
+                    student=any(
+                        f"class:{class_id}#student" in p.path for p in paths[u.id]
+                    ),
+                ),
+                explanation=[p.path for p in paths[u.id]],
+            )
+            for u in users
+        ],
+        "groups": [
+            schemas.UserGroup(
+                name=g.entity,
+                explanation=[g.path],
+            )
+            for g in objs
+            if g.is_group
+        ],
+    }
 
 
 @v1.get(
     "/class/{class_id}/users",
-    dependencies=[Depends(IsSuper() | CanWrite(models.Class, "class_id"))],
+    dependencies=[Depends(Authz("can_view_users", "class:{class_id}"))],
     response_model=schemas.ClassUsers,
 )
 async def list_class_users(class_id: str, request: Request):
-    users = await models.Class.get_users(request.state.db, int(class_id))
-    return {"users": users}
+    # Get hard-coded relations from DB. Everyone with an explicit role in the class.
+    # NOTE: this is *not* necessarily everyone who has permission to view the class;
+    # it's usually a subset, due to inherited permissions from parent objects.
+    # To get the full list of everyone with access, we need to use the `/audit` endpoint.
+    users = await models.Class.get_members(request.state.db, int(class_id))
+
+    batch = list[Relation]()
+    for u in users:
+        for role in ["admin", "teacher", "student"]:
+            batch.append((f"user:{u.user_id}", role, f"class:{class_id}"))
+
+    results = await request.state.authz.check(batch)
+
+    class_users = list[schemas.ClassUser]()
+    for i, u in enumerate(users):
+        class_users.append(
+            schemas.ClassUser(
+                id=u.user_id,
+                name=u.user.name,
+                email=u.user.email,
+                state=u.user.state,
+                roles=schemas.ClassUserRoles(
+                    admin=results[i * 3],
+                    teacher=results[i * 3 + 1],
+                    student=results[i * 3 + 2],
+                ),
+                explanation=[[]],
+            )
+        )
+
+    return {"users": class_users, "groups": []}
 
 
 @v1.post(
     "/class/{class_id}/user",
-    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    dependencies=[Depends(Authz("can_manage_users", "class:{class_id}"))],
     response_model=schemas.UserClassRoles,
 )
 async def add_users_to_class(
@@ -332,22 +499,55 @@ async def add_users_to_class(
     class_ = await models.Class.get_by_id(request.state.db, cid)
     result: list[schemas.UserClassRole] = []
     new_: list[schemas.CreateInvite] = []
+
+    grants = list[Relation]()
+    revokes = list[Relation]()
+
+    is_admin = await request.state.authz.test(
+        f"user:{request.state.session.user.id}", "admin", f"class:{class_id}"
+    )
+
     for ucr in new_ucr.roles:
+        if not is_admin and ucr.roles.admin:
+            raise HTTPException(
+                status_code=403, detail="Lacking permission to add admins"
+            )
+
+        if not is_admin and ucr.roles.teacher:
+            raise HTTPException(
+                status_code=403, detail="Lacking permission to add teachers"
+            )
+
         user = await models.User.get_or_create_by_email(request.state.db, ucr.email)
-        if user.id == request.state.session.user.id:
-            if ucr.role != schemas.Role.ADMIN:
-                raise HTTPException(status_code=403, detail="Cannot demote yourself")
+        if is_admin and user.id == request.state.session.user.id:
+            if not ucr.roles.admin:
+                raise HTTPException(
+                    status_code=403, detail="Cannot demote yourself from admin"
+                )
 
         existing = await models.UserClassRole.get(request.state.db, user.id, cid)
+        for role in ["admin", "teacher", "student"]:
+            if getattr(ucr.roles, role):
+                grants.append((f"user:{user.id}", role, f"class:{cid}"))
+            else:
+                revokes.append((f"user:{user.id}", role, f"class:{cid}"))
+
         if existing:
-            existing.role = ucr.role
-            existing.title = ucr.title
-            result.append(existing)
+            existing.role = ucr.roles.string()
+            result.append(
+                schemas.UserClassRole(
+                    user_id=existing.user_id,
+                    class_id=existing.class_id,
+                    roles=ucr.roles,
+                )
+            )
             request.state.db.add(existing)
         else:
             # Make sure the user exists...
             added = await models.UserClassRole.create(
-                request.state.db, user.id, cid, ucr
+                request.state.db,
+                user.id,
+                cid,
             )
             new_.append(
                 schemas.CreateInvite(
@@ -356,11 +556,18 @@ async def add_users_to_class(
                     class_name=class_.name,
                 )
             )
-            result.append(added)
+            result.append(
+                schemas.UserClassRole(
+                    user_id=added.user_id,
+                    class_id=added.class_id,
+                    roles=ucr.roles,
+                )
+            )
 
     # Send emails to new users in the background
+    nowfn = get_now_fn(request)
     for invite in new_:
-        magic_link = generate_auth_link(invite.user_id, expiry=86_400 * 7)
+        magic_link = generate_auth_link(invite.user_id, expiry=86_400 * 7, nowfn=nowfn)
         tasks.add_task(
             send_invite,
             config.email.sender,
@@ -369,12 +576,14 @@ async def add_users_to_class(
             new_ucr.silent,
         )
 
+    await request.state.authz.write_safe(grant=grants, revoke=revokes)
+
     return {"roles": result}
 
 
 @v1.put(
     "/class/{class_id}/user/{user_id}",
-    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    dependencies=[Depends(Authz("can_manage_users", "class:{class_id}"))],
     response_model=schemas.UserClassRole,
 )
 async def update_user_class_role(
@@ -382,32 +591,111 @@ async def update_user_class_role(
 ):
     cid = int(class_id)
     uid = int(user_id)
-    if uid == request.state.session.user.id and update.role != schemas.Role.ADMIN:
+
+    is_admin = await request.state.authz.test(
+        f"user:{request.state.session.user.id}", "admin", f"class:{class_id}"
+    )
+
+    if not is_admin and update.role != "student":
+        raise HTTPException(
+            status_code=403, detail=f"Missing permission to manage {update.role}"
+        )
+
+    if (
+        uid == request.state.session.user.id
+        and is_admin
+        and update.role == "admin"
+        and not update.verdict
+    ):
         raise HTTPException(status_code=403, detail="Cannot demote yourself")
+
     existing = await models.UserClassRole.get(request.state.db, uid, cid)
     if not existing:
         raise HTTPException(status_code=404, detail="User not found in class")
-    existing.role = update.role
-    existing.title = update.title
-    request.state.db.add(existing)
-    return existing
+
+    grants = list[Relation]()
+    revokes = list[Relation]()
+
+    if update.verdict:
+        grants.append((f"user:{uid}", update.role, f"class:{cid}"))
+    else:
+        revokes.append((f"user:{uid}", update.role, f"class:{cid}"))
+
+    await request.state.authz.write_safe(grant=grants, revoke=revokes)
+
+    return schemas.UserClassRole(
+        user_id=existing.user_id,
+        class_id=existing.class_id,
+        # TODO(jnu): optimize/batch these requests
+        roles=schemas.ClassUserRoles(
+            admin=await request.state.authz.test(
+                f"user:{uid}", "admin", f"class:{cid}"
+            ),
+            teacher=await request.state.authz.test(
+                f"user:{uid}", "teacher", f"class:{cid}"
+            ),
+            student=await request.state.authz.test(
+                f"user:{uid}", "student", f"class:{cid}"
+            ),
+        ),
+    )
+
+
+@v1.delete(
+    "/class/{class_id}/user/{user_id}",
+    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def remove_user_from_class(class_id: str, user_id: str, request: Request):
+    cid = int(class_id)
+    uid = int(user_id)
+
+    if uid == request.state.session.user.id:
+        raise HTTPException(
+            status_code=403, detail="Cannot remove yourself from a class"
+        )
+
+    existing = await models.UserClassRole.get(request.state.db, uid, cid)
+    if not existing:
+        raise HTTPException(status_code=404, detail="User not found in class")
+
+    await models.UserClassRole.delete(request.state.db, uid, cid)
+
+    revokes = list[Relation]()
+    for role in ["admin", "teacher", "student"]:
+        revokes.append((f"user:{uid}", role, f"class:{cid}"))
+
+    await request.state.authz.write_safe(revoke=revokes)
+
+    return {"status": "ok"}
 
 
 @v1.put(
     "/class/{class_id}/api_key",
-    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
     response_model=schemas.ApiKey,
 )
 async def update_class_api_key(
     class_id: str, update: schemas.UpdateApiKey, request: Request
 ):
-    await models.Class.update_api_key(request.state.db, int(class_id), update.api_key)
+    existing_key = await models.Class.get_api_key(request.state.db, int(class_id))
+    if existing_key == update.api_key:
+        return {"api_key": existing_key}
+    elif not existing_key:
+        await models.Class.update_api_key(
+            request.state.db, int(class_id), update.api_key
+        )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="API key already exists. Delete it first to create a new one.",
+        )
     return {"api_key": update.api_key}
 
 
 @v1.get(
     "/class/{class_id}/api_key",
-    dependencies=[Depends(IsSuper() | CanManage(models.Class, "class_id"))],
+    dependencies=[Depends(Authz("can_view_api_key", "class:{class_id}"))],
     response_model=schemas.ApiKey,
 )
 async def get_class_api_key(class_id: str, request: Request):
@@ -417,7 +705,7 @@ async def get_class_api_key(class_id: str, request: Request):
 
 @v1.get(
     "/class/{class_id}/models",
-    dependencies=[Depends(IsSuper() | CanRead(models.Class, "class_id"))],
+    dependencies=[Depends(Authz("can_create_assistants", "class:{class_id}"))],
     response_model=schemas.AssistantModels,
 )
 async def list_class_models(
@@ -450,9 +738,7 @@ async def list_class_models(
     "/class/{class_id}/thread/{thread_id}",
     dependencies=[
         Depends(
-            CanWrite(models.Class, "class_id")
-            | CanRead(models.Thread, "thread_id")
-            | IsSuper()
+            Authz("can_view", "thread:{thread_id}"),
         )
     ],
     response_model=schemas.ThreadWithMeta,
@@ -490,11 +776,7 @@ async def get_thread(
 @v1.get(
     "/class/{class_id}/thread/{thread_id}/last_run",
     dependencies=[
-        Depends(
-            CanWrite(models.Class, "class_id")
-            | CanRead(models.Thread, "thread_id")
-            | IsSuper()
-        )
+        Depends(Authz("can_view", "thread:{thread_id}")),
     ],
     response_model=schemas.ThreadRun,
 )
@@ -546,29 +828,28 @@ async def get_last_run(
 
 @v1.get(
     "/class/{class_id}/threads",
-    dependencies=[Depends(CanRead(models.Class, "class_id") | IsSuper())],
+    dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
     response_model=schemas.Threads,
 )
 async def list_threads(class_id: str, request: Request):
-    threads = list[models.Thread]()
-
-    perm_coros = [
-        IsSuper().test_with_cache(request),
-        CanManage(models.Class, "class_id").test_with_cache(request),
-    ]
-    if any(await asyncio.gather(*perm_coros)):
-        threads = await models.Thread.all(request.state.db, int(class_id))
-    else:
-        threads = await models.Thread.visible(
-            request.state.db, int(class_id), request.state.session.user
-        )
-
+    all_class_threads = await models.Thread.get_by_class_id(
+        request.state.db, int(class_id)
+    )
+    filters = await request.state.authz.check(
+        [
+            f"user:{request.state.session.user.id}",
+            "can_view",
+            f"thread:{t.id}",
+        ]
+        for t in all_class_threads
+    )
+    threads = [t for t, f in zip(all_class_threads, filters) if f]
     return {"threads": threads}
 
 
 @v1.post(
     "/class/{class_id}/thread",
-    dependencies=[Depends(IsSuper() | CanRead(models.Class, "class_id"))],
+    dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
     response_model=schemas.ThreadRun,
 )
 async def create_thread(
@@ -608,6 +889,11 @@ async def create_thread(
         result = await models.Thread.create(request.state.db, new_thread)
         asst = await models.Assistant.get_by_id(request.state.db, req.assistant_id)
 
+        grants = [
+            (f"class:{class_id}", "parent", f"thread:{result.id}"),
+        ] + [(f"user:{p.id}", "party", f"thread:{result.id}") for p in parties]
+        await request.state.authz.write(grant=grants)
+
         # Start a new thread run.
         run = await openai_client.beta.threads.runs.create(
             thread_id=thread.id,
@@ -625,11 +911,7 @@ async def create_thread(
 @v1.post(
     "/class/{class_id}/thread/{thread_id}",
     dependencies=[
-        Depends(
-            IsSuper()
-            | CanWrite(models.Class, "class_id")
-            | CanRead(models.Thread, "thread_id")
-        )
+        Depends(Authz("can_participate", "thread:{thread_id}")),
     ],
     response_model=schemas.ThreadRun,
 )
@@ -673,7 +955,7 @@ async def send_message(
 
 @v1.post(
     "/class/{class_id}/file",
-    dependencies=[Depends(IsSuper() | CanWrite(models.Class, "class_id"))],
+    dependencies=[Depends(Authz("can_upload_class_files", "class:{class_id}"))],
     response_model=schemas.File,
 )
 async def create_file(
@@ -687,6 +969,7 @@ async def create_file(
 
     return await handle_create_file(
         request.state.db,
+        request.state.authz,
         openai_client,
         upload=upload,
         class_id=int(class_id),
@@ -697,9 +980,7 @@ async def create_file(
 
 @v1.post(
     "/class/{class_id}/user/{user_id}/file",
-    dependencies=[
-        Depends(IsSuper() | (IsUser("user_id") & CanRead(models.Class, "class_id")))
-    ],
+    dependencies=[Depends(Authz("can_upload_user_files", "class:{class_id}"))],
     response_model=schemas.File,
 )
 async def create_user_file(
@@ -717,6 +998,7 @@ async def create_user_file(
 
     return await handle_create_file(
         request.state.db,
+        request.state.authz,
         openai_client,
         upload=upload,
         class_id=int(class_id),
@@ -727,20 +1009,21 @@ async def create_user_file(
 
 @v1.delete(
     "/class/{class_id}/file/{file_id}",
-    # TODO: file-level permissions
-    dependencies=[Depends(IsSuper() | CanWrite(models.Class, "class_id"))],
+    dependencies=[Depends(Authz("can_delete", "class_file:{file_id}"))],
     response_model=schemas.GenericStatus,
 )
 async def delete_file(
     class_id: str, file_id: str, request: Request, openai_client: OpenAIClient
 ):
-    return await handle_delete_file(request.state.db, openai_client, int(file_id))
+    return await handle_delete_file(
+        request.state.db, request.state.authz, openai_client, int(file_id)
+    )
 
 
 @v1.delete(
     "/class/{class_id}/user/{user_id}/file/{file_id}",
     dependencies=[
-        Depends(IsSuper() | (IsUser("user_id") & CanRead(models.Class, "class_id")))
+        Depends(Authz("can_delete", "user_file:{file_id}")),
     ],
     response_model=schemas.GenericStatus,
 )
@@ -751,52 +1034,63 @@ async def delete_user_file(
     request: Request,
     openai_client: OpenAIClient,
 ):
-    return await handle_delete_file(request.state.db, openai_client, int(file_id))
+    return await handle_delete_file(
+        request.state.db, request.state.authz, openai_client, int(file_id)
+    )
 
 
 @v1.get(
     "/class/{class_id}/files",
-    dependencies=[Depends(IsSuper() | CanRead(models.Class, "class_id"))],
+    dependencies=[Depends(Authz("member", "class:{class_id}"))],
     response_model=schemas.Files,
 )
 async def list_files(class_id: str, request: Request):
-    files = await models.File.for_class(request.state.db, int(class_id))
+    ids = await request.state.authz.list(
+        f"user:{request.state.session.user.id}", "can_view", "class_file"
+    )
+    class_ids = await request.state.authz.list(
+        f"class:{class_id}",
+        "parent",
+        "class_file",
+    )
+
+    file_ids = list(set(ids) & set(class_ids))
+    files = await models.File.get_all_by_id(request.state.db, file_ids)
     return {"files": files}
 
 
 @v1.get(
     "/class/{class_id}/assistants",
-    dependencies=[Depends(IsSuper() | CanRead(models.Class, "class_id"))],
+    dependencies=[Depends(Authz("member", "class:{class_id}"))],
     response_model=schemas.Assistants,
 )
 async def list_assistants(class_id: str, request: Request):
-    include_private = await IsSuper().test_with_cache(request) or await CanWrite(
-        models.Class, "class_id"
-    ).test_with_cache(request)
-
-    assts = await models.Assistant.for_class(
-        request.state.db,
-        int(class_id),
-        user_id=request.state.session.user.id,
-        include_all_private=include_private,
+    # Only return assistants that are in the class and are visible to the current user.
+    all_for_class = await models.Assistant.get_by_class_id(
+        request.state.db, int(class_id)
     )
+    filters = await request.state.authz.check(
+        [
+            (
+                f"user:{request.state.session.user.id}",
+                "can_view",
+                f"assistant:{a.id}",
+            )
+            for a in all_for_class
+        ]
+    )
+    assts = [a for a, f in zip(all_for_class, filters) if f]
+
     creator_ids = {a.creator_id for a in assts}
     creators = await models.User.get_all_by_id(request.state.db, list(creator_ids))
 
-    # Hide the prompt if requested and the user doesn't have elevated permissions.
-    has_elevated_permissions = await IsSuper().test_with_cache(
-        request
-    ) or await CanWrite(models.Class, "class_id").test_with_cache(request)
-
     ret_assistants = list[schemas.Assistant]()
-
     for asst in assts:
         cur_asst = schemas.Assistant.from_orm(asst)
-        if (
-            asst.hide_prompt
-            and not has_elevated_permissions
-            and asst.creator_id != request.state.session.user.id
-        ):
+        has_elevated_permissions = await request.state.authz.test(
+            f"user:{request.state.session.user.id}", "can_edit", f"assistant:{asst.id}"
+        )
+        if asst.hide_prompt and not has_elevated_permissions:
             cur_asst.instructions = ""
         ret_assistants.append(cur_asst)
 
@@ -808,7 +1102,7 @@ async def list_assistants(class_id: str, request: Request):
 
 @v1.post(
     "/class/{class_id}/assistant",
-    dependencies=[Depends(IsSuper() | CanRead(models.Class, "class_id"))],
+    dependencies=[Depends(Authz("can_create_assistants", "class:{class_id}"))],
     response_model=schemas.Assistant,
 )
 async def create_assistant(
@@ -818,26 +1112,13 @@ async def create_assistant(
     openai_client: OpenAIClient,
 ):
     class_id_int = int(class_id)
-    cls = await models.Class.get_by_id(request.state.db, class_id_int)
-
-    # Check additional permissions
-    if not cls.any_can_create_assistant or not cls.any_can_publish_assistant:
-        can_override = await IsSuper().test_with_cache(request) or await CanWrite(
-            models.Class, "class_id"
-        ).test_with_cache(request)
-        if not can_override:
-            if not cls.any_can_create_assistant:
-                raise HTTPException(
-                    status_code=403,
-                    detail="You are not allowed to create assistants for this class.",
-                )
-            if not cls.any_can_publish_assistant and req.published:
-                raise HTTPException(
-                    status_code=403,
-                    detail="You are not allowed to publish assistants for this class.",
-                )
-
     creator_id = request.state.session.user.id
+
+    if req.published:
+        if not await request.state.authz.test(
+            f"user:{creator_id}", "can_publish_assistants", f"class:{class_id}"
+        ):
+            raise HTTPException(403, "You lack permission to publish an assistant.")
 
     try:
         new_asst = await openai_client.beta.assistants.create(
@@ -851,13 +1132,27 @@ async def create_assistant(
         raise HTTPException(400, e.message or "OpenAI rejected this request")
 
     try:
-        return await models.Assistant.create(
+        asst = await models.Assistant.create(
             request.state.db,
             req,
             class_id=class_id_int,
             user_id=creator_id,
             assistant_id=new_asst.id,
         )
+
+        grants = [
+            (f"class:{class_id}", "parent", f"assistant:{asst.id}"),
+            (f"user:{creator_id}", "owner", f"assistant:{asst.id}"),
+        ]
+
+        if req.published:
+            grants.append(
+                (f"class:{class_id}#member", "can_view", f"assistant:{asst.id}"),
+            )
+
+        await request.state.authz.write(grant=grants)
+
+        return asst
     except Exception as e:
         await openai_client.beta.assistants.delete(new_asst.id)
         raise e
@@ -865,7 +1160,7 @@ async def create_assistant(
 
 @v1.put(
     "/class/{class_id}/assistant/{assistant_id}",
-    dependencies=[Depends(IsSuper() | CanManage(models.Assistant, "assistant_id"))],
+    dependencies=[Depends(Authz("owner", "assistant:{assistant_id}"))],
     response_model=schemas.Assistant,
 )
 async def update_assistant(
@@ -877,19 +1172,20 @@ async def update_assistant(
 ):
     # Get the existing assistant.
     asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    grants = list[Relation]()
+    revokes = list[Relation]()
 
     # Check additional permissions
-    if not asst.published:
-        cls = await models.Class.get_by_id(request.state.db, asst.class_id)
-        if not cls.any_can_publish_assistant and req.published:
-            can_override = await IsSuper().test_with_cache(request) or await CanWrite(
-                models.Class, "class_id"
-            ).test_with_cache(request)
-            if not can_override:
-                raise HTTPException(
-                    status_code=403,
-                    detail="You are not allowed to publish assistants for this class.",
-                )
+    if not asst.published and req.published:
+        if not await request.state.authz.test(
+            f"user:{request.state.session.user.id}",
+            "can_publish",
+            f"assistant:{assistant_id}",
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="You are not allowed to publish assistants for this class.",
+            )
 
     if not req.dict():
         return asst
@@ -918,7 +1214,14 @@ async def update_assistant(
         openai_update["tools"] = req.tools
         asst.tools = json.dumps(req.tools)
     if req.published is not None:
-        asst.published = func.now() if req.published else None
+        ptuple = (f"class:{class_id}#member", "can_view", f"assistant:{asst.id}")
+        if req.published:
+            asst.published = func.now()
+            grants.append(ptuple)
+        else:
+            asst.published = None
+            revokes.append(ptuple)
+
     if req.name is not None:
         asst.name = req.name
 
@@ -939,18 +1242,14 @@ async def update_assistant(
     except openai.BadRequestError as e:
         raise HTTPException(400, e.message or "OpenAI rejected this request")
 
+    await request.state.authz.write(grant=grants, revoke=revokes)
+
     return asst
 
 
 @v1.delete(
     "/class/{class_id}/assistant/{assistant_id}",
-    dependencies=[
-        Depends(
-            IsSuper()
-            | CanManage(models.Class, "class_id")
-            | CanManage(models.Assistant, "assistant_id")
-        )
-    ],
+    dependencies=[Depends(Authz("owner", "assistant:{assistant_id}"))],
     response_model=schemas.GenericStatus,
 )
 async def delete_assistant(
@@ -959,13 +1258,13 @@ async def delete_assistant(
     asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
     await asst.delete(request.state.db)
     await openai_client.beta.assistants.delete(asst.assistant_id)
+    # TODO clean up grants
     return {"status": "ok"}
 
 
 @v1.get(
-    "/class/{class_id}/image/{file_id}",
-    # TODO ideally need to check thread permission too!
-    dependencies=[Depends(IsSuper() | CanRead(models.Class, "class_id"))],
+    "/class/{class_id}/thread/{thread_id}/image/{file_id}",
+    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
 )
 async def get_image(file_id: str, request: Request, openai_client: OpenAIClient):
     response = await openai_client.files.with_raw_response.retrieve_content(file_id)
@@ -979,7 +1278,7 @@ async def get_image(file_id: str, request: Request, openai_client: OpenAIClient)
 
 @v1.get(
     "/class/{class_id}/thread/{thread_id}/file/{file_id}",
-    dependencies=[Depends(IsSuper() | CanRead(models.Thread, "thread_id"))],
+    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
 )
 async def download_file(
     class_id: str,
@@ -1013,6 +1312,32 @@ async def download_file(
 async def get_me(request: Request):
     """Get the session information."""
     return request.state.session
+
+
+@v1.post(
+    "/me/grants",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.Grants,
+)
+async def get_grants(query: schemas.GrantsQuery, request: Request):
+    checks = list[Relation]()
+    user_id = f"user:{request.state.session.user.id}"
+    for grant in query.grants:
+        target = f"{grant.target_type}:{grant.target_id}"
+        checks.append(
+            (user_id, grant.relation, target),
+        )
+
+    results = await request.state.authz.check(checks)
+    return {
+        "grants": [
+            schemas.GrantDetail(
+                request=query.grants[i],
+                verdict=results[i],
+            )
+            for i in range(len(query.grants))
+        ],
+    }
 
 
 @v1.get(
@@ -1057,12 +1382,8 @@ async def lifespan(app: FastAPI):
         await config.db.driver.create()
         await config.db.driver.init(models.Base)
 
-        logger.info("Creating superusers ...")
-        async with config.db.driver.async_session() as session:
-            for superuser in config.init.super_users:
-                user = models.User(email=superuser, super_admin=True)
-                session.add(user)
-            await session.commit()
+    logger.info("Configuring authorization ...")
+    await config.authz.driver.init()
 
     with sentry(), metrics.metrics():
         yield

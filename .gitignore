@@ -181,4 +181,5 @@ node_modules/
 
 # SQLite database files
 *.sqlite3
+*.sqlite
 docker.env
