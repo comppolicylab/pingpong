@@ -9,7 +9,7 @@ services:
         sentry_dsn: https://54d1c8a998bf4cb271881a47e10f8070@o702726.ingest.sentry.io/4506613819506688
         node_env: production
         api_host: pingpong-srv.pingpong-prod:8000
-        origin: https://pingpong.hks.cloud.huit.harvard.edu
+        origin: https://pingpong.hks.harvard.edu
 
   srv:
     labels:
