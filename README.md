@@ -48,7 +48,7 @@ test_config.toml     -- App config for Python tests
 
 At a high level, you need these things to use the app locally:
  - Postgres Database
- - Authz server (optional, can use dummy for dev)
+ - OpenFGA Authz server
  - Python / Poetry to run the API
  - Pnpm to run the FrontEnd.
  - OpenAI API Key (for using the app)
