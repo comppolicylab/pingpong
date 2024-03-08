@@ -1,3 +1,5 @@
+from unittest.mock import AsyncMock
+
 from .auth import encode_session_token
 from .now import offset
 from .testutil import with_authz, with_authz_series, with_user
@@ -174,3 +176,42 @@ async def test_auth_valid_token_with_redirect(api, now):
     assert response.status_code == 303
     # Check where redirect goes
     assert response.headers["location"] == "http://localhost:5173/foo/bar"
+
+
+async def test_magic_link_login_no_user(api, config, monkeypatch):
+    # Patch the email driver in config.email
+    send_mock = AsyncMock()
+    monkeypatch.setattr(config.email.sender, "send", send_mock)
+    response = api.post(
+        "/api/v1/login/magic",
+        json={"email": "me@org.test"},
+    )
+    assert response.status_code == 401
+    assert response.json() == {"detail": "User does not exist"}
+    # Send should not have been called
+    send_mock.assert_not_called()
+
+
+@with_user(123)
+async def test_magic_link_login(api, config, monkeypatch):
+    # Patch the email driver in config.email
+    send_mock = AsyncMock()
+    monkeypatch.setattr(config.email.sender, "send", send_mock)
+    response = api.post(
+        "/api/v1/login/magic",
+        json={"email": "user_123@domain.test"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    send_mock.assert_called_once_with(
+        "user_123@domain.test",
+        "Your PingPong login link!",
+        (
+            "Click this link to log in to PingPong: "
+            "http://localhost:5173/api/v1/auth?"
+            "token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+            "eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0."
+            "Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU"
+            "&redirect=/",
+        ),
+    )

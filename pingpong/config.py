@@ -45,7 +45,7 @@ AuthzSettings = Union[OpenFgaAuthzSettings]
 class MockEmailSettings(BaseSettings):
     type: Literal["mock"]
 
-    @property
+    @cached_property
     def sender(self) -> MockEmailSender:
         return MockEmailSender()
 

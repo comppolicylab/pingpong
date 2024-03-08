@@ -175,8 +175,10 @@ async def login(body: schemas.MagicLoginRequest, request: Request):
     # Throw an error if the user does not exist.
     if not user:
         raise HTTPException(status_code=401, detail="User does not exist")
-    magic_link = generate_auth_link(user.id, expiry=86_400)
+    nowfn = get_now_fn(request)
+    magic_link = generate_auth_link(user.id, expiry=86_400, nowfn=nowfn)
 
+    print("SEND FN ", config.email.sender.send)
     await config.email.sender.send(
         email,
         "Your PingPong login link!",
@@ -564,8 +566,9 @@ async def add_users_to_class(
             )
 
     # Send emails to new users in the background
+    nowfn = get_now_fn(request)
     for invite in new_:
-        magic_link = generate_auth_link(invite.user_id, expiry=86_400 * 7)
+        magic_link = generate_auth_link(invite.user_id, expiry=86_400 * 7, nowfn=nowfn)
         tasks.add_task(
             send_invite,
             config.email.sender,

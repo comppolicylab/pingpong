@@ -44,7 +44,7 @@ async def authz(request, config):
 
 
 @pytest.fixture
-async def api(config, db, now, authz):
+async def api(config, db, user, now, authz):
     from pingpong.server import app, v1
 
     api = TestClient(app)
@@ -57,13 +57,16 @@ async def api(config, db, now, authz):
 
 @pytest.fixture
 async def user(request, config, db):
-    from pingpong.models import User
+    if not hasattr(request, "param"):
+        yield None
+    else:
+        from pingpong.models import User
 
-    async with db.async_session() as session:
-        u = User(**request.param)
-        session.add(u)
-        await session.commit()
-    yield u
+        async with db.async_session() as session:
+            u = User(**request.param)
+            session.add(u)
+            await session.commit()
+        yield u
 
 
 @pytest.fixture
