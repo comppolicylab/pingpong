@@ -212,6 +212,6 @@ async def test_magic_link_login(api, config, monkeypatch):
             "token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
             "eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0."
             "Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU"
-            "&redirect=/",
+            "&redirect=/"
         ),
     )
