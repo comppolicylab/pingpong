@@ -6,7 +6,7 @@ import type { PageLoad } from './$types';
  */
 export const load: PageLoad = async ({ fetch, params }) => {
   const classId = parseInt(params.classId, 10);
-  const [grants, {users}, {models}] = await Promise.all([
+  const [grants, { users }, { models }] = await Promise.all([
     api.grants(fetch, {
       canEditInfo: { target_type: 'class', target_id: classId, relation: 'can_edit_info' },
       canCreateAssistants: {
@@ -30,7 +30,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
       canManageUsers: { target_type: 'class', target_id: classId, relation: 'can_manage_users' }
     }),
     api.getClassUsers(fetch, classId),
-    api.getModels(fetch, classId),
+    api.getModels(fetch, classId)
   ]);
 
   let api_key = '';
