@@ -8,13 +8,22 @@ import type { LayoutLoad } from './$types';
  */
 export const load: LayoutLoad = async ({ fetch, params }) => {
   const classId = parseInt(params.classId, 10);
-  const classData = await api.getClass(fetch, classId);
-  if (classData.$status >= 300) {
+
+  const [
+    classData,
+    { creators: assistantCreators, assistants },
+    { files },
+    uploadInfo,
+   ] = await Promise.all([
+    api.getClass(fetch, classId),
+    api.getAssistants(fetch, classId),
+    api.getClassFiles(fetch, classId),
+    api.getClassUploadInfo(fetch, classId),
+   ]);
+
+   if (classData.$status >= 300) {
     throw error(classData.$status, (classData as ErrorResponse).detail || 'Unknown error');
   }
-  const { creators: assistantCreators, assistants } = await api.getAssistants(fetch, classId);
-  const { files } = await api.getClassFiles(fetch, classId);
-  const uploadInfo = await api.getClassUploadInfo(fetch, classId);
 
   return {
     hasAssistants: !!assistants && assistants.length > 0,
