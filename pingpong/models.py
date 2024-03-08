@@ -326,6 +326,14 @@ class Assistant(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_by_class_id(
+        cls, session: AsyncSession, class_id: int
+    ) -> List["Assistant"]:
+        stmt = select(Assistant).where(Assistant.class_id == int(class_id))
+        result = await session.execute(stmt)
+        return [row.Assistant for row in result]
+
+    @classmethod
     async def get_all_by_id(
         cls, session: AsyncSession, ids: List[int]
     ) -> List["Assistant"]:
@@ -528,5 +536,13 @@ class Thread(Base):
         stmt = select(Thread).where(
             Thread.id.in_(ids),
         )
+        result = await session.execute(stmt)
+        return [row.Thread for row in result]
+
+    @classmethod
+    async def get_by_class_id(
+        cls, session: AsyncSession, class_id: int
+    ) -> List["Thread"]:
+        stmt = select(Thread).where(Thread.class_id == int(class_id))
         result = await session.execute(stmt)
         return [row.Thread for row in result]

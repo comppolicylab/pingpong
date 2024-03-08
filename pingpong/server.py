@@ -178,7 +178,6 @@ async def login(body: schemas.MagicLoginRequest, request: Request):
     nowfn = get_now_fn(request)
     magic_link = generate_auth_link(user.id, expiry=86_400, nowfn=nowfn)
 
-    print("SEND FN ", config.email.sender.send)
     await config.email.sender.send(
         email,
         "Your PingPong login link!",
@@ -833,20 +832,18 @@ async def get_last_run(
     response_model=schemas.Threads,
 )
 async def list_threads(class_id: str, request: Request):
-    ids = await request.state.authz.list(
-        f"user:{request.state.session.user.id}",
-        "can_view",
-        "thread",
+    all_class_threads = await models.Thread.get_by_class_id(
+        request.state.db, int(class_id)
     )
-    class_ids = await request.state.authz.list(
-        f"class:{class_id}",
-        "parent",
-        "thread",
+    filters = await request.state.authz.check(
+        [
+            f"user:{request.state.session.user.id}",
+            "can_view",
+            f"thread:{t.id}",
+        ]
+        for t in all_class_threads
     )
-
-    thread_ids = list(set(ids) & set(class_ids))
-    threads = await models.Thread.get_all_by_id(request.state.db, thread_ids)
-
+    threads = [t for t, f in zip(all_class_threads, filters) if f]
     return {"threads": threads}
 
 
@@ -1068,20 +1065,21 @@ async def list_files(class_id: str, request: Request):
     response_model=schemas.Assistants,
 )
 async def list_assistants(class_id: str, request: Request):
-    ids = await request.state.authz.list(
-        f"user:{request.state.session.user.id}",
-        "can_view",
-        "assistant",
-    )
-    class_ids = await request.state.authz.list(
-        f"class:{class_id}",
-        "parent",
-        "assistant",
-    )
-
     # Only return assistants that are in the class and are visible to the current user.
-    asst_ids = list(set(ids) & set(class_ids))
-    assts = await models.Assistant.get_all_by_id(request.state.db, asst_ids)
+    all_for_class = await models.Assistant.get_by_class_id(
+        request.state.db, int(class_id)
+    )
+    filters = await request.state.authz.check(
+        [
+            (
+                f"user:{request.state.session.user.id}",
+                "can_view",
+                f"assistant:{a.id}",
+            )
+            for a in all_for_class
+        ]
+    )
+    assts = [a for a, f in zip(all_for_class, filters) if f]
 
     creator_ids = {a.creator_id for a in assts}
     creators = await models.User.get_all_by_id(request.state.db, list(creator_ids))
