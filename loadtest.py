@@ -95,6 +95,7 @@ class Session(requests.Session):
         super().__init__()
         self.cookies.set("session", token)
         self.url = url + "/api/v1"
+        self.verify = False
 
     def request(self, method, url, *args, **kwargs):
         full_url = self.url + url
@@ -112,7 +113,8 @@ class TestInstance:
         self._ctr = 0
 
     def cleanup(self):
-        self._delete_test_ai(self.cls_id, self.ai_id)
+        # self._delete_test_ai(self.cls_id, self.ai_id)
+        ...
 
     def _create_test_class(self, name: str):
         # Create the institution
@@ -139,9 +141,11 @@ class TestInstance:
                 "name": "test ai",
                 "file_ids": [],
                 "instructions": "You are a friendly AI for testing purposes",
+                "description": "Auto generated for a load test",
                 "model": "gpt-4-1106-preview",
                 "tools": [],  # TODO retrieval, code interpretter
                 "published": True,
+                "use_latex": True,
             },
         )
         ai_id = resp.json()["id"]
@@ -163,9 +167,12 @@ class TestInstance:
             json={
                 "roles": [
                     {
-                        "role": "read",
+                        "roles": {
+                            "admin": False,
+                            "teacher": False,
+                            "student": True,
+                        },
                         "email": emails[i],
-                        "title": "tester",
                     }
                     for i in range(num_users)
                 ],
@@ -195,4 +202,5 @@ def on_test_start(**kwargs):
 def on_test_stop(**kwargs):
     print("Stopping test", kwargs)
     global TEST_INST
-    TEST_INST.cleanup()
+    if TEST_INST:
+        TEST_INST.cleanup()

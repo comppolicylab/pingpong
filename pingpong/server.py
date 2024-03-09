@@ -158,6 +158,14 @@ async def log_request(request: Request, call_next):
             method=request.method,
             status=status,
         )
+        if config.development:
+            logger.debug(
+                "Request %s %s %s %s",
+                request.method,
+                request.url.path,
+                status,
+                duration,
+            )
 
 
 @v1.get("/config", dependencies=[Depends(Authz("admin"))])
@@ -533,7 +541,6 @@ async def add_users_to_class(
                 revokes.append((f"user:{user.id}", role, f"class:{cid}"))
 
         if existing:
-            existing.role = ucr.roles.string()
             result.append(
                 schemas.UserClassRole(
                     user_id=existing.user_id,
