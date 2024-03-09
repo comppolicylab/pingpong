@@ -374,7 +374,7 @@ class Assistant(Base):
         return assistant
 
     async def delete(self, session: AsyncSession):
-        session.delete(self)
+        await session.delete(self)
         await session.flush()
 
 

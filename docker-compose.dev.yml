@@ -3,7 +3,7 @@ services:
   traefik:
     # Make the dashboard available as well for debugging.
     # In prod it will be accessible only within the container!
-    ports: ["80:80", "443:443", "8080:8080"]
+    ports: ["80:80", "443:443", "9080:8080"]
 
   web:
     build:

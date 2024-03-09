@@ -50,6 +50,11 @@ services:
     command: [run]
     expose: [8080, 8081, 3000]
     ports: ["8080:8080", "8081:8081", "3000:3000"]
+    environment:
+      OPENFGA_DATASTORE_MAX_OPEN_CONNS: 50
+      OPENFGA_DATASTORE_MAX_IDLE_CONNS: 25
+      OPENFGA_MAX_CONCURRENT_READS_FOR_CHECK: 100
+
     secrets:
     - source: openfgacfg
       mode: 0400
