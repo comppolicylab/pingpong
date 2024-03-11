@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { enhance } from '$app/forms';
   import type { SubmitFunction } from '@sveltejs/kit';
   import {
@@ -39,12 +40,12 @@
   /**
    * Style class for the table data cells.
    */
-  export let tdClass = "px-3 py-2 whitespace-nowrap font-medium";
+  export let tdClass = 'px-3 py-2 whitespace-nowrap font-medium';
 
   /**
    * Style class for the table header cells.
    */
-  export let thPad = "px-3 py-2";
+  export let thPad = 'px-3 py-2';
 
   // Whether a request is in flight.
   let loading = false;
@@ -83,7 +84,7 @@
 
     pages = Array.from({ length: end - start + 1 }, (_, i) => ({
       name: `${start + i}`,
-      active: start + i === page,
+      active: start + i === page
     }));
   };
 
@@ -105,7 +106,7 @@
 
     page = p;
     loadUsers();
-  }
+  };
 
   /**
    * Handle clicking on a page number in the pagination component.
@@ -215,72 +216,74 @@
 </script>
 
 <div class="my-2">
-<Input type="text" placeholder="Search users by email" bind:value={search} on:keyup={refresh}>
-  <SearchOutline slot="left" class="w-6 h-6 text-gray-500 dark:text-gray-400" />
-</Input>
+  <Input type="text" placeholder="Search users by email" bind:value={search} on:keyup={refresh}>
+    <SearchOutline slot="left" class="w-6 h-6 text-gray-500 dark:text-gray-400" />
+  </Input>
 </div>
 <div class="relative">
-{#if loading}
-<div class="absolute top-0 left-0 w-full h-full flex flex-col gap-4 items-center justify-center bg-white bg-opacity-90 dark:bg-black dark:bg-opacity-90 z-10">
-  <div class="text-gray-500 animate-pulse">Loading users...</div>
-</div>
-{/if}
+  {#if loading}
+    <div
+      class="absolute top-0 left-0 w-full h-full flex flex-col gap-4 items-center justify-center bg-white bg-opacity-90 dark:bg-black dark:bg-opacity-90 z-10"
+    >
+      <div class="text-gray-500 animate-pulse">Loading users...</div>
+    </div>
+  {/if}
 
-{#if users.length === 0}
-  <div class="text-center text-gray-500 dark:text-gray-400">No users found</div>
-{:else}
-<Table>
-  <TableHead>
-    <TableHeadCell padding={thPad}>Email</TableHeadCell>
-    {#each ROLES as role}
-      <TableHeadCell padding={thPad}>{ROLE_LABELS[role]}</TableHeadCell>
-    {/each}
-    <TableHeadCell padding={thPad}>Verified</TableHeadCell>
-    <TableHeadCell padding={thPad}></TableHeadCell>
-  </TableHead>
-  <TableBody>
-    {#each users as user (user.id)}
-      <TableBodyRow>
-        <TableBodyCell tdClass={tdClass}>{user.email}</TableBodyCell>
+  {#if users.length === 0}
+    <div class="text-center text-gray-500 dark:text-gray-400">No users found</div>
+  {:else}
+    <Table>
+      <TableHead>
+        <TableHeadCell padding={thPad}>Email</TableHeadCell>
         {#each ROLES as role}
-          <TableBodyCell tdClass={tdClass}>
-            <form action="?/updateUser" method="POST" use:enhance={enhanceToggle}>
-              <input type="hidden" name="user_id" value={user.id} />
-              <input type="hidden" name="role" value={role} />
-              <Toggle
-                checked={user.roles[role] || false}
-                on:change={updateUserRole}
-                name="verdict"
-              />
-            </form>
-          </TableBodyCell>
+          <TableHeadCell padding={thPad}>{ROLE_LABELS[role]}</TableHeadCell>
         {/each}
-        <TableBodyCell tdClass={tdClass}>
-          {#if user.state === 'verified'}
-            <div title="This user is verified."><CheckCircleOutline color="green" /></div>
-          {:else if user.state === 'unverified'}
-            <div title="This user has not responded to the invitation.">
-              <EnvelopeOutline color="orange" />
-            </div>
-          {:else if user.state === 'banned'}
-            <div title="This user has been banned from PingPong."><CloseOutline color="red" /></div>
-          {:else}
-            {user.state}
-          {/if}
-        </TableBodyCell>
-        <TableBodyCell tdClass={tdClass}>
-          <form action="?/removeUser" method="POST" use:enhance={enhanceDelete}>
-            <input type="hidden" name="user_id" value={user.id} />
-            <Button on:click={deleteUser}
-              ><TrashBinOutline color="red" /></Button
-            >
-          </form>
-        </TableBodyCell>
-      </TableBodyRow>
-    {/each}
-  </TableBody>
-</Table>
-{/if}
+        <TableHeadCell padding={thPad}>Verified</TableHeadCell>
+        <TableHeadCell padding={thPad}></TableHeadCell>
+      </TableHead>
+      <TableBody>
+        {#each users as user (user.id)}
+          <TableBodyRow>
+            <TableBodyCell {tdClass}>{user.email}</TableBodyCell>
+            {#each ROLES as role}
+              <TableBodyCell {tdClass}>
+                <form action="?/updateUser" method="POST" use:enhance={enhanceToggle}>
+                  <input type="hidden" name="user_id" value={user.id} />
+                  <input type="hidden" name="role" value={role} />
+                  <Toggle
+                    checked={user.roles[role] || false}
+                    on:change={updateUserRole}
+                    name="verdict"
+                  />
+                </form>
+              </TableBodyCell>
+            {/each}
+            <TableBodyCell {tdClass}>
+              {#if user.state === 'verified'}
+                <div title="This user is verified."><CheckCircleOutline color="green" /></div>
+              {:else if user.state === 'unverified'}
+                <div title="This user has not responded to the invitation.">
+                  <EnvelopeOutline color="orange" />
+                </div>
+              {:else if user.state === 'banned'}
+                <div title="This user has been banned from PingPong.">
+                  <CloseOutline color="red" />
+                </div>
+              {:else}
+                {user.state}
+              {/if}
+            </TableBodyCell>
+            <TableBodyCell {tdClass}>
+              <form action="?/removeUser" method="POST" use:enhance={enhanceDelete}>
+                <input type="hidden" name="user_id" value={user.id} />
+                <Button on:click={deleteUser}><TrashBinOutline color="red" /></Button>
+              </form>
+            </TableBodyCell>
+          </TableBodyRow>
+        {/each}
+      </TableBody>
+    </Table>
+  {/if}
 </div>
 <div class="flex flex-col items-center justify-center gap-2">
   <div class="text-sm text-gray-700 dark:text-gray-400">
@@ -289,7 +292,12 @@
     <span class="font-semibold text-gray-900 dark:text-white">{endIdx}</span>
     of
     <span class="font-semibold text-gray-900 dark:text-white">{total}</span>
-    {total === 1 ? "user" : "users"}
+    {total === 1 ? 'user' : 'users'}
   </div>
-  <Pagination pages={pages} on:previous={loadPreviousPage} on:next={loadNextPage} on:click={handleClick} />
+  <Pagination
+    {pages}
+    on:previous={loadPreviousPage}
+    on:next={loadNextPage}
+    on:click={handleClick}
+  />
 </div>

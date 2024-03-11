@@ -297,7 +297,7 @@
       </div>
       <div class="col-span-2">
         <div class="mb-4">
-          <ViewUsers fetchUsers={fetchUsers} />
+          <ViewUsers {fetchUsers} />
         </div>
         <GradientButton
           color="cyanToBlue"

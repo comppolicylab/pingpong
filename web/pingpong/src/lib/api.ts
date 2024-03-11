@@ -553,8 +553,8 @@ export const getClassThreads = async (f: Fetcher, classId: number, opts?: GetCla
   }
   return {
     ...result,
-    lastPage,
-  }
+    lastPage
+  };
 };
 
 /**
@@ -854,7 +854,7 @@ export const getClassUsers = async (f: Fetcher, classId: number, opts?: GetClass
 
   return {
     ...response,
-    lastPage,
+    lastPage
   };
 };
 

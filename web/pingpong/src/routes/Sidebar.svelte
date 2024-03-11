@@ -58,14 +58,18 @@
 
     const lastThread = threads[threads.length - 1].updated;
     fetchingMoreThreads = true;
-    api.getClassThreads(fetch, currentClassId, {limit: pageSize, before: lastThread}).then((response) => {
-      canFetchMoreThreads = !response.lastPage;
-      threads = [...threads, ...response.threads];
-    }).catch(e => {
-      sadToast(`Failed to load more threads: ${e}`);
-    }).then(() => {
-      fetchingMoreThreads = false;
-    });
+    api
+      .getClassThreads(fetch, currentClassId, { limit: pageSize, before: lastThread })
+      .then((response) => {
+        canFetchMoreThreads = !response.lastPage;
+        threads = [...threads, ...response.threads];
+      })
+      .catch((e) => {
+        sadToast(`Failed to load more threads: ${e}`);
+      })
+      .then(() => {
+        fetchingMoreThreads = false;
+      });
   };
 </script>
 
@@ -126,7 +130,7 @@
           </SidebarItem>
         {/each}
         {#if canFetchMoreThreads}
-        <SidebarItem label="Load more ..." on:click={loadMoreThreads}></SidebarItem>
+          <SidebarItem label="Load more ..." on:click={loadMoreThreads}></SidebarItem>
         {/if}
       </SidebarGroup>
     {:else}
