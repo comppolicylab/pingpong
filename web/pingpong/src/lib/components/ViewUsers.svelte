@@ -93,14 +93,14 @@
    *
    * This function clamps the page to the bounds.
    */
-  const loadPage = (p: number) => {
+  const loadPage = (p: number, force: boolean = false) => {
     if (p < 1) {
       p = 1;
     } else if (p > Math.ceil(total / pageSize)) {
       p = Math.ceil(total / pageSize);
     }
 
-    if (p === page) {
+    if (!force && p === page) {
       return;
     }
 
@@ -132,7 +132,7 @@
   /**
    * Reload the user list from the beginning.
    */
-  const refresh = () => loadPage(1);
+  const refresh = () => loadPage(1, true);
 
   /**
    * Remove a user from the class.
