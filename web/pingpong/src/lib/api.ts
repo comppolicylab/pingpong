@@ -527,11 +527,34 @@ export type Threads = {
 };
 
 /**
+ * Parameters for fetching threads.
+ */
+export type GetClassThreadsOpts = {
+  limit?: number;
+  before?: string;
+};
+
+/**
  * Fetch all (visible) threads for a class.
  */
-export const getClassThreads = async (f: Fetcher, classId: number) => {
+export const getClassThreads = async (f: Fetcher, classId: number, opts?: GetClassThreadsOpts) => {
   const url = `class/${classId}/threads`;
-  return await GET<never, Threads>(f, url);
+  const result = await GET<GetClassThreadsOpts, Threads>(f, url, opts);
+  let lastPage = false;
+  // Add a flag to indicate if this is the last page of results.
+  // If there was a requested limit and the server returned
+  // fewer results, then we know we're on the last page.
+  // If there was no limit, then the last page is when we get
+  // an empty list of threads.
+  if (opts?.limit) {
+    lastPage = result.threads.length < opts.limit;
+  } else {
+    lastPage = result.threads.length === 0;
+  }
+  return {
+    ...result,
+    lastPage
+  };
 };
 
 /**
@@ -806,15 +829,39 @@ export type ClassUser = {
  */
 export type ClassUsers = {
   users: ClassUser[];
+  limit: number;
+  offset: number;
+  total: number;
+};
+
+/**
+ * Search parameters for getting users in a class.
+ */
+export type GetClassUsersOpts = {
+  limit?: number;
+  offset?: number;
+  search?: string;
 };
 
 /**
  * Fetch users in a class.
  */
-export const getClassUsers = async (f: Fetcher, classId: number) => {
+export const getClassUsers = async (f: Fetcher, classId: number, opts?: GetClassUsersOpts) => {
   const url = `class/${classId}/users`;
-  return await GET<never, ClassUsers>(f, url);
+
+  const response = await GET<GetClassUsersOpts, ClassUsers>(f, url, opts);
+  const lastPage = response.users.length < response.limit;
+
+  return {
+    ...response,
+    lastPage
+  };
 };
+
+/**
+ * Response type for getClassUsers.
+ */
+export type ClassUsersResponse = ReturnType<typeof getClassUsers>;
 
 /**
  * Parameters for creating a new class user.
@@ -913,7 +960,7 @@ export type Thread = {
   private: boolean;
   users: UserPlaceholder[];
   created: string;
-  updated: string | null;
+  updated: string;
 };
 
 /**

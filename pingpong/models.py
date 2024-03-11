@@ -1,5 +1,6 @@
 import json
-from typing import List, Optional
+from datetime import datetime
+from typing import AsyncGenerator, List, Optional
 
 from sqlalchemy import Boolean, Column, DateTime
 from sqlalchemy import Enum as SQLEnum
@@ -403,14 +404,44 @@ class Class(Base):
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     @classmethod
-    async def get_members(cls, session: AsyncSession, id_: int) -> List[UserClassRole]:
+    async def get_members(
+        cls,
+        session: AsyncSession,
+        id_: int,
+        limit: int = 10,
+        offset: int = 0,
+        search: str = "",
+    ) -> AsyncGenerator["UserClassRole", None]:
+        condition = UserClassRole.class_id == int(id_)
+        if search:
+            condition = and_(condition, User.email.ilike(f"%{search}%"))
         stmt = (
             select(UserClassRole)
+            .join(User)
             .options(joinedload(UserClassRole.user))
-            .where(UserClassRole.class_id == int(id_))
+            .where(condition)
+            .order_by(User.email)
+            .limit(limit)
+            .offset(offset)
         )
         result = await session.execute(stmt)
-        return [row.UserClassRole for row in result]
+        for row in result:
+            yield row.UserClassRole
+
+    @classmethod
+    async def get_member_count(
+        cls,
+        session: AsyncSession,
+        id_: int,
+        search: str = "",
+    ) -> int:
+        condition = UserClassRole.class_id == int(id_)
+        if search:
+            condition = and_(condition, User.email.ilike(f"%{search}%"))
+        stmt = (
+            select(func.count()).select_from(UserClassRole).join(User).where(condition)
+        )
+        return await session.scalar(stmt)
 
     @classmethod
     async def get_api_key(cls, session: AsyncSession, id_: int) -> str | None:
@@ -498,7 +529,7 @@ class Thread(Base):
         "User",
         secondary=user_thread_association,
         back_populates="threads",
-        lazy="selectin",
+        lazy="subquery",
     )
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(
@@ -529,20 +560,36 @@ class Thread(Base):
     async def get_all_by_id(
         cls,
         session: AsyncSession,
-        ids: list[str],
-    ) -> List["Thread"]:
+        ids: list[int],
+        limit: int = 10,
+        before: datetime | None = None,
+    ) -> AsyncGenerator["Thread", None]:
         if not ids:
-            return []
-        stmt = select(Thread).where(
-            Thread.id.in_(ids),
-        )
+            return
+
+        condition = Thread.id.in_([int(id_) for id_ in ids])
+        if before:
+            condition = and_(condition, Thread.updated < before)
+
+        stmt = select(Thread).order_by(Thread.updated.desc()).where(condition)
         result = await session.execute(stmt)
-        return [row.Thread for row in result]
+        for row in result:
+            yield row.Thread
 
     @classmethod
     async def get_by_class_id(
-        cls, session: AsyncSession, class_id: int
-    ) -> List["Thread"]:
-        stmt = select(Thread).where(Thread.class_id == int(class_id))
+        cls,
+        session: AsyncSession,
+        class_id: int,
+        limit: int = 10,
+        before: datetime | None = None,
+    ) -> AsyncGenerator["Thread", None]:
+        condition = Thread.class_id == int(class_id)
+        if before:
+            condition = and_(condition, Thread.updated < before)
+        stmt = (
+            select(Thread).order_by(Thread.updated.desc()).where(condition).limit(limit)
+        )
         result = await session.execute(stmt)
-        return [row.Thread for row in result]
+        for row in result:
+            yield row.Thread

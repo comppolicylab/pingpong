@@ -1,13 +1,15 @@
 <script lang="ts">
   import { page } from '$app/stores';
+  import { writable } from 'svelte/store';
   import {
     CogOutline,
     BookOutline,
     FilePenOutline,
     UserSettingsOutline,
     QuestionCircleOutline,
-    ArrowRightFromBracketSolid,
-    EyeSlashOutline
+    ArrowRightToBracketSolid,
+    EyeSlashOutline,
+    RefreshOutline
   } from 'flowbite-svelte-icons';
 
   import {
@@ -28,15 +30,49 @@
   import Logo from '$lib/components/Logo.svelte';
   import dayjs from '$lib/time';
   import type { LayoutData } from './$types';
+  import * as api from '$lib/api';
+  import { sadToast } from '$lib/toast';
 
   export let data: LayoutData;
 
   $: avatar = data?.me?.profile?.image_url;
   $: name = data?.me?.user?.name || data?.me?.user?.email;
   $: classes = data?.classes || [];
-  $: threads = (data?.threads || []).sort((a, b) => (a.created > b.created ? -1 : 1));
+  $: threads = (data?.threads || []).sort((a, b) => (a.updated > b.updated ? -1 : 1));
   $: currentClassId = parseInt($page.params.classId, 10);
   $: currentClass = classes.find((class_) => class_.id === currentClassId);
+
+  // Whether there is a request in flight to fetch more threads
+  const fetchingMoreThreads = writable(false);
+  // Whether there are more threads to fetch
+  $: canFetchMoreThreads = (data?.threads || []).length > 0;
+  const pageSize = 10;
+  // Fetch another page of threads
+  const loadMoreThreads = () => {
+    if ($fetchingMoreThreads) {
+      return;
+    }
+
+    if (!threads.length) {
+      canFetchMoreThreads = false;
+      return;
+    }
+
+    const lastThread = threads[threads.length - 1].updated;
+    $fetchingMoreThreads = true;
+    api
+      .getClassThreads(fetch, currentClassId, { limit: pageSize, before: lastThread })
+      .then((response) => {
+        canFetchMoreThreads = !response.lastPage;
+        threads = [...threads, ...response.threads];
+      })
+      .catch((e) => {
+        sadToast(`Failed to load more threads: ${e}`);
+      })
+      .then(() => {
+        $fetchingMoreThreads = false;
+      });
+  };
 </script>
 
 <Sidebar asideClass="shrink-0 grow-0 w-80" activeUrl={$page.url.pathname}>
@@ -95,6 +131,22 @@
             </svelte:fragment>
           </SidebarItem>
         {/each}
+        {#if canFetchMoreThreads}
+          <SidebarItem
+            spanClass={`${$fetchingMoreThreads ? 'text-gray-500' : 'text-amber-700'}`}
+            label="Load more ..."
+            on:click={loadMoreThreads}
+          >
+            <svelte:fragment slot="icon">
+              <RefreshOutline
+                size="sm"
+                class={`${$fetchingMoreThreads ? 'text-gray-500' : 'text-amber-700'} mx-2 ${
+                  $fetchingMoreThreads ? 'animate-spin' : ''
+                }`}
+              />
+            </svelte:fragment>
+          </SidebarItem>
+        {/if}
       </SidebarGroup>
     {:else}
       <SidebarGroup class="overflow-y-auto overflow-x-hidden">
@@ -131,7 +183,7 @@
   </DropdownItem>
   <DropdownDivider />
   <DropdownItem href="/logout" class="flex space-x-4 items-center">
-    <ArrowRightFromBracketSolid size="sm" />
+    <ArrowRightToBracketSolid size="sm" />
     <span>Logout</span>
   </DropdownItem>
 </Dropdown>

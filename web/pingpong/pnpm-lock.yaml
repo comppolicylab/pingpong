@@ -18,8 +18,8 @@ dependencies:
     specifier: ^16.3.1
     version: 16.3.1
   flowbite-svelte-icons:
-    specifier: ^0.4.5
-    version: 0.4.5(svelte@4.2.7)(tailwind-merge@2.2.1)(tailwindcss@3.3.5)
+    specifier: ^1.4.3
+    version: 1.4.3(svelte@4.2.7)(tailwind-merge@2.2.1)(tailwindcss@3.3.5)
   highlight.js:
     specifier: ^11.9.0
     version: 11.9.0
@@ -1828,10 +1828,10 @@ packages:
     resolution: {integrity: sha512-36yxDn5H7OFZQla0/jFJmbIKTdZAQHngCedGxiMmpNfEZM0sdEeT+WczLQrjK6D7o2aiyLYDnkw0R3JK0Qv1RQ==}
     dev: true
 
-  /flowbite-svelte-icons@0.4.5(svelte@4.2.7)(tailwind-merge@2.2.1)(tailwindcss@3.3.5):
-    resolution: {integrity: sha512-IBudEfw9B4UE2gCRMhbRnyE8p7qq7DDMauy0mPVIShzjaN3yVk2AmAHia1JRe9jUC98Wn7xNk/IdJlXeQj19Iw==}
+  /flowbite-svelte-icons@1.4.3(svelte@4.2.7)(tailwind-merge@2.2.1)(tailwindcss@3.3.5):
+    resolution: {integrity: sha512-SNxTHPsWnynsy6SLr5nC0YRLmP3FRfl/LS1ozyx7vNraGwa2AP+23DX4pPrhVauBhoSWUAyzaM2ZbpscS2aGVQ==}
     peerDependencies:
-      svelte: ^3.54.0 || ^4.0.0
+      svelte: ^3.54.0 || ^4.0.0 || ^5.0.0
       tailwind-merge: ^2.0.0
       tailwindcss: ^3.3.2
     dependencies:

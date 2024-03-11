@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { onMount } from 'svelte';
   import { enhance } from '$app/forms';
   import type { SubmitFunction } from '@sveltejs/kit';
   import {
@@ -15,34 +15,132 @@
     TableBodyRow,
     TableHead,
     TableHeadCell,
-    TableSearch,
-    Button
+    Input,
+    Button,
+    Pagination,
+    type LinkType
   } from 'flowbite-svelte';
+  import { SearchOutline } from 'flowbite-svelte-icons';
   import Toggle from '$lib/components/Toggle.svelte';
   import type { ToggleChangeEvent } from '$lib/components/Toggle.svelte';
   import { ROLES, ROLE_LABELS } from '$lib/api';
-  import type { ClassUser, Role } from '$lib/api';
+  import type { ClassUser, Role, ClassUsersResponse } from '$lib/api';
   import { sadToast, happyToast } from '$lib/toast';
 
-  const dispatch = createEventDispatcher();
+  /**
+   * Number of users to view on each page.
+   */
+  export let pageSize: number = 10;
 
   /**
-   * List of users to display in the class.
+   * Function to fetch users from the server.
    */
-  export let users: ClassUser[];
+  export let fetchUsers: (page: number, pageSize: number, search?: string) => ClassUsersResponse;
 
-  // User search query
-  let needle = '';
-  $: filteredUsers = users
-    .filter((user) => user.email.includes(needle))
-    .sort((a, b) => a.email.localeCompare(b.email));
+  /**
+   * Style class for the table data cells.
+   */
+  export let tdClass = 'px-3 py-2 whitespace-nowrap font-medium';
+
+  /**
+   * Style class for the table header cells.
+   */
+  export let thPad = 'px-3 py-2';
+
+  // Whether a request is in flight.
+  let loading = false;
+  // The current list of users.
+  let users: ClassUser[] = [];
+  // The current page (1-based index).
+  let page = 1;
+  // The total number of users in the full (unpaginated) resultset.
+  let total = 0;
+  // The current search query.
+  let search = '';
+  // The list of pagination links to show.
+  let pages: Array<LinkType> = [];
+  // The index of the first user on the current page.
+  $: startIdx = Math.min(total, (page - 1) * pageSize + 1);
+  // The index of the last user on the current page.
+  $: endIdx = Math.min(startIdx + pageSize - 1, total);
+
+  /**
+   * Fetch users from the server based on component state.
+   */
+  const loadUsers = async () => {
+    loading = true;
+    const response = await fetchUsers(page, pageSize, search);
+    users = response.users;
+    total = response.total;
+    loading = false;
+
+    // Figure out 5 pages to show in the pagination component.
+    // The current page should be in the middle of the list of pages.
+    const totalPages = Math.ceil(total / pageSize);
+    let start = Math.max(1, page - 2);
+    const end = Math.min(totalPages, start + 4);
+    // Adjust start to make sure there are 5 pages in total if possible
+    start = Math.max(1, end - 4);
+
+    pages = Array.from({ length: end - start + 1 }, (_, i) => ({
+      name: `${start + i}`,
+      active: start + i === page
+    }));
+  };
+
+  /**
+   * Load a specific page of users.
+   *
+   * This function clamps the page to the bounds.
+   */
+  const loadPage = (p: number) => {
+    if (p < 1) {
+      p = 1;
+    } else if (p > Math.ceil(total / pageSize)) {
+      p = Math.ceil(total / pageSize);
+    }
+
+    if (p === page) {
+      return;
+    }
+
+    page = p;
+    loadUsers();
+  };
+
+  /**
+   * Handle clicking on a page number in the pagination component.
+   */
+  const handleClick = (evt: MouseEvent) => {
+    const num = +((evt.target as HTMLDivElement).innerText || '1');
+    if (isNaN(num)) {
+      return;
+    }
+    loadPage(num);
+  };
+
+  /**
+   * Load the previous page of users.
+   */
+  const loadPreviousPage = () => loadPage(page - 1);
+
+  /**
+   * Load the next page of users.
+   */
+  const loadNextPage = () => loadPage(page + 1);
+
+  /**
+   * Reload the user list from the beginning.
+   */
+  const refresh = () => loadPage(1);
 
   /**
    * Remove a user from the class.
    */
-  const deleteUser = (id: number) => {
+  const deleteUser = (evt: MouseEvent) => {
+    const target = evt.currentTarget as HTMLButtonElement;
     if (confirm('Are you sure you want to remove this user?')) {
-      dispatch('removeUser', id);
+      target?.form?.requestSubmit();
     }
   };
 
@@ -53,6 +151,29 @@
     const target = evt.detail.target;
     // Set the value of the verdict input to "on" or "off" based on the checked state of the toggle
     target.form?.requestSubmit();
+  };
+
+  /**
+   * Remove a user from the class.
+   */
+  const enhanceDelete: SubmitFunction = ({ formData }) => {
+    const userId = formData.get('user_id');
+    if (!userId) {
+      sadToast('Failed to remove user: user ID is missing');
+      return;
+    }
+    const user = users.find((u) => u.id === +userId)?.email || `User ${userId}`;
+    return async ({ result }) => {
+      if (result.type === 'failure') {
+        // Force a re-render of the component with the current data
+        const detail = result.data?.detail || 'unknown error';
+        sadToast(`Failed to remove user: ${detail}`);
+        users = users.slice();
+      } else {
+        happyToast(`Removed ${user} from the class`);
+        loadUsers();
+      }
+    };
   };
 
   /**
@@ -87,57 +208,96 @@
       }
     };
   };
+
+  // Load users from the server when the component is mounted.
+  onMount(async () => {
+    await loadUsers();
+  });
 </script>
 
-<TableSearch placeholder="Search users by email" bind:inputValue={needle} />
-<Table>
-  <TableHead>
-    <TableHeadCell>Email</TableHeadCell>
-    {#each ROLES as role}
-      <TableHeadCell>{ROLE_LABELS[role]}</TableHeadCell>
-    {/each}
-    <TableHeadCell>Verified</TableHeadCell>
-    <TableHeadCell></TableHeadCell>
-  </TableHead>
-  <TableBody>
-    {#each filteredUsers as user (user.id)}
-      <TableBodyRow>
-        <TableBodyCell>{user.email}</TableBodyCell>
+<div class="my-2">
+  <Input type="text" placeholder="Search users by email" bind:value={search} on:keyup={refresh}>
+    <SearchOutline slot="left" class="w-6 h-6 text-gray-500 dark:text-gray-400" />
+  </Input>
+</div>
+<div class="relative">
+  {#if loading}
+    <div
+      class="absolute top-0 left-0 w-full h-full flex flex-col gap-4 items-center justify-center bg-white bg-opacity-90 dark:bg-black dark:bg-opacity-90 z-10"
+    >
+      <div class="text-gray-500 animate-pulse">Loading users...</div>
+    </div>
+  {/if}
+
+  {#if users.length === 0}
+    <div class="text-center text-gray-500 dark:text-gray-400">No users found</div>
+  {:else}
+    <Table>
+      <TableHead>
+        <TableHeadCell padding={thPad}>Email</TableHeadCell>
         {#each ROLES as role}
-          <TableBodyCell>
-            <form action="?/updateUser" method="POST" use:enhance={enhanceToggle}>
-              <input type="hidden" name="user_id" value={user.id} />
-              <input type="hidden" name="role" value={role} />
-              <Toggle
-                checked={user.roles[role] || false}
-                on:change={updateUserRole}
-                name="verdict"
-              />
-            </form>
-          </TableBodyCell>
+          <TableHeadCell padding={thPad}>{ROLE_LABELS[role]}</TableHeadCell>
         {/each}
-        <TableBodyCell>
-          {#if user.state === 'verified'}
-            <div title="This user is verified."><CheckCircleOutline color="green" /></div>
-          {:else if user.state === 'unverified'}
-            <div title="This user has not responded to the invitation.">
-              <EnvelopeOutline color="orange" />
-            </div>
-          {:else if user.state === 'banned'}
-            <div title="This user has been banned from PingPong."><CloseOutline color="red" /></div>
-          {:else}
-            {user.state}
-          {/if}
-        </TableBodyCell>
-        <TableBodyCell>
-          <form action="?/removeUser" method="POST" use:enhance>
-            <input type="hidden" name="user_id" value={user.id} />
-            <Button type="submit" on:click={deleteUser.bind(null, user.id)}
-              ><TrashBinOutline color="red" /></Button
-            >
-          </form>
-        </TableBodyCell>
-      </TableBodyRow>
-    {/each}
-  </TableBody>
-</Table>
+        <TableHeadCell padding={thPad}>Verified</TableHeadCell>
+        <TableHeadCell padding={thPad}></TableHeadCell>
+      </TableHead>
+      <TableBody>
+        {#each users as user (user.id)}
+          <TableBodyRow>
+            <TableBodyCell {tdClass}>{user.email}</TableBodyCell>
+            {#each ROLES as role}
+              <TableBodyCell {tdClass}>
+                <form action="?/updateUser" method="POST" use:enhance={enhanceToggle}>
+                  <input type="hidden" name="user_id" value={user.id} />
+                  <input type="hidden" name="role" value={role} />
+                  <Toggle
+                    checked={user.roles[role] || false}
+                    on:change={updateUserRole}
+                    name="verdict"
+                  />
+                </form>
+              </TableBodyCell>
+            {/each}
+            <TableBodyCell {tdClass}>
+              {#if user.state === 'verified'}
+                <div title="This user is verified."><CheckCircleOutline color="green" /></div>
+              {:else if user.state === 'unverified'}
+                <div title="This user has not responded to the invitation.">
+                  <EnvelopeOutline color="orange" />
+                </div>
+              {:else if user.state === 'banned'}
+                <div title="This user has been banned from PingPong.">
+                  <CloseOutline color="red" />
+                </div>
+              {:else}
+                {user.state}
+              {/if}
+            </TableBodyCell>
+            <TableBodyCell {tdClass}>
+              <form action="?/removeUser" method="POST" use:enhance={enhanceDelete}>
+                <input type="hidden" name="user_id" value={user.id} />
+                <Button on:click={deleteUser}><TrashBinOutline color="red" /></Button>
+              </form>
+            </TableBodyCell>
+          </TableBodyRow>
+        {/each}
+      </TableBody>
+    </Table>
+  {/if}
+</div>
+<div class="flex flex-col items-center justify-center gap-2">
+  <div class="text-sm text-gray-700 dark:text-gray-400">
+    Showing <span class="font-semibold text-gray-900 dark:text-white">{startIdx}</span>
+    to
+    <span class="font-semibold text-gray-900 dark:text-white">{endIdx}</span>
+    of
+    <span class="font-semibold text-gray-900 dark:text-white">{total}</span>
+    {total === 1 ? 'user' : 'users'}
+  </div>
+  <Pagination
+    {pages}
+    on:previous={loadPreviousPage}
+    on:next={loadNextPage}
+    on:click={handleClick}
+  />
+</div>

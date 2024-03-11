@@ -75,8 +75,7 @@ async def sync_db_to_openfga(db: AsyncSession, authz: AuthzClient) -> None:
     logger.info("Syncing class user roles ...")
     grants = list[Relation]()
     for class_id in class_ids:
-        members = await Class.get_members(db, class_id)
-        for member in members:
+        async for member in Class.get_members(db, class_id, limit=1_000_000):
             if member.role == Role.ADMIN:
                 logger.info(f" - Making {member.user_id} admin of {class_id} ...")
                 grants.append((f"user:{member.user_id}", "admin", f"class:{class_id}"))

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import type { MimeTypeLookupFn, FileUploadInfo, FileUploadFailure } from '$lib/api';
-  import { CloseCircleSolid, FileSolid, ExclamationCircleOutline } from 'flowbite-svelte-icons';
+  import { CloseSolid, FileSolid, ExclamationCircleOutline } from 'flowbite-svelte-icons';
   import { Tooltip, Button } from 'flowbite-svelte';
   import ProgressCircle from './ProgressCircle.svelte';
   import { Jumper } from 'svelte-loading-spinners';
@@ -60,7 +60,7 @@
   {#if state !== 'pending' && state !== 'deleting'}
     <div class="absolute top-[-6px] right-[-6px] -delete-button">
       <Button pill color="dark" class="p-0">
-        <CloseCircleSolid class="w-4 h-4" on:click={deleteFile} />
+        <CloseSolid class="w-4 h-4" on:click={deleteFile} />
       </Button>
     </div>
   {/if}

@@ -236,7 +236,9 @@ class UserGroup(BaseModel):
 
 class ClassUsers(BaseModel):
     users: list[ClassUser]
-    groups: list[UserGroup]
+    limit: int
+    offset: int
+    total: int
 
     class Config:
         from_attributes = True
