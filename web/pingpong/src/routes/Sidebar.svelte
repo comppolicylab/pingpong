@@ -1,13 +1,15 @@
 <script lang="ts">
   import { page } from '$app/stores';
+  import { writable } from 'svelte/store';
   import {
     CogOutline,
     BookOutline,
     FilePenOutline,
     UserSettingsOutline,
     QuestionCircleOutline,
-    ArrowRightFromBracketSolid,
-    EyeSlashOutline
+    ArrowRightToBracketSolid,
+    EyeSlashOutline,
+    RefreshOutline
   } from 'flowbite-svelte-icons';
 
   import {
@@ -41,13 +43,13 @@
   $: currentClass = classes.find((class_) => class_.id === currentClassId);
 
   // Whether there is a request in flight to fetch more threads
-  let fetchingMoreThreads = false;
+  const fetchingMoreThreads = writable(false);
   // Whether there are more threads to fetch
   $: canFetchMoreThreads = (data?.threads || []).length > 0;
   const pageSize = 10;
   // Fetch another page of threads
   const loadMoreThreads = () => {
-    if (fetchingMoreThreads) {
+    if ($fetchingMoreThreads) {
       return;
     }
 
@@ -57,7 +59,7 @@
     }
 
     const lastThread = threads[threads.length - 1].updated;
-    fetchingMoreThreads = true;
+    $fetchingMoreThreads = true;
     api
       .getClassThreads(fetch, currentClassId, { limit: pageSize, before: lastThread })
       .then((response) => {
@@ -68,7 +70,7 @@
         sadToast(`Failed to load more threads: ${e}`);
       })
       .then(() => {
-        fetchingMoreThreads = false;
+        $fetchingMoreThreads = false;
       });
   };
 </script>
@@ -130,7 +132,20 @@
           </SidebarItem>
         {/each}
         {#if canFetchMoreThreads}
-          <SidebarItem label="Load more ..." on:click={loadMoreThreads}></SidebarItem>
+          <SidebarItem
+            spanClass={`${$fetchingMoreThreads ? 'text-gray-500' : 'text-amber-700'}`}
+            label="Load more ..."
+            on:click={loadMoreThreads}
+          >
+            <svelte:fragment slot="icon">
+              <RefreshOutline
+                size="sm"
+                class={`${$fetchingMoreThreads ? 'text-gray-500' : 'text-amber-700'} mx-2 ${
+                  $fetchingMoreThreads ? 'animate-spin' : ''
+                }`}
+              />
+            </svelte:fragment>
+          </SidebarItem>
         {/if}
       </SidebarGroup>
     {:else}
@@ -168,7 +183,7 @@
   </DropdownItem>
   <DropdownDivider />
   <DropdownItem href="/logout" class="flex space-x-4 items-center">
-    <ArrowRightFromBracketSolid size="sm" />
+    <ArrowRightToBracketSolid size="sm" />
     <span>Logout</span>
   </DropdownItem>
 </Dropdown>
