@@ -31,7 +31,7 @@ from .auth import (
     encode_session_token,
     generate_auth_link,
 )
-from .authz import RelatedObject, Relation
+from .authz import Relation
 from .config import config
 from .errors import sentry
 from .files import FILE_TYPES, handle_create_file, handle_delete_file
@@ -400,77 +400,31 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
 
 
 @v1.get(
-    "/class/{class_id}/users/audit",
-    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
-    response_model=schemas.ClassUsers,
-)
-async def audit_class_users(class_id: str, request: Request, depth: int = 1):
-    objs = await request.state.authz.expand(
-        f"class:{class_id}", "member", max_depth=depth
-    )
-    ids = {int(o.entity.split(":")[-1]) for o in objs if not o.is_group}
-
-    # One single entity can have multiple paths
-    paths = dict[int, list[RelatedObject]]()
-    for o in objs:
-        if not o.is_group:
-            id_ = int(o.entity.split(":")[-1])
-            if id_ not in paths:
-                paths[id_] = []
-            paths[id_].append(o)
-
-    users = await models.User.get_all_by_id(request.state.db, list(ids))
-
-    return {
-        "users": [
-            schemas.ClassUser(
-                id=u.id,
-                name=u.name,
-                email=u.email,
-                state=u.state,
-                roles=schemas.ClassUserRoles(
-                    # TODO batch recheck for roles
-                    admin=any(f"class:{class_id}#admin" in p.path for p in paths[u.id]),
-                    teacher=any(
-                        f"class:{class_id}#teacher" in p.path for p in paths[u.id]
-                    ),
-                    student=any(
-                        f"class:{class_id}#student" in p.path for p in paths[u.id]
-                    ),
-                ),
-                explanation=[p.path for p in paths[u.id]],
-            )
-            for u in users
-        ],
-        "groups": [
-            schemas.UserGroup(
-                name=g.entity,
-                explanation=[g.path],
-            )
-            for g in objs
-            if g.is_group
-        ],
-    }
-
-
-@v1.get(
     "/class/{class_id}/users",
     dependencies=[Depends(Authz("can_view_users", "class:{class_id}"))],
     response_model=schemas.ClassUsers,
 )
-async def list_class_users(class_id: str, request: Request):
+async def list_class_users(
+    class_id: str, request: Request, limit: int = 20, offset: int = 0, search: str = ""
+):
     # Get hard-coded relations from DB. Everyone with an explicit role in the class.
     # NOTE: this is *not* necessarily everyone who has permission to view the class;
     # it's usually a subset, due to inherited permissions from parent objects.
     # To get the full list of everyone with access, we need to use the `/audit` endpoint.
-    users = await models.Class.get_members(request.state.db, int(class_id))
+    users = list[models.UserClassRole]()
 
     batch = list[Relation]()
-    for u in users:
+    async for u in models.Class.get_members(
+        request.state.db, int(class_id), limit=limit, offset=offset, search=search
+    ):
+        users.append(u)
         for role in ["admin", "teacher", "student"]:
             batch.append((f"user:{u.user_id}", role, f"class:{class_id}"))
 
-    results = await request.state.authz.check(batch)
+    total, results = await asyncio.gather(
+        models.Class.get_member_count(request.state.db, int(class_id), search=search),
+        request.state.authz.check(batch),
+    )
 
     class_users = list[schemas.ClassUser]()
     for i, u in enumerate(users):
@@ -489,7 +443,7 @@ async def list_class_users(class_id: str, request: Request):
             )
         )
 
-    return {"users": class_users, "groups": []}
+    return {"users": class_users, "limit": limit, "offset": offset, "total": total}
 
 
 @v1.post(
@@ -838,19 +792,44 @@ async def get_last_run(
     dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
     response_model=schemas.Threads,
 )
-async def list_threads(class_id: str, request: Request):
-    all_class_threads = await models.Thread.get_by_class_id(
-        request.state.db, int(class_id)
+async def list_threads(
+    class_id: str, request: Request, limit: int = 20, before: str | None = None
+):
+    threads = list[models.Thread]()
+
+    # Number of threads to fetch per page.
+    page_size = min(limit, 20)
+    # Parse `before` timestamp if it was given
+    current_latest_time: datetime | None = (
+        datetime.fromisoformat(before) if before else None
     )
-    filters = await request.state.authz.check(
-        [
-            f"user:{request.state.session.user.id}",
-            "can_view",
-            f"thread:{t.id}",
-        ]
-        for t in all_class_threads
+    can_view_coro = request.state.authz.list(
+        f"user:{request.state.session.user.id}",
+        "can_view",
+        "thread",
     )
-    threads = [t for t, f in zip(all_class_threads, filters) if f]
+    in_class_coro = request.state.authz.list(
+        f"class:{class_id}",
+        "parent",
+        "thread",
+    )
+    can_view, in_class = await asyncio.gather(can_view_coro, in_class_coro)
+    thread_ids = list(set(can_view) & set(in_class))
+
+    # Fetch a new page of threads from the database.
+    async for new_thread in models.Thread.get_all_by_id(
+        request.state.db, thread_ids, limit=page_size, before=current_latest_time
+    ):
+        if not new_thread:
+            break
+
+        current_latest_time = new_thread.updated
+
+        threads.append(new_thread)
+
+        if len(threads) >= limit:
+            break
+
     return {"threads": threads}
 
 

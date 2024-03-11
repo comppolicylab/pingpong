@@ -28,15 +28,45 @@
   import Logo from '$lib/components/Logo.svelte';
   import dayjs from '$lib/time';
   import type { LayoutData } from './$types';
+  import * as api from '$lib/api';
+  import { sadToast } from '$lib/toast';
 
   export let data: LayoutData;
 
   $: avatar = data?.me?.profile?.image_url;
   $: name = data?.me?.user?.name || data?.me?.user?.email;
   $: classes = data?.classes || [];
-  $: threads = (data?.threads || []).sort((a, b) => (a.created > b.created ? -1 : 1));
+  $: threads = (data?.threads || []).sort((a, b) => (a.updated > b.updated ? -1 : 1));
   $: currentClassId = parseInt($page.params.classId, 10);
   $: currentClass = classes.find((class_) => class_.id === currentClassId);
+
+  // Whether there is a request in flight to fetch more threads
+  let fetchingMoreThreads = false;
+  // Whether there are more threads to fetch
+  $: canFetchMoreThreads = (data?.threads || []).length > 0;
+  const pageSize = 10;
+  // Fetch another page of threads
+  const loadMoreThreads = () => {
+    if (fetchingMoreThreads) {
+      return;
+    }
+
+    if (!threads.length) {
+      canFetchMoreThreads = false;
+      return;
+    }
+
+    const lastThread = threads[threads.length - 1].updated;
+    fetchingMoreThreads = true;
+    api.getClassThreads(fetch, currentClassId, {limit: pageSize, before: lastThread}).then((response) => {
+      canFetchMoreThreads = !response.lastPage;
+      threads = [...threads, ...response.threads];
+    }).catch(e => {
+      sadToast(`Failed to load more threads: ${e}`);
+    }).then(() => {
+      fetchingMoreThreads = false;
+    });
+  };
 </script>
 
 <Sidebar asideClass="shrink-0 grow-0 w-80" activeUrl={$page.url.pathname}>
@@ -95,6 +125,9 @@
             </svelte:fragment>
           </SidebarItem>
         {/each}
+        {#if canFetchMoreThreads}
+        <SidebarItem label="Load more ..." on:click={loadMoreThreads}></SidebarItem>
+        {/if}
       </SidebarGroup>
     {:else}
       <SidebarGroup class="overflow-y-auto overflow-x-hidden">

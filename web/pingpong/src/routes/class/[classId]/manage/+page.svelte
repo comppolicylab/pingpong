@@ -101,7 +101,6 @@
   $: asstFiles = allFiles
     .filter((f) => f.state === 'success')
     .map((f) => f.response) as ServerFile[];
-  $: members = data?.classUsers || [];
 
   $: hasApiKey = !!data?.class?.api_key;
 
@@ -155,6 +154,15 @@
   // Submit file upload
   const uploadFile = (f: File, onProgress: (p: number) => void) => {
     return api.uploadFile(data.class.id, f, { onProgress });
+  };
+
+  /**
+   * Function to fetch users from the server.
+   */
+  const fetchUsers = async (page: number, pageSize: number, search?: string) => {
+    const limit = pageSize;
+    const offset = (page - 1) * pageSize;
+    return api.getClassUsers(fetch, data.class.id, { limit, offset, search });
   };
 </script>
 
@@ -289,7 +297,7 @@
       </div>
       <div class="col-span-2">
         <div class="mb-4">
-          <ViewUsers users={members} />
+          <ViewUsers fetchUsers={fetchUsers} />
         </div>
         <GradientButton
           color="cyanToBlue"
