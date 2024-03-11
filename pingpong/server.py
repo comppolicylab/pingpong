@@ -407,6 +407,10 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
 async def list_class_users(
     class_id: str, request: Request, limit: int = 20, offset: int = 0, search: str = ""
 ):
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="Offset must be non-negative")
+    if limit < 1:
+        raise HTTPException(status_code=400, detail="Limit must be positive")
     # Get hard-coded relations from DB. Everyone with an explicit role in the class.
     # NOTE: this is *not* necessarily everyone who has permission to view the class;
     # it's usually a subset, due to inherited permissions from parent objects.

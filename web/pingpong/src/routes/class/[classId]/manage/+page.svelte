@@ -161,7 +161,7 @@
    */
   const fetchUsers = async (page: number, pageSize: number, search?: string) => {
     const limit = pageSize;
-    const offset = (page - 1) * pageSize;
+    const offset = Math.max(0, (page - 1) * pageSize);
     return api.getClassUsers(fetch, data.class.id, { limit, offset, search });
   };
 </script>

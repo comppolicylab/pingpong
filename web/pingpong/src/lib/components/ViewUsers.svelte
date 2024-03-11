@@ -60,7 +60,7 @@
   // The list of pagination links to show.
   let pages: Array<LinkType> = [];
   // The index of the first user on the current page.
-  $: startIdx = Math.min(total, (page - 1) * pageSize + 1);
+  $: startIdx = Math.min(total, Math.max(0, (page - 1) * pageSize + 1));
   // The index of the last user on the current page.
   $: endIdx = Math.min(startIdx + pageSize - 1, total);
 
@@ -70,6 +70,10 @@
   const loadUsers = async () => {
     loading = true;
     const response = await fetchUsers(page, pageSize, search);
+    if (response.$status >= 400) {
+      sadToast(`Failed to load users: ${response.detail}`);
+      return;
+    }
     users = response.users;
     total = response.total;
     loading = false;
