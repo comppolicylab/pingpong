@@ -1232,7 +1232,7 @@ async def update_assistant(
     except openai.BadRequestError as e:
         raise HTTPException(400, e.message or "OpenAI rejected this request")
 
-    await request.state.authz.write(grant=grants, revoke=revokes)
+    await request.state.authz.write_safe(grant=grants, revoke=revokes)
 
     return asst
 
