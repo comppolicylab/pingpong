@@ -1202,7 +1202,7 @@ async def update_assistant(
         asst.description = req.description
     if req.tools is not None:
         openai_update["tools"] = req.tools
-        asst.tools = json.dumps(req.tools)
+        asst.tools = json.dumps([t.model_dump() for t in req.tools])
     if req.published is not None:
         ptuple = (f"class:{class_id}#member", "can_view", f"assistant:{asst.id}")
         if req.published:
