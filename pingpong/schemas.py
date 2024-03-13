@@ -2,9 +2,9 @@ from datetime import datetime
 from enum import Enum, StrEnum, auto
 from typing import Literal
 
-from openai.types.beta.assistant_create_params import Tool
+from openai.types.beta.assistant_tool import AssistantTool as Tool
+from openai.types.beta.threads import Message as OpenAIMessage
 from openai.types.beta.threads import Run as OpenAIRun
-from openai.types.beta.threads import ThreadMessage as OpenAIMessage
 from pydantic import BaseModel, Field, SecretStr
 
 from .gravatar import get_email_hash, get_gravatar_image
