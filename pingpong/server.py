@@ -801,8 +801,6 @@ async def list_threads(
 ):
     threads = list[models.Thread]()
 
-    # Number of threads to fetch per page.
-    page_size = min(limit, 20)
     # Parse `before` timestamp if it was given
     current_latest_time: datetime | None = (
         datetime.fromisoformat(before) if before else None
@@ -822,7 +820,7 @@ async def list_threads(
 
     # Fetch a new page of threads from the database.
     async for new_thread in models.Thread.get_all_by_id(
-        request.state.db, thread_ids, limit=page_size, before=current_latest_time
+        request.state.db, thread_ids, limit=limit, before=current_latest_time
     ):
         if not new_thread:
             break
