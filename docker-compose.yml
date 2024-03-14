@@ -44,7 +44,7 @@ services:
 
   authz:
     platform: linux/amd64
-    image: openfga/openfga:v1.4.3
+    image: openfga/openfga:v1.5.0
     container_name: pingpong-authz
     networks: [back]
     command: [run]
