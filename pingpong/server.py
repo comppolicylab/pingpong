@@ -799,6 +799,12 @@ async def get_last_run(
 async def list_threads(
     class_id: str, request: Request, limit: int = 20, before: str | None = None
 ):
+    if limit < 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Limit must be positive",
+        )
+
     threads = list[models.Thread]()
 
     # Parse `before` timestamp if it was given
