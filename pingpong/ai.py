@@ -1,7 +1,11 @@
 import functools
 import hashlib
+import logging
+from typing import IO, Dict, List
 
 import openai
+
+logger = logging.getLogger(__name__)
 
 
 async def generate_name(
@@ -27,6 +31,57 @@ async def generate_name(
         model=model,
     )
     return response.choices[0].message.content
+
+
+class StreamHandler(openai.AsyncAssistantEventHandler):
+    def __init__(self, *args, io: IO, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.io = io
+
+    async def on_text_delta(self, delta, snapshot) -> None:
+        self.io.write(delta.value)
+        self.io.flush()
+
+    async def on_text_created(self, text) -> None:
+        self.io.write("::$asst$::")
+        self.io.flush()
+
+
+async def add_new_thread_message(
+    cli: openai.AsyncClient,
+    *,
+    thread_id: str,
+    assistant_id: int,
+    message: str,
+    file_ids: List[str] | None = None,
+    metadata: Dict[str, str | int] | None = None,
+    stream: IO,
+):
+    try:
+        await cli.beta.threads.messages.create(
+            thread_id,
+            role="user",
+            content=message,
+            file_ids=file_ids,
+            metadata=metadata,
+        )
+
+        async with cli.beta.threads.runs.create_and_stream(
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            event_handler=StreamHandler(io=stream),
+        ) as run:
+            await run.until_done()
+    except Exception as e:
+        try:
+            logger.exception("Error adding new thread message")
+            stream.write(f"::$err$::{e}\n")
+            stream.flush()
+        except Exception:
+            logger.exception("Error writing to stream")
+            pass
+    finally:
+        stream.close()
 
 
 def hash_thread(messages, runs) -> str:

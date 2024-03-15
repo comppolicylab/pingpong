@@ -77,21 +77,34 @@ export const fullPath = (path: string) => {
 /**
  * Common fetch method.
  */
-const _fetch = async <R extends BaseData>(
+const _fetch = async (
   f: Fetcher,
   method: Method,
   path: string,
   headers?: Record<string, string>,
   body?: string | FormData
-): Promise<R & BaseResponse> => {
+) => {
   const full = fullPath(path);
-  const res = await f(full, {
+  return f(full, {
     method,
     headers,
     body,
     credentials: 'include',
     mode: 'cors'
   });
+};
+
+/**
+ * Common fetch method returning a JSON response.
+ */
+const _fetchJSON = async <R extends BaseData>(
+  f: Fetcher,
+  method: Method,
+  path: string,
+  headers?: Record<string, string>,
+  body?: string | FormData
+): Promise<R & BaseResponse> => {
+  const res = await _fetch(f, method, path, headers, body);
 
   let data: BaseData = {};
 
@@ -115,7 +128,7 @@ const _qmethod = async <T extends BaseData, R extends BaseData>(
 ) => {
   const params = new URLSearchParams(data as Record<string, string>);
   path = `${path}?${params}`;
-  return await _fetch<R>(f, method, path);
+  return await _fetchJSON<R>(f, method, path);
 };
 
 /**
@@ -129,7 +142,7 @@ const _bmethod = async <T extends BaseData, R extends BaseData>(
 ) => {
   const body = JSON.stringify(data);
   const headers = { 'Content-Type': 'application/json' };
-  return await _fetch<R>(f, method, path, headers, body);
+  return await _fetchJSON<R>(f, method, path, headers, body);
 };
 
 /**
@@ -1130,7 +1143,23 @@ export const postMessage = async (
   data: NewThreadMessageRequest
 ) => {
   const url = `class/${classId}/thread/${threadId}`;
-  return await POST<NewThreadMessageRequest, ThreadRun>(f, url, data);
+  const res = await _fetch(f, 'POST', url, { 'Content-Type': 'application/json' }, JSON.stringify(data));
+  if (!res.body) {
+    throw new Error('No response body');
+  }
+  const stream = res.body.pipeThrough(new TextDecoderStream());
+  const reader = stream.getReader();
+  return {
+    stream,
+    reader,
+    async* [Symbol.asyncIterator]() {
+      let chunk = await reader.read();
+      while (!chunk.done) {
+        yield chunk.value;
+        chunk = await reader.read();
+      }
+    }
+  }
 };
 
 /**

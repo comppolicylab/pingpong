@@ -1,7 +1,15 @@
+<script lang="ts" context="module">
+  export type ChatInputMessage = {
+    file_ids: string[];
+    message: string;
+  };
+</script>
+
 <script lang="ts">
+  import {createEventDispatcher} from 'svelte';
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
-  import { GradientButton } from 'flowbite-svelte';
+  import { GradientButton, Review } from 'flowbite-svelte';
   import { page } from '$app/stores';
   import { ChevronUpSolid } from 'flowbite-svelte-icons';
   import type {
@@ -14,6 +22,8 @@
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import FileUpload from '$lib/components/FileUpload.svelte';
   import { sadToast } from '$lib/toast';
+
+  const dispatcher = createEventDispatcher();
 
   /**
    * Whether to allow sending.
@@ -96,13 +106,24 @@
     };
   };
 
+  // Submit the form.
+  const submit = () => {
+    const file_ids = fileIds ? fileIds.split(',') : [];
+    if (!ref.value || disabled) {
+      return;
+    }
+    const message = ref.value;
+    $files = [];
+    ref.value = '';
+    dispatcher('submit', { file_ids, message });
+  }
+
   // Submit form when Enter (but not Shift+Enter) is pressed in textarea
   const maybeSubmit = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (!disabled) {
-        const target = e.target as HTMLTextAreaElement | undefined;
-        target?.form?.requestSubmit();
+        submit();
       }
     }
   };
@@ -202,7 +223,10 @@
       />
     {/if}
     <GradientButton
-      type="submit"
+      type="button"
+      on:click={submit}
+      on:touchstart={submit}
+      on:keydown={maybeSubmit}
       color="cyanToBlue"
       class={`${
         loading ? 'animate-pulse cursor-progress' : ''

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import time
 from datetime import datetime
 from typing import Annotated, Any
@@ -16,7 +17,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from jwt.exceptions import PyJWTError
 from sqlalchemy.sql import func
 
@@ -24,7 +25,13 @@ import pingpong.metrics as metrics
 import pingpong.models as models
 import pingpong.schemas as schemas
 
-from .ai import format_instructions, generate_name, get_openai_client, hash_thread
+from .ai import (
+    add_new_thread_message,
+    format_instructions,
+    generate_name,
+    get_openai_client,
+    hash_thread,
+)
 from .auth import (
     decode_auth_token,
     decode_session_token,
@@ -915,22 +922,31 @@ async def send_message(
     data: schemas.NewThreadMessage,
     request: Request,
     openai_client: OpenAIClient,
+    tasks: BackgroundTasks,
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
     asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
 
-    await openai_client.beta.threads.messages.create(
-        thread.thread_id,
-        role="user",
-        content=data.message,
-        file_ids=data.file_ids,
-        metadata={"user_id": request.state.session.user.id},
-    )
+    # Create a pipe to communicate with the background task and stream
+    # responses to the client.
+    pr, pw = os.pipe()
+    stream = os.fdopen(pw, "w")
+    reader = os.fdopen(pr, "r")
 
-    run = await openai_client.beta.threads.runs.create(
-        thread_id=thread.thread_id,
-        assistant_id=asst.assistant_id,
+    # Create a background task to finish communicating with the upstream server
+    # and then write the response to the stream.
+    asyncio.create_task(
+        add_new_thread_message(
+            openai_client,
+            thread_id=thread.thread_id,
+            assistant_id=asst.assistant_id,
+            message=data.message,
+            file_ids=data.file_ids,
+            metadata={"user_id": request.state.session.user.id},
+            stream=stream,
+        )
     )
+    # TODO - handle background task exceptions
 
     metrics.inbound_messages.inc(
         app=config.public_url,
@@ -942,9 +958,8 @@ async def send_message(
     thread.updated = func.now()
     request.state.db.add(thread)
     await request.state.db.commit()
-    await request.state.db.refresh(thread)
 
-    return {"thread": thread, "run": run}
+    return StreamingResponse(reader, media_type="text/event-stream")
 
 
 @v1.post(

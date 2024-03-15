@@ -9,14 +9,14 @@
   import { Pulse, SyncLoader } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
   import Logo from '$lib/components/Logo.svelte';
-  import ChatInput from '$lib/components/ChatInput.svelte';
+  import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
   import { EyeSlashOutline } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
 
   export let data;
 
   let submitting = writable(false);
-  let messages: api.OpenAIMessage[] = [];
+  let messages = writable([] as api.OpenAIMessage[]);
   let participants: api.ThreadParticipants = { user: {}, assistant: {} };
   let priv = false;
   let classId = 0;
@@ -29,7 +29,7 @@
   $: {
     if ($thread && Object.hasOwn($thread, 'messages')) {
       const t = $thread as api.ThreadWithMeta;
-      messages = t.messages
+      $messages = t.messages
         .filter((m) => m.content.length > 0)
         .sort((a, b) => a.created_at - b.created_at);
       participants = t.participants;
@@ -44,7 +44,7 @@
       const assts = data.assistants.filter((a) => Object.hasOwn(participants.assistant, a.id));
       fileTypes = data.uploadInfo.fileTypesForAssistants(...assts);
     } else {
-      messages = [];
+      $messages = [];
       participants = { user: {}, assistant: {} };
       priv = false;
       classId = 0;
@@ -102,35 +102,65 @@
   };
 
   // Handle sending a message
-  const handleSubmit: SubmitFunction = () => {
+  const handleSubmit = async (e: CustomEvent<ChatInputMessage>) => {
     if ($waiting) {
       sadToast(
         'A response to the previous message is being generated. Please wait before sending a new message.'
       );
       return;
     }
+
+    $waiting = true;
     $submitting = true;
+console.log("SUBMITTING MESSAGE", e.detail)
+console.log("messages", messages)
+    $messages = [...$messages, {
+      id: "",
+      role: 'user',
+      content: [{ type: 'text', text: { value: e.detail.message, annotations: [] } }],
+      created_at: Date.now(),
+      metadata: { user_id: data.me.user!.id },
+      assistant_id: "",
+      thread_id: "",
+      file_ids: e.detail.file_ids,
+      run_id: null,
+      object: "thread.message",
+    }];
 
-    return async ({ result, update }) => {
-      if (result.type !== 'success') {
-        sadToast('Chat failed! Please try again.');
-        return;
+    const {message, file_ids} = e.detail;
+    if (!message) {
+      sadToast('Please enter a message before sending.');
+      return;
+    }
+    const chunks = await api.postMessage(fetch, classId, threadId, { message, file_ids });
+    $submitting = false;
+
+    for await (const chunk of chunks) {
+      console.log("CHUNK", chunk)
+      const asstTag = "::$asst$::";
+      if (chunk.startsWith(asstTag)) {
+        const asstMessage = chunk.slice(asstTag.length);
+        $messages = [...$messages, {
+          id: "",
+          role: 'assistant',
+          content: [{ type: 'text', text: { value: asstMessage, annotations: [] } }],
+          created_at: Date.now(),
+          metadata: { user_id: data.me.user!.id },
+          assistant_id: "",
+          thread_id: "",
+          file_ids: [],
+          run_id: null,
+          object: "thread.message",
+        }];
+      } else {
+        // Append to the last message in the thread
+        const last = $messages[$messages.length - 1];
+        last.content[last.content.length - 1].text.value += chunk;
+        $messages = [...$messages];
       }
+    }
 
-      $waiting = true;
-
-      await data.thread.refresh(false);
-      update();
-
-      $submitting = false;
-
-      // Do a blocking refresh if the completion is still running
-      if (!api.finished(($thread as api.ThreadWithMeta).run)) {
-        await data.thread.refresh(true);
-      }
-
-      $waiting = false;
-    };
+    $waiting = false;
   };
 
   // Handle file upload
@@ -167,8 +197,8 @@
     </div>
   {/if}
   <div class="w-full h-full flex flex-col justify-between">
-    <div class="overflow-y-auto pb-4 px-12" use:scroll={messages}>
-      {#each messages as message}
+    <div class="overflow-y-auto pb-4 px-12" use:scroll={$messages}>
+      {#each $messages as message}
         <div class="py-4 px-6 flex gap-x-3">
           <div class="shrink-0">
             {#if message.role === 'user'}
@@ -215,12 +245,8 @@
 
     {#if !loading}
       <div class="w-full bottom-8 bg-gradient-to-t from-white to-transparent">
-        <form
-          class="w-11/12 mx-auto"
-          action="?/newMessage"
-          method="POST"
-          use:enhance={handleSubmit}
-        >
+        <div
+          class="w-11/12 mx-auto">
           <ChatInput
             mimeType={data.uploadInfo.mimeType}
             maxSize={data.uploadInfo.private_file_max_size}
@@ -229,8 +255,9 @@
             loading={$submitting || $waiting}
             upload={handleUpload}
             remove={handleRemove}
+            on:submit={handleSubmit}
           />
-        </form>
+        </div>
       </div>
     {/if}
   </div>
