@@ -1,10 +1,10 @@
 <script lang="ts">
-  import type { SubmitFunction } from '@sveltejs/kit';
+  import {page} from '$app/stores';
+  import { onMount } from 'svelte';
   import { writable } from 'svelte/store';
   import * as api from '$lib/api';
   import { sadToast } from '$lib/toast';
   import { blur } from 'svelte/transition';
-  import { enhance } from '$app/forms';
   import { Span, Avatar } from 'flowbite-svelte';
   import { Pulse, SyncLoader } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
@@ -19,8 +19,8 @@
   let messages = writable([] as api.OpenAIMessage[]);
   let participants: api.ThreadParticipants = { user: {}, assistant: {} };
   let priv = false;
-  let classId = 0;
-  let threadId = 0;
+  const classId = parseInt($page.params.classId);
+  const threadId = parseInt($page.params.threadId);
   let waiting = writable(false);
   let fileTypes = '';
   $: thread = data?.thread?.store;
@@ -29,13 +29,11 @@
   $: {
     if ($thread && Object.hasOwn($thread, 'messages')) {
       const t = $thread as api.ThreadWithMeta;
-      $messages = t.messages
-        .filter((m) => m.content.length > 0)
-        .sort((a, b) => a.created_at - b.created_at);
+      // $messages = t.messages
+      //   .filter((m) => m.content.length > 0)
+      //   .sort((a, b) => a.created_at - b.created_at);
       participants = t.participants;
       priv = t.thread.private;
-      classId = t.thread.class_id;
-      threadId = t.thread.id;
       if (!loading) {
         waiting.set(!api.finished(t.run));
       }
@@ -44,10 +42,9 @@
       const assts = data.assistants.filter((a) => Object.hasOwn(participants.assistant, a.id));
       fileTypes = data.uploadInfo.fileTypesForAssistants(...assts);
     } else {
-      $messages = [];
+      //$messages = [];
       participants = { user: {}, assistant: {} };
       priv = false;
-      classId = 0;
     }
   }
   $: loading = !$thread && data?.thread?.loading;
@@ -101,49 +98,14 @@
     };
   };
 
-  // Handle sending a message
-  const handleSubmit = async (e: CustomEvent<ChatInputMessage>) => {
-    if ($waiting) {
-      sadToast(
-        'A response to the previous message is being generated. Please wait before sending a new message.'
-      );
-      return;
-    }
-
-    $waiting = true;
-    $submitting = true;
-console.log("SUBMITTING MESSAGE", e.detail)
-console.log("messages", messages)
-    $messages = [...$messages, {
-      id: "",
-      role: 'user',
-      content: [{ type: 'text', text: { value: e.detail.message, annotations: [] } }],
-      created_at: Date.now(),
-      metadata: { user_id: data.me.user!.id },
-      assistant_id: "",
-      thread_id: "",
-      file_ids: e.detail.file_ids,
-      run_id: null,
-      object: "thread.message",
-    }];
-
-    const {message, file_ids} = e.detail;
-    if (!message) {
-      sadToast('Please enter a message before sending.');
-      return;
-    }
-    const chunks = await api.postMessage(fetch, classId, threadId, { message, file_ids });
-    $submitting = false;
-
-    for await (const chunk of chunks) {
-      console.log("CHUNK", chunk)
-      const asstTag = "::$asst$::";
-      if (chunk.startsWith(asstTag)) {
-        const asstMessage = chunk.slice(asstTag.length);
+  // Merge incoming stream chunks into the chat thread.
+  const handleStreamChunk = (chunk: object) => {
+    switch (chunk.type) {
+        case 'message_created':
         $messages = [...$messages, {
           id: "",
-          role: 'assistant',
-          content: [{ type: 'text', text: { value: asstMessage, annotations: [] } }],
+          role: chunk.role,
+          content: [{ type: 'text', text: { value: '', annotations: [] } }],
           created_at: Date.now(),
           metadata: { user_id: data.me.user!.id },
           assistant_id: "",
@@ -152,16 +114,76 @@ console.log("messages", messages)
           run_id: null,
           object: "thread.message",
         }];
-      } else {
-        // Append to the last message in the thread
-        const last = $messages[$messages.length - 1];
-        last.content[last.content.length - 1].text.value += chunk;
-        $messages = [...$messages];
+          return true;
+        case 'message_delta':
+          const lastMessage = $messages[$messages.length - 1];
+          lastMessage.content[0].text.value += chunk.delta.content[0].text.value;
+          $messages = [...$messages];
+          return true;
+        case 'error':
+          sadToast(chunk.detail || "An unknown error occurred.");
+          return false;
+        default:
+          console.warn("Unhandled chunk type", chunk.type, chunk)
+          return true;
+      }
+  }
+
+  // Handle sending a message
+  const postMessage = async ({message, file_ids}: ChatInputMessage) => {
+    if ($waiting) {
+      sadToast(
+        'A response to the previous message is being generated. Please wait before sending a new message.'
+      );
+      return;
+    }
+
+    if (!message) {
+      sadToast('Please enter a message before sending.');
+      return;
+    }
+
+    $waiting = true;
+    $submitting = true;
+    $messages = [...$messages, {
+      id: "",
+      role: 'user',
+      content: [{ type: 'text', text: { value: message, annotations: [] } }],
+      created_at: Date.now(),
+      metadata: { user_id: data.me.user!.id },
+      assistant_id: "",
+      thread_id: "",
+      file_ids,
+      run_id: null,
+      object: "thread.message",
+    }];
+
+    const chunks = await api.postMessage(fetch, classId, threadId, { message, file_ids });
+    $submitting = false;
+
+    for await (const chunk of chunks) {
+      console.log("CHUNK", chunk)
+      if (!handleStreamChunk(chunk)) {
+        break;
       }
     }
 
     $waiting = false;
   };
+
+  const handleSubmit = (e: CustomEvent<ChatInputMessage>) => {
+    postMessage(e.detail);
+  };
+
+  onMount(() => {
+    // Check the history state and see if a new thread was created.
+    const state = history.state as { newThread?: ChatInputMessage } | undefined;
+    console.log("HSITORY", state)
+    if (state?.newThread) {
+      // Run the submit handler.
+      postMessage(state.newThread);
+    }
+  })
 
   // Handle file upload
   const handleUpload = (f: File, onProgress: (p: number) => void) => {

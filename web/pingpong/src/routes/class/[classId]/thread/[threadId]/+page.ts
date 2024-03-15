@@ -6,8 +6,6 @@ export const load: PageLoad = async ({ fetch, params }) => {
   const threadId = parseInt(params.threadId, 10);
   const thread = threads(fetch, classId, threadId);
 
-  // kick off the thread poller, but don't wait for it
-  thread.refresh();
   return {
     thread
   };

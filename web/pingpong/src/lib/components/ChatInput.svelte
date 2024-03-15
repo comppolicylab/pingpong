@@ -63,6 +63,8 @@
 
   // Text area reference for fixing height.
   let ref: HTMLTextAreaElement;
+  // Real (visible) text area input reference.
+  let realRef: HTMLTextAreaElement;
   // Container for the list of files, for calculating height.
   let fileListRef: HTMLDivElement;
 
@@ -114,8 +116,10 @@
     }
     const message = ref.value;
     $files = [];
-    ref.value = '';
     dispatcher('submit', { file_ids, message });
+    ref.value = '';
+    realRef.value = '';
+    fixHeight(realRef);
   }
 
   // Submit form when Enter (but not Shift+Enter) is pressed in textarea
@@ -195,6 +199,7 @@
   </div>
   <div class="relative top-[2px]">
     <textarea
+      bind:this={realRef}
       id="message"
       rows="1"
       name="message"

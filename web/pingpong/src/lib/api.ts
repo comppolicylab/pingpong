@@ -1,4 +1,5 @@
 import { browser } from '$app/environment';
+import {TextLineStream, JSONStream } from '$lib/streams';
 
 /**
  * HTTP methods.
@@ -41,6 +42,18 @@ export type ErrorResponse = Error & BaseResponse;
 export const isErrorResponse = (r: unknown): r is ErrorResponse => {
   return !!r && Object.hasOwn(r, '$status') && (r as BaseResponse).$status >= 400;
 };
+
+/**
+ * Expand a response into its error and data components.
+ */
+export const expandResponse = <R extends BaseData>(r: BaseResponse & (Error | R)) => {
+  const $status = r.$status || 0;
+  if (isErrorResponse(r)) {
+    return { $status, error: r as Error, data: null };
+  } else {
+    return { $status, error: null, data: r as R };
+  }
+}
 
 /**
  * Generic response returned by some API endpoints.
@@ -103,7 +116,7 @@ const _fetchJSON = async <R extends BaseData>(
   path: string,
   headers?: Record<string, string>,
   body?: string | FormData
-): Promise<R & BaseResponse> => {
+): Promise<(R | Error) & BaseResponse> => {
   const res = await _fetch(f, method, path, headers, body);
 
   let data: BaseData = {};
@@ -114,7 +127,7 @@ const _fetchJSON = async <R extends BaseData>(
     // Do nothing
   }
 
-  return { $status: res.status, ...data } as R & BaseResponse;
+  return { $status: res.status, ...data } as (R | Error) & BaseResponse;
 };
 
 /**
@@ -552,23 +565,31 @@ export type GetClassThreadsOpts = {
  */
 export const getClassThreads = async (f: Fetcher, classId: number, opts?: GetClassThreadsOpts) => {
   const url = `class/${classId}/threads`;
-  const result = await GET<GetClassThreadsOpts, Threads>(f, url, opts);
+  const result = expandResponse(await GET<GetClassThreadsOpts, Threads>(f, url, opts));
+
+  if (result.error) {
+    return {
+      lastPage: true,
+      threads: [],
+      error: result.error,
+    };
+  }
+
   let lastPage = false;
   // Add a flag to indicate if this is the last page of results.
   // If there was a requested limit and the server returned
   // fewer results, then we know we're on the last page.
   // If there was no limit, then the last page is when we get
   // an empty list of threads.
-  if (result.threads) {
-    if (opts?.limit) {
-      lastPage = result.threads.length < opts.limit;
-    } else {
-      lastPage = result.threads.length === 0;
-    }
+  if (opts?.limit) {
+    lastPage = result.data.threads.length < opts.limit;
+  } else {
+    lastPage = result.data.threads.length === 0;
   }
   return {
-    ...result,
-    lastPage
+    ...result.data,
+    lastPage,
+    error: null,
   };
 };
 
@@ -593,11 +614,18 @@ export type Assistant = {
 };
 
 /**
+ * Information about assistant creators.
+ */
+export type AssistantCreators = {
+  [id: number]: Profile;
+};
+
+/**
  * Information about multiple assistants, plus metadata about creators.
  */
 export type Assistants = {
   assistants: Assistant[];
-  creators: { [id: number]: Profile };
+  creators: AssistantCreators;
 };
 
 /**
@@ -949,10 +977,9 @@ export const removeClassUser = async (f: Fetcher, classId: number, userId: numbe
  * Parameters for creating a new thread.
  */
 export type CreateThreadRequest = {
-  message: string;
   assistant_id: number;
   parties?: number[];
-  file_ids?: string[];
+  message: string;
 };
 
 /**
@@ -1147,7 +1174,10 @@ export const postMessage = async (
   if (!res.body) {
     throw new Error('No response body');
   }
-  const stream = res.body.pipeThrough(new TextDecoderStream());
+  const stream = res.body
+    .pipeThrough(new TextDecoderStream())
+    .pipeThrough(new TextLineStream())
+    .pipeThrough(new JSONStream());
   const reader = stream.getReader();
   return {
     stream,
@@ -1333,7 +1363,15 @@ export type GetFileSupportFilter = (
  */
 export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/upload_info`;
-  const info = await GET<never, UploadInfo>(f, url);
+  const infoResponse = expandResponse(await GET<never, UploadInfo>(f, url));
+
+  const info = infoResponse.data || {
+    types: [],
+    allow_private: false,
+    private_file_max_size: 0,
+    class_file_max_size: 0,
+    error: infoResponse.error,
+  }
 
   // Create a lookup table for mime types.
   const _mimeTypeLookup = new Map<string, FileTypeInfo>();

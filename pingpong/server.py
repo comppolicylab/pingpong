@@ -851,7 +851,7 @@ async def list_threads(
 @v1.post(
     "/class/{class_id}/thread",
     dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
-    response_model=schemas.ThreadRun,
+    response_model=schemas.Thread,
 )
 async def create_thread(
     class_id: str,
@@ -860,20 +860,11 @@ async def create_thread(
     openai_client: OpenAIClient,
 ):
     parties = list[models.User]()
-    if req.parties:
-        parties = await models.User.get_all_by_id(request.state.db, req.parties)
 
-    name = await generate_name(openai_client, req.message)
-
-    thread = await openai_client.beta.threads.create(
-        messages=[
-            {
-                "metadata": {"user_id": request.state.session.user.id},
-                "role": "user",
-                "content": req.message,
-                "file_ids": req.file_ids,
-            }
-        ]
+    name, thread, parties = await asyncio.gather(
+        generate_name(openai_client, req.message),
+        openai_client.beta.threads.create(),
+        models.User.get_all_by_id(request.state.db, req.parties),
     )
 
     new_thread = {
@@ -888,20 +879,13 @@ async def create_thread(
     result: None | models.Thread = None
     try:
         result = await models.Thread.create(request.state.db, new_thread)
-        asst = await models.Assistant.get_by_id(request.state.db, req.assistant_id)
 
         grants = [
             (f"class:{class_id}", "parent", f"thread:{result.id}"),
         ] + [(f"user:{p.id}", "party", f"thread:{result.id}") for p in parties]
         await request.state.authz.write(grant=grants)
 
-        # Start a new thread run.
-        run = await openai_client.beta.threads.runs.create(
-            thread_id=thread.id,
-            assistant_id=asst.assistant_id,
-        )
-
-        return {"thread": result, "run": run}
+        return result
     except Exception as e:
         await openai_client.beta.threads.delete(thread.id)
         if result:
@@ -922,7 +906,6 @@ async def send_message(
     data: schemas.NewThreadMessage,
     request: Request,
     openai_client: OpenAIClient,
-    tasks: BackgroundTasks,
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
     asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)

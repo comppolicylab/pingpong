@@ -1,5 +1,6 @@
 import functools
 import hashlib
+import json
 import logging
 from typing import IO, Dict, List
 
@@ -38,12 +39,66 @@ class StreamHandler(openai.AsyncAssistantEventHandler):
         super().__init__(*args, **kwargs)
         self.io = io
 
-    async def on_text_delta(self, delta, snapshot) -> None:
-        self.io.write(delta.value)
+    async def on_message_created(self, message) -> None:
+        self.io.write('{"type":"message_created","role":"assistant"}\n')
         self.io.flush()
 
-    async def on_text_created(self, text) -> None:
-        self.io.write("::$asst$::")
+    async def on_message_delta(self, delta, snapshot) -> None:
+        self.io.write(
+            json.dumps(
+                {
+                    "type": "message_delta",
+                    "delta": delta.model_dump(),
+                }
+            )
+        )
+        self.io.write("\n")
+        self.io.flush()
+
+    async def on_tool_call_created(self, tool_call) -> None:
+        self.io.write('{"type":"tool_call_created"}\n')
+        self.io.flush()
+
+    async def on_tool_call_delta(self, delta, snapshot) -> None:
+        self.io.write(
+            json.dumps(
+                {
+                    "type": "tool_call_delta",
+                    "delta": delta.model_dump(),
+                }
+            )
+        )
+        self.io.write("\n")
+        self.io.flush()
+
+    async def on_run_step_created(self, run_step) -> None:
+        self.io.write('{"type":"run_step_created"}\n')
+        self.io.flush()
+
+    async def on_run_step_delta(self, delta, snapshot) -> None:
+        self.io.write(
+            json.dumps(
+                {
+                    "type": "run_step_delta",
+                    "delta": delta.model_dump(),
+                }
+            )
+        )
+        self.io.write("\n")
+        self.io.flush()
+
+    async def on_timeout(self) -> None:
+        self.io.write(
+            '{"type":"error","detail":"Stream timed out waiting for response"}\n'
+        )
+        self.io.flush()
+
+    async def on_done(self, run) -> None:
+        self.io.write('{"type":"done"}\n')
+        self.io.flush()
+
+    async def on_exception(self, exception) -> None:
+        self.io.write(json.dumps({"type": "error", "detail": str(exception)}) + "\n")
         self.io.flush()
 
 

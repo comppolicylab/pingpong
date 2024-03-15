@@ -13,8 +13,12 @@ const HOME = '/';
  */
 export const load: LayoutLoad = async ({ fetch, url, params }) => {
   // Fetch the current user
-  const me = await api.me(fetch);
-  const authed = me.status === 'valid';
+  const me = api.expandResponse(await api.me(fetch));
+  if (me.error) {
+    throw redirect(302, LOGIN);
+  }
+
+  const authed = me.data.status === 'valid';
 
   if (url.pathname === LOGIN) {
     // If the user is logged in, go to the home page.
@@ -45,7 +49,7 @@ export const load: LayoutLoad = async ({ fetch, url, params }) => {
   };
 
   if (authed) {
-    const classes = api.getMyClasses(fetch).then(({ classes }) => classes);
+    const classes = api.getMyClasses(fetch).then(api.expandResponse).then(({ error, data }) => error ? [] : data.classes);
     let threads: Promise<Thread[]> = Promise.resolve([]);
     let institutions: Promise<Institution[]> = Promise.resolve([]);
 
@@ -57,7 +61,8 @@ export const load: LayoutLoad = async ({ fetch, url, params }) => {
 
     institutions = api
       .getInstitutions(fetch, 'can_create_class')
-      .then(({ institutions }) => institutions);
+      .then(api.expandResponse)
+      .then(({ error, data }) => error ? [] : data.institutions);
 
     // After all requests have fired / returned, set the state.
     additionalState.classes = await classes;
@@ -66,7 +71,7 @@ export const load: LayoutLoad = async ({ fetch, url, params }) => {
   }
 
   return {
-    me,
+    me: me.data,
     ...additionalState
   };
 };
