@@ -183,3 +183,6 @@ node_modules/
 *.sqlite3
 *.sqlite
 docker.env
+
+# Other
+load_test_results_*
