@@ -90,7 +90,7 @@ def make_request(i: int, api_key: str, assistant_id: str):
             "status": run.status,
             "duration": time.time() - t_start,
             "index": i,
-            "error": run.last_error,
+            "error": run.last_error.model_dump() if run.last_error else None,
             "result": run.model_dump(),
         }
     except Exception as e:
