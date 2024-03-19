@@ -356,9 +356,13 @@ export const grants = async <T extends NamedGrantsQuery>(
   const grantNames = Object.keys(query);
   const grants = grantNames.map((name) => query[name]);
   const results = await POST<GrantsQuery, Grants>(f, 'me/grants', { grants });
+  const expanded = expandResponse(results);
+  if (expanded.error) {
+    throw expanded.error;
+  }
   const verdicts: NamedGrants = {};
   for (let i = 0; i < grantNames.length; i++) {
-    verdicts[grantNames[i]] = results.grants[i].verdict;
+    verdicts[grantNames[i]] = expanded.data.grants[i].verdict;
   }
   return verdicts as { [name in keyof T]: boolean };
 };
@@ -893,11 +897,20 @@ export const getClassUsers = async (f: Fetcher, classId: number, opts?: GetClass
   const url = `class/${classId}/users`;
 
   const response = await GET<GetClassUsersOpts, ClassUsers>(f, url, opts);
-  const lastPage = response.users.length < response.limit;
+  const expanded = expandResponse(response);
+  if (expanded.error) {
+    return {
+      lastPage: true,
+      users: [],
+      error: expanded.error,
+    };
+  }
+  const lastPage = expanded.data.users.length < expanded.data.limit;
 
   return {
-    ...response,
-    lastPage
+    ...expanded.data,
+    lastPage,
+    error: null,
   };
 };
 
@@ -1010,7 +1023,7 @@ export type Thread = {
  */
 export const createThread = async (f: Fetcher, classId: number, data: CreateThreadRequest) => {
   const url = `class/${classId}/thread`;
-  return await POST<CreateThreadRequest, Thread>(f, url, data);
+  return await POST<CreateThreadRequest, ThreadWithMeta>(f, url, data);
 };
 
 type LastError = {
@@ -1160,6 +1173,34 @@ export type ThreadRun = {
   run: OpenAIRun;
 };
 
+export type OpenAIMessageDelta = {
+  content: Content[];
+  role: null; // TODO - is this correct?
+  file_ids: string[] | null;
+}
+
+export type ThreadStreamMessageDeltaChunk = {
+  type: 'message_delta';
+  delta: OpenAIMessageDelta;
+}
+
+export type ThreadStreamMessageCreatedChunk = {
+  type: 'message_created';
+  role: 'user' | 'assistant';
+  message: OpenAIMessage;
+}
+
+export type ThreadStreamErrorChunk = {
+  type: 'error';
+  detail: string;
+}
+
+export type ThreadStreamDoneChunk = {
+  type: 'done';
+}
+
+export type ThreadStreamChunk = ThreadStreamMessageDeltaChunk | ThreadStreamMessageCreatedChunk | ThreadStreamErrorChunk | ThreadStreamDoneChunk;
+
 /**
  * Post a new message to the thread.
  */
@@ -1185,7 +1226,7 @@ export const postMessage = async (
     async* [Symbol.asyncIterator]() {
       let chunk = await reader.read();
       while (!chunk.done) {
-        yield chunk.value;
+        yield chunk.value as ThreadStreamChunk;
         chunk = await reader.read();
       }
     }

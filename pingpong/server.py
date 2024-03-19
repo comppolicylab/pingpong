@@ -727,11 +727,9 @@ async def get_thread(
         )
     ]
 
-    messages = await openai_client.beta.threads.messages.list(thread.thread_id)
-    user_ids = {m.metadata.get("user_id") for m in messages.data} - {None}
-    users = await models.User.get_all_by_id(request.state.db, list(user_ids))
-    assistants = await models.Assistant.get_all_by_id(
-        request.state.db, [thread.assistant_id]
+    messages, assistants = await asyncio.gather(
+        openai_client.beta.threads.messages.list(thread.thread_id),
+        models.Assistant.get_all_by_id(request.state.db, [thread.assistant_id]),
     )
     return {
         "hash": hash_thread(messages, runs),
@@ -739,7 +737,7 @@ async def get_thread(
         "run": runs[0] if runs else None,
         "messages": list(messages.data),
         "participants": {
-            "user": {u.id: schemas.Profile.from_email(u.email) for u in users},
+            "user": {u.id: schemas.Profile.from_email(u.email) for u in thread.users},
             "assistant": {a.id: a.name for a in assistants},
         },
     }
@@ -851,7 +849,7 @@ async def list_threads(
 @v1.post(
     "/class/{class_id}/thread",
     dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
-    response_model=schemas.Thread,
+    response_model=schemas.ThreadWithMeta,
 )
 async def create_thread(
     class_id: str,
@@ -861,10 +859,11 @@ async def create_thread(
 ):
     parties = list[models.User]()
 
-    name, thread, parties = await asyncio.gather(
+    name, thread, parties, assts = await asyncio.gather(
         generate_name(openai_client, req.message),
         openai_client.beta.threads.create(),
         models.User.get_all_by_id(request.state.db, req.parties),
+        models.Assistant.get_all_by_id(request.state.db, [req.assistant_id]),
     )
 
     new_thread = {
@@ -885,10 +884,25 @@ async def create_thread(
         ] + [(f"user:{p.id}", "party", f"thread:{result.id}") for p in parties]
         await request.state.authz.write(grant=grants)
 
-        return result
+        return {
+            "hash": "",
+            "thread": result,
+            "run": None,
+            "messages": [],
+            "participants": {
+                "user": {
+                    u.id: schemas.Profile.from_email(u.email) for u in result.users
+                },
+                "assistant": {a.id: a.name for a in assts},
+            },
+        }
     except Exception as e:
+        logger.error("Error creating thread: %s", e)
         await openai_client.beta.threads.delete(thread.id)
         if result:
+            # Delete users-threads mapping
+            for user in result.users:
+                result.users.remove(user)
             await result.delete(request.state.db)
         raise e
 

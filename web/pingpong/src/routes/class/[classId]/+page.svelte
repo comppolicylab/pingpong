@@ -7,6 +7,8 @@
   import { EyeSlashOutline, ChevronDownSolid } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
+  import {createThread} from '$lib/stores/threads';
+  import {errorMessage} from '$lib/errors';
   import type { Assistant, Thread } from '$lib/api';
 
   /**
@@ -61,20 +63,22 @@
     }
 
     const partyIds = parties ? parties.split(',').map((id) => parseInt(id, 10)) : [];
-    const response = api.expandResponse(
-      await api.createThread(fetch, data.class.id, {
+    try {
+      const newThread = await createThread(fetch, data.class.id, {
         assistant_id: $assistant.id,
         parties: partyIds,
+        // TODO - the only reason to pass the message is to generate a title.
+        // We should do this in a background thread.
         message: form.message,
       })
-    );
-
-    if (response.error) {
+      // Post the message to the new thread, but don't wait for the response
+      // before we redirect to the thread page.
+      newThread.postMessage(data.me.user!.id, form.message, form.file_ids);
+      goto(`/class/${newThread.classId}/thread/${newThread.threadId}`);
+    } catch (e) {
+      sadToast(`Failed to create thread. Error: ${errorMessage(e)}`);
+    } finally {
       $loading = false;
-      sadToast(`Failed to create thread. Error: ${response.error.detail || 'unknown error'}`);
-      return;
-    } else {
-      goto(`/class/${response.data.class_id}/thread/${response.data.id}`, { state: { newThread: form } });
     }
   };
 

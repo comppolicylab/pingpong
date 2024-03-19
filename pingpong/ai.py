@@ -40,7 +40,17 @@ class StreamHandler(openai.AsyncAssistantEventHandler):
         self.io = io
 
     async def on_message_created(self, message) -> None:
-        self.io.write('{"type":"message_created","role":"assistant"}\n')
+        # self.io.write('{"type":"message_created","role":"assistant"}\n')
+        self.io.write(
+            json.dumps(
+                {
+                    "type": "message_created",
+                    "role": "assistant",
+                    "message": message.model_dump(),
+                }
+            )
+            + "\n"
+        )
         self.io.flush()
 
     async def on_message_delta(self, delta, snapshot) -> None:

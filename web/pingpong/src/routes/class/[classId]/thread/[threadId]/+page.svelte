@@ -1,9 +1,8 @@
 <script lang="ts">
   import {page} from '$app/stores';
-  import { onMount } from 'svelte';
-  import { writable } from 'svelte/store';
   import * as api from '$lib/api';
   import { sadToast } from '$lib/toast';
+  import { errorMessage } from '$lib/errors';
   import { blur } from 'svelte/transition';
   import { Span, Avatar } from 'flowbite-svelte';
   import { Pulse, SyncLoader } from 'svelte-loading-spinners';
@@ -15,41 +14,27 @@
 
   export let data;
 
-  let submitting = writable(false);
-  let messages = writable([] as api.OpenAIMessage[]);
-  let participants: api.ThreadParticipants = { user: {}, assistant: {} };
-  let priv = false;
   const classId = parseInt($page.params.classId);
   const threadId = parseInt($page.params.threadId);
-  let waiting = writable(false);
-  let fileTypes = '';
-  $: thread = data?.thread?.store;
-  $: threadStatus = $thread?.$status || 0;
-  $: threadUsers = ($thread as api.ThreadWithMeta)?.thread?.users || [];
-  $: {
-    if ($thread && Object.hasOwn($thread, 'messages')) {
-      const t = $thread as api.ThreadWithMeta;
-      // $messages = t.messages
-      //   .filter((m) => m.content.length > 0)
-      //   .sort((a, b) => a.created_at - b.created_at);
-      participants = t.participants;
-      priv = t.thread.private;
-      if (!loading) {
-        waiting.set(!api.finished(t.run));
-      }
 
+  let fileTypes = '';
+  $: messages = data.thread.messages;
+  $: participants = data.thread.participants;
+  $: loading = data.thread.loading;
+  $: submitting = data.thread.submitting;
+  $: waiting = data.thread.waiting;
+  $: published = data.thread.published;
+  $: error = data.thread.error;
+  $: assistantId = data.thread.assistantId;
+  $: users = data.thread.users;
+  $: {
       // Figure out the capabilities of assistants in the thread
-      const assts = data.assistants.filter((a) => Object.hasOwn(participants.assistant, a.id));
+      const assts = data.assistants.filter((a) => Object.hasOwn($participants.assistant, a.id));
       fileTypes = data.uploadInfo.fileTypesForAssistants(...assts);
-    } else {
-      //$messages = [];
-      participants = { user: {}, assistant: {} };
-      priv = false;
-    }
   }
-  $: loading = !$thread && data?.thread?.loading;
+  // TODO - should figure this out by checking grants instead of participants
   $: canSubmit =
-    !!participants.user && data?.me?.user?.id && !!participants.user[data?.me?.user?.id];
+    !!$participants.user && data?.me?.user?.id && !!$participants.user[data?.me?.user?.id];
 
   // Get the name of the participant in the chat thread.
   const getName = (message: api.OpenAIMessage) => {
@@ -58,13 +43,13 @@
       if (!userId) {
         return 'Unknown';
       }
-      const participant = participants.user[userId];
+      const participant = $participants.user[userId];
       return participant?.email || 'Unknown';
     } else {
-      return (
-        participants.assistant[($thread as api.ThreadWithMeta).thread.assistant_id] ||
-        'PingPong Bot'
-      );
+      if ($assistantId) {
+        return $participants.assistant[$assistantId] || 'PingPong Bot';
+      }
+      return 'PingPong Bot';
     }
   };
 
@@ -75,7 +60,7 @@
       if (!userId) {
         return '';
       }
-      return participants.user[userId]?.image_url;
+      return $participants.user[userId]?.image_url;
     }
     // TODO - custom image for the assistant
 
@@ -83,7 +68,7 @@
   };
 
   // Scroll to the bottom of the chat thread.
-  const scroll = (el: HTMLDivElement, messageList: api.OpenAIMessage[]) => {
+  const scroll = (el: HTMLDivElement, messageList: unknown[]) => {
     // Scroll to the bottom of the element.
     return {
       // TODO - would be good to figure out how to do this without a timeout.
@@ -98,92 +83,18 @@
     };
   };
 
-  // Merge incoming stream chunks into the chat thread.
-  const handleStreamChunk = (chunk: object) => {
-    switch (chunk.type) {
-        case 'message_created':
-        $messages = [...$messages, {
-          id: "",
-          role: chunk.role,
-          content: [{ type: 'text', text: { value: '', annotations: [] } }],
-          created_at: Date.now(),
-          metadata: { user_id: data.me.user!.id },
-          assistant_id: "",
-          thread_id: "",
-          file_ids: [],
-          run_id: null,
-          object: "thread.message",
-        }];
-          return true;
-        case 'message_delta':
-          const lastMessage = $messages[$messages.length - 1];
-          lastMessage.content[0].text.value += chunk.delta.content[0].text.value;
-          $messages = [...$messages];
-          return true;
-        case 'error':
-          sadToast(chunk.detail || "An unknown error occurred.");
-          return false;
-        default:
-          console.warn("Unhandled chunk type", chunk.type, chunk)
-          return true;
-      }
-  }
-
   // Handle sending a message
   const postMessage = async ({message, file_ids}: ChatInputMessage) => {
-    if ($waiting) {
-      sadToast(
-        'A response to the previous message is being generated. Please wait before sending a new message.'
-      );
-      return;
+    try {
+      await data.thread.postMessage(data.me.user!.id, message, file_ids);
+    } catch (e) {
+      sadToast(`Failed to send message. Error: ${errorMessage(e)}`);
     }
-
-    if (!message) {
-      sadToast('Please enter a message before sending.');
-      return;
-    }
-
-    $waiting = true;
-    $submitting = true;
-    $messages = [...$messages, {
-      id: "",
-      role: 'user',
-      content: [{ type: 'text', text: { value: message, annotations: [] } }],
-      created_at: Date.now(),
-      metadata: { user_id: data.me.user!.id },
-      assistant_id: "",
-      thread_id: "",
-      file_ids,
-      run_id: null,
-      object: "thread.message",
-    }];
-
-    const chunks = await api.postMessage(fetch, classId, threadId, { message, file_ids });
-    $submitting = false;
-
-    for await (const chunk of chunks) {
-      console.log("CHUNK", chunk)
-      if (!handleStreamChunk(chunk)) {
-        break;
-      }
-    }
-
-    $waiting = false;
   };
 
   const handleSubmit = (e: CustomEvent<ChatInputMessage>) => {
     postMessage(e.detail);
   };
-
-  onMount(() => {
-    // Check the history state and see if a new thread was created.
-    const state = history.state as { newThread?: ChatInputMessage } | undefined;
-    console.log("HSITORY", state)
-    if (state?.newThread) {
-      // Run the submit handler.
-      postMessage(state.newThread);
-    }
-  })
 
   // Handle file upload
   const handleUpload = (f: File, onProgress: (p: number) => void) => {
@@ -201,17 +112,17 @@
 </script>
 
 <div class="relative py-8 h-full w-full">
-  {#if threadStatus >= 400}
+  {#if $error}
     <div class="absolute top-0 left-0 flex h-full w-full items-center">
       <div class="m-auto">
         <div class="text-center">
           <div class="text-2xl font-bold text-gray-600">Error loading thread.</div>
-          <div class="text-gray-400">{$thread?.detail || 'An unknown error occurred.'}</div>
+          <div class="text-gray-400">{errorMessage($error)}</div>
         </div>
       </div>
     </div>
   {/if}
-  {#if loading}
+  {#if $loading}
     <div class="absolute top-0 left-0 flex h-full w-full items-center">
       <div class="m-auto" transition:blur={{ amount: 10 }}>
         <Pulse color="#d97706" />
@@ -223,15 +134,15 @@
       {#each $messages as message}
         <div class="py-4 px-6 flex gap-x-3">
           <div class="shrink-0">
-            {#if message.role === 'user'}
-              <Avatar size="sm" src={getImage(message)} />
+            {#if message.data.role === 'user'}
+              <Avatar size="sm" src={getImage(message.data)} />
             {:else}
               <Logo size={8} />
             {/if}
           </div>
           <div class="max-w-full">
-            <div class="font-bold text-gray-400 mb-1">{getName(message)}</div>
-            {#each message.content as content}
+            <div class="font-bold text-gray-400 mb-1">{getName(message.data)}</div>
+            {#each message.data.content as content}
               {#if content.type == 'text'}
                 <div class="leading-7">
                   <Markdown
@@ -265,7 +176,7 @@
       {/if}
     </div>
 
-    {#if !loading}
+    {#if !$loading}
       <div class="w-full bottom-8 bg-gradient-to-t from-white to-transparent">
         <div
           class="w-11/12 mx-auto">
@@ -284,13 +195,13 @@
     {/if}
   </div>
 
-  {#if priv}
+  {#if !$published}
     <div
       class="absolute top-0 left-0 flex gap-2 px-4 py-2 items-center w-full bg-amber-200 text-sm"
     >
       <EyeSlashOutline size="sm" class="text-gray-400" />
       <Span class="text-gray-400">This thread is private to</Span>
-      <Span class="text-gray-600">{threadUsers.map((u) => u.email).join(', ')}</Span>
+      <Span class="text-gray-600">{$users.map((u) => u.email).join(', ')}</Span>
     </div>
   {/if}
 </div>
