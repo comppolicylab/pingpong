@@ -1,5 +1,7 @@
 import os
 import random
+import secrets
+from datetime import datetime
 from threading import Lock
 
 import requests
@@ -9,6 +11,31 @@ from pingpong.auth import encode_auth_token
 from pingpong.config import config
 
 TEST_INST = None
+
+
+class AtomicCounter:
+    def __init__(self, start=0):
+        self._value = start
+        self._lock = Lock()
+
+    def increment(self):
+        with self._lock:
+            self._value += 1
+            return self._value
+
+    @property
+    def value(self):
+        with self._lock:
+            return self._value
+
+    def __repr__(self):
+        return f"AtomicCounter({self.value})"
+
+    def __str__(self):
+        return str(self.value)
+
+
+_global_ctr = AtomicCounter()
 
 
 class WebUser(HttpUser):
@@ -108,7 +135,9 @@ class Session(requests.Session):
 class TestInstance:
     def __init__(self, url: str, token: str):
         self.session = Session(url, token)
-        self.cls_id = self._create_test_class("test class")
+        self.test_id = secrets.token_urlsafe(8)
+        dt = datetime.now().isoformat()
+        self.cls_id = self._create_test_class(f"Test class {self.test_id} - {dt}")
         self.ai_id = self._create_test_ai(self.cls_id, os.environ["OPENAI_API_KEY"])
         self._ctr = 0
 
@@ -138,7 +167,7 @@ class TestInstance:
         resp = s.post(
             f"/class/{cls_id}/assistant",
             json={
-                "name": "test ai",
+                "name": f"test ai - {self.test_id}",
                 "file_ids": [],
                 "instructions": "You are a friendly AI for testing purposes",
                 "description": "Auto generated for a load test",
@@ -160,7 +189,11 @@ class TestInstance:
     def create_test_users(self, num_users: int):
         cls_id = self.cls_id
         # Create the users
-        emails = [f"fake-{i}@test" for i in range(self._ctr, self._ctr + num_users)]
+        emails = list[str]()
+        for _ in range(num_users):
+            emails.append(f"fake-{self.test_id}-{_global_ctr}@test")
+            _global_ctr.increment()
+
         print("Creating users ...")
         resp = self.session.post(
             f"/class/{cls_id}/user",

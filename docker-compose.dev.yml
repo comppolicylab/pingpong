@@ -18,7 +18,21 @@ services:
     labels:
       - "traefik.http.middlewares.cors.headers.accesscontrolalloworiginlist=https://pingpong.local"
       - "traefik.http.routers.pingpong_api.rule=Host(`pingpong.local`) && PathPrefix(`/api`)"
+    command: ["gunicorn", "pingpong:server", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000", "--workers", "4", "--log-level", "debug"]
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "4"
+          memory: 2048M
 
+  authz:
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "1"
+          memory: 2048M
 
   db:
     platform: linux/amd64
@@ -26,12 +40,17 @@ services:
     container_name: pingpong-db
     networks: [back]
     ports: ["5432:5432"]
+    command: -c 'max_connections=190'
     environment:
       POSTGRES_USER: pingpong
       POSTGRES_PASSWORD: pingpong
     volumes:
       - dbdata:/var/lib/postgresql/data
-
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2048M
 
 volumes:
   dbdata:

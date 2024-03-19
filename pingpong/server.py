@@ -99,7 +99,7 @@ async def parse_session_token(request: Request, call_next):
                 error=str(e),
             )
         except Exception as e:
-            logger.error("Error parsing session token: %s", e)
+            logger.exception("Error parsing session token: %s", e)
             request.state.session = schemas.SessionState(
                 status=schemas.SessionStatus.ERROR,
                 error=str(e),
