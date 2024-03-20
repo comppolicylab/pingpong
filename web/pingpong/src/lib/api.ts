@@ -1045,15 +1045,15 @@ export type OpenAIRun = {
   cancelled_at: number | null;
   completed_at: number | null;
   created_at: number;
-  expires_at: number;
+  expires_at: number | null;
   failed_at: number | null;
   file_ids: string[];
-  instruction: string;
+  instructions: string;
   last_error: LastError | null;
   metadata: Record<string, unknown>;
   model: string;
   object: 'thread.run';
-  required_action: RequiredAction | null;
+  //required_action: RequiredAction | null;
   started_at: number | null;
   status:
     | 'queued'
@@ -1066,7 +1066,7 @@ export type OpenAIRun = {
     | 'expired';
   thread_id: string;
   tools: unknown[];
-  usage: unknown | null;
+  // usage: unknown | null;
 };
 
 export type TextAnnotationFilePathFilePath = {

@@ -7,9 +7,9 @@
   import { EyeSlashOutline, ChevronDownSolid } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
-  import {createThread} from '$lib/stores/threads';
+  import {createThread} from '$lib/stores/thread';
   import {errorMessage} from '$lib/errors';
-  import type { Assistant, Thread } from '$lib/api';
+  import type { Assistant } from '$lib/api';
 
   /**
    * Application data.
@@ -20,6 +20,7 @@
   let loading = writable(false);
   // Currently selected assistant.
   let assistant = writable(data?.assistants[0] || {});
+  const threadsMgr = data.threads;
 
   // Whether billing is set up for the class (which controls everything).
   $: isConfigured = data?.hasAssistants && data?.hasBilling;
@@ -71,6 +72,11 @@
         // We should do this in a background thread.
         message: form.message,
       })
+      const newThreadData = newThread.thread;
+      if (newThreadData) {
+        // It'd be weird if this was undefined, but check anyway to be safe.
+        threadsMgr.add(newThreadData);
+      }
       // Post the message to the new thread, but don't wait for the response
       // before we redirect to the thread page.
       newThread.postMessage(data.me.user!.id, form.message, form.file_ids);

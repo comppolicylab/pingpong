@@ -1,4 +1,4 @@
-import { getThread } from '$lib/stores/threads';
+import { getThread } from '$lib/stores/thread';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ fetch, params }) => {

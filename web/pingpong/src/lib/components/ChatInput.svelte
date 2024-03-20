@@ -120,6 +120,8 @@
     ref.value = '';
     realRef.value = '';
     fixHeight(realRef);
+    // Reset focus to the textarea.
+    realRef.focus();
   }
 
   // Submit form when Enter (but not Shift+Enter) is pressed in textarea

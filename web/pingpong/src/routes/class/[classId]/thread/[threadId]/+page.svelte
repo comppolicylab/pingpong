@@ -169,7 +169,7 @@
           </div>
         </div>
       {/each}
-      {#if $waiting}
+      {#if $waiting || $submitting}
         <div class="w-full flex justify-center" transition:blur={{ amount: 10 }}>
           <SyncLoader color="#d97706" size="40" />
         </div>

@@ -2,8 +2,11 @@ import { goto } from '$app/navigation';
 import { redirect } from '@sveltejs/kit';
 import { browser } from '$app/environment';
 import * as api from '$lib/api';
-import type { Class, Institution, Thread } from '$lib/api';
+import { getClassesManager } from '$lib/stores/classes';
+import { getThreadsManager } from '$lib/stores/threads';
+import type { Institution } from '$lib/api';
 import type { LayoutLoad } from './$types';
+import { getInstitutionsManager } from '$lib/stores/institutions';
 
 const LOGIN = '/login';
 const HOME = '/';
@@ -43,31 +46,26 @@ export const load: LayoutLoad = async ({ fetch, url, params }) => {
   // Fetch class / thread data (needed to render the sidebar)
   // TODO - should move this elsewhere? into shared store?
   const additionalState = {
-    classes: [] as Class[],
-    threads: [] as Thread[],
-    institutions: [] as Institution[]
+    classes: getClassesManager(fetch),
+    threads: getThreadsManager(fetch),
+    institutions: getInstitutionsManager(fetch),
   };
 
   if (authed) {
-    const classes = api.getMyClasses(fetch).then(api.expandResponse).then(({ error, data }) => error ? [] : data.classes);
-    let threads: Promise<Thread[]> = Promise.resolve([]);
-    let institutions: Promise<Institution[]> = Promise.resolve([]);
-
     const classId = params.classId ? parseInt(params.classId, 10) : null;
 
+    // Load the classes and institutions.
+    // We guarantee they will be loaded when the app first loads,
+    // and only reloaded when the relevant page is loaded.
+    const forceReloadIndexes = !classId;
+    additionalState.classes.load(forceReloadIndexes);
+    additionalState.institutions.load(forceReloadIndexes);
+
     if (classId) {
-      threads = api.getClassThreads(fetch, classId).then(({ threads }) => threads);
+      // Note: this doesn't reload the threads if the classId is the same as the current one!
+      // We should reload the threads periodically.
+      additionalState.threads.load(classId);
     }
-
-    institutions = api
-      .getInstitutions(fetch, 'can_create_class')
-      .then(api.expandResponse)
-      .then(({ error, data }) => error ? [] : data.institutions);
-
-    // After all requests have fired / returned, set the state.
-    additionalState.classes = await classes;
-    additionalState.threads = await threads;
-    additionalState.institutions = await institutions;
   }
 
   return {
