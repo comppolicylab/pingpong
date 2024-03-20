@@ -71,6 +71,10 @@
   // Scroll to the bottom of the chat thread.
   const scroll = (el: HTMLDivElement, messageList: unknown[]) => {
     // Scroll to the bottom of the element.
+    el.scrollTo({
+      top: el.scrollHeight,
+      behavior: 'smooth'
+    });
     return {
       // TODO - would be good to figure out how to do this without a timeout.
       update: () => {
