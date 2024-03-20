@@ -48,7 +48,7 @@ export const load: LayoutLoad = async ({ fetch, url, params }) => {
   const additionalState = {
     classes: getClassesManager(fetch),
     threads: getThreadsManager(fetch),
-    institutions: getInstitutionsManager(fetch),
+    institutions: getInstitutionsManager(fetch)
   };
 
   if (authed) {

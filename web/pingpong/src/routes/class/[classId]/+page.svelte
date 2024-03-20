@@ -7,8 +7,8 @@
   import { EyeSlashOutline, ChevronDownSolid } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
-  import {createThread} from '$lib/stores/thread';
-  import {errorMessage} from '$lib/errors';
+  import { createThread } from '$lib/stores/thread';
+  import { errorMessage } from '$lib/errors';
   import type { Assistant } from '$lib/api';
 
   /**
@@ -70,8 +70,8 @@
         parties: partyIds,
         // TODO - the only reason to pass the message is to generate a title.
         // We should do this in a background thread.
-        message: form.message,
-      })
+        message: form.message
+      });
       const newThreadData = newThread.thread;
       if (newThreadData) {
         // It'd be weird if this was undefined, but check anyway to be safe.
@@ -113,17 +113,17 @@
           {/each}
         </Dropdown>
       </div>
-        <ChatInput
-          mimeType={data.uploadInfo.mimeType}
-          maxSize={data.uploadInfo.private_file_max_size}
-          accept={fileTypes}
-          loading={$loading}
-          upload={handleUpload}
-          remove={handleRemove}
-          on:submit={handleSubmit}
-        />
-        <input type="hidden" name="assistant_id" bind:value={$assistant.id} />
-        <input type="hidden" name="parties" bind:value={parties} />
+      <ChatInput
+        mimeType={data.uploadInfo.mimeType}
+        maxSize={data.uploadInfo.private_file_max_size}
+        accept={fileTypes}
+        loading={$loading}
+        upload={handleUpload}
+        remove={handleRemove}
+        on:submit={handleSubmit}
+      />
+      <input type="hidden" name="assistant_id" bind:value={$assistant.id} />
+      <input type="hidden" name="parties" bind:value={parties} />
     {:else}
       <div class="text-center">
         {#if !data.hasAssistants}

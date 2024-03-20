@@ -1,5 +1,5 @@
 <script lang="ts">
-  import {page} from '$app/stores';
+  import { page } from '$app/stores';
   import * as api from '$lib/api';
   import { sadToast } from '$lib/toast';
   import { errorMessage } from '$lib/errors';
@@ -28,9 +28,9 @@
   $: assistantId = data.thread.assistantId;
   $: users = data.thread.users;
   $: {
-      // Figure out the capabilities of assistants in the thread
-      const assts = data.assistants.filter((a) => Object.hasOwn($participants.assistant, a.id));
-      fileTypes = data.uploadInfo.fileTypesForAssistants(...assts);
+    // Figure out the capabilities of assistants in the thread
+    const assts = data.assistants.filter((a) => Object.hasOwn($participants.assistant, a.id));
+    fileTypes = data.uploadInfo.fileTypesForAssistants(...assts);
   }
   // TODO - should figure this out by checking grants instead of participants
   $: canSubmit =
@@ -84,7 +84,7 @@
   };
 
   // Handle sending a message
-  const postMessage = async ({message, file_ids}: ChatInputMessage) => {
+  const postMessage = async ({ message, file_ids }: ChatInputMessage) => {
     try {
       await data.thread.postMessage(data.me.user!.id, message, file_ids);
     } catch (e) {
@@ -178,8 +178,7 @@
 
     {#if !$loading}
       <div class="w-full bottom-8 bg-gradient-to-t from-white to-transparent">
-        <div
-          class="w-11/12 mx-auto">
+        <div class="w-11/12 mx-auto">
           <ChatInput
             mimeType={data.uploadInfo.mimeType}
             maxSize={data.uploadInfo.private_file_max_size}

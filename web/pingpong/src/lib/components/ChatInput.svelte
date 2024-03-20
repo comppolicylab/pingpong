@@ -6,7 +6,7 @@
 </script>
 
 <script lang="ts">
-  import {createEventDispatcher} from 'svelte';
+  import { createEventDispatcher } from 'svelte';
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
   import { GradientButton, Review } from 'flowbite-svelte';
@@ -122,7 +122,7 @@
     fixHeight(realRef);
     // Reset focus to the textarea.
     realRef.focus();
-  }
+  };
 
   // Submit form when Enter (but not Shift+Enter) is pressed in textarea
   const maybeSubmit = (e: KeyboardEvent) => {

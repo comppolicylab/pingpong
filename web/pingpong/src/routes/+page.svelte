@@ -39,10 +39,10 @@
     {/each}
     {#if $institutions.length}
       <div data-sveltekit-preload-data="off">
-      <Card horizontal img="" class="w-80 h-40" href="/?new-class">
-        <Heading tag="h3" color="text-gray-900">Create new</Heading>
-        <P>Click here to create a new class</P>
-      </Card>
+        <Card horizontal img="" class="w-80 h-40" href="/?new-class">
+          <Heading tag="h3" color="text-gray-900">Create new</Heading>
+          <P>Click here to create a new class</P>
+        </Card>
       </div>
     {/if}
   </div>

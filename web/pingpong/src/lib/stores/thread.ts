@@ -15,7 +15,7 @@ export type ThreadManagerState = {
   loading: boolean;
   waiting: boolean;
   submitting: boolean;
-}
+};
 
 /**
  * A message in a thread.
@@ -24,7 +24,7 @@ export type Message = {
   data: api.OpenAIMessage;
   error: Error | null;
   persisted: boolean;
-}
+};
 
 /**
  * Manager for a single conversation thread.
@@ -103,17 +103,27 @@ class ThreadManager {
       optimistic: [],
       loading: false,
       waiting: false,
-      submitting: false,
+      submitting: false
     });
 
     this.messages = derived(this.#data, ($data) => {
       if (!$data) {
         return [];
       }
-      const realMessages = ($data.data?.messages || []).map((message) => ({ data: message, error: null, persisted: true }));
-      const optimisticMessages = $data.optimistic.map((message) => ({ data: message, error: null, persisted: false }));
+      const realMessages = ($data.data?.messages || []).map((message) => ({
+        data: message,
+        error: null,
+        persisted: true
+      }));
+      const optimisticMessages = $data.optimistic.map((message) => ({
+        data: message,
+        error: null,
+        persisted: false
+      }));
       // Sort messages together by created_at timestamp
-      return realMessages.concat(optimisticMessages).sort((a, b) => a.data.created_at - b.data.created_at);
+      return realMessages
+        .concat(optimisticMessages)
+        .sort((a, b) => a.data.created_at - b.data.created_at);
     });
 
     this.loading = derived(this.#data, ($data) => !!$data?.loading);
@@ -132,7 +142,7 @@ class ThreadManager {
       if (!$data?.data) {
         return { user: {}, assistant: {} };
       }
-      return $data.data.participants
+      return $data.data.participants;
     });
 
     this.users = derived(this.#data, ($data) => $data?.data?.thread?.users || []);
@@ -154,7 +164,7 @@ class ThreadManager {
     const response = await api.getThread(this.#fetcher, this.classId, this.threadId);
     const expanded = api.expandResponse(response);
     // TODO - if a thread run is in progress, subscribe to it.
-    console.log("Expanded thread", expanded);
+    console.log('Expanded thread', expanded);
     this.#data.update((d) => {
       const newData = expanded.data;
       if (d.data && newData) {
@@ -164,7 +174,7 @@ class ThreadManager {
         ...d,
         data: newData,
         error: expanded.error,
-        loading: false,
+        loading: false
       };
     });
   }
@@ -180,7 +190,9 @@ class ThreadManager {
     const current = get(this.#data);
 
     if (current.waiting || current.submitting) {
-      throw new Error('A response to the previous message is being generated. Please wait before sending a new message.');
+      throw new Error(
+        'A response to the previous message is being generated. Please wait before sending a new message.'
+      );
     }
 
     // Generate an optimistic update for the UI
@@ -191,23 +203,23 @@ class ThreadManager {
       content: [{ type: 'text', text: { value: message, annotations: [] } }],
       created_at: Date.now(),
       metadata: { user_id: fromUserId },
-      assistant_id: "",
-      thread_id: "",
+      assistant_id: '',
+      thread_id: '',
       file_ids: file_ids || [],
       run_id: null,
-      object: "thread.message",
+      object: 'thread.message'
     };
 
     this.#data.update((d) => ({
       ...d,
       optimistic: [...d.optimistic, optimistic],
-      submitting: true,
+      submitting: true
     }));
     const chunks = await api.postMessage(fetch, this.classId, this.threadId, { message, file_ids });
     this.#data.update((d) => ({
       ...d,
       submitting: false,
-      waiting: true,
+      waiting: true
     }));
 
     try {
@@ -217,12 +229,12 @@ class ThreadManager {
     } catch (e) {
       this.#data.update((d) => ({
         ...d,
-        error: e as Error,
+        error: e as Error
       }));
     } finally {
       this.#data.update((d) => ({
         ...d,
-        waiting: false,
+        waiting: false
       }));
     }
   }
@@ -231,8 +243,8 @@ class ThreadManager {
    * Set the thread data.
    */
   setThreadData(data: BaseResponse & ThreadWithMeta) {
-    this.#data.update(d => {
-      return {...d, data};
+    this.#data.update((d) => {
+      return { ...d, data };
     });
   }
 
@@ -247,27 +259,30 @@ class ThreadManager {
             ...d,
             data: {
               ...d.data!,
-              messages: [...(d.data?.messages || []), {
-                ...chunk.message,
-                // Note: make sure the message here has a timestamp that
-                // will be sequential to the optimistic messages.
-                // When the thread is reloaded, the real timestamps will be
-                // somewhat different.
-                created_at: Date.now(),
-              }],
+              messages: [
+                ...(d.data?.messages || []),
+                {
+                  ...chunk.message,
+                  // Note: make sure the message here has a timestamp that
+                  // will be sequential to the optimistic messages.
+                  // When the thread is reloaded, the real timestamps will be
+                  // somewhat different.
+                  created_at: Date.now()
+                }
+              ]
             }
           };
         });
         break;
       case 'message_delta':
         this.#appendDelta(chunk.delta);
-        break
+        break;
       case 'done':
         break;
       case 'error':
-        throw new Error(chunk.detail || "An unknown error occurred.");
+        throw new Error(chunk.detail || 'An unknown error occurred.');
       default:
-        console.warn("Unhandled chunk", chunk);
+        console.warn('Unhandled chunk', chunk);
         break;
     }
   }
@@ -279,7 +294,7 @@ class ThreadManager {
     this.#data.update((d) => {
       const lastMessage = d.data?.messages[d.data!.messages.length - 1];
       if (!lastMessage) {
-        console.warn("Received a message delta without a previous message.");
+        console.warn('Received a message delta without a previous message.');
         return d;
       }
 
@@ -287,7 +302,7 @@ class ThreadManager {
         this.#mergeContent(lastMessage.content, content);
       }
 
-      return {...d};
+      return { ...d };
     });
   }
 
@@ -300,8 +315,8 @@ class ThreadManager {
       contents.push(newContent);
       return;
     }
-    if (newContent.type === "text") {
-      if (lastContent.type === "text") {
+    if (newContent.type === 'text') {
+      if (lastContent.type === 'text') {
         lastContent.text.value += newContent.text.value;
         return;
       } else {
@@ -312,7 +327,6 @@ class ThreadManager {
       contents.push(newContent);
     }
   }
-
 }
 
 /**
@@ -323,7 +337,11 @@ const _THREADS = new Map<number, ThreadManager>();
 /**
  * Get a thread by its class and thread ID.
  */
-export const getThread = (fetcher: api.Fetcher, classId: number, threadId: number): ThreadManager => {
+export const getThread = (
+  fetcher: api.Fetcher,
+  classId: number,
+  threadId: number
+): ThreadManager => {
   if (!_THREADS.has(threadId)) {
     const thread = new ThreadManager(fetcher, classId, threadId);
     _THREADS.set(threadId, thread);
@@ -336,7 +354,11 @@ export const getThread = (fetcher: api.Fetcher, classId: number, threadId: numbe
 /**
  * Create a new thread in a class.
  */
-export const createThread = async (fetcher: api.Fetcher, classId: number, data: api.CreateThreadRequest): Promise<ThreadManager> => {
+export const createThread = async (
+  fetcher: api.Fetcher,
+  classId: number,
+  data: api.CreateThreadRequest
+): Promise<ThreadManager> => {
   const response = await api.createThread(fetcher, classId, data);
   const expanded = api.expandResponse(response);
   if (expanded.error) {
@@ -346,4 +368,4 @@ export const createThread = async (fetcher: api.Fetcher, classId: number, data: 
   thread.setThreadData(expanded.data);
   _THREADS.set(expanded.data.thread.id, thread);
   return thread;
-}
+};

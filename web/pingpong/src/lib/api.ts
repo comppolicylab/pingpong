@@ -1,5 +1,5 @@
 import { browser } from '$app/environment';
-import {TextLineStream, JSONStream } from '$lib/streams';
+import { TextLineStream, JSONStream } from '$lib/streams';
 
 /**
  * HTTP methods.
@@ -53,7 +53,7 @@ export const expandResponse = <R extends BaseData>(r: BaseResponse & (Error | R)
   } else {
     return { $status, error: null, data: r as R };
   }
-}
+};
 
 /**
  * Generic response returned by some API endpoints.
@@ -575,7 +575,7 @@ export const getClassThreads = async (f: Fetcher, classId: number, opts?: GetCla
     return {
       lastPage: true,
       threads: [],
-      error: result.error,
+      error: result.error
     };
   }
 
@@ -593,7 +593,7 @@ export const getClassThreads = async (f: Fetcher, classId: number, opts?: GetCla
   return {
     ...result.data,
     lastPage,
-    error: null,
+    error: null
   };
 };
 
@@ -902,7 +902,7 @@ export const getClassUsers = async (f: Fetcher, classId: number, opts?: GetClass
     return {
       lastPage: true,
       users: [],
-      error: expanded.error,
+      error: expanded.error
     };
   }
   const lastPage = expanded.data.users.length < expanded.data.limit;
@@ -910,7 +910,7 @@ export const getClassUsers = async (f: Fetcher, classId: number, opts?: GetClass
   return {
     ...expanded.data,
     lastPage,
-    error: null,
+    error: null
   };
 };
 
@@ -1177,29 +1177,33 @@ export type OpenAIMessageDelta = {
   content: Content[];
   role: null; // TODO - is this correct?
   file_ids: string[] | null;
-}
+};
 
 export type ThreadStreamMessageDeltaChunk = {
   type: 'message_delta';
   delta: OpenAIMessageDelta;
-}
+};
 
 export type ThreadStreamMessageCreatedChunk = {
   type: 'message_created';
   role: 'user' | 'assistant';
   message: OpenAIMessage;
-}
+};
 
 export type ThreadStreamErrorChunk = {
   type: 'error';
   detail: string;
-}
+};
 
 export type ThreadStreamDoneChunk = {
   type: 'done';
-}
+};
 
-export type ThreadStreamChunk = ThreadStreamMessageDeltaChunk | ThreadStreamMessageCreatedChunk | ThreadStreamErrorChunk | ThreadStreamDoneChunk;
+export type ThreadStreamChunk =
+  | ThreadStreamMessageDeltaChunk
+  | ThreadStreamMessageCreatedChunk
+  | ThreadStreamErrorChunk
+  | ThreadStreamDoneChunk;
 
 /**
  * Post a new message to the thread.
@@ -1211,7 +1215,13 @@ export const postMessage = async (
   data: NewThreadMessageRequest
 ) => {
   const url = `class/${classId}/thread/${threadId}`;
-  const res = await _fetch(f, 'POST', url, { 'Content-Type': 'application/json' }, JSON.stringify(data));
+  const res = await _fetch(
+    f,
+    'POST',
+    url,
+    { 'Content-Type': 'application/json' },
+    JSON.stringify(data)
+  );
   if (!res.body) {
     throw new Error('No response body');
   }
@@ -1223,14 +1233,14 @@ export const postMessage = async (
   return {
     stream,
     reader,
-    async* [Symbol.asyncIterator]() {
+    async *[Symbol.asyncIterator]() {
       let chunk = await reader.read();
       while (!chunk.done) {
         yield chunk.value as ThreadStreamChunk;
         chunk = await reader.read();
       }
     }
-  }
+  };
 };
 
 /**
@@ -1411,8 +1421,8 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
     allow_private: false,
     private_file_max_size: 0,
     class_file_max_size: 0,
-    error: infoResponse.error,
-  }
+    error: infoResponse.error
+  };
 
   // Create a lookup table for mime types.
   const _mimeTypeLookup = new Map<string, FileTypeInfo>();

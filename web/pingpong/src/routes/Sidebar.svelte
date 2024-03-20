@@ -56,10 +56,11 @@
   <SidebarWrapper class="h-full flex flex-col">
     <SidebarGroup class="mb-4">
       <div data-sveltekit-preload-data="off">
-      <NavBrand href="/" class="mx-4">
-        <Logo size={10} extraClass="fill-amber-600" />
-        <Heading tag="h1" class="text-amber-500 px-5 logo" customSize="text-3xl">PingPong</Heading>
-      </NavBrand>
+        <NavBrand href="/" class="mx-4">
+          <Logo size={10} extraClass="fill-amber-600" />
+          <Heading tag="h1" class="text-amber-500 px-5 logo" customSize="text-3xl">PingPong</Heading
+          >
+        </NavBrand>
       </div>
     </SidebarGroup>
 
@@ -120,7 +121,7 @@
         {#if $canFetchMoreThreads}
           <SidebarItem
             spanClass={`${$fetchingMoreThreads ? 'text-gray-500' : 'text-amber-700'}`}
-            label={`${$fetchingMoreThreads ? 'Loading ...' : "Load more ..."}`}
+            label={`${$fetchingMoreThreads ? 'Loading ...' : 'Load more ...'}`}
             on:click={loadMoreThreads}
           >
             <svelte:fragment slot="icon">
