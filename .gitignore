@@ -186,3 +186,4 @@ docker.env
 
 # Other
 load_test_results_*
+*_results.json
