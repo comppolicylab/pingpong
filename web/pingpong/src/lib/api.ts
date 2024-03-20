@@ -546,10 +546,12 @@ export const getClassThreads = async (f: Fetcher, classId: number, opts?: GetCla
   // fewer results, then we know we're on the last page.
   // If there was no limit, then the last page is when we get
   // an empty list of threads.
-  if (opts?.limit) {
-    lastPage = result.threads.length < opts.limit;
-  } else {
-    lastPage = result.threads.length === 0;
+  if (result.threads) {
+    if (opts?.limit) {
+      lastPage = result.threads.length < opts.limit;
+    } else {
+      lastPage = result.threads.length === 0;
+    }
   }
   return {
     ...result,
