@@ -90,7 +90,12 @@ export class ThreadManager {
   /**
    * Create a new thread manager.
    */
-  constructor(fetcher: api.Fetcher, classId: number, threadId: number, threadData: BaseResponse & (ThreadWithMeta | Error)) {
+  constructor(
+    fetcher: api.Fetcher,
+    classId: number,
+    threadId: number,
+    threadData: BaseResponse & (ThreadWithMeta | Error)
+  ) {
     const expanded = api.expandResponse(threadData);
     this.#fetcher = fetcher;
     this.classId = classId;
@@ -179,7 +184,7 @@ export class ThreadManager {
    * Poll the thread until the run is finished.
    */
   async #pollThread(timeout: number = 120_000) {
-    this.#data.update((d) => ({...d, waiting: true}));
+    this.#data.update((d) => ({ ...d, waiting: true }));
 
     const deferred = new Deferred();
 
@@ -189,14 +194,23 @@ export class ThreadManager {
       const expanded = api.expandResponse(response);
       if (api.finished(expanded.data?.run)) {
         clearInterval(interval);
-        this.#data.update((d) => ({...d, data: expanded.data, error: expanded.error, waiting: false}));
+        this.#data.update((d) => ({
+          ...d,
+          data: expanded.data,
+          error: expanded.error,
+          waiting: false
+        }));
         deferred.resolve();
         return;
       }
 
       if (Date.now() - t0 > timeout) {
         clearInterval(interval);
-        this.#data.update((d) => ({...d, error: { detail: 'The thread run took too long to complete.'}, waiting: false}));
+        this.#data.update((d) => ({
+          ...d,
+          error: { detail: 'The thread run took too long to complete.' },
+          waiting: false
+        }));
         deferred.reject(new Error('The thread run took too long to complete.'));
       }
     }, 5000);
@@ -248,7 +262,10 @@ export class ThreadManager {
       optimistic: [...d.optimistic, optimistic],
       submitting: true
     }));
-    const chunks = await api.postMessage(this.#fetcher, this.classId, this.threadId, { message, file_ids });
+    const chunks = await api.postMessage(this.#fetcher, this.classId, this.threadId, {
+      message,
+      file_ids
+    });
     await this.#handleStreamChunks(chunks);
   }
 

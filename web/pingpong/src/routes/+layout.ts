@@ -41,6 +41,6 @@ export const load: LayoutLoad = async ({ fetch, url, params }) => {
 
   return {
     me: me.data,
-    authed,
-  }
+    authed
+  };
 };

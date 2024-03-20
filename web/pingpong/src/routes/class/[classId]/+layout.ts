@@ -13,7 +13,7 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
       api.getClass(fetch, classId).then(api.expandResponse),
       api.getAssistants(fetch, classId).then(api.expandResponse),
       api.getClassFiles(fetch, classId).then(api.expandResponse),
-      api.getClassUploadInfo(fetch, classId),
+      api.getClassUploadInfo(fetch, classId)
     ]);
 
   if (classDataResponse.error) {
@@ -35,6 +35,6 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
     assistantCreators,
     files: filesResponse.data?.files || [],
     uploadInfo: uploadInfoResponse,
-    threads: api.getClassThreads(fetch, classId),
+    threads: api.getClassThreads(fetch, classId)
   };
 };

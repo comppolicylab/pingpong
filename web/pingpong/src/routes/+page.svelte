@@ -20,7 +20,6 @@
 <div class="container py-8 overflow-y-auto h-full">
   <Heading tag="h2">Welcome to PingPong!</Heading>
   <div class="flex flex-wrap mt-8 gap-4">
-
     {#await data.classes}
       <P>Loading classes...</P>
     {:then classes}

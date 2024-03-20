@@ -6,6 +6,6 @@ export const load: PageLoad = async ({ fetch, params }) => {
   const threadId = parseInt(params.threadId, 10);
 
   return {
-    threadData: api.getThread(fetch, classId, threadId),
-  }
-}
+    threadData: api.getThread(fetch, classId, threadId)
+  };
+};

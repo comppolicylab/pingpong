@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import {writable} from 'svelte/store';
+  import { writable } from 'svelte/store';
   import {
     CogOutline,
     BookOutline,
@@ -31,7 +31,7 @@
   import dayjs from '$lib/time';
   import * as api from '$lib/api';
   import type { LayoutData } from './$types';
-  import {sadToast} from '$lib/toast';
+  import { sadToast } from '$lib/toast';
 
   export let data: LayoutData;
 

@@ -19,8 +19,8 @@
   $: classId = parseInt($page.params.classId);
   $: threadId = parseInt($page.params.threadId);
   $: threadMgr = new ThreadManager(fetch, classId, threadId, data.threadData);
-  $: messages = threadMgr.messages
-  $: participants = threadMgr.participants
+  $: messages = threadMgr.messages;
+  $: participants = threadMgr.participants;
   $: published = threadMgr.published;
   $: error = threadMgr.error;
   $: assistantId = threadMgr.assistantId;

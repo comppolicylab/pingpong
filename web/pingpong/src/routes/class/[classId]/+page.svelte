@@ -63,12 +63,14 @@
 
     const partyIds = parties ? parties.split(',').map((id) => parseInt(id, 10)) : [];
     try {
-      const newThread = api.explodeResponse(await api.createThread(fetch, data.class.id, {
-        assistant_id: $assistant.id,
-        parties: partyIds,
-        message: form.message,
-        file_ids: form.file_ids,
-      }));
+      const newThread = api.explodeResponse(
+        await api.createThread(fetch, data.class.id, {
+          assistant_id: $assistant.id,
+          parties: partyIds,
+          message: form.message,
+          file_ids: form.file_ids
+        })
+      );
       data.threads.threads = [newThread, ...data.threads.threads];
       goto(`/class/${$page.params.classId}/thread/${newThread.id}`);
     } catch (e) {

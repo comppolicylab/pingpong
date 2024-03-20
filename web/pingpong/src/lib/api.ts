@@ -1260,7 +1260,7 @@ export const postMessage = async (
   );
 
   return streamThreadChunks(res);
-}
+};
 
 /**
  * Create a new thread run.
@@ -1269,7 +1269,7 @@ export const createThreadRun = async (f: Fetcher, classId: number, threadId: num
   const url = `class/${classId}/thread/${threadId}/run`;
   const res = await _fetch(f, 'POST', url);
   return streamThreadChunks(res);
-}
+};
 
 /**
  * Query parameters for getting the last run of a thread.
