@@ -240,7 +240,7 @@
       } w-8 h-8 p-2 absolute bottom-3 right-2.5`}
       disabled={uploading || loading || disabled}
     >
-      <ChevronUpSolid size="xs" />
+      <ChevronUpSolid size="md" />
     </GradientButton>
   </div>
 </div>

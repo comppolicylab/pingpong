@@ -56,6 +56,17 @@ export const expandResponse = <R extends BaseData>(r: BaseResponse & (Error | R)
 };
 
 /**
+ * Return response data or throw an error if one occurred.
+ */
+export const explodeResponse = <R extends BaseData>(r: BaseResponse & (Error | R)) => {
+  if (isErrorResponse(r)) {
+    throw r;
+  } else {
+    return r as R;
+  }
+};
+
+/**
  * Generic response returned by some API endpoints.
  */
 export type GenericStatus = {
@@ -574,7 +585,7 @@ export const getClassThreads = async (f: Fetcher, classId: number, opts?: GetCla
   if (result.error) {
     return {
       lastPage: true,
-      threads: [],
+      threads: [] as Thread[],
       error: result.error
     };
   }
@@ -591,7 +602,7 @@ export const getClassThreads = async (f: Fetcher, classId: number, opts?: GetCla
     lastPage = result.data.threads.length === 0;
   }
   return {
-    ...result.data,
+    threads: result.data.threads,
     lastPage,
     error: null
   };
@@ -993,6 +1004,7 @@ export type CreateThreadRequest = {
   assistant_id: number;
   parties?: number[];
   message: string;
+  file_ids?: string[];
 };
 
 /**
@@ -1023,7 +1035,7 @@ export type Thread = {
  */
 export const createThread = async (f: Fetcher, classId: number, data: CreateThreadRequest) => {
   const url = `class/${classId}/thread`;
-  return await POST<CreateThreadRequest, ThreadWithMeta>(f, url, data);
+  return await POST<CreateThreadRequest, Thread>(f, url, data);
 };
 
 type LastError = {
@@ -1143,7 +1155,6 @@ export type ThreadParticipants = {
  */
 export type ThreadWithMeta = {
   thread: Thread;
-  hash: string;
   run: OpenAIRun | null;
   messages: OpenAIMessage[];
   participants: ThreadParticipants;
@@ -1206,22 +1217,9 @@ export type ThreadStreamChunk =
   | ThreadStreamDoneChunk;
 
 /**
- * Post a new message to the thread.
+ * Stream chunks from a thread.
  */
-export const postMessage = async (
-  f: Fetcher,
-  classId: number,
-  threadId: number,
-  data: NewThreadMessageRequest
-) => {
-  const url = `class/${classId}/thread/${threadId}`;
-  const res = await _fetch(
-    f,
-    'POST',
-    url,
-    { 'Content-Type': 'application/json' },
-    JSON.stringify(data)
-  );
+const streamThreadChunks = (res: Response) => {
   if (!res.body) {
     throw new Error('No response body');
   }
@@ -1242,6 +1240,36 @@ export const postMessage = async (
     }
   };
 };
+
+/**
+ * Post a new message to the thread.
+ */
+export const postMessage = async (
+  f: Fetcher,
+  classId: number,
+  threadId: number,
+  data: NewThreadMessageRequest
+) => {
+  const url = `class/${classId}/thread/${threadId}`;
+  const res = await _fetch(
+    f,
+    'POST',
+    url,
+    { 'Content-Type': 'application/json' },
+    JSON.stringify(data)
+  );
+
+  return streamThreadChunks(res);
+}
+
+/**
+ * Create a new thread run.
+ */
+export const createThreadRun = async (f: Fetcher, classId: number, threadId: number) => {
+  const url = `class/${classId}/thread/${threadId}/run`;
+  const res = await _fetch(f, 'POST', url);
+  return streamThreadChunks(res);
+}
 
 /**
  * Query parameters for getting the last run of a thread.

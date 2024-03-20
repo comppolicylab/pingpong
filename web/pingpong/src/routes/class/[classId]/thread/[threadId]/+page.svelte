@@ -11,22 +11,23 @@
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
   import { EyeSlashOutline } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
+  import { ThreadManager } from '$lib/stores/thread';
 
   export let data;
 
-  const classId = parseInt($page.params.classId);
-  const threadId = parseInt($page.params.threadId);
-
   let fileTypes = '';
-  $: messages = data.thread.messages;
-  $: participants = data.thread.participants;
-  $: loading = data.thread.loading;
-  $: submitting = data.thread.submitting;
-  $: waiting = data.thread.waiting;
-  $: published = data.thread.published;
-  $: error = data.thread.error;
-  $: assistantId = data.thread.assistantId;
-  $: users = data.thread.users;
+  $: classId = parseInt($page.params.classId);
+  $: threadId = parseInt($page.params.threadId);
+  $: threadMgr = new ThreadManager(fetch, classId, threadId, data.threadData);
+  $: messages = threadMgr.messages
+  $: participants = threadMgr.participants
+  $: published = threadMgr.published;
+  $: error = threadMgr.error;
+  $: assistantId = threadMgr.assistantId;
+  $: users = threadMgr.users;
+  $: submitting = threadMgr.submitting;
+  $: waiting = threadMgr.waiting;
+  $: loading = threadMgr.loading;
   $: {
     // Figure out the capabilities of assistants in the thread
     const assts = data.assistants.filter((a) => Object.hasOwn($participants.assistant, a.id));
@@ -86,7 +87,7 @@
   // Handle sending a message
   const postMessage = async ({ message, file_ids }: ChatInputMessage) => {
     try {
-      await data.thread.postMessage(data.me.user!.id, message, file_ids);
+      await threadMgr.postMessage(data.me.user!.id, message, file_ids);
     } catch (e) {
       sadToast(`Failed to send message. Error: ${errorMessage(e)}`);
     }

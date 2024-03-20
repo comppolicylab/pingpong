@@ -7,7 +7,6 @@
   import { EyeSlashOutline, ChevronDownSolid } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
-  import { createThread } from '$lib/stores/thread';
   import { errorMessage } from '$lib/errors';
   import type { Assistant } from '$lib/api';
 
@@ -20,7 +19,6 @@
   let loading = writable(false);
   // Currently selected assistant.
   let assistant = writable(data?.assistants[0] || {});
-  const threadsMgr = data.threads;
 
   // Whether billing is set up for the class (which controls everything).
   $: isConfigured = data?.hasAssistants && data?.hasBilling;
@@ -65,22 +63,14 @@
 
     const partyIds = parties ? parties.split(',').map((id) => parseInt(id, 10)) : [];
     try {
-      const newThread = await createThread(fetch, data.class.id, {
+      const newThread = api.explodeResponse(await api.createThread(fetch, data.class.id, {
         assistant_id: $assistant.id,
         parties: partyIds,
-        // TODO - the only reason to pass the message is to generate a title.
-        // We should do this in a background thread.
-        message: form.message
-      });
-      const newThreadData = newThread.thread;
-      if (newThreadData) {
-        // It'd be weird if this was undefined, but check anyway to be safe.
-        threadsMgr.add(newThreadData);
-      }
-      // Post the message to the new thread, but don't wait for the response
-      // before we redirect to the thread page.
-      newThread.postMessage(data.me.user!.id, form.message, form.file_ids);
-      goto(`/class/${newThread.classId}/thread/${newThread.threadId}`);
+        message: form.message,
+        file_ids: form.file_ids,
+      }));
+      data.threads.threads = [newThread, ...data.threads.threads];
+      goto(`/class/${$page.params.classId}/thread/${newThread.id}`);
     } catch (e) {
       sadToast(`Failed to create thread. Error: ${errorMessage(e)}`);
     } finally {

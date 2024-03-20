@@ -1,8 +1,7 @@
 import functools
-import hashlib
 import json
 import logging
-from typing import IO, Dict, List
+from typing import IO, Callable, Dict, List
 
 import openai
 from openai.types.beta.threads import ImageFile
@@ -107,24 +106,26 @@ class StreamHandler(openai.AsyncAssistantEventHandler):
         self.io.flush()
 
 
-async def add_new_thread_message(
+async def run_thread(
     cli: openai.AsyncClient,
     *,
     thread_id: str,
     assistant_id: int,
-    message: str,
+    message: str | None,
     file_ids: List[str] | None = None,
     metadata: Dict[str, str | int] | None = None,
     stream: IO,
+    callback: Callable | None,
 ):
     try:
-        await cli.beta.threads.messages.create(
-            thread_id,
-            role="user",
-            content=message,
-            file_ids=file_ids,
-            metadata=metadata,
-        )
+        if message is not None:
+            await cli.beta.threads.messages.create(
+                thread_id,
+                role="user",
+                content=message,
+                file_ids=file_ids,
+                metadata=metadata,
+            )
 
         async with cli.beta.threads.runs.create_and_stream(
             thread_id=thread_id,
@@ -142,21 +143,11 @@ async def add_new_thread_message(
             logger.exception("Error writing to stream")
             pass
     finally:
-        stream.close()
-
-
-def hash_thread(messages, runs) -> str:
-    """Come up with a unique ID representing the thread state."""
-    rpart = ""
-    if runs:
-        last_run = runs[0]
-        rpart = f"{last_run.id}-{last_run.status}"
-
-    mpart = ""
-    if messages:
-        mpart = f"{messages.first_id}-{messages.last_id}"
-
-    return hashlib.md5(f"{mpart}-{rpart}".encode("utf-8")).hexdigest()
+        if callback is not None:
+            try:
+                callback()
+            except Exception as e:
+                logger.exception("Error running callback", e)
 
 
 def format_instructions(instructions: str, use_latex: bool = False) -> str:

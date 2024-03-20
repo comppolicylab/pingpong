@@ -2,13 +2,12 @@ import { writable, derived, get } from 'svelte/store';
 import type { Writable, Readable } from 'svelte/store';
 import * as api from '$lib/api';
 import type { ThreadWithMeta, Error, BaseResponse } from '$lib/api';
+import { Deferred } from '$lib/deferred';
 
 /**
  * State for the thread manager.
  */
 export type ThreadManagerState = {
-  classId: number;
-  threadId: number;
   data: (BaseResponse & ThreadWithMeta) | null;
   error: Error | null;
   optimistic: api.OpenAIMessage[];
@@ -29,7 +28,7 @@ export type Message = {
 /**
  * Manager for a single conversation thread.
  */
-class ThreadManager {
+export class ThreadManager {
   /**
    * The ID of the class this thread is in.
    */
@@ -91,20 +90,21 @@ class ThreadManager {
   /**
    * Create a new thread manager.
    */
-  constructor(fetcher: api.Fetcher, classId: number, threadId: number) {
+  constructor(fetcher: api.Fetcher, classId: number, threadId: number, threadData: BaseResponse & (ThreadWithMeta | Error)) {
+    const expanded = api.expandResponse(threadData);
     this.#fetcher = fetcher;
     this.classId = classId;
     this.threadId = threadId;
     this.#data = writable({
-      classId,
-      threadId,
-      data: null,
-      error: null,
+      data: expanded.data || null,
+      error: expanded.error || null,
       optimistic: [],
       loading: false,
       waiting: false,
       submitting: false
     });
+
+    this.#ensureRun(threadData);
 
     this.messages = derived(this.#data, ($data) => {
       if (!$data) {
@@ -148,35 +148,68 @@ class ThreadManager {
     this.users = derived(this.#data, ($data) => $data?.data?.thread?.users || []);
   }
 
+  async #ensureRun(threadData: BaseResponse & (ThreadWithMeta | Error)) {
+    // Only run this in the browser
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const expanded = api.expandResponse(threadData);
+    if (!expanded.data) {
+      return;
+    }
+
+    // Check if the run is in progress. If it is, we'll need to poll until it's done;
+    // streaming is not available.
+    if (expanded.data.run) {
+      if (!api.finished(expanded.data.run)) {
+        await this.#pollThread();
+        return;
+      }
+      // Otherwise, if the last run is finished, we can just display the results.
+      return;
+    }
+
+    this.#data.update((d) => ({ ...d, submitting: true }));
+    const chunks = await api.createThreadRun(this.#fetcher, this.classId, this.threadId);
+    await this.#handleStreamChunks(chunks);
+  }
+
+  /**
+   * Poll the thread until the run is finished.
+   */
+  async #pollThread(timeout: number = 120_000) {
+    this.#data.update((d) => ({...d, waiting: true}));
+
+    const deferred = new Deferred();
+
+    const t0 = Date.now();
+    const interval = setInterval(async () => {
+      const response = await api.getThread(this.#fetcher, this.classId, this.threadId);
+      const expanded = api.expandResponse(response);
+      if (api.finished(expanded.data?.run)) {
+        clearInterval(interval);
+        this.#data.update((d) => ({...d, data: expanded.data, error: expanded.error, waiting: false}));
+        deferred.resolve();
+        return;
+      }
+
+      if (Date.now() - t0 > timeout) {
+        clearInterval(interval);
+        this.#data.update((d) => ({...d, error: { detail: 'The thread run took too long to complete.'}, waiting: false}));
+        deferred.reject(new Error('The thread run took too long to complete.'));
+      }
+    }, 5000);
+
+    return deferred.promise;
+  }
+
   /**
    * Get the current thread data.
    */
   get thread() {
     const currentData = get(this.#data);
     return currentData?.data?.thread;
-  }
-
-  /**
-   * Load the thread data.
-   */
-  async load() {
-    this.#data.update((d) => ({ ...d, loading: true }));
-    const response = await api.getThread(this.#fetcher, this.classId, this.threadId);
-    const expanded = api.expandResponse(response);
-    // TODO - if a thread run is in progress, subscribe to it.
-    console.log('Expanded thread', expanded);
-    this.#data.update((d) => {
-      const newData = expanded.data;
-      if (d.data && newData) {
-        newData.messages = [...(d.data?.messages || []), ...(expanded.data?.messages || [])];
-      }
-      return {
-        ...d,
-        data: newData,
-        error: expanded.error,
-        loading: false
-      };
-    });
   }
 
   /**
@@ -215,7 +248,11 @@ class ThreadManager {
       optimistic: [...d.optimistic, optimistic],
       submitting: true
     }));
-    const chunks = await api.postMessage(fetch, this.classId, this.threadId, { message, file_ids });
+    const chunks = await api.postMessage(this.#fetcher, this.classId, this.threadId, { message, file_ids });
+    await this.#handleStreamChunks(chunks);
+  }
+
+  async #handleStreamChunks(chunks: AsyncIterable<api.ThreadStreamChunk>) {
     this.#data.update((d) => ({
       ...d,
       submitting: false,
@@ -328,44 +365,3 @@ class ThreadManager {
     }
   }
 }
-
-/**
- * Cache of thread managers.
- */
-const _THREADS = new Map<number, ThreadManager>();
-
-/**
- * Get a thread by its class and thread ID.
- */
-export const getThread = (
-  fetcher: api.Fetcher,
-  classId: number,
-  threadId: number
-): ThreadManager => {
-  if (!_THREADS.has(threadId)) {
-    const thread = new ThreadManager(fetcher, classId, threadId);
-    _THREADS.set(threadId, thread);
-    thread.load();
-  }
-
-  return _THREADS.get(threadId)!;
-};
-
-/**
- * Create a new thread in a class.
- */
-export const createThread = async (
-  fetcher: api.Fetcher,
-  classId: number,
-  data: api.CreateThreadRequest
-): Promise<ThreadManager> => {
-  const response = await api.createThread(fetcher, classId, data);
-  const expanded = api.expandResponse(response);
-  if (expanded.error) {
-    throw expanded.error;
-  }
-  const thread = new ThreadManager(fetcher, classId, expanded.data.thread.id);
-  thread.setThreadData(expanded.data);
-  _THREADS.set(expanded.data.thread.id, thread);
-  return thread;
-};

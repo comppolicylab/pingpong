@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import os
 import time
 from datetime import datetime
 from typing import Annotated, Any
@@ -25,13 +24,7 @@ import pingpong.metrics as metrics
 import pingpong.models as models
 import pingpong.schemas as schemas
 
-from .ai import (
-    add_new_thread_message,
-    format_instructions,
-    generate_name,
-    get_openai_client,
-    hash_thread,
-)
+from .ai import format_instructions, generate_name, get_openai_client, run_thread
 from .auth import (
     decode_auth_token,
     decode_session_token,
@@ -45,6 +38,7 @@ from .files import FILE_TYPES, handle_create_file, handle_delete_file
 from .invite import send_invite
 from .now import NowFn, utcnow
 from .permission import Authz, LoggedIn
+from .stream import Stream
 
 logger = logging.getLogger(__name__)
 
@@ -720,19 +714,15 @@ async def get_thread(
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
 
-    runs = [
-        r
-        async for r in await openai_client.beta.threads.runs.list(
-            thread.thread_id, limit=1, order="desc"
-        )
-    ]
-
-    messages, assistants = await asyncio.gather(
+    messages, assistants, runs_result = await asyncio.gather(
         openai_client.beta.threads.messages.list(thread.thread_id),
         models.Assistant.get_all_by_id(request.state.db, [thread.assistant_id]),
+        openai_client.beta.threads.runs.list(thread.thread_id, limit=1, order="desc"),
     )
+
+    runs = [r async for r in runs_result]
+
     return {
-        "hash": hash_thread(messages, runs),
         "thread": thread,
         "run": runs[0] if runs else None,
         "messages": list(messages.data),
@@ -849,7 +839,7 @@ async def list_threads(
 @v1.post(
     "/class/{class_id}/thread",
     dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
-    response_model=schemas.ThreadWithMeta,
+    response_model=schemas.Thread,
 )
 async def create_thread(
     class_id: str,
@@ -859,11 +849,19 @@ async def create_thread(
 ):
     parties = list[models.User]()
 
-    name, thread, parties, assts = await asyncio.gather(
+    name, thread, parties = await asyncio.gather(
         generate_name(openai_client, req.message),
-        openai_client.beta.threads.create(),
+        openai_client.beta.threads.create(
+            messages=[
+                {
+                    "metadata": {"user_id": request.state.session.user.id},
+                    "role": "user",
+                    "content": req.message,
+                    "file_ids": req.file_ids,
+                }
+            ]
+        ),
         models.User.get_all_by_id(request.state.db, req.parties),
-        models.Assistant.get_all_by_id(request.state.db, [req.assistant_id]),
     )
 
     new_thread = {
@@ -884,18 +882,7 @@ async def create_thread(
         ] + [(f"user:{p.id}", "party", f"thread:{result.id}") for p in parties]
         await request.state.authz.write(grant=grants)
 
-        return {
-            "hash": "",
-            "thread": result,
-            "run": None,
-            "messages": [],
-            "participants": {
-                "user": {
-                    u.id: schemas.Profile.from_email(u.email) for u in result.users
-                },
-                "assistant": {a.id: a.name for a in assts},
-            },
-        }
+        return result
     except Exception as e:
         logger.error("Error creating thread: %s", e)
         await openai_client.beta.threads.delete(thread.id)
@@ -908,11 +895,41 @@ async def create_thread(
 
 
 @v1.post(
+    "/class/{class_id}/thread/{thread_id}/run",
+    dependencies=[
+        Depends(Authz("can_participate", "thread:{thread_id}")),
+    ],
+)
+async def create_run(
+    class_id: str,
+    thread_id: str,
+    request: Request,
+    openai_client: OpenAIClient,
+):
+    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
+    stream = Stream()
+
+    asyncio.create_task(
+        run_thread(
+            openai_client,
+            thread_id=thread.thread_id,
+            assistant_id=asst.assistant_id,
+            message=None,
+            file_ids=None,
+            stream=stream.writer,
+            callback=stream.close,
+        )
+    )
+
+    return StreamingResponse(stream.reader, media_type="text/event-stream")
+
+
+@v1.post(
     "/class/{class_id}/thread/{thread_id}",
     dependencies=[
         Depends(Authz("can_participate", "thread:{thread_id}")),
     ],
-    response_model=schemas.ThreadRun,
 )
 async def send_message(
     class_id: str,
@@ -926,21 +943,20 @@ async def send_message(
 
     # Create a pipe to communicate with the background task and stream
     # responses to the client.
-    pr, pw = os.pipe()
-    stream = os.fdopen(pw, "w")
-    reader = os.fdopen(pr, "r")
+    stream = Stream()
 
     # Create a background task to finish communicating with the upstream server
     # and then write the response to the stream.
     asyncio.create_task(
-        add_new_thread_message(
+        run_thread(
             openai_client,
             thread_id=thread.thread_id,
             assistant_id=asst.assistant_id,
             message=data.message,
             file_ids=data.file_ids,
             metadata={"user_id": request.state.session.user.id},
-            stream=stream,
+            stream=stream.writer,
+            callback=stream.close,
         )
     )
     # TODO - handle background task exceptions
@@ -956,7 +972,7 @@ async def send_message(
     request.state.db.add(thread)
     await request.state.db.commit()
 
-    return StreamingResponse(reader, media_type="text/event-stream")
+    return StreamingResponse(stream.reader, media_type="text/event-stream")
 
 
 @v1.post(

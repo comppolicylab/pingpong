@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from '$app/stores';
+  import {writable} from 'svelte/store';
   import {
     CogOutline,
     BookOutline,
@@ -28,27 +29,51 @@
   } from 'flowbite-svelte';
   import Logo from '$lib/components/Logo.svelte';
   import dayjs from '$lib/time';
+  import * as api from '$lib/api';
   import type { LayoutData } from './$types';
+  import {sadToast} from '$lib/toast';
 
   export let data: LayoutData;
 
   $: avatar = data?.me?.profile?.image_url;
   $: name = data?.me?.user?.name || data?.me?.user?.email;
-  $: classesMgr = data.classes;
-  $: classes = classesMgr.classes;
-  $: fetchingClasses = classesMgr.loading;
-  $: threadsMgr = data.threads;
-  $: threads = threadsMgr.threads;
+  $: classes = $page.data.classes || [];
+  $: threads = $page.data.threads?.threads || [];
   $: currentClassId = parseInt($page.params.classId, 10);
-  $: currentClass = $classes.find((class_) => class_.id === currentClassId);
-  $: fetchingMoreThreads = threadsMgr.loading;
-  $: canFetchMoreThreads = threadsMgr.canFetchMore;
-  // TODO - display error loading threads, and loading indicator
+  $: currentClass = $page.data.class;
+  $: canFetchMoreThreads = !!$page.data.threads && !$page.data.threads.lastPage;
 
+  const fetchingMoreThreads = writable(false);
   const pageSize = 10;
-  // Fetch another page of threads
-  const loadMoreThreads = () => {
-    threadsMgr.loadMore(pageSize);
+
+  /**
+   * Load another page of threads from the server.
+   */
+  const loadMoreThreads = async () => {
+    const lastThread = threads[threads.length - 1];
+    if (!lastThread || $fetchingMoreThreads) {
+      return;
+    }
+
+    $fetchingMoreThreads = true;
+    const response = await api.getClassThreads(fetch, currentClassId, {
+      limit: pageSize,
+      before: lastThread.created
+    });
+
+    if (response.error) {
+      sadToast(`Failed to load threads: ${response.error.detail || 'unknown error'}`);
+      $fetchingMoreThreads = false;
+      return;
+    }
+
+    // Join the new threads with the old ones
+    // NOTE: this is not written into the $page.data store,
+    // so it disappears on navigation :(
+    threads = [...threads, ...response.threads];
+    canFetchMoreThreads = !response.lastPage;
+
+    $fetchingMoreThreads = false;
   };
 </script>
 
@@ -74,14 +99,10 @@
             <svelte:fragment slot="icon">
               <BookOutline class="text-gray-400" size="sm" />
             </svelte:fragment>
-            {#if !$fetchingClasses}
-              <a href={`/class/${currentClassId}`}>{currentClass?.name}</a>
-              <a href={`/class/${currentClassId}/manage`}>
-                <CogOutline size="sm" />
-              </a>
-            {:else}
-              <span>Loading ...</span>
-            {/if}
+            <a href={`/class/${currentClassId}`}>{currentClass?.name}</a>
+            <a href={`/class/${currentClassId}/manage`}>
+              <CogOutline size="sm" />
+            </a>
           </BreadcrumbItem>
         </Breadcrumb>
       </SidebarGroup>
@@ -95,7 +116,7 @@
       </SidebarGroup>
 
       <SidebarGroup border class="overflow-y-auto">
-        {#each $threads as thread}
+        {#each threads as thread}
           <SidebarItem
             class="text-sm p-1 flex gap-2"
             spanClass="flex-1 truncate"
@@ -115,10 +136,10 @@
             </svelte:fragment>
           </SidebarItem>
         {/each}
-        {#if !$threads.length && !$fetchingMoreThreads}
+        {#if !threads.length && !$fetchingMoreThreads}
           <div class="text-gray-500">No conversations yet!</div>
         {/if}
-        {#if $canFetchMoreThreads}
+        {#if canFetchMoreThreads}
           <SidebarItem
             spanClass={`${$fetchingMoreThreads ? 'text-gray-500' : 'text-amber-700'}`}
             label={`${$fetchingMoreThreads ? 'Loading ...' : 'Load more ...'}`}
@@ -140,12 +161,9 @@
         <Heading tag="h2" class="text-sm font-medium text-gray-500 md:ms-2 dark:text-gray-400"
           >Classes</Heading
         >
-        {#each $classes as cls}
+        {#each classes as cls}
           <SidebarItem label={cls.name} href={`/class/${cls.id}`} />
         {/each}
-        {#if $fetchingClasses}
-          <div class="text-gray-500">Loading ...</div>
-        {/if}
       </SidebarGroup>
     {/if}
 
