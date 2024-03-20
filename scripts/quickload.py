@@ -12,6 +12,8 @@ from typing import Any
 
 import click
 import openai
+import requests
+from tqdm import tqdm
 
 
 class LoadTestResultSummary:
@@ -124,13 +126,13 @@ class LoadTest:
     def run(self, n: int, *args, **kwargs):
         print("Starting load test...")
         t0 = time.time()
+        cases = list[LoadTestSample]()
         with concurrent.futures.ThreadPoolExecutor(max_workers=n) as executor:
             futures = [
                 executor.submit(self._run_test, i, *args, **kwargs) for i in range(n)
             ]
-            cases = [
-                future.result() for future in concurrent.futures.as_completed(futures)
-            ]
+            for future in tqdm(concurrent.futures.as_completed(futures), total=n):
+                cases.append(future.result())
 
         t1 = time.time()
         result = LoadTestResult(self.test_id, n, args, kwargs, cases, t0, t1)
@@ -203,6 +205,15 @@ COUNTRIES = [
 ]
 
 
+class UrlLoadTest(LoadTest):
+    def test(self, url: str, session: str | None = None):
+        """Make a single request to the given URL and return the result."""
+        cookies = {"session": session} if session else None
+        r = requests.get(url, cookies=cookies)
+        r.raise_for_status()
+        return r.text
+
+
 class AssistantsApiRateLimitLoadTest(LoadTest):
     def test(self, api_key: str, assistant_id: str):
         """Make a single request to the assistant and return the result."""
@@ -240,6 +251,13 @@ class AssistantsApiRateLimitLoadTest(LoadTest):
         return run.model_dump()
 
 
+def run_test(test: LoadTest, num_requests: int, *args, **kwargs):
+    result = test.run(num_requests, *args, **kwargs)
+    result.save()
+    result.print()
+    result.summarize().print()
+
+
 @click.group()
 def cli():
     pass
@@ -251,11 +269,16 @@ def cli():
 @click.option("--assistant_id", help="Assistant ID")
 def assistants(num_requests, api_key, assistant_id):
     """Run the load test of the Assistants API with the given parameters."""
-    test = AssistantsApiRateLimitLoadTest()
-    result = test.run(num_requests, api_key, assistant_id)
-    result.save()
-    result.print()
-    result.summarize().print()
+    run_test(AssistantsApiRateLimitLoadTest(), num_requests, api_key, assistant_id)
+
+
+@cli.command()
+@click.option("--num_requests", default=10, help="Number of concurrent requests")
+@click.option("--url", help="URL to test")
+@click.option("--session", help="Session cookie", required=False, default=None)
+def burst(num_requests, url, session):
+    """Send a burst of requests to the given URL."""
+    run_test(UrlLoadTest(), num_requests, url, session)
 
 
 if __name__ == "__main__":

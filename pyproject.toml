@@ -46,6 +46,7 @@ pytest = "^7.4.2"
 pre-commit = "^3.4.0"
 locust = "^2.20.0"
 pytest-asyncio = "^0.23.5"
+tqdm = "^4.66.2"
 
 [build-system]
 requires = ["poetry-core"]
