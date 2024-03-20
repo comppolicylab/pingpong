@@ -6,7 +6,7 @@ import type { PageLoad } from './$types';
  */
 export const load: PageLoad = async ({ fetch, params }) => {
   const classId = parseInt(params.classId, 10);
-  const [grants, { models }] = await Promise.all([
+  const [grants, modelsResponse] = await Promise.all([
     api.grants(fetch, {
       canEditInfo: { target_type: 'class', target_id: classId, relation: 'can_edit_info' },
       canCreateAssistants: {
@@ -29,14 +29,20 @@ export const load: PageLoad = async ({ fetch, params }) => {
       canDelete: { target_type: 'class', target_id: classId, relation: 'can_delete' },
       canManageUsers: { target_type: 'class', target_id: classId, relation: 'can_manage_users' }
     }),
-    api.getModels(fetch, classId)
+    api.getModels(fetch, classId).then(api.expandResponse)
   ]);
 
   let api_key = '';
   if (grants.canViewApiKey) {
-    const apiKeyResponse = await api.getApiKey(fetch, classId);
-    api_key = apiKeyResponse.api_key;
+    const apiKeyResponse = api.expandResponse(await api.getApiKey(fetch, classId));
+    if (apiKeyResponse.error) {
+      api_key = '[error fetching API key!]';
+    } else {
+      api_key = apiKeyResponse.data.api_key;
+    }
   }
+
+  const models = modelsResponse.error ? [] : modelsResponse.data.models;
 
   return {
     models,

@@ -70,8 +70,8 @@
   const loadUsers = async () => {
     loading = true;
     const response = await fetchUsers(page, pageSize, search);
-    if (response.$status >= 400) {
-      sadToast(`Failed to load users: ${response.detail}`);
+    if (response.error) {
+      sadToast(`Failed to load users: ${response.error.detail || 'unknown error'}`);
       return;
     }
     users = response.users;
