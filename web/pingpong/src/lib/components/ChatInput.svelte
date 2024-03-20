@@ -9,7 +9,7 @@
   import { createEventDispatcher } from 'svelte';
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
-  import { GradientButton, Review } from 'flowbite-svelte';
+  import { GradientButton } from 'flowbite-svelte';
   import { page } from '$app/stores';
   import { ChevronUpSolid } from 'flowbite-svelte-icons';
   import type {

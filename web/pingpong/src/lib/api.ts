@@ -1043,11 +1043,6 @@ type LastError = {
   message: string;
 };
 
-type RequiredAction = {
-  submit_tool_outputs: unknown;
-  type: 'submit_tool_outputs';
-};
-
 /**
  * Type of a thread run, per the OpenAI library.
  */
