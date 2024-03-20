@@ -103,6 +103,7 @@ class ThreadsManager {
     if (response.error) {
       this.#data.update((d) => {
         // If the class ID has changed, drop the update (race condition with another load call).
+        console.log("HAVE ERROR DATA FOR CLASS", d.classId, "WANT", classId);
         if (d.classId !== classId) {
           return d;
         }
@@ -117,6 +118,7 @@ class ThreadsManager {
       return;
     } else {
       this.#data.update((d) => {
+        console.log("HAVE DATA FOR CLASS", d.classId, "WANT", classId);
         // If the class ID has changed, drop the update
         if (d.classId !== classId) {
           return d;

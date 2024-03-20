@@ -45,9 +45,10 @@ export const load: LayoutLoad = async ({ fetch, url, params }) => {
 
   // Fetch class / thread data (needed to render the sidebar)
   // TODO - should move this elsewhere? into shared store?
+  const threadsMgr = getThreadsManager(fetch);
   const additionalState = {
     classes: getClassesManager(fetch),
-    threads: getThreadsManager(fetch),
+    threads: threadsMgr.get(null),
     institutions: getInstitutionsManager(fetch)
   };
 
@@ -62,9 +63,7 @@ export const load: LayoutLoad = async ({ fetch, url, params }) => {
     additionalState.institutions.load(forceReloadIndexes);
 
     if (classId) {
-      // Note: this doesn't reload the threads if the classId is the same as the current one!
-      // We should reload the threads periodically.
-      additionalState.threads.load(classId);
+      additionalState.threads = threadsMgr.get(classId);
     }
   }
 

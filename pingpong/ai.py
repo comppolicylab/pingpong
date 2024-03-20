@@ -5,6 +5,7 @@ import logging
 from typing import IO, Dict, List
 
 import openai
+from openai.types.beta.threads import ImageFile
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +40,13 @@ class StreamHandler(openai.AsyncAssistantEventHandler):
         super().__init__(*args, **kwargs)
         self.io = io
 
+    async def on_image_file_done(self, image_file: ImageFile) -> None:
+        self.io.write(
+            '{"type":"image_file_done","file_id":"' + image_file.file_id + '"}\n'
+        )
+        self.io.flush()
+
     async def on_message_created(self, message) -> None:
-        # self.io.write('{"type":"message_created","role":"assistant"}\n')
         self.io.write(
             json.dumps(
                 {
@@ -49,8 +55,8 @@ class StreamHandler(openai.AsyncAssistantEventHandler):
                     "message": message.model_dump(),
                 }
             )
-            + "\n"
         )
+        self.io.write("\n")
         self.io.flush()
 
     async def on_message_delta(self, delta, snapshot) -> None:
@@ -66,7 +72,12 @@ class StreamHandler(openai.AsyncAssistantEventHandler):
         self.io.flush()
 
     async def on_tool_call_created(self, tool_call) -> None:
-        self.io.write('{"type":"tool_call_created"}\n')
+        self.io.write(
+            json.dumps(
+                {"type": "tool_call_created", "tool_call": tool_call.model_dump()}
+            )
+        )
+        self.io.write("\n")
         self.io.flush()
 
     async def on_tool_call_delta(self, delta, snapshot) -> None:
@@ -74,22 +85,6 @@ class StreamHandler(openai.AsyncAssistantEventHandler):
             json.dumps(
                 {
                     "type": "tool_call_delta",
-                    "delta": delta.model_dump(),
-                }
-            )
-        )
-        self.io.write("\n")
-        self.io.flush()
-
-    async def on_run_step_created(self, run_step) -> None:
-        self.io.write('{"type":"run_step_created"}\n')
-        self.io.flush()
-
-    async def on_run_step_delta(self, delta, snapshot) -> None:
-        self.io.write(
-            json.dumps(
-                {
-                    "type": "run_step_delta",
                     "delta": delta.model_dump(),
                 }
             )
@@ -140,7 +135,8 @@ async def add_new_thread_message(
     except Exception as e:
         try:
             logger.exception("Error adding new thread message")
-            stream.write(f"::$err$::{e}\n")
+            stream.write(json.dumps({"type": "error", "detail": str(e)}))
+            stream.write("\n")
             stream.flush()
         except Exception:
             logger.exception("Error writing to stream")
