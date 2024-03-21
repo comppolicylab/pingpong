@@ -7,7 +7,7 @@ export const load: PageLoad = async ({ fetch }) => {
       .getInstitutions(fetch, 'can_create_class')
       .then(api.explodeResponse)
       .then((i) => i.institutions),
-      api
+    api
       .getMyClasses(fetch)
       .then(api.explodeResponse)
       .then((c) => c.classes)
