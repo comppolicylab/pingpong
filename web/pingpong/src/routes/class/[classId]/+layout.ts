@@ -17,7 +17,7 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
     ]);
 
   if (classDataResponse.error) {
-    throw error(classDataResponse.$status, classDataResponse.error.detail || 'Unknown error');
+    error(classDataResponse.$status, classDataResponse.error.detail || 'Unknown error');
   }
 
   let assistants: api.Assistant[] = [];
