@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum, StrEnum, auto
-from typing import Literal
+from typing import Literal, Union
 
 from openai.types.beta.assistant_tool import AssistantTool as Tool
 from openai.types.beta.threads import Message as OpenAIMessage
@@ -11,6 +11,43 @@ from .gravatar import get_email_hash, get_gravatar_image
 
 class GenericStatus(BaseModel):
     status: str
+
+
+class ManageAuthzRequest(BaseModel):
+    grant: list[tuple[str, str, str]] = []
+    revoke: list[tuple[str, str, str]] = []
+
+
+class AuthzEntity(BaseModel):
+    id: int | None = None
+    type: str
+
+
+class InspectAuthzTestResult(BaseModel):
+    test: Literal["test"] = "test"
+    verdict: bool
+
+
+class InspectAuthzListResult(BaseModel):
+    test: Literal["list"] = "list"
+    list: list[int]
+
+
+class InspectAuthzErrorResult(BaseModel):
+    test: Literal["error"] = "error"
+    error: str
+
+
+InspectAuthzResult = Union[
+    InspectAuthzTestResult, InspectAuthzListResult, InspectAuthzErrorResult
+]
+
+
+class InspectAuthz(BaseModel):
+    subject: AuthzEntity
+    relation: str
+    object: AuthzEntity
+    result: InspectAuthzResult
 
 
 class MagicLoginRequest(BaseModel):

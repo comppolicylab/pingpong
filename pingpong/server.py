@@ -170,7 +170,59 @@ async def log_request(request: Request, call_next):
 
 @v1.get("/config", dependencies=[Depends(Authz("admin"))])
 def get_config(request: Request):
+    d = config.dict()
+    for k in d.get("auth", {}).get("secret_keys", []):
+        k["key"] = "******"
+    if "key" in d.get("authz", {}):
+        d["authz"]["key"] = "******"
+    if "password" in d.get("db", {}):
+        d["db"]["password"] = "******"
+    if "webhook" in d.get("support", {}):
+        d["support"]["webhook"] = "******"
     return {"config": config.dict(), "headers": dict(request.headers)}
+
+
+@v1.get(
+    "/authz/audit",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.InspectAuthz,
+)
+async def inspect_authz(request: Request, subj: str, obj: str, rel: str):
+    subj_type_, _, subj_id_ = subj.partition(":")
+    obj_type_, _, obj_id_ = obj.partition(":")
+    try:
+        result: schemas.InspectAuthzResult | None = None
+        if obj_id_:
+            verdict = await request.state.authz.test(subj, rel, obj)
+            result = schemas.InspectAuthzTestResult(
+                verdict=verdict,
+            )
+        else:
+            ids = await request.state.authz.list(subj, rel, obj)
+            result = schemas.InspectAuthzListResult(
+                list=ids,
+            )
+    except Exception as e:
+        result = schemas.InspectAuthzErrorResult(error=str(e))
+
+    return schemas.InspectAuthz(
+        subject=schemas.AuthzEntity(id=int(subj_id_), type=subj_type_),
+        relation=rel,
+        object=schemas.AuthzEntity(
+            id=int(obj_id_) if obj_id_ else None, type=obj_type_
+        ),
+        result=result,
+    )
+
+
+@v1.post(
+    "/authz/audit",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.GenericStatus,
+)
+async def manage_authz(data: schemas.ManageAuthzRequest, request: Request):
+    await request.state.authz.write(grant=data.grant, revoke=data.revoke)
+    return {"status": "ok"}
 
 
 @v1.post("/login/magic", response_model=schemas.GenericStatus)
