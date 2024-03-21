@@ -1,4 +1,5 @@
 import { browser } from '$app/environment';
+import { TextLineStream, JSONStream } from '$lib/streams';
 
 /**
  * HTTP methods.
@@ -43,6 +44,29 @@ export const isErrorResponse = (r: unknown): r is ErrorResponse => {
 };
 
 /**
+ * Expand a response into its error and data components.
+ */
+export const expandResponse = <R extends BaseData>(r: BaseResponse & (Error | R)) => {
+  const $status = r.$status || 0;
+  if (isErrorResponse(r)) {
+    return { $status, error: r as Error, data: null };
+  } else {
+    return { $status, error: null, data: r as R };
+  }
+};
+
+/**
+ * Return response data or throw an error if one occurred.
+ */
+export const explodeResponse = <R extends BaseData>(r: BaseResponse & (Error | R)) => {
+  if (isErrorResponse(r)) {
+    throw r;
+  } else {
+    return r as R;
+  }
+};
+
+/**
  * Generic response returned by some API endpoints.
  */
 export type GenericStatus = {
@@ -77,21 +101,34 @@ export const fullPath = (path: string) => {
 /**
  * Common fetch method.
  */
-const _fetch = async <R extends BaseData>(
+const _fetch = async (
   f: Fetcher,
   method: Method,
   path: string,
   headers?: Record<string, string>,
   body?: string | FormData
-): Promise<R & BaseResponse> => {
+) => {
   const full = fullPath(path);
-  const res = await f(full, {
+  return f(full, {
     method,
     headers,
     body,
     credentials: 'include',
     mode: 'cors'
   });
+};
+
+/**
+ * Common fetch method returning a JSON response.
+ */
+const _fetchJSON = async <R extends BaseData>(
+  f: Fetcher,
+  method: Method,
+  path: string,
+  headers?: Record<string, string>,
+  body?: string | FormData
+): Promise<(R | Error) & BaseResponse> => {
+  const res = await _fetch(f, method, path, headers, body);
 
   let data: BaseData = {};
 
@@ -101,7 +138,7 @@ const _fetch = async <R extends BaseData>(
     // Do nothing
   }
 
-  return { $status: res.status, ...data } as R & BaseResponse;
+  return { $status: res.status, ...data } as (R | Error) & BaseResponse;
 };
 
 /**
@@ -115,7 +152,7 @@ const _qmethod = async <T extends BaseData, R extends BaseData>(
 ) => {
   const params = new URLSearchParams(data as Record<string, string>);
   path = `${path}?${params}`;
-  return await _fetch<R>(f, method, path);
+  return await _fetchJSON<R>(f, method, path);
 };
 
 /**
@@ -129,7 +166,7 @@ const _bmethod = async <T extends BaseData, R extends BaseData>(
 ) => {
   const body = JSON.stringify(data);
   const headers = { 'Content-Type': 'application/json' };
-  return await _fetch<R>(f, method, path, headers, body);
+  return await _fetchJSON<R>(f, method, path, headers, body);
 };
 
 /**
@@ -330,9 +367,13 @@ export const grants = async <T extends NamedGrantsQuery>(
   const grantNames = Object.keys(query);
   const grants = grantNames.map((name) => query[name]);
   const results = await POST<GrantsQuery, Grants>(f, 'me/grants', { grants });
+  const expanded = expandResponse(results);
+  if (expanded.error) {
+    throw expanded.error;
+  }
   const verdicts: NamedGrants = {};
   for (let i = 0; i < grantNames.length; i++) {
-    verdicts[grantNames[i]] = results.grants[i].verdict;
+    verdicts[grantNames[i]] = expanded.data.grants[i].verdict;
   }
   return verdicts as { [name in keyof T]: boolean };
 };
@@ -539,23 +580,31 @@ export type GetClassThreadsOpts = {
  */
 export const getClassThreads = async (f: Fetcher, classId: number, opts?: GetClassThreadsOpts) => {
   const url = `class/${classId}/threads`;
-  const result = await GET<GetClassThreadsOpts, Threads>(f, url, opts);
+  const result = expandResponse(await GET<GetClassThreadsOpts, Threads>(f, url, opts));
+
+  if (result.error) {
+    return {
+      lastPage: true,
+      threads: [] as Thread[],
+      error: result.error
+    };
+  }
+
   let lastPage = false;
   // Add a flag to indicate if this is the last page of results.
   // If there was a requested limit and the server returned
   // fewer results, then we know we're on the last page.
   // If there was no limit, then the last page is when we get
   // an empty list of threads.
-  if (result.threads) {
-    if (opts?.limit) {
-      lastPage = result.threads.length < opts.limit;
-    } else {
-      lastPage = result.threads.length === 0;
-    }
+  if (opts?.limit) {
+    lastPage = result.data.threads.length < opts.limit;
+  } else {
+    lastPage = result.data.threads.length === 0;
   }
   return {
-    ...result,
-    lastPage
+    threads: result.data.threads,
+    lastPage,
+    error: null
   };
 };
 
@@ -580,11 +629,18 @@ export type Assistant = {
 };
 
 /**
+ * Information about assistant creators.
+ */
+export type AssistantCreators = {
+  [id: number]: Profile;
+};
+
+/**
  * Information about multiple assistants, plus metadata about creators.
  */
 export type Assistants = {
   assistants: Assistant[];
-  creators: { [id: number]: Profile };
+  creators: AssistantCreators;
 };
 
 /**
@@ -852,11 +908,20 @@ export const getClassUsers = async (f: Fetcher, classId: number, opts?: GetClass
   const url = `class/${classId}/users`;
 
   const response = await GET<GetClassUsersOpts, ClassUsers>(f, url, opts);
-  const lastPage = response.users.length < response.limit;
+  const expanded = expandResponse(response);
+  if (expanded.error) {
+    return {
+      lastPage: true,
+      users: [],
+      error: expanded.error
+    };
+  }
+  const lastPage = expanded.data.users.length < expanded.data.limit;
 
   return {
-    ...response,
-    lastPage
+    ...expanded.data,
+    lastPage,
+    error: null
   };
 };
 
@@ -936,9 +1001,9 @@ export const removeClassUser = async (f: Fetcher, classId: number, userId: numbe
  * Parameters for creating a new thread.
  */
 export type CreateThreadRequest = {
-  message: string;
   assistant_id: number;
   parties?: number[];
+  message: string;
   file_ids?: string[];
 };
 
@@ -978,11 +1043,6 @@ type LastError = {
   message: string;
 };
 
-type RequiredAction = {
-  submit_tool_outputs: unknown;
-  type: 'submit_tool_outputs';
-};
-
 /**
  * Type of a thread run, per the OpenAI library.
  */
@@ -992,15 +1052,15 @@ export type OpenAIRun = {
   cancelled_at: number | null;
   completed_at: number | null;
   created_at: number;
-  expires_at: number;
+  expires_at: number | null;
   failed_at: number | null;
   file_ids: string[];
-  instruction: string;
+  instructions: string;
   last_error: LastError | null;
   metadata: Record<string, unknown>;
   model: string;
   object: 'thread.run';
-  required_action: RequiredAction | null;
+  //required_action: RequiredAction | null;
   started_at: number | null;
   status:
     | 'queued'
@@ -1013,7 +1073,7 @@ export type OpenAIRun = {
     | 'expired';
   thread_id: string;
   tools: unknown[];
-  usage: unknown | null;
+  // usage: unknown | null;
 };
 
 export type TextAnnotationFilePathFilePath = {
@@ -1090,7 +1150,6 @@ export type ThreadParticipants = {
  */
 export type ThreadWithMeta = {
   thread: Thread;
-  hash: string;
   run: OpenAIRun | null;
   messages: OpenAIMessage[];
   participants: ThreadParticipants;
@@ -1120,6 +1179,75 @@ export type ThreadRun = {
   run: OpenAIRun;
 };
 
+export type OpenAIMessageDelta = {
+  content: Content[];
+  role: null; // TODO - is this correct?
+  file_ids: string[] | null;
+};
+
+export type ThreadStreamMessageDeltaChunk = {
+  type: 'message_delta';
+  delta: OpenAIMessageDelta;
+};
+
+export type ThreadStreamMessageCreatedChunk = {
+  type: 'message_created';
+  role: 'user' | 'assistant';
+  message: OpenAIMessage;
+};
+
+export type ThreadStreamToolCallCreatedChunk = {
+  type: 'tool_call_created';
+  tool_call: unknown; // TODO
+};
+
+export type ThreadStreamToolCallDeltaChunk = {
+  type: 'tool_call_delta';
+  delta: unknown; // TODO
+};
+
+export type ThreadStreamErrorChunk = {
+  type: 'error';
+  detail: string;
+};
+
+export type ThreadStreamDoneChunk = {
+  type: 'done';
+};
+
+export type ThreadStreamChunk =
+  | ThreadStreamMessageDeltaChunk
+  | ThreadStreamMessageCreatedChunk
+  | ThreadStreamErrorChunk
+  | ThreadStreamDoneChunk
+  | ThreadStreamToolCallCreatedChunk
+  | ThreadStreamToolCallDeltaChunk;
+
+/**
+ * Stream chunks from a thread.
+ */
+const streamThreadChunks = (res: Response) => {
+  if (!res.body) {
+    throw new Error('No response body');
+  }
+  const stream = res.body
+    .pipeThrough(new TextDecoderStream())
+    .pipeThrough(new TextLineStream())
+    .pipeThrough(new JSONStream());
+  const reader = stream.getReader();
+  return {
+    stream,
+    reader,
+    async *[Symbol.asyncIterator]() {
+      let chunk = await reader.read();
+      while (!chunk.done) {
+        yield chunk.value as ThreadStreamChunk;
+        chunk = await reader.read();
+      }
+    }
+  };
+};
+
 /**
  * Post a new message to the thread.
  */
@@ -1130,7 +1258,24 @@ export const postMessage = async (
   data: NewThreadMessageRequest
 ) => {
   const url = `class/${classId}/thread/${threadId}`;
-  return await POST<NewThreadMessageRequest, ThreadRun>(f, url, data);
+  const res = await _fetch(
+    f,
+    'POST',
+    url,
+    { 'Content-Type': 'application/json' },
+    JSON.stringify(data)
+  );
+
+  return streamThreadChunks(res);
+};
+
+/**
+ * Create a new thread run.
+ */
+export const createThreadRun = async (f: Fetcher, classId: number, threadId: number) => {
+  const url = `class/${classId}/thread/${threadId}/run`;
+  const res = await _fetch(f, 'POST', url);
+  return streamThreadChunks(res);
 };
 
 /**
@@ -1304,7 +1449,15 @@ export type GetFileSupportFilter = (
  */
 export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/upload_info`;
-  const info = await GET<never, UploadInfo>(f, url);
+  const infoResponse = expandResponse(await GET<never, UploadInfo>(f, url));
+
+  const info = infoResponse.data || {
+    types: [],
+    allow_private: false,
+    private_file_max_size: 0,
+    class_file_max_size: 0,
+    error: infoResponse.error
+  };
 
   // Create a lookup table for mime types.
   const _mimeTypeLookup = new Map<string, FileTypeInfo>();

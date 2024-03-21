@@ -16,7 +16,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from jwt.exceptions import PyJWTError
 from sqlalchemy.sql import func
 
@@ -24,7 +24,7 @@ import pingpong.metrics as metrics
 import pingpong.models as models
 import pingpong.schemas as schemas
 
-from .ai import format_instructions, generate_name, get_openai_client, hash_thread
+from .ai import format_instructions, generate_name, get_openai_client, run_thread
 from .auth import (
     decode_auth_token,
     decode_session_token,
@@ -713,26 +713,20 @@ async def get_thread(
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
 
-    runs = [
-        r
-        async for r in await openai_client.beta.threads.runs.list(
-            thread.thread_id, limit=1, order="desc"
-        )
-    ]
-
-    messages = await openai_client.beta.threads.messages.list(thread.thread_id)
-    user_ids = {m.metadata.get("user_id") for m in messages.data} - {None}
-    users = await models.User.get_all_by_id(request.state.db, list(user_ids))
-    assistants = await models.Assistant.get_all_by_id(
-        request.state.db, [thread.assistant_id]
+    messages, assistants, runs_result = await asyncio.gather(
+        openai_client.beta.threads.messages.list(thread.thread_id),
+        models.Assistant.get_all_by_id(request.state.db, [thread.assistant_id]),
+        openai_client.beta.threads.runs.list(thread.thread_id, limit=1, order="desc"),
     )
+
+    runs = [r async for r in runs_result]
+
     return {
-        "hash": hash_thread(messages, runs),
         "thread": thread,
         "run": runs[0] if runs else None,
         "messages": list(messages.data),
         "participants": {
-            "user": {u.id: schemas.Profile.from_email(u.email) for u in users},
+            "user": {u.id: schemas.Profile.from_email(u.email) for u in thread.users},
             "assistant": {a.id: a.name for a in assistants},
         },
     }
@@ -844,7 +838,7 @@ async def list_threads(
 @v1.post(
     "/class/{class_id}/thread",
     dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
-    response_model=schemas.ThreadRun,
+    response_model=schemas.Thread,
 )
 async def create_thread(
     class_id: str,
@@ -853,20 +847,20 @@ async def create_thread(
     openai_client: OpenAIClient,
 ):
     parties = list[models.User]()
-    if req.parties:
-        parties = await models.User.get_all_by_id(request.state.db, req.parties)
 
-    name = await generate_name(openai_client, req.message)
-
-    thread = await openai_client.beta.threads.create(
-        messages=[
-            {
-                "metadata": {"user_id": request.state.session.user.id},
-                "role": "user",
-                "content": req.message,
-                "file_ids": req.file_ids,
-            }
-        ]
+    name, thread, parties = await asyncio.gather(
+        generate_name(openai_client, req.message),
+        openai_client.beta.threads.create(
+            messages=[
+                {
+                    "metadata": {"user_id": request.state.session.user.id},
+                    "role": "user",
+                    "content": req.message,
+                    "file_ids": req.file_ids,
+                }
+            ]
+        ),
+        models.User.get_all_by_id(request.state.db, req.parties),
     )
 
     new_thread = {
@@ -881,25 +875,48 @@ async def create_thread(
     result: None | models.Thread = None
     try:
         result = await models.Thread.create(request.state.db, new_thread)
-        asst = await models.Assistant.get_by_id(request.state.db, req.assistant_id)
 
         grants = [
             (f"class:{class_id}", "parent", f"thread:{result.id}"),
         ] + [(f"user:{p.id}", "party", f"thread:{result.id}") for p in parties]
         await request.state.authz.write(grant=grants)
 
-        # Start a new thread run.
-        run = await openai_client.beta.threads.runs.create(
-            thread_id=thread.id,
-            assistant_id=asst.assistant_id,
-        )
-
-        return {"thread": result, "run": run}
+        return result
     except Exception as e:
+        logger.error("Error creating thread: %s", e)
         await openai_client.beta.threads.delete(thread.id)
         if result:
+            # Delete users-threads mapping
+            for user in result.users:
+                result.users.remove(user)
             await result.delete(request.state.db)
         raise e
+
+
+@v1.post(
+    "/class/{class_id}/thread/{thread_id}/run",
+    dependencies=[
+        Depends(Authz("can_participate", "thread:{thread_id}")),
+    ],
+)
+async def create_run(
+    class_id: str,
+    thread_id: str,
+    request: Request,
+    openai_client: OpenAIClient,
+):
+    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
+
+    stream = run_thread(
+        openai_client,
+        thread_id=thread.thread_id,
+        assistant_id=asst.assistant_id,
+        message=None,
+        file_ids=None,
+    )
+
+    return StreamingResponse(stream, media_type="text/event-stream")
 
 
 @v1.post(
@@ -907,7 +924,6 @@ async def create_thread(
     dependencies=[
         Depends(Authz("can_participate", "thread:{thread_id}")),
     ],
-    response_model=schemas.ThreadRun,
 )
 async def send_message(
     class_id: str,
@@ -919,18 +935,8 @@ async def send_message(
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
     asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
 
-    await openai_client.beta.threads.messages.create(
-        thread.thread_id,
-        role="user",
-        content=data.message,
-        file_ids=data.file_ids,
-        metadata={"user_id": request.state.session.user.id},
-    )
-
-    run = await openai_client.beta.threads.runs.create(
-        thread_id=thread.thread_id,
-        assistant_id=asst.assistant_id,
-    )
+    thread.updated = func.now()
+    request.state.db.add(thread)
 
     metrics.inbound_messages.inc(
         app=config.public_url,
@@ -939,12 +945,16 @@ async def send_message(
         thread=thread.thread_id,
     )
 
-    thread.updated = func.now()
-    request.state.db.add(thread)
-    await request.state.db.commit()
-    await request.state.db.refresh(thread)
-
-    return {"thread": thread, "run": run}
+    # Create a generator that will stream chunks to the client.
+    stream = run_thread(
+        openai_client,
+        thread_id=thread.thread_id,
+        assistant_id=asst.assistant_id,
+        message=data.message,
+        file_ids=data.file_ids,
+        metadata={"user_id": request.state.session.user.id},
+    )
+    return StreamingResponse(stream, media_type="text/event-stream")
 
 
 @v1.post(

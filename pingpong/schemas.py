@@ -4,7 +4,6 @@ from typing import Literal
 
 from openai.types.beta.assistant_tool import AssistantTool as Tool
 from openai.types.beta.threads import Message as OpenAIMessage
-from openai.types.beta.threads import Run as OpenAIRun
 from pydantic import BaseModel, Field, SecretStr
 
 from .gravatar import get_email_hash, get_gravatar_image
@@ -131,8 +130,8 @@ class Thread(BaseModel):
 class CreateThread(BaseModel):
     parties: list[int] = []
     message: str = Field(..., min_length=1)
-    assistant_id: int
     file_ids: list[str] = Field([], min_length=0, max_length=10)
+    assistant_id: int
 
 
 class NewThreadMessage(BaseModel):
@@ -322,6 +321,39 @@ class Classes(BaseModel):
         from_attributes = True
 
 
+class OpenAIRunError(BaseModel):
+    code: str
+    message: str
+
+
+class OpenAIRun(BaseModel):
+    # See OpenAI's Run type. We select a subset of fields.
+    id: str
+    assistant_id: str
+    cancelled_at: int | None
+    completed_at: int | None
+    created_at: int
+    expires_at: int | None
+    failed_at: int | None
+    file_ids: list[str]
+    instructions: SecretStr
+    last_error: OpenAIRunError | None
+    metadata: dict[str, str]
+    model: str
+    object: Literal["thread.run"]
+    status: Literal["queued"] | Literal["in_progress"] | Literal[
+        "requires_action"
+    ] | Literal["cancelling"] | Literal["cancelled"] | Literal["failed"] | Literal[
+        "completed"
+    ] | Literal[
+        "expired"
+    ]
+    thread_id: str
+    tools: list[Tool]
+    # required_action // not shown
+    # usage // not shown
+
+
 class ThreadRun(BaseModel):
     thread: Thread
     run: OpenAIRun | None
@@ -337,7 +369,6 @@ class ThreadParticipants(BaseModel):
 
 class ThreadWithMeta(BaseModel):
     thread: Thread
-    hash: str
     run: OpenAIRun | None
     messages: list[OpenAIMessage]
     participants: ThreadParticipants

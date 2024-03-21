@@ -1,58 +1,41 @@
 <script lang="ts">
-  import type { SubmitFunction } from '@sveltejs/kit';
-  import { writable } from 'svelte/store';
+  import { page } from '$app/stores';
   import * as api from '$lib/api';
   import { sadToast } from '$lib/toast';
+  import { errorMessage } from '$lib/errors';
   import { blur } from 'svelte/transition';
-  import { enhance } from '$app/forms';
   import { Span, Avatar } from 'flowbite-svelte';
-  import { Pulse, SyncLoader } from 'svelte-loading-spinners';
+  import { Pulse, DoubleBounce } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
   import Logo from '$lib/components/Logo.svelte';
-  import ChatInput from '$lib/components/ChatInput.svelte';
+  import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
   import { EyeSlashOutline } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
+  import { ThreadManager } from '$lib/stores/thread';
 
   export let data;
 
-  let submitting = writable(false);
-  let messages: api.OpenAIMessage[] = [];
-  let participants: api.ThreadParticipants = { user: {}, assistant: {} };
-  let priv = false;
-  let classId = 0;
-  let threadId = 0;
-  let waiting = writable(false);
   let fileTypes = '';
-  $: thread = data?.thread?.store;
-  $: threadStatus = $thread?.$status || 0;
-  $: threadUsers = ($thread as api.ThreadWithMeta)?.thread?.users || [];
+  $: classId = parseInt($page.params.classId);
+  $: threadId = parseInt($page.params.threadId);
+  $: threadMgr = new ThreadManager(fetch, classId, threadId, data.threadData);
+  $: messages = threadMgr.messages;
+  $: participants = threadMgr.participants;
+  $: published = threadMgr.published;
+  $: error = threadMgr.error;
+  $: assistantId = threadMgr.assistantId;
+  $: users = threadMgr.users;
+  $: submitting = threadMgr.submitting;
+  $: waiting = threadMgr.waiting;
+  $: loading = threadMgr.loading;
   $: {
-    if ($thread && Object.hasOwn($thread, 'messages')) {
-      const t = $thread as api.ThreadWithMeta;
-      messages = t.messages
-        .filter((m) => m.content.length > 0)
-        .sort((a, b) => a.created_at - b.created_at);
-      participants = t.participants;
-      priv = t.thread.private;
-      classId = t.thread.class_id;
-      threadId = t.thread.id;
-      if (!loading) {
-        waiting.set(!api.finished(t.run));
-      }
-
-      // Figure out the capabilities of assistants in the thread
-      const assts = data.assistants.filter((a) => Object.hasOwn(participants.assistant, a.id));
-      fileTypes = data.uploadInfo.fileTypesForAssistants(...assts);
-    } else {
-      messages = [];
-      participants = { user: {}, assistant: {} };
-      priv = false;
-      classId = 0;
-    }
+    // Figure out the capabilities of assistants in the thread
+    const assts = data.assistants.filter((a) => Object.hasOwn($participants.assistant, a.id));
+    fileTypes = data.uploadInfo.fileTypesForAssistants(...assts);
   }
-  $: loading = !$thread && data?.thread?.loading;
+  // TODO - should figure this out by checking grants instead of participants
   $: canSubmit =
-    !!participants.user && data?.me?.user?.id && !!participants.user[data?.me?.user?.id];
+    !!$participants.user && data?.me?.user?.id && !!$participants.user[data?.me?.user?.id];
 
   // Get the name of the participant in the chat thread.
   const getName = (message: api.OpenAIMessage) => {
@@ -61,13 +44,13 @@
       if (!userId) {
         return 'Unknown';
       }
-      const participant = participants.user[userId];
+      const participant = $participants.user[userId];
       return participant?.email || 'Unknown';
     } else {
-      return (
-        participants.assistant[($thread as api.ThreadWithMeta).thread.assistant_id] ||
-        'PingPong Bot'
-      );
+      if ($assistantId) {
+        return $participants.assistant[$assistantId] || 'PingPong Bot';
+      }
+      return 'PingPong Bot';
     }
   };
 
@@ -78,7 +61,7 @@
       if (!userId) {
         return '';
       }
-      return participants.user[userId]?.image_url;
+      return $participants.user[userId]?.image_url;
     }
     // TODO - custom image for the assistant
 
@@ -86,8 +69,12 @@
   };
 
   // Scroll to the bottom of the chat thread.
-  const scroll = (el: HTMLDivElement, messageList: api.OpenAIMessage[]) => {
+  const scroll = (el: HTMLDivElement, messageList: unknown[]) => {
     // Scroll to the bottom of the element.
+    el.scrollTo({
+      top: el.scrollHeight,
+      behavior: 'smooth'
+    });
     return {
       // TODO - would be good to figure out how to do this without a timeout.
       update: () => {
@@ -102,35 +89,18 @@
   };
 
   // Handle sending a message
-  const handleSubmit: SubmitFunction = () => {
-    if ($waiting) {
-      sadToast(
-        'A response to the previous message is being generated. Please wait before sending a new message.'
-      );
-      return;
+  const postMessage = async ({ message, file_ids }: ChatInputMessage) => {
+    try {
+      await threadMgr.postMessage(data.me.user!.id, message, file_ids);
+    } catch (e) {
+      sadToast(`Failed to send message. Error: ${errorMessage(e)}`);
     }
-    $submitting = true;
+  };
 
-    return async ({ result, update }) => {
-      if (result.type !== 'success') {
-        sadToast('Chat failed! Please try again.');
-        return;
-      }
-
-      $waiting = true;
-
-      await data.thread.refresh(false);
-      update();
-
-      $submitting = false;
-
-      // Do a blocking refresh if the completion is still running
-      if (!api.finished(($thread as api.ThreadWithMeta).run)) {
-        await data.thread.refresh(true);
-      }
-
-      $waiting = false;
-    };
+  // Handle submit on the chat input
+  const handleSubmit = async (e: CustomEvent<ChatInputMessage>) => {
+    await postMessage(e.detail);
+    e.detail.callback?.();
   };
 
   // Handle file upload
@@ -149,37 +119,37 @@
 </script>
 
 <div class="relative py-8 h-full w-full">
-  {#if threadStatus >= 400}
+  {#if $error}
     <div class="absolute top-0 left-0 flex h-full w-full items-center">
       <div class="m-auto">
         <div class="text-center">
           <div class="text-2xl font-bold text-gray-600">Error loading thread.</div>
-          <div class="text-gray-400">{$thread?.detail || 'An unknown error occurred.'}</div>
+          <div class="text-gray-400">{errorMessage($error)}</div>
         </div>
       </div>
     </div>
   {/if}
-  {#if loading}
+  {#if $loading}
     <div class="absolute top-0 left-0 flex h-full w-full items-center">
       <div class="m-auto" transition:blur={{ amount: 10 }}>
-        <Pulse color="#d97706" />
+        <Pulse color="#0ea5e9" />
       </div>
     </div>
   {/if}
   <div class="w-full h-full flex flex-col justify-between">
-    <div class="overflow-y-auto pb-4 px-12" use:scroll={messages}>
-      {#each messages as message}
+    <div class="overflow-y-auto pb-4 px-12" use:scroll={$messages}>
+      {#each $messages as message}
         <div class="py-4 px-6 flex gap-x-3">
           <div class="shrink-0">
-            {#if message.role === 'user'}
-              <Avatar size="sm" src={getImage(message)} />
+            {#if message.data.role === 'user'}
+              <Avatar size="sm" src={getImage(message.data)} />
             {:else}
               <Logo size={8} />
             {/if}
           </div>
           <div class="max-w-full">
-            <div class="font-bold text-gray-400 mb-1">{getName(message)}</div>
-            {#each message.content as content}
+            <div class="font-bold text-gray-400 mb-1">{getName(message.data)}</div>
+            {#each message.data.content as content}
               {#if content.type == 'text'}
                 <div class="leading-7">
                   <Markdown
@@ -206,21 +176,19 @@
           </div>
         </div>
       {/each}
-      {#if $waiting}
-        <div class="w-full flex justify-center" transition:blur={{ amount: 10 }}>
-          <SyncLoader color="#d97706" size="40" />
-        </div>
-      {/if}
     </div>
 
-    {#if !loading}
+    {#if !$loading}
       <div class="w-full bottom-8 bg-gradient-to-t from-white to-transparent">
-        <form
-          class="w-11/12 mx-auto"
-          action="?/newMessage"
-          method="POST"
-          use:enhance={handleSubmit}
-        >
+        <div class="w-11/12 mx-auto relative">
+          {#if $waiting || $submitting}
+            <div
+              class="w-full flex justify-center absolute -top-10"
+              transition:blur={{ amount: 10 }}
+            >
+              <DoubleBounce color="#0ea5e9" size="30" />
+            </div>
+          {/if}
           <ChatInput
             mimeType={data.uploadInfo.mimeType}
             maxSize={data.uploadInfo.private_file_max_size}
@@ -229,19 +197,20 @@
             loading={$submitting || $waiting}
             upload={handleUpload}
             remove={handleRemove}
+            on:submit={handleSubmit}
           />
-        </form>
+        </div>
       </div>
     {/if}
   </div>
 
-  {#if priv}
+  {#if !$published}
     <div
       class="absolute top-0 left-0 flex gap-2 px-4 py-2 items-center w-full bg-amber-200 text-sm"
     >
       <EyeSlashOutline size="sm" class="text-gray-400" />
       <Span class="text-gray-400">This thread is private to</Span>
-      <Span class="text-gray-600">{threadUsers.map((u) => u.email).join(', ')}</Span>
+      <Span class="text-gray-600">{$users.map((u) => u.email).join(', ')}</Span>
     </div>
   {/if}
 </div>

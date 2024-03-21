@@ -29,15 +29,17 @@ export const actions: Actions = {
         if (!d.newInstitution) {
           throw invalid('institution', 'Institution is required');
         }
-        const institution = await api.createInstitution(f, {
-          name: d.newInstitution
-        });
+        const institution = api.expandResponse(
+          await api.createInstitution(f, {
+            name: d.newInstitution
+          })
+        );
 
-        if (institution.$status >= 400) {
-          throw institution;
+        if (institution.error) {
+          throw institution.error;
         }
 
-        instId = institution.id;
+        instId = institution.data.id;
       }
 
       return api.createClass(f, instId, {

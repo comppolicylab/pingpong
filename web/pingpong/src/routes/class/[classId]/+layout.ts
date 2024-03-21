@@ -1,5 +1,4 @@
 import * as api from '$lib/api';
-import type { ErrorResponse } from '$lib/api';
 import { error } from '@sveltejs/kit';
 import type { LayoutLoad } from './$types';
 
@@ -9,25 +8,33 @@ import type { LayoutLoad } from './$types';
 export const load: LayoutLoad = async ({ fetch, params }) => {
   const classId = parseInt(params.classId, 10);
 
-  const [classData, { creators: assistantCreators, assistants }, { files }, uploadInfo] =
+  const [classDataResponse, assistantsResponse, filesResponse, uploadInfoResponse] =
     await Promise.all([
-      api.getClass(fetch, classId),
-      api.getAssistants(fetch, classId),
-      api.getClassFiles(fetch, classId),
+      api.getClass(fetch, classId).then(api.expandResponse),
+      api.getAssistants(fetch, classId).then(api.expandResponse),
+      api.getClassFiles(fetch, classId).then(api.expandResponse),
       api.getClassUploadInfo(fetch, classId)
     ]);
 
-  if (classData.$status >= 300) {
-    throw error(classData.$status, (classData as ErrorResponse).detail || 'Unknown error');
+  if (classDataResponse.error) {
+    throw error(classDataResponse.$status, classDataResponse.error.detail || 'Unknown error');
+  }
+
+  let assistants: api.Assistant[] = [];
+  let assistantCreators: api.AssistantCreators = {};
+  if (assistantsResponse.data) {
+    assistants = assistantsResponse.data.assistants;
+    assistantCreators = assistantsResponse.data.creators;
   }
 
   return {
     hasAssistants: !!assistants && assistants.length > 0,
-    hasBilling: !!classData?.api_key,
-    class: classData,
+    hasBilling: !!classDataResponse.data.api_key,
+    class: classDataResponse.data,
     assistants,
     assistantCreators,
-    files,
-    uploadInfo
+    files: filesResponse.data?.files || [],
+    uploadInfo: uploadInfoResponse,
+    threads: api.getClassThreads(fetch, classId)
   };
 };

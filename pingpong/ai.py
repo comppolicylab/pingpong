@@ -1,7 +1,13 @@
 import functools
-import hashlib
+import io
+import logging
+from typing import Dict, List
 
 import openai
+import orjson
+from openai.types.beta.threads import ImageFile
+
+logger = logging.getLogger(__name__)
 
 
 async def generate_name(
@@ -29,18 +35,120 @@ async def generate_name(
     return response.choices[0].message.content
 
 
-def hash_thread(messages, runs) -> str:
-    """Come up with a unique ID representing the thread state."""
-    rpart = ""
-    if runs:
-        last_run = runs[0]
-        rpart = f"{last_run.id}-{last_run.status}"
+class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__buffer = io.BytesIO()
 
-    mpart = ""
-    if messages:
-        mpart = f"{messages.first_id}-{messages.last_id}"
+    def enqueue(self, data: Dict) -> None:
+        self.__buffer.write(orjson.dumps(data))
+        self.__buffer.write(b"\n")
 
-    return hashlib.md5(f"{mpart}-{rpart}".encode("utf-8")).hexdigest()
+    def flush(self) -> bytes:
+        value = self.__buffer.getvalue()
+        self.__buffer.truncate(0)
+        self.__buffer.seek(0)
+        return value
+
+    async def on_image_file_done(self, image_file: ImageFile) -> None:
+        self.enqueue(
+            {
+                "type": "image_file_done",
+                "file_id": image_file.file_id,
+            }
+        )
+
+    async def on_message_created(self, message) -> None:
+        self.enqueue(
+            {
+                "type": "message_created",
+                "role": "assistant",
+                "message": message.model_dump(),
+            }
+        )
+
+    async def on_message_delta(self, delta, snapshot) -> None:
+        self.enqueue(
+            {
+                "type": "message_delta",
+                "delta": delta.model_dump(),
+            }
+        )
+
+    async def on_tool_call_created(self, tool_call) -> None:
+        self.enqueue(
+            {
+                "type": "tool_call_created",
+                "tool_call": tool_call.model_dump(),
+            }
+        )
+
+    async def on_tool_call_delta(self, delta, snapshot) -> None:
+        self.enqueue(
+            {
+                "type": "tool_call_delta",
+                "delta": delta.model_dump(),
+            }
+        )
+
+    async def on_timeout(self) -> None:
+        self.enqueue(
+            {
+                "type": "error",
+                "detail": "Stream timed out waiting for response",
+            }
+        )
+
+    async def on_done(self, run) -> None:
+        self.enqueue({"type": "done"})
+
+    async def on_exception(self, exception) -> None:
+        self.enqueue(
+            {
+                "type": "error",
+                "detail": str(exception),
+            }
+        )
+
+
+async def run_thread(
+    cli: openai.AsyncClient,
+    *,
+    thread_id: str,
+    assistant_id: int,
+    message: str | None,
+    file_ids: List[str] | None = None,
+    metadata: Dict[str, str | int] | None = None,
+):
+    try:
+        if message is not None:
+            await cli.beta.threads.messages.create(
+                thread_id,
+                role="user",
+                content=message,
+                file_ids=file_ids,
+                metadata=metadata,
+            )
+
+        handler = BufferedStreamHandler()
+        async with cli.beta.threads.runs.create_and_stream(
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            event_handler=handler,
+        ) as run:
+            async for _ in run:
+                # Consume the stream and
+                yield handler.flush()
+
+    except Exception as e:
+        try:
+            logger.exception("Error adding new thread message")
+            yield orjson.dumps({"type": "error", "detail": str(e)}) + b"\n"
+        except Exception:
+            logger.exception("Error writing to stream")
+            pass
+    finally:
+        yield b'{"type":"done"}\n'
 
 
 def format_instructions(instructions: str, use_latex: bool = False) -> str:

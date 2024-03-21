@@ -1,15 +1,16 @@
 <script lang="ts">
+  import { blur } from 'svelte/transition';
   import { writable } from 'svelte/store';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
-  import { enhance } from '$app/forms';
-  import ChatInput from '$lib/components/ChatInput.svelte';
+  import { Pulse } from 'svelte-loading-spinners';
+  import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
   import { Helper, GradientButton, Dropdown, DropdownItem } from 'flowbite-svelte';
   import { EyeSlashOutline, ChevronDownSolid } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
-  import type { Assistant, Thread } from '$lib/api';
-  import type { SubmitFunction } from '@sveltejs/kit';
+  import { errorMessage } from '$lib/errors';
+  import type { Assistant } from '$lib/api';
 
   /**
    * Application data.
@@ -23,7 +24,7 @@
 
   // Whether billing is set up for the class (which controls everything).
   $: isConfigured = data?.hasAssistants && data?.hasBilling;
-  $: parties = data.me.user?.id || '';
+  $: parties = data.me.user?.id ? `${data.me.user.id}` : '';
   // The assistant ID from the URL.
   $: linkedAssistant = parseInt($page.url.searchParams.get('assistant') || '0', 10);
   $: {
@@ -53,18 +54,31 @@
   };
 
   // Handle form submission
-  const handleSubmit: SubmitFunction = () => {
+  const handleSubmit = async (e: CustomEvent<ChatInputMessage>) => {
     $loading = true;
+    const form = e.detail;
+    if (!form.message) {
+      $loading = false;
+      sadToast('Please enter a message.');
+      return;
+    }
 
-    return ({ result }) => {
-      if (result.type === 'success') {
-        const data = result.data as { thread: Thread };
-        goto(`/class/${data.thread.class_id}/thread/${data.thread.id}`);
-      } else {
-        $loading = false;
-        sadToast(`Chat failed! Please try again. Error: ${JSON.stringify(result)}`);
-      }
-    };
+    const partyIds = parties ? parties.split(',').map((id) => parseInt(id, 10)) : [];
+    try {
+      const newThread = api.explodeResponse(
+        await api.createThread(fetch, data.class.id, {
+          assistant_id: $assistant.id,
+          parties: partyIds,
+          message: form.message,
+          file_ids: form.file_ids
+        })
+      );
+      data.threads.threads = [newThread, ...data.threads.threads];
+      goto(`/class/${$page.params.classId}/thread/${newThread.id}`);
+    } catch (e) {
+      sadToast(`Failed to create thread. Error: ${errorMessage(e)}`);
+      $loading = false;
+    }
   };
 
   // Set the new assistant selection.
@@ -73,8 +87,16 @@
   };
 </script>
 
-<div class="v-full h-full flex items-center">
-  <div class="m-auto w-10/12">
+<div class="v-full h-full flex items-center relative">
+  {#if $loading}
+    <div class="absolute top-0 left-0 flex h-full w-full items-center">
+      <div class="m-auto" transition:blur={{ amount: 10 }}>
+        <Pulse color="#0ea5e9" />
+      </div>
+    </div>
+  {/if}
+
+  <div class="m-auto w-10/12 transition-opacity ease-in" class:opacity-0={$loading}>
     {#if isConfigured}
       <div class="text-center my-2 w-full">
         <GradientButton color="tealToLime"
@@ -92,18 +114,17 @@
           {/each}
         </Dropdown>
       </div>
-      <form action="?/newThread" method="POST" use:enhance={handleSubmit}>
-        <ChatInput
-          mimeType={data.uploadInfo.mimeType}
-          maxSize={data.uploadInfo.private_file_max_size}
-          accept={fileTypes}
-          loading={$loading}
-          upload={handleUpload}
-          remove={handleRemove}
-        />
-        <input type="hidden" name="assistant_id" bind:value={$assistant.id} />
-        <input type="hidden" name="parties" bind:value={parties} />
-      </form>
+      <ChatInput
+        mimeType={data.uploadInfo.mimeType}
+        maxSize={data.uploadInfo.private_file_max_size}
+        accept={fileTypes}
+        loading={$loading}
+        upload={handleUpload}
+        remove={handleRemove}
+        on:submit={handleSubmit}
+      />
+      <input type="hidden" name="assistant_id" bind:value={$assistant.id} />
+      <input type="hidden" name="parties" bind:value={parties} />
     {:else}
       <div class="text-center">
         {#if !data.hasAssistants}

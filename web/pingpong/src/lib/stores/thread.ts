@@ -1,0 +1,390 @@
+import { writable, derived, get } from 'svelte/store';
+import type { Writable, Readable } from 'svelte/store';
+import * as api from '$lib/api';
+import type { ThreadWithMeta, Error, BaseResponse } from '$lib/api';
+import { Deferred } from '$lib/deferred';
+
+/**
+ * State for the thread manager.
+ */
+export type ThreadManagerState = {
+  data: (BaseResponse & ThreadWithMeta) | null;
+  error: Error | null;
+  optimistic: api.OpenAIMessage[];
+  loading: boolean;
+  waiting: boolean;
+  submitting: boolean;
+};
+
+/**
+ * A message in a thread.
+ */
+export type Message = {
+  data: api.OpenAIMessage;
+  error: Error | null;
+  persisted: boolean;
+};
+
+/**
+ * Manager for a single conversation thread.
+ */
+export class ThreadManager {
+  /**
+   * The ID of the class this thread is in.
+   */
+  classId: number;
+
+  /**
+   * The ID of the thread.
+   */
+  threadId: number;
+
+  /**
+   * The current list of messages in the thread.
+   */
+  messages: Readable<Message[]>;
+
+  /**
+   * Whether the thread data is currently being loaded.
+   */
+  loading: Readable<boolean>;
+
+  /**
+   * Whether a message is currently being generated.
+   */
+  waiting: Readable<boolean>;
+
+  /**
+   * Whether a message is currently being submitted.
+   */
+  submitting: Readable<boolean>;
+
+  /**
+   * The users + assistants in the thread.
+   */
+  participants: Readable<api.ThreadParticipants>;
+
+  /**
+   * The users in the thread.
+   */
+  users: Readable<api.UserPlaceholder[]>;
+
+  /**
+   * Whether the thread is published.
+   */
+  published: Readable<boolean>;
+
+  /**
+   * The ID of the assistant for this thread.
+   */
+  assistantId: Readable<number | null>;
+
+  /**
+   * Any error that occurred while fetching the thread.
+   */
+  error: Readable<Error | null>;
+
+  #data: Writable<ThreadManagerState>;
+  #fetcher: api.Fetcher;
+
+  /**
+   * Create a new thread manager.
+   */
+  constructor(
+    fetcher: api.Fetcher,
+    classId: number,
+    threadId: number,
+    threadData: BaseResponse & (ThreadWithMeta | Error)
+  ) {
+    const expanded = api.expandResponse(threadData);
+    this.#fetcher = fetcher;
+    this.classId = classId;
+    this.threadId = threadId;
+    this.#data = writable({
+      data: expanded.data || null,
+      error: expanded.error || null,
+      optimistic: [],
+      loading: false,
+      waiting: false,
+      submitting: false
+    });
+
+    this.#ensureRun(threadData);
+
+    this.messages = derived(this.#data, ($data) => {
+      if (!$data) {
+        return [];
+      }
+      const realMessages = ($data.data?.messages || []).map((message) => ({
+        data: message,
+        error: null,
+        persisted: true
+      }));
+      const optimisticMessages = $data.optimistic.map((message) => ({
+        data: message,
+        error: null,
+        persisted: false
+      }));
+      // Sort messages together by created_at timestamp
+      return realMessages
+        .concat(optimisticMessages)
+        .sort((a, b) => a.data.created_at - b.data.created_at);
+    });
+
+    this.loading = derived(this.#data, ($data) => !!$data?.loading);
+
+    this.waiting = derived(this.#data, ($data) => !!$data?.waiting);
+
+    this.submitting = derived(this.#data, ($data) => !!$data?.submitting);
+
+    this.assistantId = derived(this.#data, ($data) => $data?.data?.thread?.assistant_id || null);
+
+    this.published = derived(this.#data, ($data) => $data?.data?.thread?.private === false);
+
+    this.error = derived(this.#data, ($data) => $data?.error || null);
+
+    this.participants = derived(this.#data, ($data) => {
+      if (!$data?.data) {
+        return { user: {}, assistant: {} };
+      }
+      return $data.data.participants;
+    });
+
+    this.users = derived(this.#data, ($data) => $data?.data?.thread?.users || []);
+  }
+
+  async #ensureRun(threadData: BaseResponse & (ThreadWithMeta | Error)) {
+    // Only run this in the browser
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const expanded = api.expandResponse(threadData);
+    if (!expanded.data) {
+      return;
+    }
+
+    // Check if the run is in progress. If it is, we'll need to poll until it's done;
+    // streaming is not available.
+    if (expanded.data.run) {
+      if (!api.finished(expanded.data.run)) {
+        await this.#pollThread();
+        return;
+      }
+      // Otherwise, if the last run is finished, we can just display the results.
+      return;
+    }
+
+    this.#data.update((d) => ({ ...d, submitting: true }));
+    const chunks = await api.createThreadRun(this.#fetcher, this.classId, this.threadId);
+    await this.#handleStreamChunks(chunks);
+  }
+
+  /**
+   * Poll the thread until the run is finished.
+   */
+  async #pollThread(timeout: number = 120_000) {
+    this.#data.update((d) => ({ ...d, waiting: true }));
+
+    const deferred = new Deferred();
+
+    const t0 = Date.now();
+    const interval = setInterval(async () => {
+      const response = await api.getThread(this.#fetcher, this.classId, this.threadId);
+      const expanded = api.expandResponse(response);
+      if (api.finished(expanded.data?.run)) {
+        clearInterval(interval);
+        this.#data.update((d) => ({
+          ...d,
+          data: expanded.data,
+          error: expanded.error,
+          waiting: false
+        }));
+        deferred.resolve();
+        return;
+      }
+
+      if (Date.now() - t0 > timeout) {
+        clearInterval(interval);
+        this.#data.update((d) => ({
+          ...d,
+          error: { detail: 'The thread run took too long to complete.' },
+          waiting: false
+        }));
+        deferred.reject(new Error('The thread run took too long to complete.'));
+      }
+    }, 5000);
+
+    return deferred.promise;
+  }
+
+  /**
+   * Get the current thread data.
+   */
+  get thread() {
+    const currentData = get(this.#data);
+    return currentData?.data?.thread;
+  }
+
+  /**
+   * Send a new message to this thread.
+   */
+  async postMessage(fromUserId: number, message: string, file_ids?: string[]) {
+    if (!message) {
+      throw new Error('Please enter a message before sending.');
+    }
+
+    const current = get(this.#data);
+
+    if (current.waiting || current.submitting) {
+      throw new Error(
+        'A response to the previous message is being generated. Please wait before sending a new message.'
+      );
+    }
+
+    // Generate an optimistic update for the UI
+    const optimisticMsgId = `optimistic-${(Math.random() + 1).toString(36).substring(2)}`;
+    const optimistic: api.OpenAIMessage = {
+      id: optimisticMsgId,
+      role: 'user',
+      content: [{ type: 'text', text: { value: message, annotations: [] } }],
+      created_at: Date.now(),
+      metadata: { user_id: fromUserId },
+      assistant_id: '',
+      thread_id: '',
+      file_ids: file_ids || [],
+      run_id: null,
+      object: 'thread.message'
+    };
+
+    this.#data.update((d) => ({
+      ...d,
+      optimistic: [...d.optimistic, optimistic],
+      submitting: true
+    }));
+    const chunks = await api.postMessage(this.#fetcher, this.classId, this.threadId, {
+      message,
+      file_ids
+    });
+    await this.#handleStreamChunks(chunks);
+  }
+
+  async #handleStreamChunks(chunks: AsyncIterable<api.ThreadStreamChunk>) {
+    this.#data.update((d) => ({
+      ...d,
+      submitting: false,
+      waiting: true
+    }));
+
+    try {
+      for await (const chunk of chunks) {
+        this.#handleStreamChunk(chunk);
+      }
+    } catch (e) {
+      this.#data.update((d) => ({
+        ...d,
+        error: e as Error
+      }));
+    } finally {
+      this.#data.update((d) => ({
+        ...d,
+        waiting: false
+      }));
+    }
+  }
+
+  /**
+   * Set the thread data.
+   */
+  setThreadData(data: BaseResponse & ThreadWithMeta) {
+    this.#data.update((d) => {
+      return { ...d, data };
+    });
+  }
+
+  /**
+   * Handle a new chunk of data from a streaming response.
+   */
+  #handleStreamChunk(chunk: api.ThreadStreamChunk) {
+    switch (chunk.type) {
+      case 'message_created':
+        this.#data.update((d) => {
+          return {
+            ...d,
+            data: {
+              ...d.data!,
+              messages: [
+                ...(d.data?.messages || []),
+                {
+                  ...chunk.message,
+                  // Note: make sure the message here has a timestamp that
+                  // will be sequential to the optimistic messages.
+                  // When the thread is reloaded, the real timestamps will be
+                  // somewhat different.
+                  created_at: Date.now()
+                }
+              ]
+            }
+          };
+        });
+        break;
+      case 'message_delta':
+        this.#appendDelta(chunk.delta);
+        break;
+      case 'done':
+        break;
+      case 'error':
+        throw new Error(chunk.detail || 'An unknown error occurred.');
+      case 'tool_call_created':
+        // TODO: handle tool call created
+        break;
+      case 'tool_call_delta':
+        // TODO: handle tool call delta
+        break;
+      default:
+        console.warn('Unhandled chunk', chunk);
+        break;
+    }
+  }
+
+  /**
+   * Add a message delta into the current thread data.
+   */
+  #appendDelta(chunk: api.OpenAIMessageDelta) {
+    this.#data.update((d) => {
+      const lastMessage = d.data?.messages[d.data!.messages.length - 1];
+      if (!lastMessage) {
+        console.warn('Received a message delta without a previous message.');
+        return d;
+      }
+
+      for (const content of chunk.content) {
+        this.#mergeContent(lastMessage.content, content);
+      }
+
+      return { ...d };
+    });
+  }
+
+  /**
+   * Merge a message delta into the last message in the thread data.
+   */
+  #mergeContent(contents: api.Content[], newContent: api.Content) {
+    const lastContent = contents[contents.length - 1];
+    if (!lastContent) {
+      contents.push(newContent);
+      return;
+    }
+    if (newContent.type === 'text') {
+      if (lastContent.type === 'text') {
+        lastContent.text.value += newContent.text.value;
+        return;
+      } else {
+        contents.push(newContent);
+        return;
+      }
+    } else {
+      contents.push(newContent);
+    }
+  }
+}

@@ -10,7 +10,6 @@
   const close = () => goto('/');
 
   $: isCreatingClass = $page.url.searchParams.has('new-class');
-  $: institutions = data?.institutions || [];
   $: {
     if (form?.$status && form?.$status < 300 && isCreatingClass) {
       close();
@@ -21,30 +20,45 @@
 <div class="container py-8 overflow-y-auto h-full">
   <Heading tag="h2">Welcome to PingPong!</Heading>
   <div class="flex flex-wrap mt-8 gap-4">
-    {#each data?.classes as cls}
-      <Card horizontal class="w-80 h-40" href={`/class/${cls.id}`}>
-        <div class="flex flex-col w-full justify-between">
-          <div class="flex flex-row justify-between">
-            <Heading tag="h3" color="text-gray-900">{cls.name}</Heading>
-            <P class="text-gray-400">{cls.term}</P>
+    {#await data.classes}
+      <P>Loading classes...</P>
+    {:then classes}
+      {#each classes as cls}
+        <Card horizontal class="w-80 h-40" href={`/class/${cls.id}`}>
+          <div class="flex flex-col w-full justify-between">
+            <div class="flex flex-row justify-between">
+              <Heading tag="h3" color="text-gray-900">{cls.name}</Heading>
+              <P class="text-gray-400">{cls.term}</P>
+            </div>
+            <div class="text-amber-500 text-lg">
+              {cls.institution?.name || 'Unknown institution'}
+            </div>
           </div>
-          <div class="text-amber-500 text-lg">
-            {cls.institution?.name || 'Unknown institution'}
-          </div>
+        </Card>
+      {/each}
+    {:catch error}
+      <P class="text-red-600">Error: {error.message}</P>
+    {/await}
+
+    {#await data.institutions}
+      <P>Loading institutions...</P>
+    {:then institutions}
+      {#if institutions.length > 0}
+        <div data-sveltekit-preload-data="off">
+          <Card horizontal img="" class="w-80 h-40" href="/?new-class">
+            <Heading tag="h3" color="text-gray-900">Create new</Heading>
+            <P>Click here to create a new class</P>
+          </Card>
         </div>
-      </Card>
-    {/each}
-    {#if institutions.length}
-      <Card horizontal img="" class="w-80 h-40" href="/?new-class">
-        <Heading tag="h3" color="text-gray-900">Create new</Heading>
-        <P>Click here to create a new class</P>
-      </Card>
-    {/if}
+      {/if}
+    {:catch error}
+      <P class="text-red-600">Error: {error.message}</P>
+    {/await}
   </div>
 </div>
 
 <Modal bind:open={isCreatingClass} dismissable={false}>
-  <CreateClass {institutions} on:close={close} />
+  <CreateClass institutions={data.institutions} on:close={close} />
   {#if form && !form.success}
     <P class="text-red-600">Error: {form?.detail || `unknown (${form.$status})`}</P>
   {/if}

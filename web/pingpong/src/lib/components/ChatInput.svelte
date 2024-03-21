@@ -1,4 +1,13 @@
+<script lang="ts" context="module">
+  export type ChatInputMessage = {
+    file_ids: string[];
+    message: string;
+    callback?: () => void;
+  };
+</script>
+
 <script lang="ts">
+  import { createEventDispatcher } from 'svelte';
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
   import { GradientButton } from 'flowbite-svelte';
@@ -14,6 +23,8 @@
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import FileUpload from '$lib/components/FileUpload.svelte';
   import { sadToast } from '$lib/toast';
+
+  const dispatcher = createEventDispatcher();
 
   /**
    * Whether to allow sending.
@@ -53,6 +64,8 @@
 
   // Text area reference for fixing height.
   let ref: HTMLTextAreaElement;
+  // Real (visible) text area input reference.
+  let realRef: HTMLTextAreaElement;
   // Container for the list of files, for calculating height.
   let fileListRef: HTMLDivElement;
 
@@ -96,13 +109,32 @@
     };
   };
 
+  // Submit the form.
+  const submit = () => {
+    const file_ids = fileIds ? fileIds.split(',') : [];
+    if (!ref.value || disabled) {
+      return;
+    }
+    const message = ref.value;
+    $files = [];
+    dispatcher('submit', {
+      file_ids,
+      message,
+      callback: () => {
+        document.getElementById('message')?.focus();
+      }
+    });
+    ref.value = '';
+    realRef.value = '';
+    fixHeight(realRef);
+  };
+
   // Submit form when Enter (but not Shift+Enter) is pressed in textarea
   const maybeSubmit = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (!disabled) {
-        const target = e.target as HTMLTextAreaElement | undefined;
-        target?.form?.requestSubmit();
+        submit();
       }
     }
   };
@@ -174,6 +206,7 @@
   </div>
   <div class="relative top-[2px]">
     <textarea
+      bind:this={realRef}
       id="message"
       rows="1"
       name="message"
@@ -202,14 +235,17 @@
       />
     {/if}
     <GradientButton
-      type="submit"
+      type="button"
+      on:click={submit}
+      on:touchstart={submit}
+      on:keydown={maybeSubmit}
       color="cyanToBlue"
       class={`${
         loading ? 'animate-pulse cursor-progress' : ''
       } w-8 h-8 p-2 absolute bottom-3 right-2.5`}
       disabled={uploading || loading || disabled}
     >
-      <ChevronUpSolid size="xs" />
+      <ChevronUpSolid size="md" />
     </GradientButton>
   </div>
 </div>
