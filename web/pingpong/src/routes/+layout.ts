@@ -14,7 +14,7 @@ export const load: LayoutLoad = async ({ fetch, url, params }) => {
   // Fetch the current user
   const me = api.expandResponse(await api.me(fetch));
   if (me.error) {
-    throw redirect(302, LOGIN);
+    redirect(302, LOGIN);
   }
 
   const authed = me.data.status === 'valid';
@@ -25,7 +25,7 @@ export const load: LayoutLoad = async ({ fetch, url, params }) => {
       if (browser) {
         goto(HOME);
       } else {
-        throw redirect(302, HOME);
+        redirect(302, HOME);
       }
     }
   } else {
@@ -34,7 +34,7 @@ export const load: LayoutLoad = async ({ fetch, url, params }) => {
       if (browser) {
         goto(LOGIN);
       } else {
-        throw redirect(302, LOGIN);
+        redirect(302, LOGIN);
       }
     }
   }
