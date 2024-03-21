@@ -117,9 +117,13 @@
     }
     const message = ref.value;
     $files = [];
-    dispatcher('submit', { file_ids, message, callback: () => {
-      document.getElementById('message')?.focus();
-    } });
+    dispatcher('submit', {
+      file_ids,
+      message,
+      callback: () => {
+        document.getElementById('message')?.focus();
+      }
+    });
     ref.value = '';
     realRef.value = '';
     fixHeight(realRef);

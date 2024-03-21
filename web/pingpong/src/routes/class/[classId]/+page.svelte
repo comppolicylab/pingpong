@@ -87,9 +87,7 @@
   };
 </script>
 
-
 <div class="v-full h-full flex items-center relative">
-
   {#if $loading}
     <div class="absolute top-0 left-0 flex h-full w-full items-center">
       <div class="m-auto" transition:blur={{ amount: 10 }}>
