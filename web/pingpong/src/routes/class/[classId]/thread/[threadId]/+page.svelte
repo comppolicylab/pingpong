@@ -5,7 +5,7 @@
   import { errorMessage } from '$lib/errors';
   import { blur } from 'svelte/transition';
   import { Span, Avatar } from 'flowbite-svelte';
-  import { Pulse, SyncLoader } from 'svelte-loading-spinners';
+  import { Pulse, DoubleBounce } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
   import Logo from '$lib/components/Logo.svelte';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
@@ -132,7 +132,7 @@
   {#if $loading}
     <div class="absolute top-0 left-0 flex h-full w-full items-center">
       <div class="m-auto" transition:blur={{ amount: 10 }}>
-        <Pulse color="#d97706" />
+        <Pulse color="#0ea5e9" />
       </div>
     </div>
   {/if}
@@ -176,16 +176,16 @@
           </div>
         </div>
       {/each}
-      {#if $waiting || $submitting}
-        <div class="w-full flex justify-center" transition:blur={{ amount: 10 }}>
-          <SyncLoader color="#d97706" size="40" />
-        </div>
-      {/if}
     </div>
 
     {#if !$loading}
       <div class="w-full bottom-8 bg-gradient-to-t from-white to-transparent">
-        <div class="w-11/12 mx-auto">
+        <div class="w-11/12 mx-auto relative">
+          {#if $waiting || $submitting}
+            <div class="w-full flex justify-center absolute -top-10" transition:blur={{ amount: 10 }}>
+              <DoubleBounce color="#0ea5e9" size="30" />
+            </div>
+          {/if}
           <ChatInput
             mimeType={data.uploadInfo.mimeType}
             maxSize={data.uploadInfo.private_file_max_size}

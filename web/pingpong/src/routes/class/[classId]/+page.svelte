@@ -91,7 +91,7 @@
   {#if $loading}
     <div class="absolute top-0 left-0 flex h-full w-full items-center">
       <div class="m-auto" transition:blur={{ amount: 10 }}>
-        <Pulse color="#d97706" />
+        <Pulse color="#0ea5e9" />
       </div>
     </div>
   {/if}
