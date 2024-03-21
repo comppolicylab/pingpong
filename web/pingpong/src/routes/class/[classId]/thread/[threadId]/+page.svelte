@@ -97,8 +97,10 @@
     }
   };
 
-  const handleSubmit = (e: CustomEvent<ChatInputMessage>) => {
-    postMessage(e.detail);
+  // Handle submit on the chat input
+  const handleSubmit = async (e: CustomEvent<ChatInputMessage>) => {
+    await postMessage(e.detail);
+    e.detail.callback?.();
   };
 
   // Handle file upload

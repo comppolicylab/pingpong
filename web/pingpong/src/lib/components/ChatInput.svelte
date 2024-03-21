@@ -2,6 +2,7 @@
   export type ChatInputMessage = {
     file_ids: string[];
     message: string;
+    callback?: () => void;
   };
 </script>
 
@@ -116,12 +117,12 @@
     }
     const message = ref.value;
     $files = [];
-    dispatcher('submit', { file_ids, message });
+    dispatcher('submit', { file_ids, message, callback: () => {
+      document.getElementById('message')?.focus();
+    } });
     ref.value = '';
     realRef.value = '';
     fixHeight(realRef);
-    // Reset focus to the textarea.
-    realRef.focus();
   };
 
   // Submit form when Enter (but not Shift+Enter) is pressed in textarea

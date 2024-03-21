@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { blur } from 'svelte/transition';
   import { writable } from 'svelte/store';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
+  import { Pulse } from 'svelte-loading-spinners';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
   import { Helper, GradientButton, Dropdown, DropdownItem } from 'flowbite-svelte';
   import { EyeSlashOutline, ChevronDownSolid } from 'flowbite-svelte-icons';
@@ -75,7 +77,6 @@
       goto(`/class/${$page.params.classId}/thread/${newThread.id}`);
     } catch (e) {
       sadToast(`Failed to create thread. Error: ${errorMessage(e)}`);
-    } finally {
       $loading = false;
     }
   };
@@ -86,8 +87,18 @@
   };
 </script>
 
-<div class="v-full h-full flex items-center">
-  <div class="m-auto w-10/12">
+
+<div class="v-full h-full flex items-center relative">
+
+  {#if $loading}
+    <div class="absolute top-0 left-0 flex h-full w-full items-center">
+      <div class="m-auto" transition:blur={{ amount: 10 }}>
+        <Pulse color="#d97706" />
+      </div>
+    </div>
+  {/if}
+
+  <div class="m-auto w-10/12 transition-opacity ease-in" class:opacity-0={$loading}>
     {#if isConfigured}
       <div class="text-center my-2 w-full">
         <GradientButton color="tealToLime"
