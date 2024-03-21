@@ -1196,6 +1196,16 @@ export type ThreadStreamMessageCreatedChunk = {
   message: OpenAIMessage;
 };
 
+export type ThreadStreamToolCallCreatedChunk = {
+  type: 'tool_call_created';
+  tool_call: unknown; // TODO
+};
+
+export type ThreadStreamToolCallDeltaChunk = {
+  type: 'tool_call_delta';
+  delta: unknown; // TODO
+};
+
 export type ThreadStreamErrorChunk = {
   type: 'error';
   detail: string;
@@ -1209,7 +1219,9 @@ export type ThreadStreamChunk =
   | ThreadStreamMessageDeltaChunk
   | ThreadStreamMessageCreatedChunk
   | ThreadStreamErrorChunk
-  | ThreadStreamDoneChunk;
+  | ThreadStreamDoneChunk
+  | ThreadStreamToolCallCreatedChunk
+  | ThreadStreamToolCallDeltaChunk;
 
 /**
  * Stream chunks from a thread.

@@ -335,6 +335,12 @@ export class ThreadManager {
         break;
       case 'error':
         throw new Error(chunk.detail || 'An unknown error occurred.');
+      case 'tool_call_created':
+        // TODO: handle tool call created
+        break;
+      case 'tool_call_delta':
+        // TODO: handle tool call delta
+        break;
       default:
         console.warn('Unhandled chunk', chunk);
         break;
