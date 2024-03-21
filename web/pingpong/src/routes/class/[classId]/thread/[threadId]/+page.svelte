@@ -119,16 +119,6 @@
 </script>
 
 <div class="relative py-8 h-full w-full">
-  {#if $error}
-    <div class="absolute top-0 left-0 flex h-full w-full items-center">
-      <div class="m-auto">
-        <div class="text-center">
-          <div class="text-2xl font-bold text-gray-600">Error loading thread.</div>
-          <div class="text-gray-400">{errorMessage($error)}</div>
-        </div>
-      </div>
-    </div>
-  {/if}
   {#if $loading}
     <div class="absolute top-0 left-0 flex h-full w-full items-center">
       <div class="m-auto" transition:blur={{ amount: 10 }}>
@@ -176,6 +166,17 @@
           </div>
         </div>
       {/each}
+
+      {#if $error}
+        <div class="flex w-full items-center">
+          <div class="m-auto">
+            <div class="text-center">
+              <div class="text-2xl font-bold text-red-600">Error loading thread.</div>
+              <div class="text-red-400">{errorMessage($error)}</div>
+            </div>
+          </div>
+        </div>
+      {/if}
     </div>
 
     {#if !$loading}
