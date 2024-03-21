@@ -65,7 +65,7 @@ services:
 
   web:
     platform: linux/amd64
-    image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-web:v0.1.1
+    image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-web:v0.2.0
     build:
       context: ./web/pingpong
       dockerfile: Dockerfile
@@ -93,7 +93,7 @@ services:
 
   srv:
     platform: linux/amd64
-    image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-srv:v0.1.3
+    image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-srv:v0.2.0
     build:
       context: ./
       dockerfile: Dockerfile
