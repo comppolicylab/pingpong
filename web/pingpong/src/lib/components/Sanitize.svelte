@@ -1,5 +1,5 @@
 <script lang="ts">
-  import DOMPurify from 'isomorphic-dompurify';
+  import DOMPurify from '$lib/purify';
 
   /**
    * Content to render.
