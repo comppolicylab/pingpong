@@ -259,6 +259,7 @@ export class ThreadManager {
 
     this.#data.update((d) => ({
       ...d,
+      error: null,
       optimistic: [...d.optimistic, optimistic],
       submitting: true
     }));
@@ -272,6 +273,7 @@ export class ThreadManager {
   async #handleStreamChunks(chunks: AsyncIterable<api.ThreadStreamChunk>) {
     this.#data.update((d) => ({
       ...d,
+      error: null,
       submitting: false,
       waiting: true
     }));
