@@ -182,7 +182,10 @@
       <div class="w-full bottom-8 bg-gradient-to-t from-white to-transparent">
         <div class="w-11/12 mx-auto relative">
           {#if $waiting || $submitting}
-            <div class="w-full flex justify-center absolute -top-10" transition:blur={{ amount: 10 }}>
+            <div
+              class="w-full flex justify-center absolute -top-10"
+              transition:blur={{ amount: 10 }}
+            >
               <DoubleBounce color="#0ea5e9" size="30" />
             </div>
           {/if}
