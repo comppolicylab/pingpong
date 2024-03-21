@@ -1,9 +1,10 @@
 import functools
-import json
+import io
 import logging
-from typing import IO, Callable, Dict, List
+from typing import Dict, List
 
 import openai
+import orjson
 from openai.types.beta.threads import ImageFile
 
 logger = logging.getLogger(__name__)
@@ -34,76 +35,80 @@ async def generate_name(
     return response.choices[0].message.content
 
 
-class StreamHandler(openai.AsyncAssistantEventHandler):
-    def __init__(self, *args, io: IO, **kwargs):
+class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.io = io
+        self.__buffer = io.BytesIO()
+
+    def enqueue(self, data: Dict) -> None:
+        self.__buffer.write(orjson.dumps(data))
+        self.__buffer.write(b"\n")
+
+    def flush(self) -> bytes:
+        value = self.__buffer.getvalue()
+        self.__buffer.truncate(0)
+        self.__buffer.seek(0)
+        return value
 
     async def on_image_file_done(self, image_file: ImageFile) -> None:
-        self.io.write(
-            '{"type":"image_file_done","file_id":"' + image_file.file_id + '"}\n'
+        self.enqueue(
+            {
+                "type": "image_file_done",
+                "file_id": image_file.file_id,
+            }
         )
-        self.io.flush()
 
     async def on_message_created(self, message) -> None:
-        self.io.write(
-            json.dumps(
-                {
-                    "type": "message_created",
-                    "role": "assistant",
-                    "message": message.model_dump(),
-                }
-            )
+        self.enqueue(
+            {
+                "type": "message_created",
+                "role": "assistant",
+                "message": message.model_dump(),
+            }
         )
-        self.io.write("\n")
-        self.io.flush()
 
     async def on_message_delta(self, delta, snapshot) -> None:
-        self.io.write(
-            json.dumps(
-                {
-                    "type": "message_delta",
-                    "delta": delta.model_dump(),
-                }
-            )
+        self.enqueue(
+            {
+                "type": "message_delta",
+                "delta": delta.model_dump(),
+            }
         )
-        self.io.write("\n")
-        self.io.flush()
 
     async def on_tool_call_created(self, tool_call) -> None:
-        self.io.write(
-            json.dumps(
-                {"type": "tool_call_created", "tool_call": tool_call.model_dump()}
-            )
+        self.enqueue(
+            {
+                "type": "tool_call_created",
+                "tool_call": tool_call.model_dump(),
+            }
         )
-        self.io.write("\n")
-        self.io.flush()
 
     async def on_tool_call_delta(self, delta, snapshot) -> None:
-        self.io.write(
-            json.dumps(
-                {
-                    "type": "tool_call_delta",
-                    "delta": delta.model_dump(),
-                }
-            )
+        self.enqueue(
+            {
+                "type": "tool_call_delta",
+                "delta": delta.model_dump(),
+            }
         )
-        self.io.write("\n")
-        self.io.flush()
 
     async def on_timeout(self) -> None:
-        self.io.write(
-            '{"type":"error","detail":"Stream timed out waiting for response"}\n'
+        self.enqueue(
+            {
+                "type": "error",
+                "detail": "Stream timed out waiting for response",
+            }
         )
-        self.io.flush()
 
     async def on_done(self, run) -> None:
-        self.io.write('{"type":"done"}\n')
-        self.io.flush()
+        self.enqueue({"type": "done"})
 
     async def on_exception(self, exception) -> None:
-        self.io.write(json.dumps({"type": "error", "detail": str(exception)}) + "\n")
-        self.io.flush()
+        self.enqueue(
+            {
+                "type": "error",
+                "detail": str(exception),
+            }
+        )
 
 
 async def run_thread(
@@ -114,8 +119,6 @@ async def run_thread(
     message: str | None,
     file_ids: List[str] | None = None,
     metadata: Dict[str, str | int] | None = None,
-    stream: IO,
-    callback: Callable | None,
 ):
     try:
         if message is not None:
@@ -127,27 +130,25 @@ async def run_thread(
                 metadata=metadata,
             )
 
+        handler = BufferedStreamHandler()
         async with cli.beta.threads.runs.create_and_stream(
             thread_id=thread_id,
             assistant_id=assistant_id,
-            event_handler=StreamHandler(io=stream),
+            event_handler=handler,
         ) as run:
-            await run.until_done()
+            async for _ in run:
+                # Consume the stream and
+                yield handler.flush()
+
     except Exception as e:
         try:
             logger.exception("Error adding new thread message")
-            stream.write(json.dumps({"type": "error", "detail": str(e)}))
-            stream.write("\n")
-            stream.flush()
+            yield orjson.dumps({"type": "error", "detail": str(e)}) + b"\n"
         except Exception:
             logger.exception("Error writing to stream")
             pass
     finally:
-        if callback is not None:
-            try:
-                callback()
-            except Exception as e:
-                logger.exception("Error running callback", e)
+        yield b'{"type":"done"}\n'
 
 
 def format_instructions(instructions: str, use_latex: bool = False) -> str:

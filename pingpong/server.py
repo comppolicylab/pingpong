@@ -38,7 +38,6 @@ from .files import FILE_TYPES, handle_create_file, handle_delete_file
 from .invite import send_invite
 from .now import NowFn, utcnow
 from .permission import Authz, LoggedIn
-from .stream import Stream
 
 logger = logging.getLogger(__name__)
 
@@ -908,21 +907,16 @@ async def create_run(
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
     asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
-    stream = Stream()
 
-    asyncio.create_task(
-        run_thread(
-            openai_client,
-            thread_id=thread.thread_id,
-            assistant_id=asst.assistant_id,
-            message=None,
-            file_ids=None,
-            stream=stream.writer,
-            callback=stream.close,
-        )
+    stream = run_thread(
+        openai_client,
+        thread_id=thread.thread_id,
+        assistant_id=asst.assistant_id,
+        message=None,
+        file_ids=None,
     )
 
-    return StreamingResponse(stream.reader, media_type="text/event-stream")
+    return StreamingResponse(stream, media_type="text/event-stream")
 
 
 @v1.post(
@@ -941,25 +935,8 @@ async def send_message(
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
     asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
 
-    # Create a pipe to communicate with the background task and stream
-    # responses to the client.
-    stream = Stream()
-
-    # Create a background task to finish communicating with the upstream server
-    # and then write the response to the stream.
-    asyncio.create_task(
-        run_thread(
-            openai_client,
-            thread_id=thread.thread_id,
-            assistant_id=asst.assistant_id,
-            message=data.message,
-            file_ids=data.file_ids,
-            metadata={"user_id": request.state.session.user.id},
-            stream=stream.writer,
-            callback=stream.close,
-        )
-    )
-    # TODO - handle background task exceptions
+    thread.updated = func.now()
+    request.state.db.add(thread)
 
     metrics.inbound_messages.inc(
         app=config.public_url,
@@ -968,11 +945,16 @@ async def send_message(
         thread=thread.thread_id,
     )
 
-    thread.updated = func.now()
-    request.state.db.add(thread)
-    await request.state.db.commit()
-
-    return StreamingResponse(stream.reader, media_type="text/event-stream")
+    # Create a generator that will stream chunks to the client.
+    stream = run_thread(
+        openai_client,
+        thread_id=thread.thread_id,
+        assistant_id=asst.assistant_id,
+        message=data.message,
+        file_ids=data.file_ids,
+        metadata={"user_id": request.state.session.user.id},
+    )
+    return StreamingResponse(stream, media_type="text/event-stream")
 
 
 @v1.post(
