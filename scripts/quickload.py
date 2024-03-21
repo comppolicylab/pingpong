@@ -44,9 +44,14 @@ class LoadTestResultSummary:
 
 
 class LoadTestResult:
-    def __init__(self, test_id: str, n: int, args, kwargs, cases, t0, t1):
+    def __init__(
+        self, test_id: str, n: int, k: int, jitter: float, args, kwargs, cases, t0, t1
+    ):
         self.test_id = test_id
         self.n = n
+        self.k = k
+        self.jitter = jitter
+        self.total = n * k
         self.args = args
         self.kwargs = kwargs
         self.cases = cases
@@ -59,32 +64,35 @@ class LoadTestResult:
         num_exceptions = sum(1 for result in self.cases if result.error)
 
         # Print success rate
-        success_rate = num_completed / self.n
+        success_rate = num_completed / self.total
         return LoadTestResultSummary(
             completions=num_completed,
             failures=num_failed,
             exceptions=num_exceptions,
-            avg_duration=sum(result.duration for result in self.cases) / self.n,
+            avg_duration=sum(result.duration for result in self.cases) / self.total,
             success_rate=success_rate,
         )
 
     def print(self):
         print(f"Test ID: {self.test_id}")
-        print(f"Number of requests: {self.n}")
+        print(f"Number of requests: {self.total}")
+        print(f"Concurrent requests: {self.n}")
+        print(f"Tests per thread: {self.k}")
+        print(f"Jitter: {self.jitter}")
         print(f"Arguments: {self.args}")
         print(f"Keyword arguments: {self.kwargs}")
         print(f"Start time: {self.t0}")
         print(f"End time: {self.t1}")
         print("Results:")
         for case in self.cases:
-            print(
-                f"Request {case.index} - Success: {case.success},",
-                f"Duration: {case.duration}, Error: {case.error}",
-            )
+            case.print()
 
     def dump(self):
         return {
             "n": self.n,
+            "k": self.k,
+            "total": self.total,
+            "jitter": self.jitter,
             "args": self.args,
             "kwargs": self.kwargs,
             "cases": [c.dump() for c in self.cases],
@@ -100,8 +108,15 @@ class LoadTestResult:
 
 class LoadTestSample:
     def __init__(
-        self, index: int, success: bool, duration: float, error: str | None, result: Any
+        self,
+        delay: float,
+        index: int,
+        success: bool,
+        duration: float,
+        error: str | None,
+        result: Any,
     ):
+        self.delay = delay
         self.index = index
         self.success = success
         self.duration = duration
@@ -110,6 +125,7 @@ class LoadTestSample:
 
     def dump(self):
         return {
+            "delay": self.delay,
             "index": self.index,
             "success": self.success,
             "duration": self.duration,
@@ -117,25 +133,41 @@ class LoadTestSample:
             "result": self.result,
         }
 
+    def print(self):
+        print(
+            f"Index: {self.index},",
+            f"Success: {self.success},",
+            f"Duration: {self.duration:.2f} seconds,",
+            f"Error: {self.error}",
+            f"Delay: {self.delay:.2f} seconds",
+        )
+
 
 class LoadTest:
-    def __init__(self):
-        self.results = []
+    def __init__(self, n: int, k: int = 1, jitter: float = 0.0):
+        self.n = n
+        self.k = k
+        self.jitter = jitter
+        self.results = list[LoadTestResult]()
         self.test_id = f"{self.__class__.__name__}_{time.time()}"
 
-    def run(self, n: int, *args, **kwargs):
+    def run(self, *args, **kwargs):
         print("Starting load test...")
         t0 = time.time()
         cases = list[LoadTestSample]()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=n) as executor:
+        total = self.n * self.k
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.n) as executor:
             futures = [
-                executor.submit(self._run_test, i, *args, **kwargs) for i in range(n)
+                executor.submit(self._run_test, i, *args, **kwargs)
+                for i in range(total)
             ]
-            for future in tqdm(concurrent.futures.as_completed(futures), total=n):
+            for future in tqdm(concurrent.futures.as_completed(futures), total=total):
                 cases.append(future.result())
 
         t1 = time.time()
-        result = LoadTestResult(self.test_id, n, args, kwargs, cases, t0, t1)
+        result = LoadTestResult(
+            self.test_id, self.n, self.k, self.jitter, args, kwargs, cases, t0, t1
+        )
         self.results.append(result)
         return result
 
@@ -146,10 +178,13 @@ class LoadTest:
         return self.results[-1]
 
     def _run_test(self, idx: int, *args, **kwargs):
+        delay = random.uniform(0, self.jitter)
+        time.sleep(delay)
         try:
             t0 = time.time()
             result = self.test(*args, **kwargs)
             return LoadTestSample(
+                delay=delay,
                 index=idx,
                 success=True,
                 duration=time.time() - t0,
@@ -158,6 +193,7 @@ class LoadTest:
             )
         except Exception as e:
             return LoadTestSample(
+                delay=delay,
                 index=idx,
                 success=False,
                 duration=time.time() - t0,
@@ -205,7 +241,7 @@ COUNTRIES = [
 ]
 
 
-class UrlLoadTest(LoadTest):
+class UrlBurstTest(LoadTest):
     def test(self, url: str, session: str | None = None):
         """Make a single request to the given URL and return the result."""
         cookies = {"session": session} if session else None
@@ -251,8 +287,8 @@ class AssistantsApiRateLimitLoadTest(LoadTest):
         return run.model_dump()
 
 
-def run_test(test: LoadTest, num_requests: int, *args, **kwargs):
-    result = test.run(num_requests, *args, **kwargs)
+def run_test(test: LoadTest, *args, **kwargs):
+    result = test.run(*args, **kwargs)
     result.save()
     result.print()
     result.summarize().print()
@@ -264,21 +300,23 @@ def cli():
 
 
 @cli.command()
-@click.option("--num_requests", default=10, help="Number of concurrent requests")
+@click.option("--n", default=10, help="Number of concurrent requests")
 @click.option("--api_key", help="OpenAI API key")
 @click.option("--assistant_id", help="Assistant ID")
-def assistants(num_requests, api_key, assistant_id):
+def assistants(n, api_key, assistant_id):
     """Run the load test of the Assistants API with the given parameters."""
-    run_test(AssistantsApiRateLimitLoadTest(), num_requests, api_key, assistant_id)
+    run_test(AssistantsApiRateLimitLoadTest(n=n), api_key, assistant_id)
 
 
 @cli.command()
-@click.option("--num_requests", default=10, help="Number of concurrent requests")
+@click.option("--n", default=10, help="Number of concurrent requests")
+@click.option("--k", default=1, help="Number of tests per thread")
+@click.option("--jitter", default=0, help="Random jitter in seconds")
 @click.option("--url", help="URL to test")
 @click.option("--session", help="Session cookie", required=False, default=None)
-def burst(num_requests, url, session):
+def burst(n, k, jitter, url, session):
     """Send a burst of requests to the given URL."""
-    run_test(UrlLoadTest(), num_requests, url, session)
+    run_test(UrlBurstTest(n=n, k=k, jitter=jitter), url, session)
 
 
 if __name__ == "__main__":
