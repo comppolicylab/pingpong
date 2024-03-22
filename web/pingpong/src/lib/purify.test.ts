@@ -4,7 +4,7 @@ import purify from './purify';
 describe('purify', () => {
   it('should add target blank and proper rel to links', () => {
     expect(purify.sanitize(`<a href="https://pingpong.local/">pingpong</a>`)).toBe(
-      `<a href="https://pingpong.local/" target="_blank" rel="noopener noreferrer">pingpong</a>`
+      `<a href="https://pingpong.local/" target="_blank" rel="noopener noreferrer external">pingpong</a>`
     );
   });
 
