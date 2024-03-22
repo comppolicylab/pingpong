@@ -379,7 +379,26 @@ export class ThreadManager {
     }
     if (newContent.type === 'text') {
       if (lastContent.type === 'text') {
-        lastContent.text.value += newContent.text.value;
+        // Ensure that the last content has a text value (non-null).
+        if (!lastContent.text.value) {
+          lastContent.text.value = '';
+        }
+
+        // Text content might be null, often when the delta only contains an annotation.
+        if (newContent.text.value) {
+          lastContent.text.value += newContent.text.value;
+        }
+
+        // Ensure that the last content has an annotations array.
+        if (!lastContent.text.annotations) {
+          lastContent.text.annotations = [];
+        }
+
+        // Merge any new annotations into the last content.
+        if (newContent.text.annotations) {
+          lastContent.text.annotations.push(...newContent.text.annotations);
+        }
+
         return;
       } else {
         contents.push(newContent);
