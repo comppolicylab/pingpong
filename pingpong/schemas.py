@@ -404,10 +404,16 @@ class ThreadParticipants(BaseModel):
     assistant: dict[int, str]
 
 
+class ThreadMessages(BaseModel):
+    limit: int
+    messages: list[OpenAIMessage]
+
+
 class ThreadWithMeta(BaseModel):
     thread: Thread
     run: OpenAIRun | None
     messages: list[OpenAIMessage]
+    limit: int
     participants: ThreadParticipants
 
     class Config:

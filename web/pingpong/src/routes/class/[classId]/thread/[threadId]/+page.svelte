@@ -28,6 +28,7 @@
   $: submitting = threadMgr.submitting;
   $: waiting = threadMgr.waiting;
   $: loading = threadMgr.loading;
+  $: canFetchMore = threadMgr.canFetchMore;
   $: {
     // Figure out the capabilities of assistants in the thread
     const assts = data.assistants.filter((a) => Object.hasOwn($participants.assistant, a.id));
@@ -79,6 +80,12 @@
       // TODO - would be good to figure out how to do this without a timeout.
       update: () => {
         setTimeout(() => {
+          // Don't auto-scroll if the user is not near the bottom of the chat.
+          // TODO - we can show an indicator if there are new messages that we'd want to scroll to.
+          if (el.scrollTop + el.clientHeight < el.scrollHeight - 600) {
+            return;
+          }
+
           el.scrollTo({
             top: el.scrollHeight,
             behavior: 'smooth'
@@ -86,6 +93,11 @@
         }, 250);
       }
     };
+  };
+
+  // Fetch an earlier page of messages
+  const fetchMoreMessages = async () => {
+    await threadMgr.fetchMore();
   };
 
   // Handle sending a message
@@ -128,6 +140,16 @@
   {/if}
   <div class="w-full h-full flex flex-col justify-between">
     <div class="overflow-y-auto pb-4 px-12" use:scroll={$messages}>
+      {#if $canFetchMore}
+        <div class="flex justify-center py-4">
+          <button
+            class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+            on:click={fetchMoreMessages}
+          >
+            Load more
+          </button>
+        </div>
+      {/if}
       {#each $messages as message}
         <div class="py-4 px-6 flex gap-x-3">
           <div class="shrink-0">
