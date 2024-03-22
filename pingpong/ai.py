@@ -1,6 +1,7 @@
 import functools
 import io
 import logging
+from datetime import datetime
 from typing import Dict, List
 
 import openai
@@ -164,6 +165,14 @@ def format_instructions(instructions: str, use_latex: bool = False) -> str:
             "with newlines before and after them as the opening and closing "
             "delimiter. Do not use LaTeX inside backticks."
         )
+
+    # Inject the current time into the instructions
+    instructions += (
+        "\n---Other context---\n"
+        "The current date and time is "
+        f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} (UTC)."
+    )
+
     return instructions
 
 
