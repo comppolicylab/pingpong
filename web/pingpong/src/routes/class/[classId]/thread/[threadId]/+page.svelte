@@ -4,12 +4,12 @@
   import { sadToast } from '$lib/toast';
   import { errorMessage } from '$lib/errors';
   import { blur } from 'svelte/transition';
-  import { Span, Avatar } from 'flowbite-svelte';
+  import { Span, Avatar, Button } from 'flowbite-svelte';
   import { Pulse, DoubleBounce } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
   import Logo from '$lib/components/Logo.svelte';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
-  import { EyeSlashOutline } from 'flowbite-svelte-icons';
+  import { EyeSlashOutline, RefreshOutline } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
 
@@ -142,12 +142,9 @@
     <div class="overflow-y-auto pb-4 px-12" use:scroll={$messages}>
       {#if $canFetchMore}
         <div class="flex justify-center py-4">
-          <button
-            class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
-            on:click={fetchMoreMessages}
-          >
-            Load more
-          </button>
+          <Button size="sm" class="text-sky-600 hover:text-sky-800" on:click={fetchMoreMessages}>
+            <RefreshOutline class="w-3 h-3 me-2" /> Load earlier messages ...
+          </Button>
         </div>
       {/if}
       {#each $messages as message}
