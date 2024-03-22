@@ -1151,6 +1151,7 @@ export type ThreadParticipants = {
 export type ThreadWithMeta = {
   thread: Thread;
   run: OpenAIRun | null;
+  limit: number;
   messages: OpenAIMessage[];
   participants: ThreadParticipants;
 };
@@ -1161,6 +1162,52 @@ export type ThreadWithMeta = {
 export const getThread = async (f: Fetcher, classId: number, threadId: number) => {
   const url = `class/${classId}/thread/${threadId}`;
   return await GET<never, ThreadWithMeta>(f, url);
+};
+
+/**
+ * Parameters for getting messages in a thread.
+ */
+export type GetThreadMessagesOpts = {
+  limit?: number;
+  before?: string;
+};
+
+/**
+ * Thread messages
+ */
+export type ThreadMessages = {
+  messages: OpenAIMessage[];
+  limit: number;
+};
+
+/**
+ * List messages in a thread.
+ */
+export const getThreadMessages = async (
+  f: Fetcher,
+  classId: number,
+  threadId: number,
+  opts?: GetThreadMessagesOpts
+) => {
+  const url = `class/${classId}/thread/${threadId}/messages`;
+  const expanded = expandResponse(await GET<GetThreadMessagesOpts, ThreadMessages>(f, url, opts));
+  if (expanded.error) {
+    return {
+      lastPage: true,
+      limit: null,
+      messages: [],
+      error: expanded.error
+    };
+  }
+
+  const n = expanded.data.messages.length;
+  const lastPage = n < expanded.data.limit;
+  return {
+    messages: expanded.data.messages,
+    limit: expanded.data.limit,
+    lastPage,
+    error: null
+  };
 };
 
 /**

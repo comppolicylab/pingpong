@@ -766,7 +766,9 @@ async def get_thread(
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
 
     messages, assistants, runs_result = await asyncio.gather(
-        openai_client.beta.threads.messages.list(thread.thread_id),
+        openai_client.beta.threads.messages.list(
+            thread.thread_id, limit=20, order="desc"
+        ),
         models.Assistant.get_all_by_id(request.state.db, [thread.assistant_id]),
         openai_client.beta.threads.runs.list(thread.thread_id, limit=1, order="desc"),
     )
@@ -777,10 +779,47 @@ async def get_thread(
         "thread": thread,
         "run": runs[0] if runs else None,
         "messages": list(messages.data),
+        "limit": 20,
         "participants": {
             "user": {u.id: schemas.Profile.from_email(u.email) for u in thread.users},
             "assistant": {a.id: a.name for a in assistants},
         },
+    }
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/messages",
+    dependencies=[
+        Depends(
+            Authz("can_view", "thread:{thread_id}"),
+        )
+    ],
+    response_model=schemas.ThreadMessages,
+)
+async def list_thread_messages(
+    class_id: str,
+    thread_id: str,
+    request: Request,
+    openai_client: OpenAIClient,
+    limit: int = 20,
+    before: str | None = None,
+):
+    if limit < 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Limit must be positive",
+        )
+
+    limit = min(limit, 100)
+
+    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    messages = await openai_client.beta.threads.messages.list(
+        thread.thread_id, limit=limit, order="asc", before=before
+    )
+
+    return {
+        "messages": list(messages.data),
+        "limit": limit,
     }
 
 

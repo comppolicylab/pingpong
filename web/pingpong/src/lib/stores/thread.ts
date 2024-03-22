@@ -11,6 +11,8 @@ export type ThreadManagerState = {
   data: (BaseResponse & ThreadWithMeta) | null;
   error: Error | null;
   optimistic: api.OpenAIMessage[];
+  limit: number;
+  canFetchMore: boolean;
   loading: boolean;
   waiting: boolean;
   submitting: boolean;
@@ -80,6 +82,11 @@ export class ThreadManager {
   assistantId: Readable<number | null>;
 
   /**
+   * Whether more messages can be fetched.
+   */
+  canFetchMore: Readable<boolean>;
+
+  /**
    * Any error that occurred while fetching the thread.
    */
   error: Readable<Error | null>;
@@ -103,6 +110,8 @@ export class ThreadManager {
     this.#data = writable({
       data: expanded.data || null,
       error: expanded.error || null,
+      limit: expanded.data?.limit || 20,
+      canFetchMore: expanded.data ? expanded.data.messages.length == expanded.data.limit : false,
       optimistic: [],
       loading: false,
       waiting: false,
@@ -138,6 +147,8 @@ export class ThreadManager {
     this.submitting = derived(this.#data, ($data) => !!$data?.submitting);
 
     this.assistantId = derived(this.#data, ($data) => $data?.data?.thread?.assistant_id || null);
+
+    this.canFetchMore = derived(this.#data, ($data) => !!$data?.canFetchMore);
 
     this.published = derived(this.#data, ($data) => $data?.data?.thread?.private === false);
 
@@ -216,6 +227,45 @@ export class ThreadManager {
     }, 5000);
 
     return deferred.promise;
+  }
+
+  /**
+   * Fetch an earlier page of results.
+   */
+  async fetchMore() {
+    const currentData = get(this.#data);
+    if (currentData.loading || !currentData.canFetchMore) {
+      return;
+    }
+
+    this.#data.update((d) => ({ ...d, error: null, loading: true }));
+    const earliestMessage = currentData.data?.messages.sort(
+      (a, b) => a.created_at - b.created_at
+    )[0];
+    const response = await api.getThreadMessages(this.#fetcher, this.classId, this.threadId, {
+      limit: currentData.limit,
+      before: earliestMessage?.id
+    });
+
+    // Merge the new messages into the existing messages.
+    this.#data.update((d) => {
+      if (!d.data) {
+        return d;
+      }
+      return {
+        ...d,
+        data: {
+          ...d.data,
+          messages: [...response.messages, ...d.data.messages].sort(
+            (a, b) => a.created_at - b.created_at
+          )
+        },
+        limit: response.limit || d.limit,
+        error: response.error,
+        loading: false,
+        canFetchMore: !response.lastPage
+      };
+    });
   }
 
   /**
