@@ -102,7 +102,7 @@
         <GradientButton color="tealToLime"
           >{$assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></GradientButton
         >
-        <Dropdown>
+        <Dropdown class="max-h-60 overflow-y-auto w-60">
           {#each data.assistants as asst}
             <DropdownItem on:click={() => selectAi(asst)} on:touchstart={() => selectAi(asst)}>
               {#if !asst.published}
