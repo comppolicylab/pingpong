@@ -13,7 +13,7 @@ services:
         origin: https://pingpong.hks.harvard.edu
 
   srv:
-    image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-srv:v0.2.3
+    image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-srv:v0.2.4
     labels:
       - "traefik.http.routers.pingpong_api.rule=Host(`pingpong.hks.harvard.edu`) && PathPrefix(`/api`)"
       - "traefik.http.middlewares.cors.headers.accesscontrolalloworiginlist=https://pingpong.hks.harvard.edu"
