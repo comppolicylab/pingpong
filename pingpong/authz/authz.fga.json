@@ -438,24 +438,13 @@
           }
         },
         "can_delete": {
-          "union": {
-            "child": [
-              {
-                "computedUserset": {
-                  "relation": "party"
-                }
-              },
-              {
-                "tupleToUserset": {
-                  "computedUserset": {
-                    "relation": "admin"
-                  },
-                  "tupleset": {
-                    "relation": "parent"
-                  }
-                }
-              }
-            ]
+          "tupleToUserset": {
+            "computedUserset": {
+              "relation": "supervisor"
+            },
+            "tupleset": {
+              "relation": "parent"
+            }
           }
         },
         "can_publish": {

@@ -52,6 +52,15 @@ def migrate_authz() -> None:
     asyncio.run(_migrate())
 
 
+@auth.command("update_model")
+def update_model() -> None:
+    async def _update_model() -> None:
+        await config.authz.driver.init()
+        await config.authz.driver.update_model()
+
+    asyncio.run(_update_model())
+
+
 @auth.command("login")
 @click.argument("email")
 @click.argument("redirect", default="/")

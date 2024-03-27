@@ -285,3 +285,16 @@ class OpenFgaAuthzDriver(AuthzDriver):
                     )
 
             await c.close()
+
+    async def update_model(self):
+        async with self.get_client() as ac:
+            c = ac._cli
+            with open(self.model_config) as f:
+                model = json.load(f)
+                resp = await c.write_authorization_model(model)
+                self.config.authorization_model_id = resp.authorization_model_id
+                logger.info(
+                    f"Updated model with id {self.config.authorization_model_id}"
+                )
+
+            await c.close()

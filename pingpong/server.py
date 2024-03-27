@@ -1048,6 +1048,40 @@ async def send_message(
     return StreamingResponse(stream, media_type="text/event-stream")
 
 
+@v1.post(
+    "/class/{class_id}/thread/{thread_id}/publish",
+    dependencies=[
+        Depends(Authz("can_publish", "thread:{thread_id}")),
+    ],
+    response_model=schemas.GenericStatus,
+)
+async def publish_thread(class_id: str, thread_id: str, request: Request):
+    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    thread.private = False
+    request.state.db.add(thread)
+    await request.state.authz.write_safe(
+        grant=[(f"class:{class_id}#member", "can_view", f"thread:{thread_id}")]
+    )
+    return {"status": "ok"}
+
+
+@v1.delete(
+    "/class/{class_id}/thread/{thread_id}/publish",
+    dependencies=[
+        Depends(Authz("can_publish", "thread:{thread_id}")),
+    ],
+    response_model=schemas.GenericStatus,
+)
+async def unpublish_thread(class_id: str, thread_id: str, request: Request):
+    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    thread.private = True
+    request.state.db.add(thread)
+    await request.state.authz.write_safe(
+        revoke=[(f"class:{class_id}#member", "can_view", f"thread:{thread_id}")]
+    )
+    return {"status": "ok"}
+
+
 @v1.delete(
     "/class/{class_id}/thread/{thread_id}",
     dependencies=[Depends(Authz("can_delete", "thread:{thread_id}"))],
