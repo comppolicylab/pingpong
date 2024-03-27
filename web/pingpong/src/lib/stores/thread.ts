@@ -230,6 +230,53 @@ export class ThreadManager {
   }
 
   /**
+   * Delete the current thread.
+   */
+  async delete() {
+    this.#data.update((d) => ({ ...d, loading: true, error: null }));
+    try {
+      const result = api.expandResponse(
+        await api.deleteThread(this.#fetcher, this.classId, this.threadId)
+      );
+      if (result.error) {
+        throw result.error;
+      }
+      this.#data.update((d) => ({ ...d, loading: false }));
+    } catch (e) {
+      this.#data.update((d) => ({ ...d, error: e as Error, loading: false }));
+      throw e;
+    }
+  }
+
+  /**
+   * Publish the current thread.
+   */
+  async publish() {
+    this.#data.update((d) => ({ ...d, loading: true, error: null }));
+    try {
+      await api.publishThread(this.#fetcher, this.classId, this.threadId);
+      this.#data.update((d) => ({ ...d, loading: false }));
+    } catch (e) {
+      this.#data.update((d) => ({ ...d, error: e as Error, loading: false }));
+      throw e;
+    }
+  }
+
+  /**
+   * Unpublish the current thread.
+   */
+  async unpublish() {
+    this.#data.update((d) => ({ ...d, loading: true, error: null }));
+    try {
+      await api.unpublishThread(this.#fetcher, this.classId, this.threadId);
+      this.#data.update((d) => ({ ...d, loading: false }));
+    } catch (e) {
+      this.#data.update((d) => ({ ...d, error: e as Error, loading: false }));
+      throw e;
+    }
+  }
+
+  /**
    * Fetch an earlier page of results.
    */
   async fetchMore() {

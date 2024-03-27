@@ -1049,6 +1049,59 @@ async def send_message(
 
 
 @v1.post(
+    "/class/{class_id}/thread/{thread_id}/publish",
+    dependencies=[
+        Depends(Authz("can_publish", "thread:{thread_id}")),
+    ],
+    response_model=schemas.GenericStatus,
+)
+async def publish_thread(class_id: str, thread_id: str, request: Request):
+    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    thread.private = False
+    request.state.db.add(thread)
+    await request.state.authz.write_safe(
+        grant=[(f"class:{class_id}#member", "can_view", f"thread:{thread_id}")]
+    )
+    return {"status": "ok"}
+
+
+@v1.delete(
+    "/class/{class_id}/thread/{thread_id}/publish",
+    dependencies=[
+        Depends(Authz("can_publish", "thread:{thread_id}")),
+    ],
+    response_model=schemas.GenericStatus,
+)
+async def unpublish_thread(class_id: str, thread_id: str, request: Request):
+    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    thread.private = True
+    request.state.db.add(thread)
+    await request.state.authz.write_safe(
+        revoke=[(f"class:{class_id}#member", "can_view", f"thread:{thread_id}")]
+    )
+    return {"status": "ok"}
+
+
+@v1.delete(
+    "/class/{class_id}/thread/{thread_id}",
+    dependencies=[Depends(Authz("can_delete", "thread:{thread_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def delete_thread(
+    class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
+):
+    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    revokes = [(f"class:{class_id}", "parent", f"thread:{thread_id}")] + [
+        (f"user:{u.id}", "party", f"thread:{thread_id}") for u in thread.users
+    ]
+    await thread.delete(request.state.db)
+    await openai_client.beta.threads.delete(thread.thread_id)
+    await request.state.authz.write_safe(revoke=revokes)
+
+    return {"status": "ok"}
+
+
+@v1.post(
     "/class/{class_id}/file",
     dependencies=[Depends(Authz("can_upload_class_files", "class:{class_id}"))],
     response_model=schemas.File,

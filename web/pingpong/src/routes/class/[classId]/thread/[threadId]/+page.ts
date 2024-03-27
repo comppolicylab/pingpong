@@ -5,7 +5,17 @@ export const load: PageLoad = async ({ fetch, params }) => {
   const classId = parseInt(params.classId, 10);
   const threadId = parseInt(params.threadId, 10);
 
+  const [threadData, threadGrants] = await Promise.all([
+    api.getThread(fetch, classId, threadId),
+    api.grants(fetch, {
+      canDelete: { target_type: 'thread', target_id: threadId, relation: 'can_delete' },
+      canPublish: { target_type: 'thread', target_id: threadId, relation: 'can_publish' }
+    })
+  ]);
+
   return {
-    threadData: await api.getThread(fetch, classId, threadId)
+    threadData,
+    canDeleteThread: threadGrants.canDelete,
+    canPublishThread: threadGrants.canPublish
   };
 };

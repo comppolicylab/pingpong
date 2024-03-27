@@ -1,15 +1,16 @@
 <script lang="ts">
   import { page } from '$app/stores';
+  import { goto, invalidateAll } from '$app/navigation';
   import * as api from '$lib/api';
-  import { sadToast } from '$lib/toast';
+  import { happyToast, sadToast } from '$lib/toast';
   import { errorMessage } from '$lib/errors';
   import { blur } from 'svelte/transition';
-  import { Span, Avatar, Button } from 'flowbite-svelte';
+  import { Span, Avatar, Button, Dropdown, DropdownItem } from 'flowbite-svelte';
   import { Pulse, DoubleBounce } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
   import Logo from '$lib/components/Logo.svelte';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
-  import { EyeSlashOutline, RefreshOutline } from 'flowbite-svelte-icons';
+  import { EyeSlashOutline, RefreshOutline, DotsHorizontalOutline } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
 
@@ -19,6 +20,8 @@
   $: classId = parseInt($page.params.classId);
   $: threadId = parseInt($page.params.threadId);
   $: threadMgr = new ThreadManager(fetch, classId, threadId, data.threadData);
+  $: canDeleteThread = data.canDeleteThread;
+  $: canPublishThread = data.canPublishThread;
   $: messages = threadMgr.messages;
   $: participants = threadMgr.participants;
   $: published = threadMgr.published;
@@ -128,6 +131,46 @@
       throw new Error(result.detail || 'unknown error');
     }
   };
+
+  /**
+   * Publish or unpublish a thread.
+   */
+  const togglePublish = async () => {
+    if (!threadMgr.thread) {
+      return;
+    }
+    let verb = 'publish';
+    try {
+      if (threadMgr.thread.private) {
+        await threadMgr.publish();
+      } else {
+        verb = 'unpublish';
+        await threadMgr.unpublish();
+      }
+      invalidateAll();
+    } catch (e) {
+      sadToast(`Failed to ${verb} thread. Error: ${errorMessage(e)}`);
+    }
+  };
+
+  /**
+   * Delete the thread.
+   */
+  const deleteThread = async () => {
+    if (!threadMgr.thread) {
+      return;
+    }
+    try {
+      if (!confirm('Are you sure you want to delete this thread? This cannot be undone!')) {
+        return;
+      }
+      await threadMgr.delete();
+      happyToast('Thread deleted.');
+      goto(`/class/${classId}`, { invalidateAll: true });
+    } catch (e) {
+      sadToast(`Failed to delete thread. Error: ${errorMessage(e)}`);
+    }
+  };
 </script>
 
 <div class="relative py-8 h-full w-full">
@@ -233,6 +276,23 @@
       <Span class="text-gray-600">{$users.map((u) => u.email).join(', ')}</Span>
     </div>
   {/if}
+  <div class="absolute top-2 right-2">
+    <DotsHorizontalOutline class="dots-menu dark:text-white cursor-pointer" />
+    <Dropdown>
+      <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
+        <span class:text-gray-300={!canPublishThread}>
+          {#if $published}
+            Unpublish
+          {:else}
+            Publish
+          {/if}
+        </span>
+      </DropdownItem>
+      <DropdownItem on:click={deleteThread} disabled={!canDeleteThread}>
+        <span class:text-gray-300={!canDeleteThread}>Delete</span>
+      </DropdownItem>
+    </Dropdown>
+  </div>
 </div>
 
 <style lang="css">

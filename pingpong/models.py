@@ -540,6 +540,8 @@ class Thread(Base):
     )
 
     async def delete(self, session: AsyncSession) -> None:
+        for user in self.users:
+            self.users.remove(user)
         stmt = delete(Thread).where(Thread.id == self.id)
         await session.execute(stmt)
 
