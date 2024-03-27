@@ -10,12 +10,7 @@
   import Markdown from '$lib/components/Markdown.svelte';
   import Logo from '$lib/components/Logo.svelte';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
-  import {
-    EyeSlashOutline,
-    RefreshOutline,
-    DotsHorizontalOutline,
-    TrashBinOutline
-  } from 'flowbite-svelte-icons';
+  import { EyeSlashOutline, RefreshOutline, DotsHorizontalOutline } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
 
