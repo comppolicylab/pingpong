@@ -9,13 +9,13 @@ export const load: PageLoad = async ({ fetch, params }) => {
     api.getThread(fetch, classId, threadId),
     api.grants(fetch, {
       canDelete: { target_type: 'thread', target_id: threadId, relation: 'can_delete' },
-      canPublish: { target_type: 'thread', target_id: threadId, relation: 'can_publish' },
-    }),
+      canPublish: { target_type: 'thread', target_id: threadId, relation: 'can_publish' }
+    })
   ]);
 
   return {
     threadData,
     canDeleteThread: threadGrants.canDelete,
-    canPublishThread: threadGrants.canPublish,
+    canPublishThread: threadGrants.canPublish
   };
 };

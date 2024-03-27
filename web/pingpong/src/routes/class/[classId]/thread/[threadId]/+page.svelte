@@ -10,7 +10,12 @@
   import Markdown from '$lib/components/Markdown.svelte';
   import Logo from '$lib/components/Logo.svelte';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
-  import { EyeSlashOutline, RefreshOutline, DotsHorizontalOutline, TrashBinOutline } from 'flowbite-svelte-icons';
+  import {
+    EyeSlashOutline,
+    RefreshOutline,
+    DotsHorizontalOutline,
+    TrashBinOutline
+  } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
 
@@ -166,7 +171,7 @@
       }
       await threadMgr.delete();
       happyToast('Thread deleted.');
-      goto(`/class/${classId}`, {invalidateAll: true});
+      goto(`/class/${classId}`, { invalidateAll: true });
     } catch (e) {
       sadToast(`Failed to delete thread. Error: ${errorMessage(e)}`);
     }
@@ -279,15 +284,15 @@
   <div class="absolute top-2 right-2">
     <DotsHorizontalOutline class="dots-menu dark:text-white cursor-pointer" />
     <Dropdown>
-    <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
-      <span class:text-gray-300={!canPublishThread}>
-      {#if $published}
-        Unpublish
-        {:else}
-        Publish
-        {/if}
-      </span>
-    </DropdownItem>
+      <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
+        <span class:text-gray-300={!canPublishThread}>
+          {#if $published}
+            Unpublish
+          {:else}
+            Publish
+          {/if}
+        </span>
+      </DropdownItem>
       <DropdownItem on:click={deleteThread} disabled={!canDeleteThread}>
         <span class:text-gray-300={!canDeleteThread}>Delete</span>
       </DropdownItem>

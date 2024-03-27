@@ -1044,7 +1044,7 @@ export const createThread = async (f: Fetcher, classId: number, data: CreateThre
 export const deleteThread = async (f: Fetcher, classId: number, threadId: number) => {
   const url = `class/${classId}/thread/${threadId}`;
   return await DELETE<never, GenericStatus>(f, url);
-}
+};
 
 /**
  * Publish a thread.
@@ -1052,7 +1052,7 @@ export const deleteThread = async (f: Fetcher, classId: number, threadId: number
 export const publishThread = async (f: Fetcher, classId: number, threadId: number) => {
   const url = `class/${classId}/thread/${threadId}/publish`;
   return await POST<never, GenericStatus>(f, url);
-}
+};
 
 /**
  * Unpublish a thread.
@@ -1060,7 +1060,7 @@ export const publishThread = async (f: Fetcher, classId: number, threadId: numbe
 export const unpublishThread = async (f: Fetcher, classId: number, threadId: number) => {
   const url = `class/${classId}/thread/${threadId}/publish`;
   return await DELETE<never, GenericStatus>(f, url);
-}
+};
 
 type LastError = {
   code: 'server_error' | 'rate_limit_exceeded';

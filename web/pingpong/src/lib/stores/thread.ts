@@ -235,7 +235,9 @@ export class ThreadManager {
   async delete() {
     this.#data.update((d) => ({ ...d, loading: true, error: null }));
     try {
-      const result = api.expandResponse(await api.deleteThread(this.#fetcher, this.classId, this.threadId));
+      const result = api.expandResponse(
+        await api.deleteThread(this.#fetcher, this.classId, this.threadId)
+      );
       if (result.error) {
         throw result.error;
       }
