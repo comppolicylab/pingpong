@@ -364,6 +364,24 @@ async def create_class(
             )
         )
 
+    if new_class.any_can_publish_thread:
+        grants.append(
+            (
+                f"class:{new_class.id}#student",
+                "can_publish_threads",
+                f"class:{new_class.id}",
+            )
+        )
+
+    if new_class.any_can_upload_class_file:
+        grants.append(
+            (
+                f"class:{new_class.id}#student",
+                "can_upload_class_files",
+                f"class:{new_class.id}",
+            )
+        )
+
     await request.state.authz.write(grant=grants)
 
     return new_class
@@ -427,26 +445,38 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
         "can_publish_assistants",
         f"class:{class_id}",
     )
+    can_pub_thread = (
+        f"class:{class_id}#student",
+        "can_publish_threads",
+        f"class:{class_id}",
+    )
+    can_upload_class_file = (
+        f"class:{class_id}#student",
+        "can_upload_class_files",
+        f"class:{class_id}",
+    )
 
-    # The permissions API is not idempotent, so we need to check the current state
-    # before granting/revoking new permissions.
-    can_create = await request.state.authz.test(*can_create_asst)
     if cls.any_can_create_assistant:
-        if not can_create:
-            grants.append(can_create_asst)
+        grants.append(can_create_asst)
     else:
-        if can_create:
-            revokes.append(can_create_asst)
+        revokes.append(can_create_asst)
 
-    can_publish = await request.state.authz.test(*can_pub_asst)
     if cls.any_can_publish_assistant:
-        if not can_publish:
-            grants.append(can_pub_asst)
+        grants.append(can_pub_asst)
     else:
-        if can_publish:
-            revokes.append(can_pub_asst)
+        revokes.append(can_pub_asst)
 
-    await request.state.authz.write(grant=grants, revoke=revokes)
+    if cls.any_can_publish_thread:
+        grants.append(can_pub_thread)
+    else:
+        revokes.append(can_pub_thread)
+
+    if cls.any_can_upload_class_file:
+        grants.append(can_upload_class_file)
+    else:
+        revokes.append(can_upload_class_file)
+
+    await request.state.authz.write_safe(grant=grants, revoke=revokes)
 
     return cls
 

@@ -438,6 +438,8 @@ export type Class = {
   api_key: string | null;
   any_can_create_assistant: boolean | null;
   any_can_publish_assistant: boolean | null;
+  any_can_publish_thread: boolean | null;
+  any_can_upload_class_file: boolean | null;
 };
 
 /**
@@ -469,6 +471,8 @@ export type CreateClassRequest = {
   term: string;
   any_can_create_assistant?: boolean;
   any_can_publish_assistant?: boolean;
+  any_can_publish_thread?: boolean;
+  any_can_upload_class_file?: boolean;
 };
 
 /**
@@ -479,6 +483,8 @@ export type UpdateClassRequest = {
   term?: string;
   any_can_create_assistant?: boolean;
   any_can_publish_assistant?: boolean;
+  any_can_publish_thread?: boolean;
+  any_can_upload_class_file?: boolean;
 };
 
 /**
