@@ -193,19 +193,18 @@
           <Input label="Term" id="term" name="term" value={data.class.term} />
         </div>
 
-
         <div></div>
         <div>
           <Checkbox
             id="any_can_publish_thread"
             name="any_can_publish_thread"
-            checked={anyCanPublishThread}
-            >Allow anyone to publish threads</Checkbox>
+            checked={anyCanPublishThread}>Allow anyone to publish threads</Checkbox
+          >
         </div>
         <Helper
-          >When this is enabled, anyone in the class can share their own threads with the rest of the
-          class. Otherwise, only teachers and admins can share threads.</Helper>
-
+          >When this is enabled, anyone in the class can share their own threads with the rest of
+          the class. Otherwise, only teachers and admins can share threads.</Helper
+        >
 
         <div></div>
         <Checkbox
@@ -248,20 +247,21 @@
           <Checkbox
             id="any_can_upload_class_file"
             name="any_can_upload_class_file"
-            checked={anyCanUploadClassFile}
-            >Allow anyone to upload files for assistants</Checkbox>
+            checked={anyCanUploadClassFile}>Allow anyone to upload files for assistants</Checkbox
+          >
         {:else}
           <Checkbox
             id="any_can_upload_class_file"
             name="any_can_upload_class_file"
             checked={false}
-            disabled
-            >Allow anyone to upload files for assistants</Checkbox
+            disabled>Allow anyone to upload files for assistants</Checkbox
           >
         {/if}
         <Helper
-          >When this is enabled, anyone in the class can upload files for use in creating assistants. Otherwise,
-          only teachers and admins can upload files. (Note that users can still upload files privately to chat threads even when this setting is disabled.)</Helper>
+          >When this is enabled, anyone in the class can upload files for use in creating
+          assistants. Otherwise, only teachers and admins can upload files. (Note that users can
+          still upload files privately to chat threads even when this setting is disabled.)</Helper
+        >
 
         <div></div>
         <div></div>

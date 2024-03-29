@@ -168,7 +168,14 @@ export const actions: Actions = {
       const classId = parseInt(event.params.classId, 10);
       return api.updateClass(f, classId, d);
     },
-    { checkboxes: ['any_can_create_assistant', 'any_can_publish_assistant', 'any_can_publish_thread', 'any_can_upload_class_file'] }
+    {
+      checkboxes: [
+        'any_can_create_assistant',
+        'any_can_publish_assistant',
+        'any_can_publish_thread',
+        'any_can_upload_class_file'
+      ]
+    }
   ),
 
   /**
