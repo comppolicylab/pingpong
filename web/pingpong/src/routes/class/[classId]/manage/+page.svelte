@@ -109,10 +109,11 @@
 
   $: canEditClassInfo = !!data?.grants?.canEditInfo;
   $: canManageClassUsers = !!data?.grants?.canManageUsers;
-  $: canUploadClassFiles = !!data?.grants?.canUploadClassFiles;
+  $: canUploadClassFiles = !!data?.grants?.canUploadClassFiles && publishOptMakesSense;
   $: canViewApiKey = !!data?.grants?.canViewApiKey;
   $: canCreateAssistant = !!data?.grants?.canCreateAssistants;
   $: canPublishAssistant = !!data?.grants?.canPublishAssistants;
+  $: isSupervisor = !!data?.grants?.isSupervisor;
 
   // Check if we are editing an assistant and prompt if so.
   beforeNavigate((nav) => {
@@ -192,6 +193,20 @@
           <Input label="Term" id="term" name="term" value={data.class.term} />
         </div>
 
+
+        <div></div>
+        <div>
+          <Checkbox
+            id="any_can_publish_thread"
+            name="any_can_publish_thread"
+            checked={anyCanPublishThread}
+            >Allow anyone to publish threads</Checkbox>
+        </div>
+        <Helper
+          >When this is enabled, anyone in the class can share their own threads with the rest of the
+          class. Otherwise, only teachers and admins can share threads.</Helper>
+
+
         <div></div>
         <Checkbox
           id="any_can_create_assistant"
@@ -228,27 +243,22 @@
           the class. Otherwise, only teachers and admins can share assistants.</Helper
         >
 
-
         <div></div>
-        <div>
-          <Checkbox
-            id="any_can_publish_thread"
-            name="any_can_publish_thread"
-            checked={anyCanPublishThread}
-            >Allow anyone to publish threads</Checkbox>
-        </div>
-        <Helper
-          >When this is enabled, anyone in the class can share their own threads with the rest of the
-          class. Otherwise, only teachers and admins can share threads.</Helper>
-
-        <div></div>
-        <div>
+        {#if publishOptMakesSense}
           <Checkbox
             id="any_can_upload_class_file"
             name="any_can_upload_class_file"
             checked={anyCanUploadClassFile}
             >Allow anyone to upload files for assistants</Checkbox>
-        </div>
+        {:else}
+          <Checkbox
+            id="any_can_upload_class_file"
+            name="any_can_upload_class_file"
+            checked={false}
+            disabled
+            >Allow anyone to upload files for assistants</Checkbox
+          >
+        {/if}
         <Helper
           >When this is enabled, anyone in the class can upload files for use in creating assistants. Otherwise,
           only teachers and admins can upload files. (Note that users can still upload files privately to chat threads even when this setting is disabled.)</Helper>
@@ -430,7 +440,7 @@
           {:else}
             <Card
               class="w-full max-w-full space-y-2"
-              href={assistant.creator_id === data.me.user?.id && canCreateAssistant
+              href={(isSupervisor || assistant.creator_id === data.me.user?.id) && canCreateAssistant
                 ? `${$page.url.pathname}?edit-assistant=${assistant.id}`
                 : null}
             >

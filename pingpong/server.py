@@ -1338,7 +1338,7 @@ async def create_assistant(
 
 @v1.put(
     "/class/{class_id}/assistant/{assistant_id}",
-    dependencies=[Depends(Authz("owner", "assistant:{assistant_id}"))],
+    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
     response_model=schemas.Assistant,
 )
 async def update_assistant(
@@ -1427,7 +1427,7 @@ async def update_assistant(
 
 @v1.delete(
     "/class/{class_id}/assistant/{assistant_id}",
-    dependencies=[Depends(Authz("owner", "assistant:{assistant_id}"))],
+    dependencies=[Depends(Authz("can_delete", "assistant:{assistant_id}"))],
     response_model=schemas.GenericStatus,
 )
 async def delete_assistant(
