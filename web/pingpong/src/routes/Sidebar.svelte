@@ -37,7 +37,9 @@
 
   $: avatar = data?.me?.profile?.image_url;
   $: name = data?.me?.user?.name || data?.me?.user?.email;
-  $: classes = $page.data.classes || [];
+  $: classes = ($page.data.classes || []).sort((a: api.Class, b: api.Class) =>
+    a.name.localeCompare(b.name)
+  );
   $: threads = $page.data.threads?.threads || [];
   $: currentClassId = parseInt($page.params.classId, 10);
   $: currentClass = $page.data.class;
