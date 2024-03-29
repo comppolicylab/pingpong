@@ -51,10 +51,10 @@ devDependencies:
     version: 3.0.1(@sveltejs/kit@2.5.4)
   '@sveltejs/kit':
     specifier: ^2.5.4
-    version: 2.5.4(@sveltejs/vite-plugin-svelte@3.0.2)(svelte@4.2.8)(vite@5.2.2)
+    version: 2.5.4(@sveltejs/vite-plugin-svelte@3.0.2)(svelte@4.2.8)(vite@5.2.7)
   '@sveltejs/vite-plugin-svelte':
     specifier: ^3.0.0
-    version: 3.0.2(svelte@4.2.8)(vite@5.2.2)
+    version: 3.0.2(svelte@4.2.8)(vite@5.2.7)
   '@types/katex':
     specifier: ^0.16.7
     version: 0.16.7
@@ -116,8 +116,8 @@ devDependencies:
     specifier: ^5.3.2
     version: 5.3.2
   vite:
-    specifier: ^5.2.2
-    version: 5.2.2
+    specifier: ^5.2.7
+    version: 5.2.7
   vitest:
     specifier: ^1.0.0
     version: 1.4.0
@@ -852,7 +852,7 @@ packages:
       '@sentry/types': 7.94.1
       '@sentry/utils': 7.94.1
       '@sentry/vite-plugin': 0.6.1
-      '@sveltejs/kit': 2.5.4(@sveltejs/vite-plugin-svelte@3.0.2)(svelte@4.2.8)(vite@5.2.2)
+      '@sveltejs/kit': 2.5.4(@sveltejs/vite-plugin-svelte@3.0.2)(svelte@4.2.8)(vite@5.2.7)
       magicast: 0.2.8
       sorcery: 0.11.0
     transitivePeerDependencies:
@@ -899,7 +899,7 @@ packages:
     peerDependencies:
       '@sveltejs/kit': ^2.0.0
     dependencies:
-      '@sveltejs/kit': 2.5.4(@sveltejs/vite-plugin-svelte@3.0.2)(svelte@4.2.8)(vite@5.2.2)
+      '@sveltejs/kit': 2.5.4(@sveltejs/vite-plugin-svelte@3.0.2)(svelte@4.2.8)(vite@5.2.7)
       import-meta-resolve: 4.0.0
     dev: true
 
@@ -911,7 +911,7 @@ packages:
       '@rollup/plugin-commonjs': 25.0.7(rollup@4.13.0)
       '@rollup/plugin-json': 6.1.0(rollup@4.13.0)
       '@rollup/plugin-node-resolve': 15.2.3(rollup@4.13.0)
-      '@sveltejs/kit': 2.5.4(@sveltejs/vite-plugin-svelte@3.0.2)(svelte@4.2.8)(vite@5.2.2)
+      '@sveltejs/kit': 2.5.4(@sveltejs/vite-plugin-svelte@3.0.2)(svelte@4.2.8)(vite@5.2.7)
       rollup: 4.13.0
     dev: true
 
@@ -920,10 +920,10 @@ packages:
     peerDependencies:
       '@sveltejs/kit': ^2.0.0
     dependencies:
-      '@sveltejs/kit': 2.5.4(@sveltejs/vite-plugin-svelte@3.0.2)(svelte@4.2.8)(vite@5.2.2)
+      '@sveltejs/kit': 2.5.4(@sveltejs/vite-plugin-svelte@3.0.2)(svelte@4.2.8)(vite@5.2.7)
     dev: true
 
-  /@sveltejs/kit@2.5.4(@sveltejs/vite-plugin-svelte@3.0.2)(svelte@4.2.8)(vite@5.2.2):
+  /@sveltejs/kit@2.5.4(@sveltejs/vite-plugin-svelte@3.0.2)(svelte@4.2.8)(vite@5.2.7):
     resolution: {integrity: sha512-eDxK2d4EGzk99QsZNoPXe7jlzA5EGqfcCpUwZ912bhnalsZ2ZsG5wGRthkydupVjYyqdmzEanVKFhLxU2vkPSQ==}
     engines: {node: '>=18.13'}
     hasBin: true
@@ -933,7 +933,7 @@ packages:
       svelte: ^4.0.0 || ^5.0.0-next.0
       vite: ^5.0.3
     dependencies:
-      '@sveltejs/vite-plugin-svelte': 3.0.2(svelte@4.2.8)(vite@5.2.2)
+      '@sveltejs/vite-plugin-svelte': 3.0.2(svelte@4.2.8)(vite@5.2.7)
       '@types/cookie': 0.6.0
       cookie: 0.6.0
       devalue: 4.3.2
@@ -947,9 +947,9 @@ packages:
       sirv: 2.0.4
       svelte: 4.2.8
       tiny-glob: 0.2.9
-      vite: 5.2.2
+      vite: 5.2.7
 
-  /@sveltejs/vite-plugin-svelte-inspector@2.0.0(@sveltejs/vite-plugin-svelte@3.0.2)(svelte@4.2.8)(vite@5.2.2):
+  /@sveltejs/vite-plugin-svelte-inspector@2.0.0(@sveltejs/vite-plugin-svelte@3.0.2)(svelte@4.2.8)(vite@5.2.7):
     resolution: {integrity: sha512-gjr9ZFg1BSlIpfZ4PRewigrvYmHWbDrq2uvvPB1AmTWKuM+dI1JXQSUu2pIrYLb/QncyiIGkFDFKTwJ0XqQZZg==}
     engines: {node: ^18.0.0 || >=20}
     peerDependencies:
@@ -957,29 +957,29 @@ packages:
       svelte: ^4.0.0 || ^5.0.0-next.0
       vite: ^5.0.0
     dependencies:
-      '@sveltejs/vite-plugin-svelte': 3.0.2(svelte@4.2.8)(vite@5.2.2)
+      '@sveltejs/vite-plugin-svelte': 3.0.2(svelte@4.2.8)(vite@5.2.7)
       debug: 4.3.4
       svelte: 4.2.8
-      vite: 5.2.2
+      vite: 5.2.7
     transitivePeerDependencies:
       - supports-color
 
-  /@sveltejs/vite-plugin-svelte@3.0.2(svelte@4.2.8)(vite@5.2.2):
+  /@sveltejs/vite-plugin-svelte@3.0.2(svelte@4.2.8)(vite@5.2.7):
     resolution: {integrity: sha512-MpmF/cju2HqUls50WyTHQBZUV3ovV/Uk8k66AN2gwHogNAG8wnW8xtZDhzNBsFJJuvmq1qnzA5kE7YfMJNFv2Q==}
     engines: {node: ^18.0.0 || >=20}
     peerDependencies:
       svelte: ^4.0.0 || ^5.0.0-next.0
       vite: ^5.0.0
     dependencies:
-      '@sveltejs/vite-plugin-svelte-inspector': 2.0.0(@sveltejs/vite-plugin-svelte@3.0.2)(svelte@4.2.8)(vite@5.2.2)
+      '@sveltejs/vite-plugin-svelte-inspector': 2.0.0(@sveltejs/vite-plugin-svelte@3.0.2)(svelte@4.2.8)(vite@5.2.7)
       debug: 4.3.4
       deepmerge: 4.3.1
       kleur: 4.1.5
       magic-string: 0.30.5
       svelte: 4.2.8
       svelte-hmr: 0.15.3(svelte@4.2.8)
-      vite: 5.2.2
-      vitefu: 0.2.5(vite@5.2.2)
+      vite: 5.2.7
+      vitefu: 0.2.5(vite@5.2.7)
     transitivePeerDependencies:
       - supports-color
 
@@ -3731,7 +3731,7 @@ packages:
       debug: 4.3.4
       pathe: 1.1.1
       picocolors: 1.0.0
-      vite: 5.2.2
+      vite: 5.2.7
     transitivePeerDependencies:
       - '@types/node'
       - less
@@ -3743,8 +3743,8 @@ packages:
       - terser
     dev: true
 
-  /vite@5.2.2:
-    resolution: {integrity: sha512-FWZbz0oSdLq5snUI0b6sULbz58iXFXdvkZfZWR/F0ZJuKTSPO7v72QPXt6KqYeMFb0yytNp6kZosxJ96Nr/wDQ==}
+  /vite@5.2.7:
+    resolution: {integrity: sha512-k14PWOKLI6pMaSzAuGtT+Cf0YmIx12z9YGon39onaJNy8DLBfBJrzg9FQEmkAM5lpHBZs9wksWAsyF/HkpEwJA==}
     engines: {node: ^18.0.0 || >=20.0.0}
     hasBin: true
     peerDependencies:
@@ -3777,7 +3777,7 @@ packages:
     optionalDependencies:
       fsevents: 2.3.3
 
-  /vitefu@0.2.5(vite@5.2.2):
+  /vitefu@0.2.5(vite@5.2.7):
     resolution: {integrity: sha512-SgHtMLoqaeeGnd2evZ849ZbACbnwQCIwRH57t18FxcXoZop0uQu0uzlIhJBlF/eWVzuce0sHeqPcDo+evVcg8Q==}
     peerDependencies:
       vite: ^3.0.0 || ^4.0.0 || ^5.0.0
@@ -3785,7 +3785,7 @@ packages:
       vite:
         optional: true
     dependencies:
-      vite: 5.2.2
+      vite: 5.2.7
 
   /vitest@1.4.0:
     resolution: {integrity: sha512-gujzn0g7fmwf83/WzrDTnncZt2UiXP41mHuFYFrdwaLRVQ6JYQEiME2IfEjU3vcFL3VKa75XhI3lFgn+hfVsQw==}
@@ -3829,7 +3829,7 @@ packages:
       strip-literal: 2.0.0
       tinybench: 2.5.1
       tinypool: 0.8.2
-      vite: 5.2.2
+      vite: 5.2.7
       vite-node: 1.4.0
       why-is-node-running: 2.2.2
     transitivePeerDependencies:
