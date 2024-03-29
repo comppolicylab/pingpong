@@ -119,7 +119,7 @@ devDependencies:
     specifier: ^5.2.7
     version: 5.2.7
   vitest:
-    specifier: ^1.0.0
+    specifier: ^1.4.0
     version: 1.4.0
 
 packages:
