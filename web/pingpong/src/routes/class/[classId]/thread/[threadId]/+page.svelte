@@ -267,15 +267,19 @@
     {/if}
   </div>
 
-  {#if !$published}
-    <div
-      class="absolute top-0 left-0 flex gap-2 px-4 py-2 items-center w-full bg-amber-200 text-sm"
-    >
+  <div
+    class="absolute top-0 left-0 flex gap-2 px-4 py-2 items-center w-full text-sm"
+    class:bg-gray-200={!$published}
+    class:bg-green-100={$published}
+  >
+    {#if !$published}
       <EyeSlashOutline size="sm" class="text-gray-400" />
-      <Span class="text-gray-400">This thread is private to</Span>
+      <Span class="text-gray-400">This thread is visible to the teaching team and</Span>
       <Span class="text-gray-600">{$users.map((u) => u.email).join(', ')}</Span>
-    </div>
-  {/if}
+    {:else}
+      <Span class="text-gray-400">This thread is visible to everyone in this class.</Span>
+    {/if}
+  </div>
   <div class="absolute top-2 right-2">
     <DotsHorizontalOutline class="dots-menu dark:text-white cursor-pointer" />
     <Dropdown>
