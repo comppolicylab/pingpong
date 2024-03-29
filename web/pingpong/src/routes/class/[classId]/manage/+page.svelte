@@ -81,7 +81,7 @@
   $: creators = data?.assistantCreators || {};
   $: {
     assistants = data?.assistants || [];
-    assistants.sort((a, b) => a.id - b.id);
+    assistants.sort((a, b) => a.name.localeCompare(b.name));
   }
   $: models = data?.models || [];
   $: files = data?.files || [];

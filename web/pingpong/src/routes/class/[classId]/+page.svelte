@@ -25,6 +25,7 @@
   // Whether billing is set up for the class (which controls everything).
   $: isConfigured = data?.hasAssistants && data?.hasBilling;
   $: parties = data.me.user?.id ? `${data.me.user.id}` : '';
+  $: assistants = (data?.assistants || []).sort((a, b) => a.name.localeCompare(b.name));
   // The assistant ID from the URL.
   $: linkedAssistant = parseInt($page.url.searchParams.get('assistant') || '0', 10);
   $: {
@@ -103,7 +104,7 @@
           >{$assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></GradientButton
         >
         <Dropdown class="max-h-60 overflow-y-auto w-60">
-          {#each data.assistants as asst}
+          {#each assistants as asst}
             <DropdownItem on:click={() => selectAi(asst)} on:touchstart={() => selectAi(asst)}>
               {#if !asst.published}
                 <EyeSlashOutline size="sm" class="inline-block mr-2 text-gray-400" />

@@ -15,12 +15,13 @@
       close();
     }
   }
+  $: classes = (data.classes || []).sort((a, b) => a.name.localeCompare(b.name));
 </script>
 
 <div class="container py-8 overflow-y-auto h-full">
   <Heading tag="h2">Welcome to PingPong!</Heading>
   <div class="flex flex-wrap mt-8 gap-4">
-    {#each data.classes as cls}
+    {#each classes as cls}
       <Card horizontal class="w-80 h-40" href={`/class/${cls.id}`}>
         <div class="flex flex-col w-full justify-between">
           <div class="flex flex-row justify-between">
