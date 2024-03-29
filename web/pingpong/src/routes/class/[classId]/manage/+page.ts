@@ -19,10 +19,20 @@ export const load: PageLoad = async ({ fetch, params }) => {
         target_id: classId,
         relation: 'can_publish_assistants'
       },
+      canPublishThreads: {
+        target_type: 'class',
+        target_id: classId,
+        relation: 'can_publish_threads'
+      },
       canUploadClassFiles: {
         target_type: 'class',
         target_id: classId,
         relation: 'can_upload_class_files'
+      },
+      isAdmin: {
+        target_type: 'class',
+        target_id: classId,
+        relation: 'admin'
       },
       canViewApiKey: { target_type: 'class', target_id: classId, relation: 'can_view_api_key' },
       canViewUsers: { target_type: 'class', target_id: classId, relation: 'can_view_users' },

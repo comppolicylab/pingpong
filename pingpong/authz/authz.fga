@@ -35,7 +35,7 @@ type class
     define can_create_assistants: [class#student] or supervisor
     define can_publish_assistants: [class#student] or supervisor
     define can_publish_threads: [class#student] or supervisor
-    define can_upload_class_files: supervisor
+    define can_upload_class_files: [class#student] or supervisor
     define can_upload_user_files: can_create_thread
 
 type thread
@@ -45,7 +45,7 @@ type thread
     define can_view: [class#member] or party or supervisor from parent
     define can_participate: party
     define can_delete: supervisor from parent
-    define can_publish: party and can_publish_threads from parent
+    define can_publish: (party and can_publish_threads from parent) or supervisor from parent
 
 type assistant
   relations

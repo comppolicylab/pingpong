@@ -394,6 +394,8 @@ class Class(Base):
     api_key = Column(String, nullable=True)
     any_can_create_assistant = Column(Boolean, default=False)
     any_can_publish_assistant = Column(Boolean, default=False)
+    any_can_publish_thread = Column(Boolean, default=False)
+    any_can_upload_class_file = Column(Boolean, default=False)
     users: Mapped[List["UserClassRole"]] = relationship(
         "UserClassRole",
         back_populates="class_",

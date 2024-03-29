@@ -63,14 +63,17 @@
   });
 
   let usersModalOpen = false;
-  let anyCanCreate = data?.class?.any_can_create_assistant || false;
-  let anyCanPublish = data.class.any_can_publish_assistant || false;
+  let anyCanCreateAsst = data?.class.any_can_create_assistant || false;
+  let anyCanPublishAsst = data.class.any_can_publish_assistant || false;
+  let anyCanPublishThread = data?.class.any_can_publish_thread || false;
+  let anyCanUploadClassFile = data?.class.any_can_upload_class_file || false;
+
   let assistants: Assistant[] = [];
   const blurred = writable(true);
   let uploads = writable<FileUploadInfo[]>([]);
   const trashFiles = writable<number[]>([]);
   let savingAssistant = false;
-  $: publishOptMakesSense = anyCanCreate;
+  $: publishOptMakesSense = anyCanCreateAsst;
   $: apiKey = data.apiKey || '';
   $: apiKeyBlur =
     apiKey.substring(0, 6) + '**************' + apiKey.substring(Math.max(6, apiKey.length - 6));
@@ -106,10 +109,11 @@
 
   $: canEditClassInfo = !!data?.grants?.canEditInfo;
   $: canManageClassUsers = !!data?.grants?.canManageUsers;
-  $: canUploadClassFiles = !!data?.grants?.canUploadClassFiles;
+  $: canUploadClassFiles = !!data?.grants?.canUploadClassFiles && publishOptMakesSense;
   $: canViewApiKey = !!data?.grants?.canViewApiKey;
   $: canCreateAssistant = !!data?.grants?.canCreateAssistants;
   $: canPublishAssistant = !!data?.grants?.canPublishAssistants;
+  $: isAdmin = !!data?.grants?.isAdmin;
 
   // Check if we are editing an assistant and prompt if so.
   beforeNavigate((nav) => {
@@ -190,10 +194,23 @@
         </div>
 
         <div></div>
+        <div>
+          <Checkbox
+            id="any_can_publish_thread"
+            name="any_can_publish_thread"
+            checked={anyCanPublishThread}>Allow anyone to publish threads</Checkbox
+          >
+        </div>
+        <Helper
+          >When this is enabled, anyone in the class can share their own threads with the rest of
+          the class. Otherwise, only teachers and admins can share threads.</Helper
+        >
+
+        <div></div>
         <Checkbox
           id="any_can_create_assistant"
           name="any_can_create_assistant"
-          bind:checked={anyCanCreate}>Allow anyone to create assistants</Checkbox
+          bind:checked={anyCanCreateAsst}>Allow anyone to create assistants</Checkbox
         >
         <Helper
           >When this is enabled, anyone in the class can create assistants. Otherwise, only teachers
@@ -205,7 +222,7 @@
           <Checkbox
             id="any_can_publish_assistant"
             name="any_can_publish_assistant"
-            checked={anyCanPublish}
+            checked={anyCanPublishAsst}
           >
             Allow anyone to publish assistants
           </Checkbox>
@@ -219,9 +236,31 @@
             Allow anyone to publish assistants
           </Checkbox>
         {/if}
+
         <Helper
           >When this is enabled, anyone in the class can share their own assistants with the rest of
           the class. Otherwise, only teachers and admins can share assistants.</Helper
+        >
+
+        <div></div>
+        {#if publishOptMakesSense}
+          <Checkbox
+            id="any_can_upload_class_file"
+            name="any_can_upload_class_file"
+            checked={anyCanUploadClassFile}>Allow anyone to upload files for assistants</Checkbox
+          >
+        {:else}
+          <Checkbox
+            id="any_can_upload_class_file"
+            name="any_can_upload_class_file"
+            checked={false}
+            disabled>Allow anyone to upload files for assistants</Checkbox
+          >
+        {/if}
+        <Helper
+          >When this is enabled, anyone in the class can upload files for use in creating
+          assistants. Otherwise, only teachers and admins can upload files. (Note that users can
+          still upload files privately to chat threads even when this setting is disabled.)</Helper
         >
 
         <div></div>
@@ -401,7 +440,7 @@
           {:else}
             <Card
               class="w-full max-w-full space-y-2"
-              href={assistant.creator_id === data.me.user?.id && canCreateAssistant
+              href={(isAdmin || assistant.creator_id === data.me.user?.id) && canCreateAssistant
                 ? `${$page.url.pathname}?edit-assistant=${assistant.id}`
                 : null}
             >

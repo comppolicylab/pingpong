@@ -36,6 +36,8 @@ export type UpdateClassForm = {
   term: string;
   any_can_create_assistant: boolean;
   any_can_publish_assistant: boolean;
+  any_can_publish_thread: boolean;
+  any_can_upload_class_file: boolean;
 };
 
 /**
@@ -166,7 +168,14 @@ export const actions: Actions = {
       const classId = parseInt(event.params.classId, 10);
       return api.updateClass(f, classId, d);
     },
-    { checkboxes: ['any_can_create_assistant', 'any_can_publish_assistant'] }
+    {
+      checkboxes: [
+        'any_can_create_assistant',
+        'any_can_publish_assistant',
+        'any_can_publish_thread',
+        'any_can_upload_class_file'
+      ]
+    }
   ),
 
   /**

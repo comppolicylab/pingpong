@@ -314,6 +314,8 @@ class Class(BaseModel):
     api_key: SecretStr | None
     any_can_create_assistant: bool | None = None
     any_can_publish_assistant: bool | None = None
+    any_can_publish_thread: bool | None = None
+    any_can_upload_class_file: bool | None = None
 
     class Config:
         from_attributes = True
@@ -324,6 +326,8 @@ class CreateClass(BaseModel):
     term: str = Field(..., min_length=1, max_length=100)
     any_can_create_assistant: bool = False
     any_can_publish_assistant: bool = False
+    any_can_publish_thread: bool = False
+    any_can_upload_class_file: bool = False
 
 
 class UpdateClass(BaseModel):
@@ -331,6 +335,8 @@ class UpdateClass(BaseModel):
     term: str | None = Field(None, min_length=1, max_length=100)
     any_can_create_assistant: bool | None = None
     any_can_publish_assistant: bool | None = None
+    any_can_publish_thread: bool | None = None
+    any_can_upload_class_file: bool | None = None
 
 
 class UpdateApiKey(BaseModel):
