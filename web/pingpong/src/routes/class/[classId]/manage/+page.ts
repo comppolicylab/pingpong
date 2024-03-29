@@ -29,10 +29,10 @@ export const load: PageLoad = async ({ fetch, params }) => {
         target_id: classId,
         relation: 'can_upload_class_files'
       },
-      isSupervisor: {
+      isAdmin: {
         target_type: 'class',
         target_id: classId,
-        relation: 'supervisor'
+        relation: 'admin'
       },
       canViewApiKey: { target_type: 'class', target_id: classId, relation: 'can_view_api_key' },
       canViewUsers: { target_type: 'class', target_id: classId, relation: 'can_view_users' },

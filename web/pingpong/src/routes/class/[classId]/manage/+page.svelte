@@ -113,7 +113,7 @@
   $: canViewApiKey = !!data?.grants?.canViewApiKey;
   $: canCreateAssistant = !!data?.grants?.canCreateAssistants;
   $: canPublishAssistant = !!data?.grants?.canPublishAssistants;
-  $: isSupervisor = !!data?.grants?.isSupervisor;
+  $: isAdmin = !!data?.grants?.isAdmin;
 
   // Check if we are editing an assistant and prompt if so.
   beforeNavigate((nav) => {
@@ -440,7 +440,7 @@
           {:else}
             <Card
               class="w-full max-w-full space-y-2"
-              href={(isSupervisor || assistant.creator_id === data.me.user?.id) && canCreateAssistant
+              href={(isAdmin || assistant.creator_id === data.me.user?.id) && canCreateAssistant
                 ? `${$page.url.pathname}?edit-assistant=${assistant.id}`
                 : null}
             >
