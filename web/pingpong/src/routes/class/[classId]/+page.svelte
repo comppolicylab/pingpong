@@ -11,26 +11,36 @@
   import * as api from '$lib/api';
   import { errorMessage } from '$lib/errors';
   import type { Assistant } from '$lib/api';
+  import { onMount } from 'svelte';
 
   /**
    * Application data.
    */
   export let data;
 
+  onMount(() => {
+    // Make sure that an assistant is linked in the URL
+    if (!$page.url.searchParams.has('assistant')) {
+      if (data.assistants.length > 0) {
+        // replace current URL with one that has the assistant ID
+        goto(`/class/${data.class.id}/?assistant=${data.assistants[0].id}`, { replaceState: true });
+      }
+    }
+  });
+
   // Whether the app is currently loading.
   let loading = writable(false);
   // Currently selected assistant.
+  $: assistants = data?.assistants || [];
   let assistant = writable(data?.assistants[0] || {});
-
   // Whether billing is set up for the class (which controls everything).
   $: isConfigured = data?.hasAssistants && data?.hasBilling;
   $: parties = data.me.user?.id ? `${data.me.user.id}` : '';
-  $: assistants = (data?.assistants || []).sort((a, b) => a.name.localeCompare(b.name));
   // The assistant ID from the URL.
   $: linkedAssistant = parseInt($page.url.searchParams.get('assistant') || '0', 10);
   $: {
-    if (linkedAssistant && data?.assistants) {
-      const selectedAssistant = (data?.assistants || []).find(
+    if (linkedAssistant && assistants) {
+      const selectedAssistant = (assistants || []).find(
         (asst) => asst.id === linkedAssistant
       );
       if (selectedAssistant) {

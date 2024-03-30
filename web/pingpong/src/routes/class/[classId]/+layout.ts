@@ -24,7 +24,7 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
   let assistants: api.Assistant[] = [];
   let assistantCreators: api.AssistantCreators = {};
   if (assistantsResponse.data) {
-    assistants = assistantsResponse.data.assistants;
+    assistants = assistantsResponse.data.assistants.sort((a, b) => a.name.localeCompare(b.name));
     assistantCreators = assistantsResponse.data.creators;
   }
 
