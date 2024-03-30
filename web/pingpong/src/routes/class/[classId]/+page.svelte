@@ -40,9 +40,7 @@
   $: linkedAssistant = parseInt($page.url.searchParams.get('assistant') || '0', 10);
   $: {
     if (linkedAssistant && assistants) {
-      const selectedAssistant = (assistants || []).find(
-        (asst) => asst.id === linkedAssistant
-      );
+      const selectedAssistant = (assistants || []).find((asst) => asst.id === linkedAssistant);
       if (selectedAssistant) {
         $assistant = selectedAssistant;
       }
