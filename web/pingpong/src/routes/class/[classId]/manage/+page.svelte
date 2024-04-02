@@ -109,7 +109,7 @@
 
   $: canEditClassInfo = !!data?.grants?.canEditInfo;
   $: canManageClassUsers = !!data?.grants?.canManageUsers;
-  $: canUploadClassFiles = !!data?.grants?.canUploadClassFiles && publishOptMakesSense;
+  $: canUploadClassFiles = !!data?.grants?.canUploadClassFiles;
   $: canViewApiKey = !!data?.grants?.canViewApiKey;
   $: canCreateAssistant = !!data?.grants?.canCreateAssistants;
   $: canPublishAssistant = !!data?.grants?.canPublishAssistants;
