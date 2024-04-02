@@ -35,7 +35,7 @@
       </Card>
     {/each}
 
-    {#if data.institutions.length > 0}
+    {#if data.institutions.length > 0 || data.canCreateInstitution}
       <div data-sveltekit-preload-data="off">
         <Card horizontal img="" class="w-80 h-40" href="/?new-class">
           <Heading tag="h3" color="text-gray-900">Create new</Heading>

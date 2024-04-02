@@ -26,11 +26,3 @@ services:
       POSTGRES_PASSWORD: pingpong
     volumes:
       - dbdata:/var/lib/postgresql/data
-
-volumes:
-  dbdata:
-    driver: local
-    driver_opts:
-      type: none
-      device: ./.db/pg
-      o: bind
