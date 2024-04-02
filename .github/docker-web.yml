@@ -1,0 +1,48 @@
+name: Docker - PingPong Web
+
+on:
+  push:
+    tags:
+      - "web-*"
+
+jobs:
+  build:
+    name: Build Web Image
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@0e613a0980cbf65ed5b322eb7a1e075d28913a83
+        with:
+          aws-access-key-id: ${{ secrets.PINGPONG_AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.PINGPONG_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@62f4f872db3836360b72999f4b87f1ff13310f3a
+
+      - name: Build docker image
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml build web
+
+      - name: Push docker image to repo
+        run: |
+          docker tag ${{ env.PINGPONG_WEB_REGISTRY }}:${GITHUB_REF##*-} ${{ env.PINGPONG_WEB_REGISTRY }}:latest
+          docker push ${{ env.PINGPONG_WEB_REGISTRY }}:${GITHUB_REF##*-}
+          docker push ${{ env.PINGPONG_WEB_REGISTRY }}:latest
+
+      - name: Send notification
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          GIPHY_API_KEY: ${{ secrets.GIPHY_API_KEY }}
+        run: |
+          GIF=$(curl "https://api.giphy.com/v1/gifs/random?api_key=$GIPHY_API_KEY&tag=dog&rating=g" | python -c "import sys,json; print (json.load(sys.stdin)['data']['images']['downsized']['url'])")
+          MSG=":pingpong: Built PingPong Web Docker image v${GITHUB_REF##*-} :tada:"
+
+          curl -X POST -H 'Content-Type: application/json' \
+            --data "{\"text\": \"$MSG\", \"blocks\": [{\"type\":\"section\", \"text\": {\"type\": \"plain_text\", \"text\": \"$MSG\", \"emoji\": true}}, {\"type\":\"image\",\"image_url\":\"$GIF\", \"alt_text\":\"dog\", \"title\": {\"type\":\"plain_text\", \"text\": \"success dog\"}}]}" \
+            $SLACK_WEBHOOK
