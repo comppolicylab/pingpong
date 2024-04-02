@@ -31,8 +31,30 @@ the easiest way to start up development services is with the following script:
 
 This will set up the DB (with all tables), OpenFGA, and the Python API in containers.
 
-This does **not** build/start the Web UI; for that, see the `web/pingpong/README.md`.
+This does **not** build/start the Web UI; for that, see the [`web/pingpong/README.md`](web/pingpong/README.md).
 You may also wish to stop the `pingpong-srv-1` container and replace it with an uncontainerized Python API for development.
+
+
+#### First time logging in
+
+When you have everything running (including the UI; see [`web/pingpong/README.md`](web/pingpong/README.md)),
+go to [http://localhost:5173](http://localhost:5173).
+You should log in with a real email address you have access to.
+In development, this user will be automatically promoted to a super user,
+with full permissions to create new classes, etc.
+
+You will receive a real email to that address with a link to log in to the dev server.
+Click the link, you will be in!
+
+#### Creating test users
+
+You can use the `+` email trick to create test user accounts.
+
+For example, if `joenudell@testdomain.com` is my real email address, I will use that as my super-user account.
+Then, from the PingPong UI I can invite `joenudell+student1@testdomain.com` to be a student,
+and `joenudell+teacher1@testdomain.com` to be an instructor in a class.
+
+All of the login emails will be sent to `joenudell@testdomain.com`, so you can easily work with multiple users with different permissions.
 
 
 ## Adding new DB Migrations
@@ -50,7 +72,7 @@ poetry run python -m pingpong db migrate
 
 ## Authz
 
-The OpenFGA authorization server has a playground at `http://localhost:3000/playground` that may be useful.
+The OpenFGA authorization server has a [playground](http://localhost:3000/playground) that may be useful.
 
 
 ## Backend / API
