@@ -19,7 +19,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.PINGPONG_AWS_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.PINGPONG_AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -31,9 +31,9 @@ jobs:
 
       - name: Push docker image to repo
         run: |
-          docker tag ${{ env.PINGPONG_WEB_REGISTRY }}:${GITHUB_REF##*-} ${{ env.PINGPONG_WEB_REGISTRY }}:latest
-          docker push ${{ env.PINGPONG_WEB_REGISTRY }}:${GITHUB_REF##*-}
-          docker push ${{ env.PINGPONG_WEB_REGISTRY }}:latest
+          docker tag ${{ vars.PINGPONG_WEB_REGISTRY }}:${GITHUB_REF##*-} ${{ vars.PINGPONG_WEB_REGISTRY }}:latest
+          docker push ${{ vars.PINGPONG_WEB_REGISTRY }}:${GITHUB_REF##*-}
+          docker push ${{ vars.PINGPONG_WEB_REGISTRY }}:latest
 
       - name: Send notification
         env:
