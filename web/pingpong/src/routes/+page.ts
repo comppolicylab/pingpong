@@ -15,13 +15,13 @@ export const load: PageLoad = async ({ fetch }) => {
       canCreateInstitution: {
         target_type: 'root',
         target_id: 0,
-        relation: 'can_create_institution',
-      },
+        relation: 'can_create_institution'
+      }
     })
   ]);
   return {
     institutions,
     classes,
-    canCreateInstitution: grants.canCreateInstitution,
+    canCreateInstitution: grants.canCreateInstitution
   };
 };

@@ -2,7 +2,6 @@
 
 This is the UI for the PingPong app.
 
-
 ## Overview
 
 - Built with `SvelteKit` / `TypeScript`
@@ -13,13 +12,11 @@ This is the UI for the PingPong app.
 
 ## Development
 
-
 ### Pre-reqs
 
 - Use Node `v21.1.0` (other versions probably work, but no guarantees)
 - Use [`pnpm`](https://pnpm.io/) for package management. (It's a lot faster than `npm` and `yarnpkg`.)
 - Run the PingPong API, DB, and other services. The easiest way to do this is with Docker by running the `./start-dev-docker.sh` script.
-
 
 ### Running the live-reload FE dev server
 
@@ -39,7 +36,6 @@ pnpm dev
 
 PingPong will be available at [`http://localhost:5173`](http://localhost:5173).
 
-
 ### Code quality
 
 The following static checks are performed when you create a pull request:
@@ -47,7 +43,6 @@ The following static checks are performed when you create a pull request:
 - `vite check` - Runs TypeScript type-checking
 - `vite lint` - Runs `eslint` and `prettier` formatting checks (hint: use `vite format` to automatically fix many issues!)
 - `vite test` - Runs unit tests through `vitest`
-
 
 ## Deployment
 
