@@ -37,7 +37,7 @@ Then run the server with:
 pnpm dev
 ```
 
-PingPong will be available at `http://localhost:5173`.
+PingPong will be available at [`http://localhost:5173`](http://localhost:5173).
 
 
 ### Code quality
