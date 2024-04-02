@@ -2,6 +2,7 @@
 
 This is the UI for the PingPong app.
 
+
 ## Overview
 
 - Built with `SvelteKit` / `TypeScript`
@@ -12,28 +13,32 @@ This is the UI for the PingPong app.
 
 ## Development
 
-### Installation
+
+### Pre-reqs
 
 - Use Node `v21.1.0` (other versions probably work, but no guarantees)
 - Use [`pnpm`](https://pnpm.io/) for package management. (It's a lot faster than `npm` and `yarnpkg`.)
+- Run the PingPong API, DB, and other services. The easiest way to do this is with Docker by running the `./start-dev-docker.sh` script.
 
-Install dependencies (including dev):
+
+### Running the live-reload FE dev server
+
+This is how you run the FE dev server, which will reload as you make changes.
+
+First install dependencies:
 
 ```
 pnpm install
 ```
 
-### Dev server
-
-The dev server with live reload can be started on port 5173 with:
+Then run the server with:
 
 ```
 pnpm dev
 ```
 
-**You need to run the Python API as well. See the other READMEs for more information!**
+PingPong will be available at `http://localhost:5173`.
 
-We use `vite` to build our code. See `vite.config.ts` (and affiliated config files) for more information.
 
 ### Code quality
 
@@ -43,18 +48,6 @@ The following static checks are performed when you create a pull request:
 - `vite lint` - Runs `eslint` and `prettier` formatting checks (hint: use `vite format` to automatically fix many issues!)
 - `vite test` - Runs unit tests through `vitest`
 
-### Env
-
-There is a `.env` checked into the repo with good defaults for development.
-
-You can use an untracked version to configure your own if needed:
-
-- `API_PROTO` - The protocol (scheme) for the Python API (`http` in dev)
-- `API_HOST` - The host & port of the Python API (`localhost:8000` in dev)
-- `HOST` - Host to bind the node server to (default is `0.0.0.0`, but this does NOT apply to the dev server! Only when running with the `node-adapter`!)
-- `PORT` - Port to bind the node server to (default is `3000`, buthis does NOT apply to the dev server! Only when running with the `node-adapter`!)
-- `NODE_ENV` - Enables additional debugging when set to `development` vs `production`
-- `VITE_SENTRY_DSN` - For error reporting -- can leave empty in dev
 
 ## Deployment
 
