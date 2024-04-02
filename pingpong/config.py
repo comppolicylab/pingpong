@@ -125,6 +125,7 @@ class SecretKey(BaseSettings):
 
 
 class AuthSettings(BaseSettings):
+    autopromote_on_login: bool = Field(False)
     secret_keys: list[SecretKey]
 
 

@@ -2,50 +2,10 @@ version: "3.9"
 
 services:
 
-  traefik:
-    platform: linux/amd64
-    image: traefik:2.10.7
-    container_name: pingpong-traefik
-    command:
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--providers.file.directory=/etc/traefik/dynamic"
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
-      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
-      - "--entrypoints.web.http.redirections.entryPoint.permanent=true"
-      - "--entrypoints.websecure.address=:443"
-      - "--ping"
-      - "--accesslog=true"
-    networks: [back, front]
-    expose: [80, 443]
-    ports: ["80:80", "443:443"]
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
-    secrets:
-    - source: webcrt
-      target: /etc/ssl/srv.crt
-      mode: 0400
-    - source: webkey
-      target: /etc/ssl/srv.key
-      mode: 0400
-    - source: traefikcrtcfg
-      target: /etc/traefik/dynamic/traefik-crt.yml
-      mode: 0400
-    volumes:
-      - "/var/run/docker.sock:/var/run/docker.sock:ro"
-      - logs:/logs
-
   authz:
     platform: linux/amd64
     image: openfga/openfga:v1.5.0
     container_name: pingpong-authz
-    networks: [back]
     command: [run]
     expose: [8080, 8081, 3000]
     ports: ["8080:8080", "8081:8081", "3000:3000"]
@@ -72,18 +32,6 @@ services:
       args:
         port: 3000
     restart: always
-    networks: [back]
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.middlewares.cors.headers.accesscontrolallowmethods=*"
-      - "traefik.http.middlewares.cors.headers.addvaryheader=true"
-      - "traefik.http.middlewares.cors.headers.accesscontrolallowheaders=*"
-      - "traefik.http.middlewares.cors.headers.accesscontrolmaxage=600"
-      - "traefik.http.middlewares.cors.headers.accesscontrolallowcredentials=true"
-      - "traefik.http.routers.pingpong_web.entrypoints=websecure"
-      - "traefik.http.routers.pingpong_web.tls=true"
-      - "traefik.http.routers.pingpong_web.middlewares=cors"
-      - "traefik.http.services.web-pingpong.loadbalancer.server.port=3000"
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
       interval: 5s
@@ -98,22 +46,12 @@ services:
       context: ./
       dockerfile: Dockerfile
     restart: always
-    networks: [back]
+    expose: [8000]
+    ports: ["8000:8000"]
     secrets:
       - source: app_config
         target: /code/config.toml
         mode: 0400
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.middlewares.cors.headers.accesscontrolallowmethods=*"
-      - "traefik.http.middlewares.cors.headers.addvaryheader=true"
-      - "traefik.http.middlewares.cors.headers.accesscontrolallowheaders=*"
-      - "traefik.http.middlewares.cors.headers.accesscontrolmaxage=600"
-      - "traefik.http.middlewares.cors.headers.accesscontrolallowcredentials=true"
-      - "traefik.http.routers.pingpong_api.entrypoints=websecure"
-      - "traefik.http.routers.pingpong_api.tls=true"
-      - "traefik.http.routers.pingpong_api.middlewares=cors"
-      - "traefik.http.services.srv-pingpong.loadbalancer.server.port=8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 5s
@@ -121,9 +59,6 @@ services:
       retries: 3
       start_period: 15s
 
-networks:
-  front:
-  back:
 
 # Use ephemeral volume in dev
 volumes:
@@ -136,10 +71,6 @@ volumes:
 secrets:
   app_config:
     file: ./config.dev.toml
-  webcrt:
-     file: ./cert/dev.crt
-  webkey:
-    file: ./cert/dev.key
   traefikcrtcfg:
     file: ./traefik-crt.yml
   openfgacfg:

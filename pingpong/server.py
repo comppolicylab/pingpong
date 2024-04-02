@@ -234,7 +234,17 @@ async def login(body: schemas.MagicLoginRequest, request: Request):
     user = await models.User.get_by_email(request.state.db, email)
     # Throw an error if the user does not exist.
     if not user:
-        raise HTTPException(status_code=401, detail="User does not exist")
+        # In dev we can auto-create the user as a super-admin
+        if config.auth.autopromote_on_login:
+            if not config.development:
+                raise RuntimeError("Cannot autopromote in non-dev mode")
+            user = await models.User.get_or_create_by_email(request.state.db, email)
+            user.super_admin = True
+            request.state.db.add(user)
+            await request.state.authz.create_root_user(user.id)
+        else:
+            raise HTTPException(status_code=401, detail="User does not exist")
+
     nowfn = get_now_fn(request)
     magic_link = generate_auth_link(user.id, expiry=86_400, nowfn=nowfn)
 

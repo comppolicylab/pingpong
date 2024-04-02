@@ -5,7 +5,117 @@ PingPong
 
 A web app that helps students out with class assignments and logistics.
 
-# Repo map
+
+# Development
+
+## Running locally
+
+You need these things to use the app locally.
+ - Postgres Database
+ - OpenFGA Authz server
+ - Python / Poetry to run the API
+ - Pnpm to run the FrontEnd.
+ - OpenAI API Key (for using the app)
+
+The easiest way to run the DB and OpenFGA is through Docker.
+
+
+### Quick setup
+
+Assuming you have a Docker environment available,
+the easiest way to start up development services is with the following script:
+
+```
+./start-dev-docker.sh
+```
+
+This will set up the DB (with all tables), OpenFGA, and the Python API in containers.
+
+This does **not** build/start the Web UI; for that, see the [`web/pingpong/README.md`](web/pingpong/README.md).
+You may also wish to stop the `pingpong-srv-1` container and replace it with an uncontainerized Python API for development.
+
+
+#### First time logging in
+
+When you have everything running (including the UI; see [`web/pingpong/README.md`](web/pingpong/README.md)),
+go to [http://localhost:5173](http://localhost:5173).
+You should log in with a real email address you have access to.
+In development, this user will be automatically promoted to a super user,
+with full permissions to create new classes, etc.
+
+You will receive a real email to that address with a link to log in to the dev server.
+Click the link, you will be in!
+
+#### Creating test users
+
+You can use the `+` email trick to create test user accounts.
+
+For example, if `joenudell@testdomain.com` is my real email address, I will use that as my super-user account.
+Then, from the PingPong UI I can invite `joenudell+student1@testdomain.com` to be a student,
+and `joenudell+teacher1@testdomain.com` to be an instructor in a class.
+
+All of the login emails will be sent to `joenudell@testdomain.com`, so you can easily work with multiple users with different permissions.
+
+
+## Adding new DB Migrations
+If you need to modify the database, make your changes in the SQLAlchemy code, then run:
+
+```
+poetry run alembic revision --autogenerate -m "<description of change>"
+```
+
+Verify the migration is correct, check it into the repo, and apply it to the database by running:
+
+```
+poetry run python -m pingpong db migrate
+```
+
+## Authz
+
+The OpenFGA authorization server has a [playground](http://localhost:3000/playground) that may be useful.
+
+
+## Backend / API
+
+We use `Python 3.11` and [`Poetry`](https://python-poetry.org/) for package management.
+
+If you want to develop outside of a container using a live-reload server, do the following:
+
+Run `poetry install --with dev` to install dependencies.
+
+The following command runs the API in development mode:
+```
+poetry run uvicorn pingpong:server --port 8000 --workers 1 --reload
+```
+
+NOTE: in development the API uses a mock email sender that prints emails to the console rather than sending them.
+Remember to check the console when you are expecting an email!
+
+### Custom API Config
+
+See the `config.toml` file for default configuration settings used in development.
+
+You can use another config file if you want to customize your setup,
+such as `config.local.toml` which will not be tracked:
+
+```
+CONFIG_PATH=config.local.toml poetry run python ...
+```
+
+## Frontend / UI
+
+See the [`web/pingpong`](web/pingpong/README.md) directory for instructions.
+
+
+
+# Production
+
+TKTK instructions for deployment.
+
+The prod deployment is available at `pingpong.hks.harvard.edu`.
+
+
+# Repo Map
 ```
 Outline of directories:
 ===
@@ -13,8 +123,8 @@ Outline of directories:
 .github/        -- Workflows / automation
 alembic/        -- Database migrations
 assets/         -- App design material
-cert/           -- Local development certificate stuff (for testing SSL configuraiton)
-docs/           -- Documentary material (currently out of date!)
+docs/           -- Documentary material
+scripts/        -- One-off development / testing code
 pingpong/       -- Python API code
   - authz/      -- Authorization model and related code
   - db/         -- Database adapters
@@ -30,149 +140,11 @@ web/            -- Front-end code
 
 Important files:
 ===
-./deploy.sh          -- Script for building and uploading images to prod registry
-./migrate.sh         -- Script for running migrations on prod server
-./rollout.sh         -- Script for rolling out new prod images to production server
-config.toml          -- Config for Python API in Development
-conftest.py          -- Config for pytest
-docker-compose.yml   -- Base docker compose config
-docker-compose.*.yml -- Docker config overrides for different environments
-loadtest.py          -- Script for load-testing with `locust`
-test_config.toml     -- App config for Python tests
+./start-dev-docker.sh -- Script for starting development services in Docker
+config.dev.toml       -- Config for Python API in Development
+conftest.py           -- Config for pytest
+docker-compose.yml    -- Base docker compose config
+docker-compose.*.yml  -- Docker config overrides for different environments
+loadtest.py           -- Script for load-testing with `locust`
+test_config.toml      -- App config for Python tests
 ```
-
-
-# Development
-
-## Running locally
-
-At a high level, you need these things to use the app locally:
- - Postgres Database
- - OpenFGA Authz server
- - Python / Poetry to run the API
- - Pnpm to run the FrontEnd.
- - OpenAI API Key (for using the app)
-
-Docker is necessary for deployment.
-You can also use Docker for running the Authz server and DB on dev, but is not technically required.
-
-
-### Database
-
-Assuming you have a Docker environment available,
-you can run a new database easily with the following command:
-
-```
-./start-dev-db.sh
-```
-
-This creates a persistent volume at `./.db/pg` in this directory and starts Postgres with the settings in `docker-compose.dev.yml`.
-
-Of course, you can run Postgres-15 another way if you choose. Just make sure the app config settings match (user, pw, etc).
-
-We also support a SQLite backend if needed,
-although since prod uses Postgres it's best to use this in dev as well!
-
-
-#### Database setup / Migrations
-
-The first time you start the database you will need to initialize it.
-(Make sure you have `python` / `poetry` set up, per instructions below!)
-
-You can use the `poetry run python -m pingpong db init` command for this.
-
-We use Alembic to manage database changes.
-
-If you need to modify the database, make your changes in the SQLAlchemy code, then run:
-
-```
-poetry run alembic revision --autogenerate -m "<description of change>"
-```
-
-Verify the migration is correct, check it into the repo, and apply it to the database by running:
-
-```
-poetry run python -m pingpong db migrate
-```
-
-### Authz
-
-The authorization server depends on the database and needs to be configured for use.
-
-TODO(jnu): refactor / automate / embed this in the `start-dev*.sh` script
-
- 1. In PostgreSQL run `CREATE SCHEMA IF NOT EXISTS authz ;`
- 2. Configure the DB tables for OpenFGA with `docker compose run authz migrate`
- 3. Run the OpenFGA server with `docker compose up authz -d`
-
-Initialization of the rulesets will happen when the API server is started.
-
-
-### Backend / API
-
-We use `Python 3.11` and [`Poetry`](https://python-poetry.org/) for package management.
-
-Run `poetry install --with dev` to install dependencies.
-
-The following command runs the API in development mode:
-```
-poetry run uvicorn pingpong:server --port 8000 --workers 1 --reload
-```
-
-NOTE: in development the API uses a mock email sender that prints emails to the console rather than sending them.
-Remember to check the console when you are expecting an email!
-
-#### Custom Config
-See the `config.toml` file for default configuration settings used in development.
-
-You can use another config file if you want to customize your setup,
-such as `config.local.toml` which will not be tracked:
-
-```
-CONFIG_PATH=config.local.toml poetry run python ...
-```
-
-
-### Frontend / UI
-
-See the [`web/pingpong`](web/pingpong/README.md) directory for instructions.
-
-
-## Docker Compose
-
-We use docker containers for deployment.
-You can test this locally as well (useful for checking networking, TLS, etc):
-
-Bring up all docker services in development mode:
-```
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
-```
-
-This will serve the site on `https://pingpong.local`.
-You should add the following line to your `/etc/hosts` file to resolve it to localhost:
-```
-127.0.0.1   pingpong.local
-```
-
-
-### SSL
-
-The dev `docker-compose` cluster uses a certificate signed by our local authority.
-
-**In order to stop receiving security alerts while developing, you need to trust this authority!**
-To do so, in your browser's security settings, import the `cert/DevRootCA.crt` file.
-Then you can use `https://pingpong.localhost` without issue.
-
-
-The (obviously insecure) dev CA and keys are checked into the repo in plaintext.
-See [the cert directory](cert/README.md) for more information.
-
-To use a real certificate in production, just override the `webcrt` and `webkey` secrets with the appropriate files.
-
-
-# Production
-
-Use the `./deploy.sh` and `./rollout.sh` scripts for deployment.
-TKTK this will change soon!
-
-The prod deployment is available at `pingpong.hks.harvard.edu`.
