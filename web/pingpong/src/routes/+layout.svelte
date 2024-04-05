@@ -9,7 +9,7 @@
 
 <SvelteToast />
 {#if data.me.user}
-  <div class="flex h-screen">
+  <div class="h-full sm:grid sm:w-full sm:grid-cols-[320px_1fr] sm:gap-4">
     <Sidebar {data} />
     <Main>
       <slot />

@@ -17,8 +17,23 @@
     ondragover="event.preventDefault()"
     ondrop="event.preventDefault()"
     data-sveltekit-preload-data="hover"
-    class="h-min-screen v-min-screen"
+    class="h-min-screen v-min-screen bg-darkblue"
   >
-    <div style="display: contents">%sveltekit.body%</div>
+    <div class="max-w-screen-2xl mx-auto mt-12 sm:h-[calc(100vh-3rem)]">%sveltekit.body%</div>
+    
+    <script>
+      window.onload = function() {
+  
+        const menuButton = document.querySelector('.menu-button');
+        const panel = document.querySelector('.main-panel');
+        
+        menuButton.addEventListener('click', function() {
+          panel.classList.toggle('left-3/4');
+          console.log('hit');
+        });
+        
+      }
+    </script>
+    
   </body>
 </html>

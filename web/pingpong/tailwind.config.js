@@ -12,7 +12,15 @@ const config = {
       center: true,
       padding: '2rem'
     },
-    extend: {}
+    extend: {
+      borderRadius: {
+        '4xl': '2rem',
+      },
+      colors: {
+        'darkblue': '#201E45',
+        'lightblue': '#F1F4FF',
+      },
+    }
   },
 
   plugins: [require('flowbite/plugin')]

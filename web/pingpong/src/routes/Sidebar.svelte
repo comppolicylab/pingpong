@@ -9,7 +9,8 @@
     QuestionCircleOutline,
     ArrowRightToBracketSolid,
     EyeSlashOutline,
-    RefreshOutline
+    RefreshOutline,
+    BarsSolid
   } from 'flowbite-svelte-icons';
 
   import {
@@ -79,10 +80,13 @@
   };
 </script>
 
-<Sidebar asideClass="shrink-0 grow-0 w-80" activeUrl={$page.url.pathname}>
-  <SidebarWrapper class="h-full flex flex-col">
+<Sidebar asideClass="absolute top-0 left-0 z-0 w-full sm:static" activeUrl={$page.url.pathname}>
+  <SidebarWrapper class="bg-transparent h-full flex flex-col">
     <SidebarGroup class="mb-4">
-      <div data-sveltekit-preload-data="off">
+      <div class="flex items-center" data-sveltekit-preload-data="off">
+        <button class="menu-button bg-transparent border-none sm:hidden">
+          <BarsSolid size="md" class="text-white" />
+        </button>
         <NavBrand href="/" class="mx-4">
           <Logo size={10} extraClass="fill-amber-600" />
           <Heading tag="h1" class="text-amber-500 px-5 logo" customSize="text-3xl">PingPong</Heading
