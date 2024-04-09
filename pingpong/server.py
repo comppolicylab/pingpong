@@ -774,6 +774,8 @@ async def list_class_models(
     known_models = {
         "gpt-4-0125-preview",
         "gpt-4-1106-preview",
+        "gpt-4-turbo-2024-04-09",
+        "gpt-4-turbo",
         "gpt-4-turbo-preview",
         "gpt-3.5-turbo-1106",
     }
