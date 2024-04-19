@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Select, GradientButton, Label, Input, Heading } from 'flowbite-svelte';
+  import { Select, Button, GradientButton, Label, Input, Heading } from 'flowbite-svelte';
   import { enhance } from '$app/forms';
   import { createEventDispatcher } from 'svelte';
   import type { Institution } from '$lib/api';
@@ -13,7 +13,7 @@
   let selectedInst = '';
 </script>
 
-<Heading tag="h2">Create a new class</Heading>
+<Heading tag="h2" class="serif">Create a new class</Heading>
 <form action="?/createClass" method="POST" use:enhance class="flex flex-col gap-4">
   <div>
     <Label for="name">Name</Label>
@@ -38,10 +38,10 @@
       </div>
     {/if}
   </div>
-  <div class="flex items-center">
-    <GradientButton color="cyanToBlue" type="submit">Create</GradientButton>
-    <GradientButton color="pinkToOrange" type="reset" on:click={done} on:touchstart={done}
-      >Close</GradientButton
+  <div class="flex items-center justify-between">
+    <Button pill outline class="bg-white text-blue-dark-50 border-blue-dark-40 hover:bg-blue-light-40 hover:text-blue-dark-50" type="reset" on:click={done} on:touchstart={done}
+      >Cancel</Button
     >
+    <Button pill class="bg-orange text-white hover:bg-orange-dark" type="submit">Create</Button>
   </div>
 </form>

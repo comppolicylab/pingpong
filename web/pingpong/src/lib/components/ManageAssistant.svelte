@@ -144,13 +144,13 @@
 <input type="hidden" name="assistantId" value={assistant?.id} />
 
 <div class="border-t pt-4 mt-4 flex items-center col-span-2">
-  <GradientButton color="cyanToBlue" type="submit">Save</GradientButton>
+  <Button pill class="bg-orange text-white hover:bg-orange-dark" type="submit">Save</Button>
   {#if assistant}
     <Button
       disabled={loading}
       href="/manageAssistants"
       color="red"
-      class="ml-4"
+      class="bg-blue-light-50 border border-blue-dark-40 text-blue-dark-50 hover:bg-blue-light-40 ml-4"
       on:click={reset}
       on:touchstart={reset}>Cancel</Button
     >

@@ -9,6 +9,7 @@
       href="https://fonts.googleapis.com/css2?family=Rubik+Doodle+Shadow&display=swap"
       rel="stylesheet"
     />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=STIX+Two+Text:ital,wght@0,300..700;1,300..700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="%sveltekit.assets%/default.min.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     %sveltekit.head%
@@ -17,7 +18,7 @@
     ondragover="event.preventDefault()"
     ondrop="event.preventDefault()"
     data-sveltekit-preload-data="hover"
-    class="h-min-screen v-min-screen bg-darkblue"
+    class="h-min-screen v-min-screen bg-blue-dark-50"
   >
     <div class="max-w-screen-2xl mx-auto mt-12 sm:h-[calc(100vh-3rem)]">%sveltekit.body%</div>
     
@@ -26,10 +27,13 @@
   
         const menuButton = document.querySelector('.menu-button');
         const panel = document.querySelector('.main-panel');
+        const openIcon = document.querySelector('.menu-open');
+        const closeIcon = document.querySelector('.menu-close');
         
         menuButton.addEventListener('click', function() {
-          panel.classList.toggle('left-3/4');
-          console.log('hit');
+          panel.classList.toggle('left-[90%]');
+          openIcon.classList.toggle('hidden');
+          closeIcon.classList.toggle('hidden');
         });
         
       }

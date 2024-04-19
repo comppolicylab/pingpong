@@ -10,7 +10,7 @@
   import { createEventDispatcher } from 'svelte';
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
-  import { GradientButton } from 'flowbite-svelte';
+  import { GradientButton, Button } from 'flowbite-svelte';
   import { page } from '$app/stores';
   import { ChevronUpSolid } from 'flowbite-svelte-icons';
   import type {
@@ -192,7 +192,7 @@
 
 <div
   use:init={$page.params.threadId}
-  class="w-full relative rounded-lg border-[1px] border-solid border-cyan-500"
+  class="w-full relative rounded-full bg-blue-light-50 shadow-inner"
 >
   <input type="hidden" name="file_ids" bind:value={fileIds} />
   <div
@@ -204,20 +204,20 @@
       <FilePlaceholder {mimeType} info={file} on:delete={removeFile} />
     {/each}
   </div>
-  <div class="relative top-[2px]">
+  <div class="relative flex gap-3 items-center p-2">
     <textarea
       bind:this={realRef}
       id="message"
       rows="1"
       name="message"
-      class="w-full !outline-none focus:ring-0 resize-none border-none bg-transparent pt-[12px] pb-[8px]"
+      class="w-full !outline-none focus:ring-0 resize-none border-none bg-transparent pt-[12px] pb-[10px]"
       placeholder="Ask me anything"
       class:text-gray-700={disabled}
       class:animate-pulse={loading}
       disabled={loading || disabled}
       on:keydown={maybeSubmit}
       on:input={handleTextAreaInput}
-      style={`height: 48px; max-height: ${maxHeight}px; padding-right: 3rem; padding-left: 3.5rem; font-size: 1rem; line-height: 1.5rem;`}
+      style={`height: 48px; max-height: ${maxHeight}px; padding-right: 3rem; padding-left: 1.5rem; font-size: 1rem; line-height: 1.5rem;`}
     />
     <textarea
       bind:this={ref}
@@ -227,25 +227,23 @@
       <FileUpload
         {maxSize}
         {accept}
-        wrapperClass="absolute bottom-3 left-2.5"
         disabled={loading || disabled || !upload}
         {upload}
         on:error={(e) => sadToast(e.detail.message)}
         on:change={handleFilesChange}
       />
     {/if}
-    <GradientButton
-      type="button"
+    <Button
+      pill
       on:click={submit}
       on:touchstart={submit}
       on:keydown={maybeSubmit}
-      color="cyanToBlue"
       class={`${
         loading ? 'animate-pulse cursor-progress' : ''
-      } w-8 h-8 p-2 absolute bottom-3 right-2.5`}
+      } p-3 px-4 mr-2 bg-orange hover:bg-orange-dark`}
       disabled={uploading || loading || disabled}
     >
-      <ChevronUpSolid size="md" />
-    </GradientButton>
+    Submit
+    </Button>
   </div>
 </div>

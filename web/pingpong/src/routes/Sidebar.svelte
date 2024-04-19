@@ -2,6 +2,7 @@
   import { page } from '$app/stores';
   import { writable } from 'svelte/store';
   import {
+    CloseOutline,
     CogOutline,
     BookOutline,
     FilePenOutline,
@@ -10,7 +11,9 @@
     ArrowRightToBracketSolid,
     EyeSlashOutline,
     RefreshOutline,
-    BarsSolid
+    BarsSolid,
+    CirclePlusSolid,
+    DotsVerticalOutline
   } from 'flowbite-svelte-icons';
 
   import {
@@ -29,6 +32,7 @@
     NavBrand
   } from 'flowbite-svelte';
   import Logo from '$lib/components/Logo.svelte';
+  import PingPongLogo from '$lib/components/PingPongLogo.svelte';
   import dayjs from '$lib/time';
   import * as api from '$lib/api';
   import type { LayoutData } from './$types';
@@ -80,17 +84,17 @@
   };
 </script>
 
-<Sidebar asideClass="absolute top-0 left-0 z-0 w-full sm:static" activeUrl={$page.url.pathname}>
+<Sidebar asideClass="absolute top-0 left-0 z-0 w-[90%] px-2 sm:static sm:h-full sm:w-full" activeUrl={$page.url.pathname}>
   <SidebarWrapper class="bg-transparent h-full flex flex-col">
-    <SidebarGroup class="mb-4">
+    <SidebarGroup class="mb-6">
       <div class="flex items-center" data-sveltekit-preload-data="off">
-        <button class="menu-button bg-transparent border-none sm:hidden">
-          <BarsSolid size="md" class="text-white" />
+        <button class="menu-button bg-transparent border-none mr-3 mt-1 sm:hidden">
+          <BarsSolid size="xl" class="text-white menu-open" />
+          <CloseOutline size="xl" class="text-white menu-close hidden" />
         </button>
-        <NavBrand href="/" class="mx-4">
-          <Logo size={10} extraClass="fill-amber-600" />
-          <Heading tag="h1" class="text-amber-500 px-5 logo" customSize="text-3xl">PingPong</Heading
-          >
+        <NavBrand href="/" class="">
+          <PingPongLogo size={10} extraClass="fill-amber-600" />
+          <!-- <Heading tag="h1" class="text-amber-500 px-5 logo" customSize="text-3xl">PingPong</Heading> -->
         </NavBrand>
       </div>
     </SidebarGroup>
@@ -105,7 +109,7 @@
             <svelte:fragment slot="icon">
               <BookOutline class="text-gray-400" size="sm" />
             </svelte:fragment>
-            <a href={`/class/${currentClassId}`}>{currentClass?.name}</a>
+            <a href={`/class/${currentClassId}`} class="eyebrow" >{currentClass?.name}</a>
             <a href={`/class/${currentClassId}/manage`}>
               <CogOutline size="sm" />
             </a>
@@ -113,48 +117,50 @@
         </Breadcrumb>
       </SidebarGroup>
 
-      <SidebarGroup border>
-        <SidebarItem href={`/class/${currentClassId}`} label="New Thread" class="text-amber-800">
+      <SidebarGroup border class="border-blue-dark-40 border-t-3">
+        <SidebarItem href={`/class/${currentClassId}`} label="Start a new chat" class="flex flex-row-reverse justify-between pr-4 bg-orange text-white rounded-full hover:bg-orange-dark">
           <svelte:fragment slot="icon">
-            <FilePenOutline size="sm" />
+            <CirclePlusSolid size="sm" />
           </svelte:fragment>
         </SidebarItem>
       </SidebarGroup>
 
-      <SidebarGroup border class="overflow-y-auto">
+      <SidebarGroup border class="overflow-y-auto border-blue-dark-40 border-t-3">
         {#each threads as thread}
           <SidebarItem
-            class="text-sm p-1 flex gap-2"
+            class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2"
             spanClass="flex-1 truncate"
             href={`/class/${currentClassId}/thread/${thread.id}`}
             label={thread.name || 'Undefined'}
+            activeClass="bg-blue-dark-40"
           >
             <svelte:fragment slot="icon">
               <EyeSlashOutline
                 size="sm"
-                class={`text-gray-400 ${thread.private ? 'visible' : 'invisible'}`}
+                class={`text-white ${thread.private ? 'visible' : 'invisible'}`}
               />
             </svelte:fragment>
             <svelte:fragment slot="subtext">
-              <span class="text-xs text-gray-400 ml-auto"
+              <span class="text-xs text-gray-400 w-full"
                 >{dayjs.utc(thread.updated).fromNow()}</span
               >
             </svelte:fragment>
           </SidebarItem>
         {/each}
         {#if !threads.length && !$fetchingMoreThreads}
-          <div class="text-gray-500">No conversations yet!</div>
+          <div class="text-white">No conversations yet!</div>
         {/if}
         {#if canFetchMoreThreads}
           <SidebarItem
-            spanClass={`${$fetchingMoreThreads ? 'text-gray-500' : 'text-amber-700'}`}
-            label={`${$fetchingMoreThreads ? 'Loading ...' : 'Load more ...'}`}
+            class="hover:bg-blue-dark-40 text-xs text-center flex justify-center border tracking-wide border-blue-dark-40 gap-1 uppercase"
+            spanClass={`${$fetchingMoreThreads ? 'text-white' : 'text-blue-light-50'}`}
+            label={`${$fetchingMoreThreads ? 'Loading ...' : 'Load more'}`}
             on:click={loadMoreThreads}
           >
             <svelte:fragment slot="icon">
               <RefreshOutline
                 size="sm"
-                class={`${$fetchingMoreThreads ? 'text-gray-500' : 'text-amber-700'} mx-2 ${
+                class={`${$fetchingMoreThreads ? 'text-white' : 'text-blue-light-50'} ${
                   $fetchingMoreThreads ? 'animate-spin' : ''
                 }`}
               />
@@ -163,30 +169,31 @@
         {/if}
       </SidebarGroup>
     {:else}
-      <SidebarGroup class="overflow-y-auto overflow-x-hidden">
-        <Heading tag="h2" class="text-sm font-medium text-gray-500 md:ms-2 dark:text-gray-400"
+      <SidebarGroup class="overflow-y-auto overflow-x-hidden border-blue-dark-40 border-t-3 pt-4">
+        <Heading tag="h2" class="text-sm eyebrow font-medium text-white md:ms-2 dark:text-gray-400"
           >Classes</Heading
         >
         {#each classes as cls}
-          <SidebarItem label={cls.name} href={`/class/${cls.id}`} />
+          <SidebarItem label={cls.name} class="text-sm text-white hover:bg-blue-dark-40 py-2 rounded" href={`/class/${cls.id}`} />
         {/each}
       </SidebarGroup>
     {/if}
 
-    <SidebarGroup class="mt-auto" border>
+    <SidebarGroup class="mt-auto border-blue-dark-40 border-t-3" border>
       <Li>
         <div
-          class="user cursor-pointer flex items-center p-2 text-base font-normal text-gray-900 rounded-lg dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
+          class="user cursor-pointer flex items-center p-2 text-base font-normal text-white rounded-lg dark:text-white hover:bg-blue-dark-40 dark:hover:bg-gray-700"
         >
           <Avatar src={avatar} alt={name} />
-          <span class="ml-3">{name}</span>
+          <span class="ml-3 text-sm">{name}</span>
+          <DotsVerticalOutline size="lg" class="ml-auto"/>
         </div>
       </Li>
     </SidebarGroup>
   </SidebarWrapper>
 </Sidebar>
 
-<Dropdown class="w-40" placement="top" triggeredBy=".user">
+<Dropdown class="w-40" placement="right" triggeredBy=".user">
   <DropdownItem href="/profile" class="flex space-x-4 items-center">
     <UserSettingsOutline size="sm" />
     <span>Profile</span>

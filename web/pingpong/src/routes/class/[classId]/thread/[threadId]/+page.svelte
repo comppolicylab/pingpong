@@ -5,7 +5,7 @@
   import { happyToast, sadToast } from '$lib/toast';
   import { errorMessage } from '$lib/errors';
   import { blur } from 'svelte/transition';
-  import { Span, Avatar, Button, Dropdown, DropdownItem } from 'flowbite-svelte';
+  import { Heading, Span, Avatar, Button, Dropdown, DropdownItem } from 'flowbite-svelte';
   import { Pulse, DoubleBounce } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
   import Logo from '$lib/components/Logo.svelte';
@@ -173,16 +173,22 @@
   };
 </script>
 
-<div class="relative py-8 h-full w-full">
+<div class="relative pb-8 h-full w-full">
   {#if $loading}
-    <div class="absolute top-0 left-0 flex h-full w-full items-center">
+    <div class="absolute top-0 left-0 flex h-screen w-full items-center">
       <div class="m-auto" transition:blur={{ amount: 10 }}>
         <Pulse color="#0ea5e9" />
       </div>
     </div>
   {/if}
-  <div class="w-full h-full flex flex-col justify-between">
-    <div class="overflow-y-auto pb-4 px-12" use:scroll={$messages}>
+  
+  <header class="bg-blue-light-50 p-8 pb-6">
+    <p class="eyebrow eyebrow-dark pb-1">Select Class</p>
+    <Heading tag="h2" class="font-serif">Class Title</Heading>
+  </header>
+  
+  <div class="w-full flex flex-col justify-between h-[calc(100%-5rem)]">
+    <div class="overflow-y-auto pb-4 px-2 sm:px-4" use:scroll={$messages}>
       {#if $canFetchMore}
         <div class="flex justify-center py-4">
           <Button size="sm" class="text-sky-600 hover:text-sky-800" on:click={fetchMoreMessages}>
@@ -200,10 +206,10 @@
             {/if}
           </div>
           <div class="max-w-full">
-            <div class="font-bold text-gray-400 mb-1">{getName(message.data)}</div>
+            <div class="font-semibold text-blue-dark-40 mb-2 mt-1">{getName(message.data)}</div>
             {#each message.data.content as content}
               {#if content.type == 'text'}
-                <div class="leading-7">
+                <div class="leading-6">
                   <Markdown
                     content={parseTextContent(
                       content.text,
@@ -212,7 +218,7 @@
                   />
                 </div>
               {:else if content.type == 'image_file'}
-                <div class="leading-7 w-full">
+                <div class="leading-6 w-full">
                   <img
                     class="img-attachment m-auto"
                     src={api.fullPath(
@@ -222,7 +228,7 @@
                   />
                 </div>
               {:else}
-                <div class="leading-7"><pre>{JSON.stringify(content, null, 2)}</pre></div>
+                <div class="leading-6"><pre>{JSON.stringify(content, null, 2)}</pre></div>
               {/if}
             {/each}
           </div>
@@ -242,7 +248,7 @@
     </div>
 
     {#if !$loading}
-      <div class="w-full bottom-8 bg-gradient-to-t from-white to-transparent">
+      <div class="w-full bg-gradient-to-t from-white to-transparent">
         <div class="w-11/12 mx-auto relative">
           {#if $waiting || $submitting}
             <div
@@ -262,41 +268,41 @@
             remove={handleRemove}
             on:submit={handleSubmit}
           />
+          <div
+            class="flex gap-2 px-4 py-2 items-center w-full text-sm"
+          >
+            {#if !$published}
+              <EyeSlashOutline size="sm" class="text-orange" />
+              <Span class="text-gray-400 text-xs">This thread is visible to the teaching team and</Span>
+              <Span class="text-gray-600 text-xs">{$users.map((u) => u.email).join(', ')}</Span>
+            {:else}
+              <Span class="text-gray-400 text-xs">This thread is visible to everyone in this class.</Span>
+            {/if}
+            
+            <div class="ml-auto">
+              <DotsHorizontalOutline class="dots-menu dark:text-white cursor-pointer" />
+              <Dropdown>
+                <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
+                  <span class:text-gray-300={!canPublishThread}>
+                    {#if $published}
+                      Unpublish
+                    {:else}
+                      Publish
+                    {/if}
+                  </span>
+                </DropdownItem>
+                <DropdownItem on:click={deleteThread} disabled={!canDeleteThread}>
+                  <span class:text-gray-300={!canDeleteThread}>Delete</span>
+                </DropdownItem>
+              </Dropdown>
+            </div>
+            
+          </div>
         </div>
       </div>
     {/if}
   </div>
 
-  <div
-    class="absolute top-0 left-0 flex gap-2 px-4 py-2 items-center w-full text-sm"
-    class:bg-gray-200={!$published}
-    class:bg-green-100={$published}
-  >
-    {#if !$published}
-      <EyeSlashOutline size="sm" class="text-gray-400" />
-      <Span class="text-gray-400">This thread is visible to the teaching team and</Span>
-      <Span class="text-gray-600">{$users.map((u) => u.email).join(', ')}</Span>
-    {:else}
-      <Span class="text-gray-400">This thread is visible to everyone in this class.</Span>
-    {/if}
-  </div>
-  <div class="absolute top-2 right-2">
-    <DotsHorizontalOutline class="dots-menu dark:text-white cursor-pointer" />
-    <Dropdown>
-      <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
-        <span class:text-gray-300={!canPublishThread}>
-          {#if $published}
-            Unpublish
-          {:else}
-            Publish
-          {/if}
-        </span>
-      </DropdownItem>
-      <DropdownItem on:click={deleteThread} disabled={!canDeleteThread}>
-        <span class:text-gray-300={!canDeleteThread}>Delete</span>
-      </DropdownItem>
-    </Dropdown>
-  </div>
 </div>
 
 <style lang="css">
