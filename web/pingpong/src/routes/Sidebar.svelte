@@ -5,7 +5,6 @@
     CloseOutline,
     CogOutline,
     BookOutline,
-    FilePenOutline,
     UserSettingsOutline,
     QuestionCircleOutline,
     ArrowRightToBracketSolid,
@@ -31,12 +30,12 @@
     Heading,
     NavBrand
   } from 'flowbite-svelte';
-  import Logo from '$lib/components/Logo.svelte';
   import PingPongLogo from '$lib/components/PingPongLogo.svelte';
   import dayjs from '$lib/time';
   import * as api from '$lib/api';
   import type { LayoutData } from './$types';
   import { sadToast } from '$lib/toast';
+  import { appMenuOpen } from '$lib/stores/general';
 
   export let data: LayoutData;
 
@@ -82,6 +81,9 @@
 
     $fetchingMoreThreads = false;
   };
+
+  // Toggle whether menu is open.
+  const togglePanel = () => ($appMenuOpen = !$appMenuOpen);
 </script>
 
 <Sidebar
@@ -91,13 +93,18 @@
   <SidebarWrapper class="bg-transparent h-full flex flex-col">
     <SidebarGroup class="mb-6">
       <div class="flex items-center" data-sveltekit-preload-data="off">
-        <button class="menu-button bg-transparent border-none mr-3 mt-1 sm:hidden">
-          <BarsSolid size="xl" class="text-white menu-open" />
-          <CloseOutline size="xl" class="text-white menu-close hidden" />
+        <button
+          class="menu-button bg-transparent border-none mr-3 mt-1 sm:hidden"
+          on:click={togglePanel}
+        >
+          {#if $appMenuOpen}
+            <CloseOutline size="xl" class="text-white menu-close" />
+          {:else}
+            <BarsSolid size="xl" class="text-white menu-open" />
+          {/if}
         </button>
         <NavBrand href="/" class="">
           <PingPongLogo size={10} extraClass="fill-amber-600" />
-          <!-- <Heading tag="h1" class="text-amber-500 px-5 logo" customSize="text-3xl">PingPong</Heading> -->
         </NavBrand>
       </div>
     </SidebarGroup>

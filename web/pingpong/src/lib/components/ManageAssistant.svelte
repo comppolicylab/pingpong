@@ -10,7 +10,6 @@
     MultiSelect,
     Input,
     Textarea,
-    GradientButton,
     type SelectOptionType
   } from 'flowbite-svelte';
   import type { ServerFile, Assistant, AssistantModel, Tool, GetFileSupportFilter } from '$lib/api';

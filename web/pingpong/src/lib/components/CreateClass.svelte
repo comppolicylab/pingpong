@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Select, Button, GradientButton, Label, Input, Heading } from 'flowbite-svelte';
+  import { Select, Button, Label, Input, Heading } from 'flowbite-svelte';
   import { enhance } from '$app/forms';
   import { createEventDispatcher } from 'svelte';
   import type { Institution } from '$lib/api';

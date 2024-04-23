@@ -2,17 +2,7 @@
   import type { SubmitFunction } from '@sveltejs/kit';
   import { enhance } from '$app/forms';
   import PingPongLogo from '$lib/components/PingPongLogo.svelte';
-  import Logo from '$lib/components/Logo.svelte';
-  import {
-    Button,
-    P,
-    InputAddon,
-    Input,
-    Helper,
-    GradientButton,
-    Heading,
-    ButtonGroup
-  } from 'flowbite-svelte';
+  import { Button, P, InputAddon, Input, Helper, Heading, ButtonGroup } from 'flowbite-svelte';
   import { EnvelopeSolid } from 'flowbite-svelte-icons';
 
   export let form;

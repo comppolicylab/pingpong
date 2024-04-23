@@ -1,7 +1,7 @@
 <script lang="ts">
   import logo from './pingpong-logo.svg?raw';
 
-  export let size = 8;
+  export let size: number | string = 8;
   export let extraClass = '';
 </script>
 

@@ -5,17 +5,7 @@
   import { page } from '$app/stores';
   import { Pulse } from 'svelte-loading-spinners';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
-  import {
-    Button,
-    Modal,
-    Heading,
-    P,
-    Card,
-    Helper,
-    GradientButton,
-    Dropdown,
-    DropdownItem
-  } from 'flowbite-svelte';
+  import { Button, Heading, Helper, Dropdown, DropdownItem } from 'flowbite-svelte';
   import { EyeSlashOutline, ChevronDownSolid } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
