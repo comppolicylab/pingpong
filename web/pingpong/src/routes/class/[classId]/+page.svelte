@@ -5,7 +5,7 @@
   import { page } from '$app/stores';
   import { Pulse } from 'svelte-loading-spinners';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
-  import { Helper, GradientButton, Dropdown, DropdownItem } from 'flowbite-svelte';
+  import { Button, Heading, Helper, Dropdown, DropdownItem } from 'flowbite-svelte';
   import { EyeSlashOutline, ChevronDownSolid } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
@@ -96,7 +96,11 @@
   };
 </script>
 
-<div class="v-full h-full flex items-center relative">
+<header class="bg-blue-light-50 p-8 pb-6">
+  <Heading tag="h2" class="font-serif">Welcome to PingPong!</Heading>
+</header>
+
+<div class="flex items-center relative h-[calc(100%-7rem)]">
   {#if $loading}
     <div class="absolute top-0 left-0 flex h-full w-full items-center">
       <div class="m-auto" transition:blur={{ amount: 10 }}>
@@ -104,12 +108,16 @@
       </div>
     </div>
   {/if}
-
-  <div class="m-auto w-10/12 transition-opacity ease-in" class:opacity-0={$loading}>
+  <div
+    class="m-auto w-11/12 transition-opacity ease-in flex flex-col h-full py-3"
+    class:opacity-0={$loading}
+  >
     {#if isConfigured}
-      <div class="text-center my-2 w-full">
-        <GradientButton color="tealToLime"
-          >{$assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></GradientButton
+      <div class="my-2 w-full">
+        <Button
+          pill
+          class="bg-blue-light-50 text-xs uppercase tracking-wide font-medium text-black border-solid border border-blue-dark-40"
+          >{$assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></Button
         >
         <Dropdown class="max-h-60 overflow-y-auto w-60">
           {#each assistants as asst}
@@ -123,17 +131,19 @@
           {/each}
         </Dropdown>
       </div>
-      <ChatInput
-        mimeType={data.uploadInfo.mimeType}
-        maxSize={data.uploadInfo.private_file_max_size}
-        accept={fileTypes}
-        loading={$loading}
-        upload={handleUpload}
-        remove={handleRemove}
-        on:submit={handleSubmit}
-      />
-      <input type="hidden" name="assistant_id" bind:value={$assistant.id} />
-      <input type="hidden" name="parties" bind:value={parties} />
+      <div class="mt-auto">
+        <ChatInput
+          mimeType={data.uploadInfo.mimeType}
+          maxSize={data.uploadInfo.private_file_max_size}
+          accept={fileTypes}
+          loading={$loading}
+          upload={handleUpload}
+          remove={handleRemove}
+          on:submit={handleSubmit}
+        />
+        <input type="hidden" name="assistant_id" bind:value={$assistant.id} />
+        <input type="hidden" name="parties" bind:value={parties} />
+      </div>
     {:else}
       <div class="text-center">
         {#if !data.hasAssistants}

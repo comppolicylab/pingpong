@@ -210,9 +210,9 @@
       type="button"
       color={drop ? 'alternative' : 'blue'}
       {disabled}
-      class={`p-2 w-8 h-8 rounded-full ${drop ? 'bg-transparent border-transparent' : ''} ${
-        dropzoneActive ? 'animate-bounce' : ''
-      }`}
+      class={`p-3 rounded-full bg-blue-light-40 border-transparent ${
+        drop ? 'bg-blue-light-40 border-transparent' : ''
+      } ${dropzoneActive ? 'animate-bounce' : ''}`}
       on:click={() => uploadRef.click()}
     >
       <slot name="icon">

@@ -9,6 +9,10 @@
       href="https://fonts.googleapis.com/css2?family=Rubik+Doodle+Shadow&display=swap"
       rel="stylesheet"
     />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=STIX+Two+Text:ital,wght@0,300..700;1,300..700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="%sveltekit.assets%/default.min.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     %sveltekit.head%
@@ -17,8 +21,8 @@
     ondragover="event.preventDefault()"
     ondrop="event.preventDefault()"
     data-sveltekit-preload-data="hover"
-    class="h-min-screen v-min-screen"
+    class="h-min-screen v-min-screen bg-blue-dark-50"
   >
-    <div style="display: contents">%sveltekit.body%</div>
+    <div class="mx-auto mt-12 max-w-screen-2xl sm:h-[calc(100vh-3rem)]">%sveltekit.body%</div>
   </body>
 </html>
