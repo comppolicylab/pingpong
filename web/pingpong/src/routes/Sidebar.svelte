@@ -84,7 +84,10 @@
   };
 </script>
 
-<Sidebar asideClass="absolute top-0 left-0 z-0 w-[90%] px-2 sm:static sm:h-full sm:w-full" activeUrl={$page.url.pathname}>
+<Sidebar
+  asideClass="absolute top-0 left-0 z-0 w-[90%] px-2 sm:static sm:h-full sm:w-full"
+  activeUrl={$page.url.pathname}
+>
   <SidebarWrapper class="bg-transparent h-full flex flex-col">
     <SidebarGroup class="mb-6">
       <div class="flex items-center" data-sveltekit-preload-data="off">
@@ -109,7 +112,7 @@
             <svelte:fragment slot="icon">
               <BookOutline class="text-gray-400" size="sm" />
             </svelte:fragment>
-            <a href={`/class/${currentClassId}`} class="eyebrow" >{currentClass?.name}</a>
+            <a href={`/class/${currentClassId}`} class="eyebrow">{currentClass?.name}</a>
             <a href={`/class/${currentClassId}/manage`}>
               <CogOutline size="sm" />
             </a>
@@ -118,7 +121,11 @@
       </SidebarGroup>
 
       <SidebarGroup border class="border-blue-dark-40 border-t-3">
-        <SidebarItem href={`/class/${currentClassId}`} label="Start a new chat" class="flex flex-row-reverse justify-between pr-4 bg-orange text-white rounded-full hover:bg-orange-dark">
+        <SidebarItem
+          href={`/class/${currentClassId}`}
+          label="Start a new chat"
+          class="flex flex-row-reverse justify-between pr-4 bg-orange text-white rounded-full hover:bg-orange-dark"
+        >
           <svelte:fragment slot="icon">
             <CirclePlusSolid size="sm" />
           </svelte:fragment>
@@ -141,8 +148,7 @@
               />
             </svelte:fragment>
             <svelte:fragment slot="subtext">
-              <span class="text-xs text-gray-400 w-full"
-                >{dayjs.utc(thread.updated).fromNow()}</span
+              <span class="text-xs text-gray-400 w-full">{dayjs.utc(thread.updated).fromNow()}</span
               >
             </svelte:fragment>
           </SidebarItem>
@@ -174,7 +180,11 @@
           >Classes</Heading
         >
         {#each classes as cls}
-          <SidebarItem label={cls.name} class="text-sm text-white hover:bg-blue-dark-40 py-2 rounded" href={`/class/${cls.id}`} />
+          <SidebarItem
+            label={cls.name}
+            class="text-sm text-white hover:bg-blue-dark-40 py-2 rounded"
+            href={`/class/${cls.id}`}
+          />
         {/each}
       </SidebarGroup>
     {/if}
@@ -186,7 +196,7 @@
         >
           <Avatar src={avatar} alt={name} />
           <span class="ml-3 text-sm">{name}</span>
-          <DotsVerticalOutline size="lg" class="ml-auto"/>
+          <DotsVerticalOutline size="lg" class="ml-auto" />
         </div>
       </Li>
     </SidebarGroup>

@@ -243,7 +243,7 @@
       } p-3 px-4 mr-2 bg-orange hover:bg-orange-dark`}
       disabled={uploading || loading || disabled}
     >
-    Submit
+      Submit
     </Button>
   </div>
 </div>

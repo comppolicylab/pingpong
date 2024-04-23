@@ -40,9 +40,7 @@
     </header>
     <div class="px-12 py-16 bg-white">
       {#if form?.success}
-        <div class="text-orange">
-          Success! Follow the link in your email to finish signing in.
-        </div>
+        <div class="text-orange">Success! Follow the link in your email to finish signing in.</div>
       {:else}
         <form action="/login?/loginWithMagicLink" method="POST" use:enhance={login}>
           <ButtonGroup class="w-full rounded-full bg-blue-light-50 shadow-inner p-4">
@@ -58,8 +56,11 @@
               id="email"
               class="bg-transparent border-none"
             ></Input>
-            <Button pill class="p-3 px-6 mr-2 rounded-full bg-orange text-white hover:bg-orange-dark" type="submit" disabled={loggingIn}
-              >Login</Button
+            <Button
+              pill
+              class="p-3 px-6 mr-2 rounded-full bg-orange text-white hover:bg-orange-dark"
+              type="submit"
+              disabled={loggingIn}>Login</Button
             >
           </ButtonGroup>
           {#if form?.error}

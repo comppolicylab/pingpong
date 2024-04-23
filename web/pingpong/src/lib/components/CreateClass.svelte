@@ -39,8 +39,13 @@
     {/if}
   </div>
   <div class="flex items-center justify-between">
-    <Button pill outline class="bg-white text-blue-dark-50 border-blue-dark-40 hover:bg-blue-light-40 hover:text-blue-dark-50" type="reset" on:click={done} on:touchstart={done}
-      >Cancel</Button
+    <Button
+      pill
+      outline
+      class="bg-white text-blue-dark-50 border-blue-dark-40 hover:bg-blue-light-40 hover:text-blue-dark-50"
+      type="reset"
+      on:click={done}
+      on:touchstart={done}>Cancel</Button
     >
     <Button pill class="bg-orange text-white hover:bg-orange-dark" type="submit">Create</Button>
   </div>

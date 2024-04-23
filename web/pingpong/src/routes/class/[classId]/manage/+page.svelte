@@ -176,7 +176,7 @@
     <p class="eyebrow eyebrow-dark pb-1">Select Class</p>
     <Heading tag="h2" class="font-serif">Class Title</Heading>
   </header>
-  
+
   <div
     class="container py-8 space-y-12 divide-y-3 divide-blue-dark-40 dark:divide-gray-700 overflow-y-auto w-full flex flex-col justify-between h-[calc(100%-5rem)]"
   >
@@ -194,12 +194,12 @@
             <Label for="name">Name</Label>
             <Input label="Name" id="name" name="name" value={data.class.name} />
           </div>
-  
+
           <div>
             <Label for="term">Term</Label>
             <Input label="Term" id="term" name="term" value={data.class.term} />
           </div>
-  
+
           <div></div>
           <div>
             <Checkbox
@@ -212,7 +212,7 @@
             >When this is enabled, anyone in the class can share their own threads with the rest of
             the class. Otherwise, only teachers and admins can share threads.</Helper
           >
-  
+
           <div></div>
           <Checkbox
             id="any_can_create_assistant"
@@ -220,10 +220,10 @@
             bind:checked={anyCanCreateAsst}>Allow anyone to create assistants</Checkbox
           >
           <Helper
-            >When this is enabled, anyone in the class can create assistants. Otherwise, only teachers
-            and admins can create assistants.</Helper
+            >When this is enabled, anyone in the class can create assistants. Otherwise, only
+            teachers and admins can create assistants.</Helper
           >
-  
+
           <div></div>
           {#if publishOptMakesSense}
             <Checkbox
@@ -243,12 +243,12 @@
               Allow anyone to publish assistants
             </Checkbox>
           {/if}
-  
+
           <Helper
-            >When this is enabled, anyone in the class can share their own assistants with the rest of
-            the class. Otherwise, only teachers and admins can share assistants.</Helper
+            >When this is enabled, anyone in the class can share their own assistants with the rest
+            of the class. Otherwise, only teachers and admins can share assistants.</Helper
           >
-  
+
           <div></div>
           {#if publishOptMakesSense}
             <Checkbox
@@ -269,16 +269,18 @@
             assistants. Otherwise, only teachers and admins can upload files. (Note that users can
             still upload files privately to chat threads even when this setting is disabled.)</Helper
           >
-  
+
           <div></div>
           <div></div>
           <div>
-            <Button pill type="submit" class="bg-orange text-white hover:bg-orange-dark">Save</Button>
+            <Button pill type="submit" class="bg-orange text-white hover:bg-orange-dark"
+              >Save</Button
+            >
           </div>
         </div>
       </form>
     {/if}
-  
+
     {#if canViewApiKey}
       <form action="?/updateApiKey" class="pt-6" method="POST">
         <div class="grid grid-cols-3 gap-x-6 gap-y-8">
@@ -288,7 +290,7 @@
             >
             <Info>Manage OpenAI credentials</Info>
           </div>
-  
+
           <div class="col-span-2">
             <Label for="apiKey">API Key</Label>
             <div class="w-full relative" class:cursor-pointer={$blurred}>
@@ -315,24 +317,26 @@
                 </div>
               {/if}
             </div>
-  
+
             {#if apiKey && !$blurred}
               <Helper
-                >Note: changing the API key will break all threads and assistants in the class, so it
-                is not currently supported.</Helper
+                >Note: changing the API key will break all threads and assistants in the class, so
+                it is not currently supported.</Helper
               >
             {/if}
           </div>
-  
+
           <div></div>
           <div></div>
           <div>
-            <Button pill type="submit" class="bg-orange text-white hover:bg-orange-dark">Save</Button>
+            <Button pill type="submit" class="bg-orange text-white hover:bg-orange-dark"
+              >Save</Button
+            >
           </div>
         </div>
       </form>
     {/if}
-  
+
     {#if canManageClassUsers}
       <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
         <div>
@@ -363,7 +367,7 @@
         </div>
       </div>
     {/if}
-  
+
     {#if canUploadClassFiles}
       <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
         <div>
@@ -413,7 +417,7 @@
         </div>
       </div>
     {/if}
-  
+
     <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
       <div>
         <Heading tag="h3" customSize="text-xl font-bold"

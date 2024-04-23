@@ -5,7 +5,17 @@
   import { page } from '$app/stores';
   import { Pulse } from 'svelte-loading-spinners';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
-  import { Button, Modal, Heading, P, Card, Helper, GradientButton, Dropdown, DropdownItem } from 'flowbite-svelte';
+  import {
+    Button,
+    Modal,
+    Heading,
+    P,
+    Card,
+    Helper,
+    GradientButton,
+    Dropdown,
+    DropdownItem
+  } from 'flowbite-svelte';
   import { EyeSlashOutline, ChevronDownSolid } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
@@ -108,10 +118,15 @@
       </div>
     </div>
   {/if}
-  <div class="m-auto w-11/12 transition-opacity ease-in flex flex-col h-full py-3" class:opacity-0={$loading}>
+  <div
+    class="m-auto w-11/12 transition-opacity ease-in flex flex-col h-full py-3"
+    class:opacity-0={$loading}
+  >
     {#if isConfigured}
       <div class="my-2 w-full">
-        <Button pill class="bg-blue-light-50 text-xs uppercase tracking-wide font-medium text-black border-solid border border-blue-dark-40"
+        <Button
+          pill
+          class="bg-blue-light-50 text-xs uppercase tracking-wide font-medium text-black border-solid border border-blue-dark-40"
           >{$assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></Button
         >
         <Dropdown class="max-h-60 overflow-y-auto w-60">
