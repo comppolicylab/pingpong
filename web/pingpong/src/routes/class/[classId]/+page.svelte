@@ -97,7 +97,7 @@
   };
 </script>
 
-<PageHeader />
+<PageHeader current={data.class} classes={data.classes} />
 
 <div class="flex items-center relative h-[calc(100%-7rem)]">
   {#if $loading}
