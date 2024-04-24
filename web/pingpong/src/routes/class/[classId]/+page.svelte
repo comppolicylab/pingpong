@@ -5,13 +5,14 @@
   import { page } from '$app/stores';
   import { Pulse } from 'svelte-loading-spinners';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
-  import { Button, Heading, Helper, Dropdown, DropdownItem } from 'flowbite-svelte';
+  import { Button, Helper, Dropdown, DropdownItem } from 'flowbite-svelte';
   import { EyeSlashOutline, ChevronDownSolid } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
   import { errorMessage } from '$lib/errors';
   import type { Assistant } from '$lib/api';
   import { onMount } from 'svelte';
+  import PageHeader from '$lib/components/PageHeader.svelte';
 
   /**
    * Application data.
@@ -96,9 +97,7 @@
   };
 </script>
 
-<header class="bg-blue-light-50 p-8 pb-6">
-  <Heading tag="h2" class="font-serif">Welcome to PingPong!</Heading>
-</header>
+<PageHeader current={data.class} classes={data.classes} />
 
 <div class="flex items-center relative h-[calc(100%-7rem)]">
   {#if $loading}
