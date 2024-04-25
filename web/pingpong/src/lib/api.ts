@@ -588,8 +588,7 @@ export type GetThreadsOpts = {
  *
  * If `classId` is not given, this will fetch the user's recent threads from all classes.
  */
-const getThreads = async (f: Fetcher, classId: number | null, opts?: GetThreadsOpts) => {
-  const url = classId ? `class/${classId}/threads` : `threads/recent`;
+const getThreads = async (f: Fetcher, url: string, opts?: GetThreadsOpts) => {
   const result = expandResponse(await GET<GetThreadsOpts, Threads>(f, url, opts));
 
   if (result.error) {
@@ -622,14 +621,15 @@ const getThreads = async (f: Fetcher, classId: number | null, opts?: GetThreadsO
  * Fetch all (visible) threads for a class.
  */
 export const getClassThreads = async (f: Fetcher, classId: number, opts?: GetThreadsOpts) => {
-  return getThreads(f, classId, opts);
+  const url = `class/${classId}/threads`;
+  return getThreads(f, url, opts);
 };
 
 /**
  * Get recent threads that the current user has participated in.
  */
 export const getRecentThreads = async (f: Fetcher, opts?: GetThreadsOpts) => {
-  return getThreads(f, null, opts);
+  return getThreads(f, 'threads/recent', opts);
 };
 
 /**
