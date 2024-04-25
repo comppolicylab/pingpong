@@ -43,15 +43,15 @@ export const load: LayoutLoad = async ({ fetch, url, params }) => {
   if (authed) {
     [classes] = await Promise.all([
       api
-      .getMyClasses(fetch)
-      .then(api.explodeResponse)
-      .then((c) => c.classes),
+        .getMyClasses(fetch)
+        .then(api.explodeResponse)
+        .then((c) => c.classes)
     ]);
   }
 
   return {
     me: me.data,
     authed,
-    classes,
+    classes
   };
 };

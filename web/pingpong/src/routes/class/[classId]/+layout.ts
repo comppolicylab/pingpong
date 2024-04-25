@@ -8,19 +8,14 @@ import type { LayoutLoad } from './$types';
 export const load: LayoutLoad = async ({ fetch, params }) => {
   const classId = parseInt(params.classId, 10);
 
-  const [
-    classDataResponse,
-    assistantsResponse,
-    filesResponse,
-    uploadInfoResponse,
-    threads
-  ] = await Promise.all([
-    api.getClass(fetch, classId).then(api.expandResponse),
-    api.getAssistants(fetch, classId).then(api.expandResponse),
-    api.getClassFiles(fetch, classId).then(api.expandResponse),
-    api.getClassUploadInfo(fetch, classId),
-    api.getClassThreads(fetch, classId)
-  ]);
+  const [classDataResponse, assistantsResponse, filesResponse, uploadInfoResponse, threads] =
+    await Promise.all([
+      api.getClass(fetch, classId).then(api.expandResponse),
+      api.getAssistants(fetch, classId).then(api.expandResponse),
+      api.getClassFiles(fetch, classId).then(api.expandResponse),
+      api.getClassUploadInfo(fetch, classId),
+      api.getClassThreads(fetch, classId)
+    ]);
 
   if (classDataResponse.error) {
     error(classDataResponse.$status, classDataResponse.error.detail || 'Unknown error');
