@@ -83,7 +83,7 @@
           file_ids: form.file_ids
         })
       );
-      data.threads.threads = [newThread, ...data.threads.threads];
+      data.threads = [newThread, ...data.threads];
       goto(`/class/${$page.params.classId}/thread/${newThread.id}`);
     } catch (e) {
       sadToast(`Failed to create thread. Error: ${errorMessage(e)}`);

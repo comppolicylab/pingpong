@@ -10,7 +10,7 @@ const HOME = '/';
 /**
  * Load the current user and redirect if they are not logged in.
  */
-export const load: LayoutLoad = async ({ fetch, url, params }) => {
+export const load: LayoutLoad = async ({ fetch, url }) => {
   // Fetch the current user
   const me = api.expandResponse(await api.me(fetch));
   if (me.error) {
@@ -40,18 +40,21 @@ export const load: LayoutLoad = async ({ fetch, url, params }) => {
   }
 
   let classes: api.Class[] = [];
+  let threads: api.Thread[] = [];
   if (authed) {
-    [classes] = await Promise.all([
+    [classes, threads] = await Promise.all([
       api
         .getMyClasses(fetch)
         .then(api.explodeResponse)
-        .then((c) => c.classes)
-    ]);
+        .then((c) => c.classes),
+      api.getRecentThreads(fetch).then((t) => t.threads),
+    ])
   }
 
   return {
     me: me.data,
     authed,
-    classes
+    classes,
+    threads,
   };
 };

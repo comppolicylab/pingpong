@@ -1,6 +1,5 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import { writable } from 'svelte/store';
   import {
     CloseOutline,
     CogOutline,
@@ -34,53 +33,20 @@
   import dayjs from '$lib/time';
   import * as api from '$lib/api';
   import type { LayoutData } from '../../routes/$types';
-  import { sadToast } from '$lib/toast';
   import { appMenuOpen } from '$lib/stores/general';
 
   export let data: LayoutData;
 
   $: avatar = data?.me?.profile?.image_url;
   $: name = data?.me?.user?.name || data?.me?.user?.email;
-  $: classes = ($page.data.classes || []).sort((a: api.Class, b: api.Class) =>
-    a.name.localeCompare(b.name)
-  );
-  $: threads = $page.data.threads?.threads || [];
+  // Index classes by ID so we can look them up easier.
+  $: classesById = ($page.data.classes || []).reduce((acc: Record<number, api.Class>, cls: api.Class) => {
+    acc[cls.id] = cls;
+    return acc;
+  }, {});
+  $: threads = ($page.data.threads || []) as api.Thread[];
   $: currentClassId = parseInt($page.params.classId, 10);
   $: currentClass = $page.data.class;
-  $: canFetchMoreThreads = !!$page.data.threads && !$page.data.threads.lastPage;
-
-  const fetchingMoreThreads = writable(false);
-  const pageSize = 10;
-
-  /**
-   * Load another page of threads from the server.
-   */
-  const loadMoreThreads = async () => {
-    const lastThread = threads[threads.length - 1];
-    if (!lastThread || $fetchingMoreThreads) {
-      return;
-    }
-
-    $fetchingMoreThreads = true;
-    const response = await api.getClassThreads(fetch, currentClassId, {
-      limit: pageSize,
-      before: lastThread.created
-    });
-
-    if (response.error) {
-      sadToast(`Failed to load threads: ${response.error.detail || 'unknown error'}`);
-      $fetchingMoreThreads = false;
-      return;
-    }
-
-    // Join the new threads with the old ones
-    // NOTE: this is not written into the $page.data store,
-    // so it disappears on navigation :(
-    threads = [...threads, ...response.threads];
-    canFetchMoreThreads = !response.lastPage;
-
-    $fetchingMoreThreads = false;
-  };
 
   // Toggle whether menu is open.
   const togglePanel = () => ($appMenuOpen = !$appMenuOpen);
@@ -109,92 +75,61 @@
       </div>
     </SidebarGroup>
 
-    {#if currentClassId}
-      <SidebarGroup>
-        <Breadcrumb class="pr-2 w-full" olClass="w-full">
-          <BreadcrumbItem
-            spanClass="ms-1 text-sm font-medium text-gray-500 md:ms-2 dark:text-gray-400 flex items-center justify-between w-full"
-            class="inline-flex items-center w-full"
-          >
-            <svelte:fragment slot="icon">
-              <BookOutline class="text-gray-400" size="sm" />
-            </svelte:fragment>
-            <a href={`/class/${currentClassId}`} class="eyebrow">{currentClass?.name}</a>
-            <a href={`/class/${currentClassId}/manage`}>
-              <CogOutline size="sm" />
-            </a>
-          </BreadcrumbItem>
-        </Breadcrumb>
-      </SidebarGroup>
-
-      <SidebarGroup border class="border-blue-dark-40 border-t-3">
-        <SidebarItem
-          href={`/class/${currentClassId}`}
-          label="Start a new chat"
-          class="flex flex-row-reverse justify-between pr-4 bg-orange text-white rounded-full hover:bg-orange-dark"
+    <SidebarGroup>
+      <Breadcrumb class="pr-2 w-full" olClass="w-full">
+        <BreadcrumbItem
+          spanClass="ms-1 text-sm font-medium text-gray-500 md:ms-2 dark:text-gray-400 flex items-center justify-between w-full"
+          class="inline-flex items-center w-full"
         >
           <svelte:fragment slot="icon">
-            <CirclePlusSolid size="sm" />
+            <BookOutline class="text-gray-400" size="sm" />
+          </svelte:fragment>
+          <a href={`/class/${currentClassId}`} class="eyebrow">{currentClass?.name}</a>
+          <a href={`/class/${currentClassId}/manage`}>
+            <CogOutline size="sm" />
+          </a>
+        </BreadcrumbItem>
+      </Breadcrumb>
+    </SidebarGroup>
+
+    <SidebarGroup border class="border-blue-dark-40 border-t-3">
+      <SidebarItem
+        href={`/class/${currentClassId}`}
+        label="Start a new chat"
+        class="flex flex-row-reverse justify-between pr-4 bg-orange text-white rounded-full hover:bg-orange-dark"
+      >
+        <svelte:fragment slot="icon">
+          <CirclePlusSolid size="sm" />
+        </svelte:fragment>
+      </SidebarItem>
+    </SidebarGroup>
+
+    <SidebarGroup border class="overflow-y-auto border-blue-dark-40 border-t-3">
+      {#each threads as thread}
+        <SidebarItem
+          class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2"
+          spanClass="flex-1 truncate"
+          href={`/class/${currentClassId}/thread/${thread.id}`}
+          label={thread.name || 'Undefined'}
+          activeClass="bg-blue-dark-40"
+        >
+          <svelte:fragment slot="icon">
+            <EyeSlashOutline
+              size="sm"
+              class={`text-white ${thread.private ? 'visible' : 'invisible'}`}
+            />
+          </svelte:fragment>
+          <svelte:fragment slot="subtext">
+            <span>{classesById[thread.class_id].name}</span>
+            <span class="text-xs text-gray-400 w-full">{dayjs.utc(thread.updated).fromNow()}</span
+            >
           </svelte:fragment>
         </SidebarItem>
-      </SidebarGroup>
-
-      <SidebarGroup border class="overflow-y-auto border-blue-dark-40 border-t-3">
-        {#each threads as thread}
-          <SidebarItem
-            class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2"
-            spanClass="flex-1 truncate"
-            href={`/class/${currentClassId}/thread/${thread.id}`}
-            label={thread.name || 'Undefined'}
-            activeClass="bg-blue-dark-40"
-          >
-            <svelte:fragment slot="icon">
-              <EyeSlashOutline
-                size="sm"
-                class={`text-white ${thread.private ? 'visible' : 'invisible'}`}
-              />
-            </svelte:fragment>
-            <svelte:fragment slot="subtext">
-              <span class="text-xs text-gray-400 w-full">{dayjs.utc(thread.updated).fromNow()}</span
-              >
-            </svelte:fragment>
-          </SidebarItem>
-        {/each}
-        {#if !threads.length && !$fetchingMoreThreads}
-          <div class="text-white">No conversations yet!</div>
-        {/if}
-        {#if canFetchMoreThreads}
-          <SidebarItem
-            class="hover:bg-blue-dark-40 text-xs text-center flex justify-center border tracking-wide border-blue-dark-40 gap-1 uppercase"
-            spanClass={`${$fetchingMoreThreads ? 'text-white' : 'text-blue-light-50'}`}
-            label={`${$fetchingMoreThreads ? 'Loading ...' : 'Load more'}`}
-            on:click={loadMoreThreads}
-          >
-            <svelte:fragment slot="icon">
-              <RefreshOutline
-                size="sm"
-                class={`${$fetchingMoreThreads ? 'text-white' : 'text-blue-light-50'} ${
-                  $fetchingMoreThreads ? 'animate-spin' : ''
-                }`}
-              />
-            </svelte:fragment>
-          </SidebarItem>
-        {/if}
-      </SidebarGroup>
-    {:else}
-      <SidebarGroup class="overflow-y-auto overflow-x-hidden border-blue-dark-40 border-t-3 pt-4">
-        <Heading tag="h2" class="text-sm eyebrow font-medium text-white md:ms-2 dark:text-gray-400"
-          >Classes</Heading
-        >
-        {#each classes as cls}
-          <SidebarItem
-            label={cls.name}
-            class="text-sm text-white hover:bg-blue-dark-40 py-2 rounded"
-            href={`/class/${cls.id}`}
-          />
-        {/each}
-      </SidebarGroup>
-    {/if}
+      {/each}
+      {#if !threads.length}
+        <div class="text-white">No conversations yet!</div>
+      {/if}
+    </SidebarGroup>
 
     <SidebarGroup class="mt-auto border-blue-dark-40 border-t-3" border>
       <Li>

@@ -573,27 +573,28 @@ class Thread(Base):
         This is useful if we suspect that some of the `ids` in the input do not exist;
         we will keep querying until we have `n` results or we run out of threads to query.
         """
+        if n < 1:
+            return []
         # We might need to issue multiple queries in case the information in the authz
         # server is out of date (e.g., threads have been deleted but the authz server
         # still thinks they exist).
         threads: List["Thread"] = []
-        no_more_results = False
-        next_latest_time = before or datetime.now()
-        while len(threads) < n and not no_more_results:
+        next_latest_time: datetime | None = before
+        while len(threads) < n:
+            added_in_page = 0
             async for new_thread in cls.get_all_by_id(
                 session, ids, limit=n, before=next_latest_time
             ):
-                if not new_thread:
-                    no_more_results = True
-                    break
-
-                if new_thread.updated < next_latest_time:
+                if not next_latest_time or new_thread.updated < next_latest_time:
                     next_latest_time = new_thread.updated
 
                 threads.append(new_thread)
+                added_in_page += 1
 
                 if len(threads) >= n:
                     break
+            if not added_in_page:
+                break
         return threads
 
     @classmethod
@@ -618,7 +619,7 @@ class Thread(Base):
             condition = and_(condition, Thread.updated < before)
 
         stmt = (
-            select(Thread, limit=limit).order_by(Thread.updated.desc()).where(condition)
+            select(Thread).order_by(Thread.updated.desc()).where(condition).limit(limit)
         )
         result = await session.execute(stmt)
         for row in result:

@@ -924,7 +924,7 @@ async def get_last_run(
     response_model=schemas.Threads,
 )
 async def list_recent_threads(
-    request: Request, limit: int = 20, before: str | None = None
+    request: Request, limit: int = 5, before: str | None = None
 ):
     if limit < 1:
         raise HTTPException(
