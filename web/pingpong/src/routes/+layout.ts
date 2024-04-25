@@ -47,14 +47,14 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
         .getMyClasses(fetch)
         .then(api.explodeResponse)
         .then((c) => c.classes),
-      api.getRecentThreads(fetch).then((t) => t.threads),
-    ])
+      api.getRecentThreads(fetch).then((t) => t.threads)
+    ]);
   }
 
   return {
     me: me.data,
     authed,
     classes,
-    threads,
+    threads
   };
 };

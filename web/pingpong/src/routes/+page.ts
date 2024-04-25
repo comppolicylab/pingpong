@@ -2,7 +2,7 @@ import type { PageLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
 import * as api from '$lib/api';
 
-export const load: PageLoad = async ({fetch, parent}) => {
+export const load: PageLoad = async ({ fetch, parent }) => {
   const [institutions, grants] = await Promise.all([
     api
       .getInstitutions(fetch, 'can_create_class')

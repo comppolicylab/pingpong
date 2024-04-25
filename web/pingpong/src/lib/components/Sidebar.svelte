@@ -8,7 +8,6 @@
     QuestionCircleOutline,
     ArrowRightToBracketSolid,
     EyeSlashOutline,
-    RefreshOutline,
     BarsSolid,
     CirclePlusSolid,
     DotsVerticalOutline
@@ -26,7 +25,6 @@
     SidebarWrapper,
     SidebarItem,
     SidebarGroup,
-    Heading,
     NavBrand
   } from 'flowbite-svelte';
   import PingPongLogo from '$lib/components/PingPongLogo.svelte';
@@ -40,10 +38,13 @@
   $: avatar = data?.me?.profile?.image_url;
   $: name = data?.me?.user?.name || data?.me?.user?.email;
   // Index classes by ID so we can look them up easier.
-  $: classesById = ($page.data.classes || []).reduce((acc: Record<number, api.Class>, cls: api.Class) => {
-    acc[cls.id] = cls;
-    return acc;
-  }, {});
+  $: classesById = ($page.data.classes || []).reduce(
+    (acc: Record<number, api.Class>, cls: api.Class) => {
+      acc[cls.id] = cls;
+      return acc;
+    },
+    {}
+  );
   $: threads = ($page.data.threads || []) as api.Thread[];
   $: currentClassId = parseInt($page.params.classId, 10);
   $: currentClass = $page.data.class;
@@ -121,8 +122,7 @@
           </svelte:fragment>
           <svelte:fragment slot="subtext">
             <span>{classesById[thread.class_id].name}</span>
-            <span class="text-xs text-gray-400 w-full">{dayjs.utc(thread.updated).fromNow()}</span
-            >
+            <span class="text-xs text-gray-400 w-full">{dayjs.utc(thread.updated).fromNow()}</span>
           </svelte:fragment>
         </SidebarItem>
       {/each}
