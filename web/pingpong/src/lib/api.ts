@@ -576,17 +576,20 @@ export type Threads = {
 /**
  * Parameters for fetching threads.
  */
-export type GetClassThreadsOpts = {
+export type GetThreadsOpts = {
   limit?: number;
   before?: string;
 };
 
 /**
- * Fetch all (visible) threads for a class.
+ * Get a list of threads.
+ *
+ * If `classId` is given, this will fetch the user's threads for that class.
+ *
+ * If `classId` is not given, this will fetch the user's recent threads from all classes.
  */
-export const getClassThreads = async (f: Fetcher, classId: number, opts?: GetClassThreadsOpts) => {
-  const url = `class/${classId}/threads`;
-  const result = expandResponse(await GET<GetClassThreadsOpts, Threads>(f, url, opts));
+const getThreads = async (f: Fetcher, url: string, opts?: GetThreadsOpts) => {
+  const result = expandResponse(await GET<GetThreadsOpts, Threads>(f, url, opts));
 
   if (result.error) {
     return {
@@ -612,6 +615,21 @@ export const getClassThreads = async (f: Fetcher, classId: number, opts?: GetCla
     lastPage,
     error: null
   };
+};
+
+/**
+ * Fetch all (visible) threads for a class.
+ */
+export const getClassThreads = async (f: Fetcher, classId: number, opts?: GetThreadsOpts) => {
+  const url = `class/${classId}/threads`;
+  return getThreads(f, url, opts);
+};
+
+/**
+ * Get recent threads that the current user has participated in.
+ */
+export const getRecentThreads = async (f: Fetcher, opts?: GetThreadsOpts) => {
+  return getThreads(f, 'threads/recent', opts);
 };
 
 /**

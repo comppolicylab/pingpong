@@ -8,24 +8,13 @@ import type { LayoutLoad } from './$types';
 export const load: LayoutLoad = async ({ fetch, params }) => {
   const classId = parseInt(params.classId, 10);
 
-  const [
-    classDataResponse,
-    classes,
-    assistantsResponse,
-    filesResponse,
-    uploadInfoResponse,
-    threads
-  ] = await Promise.all([
-    api.getClass(fetch, classId).then(api.expandResponse),
-    api
-      .getMyClasses(fetch)
-      .then(api.explodeResponse)
-      .then((c) => c.classes),
-    api.getAssistants(fetch, classId).then(api.expandResponse),
-    api.getClassFiles(fetch, classId).then(api.expandResponse),
-    api.getClassUploadInfo(fetch, classId),
-    api.getClassThreads(fetch, classId)
-  ]);
+  const [classDataResponse, assistantsResponse, filesResponse, uploadInfoResponse] =
+    await Promise.all([
+      api.getClass(fetch, classId).then(api.expandResponse),
+      api.getAssistants(fetch, classId).then(api.expandResponse),
+      api.getClassFiles(fetch, classId).then(api.expandResponse),
+      api.getClassUploadInfo(fetch, classId)
+    ]);
 
   if (classDataResponse.error) {
     error(classDataResponse.$status, classDataResponse.error.detail || 'Unknown error');
@@ -42,11 +31,9 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
     hasAssistants: !!assistants && assistants.length > 0,
     hasBilling: !!classDataResponse.data.api_key,
     class: classDataResponse.data,
-    classes,
     assistants,
     assistantCreators,
     files: filesResponse.data?.files || [],
-    uploadInfo: uploadInfoResponse,
-    threads
+    uploadInfo: uploadInfoResponse
   };
 };
