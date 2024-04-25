@@ -919,6 +919,37 @@ async def get_last_run(
 
 
 @v1.get(
+    "/threads/recent",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.Threads,
+)
+async def list_recent_threads(
+    request: Request, limit: int = 20, before: str | None = None
+):
+    if limit < 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Limit must be positive",
+        )
+
+    # Parse `before` timestamp if it was given
+    current_latest_time: datetime | None = (
+        datetime.fromisoformat(before) if before else None
+    )
+    thread_ids = await request.state.authz.list(
+        f"user:{request.state.session.user.id}",
+        "party",
+        "thread",
+    )
+
+    threads = await models.Thread.get_n_by_id(
+        request.state.db, thread_ids, limit, before=current_latest_time
+    )
+
+    return {"threads": threads}
+
+
+@v1.get(
     "/class/{class_id}/threads",
     dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
     response_model=schemas.Threads,
@@ -931,8 +962,6 @@ async def list_threads(
             status_code=400,
             detail="Limit must be positive",
         )
-
-    threads = list[models.Thread]()
 
     # Parse `before` timestamp if it was given
     current_latest_time: datetime | None = (
@@ -950,20 +979,9 @@ async def list_threads(
     )
     can_view, in_class = await asyncio.gather(can_view_coro, in_class_coro)
     thread_ids = list(set(can_view) & set(in_class))
-
-    # Fetch a new page of threads from the database.
-    async for new_thread in models.Thread.get_all_by_id(
-        request.state.db, thread_ids, limit=limit, before=current_latest_time
-    ):
-        if not new_thread:
-            break
-
-        current_latest_time = new_thread.updated
-
-        threads.append(new_thread)
-
-        if len(threads) >= limit:
-            break
+    threads = await models.Thread.get_n_by_id(
+        request.state.db, thread_ids, limit, before=current_latest_time
+    )
 
     return {"threads": threads}
 

@@ -561,6 +561,42 @@ class Thread(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_n_by_id(
+        cls,
+        session: AsyncSession,
+        ids: list[int],
+        n: int = 10,
+        before: datetime | None = None,
+    ) -> List["Thread"]:
+        """Similar to `get_all_by_id` but tries to guarantee `n` results.
+
+        This is useful if we suspect that some of the `ids` in the input do not exist;
+        we will keep querying until we have `n` results or we run out of threads to query.
+        """
+        # We might need to issue multiple queries in case the information in the authz
+        # server is out of date (e.g., threads have been deleted but the authz server
+        # still thinks they exist).
+        threads: List["Thread"] = []
+        no_more_results = False
+        next_latest_time = before or datetime.now()
+        while len(threads) < n and not no_more_results:
+            async for new_thread in cls.get_all_by_id(
+                session, ids, limit=n, before=next_latest_time
+            ):
+                if not new_thread:
+                    no_more_results = True
+                    break
+
+                if new_thread.updated < next_latest_time:
+                    next_latest_time = new_thread.updated
+
+                threads.append(new_thread)
+
+                if len(threads) >= n:
+                    break
+        return threads
+
+    @classmethod
     async def get_all_by_id(
         cls,
         session: AsyncSession,
@@ -568,6 +604,12 @@ class Thread(Base):
         limit: int = 10,
         before: datetime | None = None,
     ) -> AsyncGenerator["Thread", None]:
+        """Get a number of threads by their IDs.
+
+        Might not return exactly the number of threads requested.
+        See `get_n_by_id` for a version that tries to guarantee `n` results
+        if possible.
+        """
         if not ids:
             return
 
@@ -575,7 +617,9 @@ class Thread(Base):
         if before:
             condition = and_(condition, Thread.updated < before)
 
-        stmt = select(Thread).order_by(Thread.updated.desc()).where(condition)
+        stmt = (
+            select(Thread, limit=limit).order_by(Thread.updated.desc()).where(condition)
+        )
         result = await session.execute(stmt)
         for row in result:
             yield row.Thread
