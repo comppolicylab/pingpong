@@ -615,6 +615,21 @@ export const getClassThreads = async (f: Fetcher, classId: number, opts?: GetCla
 };
 
 /**
+ * Parameters for fetching recent threads.
+ */
+export type GetRecentThreadOpts = {
+  limit?: number;
+};
+
+/**
+ * Get recent threads that the current user has participated in.
+ */
+export const getRecentThreads = async (f: Fetcher, opts?: GetRecentThreadOpts) => {
+  const url = `threads/recent`;
+  return await GET<GetRecentThreadOpts, Threads>(f, url, opts);
+}
+
+/**
  * Information about an assistant.
  */
 export type Assistant = {

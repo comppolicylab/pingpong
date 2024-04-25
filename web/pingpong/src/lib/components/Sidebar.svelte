@@ -33,7 +33,7 @@
   import PingPongLogo from '$lib/components/PingPongLogo.svelte';
   import dayjs from '$lib/time';
   import * as api from '$lib/api';
-  import type { LayoutData } from './$types';
+  import type { LayoutData } from '../../routes/$types';
   import { sadToast } from '$lib/toast';
   import { appMenuOpen } from '$lib/stores/general';
 
