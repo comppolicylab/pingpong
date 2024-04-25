@@ -23,7 +23,10 @@ export const load: PageLoad = async ({ fetch, parent }) => {
   // TODO - for admins, we should land on this page and show controls.
   const parentData = await parent();
   if (parentData.threads.length > 0) {
-    return redirect(302, `/class/${parentData.threads[0].class_id}`);
+    const latestThread = parentData.threads[0];
+    const classId = latestThread.class_id;
+    const asstId = latestThread.assistant_id;
+    return redirect(302, `/class/${classId}?assistant=${asstId}`);
   } else if (parentData.classes.length > 0) {
     return redirect(302, `/class/${parentData.classes[0].id}`);
   }
