@@ -99,7 +99,7 @@
 
 <PageHeader current={data.class} classes={data.classes} />
 
-<div class="flex items-center relative h-[calc(100%-7rem)]">
+<div class="flex items-center relative h-[calc(100%-5rem)] sm:h-[calc(100%-7rem)]">
   {#if $loading}
     <div class="absolute top-0 left-0 flex h-full w-full items-center">
       <div class="m-auto" transition:blur={{ amount: 10 }}>
