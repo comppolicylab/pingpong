@@ -209,14 +209,14 @@
       id="message"
       rows="1"
       name="message"
-      class="w-full !outline-none focus:ring-0 resize-none border-none bg-transparent pt-[12px] pb-[10px]"
+      class="w-full !outline-none focus:ring-0 resize-none border-none bg-transparent pt-[12px] pb-[10px] pl-2 sm:pl-6 pr-2 sm:pr-8"
       placeholder="Ask me anything"
       class:text-gray-700={disabled}
       class:animate-pulse={loading}
       disabled={loading || disabled}
       on:keydown={maybeSubmit}
       on:input={handleTextAreaInput}
-      style={`height: 48px; max-height: ${maxHeight}px; padding-right: 3rem; padding-left: 1.5rem; font-size: 1rem; line-height: 1.5rem;`}
+      style={`height: 48px; max-height: ${maxHeight}px; font-size: 1rem; line-height: 1.5rem;`}
     />
     <textarea
       bind:this={ref}
