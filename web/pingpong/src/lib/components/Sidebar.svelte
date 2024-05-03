@@ -54,7 +54,7 @@
 </script>
 
 <Sidebar
-  asideClass="absolute top-0 left-0 z-0 w-[90%] px-2 sm:static sm:h-full sm:w-full"
+  asideClass="absolute top-0 left-0 z-0 w-[90%] px-2 h-[calc(100dvh)] sm:static sm:h-full sm:w-full"
   activeUrl={$page.url.pathname}
 >
   <SidebarWrapper class="bg-transparent h-full flex flex-col">
