@@ -268,13 +268,13 @@
             remove={handleRemove}
             on:submit={handleSubmit}
           />
-          <div class="flex gap-2 px-4 py-2 items-center w-full text-sm">
+          <div class="flex gap-2 px-4 py-2 items-center w-full text-sm flex-wrap sm:flex-nowrap">
             {#if !$published}
               <EyeSlashOutline size="sm" class="text-orange" />
               <Span class="text-gray-400 text-xs"
                 >This thread is visible to the teaching team and</Span
               >
-              <Span class="text-gray-600 text-xs">{$users.map((u) => u.email).join(', ')}</Span>
+              <Span class="text-gray-600 text-xs w-full sm:w-auto">{$users.map((u) => u.email).join(', ')}</Span>
             {:else}
               <Span class="text-gray-400 text-xs"
                 >This thread is visible to everyone in this class.</Span
