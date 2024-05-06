@@ -182,11 +182,6 @@
     </div>
   {/if}
 
-  <header class="bg-blue-light-50 p-8 pb-6">
-    <p class="eyebrow eyebrow-dark pb-1">Select Class</p>
-    <Heading tag="h2" class="font-serif">Class Title</Heading>
-  </header>
-
   <div class="w-full flex flex-col justify-between h-[calc(100%-5rem)]">
     <div class="overflow-y-auto pb-4 px-2 sm:px-4" use:scroll={$messages}>
       {#if $canFetchMore}

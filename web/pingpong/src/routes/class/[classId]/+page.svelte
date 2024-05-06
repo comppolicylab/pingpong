@@ -12,7 +12,6 @@
   import { errorMessage } from '$lib/errors';
   import type { Assistant } from '$lib/api';
   import { onMount } from 'svelte';
-  import PageHeader from '$lib/components/PageHeader.svelte';
 
   /**
    * Application data.
@@ -96,8 +95,6 @@
     goto(`/class/${data.class.id}/?assistant=${asst.id}`);
   };
 </script>
-
-<PageHeader current={data.class} classes={data.classes} />
 
 <div class="flex items-center relative h-[calc(100%-5rem)] sm:h-[calc(100%-7rem)]">
   {#if $loading}
