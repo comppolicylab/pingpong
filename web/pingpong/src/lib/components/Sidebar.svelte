@@ -121,7 +121,7 @@
               class={`text-white ${thread.private ? 'visible' : 'invisible'}`}
             />
           </svelte:fragment>
-          
+
           <svelte:fragment slot="subtext">
             <span class="text-xs text-gray-400 w-full">{dayjs.utc(thread.updated).fromNow()}</span>
           </svelte:fragment>
