@@ -32,6 +32,7 @@
   import * as api from '$lib/api';
   import type { LayoutData } from '../../routes/$types';
   import { appMenuOpen } from '$lib/stores/general';
+  import { afterNavigate } from '$app/navigation';
 
   export let data: LayoutData;
 
@@ -50,7 +51,18 @@
   $: currentClass = $page.data.class;
 
   // Toggle whether menu is open.
-  const togglePanel = () => ($appMenuOpen = !$appMenuOpen);
+  const togglePanel = (state?: boolean) => {
+    if (state !== undefined) {
+      $appMenuOpen = state;
+    } else {
+      $appMenuOpen = !$appMenuOpen;
+    }
+  };
+
+  // Close the menu when navigating.
+  afterNavigate(() => {
+    togglePanel(false);
+  });
 </script>
 
 <Sidebar
@@ -62,7 +74,7 @@
       <div class="flex items-center" data-sveltekit-preload-data="off">
         <button
           class="menu-button bg-transparent border-none mr-3 mt-1 sm:hidden"
-          on:click={togglePanel}
+          on:click={() => togglePanel()}
         >
           {#if $appMenuOpen}
             <CloseOutline size="xl" class="text-white menu-close" />
@@ -76,22 +88,24 @@
       </div>
     </SidebarGroup>
 
-    <SidebarGroup>
-      <Breadcrumb class="pr-2 w-full" olClass="w-full">
-        <BreadcrumbItem
-          spanClass="ms-1 text-sm font-medium text-gray-500 md:ms-2 dark:text-gray-400 flex items-center justify-between w-full"
-          class="inline-flex items-center w-full"
-        >
-          <svelte:fragment slot="icon">
-            <BookOutline class="text-gray-400" size="sm" />
-          </svelte:fragment>
-          <a href={`/class/${currentClassId}`} class="eyebrow">{currentClass?.name}</a>
-          <a href={`/class/${currentClassId}/manage`}>
-            <CogOutline size="sm" />
-          </a>
-        </BreadcrumbItem>
-      </Breadcrumb>
-    </SidebarGroup>
+    {#if currentClass}
+      <SidebarGroup>
+        <Breadcrumb class="pr-2 w-full" olClass="w-full">
+          <BreadcrumbItem
+            spanClass="ms-1 text-sm font-medium text-gray-500 md:ms-2 dark:text-gray-400 flex items-center justify-between w-full"
+            class="inline-flex items-center w-full"
+          >
+            <svelte:fragment slot="icon">
+              <BookOutline class="text-gray-400" size="sm" />
+            </svelte:fragment>
+            <a href={`/class/${currentClassId}`} class="eyebrow">{currentClass.name}</a>
+            <a href={`/class/${currentClassId}/manage`}>
+              <CogOutline size="sm" />
+            </a>
+          </BreadcrumbItem>
+        </Breadcrumb>
+      </SidebarGroup>
+    {/if}
 
     <SidebarGroup border class="border-blue-dark-40 border-t-3">
       <SidebarItem
@@ -106,6 +120,12 @@
     </SidebarGroup>
 
     <SidebarGroup border class="overflow-y-auto border-blue-dark-40 border-t-3">
+      <a
+        href={`/threads`}
+        class="text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2"
+      >
+        <span class="flex-1 truncate">All conversations</span>
+      </a>
       {#each threads as thread}
         <SidebarItem
           class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2"
