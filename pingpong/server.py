@@ -950,6 +950,45 @@ async def list_recent_threads(
 
 
 @v1.get(
+    "/threads",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.Threads,
+)
+async def list_all_threads(
+    request: Request,
+    limit: int = 20,
+    before: str | None = None,
+    private: bool | None = None,
+    class_id: int | None = None,
+):
+    if limit < 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Limit must be positive",
+        )
+
+    # Parse `before` timestamp if it was given
+    current_latest_time: datetime | None = (
+        datetime.fromisoformat(before) if before else None
+    )
+    thread_ids = await request.state.authz.list(
+        f"user:{request.state.session.user.id}",
+        "can_view",
+        "thread",
+    )
+    threads = await models.Thread.get_n_by_id(
+        request.state.db,
+        thread_ids,
+        limit,
+        before=current_latest_time,
+        private=private,
+        class_id=class_id,
+    )
+
+    return {"threads": threads}
+
+
+@v1.get(
     "/class/{class_id}/threads",
     dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
     response_model=schemas.Threads,

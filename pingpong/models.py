@@ -567,6 +567,7 @@ class Thread(Base):
         ids: list[int],
         n: int = 10,
         before: datetime | None = None,
+        **kwargs,
     ) -> List["Thread"]:
         """Similar to `get_all_by_id` but tries to guarantee `n` results.
 
@@ -583,7 +584,7 @@ class Thread(Base):
         while len(threads) < n:
             added_in_page = 0
             async for new_thread in cls.get_all_by_id(
-                session, ids, limit=n, before=next_latest_time
+                session, ids, limit=n, before=next_latest_time, **kwargs
             ):
                 if not next_latest_time or new_thread.updated < next_latest_time:
                     next_latest_time = new_thread.updated
@@ -604,6 +605,8 @@ class Thread(Base):
         ids: list[int],
         limit: int = 10,
         before: datetime | None = None,
+        class_id: int | None = None,
+        private: bool | None = None,
     ) -> AsyncGenerator["Thread", None]:
         """Get a number of threads by their IDs.
 
@@ -617,6 +620,10 @@ class Thread(Base):
         condition = Thread.id.in_([int(id_) for id_ in ids])
         if before:
             condition = and_(condition, Thread.updated < before)
+        if class_id:
+            condition = and_(condition, Thread.class_id == int(class_id))
+        if private is not None:
+            condition = and_(condition, Thread.private == private)
 
         stmt = (
             select(Thread).order_by(Thread.updated.desc()).where(condition).limit(limit)
