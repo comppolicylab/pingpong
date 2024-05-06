@@ -130,7 +130,7 @@
         <SidebarItem
           class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2"
           spanClass="flex-1 truncate"
-          href={`/class/${currentClassId}/thread/${thread.id}`}
+          href={`/class/${thread.class_id}/thread/${thread.id}`}
           label={thread.name || 'Undefined'}
           activeClass="bg-blue-dark-40"
         >

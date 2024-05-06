@@ -1,8 +1,8 @@
 <script lang="ts">
-  import PageHeader from '$lib/components/PageHeader.svelte';
+  import ThreadHeader from '$lib/components/ThreadHeader.svelte';
 
   export let data;
 </script>
 
-<PageHeader current={data.class} classes={data.classes} />
+<ThreadHeader current={data.class} classes={data.classes} />
 <slot />
