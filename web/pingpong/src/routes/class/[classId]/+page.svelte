@@ -12,7 +12,6 @@
   import { errorMessage } from '$lib/errors';
   import type { Assistant } from '$lib/api';
   import { onMount } from 'svelte';
-  import PageHeader from '$lib/components/PageHeader.svelte';
 
   /**
    * Application data.
@@ -97,9 +96,7 @@
   };
 </script>
 
-<PageHeader current={data.class} classes={data.classes} />
-
-<div class="flex items-center relative h-[calc(100%-7rem)]">
+<div class="flex items-center relative h-[calc(100%-5rem)] sm:h-[calc(100%-7rem)]">
   {#if $loading}
     <div class="absolute top-0 left-0 flex h-full w-full items-center">
       <div class="m-auto" transition:blur={{ amount: 10 }}>
@@ -130,7 +127,7 @@
           {/each}
         </Dropdown>
       </div>
-      <div class="mt-auto">
+      <div class="mt-auto mb-8">
         <ChatInput
           mimeType={data.uploadInfo.mimeType}
           maxSize={data.uploadInfo.private_file_max_size}

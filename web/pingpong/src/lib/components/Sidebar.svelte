@@ -54,7 +54,7 @@
 </script>
 
 <Sidebar
-  asideClass="absolute top-0 left-0 z-0 w-[90%] px-2 sm:static sm:h-full sm:w-full"
+  asideClass="absolute top-0 left-0 z-0 w-[90%] px-2 h-[calc(100dvh)] sm:static sm:h-full sm:w-full"
   activeUrl={$page.url.pathname}
 >
   <SidebarWrapper class="bg-transparent h-full flex flex-col">
@@ -115,13 +115,14 @@
           activeClass="bg-blue-dark-40"
         >
           <svelte:fragment slot="icon">
+            <span class="eyebrow w-full">{classesById[thread.class_id].name}</span>
             <EyeSlashOutline
               size="sm"
               class={`text-white ${thread.private ? 'visible' : 'invisible'}`}
             />
           </svelte:fragment>
+
           <svelte:fragment slot="subtext">
-            <span>{classesById[thread.class_id].name}</span>
             <span class="text-xs text-gray-400 w-full">{dayjs.utc(thread.updated).fromNow()}</span>
           </svelte:fragment>
         </SidebarItem>
