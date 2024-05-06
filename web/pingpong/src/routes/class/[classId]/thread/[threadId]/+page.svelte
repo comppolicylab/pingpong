@@ -5,7 +5,7 @@
   import { happyToast, sadToast } from '$lib/toast';
   import { errorMessage } from '$lib/errors';
   import { blur } from 'svelte/transition';
-  import { Heading, Span, Avatar, Button, Dropdown, DropdownItem } from 'flowbite-svelte';
+  import { Span, Avatar, Button, Dropdown, DropdownItem } from 'flowbite-svelte';
   import { Pulse, DoubleBounce } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
   import Logo from '$lib/components/Logo.svelte';
