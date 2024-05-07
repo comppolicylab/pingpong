@@ -1330,6 +1330,17 @@ async def list_assistants(class_id: str, request: Request):
 
     creator_ids = {a.creator_id for a in assts}
     creators = await models.User.get_all_by_id(request.state.db, list(creator_ids))
+    creator_perms = await request.state.authz.check(
+        [
+            (
+                f"user:{id_}",
+                "supervisor",
+                f"class:{class_id}",
+            )
+            for id_ in creator_ids
+        ]
+    )
+    endorsed_creators = {id_ for id_, perm in zip(creator_ids, creator_perms) if perm}
 
     ret_assistants = list[schemas.Assistant]()
     for asst in assts:
@@ -1339,6 +1350,16 @@ async def list_assistants(class_id: str, request: Request):
         )
         if asst.hide_prompt and not has_elevated_permissions:
             cur_asst.instructions = ""
+
+        # For now, "endorsed" creators are published assistants that were
+        # created by a teacher or admin.
+        #
+        # TODO(jnu): separate this into an explicit category where teachers
+        # can mark any public assistant as "endorsed."
+        # https://github.com/stanford-policylab/pingpong/issues/226
+        if asst.published and asst.creator_id in endorsed_creators:
+            cur_asst.endorsed = True
+
         ret_assistants.append(cur_asst)
 
     return {
@@ -1559,6 +1580,28 @@ async def download_file(
 async def get_me(request: Request):
     """Get the session information."""
     return request.state.session
+
+
+@v1.get(
+    "/me/grants/list",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.GrantsList,
+)
+async def get_grants_list(rel: str, obj: str, request: Request):
+    """List objects for which user has a specific relation."""
+    sub = f"user:{request.state.session.user.id}"
+    results = await request.state.authz.list(
+        sub,
+        rel,
+        obj,
+    )
+    return {
+        "subject_type": "user",
+        "subject_id": request.state.session.user.id,
+        "relation": rel,
+        "target_type": obj,
+        "target_ids": results,
+    }
 
 
 @v1.post(

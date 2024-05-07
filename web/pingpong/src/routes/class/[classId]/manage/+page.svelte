@@ -2,31 +2,27 @@
   import { onMount } from 'svelte';
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
-  import { page } from '$app/stores';
-  import { beforeNavigate } from '$app/navigation';
   import * as api from '$lib/api';
-  import type { FileUploadInfo, Assistant, ServerFile } from '$lib/api';
+  import type { FileUploadInfo, ServerFile } from '$lib/api';
   import {
     Button,
     Checkbox,
     Helper,
     Modal,
     Secondary,
-    Card,
     Heading,
     Label,
     Input
   } from 'flowbite-svelte';
   import BulkAddUsers from '$lib/components/BulkAddUsers.svelte';
   import ViewUsers from '$lib/components/ViewUsers.svelte';
-  import ManageAssistant from '$lib/components/ManageAssistant.svelte';
-  import ViewAssistant from '$lib/components/ViewAssistant.svelte';
   import FileUpload from '$lib/components/FileUpload.svelte';
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import Info from '$lib/components/Info.svelte';
   import { PenOutline, CloudArrowUpOutline } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
+  import { invalidateAll, onNavigate } from '$app/navigation';
 
   /**
    * Application data.
@@ -67,22 +63,13 @@
   let anyCanPublishThread = data?.class.any_can_publish_thread || false;
   let anyCanUploadClassFile = data?.class.any_can_upload_class_file || false;
 
-  let assistants: Assistant[] = [];
   const blurred = writable(true);
   let uploads = writable<FileUploadInfo[]>([]);
   const trashFiles = writable<number[]>([]);
-  let savingAssistant = false;
   $: publishOptMakesSense = anyCanCreateAsst;
   $: apiKey = data.apiKey || '';
   $: apiKeyBlur =
     apiKey.substring(0, 6) + '**************' + apiKey.substring(Math.max(6, apiKey.length - 6));
-  $: editingAssistant = parseInt($page.url.searchParams.get('edit-assistant') || '0', 10);
-  $: creators = data?.assistantCreators || {};
-  $: {
-    assistants = data?.assistants || [];
-    assistants.sort((a, b) => a.name.localeCompare(b.name));
-  }
-  $: models = data?.models || [];
   $: files = data?.files || [];
   $: allFiles = [
     ...$uploads,
@@ -100,9 +87,6 @@
       const bName = b.file?.name || (b.response as { name: string })?.name || '';
       return aName.localeCompare(bName);
     }) as FileUploadInfo[];
-  $: asstFiles = allFiles
-    .filter((f) => f.state === 'success')
-    .map((f) => f.response) as ServerFile[];
 
   $: hasApiKey = !!data?.class?.api_key;
 
@@ -110,28 +94,6 @@
   $: canManageClassUsers = !!data?.grants?.canManageUsers;
   $: canUploadClassFiles = !!data?.grants?.canUploadClassFiles;
   $: canViewApiKey = !!data?.grants?.canViewApiKey;
-  $: canCreateAssistant = !!data?.grants?.canCreateAssistants;
-  $: canPublishAssistant = !!data?.grants?.canPublishAssistants;
-  $: isAdmin = !!data?.grants?.isAdmin;
-
-  // Check if we are editing an assistant and prompt if so.
-  beforeNavigate((nav) => {
-    const isSaved = nav.to?.url.searchParams.has('save');
-
-    if (isSaved) {
-      nav.to?.url.searchParams.delete('save');
-      return;
-    }
-
-    if (editingAssistant && !savingAssistant) {
-      const really = confirm(
-        'You have not saved your changes to this assistant. Do you wish to discard them?'
-      );
-      if (!really) {
-        nav.cancel();
-      }
-    }
-  });
 
   // Handle file deletion.
   const removeFile = async (evt: CustomEvent<FileUploadInfo>) => {
@@ -154,6 +116,7 @@
   const handleNewFiles = (evt: CustomEvent<Writable<FileUploadInfo[]>>) => {
     uploads = evt.detail;
   };
+
   // Submit file upload
   const uploadFile = (f: File, onProgress: (p: number) => void) => {
     return api.uploadFile(data.class.id, f, { onProgress });
@@ -167,6 +130,15 @@
     const offset = Math.max(0, (page - 1) * pageSize);
     return api.getClassUsers(fetch, data.class.id, { limit, offset, search });
   };
+
+  // Clean up state on navigation. Invalidate data so that any changes
+  // are reflected in the rest of the app. (If performance suffers here,
+  // we can be more selective about what we invalidate.)
+  onNavigate(() => {
+    uploads.set([]);
+    trashFiles.set([]);
+    invalidateAll();
+  });
 </script>
 
 <div
@@ -405,67 +377,4 @@
       </div>
     </div>
   {/if}
-
-  <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
-    <div>
-      <Heading tag="h3" customSize="text-xl font-bold"
-        ><Secondary class="text-3xl text-black font-normal">AI Assistants</Secondary></Heading
-      >
-      <Info>Manage AI assistants.</Info>
-    </div>
-    <div class="col-span-2 flex flex-wrap gap-4">
-      {#if !hasApiKey}
-        <div class="text-gray-400 mb-4">
-          You need to set an API key before you can create AI assistants.
-        </div>
-      {:else}
-        {#each assistants as assistant}
-          {#if assistant.id == editingAssistant}
-            <Card class="w-full max-w-full">
-              <form
-                class="grid grid-cols-2 gap-2"
-                action="?/updateAssistant"
-                method="POST"
-                on:submit={() => (savingAssistant = true)}
-              >
-                <ManageAssistant
-                  files={asstFiles}
-                  getFileSupportFilter={data.uploadInfo.getFileSupportFilter}
-                  {assistant}
-                  {models}
-                  canPublish={canPublishAssistant || false}
-                />
-              </form>
-            </Card>
-          {:else}
-            <Card
-              class="w-full max-w-full space-y-2"
-              href={(isAdmin || assistant.creator_id === data.me.user?.id) && canCreateAssistant
-                ? `${$page.url.pathname}?edit-assistant=${assistant.id}`
-                : null}
-            >
-              <ViewAssistant {assistant} creator={creators[assistant.creator_id]} />
-            </Card>
-          {/if}
-        {/each}
-        {#if !editingAssistant && canCreateAssistant}
-          <Card class="w-full max-w-full">
-            <Heading tag="h4" class="pb-3">Add new AI assistant</Heading>
-            <form
-              class="grid grid-cols-2 gap-2"
-              action="?/createAssistant"
-              method="POST"
-              on:submit={() => (savingAssistant = true)}
-            >
-              <ManageAssistant
-                files={asstFiles}
-                {models}
-                canPublish={canPublishAssistant || false}
-              />
-            </form>
-          </Card>
-        {/if}
-      {/if}
-    </div>
-  </div>
 </div>

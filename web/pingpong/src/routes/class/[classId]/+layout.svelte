@@ -4,7 +4,7 @@
   export let data;
 </script>
 
-<div class="relative pb-8 h-full w-full">
+<div class="relative pb-8 h-full w-full flex flex-col">
   <ThreadHeader current={data.class} classes={data.classes} canManage={data.canManage} />
   <slot />
 </div>

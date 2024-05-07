@@ -2,13 +2,13 @@
   import { page } from '$app/stores';
   import { copy } from 'svelte-copy';
   import { toast } from '@zerodevx/svelte-toast';
-  import { Heading, Label, List, Li } from 'flowbite-svelte';
+  import { Heading } from 'flowbite-svelte';
   import { EyeOutline, EyeSlashOutline, LinkOutline } from 'flowbite-svelte-icons';
-  import Markdown from './Markdown.svelte';
   import type { Assistant } from '$lib/api';
 
   export let assistant: Assistant;
   export let creator: { email: string };
+  export let editable = false;
 
   // Get the full URL to use the assistant
   $: assistantLink = `${$page.url.protocol}//${$page.url.host}/class/${assistant.class_id}?assistant=${assistant.id}`;
@@ -34,6 +34,10 @@
       {assistant.name}
     </div>
 
+    {#if editable}
+      <a href="/class/{assistant.class_id}/assistant/{assistant.id}">Edit</a>
+    {/if}
+
     <button
       on:click|preventDefault={() => {}}
       on:svelte-copy={showCopiedLink}
@@ -43,36 +47,9 @@
       /></button
     >
   </Heading>
-  <Label>Author</Label>
-  <span>{creator.email}</span>
-  <Label>Description</Label>
-  <span>{assistant.description || '(None provided)'}</span>
-  <Label>Instructions</Label>
-  {#if !assistant.instructions}
-    <span>(None available)</span>
-  {:else}
-    <Markdown content={assistant.instructions} />
-  {/if}
-  <Label>Instructions visibility</Label>
-  <span>{assistant.hide_prompt ? 'Hidden' : 'Visible'}</span>
-  <Label>Model</Label>
-  <span>{assistant.model}</span>
-  <Label>Formatting</Label>
-  <List>
-    <Li>Latex: {assistant.use_latex || false}</Li>
-  </List>
-  <Label>Tools</Label>
-  <List>
-    {#each JSON.parse(assistant.tools) as tool}
-      <Li>{tool.type}</Li>
-    {/each}
-  </List>
-  <Label>Files</Label>
-  <List>
-    {#each assistant.files as file}
-      <Li>{file.name}</Li>
-    {/each}
-  </List>
-  <Label>Published</Label>
-  <span>{assistant.published ? 'Yes' : 'No'}</span>
+  <div>Created by {creator.email}</div>
+  <div>{assistant.description || '(No description provided)'}</div>
+  <div>
+    <a href={assistantLink}>Start a chat</a>
+  </div>
 </div>

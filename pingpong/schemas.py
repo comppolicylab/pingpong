@@ -105,6 +105,7 @@ class Assistant(BaseModel):
     use_latex: bool | None
     hide_prompt: bool | None
     published: datetime | None
+    endorsed: bool | None = None
     created: datetime
     updated: datetime | None
 
@@ -501,3 +502,11 @@ class GrantDetail(BaseModel):
 
 class Grants(BaseModel):
     grants: list[GrantDetail]
+
+
+class GrantsList(BaseModel):
+    subject_type: str
+    subject_id: int
+    target_type: str
+    relation: str
+    target_ids: list[int]
