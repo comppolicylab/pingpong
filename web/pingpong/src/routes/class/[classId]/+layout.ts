@@ -8,12 +8,15 @@ import type { LayoutLoad } from './$types';
 export const load: LayoutLoad = async ({ fetch, params }) => {
   const classId = parseInt(params.classId, 10);
 
-  const [classDataResponse, assistantsResponse, filesResponse, uploadInfoResponse] =
+  const [classDataResponse, assistantsResponse, filesResponse, uploadInfoResponse, grants] =
     await Promise.all([
       api.getClass(fetch, classId).then(api.expandResponse),
       api.getAssistants(fetch, classId).then(api.expandResponse),
       api.getClassFiles(fetch, classId).then(api.expandResponse),
-      api.getClassUploadInfo(fetch, classId)
+      api.getClassUploadInfo(fetch, classId),
+      api.grants(fetch, {
+        canManage: { target_type: 'class', target_id: classId, relation: 'supervisor' }
+      })
     ]);
 
   if (classDataResponse.error) {
@@ -34,6 +37,7 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
     assistants,
     assistantCreators,
     files: filesResponse.data?.files || [],
-    uploadInfo: uploadInfoResponse
+    uploadInfo: uploadInfoResponse,
+    canManage: grants.canManage
   };
 };

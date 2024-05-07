@@ -63,7 +63,7 @@
 </script>
 
 <PageHeader>
-  <h2 class={mainTextClass}>Threads Archive</h2>
+  <h2 class={mainTextClass} slot="left">Threads Archive</h2>
 </PageHeader>
 
 <!-- TODO: search is not yet fully supported. -->
