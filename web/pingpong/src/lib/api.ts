@@ -379,6 +379,42 @@ export const grants = async <T extends NamedGrantsQuery>(
 };
 
 /**
+ * Parameters for listing objects that the user has a grant for.
+ */
+export type GrantsListQuery = {
+  rel: string;
+  obj: string;
+};
+
+/**
+ * List of objects that the user has a grant for.
+ */
+export type GrantsList = {
+  subject_type: string;
+  subject_id: number;
+  target_type: string;
+  relation: string;
+  target_ids: number[];
+};
+
+/**
+ * Get a list of objects that the user has a grant for.
+ */
+export const grantsList = async (f: Fetcher, relation: string, targetType: string) => {
+  const result = await GET<GrantsListQuery, GrantsList>(f, 'me/grants/list', {
+    obj: targetType,
+    rel: relation
+  });
+
+  const expanded = expandResponse(result);
+  if (expanded.error) {
+    throw expanded.error;
+  }
+
+  return expanded.data.target_ids;
+};
+
+/**
  * List of institutions.
  */
 export type Institutions = {
@@ -673,6 +709,7 @@ export type Assistant = {
   published: string | null;
   use_latex: boolean | null;
   hide_prompt: boolean | null;
+  endorsed: boolean | null;
   created: string;
   updated: string | null;
 };

@@ -6,19 +6,9 @@ import type { PageLoad } from './$types';
  */
 export const load: PageLoad = async ({ fetch, params }) => {
   const classId = parseInt(params.classId, 10);
-  const [grants, modelsResponse] = await Promise.all([
+  const [grants] = await Promise.all([
     api.grants(fetch, {
       canEditInfo: { target_type: 'class', target_id: classId, relation: 'can_edit_info' },
-      canCreateAssistants: {
-        target_type: 'class',
-        target_id: classId,
-        relation: 'can_create_assistants'
-      },
-      canPublishAssistants: {
-        target_type: 'class',
-        target_id: classId,
-        relation: 'can_publish_assistants'
-      },
       canPublishThreads: {
         target_type: 'class',
         target_id: classId,
@@ -38,8 +28,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
       canViewUsers: { target_type: 'class', target_id: classId, relation: 'can_view_users' },
       canDelete: { target_type: 'class', target_id: classId, relation: 'can_delete' },
       canManageUsers: { target_type: 'class', target_id: classId, relation: 'can_manage_users' }
-    }),
-    api.getModels(fetch, classId).then(api.expandResponse)
+    })
   ]);
 
   let api_key = '';
@@ -52,10 +41,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
     }
   }
 
-  const models = modelsResponse.error ? [] : modelsResponse.data.models;
-
   return {
-    models,
     apiKey: api_key || '',
     grants
   };

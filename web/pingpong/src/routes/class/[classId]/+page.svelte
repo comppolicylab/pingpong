@@ -127,7 +127,7 @@
           {/each}
         </Dropdown>
       </div>
-      <div class="mt-auto mb-8">
+      <div class="mt-auto mb-6">
         <ChatInput
           mimeType={data.uploadInfo.mimeType}
           maxSize={data.uploadInfo.private_file_max_size}

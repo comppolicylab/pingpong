@@ -99,7 +99,7 @@
               <BookOutline class="text-gray-400" size="sm" />
             </svelte:fragment>
             <a href={`/class/${currentClassId}`} class="eyebrow">{currentClass.name}</a>
-            <a href={`/class/${currentClassId}/manage`}>
+            <a href={`/class/${currentClassId}/assistant`}>
               <CogOutline size="sm" />
             </a>
           </BreadcrumbItem>
