@@ -3,7 +3,7 @@
   import { page } from '$app/stores';
   import { Modal, Heading, P, Card } from 'flowbite-svelte';
   import CreateClass from '$lib/components/CreateClass.svelte';
-  import PageHeader from '$lib/components/PageHeader.svelte';
+  import ThreadHeader from '$lib/components/ThreadHeader.svelte';
 
   export let data;
   export let form;
@@ -20,7 +20,7 @@
 </script>
 
 <div>
-  <PageHeader classes={data.classes} />
+  <ThreadHeader classes={data.classes} />
   <div class="flex flex-wrap gap-4 p-8">
     {#each classes as cls}
       <Card horizontal class="w-80 h-40" href={`/class/${cls.id}`}>

@@ -589,6 +589,16 @@ export type GetThreadsOpts = {
  * If `classId` is not given, this will fetch the user's recent threads from all classes.
  */
 const getThreads = async (f: Fetcher, url: string, opts?: GetThreadsOpts) => {
+  if (!opts) {
+    opts = {};
+  }
+
+  // Ensure a limit is set. This prevents excessively large responses, and
+  // also helps to determine when we've reached the last page of results.
+  if (!opts.limit) {
+    opts.limit = 20;
+  }
+
   const result = expandResponse(await GET<GetThreadsOpts, Threads>(f, url, opts));
 
   if (result.error) {
@@ -630,6 +640,21 @@ export const getClassThreads = async (f: Fetcher, classId: number, opts?: GetThr
  */
 export const getRecentThreads = async (f: Fetcher, opts?: GetThreadsOpts) => {
   return getThreads(f, 'threads/recent', opts);
+};
+
+/**
+ * Options for fetching all threads.
+ */
+export type GetAllThreadsOpts = GetThreadsOpts & {
+  class_id?: number;
+  private?: boolean;
+};
+
+/**
+ * Get all threads that the user can see.
+ */
+export const getAllThreads = async (f: Fetcher, opts?: GetAllThreadsOpts) => {
+  return getThreads(f, 'threads', opts);
 };
 
 /**
