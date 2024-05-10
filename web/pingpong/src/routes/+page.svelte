@@ -20,7 +20,7 @@
 </script>
 
 <div>
-  <ThreadHeader classes={data.classes} />
+  <ThreadHeader classes={data.classes} isOnClassPage={false} />
   <div class="flex flex-wrap gap-4 p-8">
     {#each classes as cls}
       <Card horizontal class="w-80 h-40" href={`/class/${cls.id}`}>
