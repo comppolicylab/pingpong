@@ -2217,6 +2217,20 @@ files = [
 cli = ["click (>=5.0)"]
 
 [[package]]
+name = "python-glowplug"
+version = "0.1.0"
+description = ""
+optional = false
+python-versions = "<4.0,>=3.9"
+files = [
+    {file = "python_glowplug-0.1.0-py3-none-any.whl", hash = "sha256:c6a2d2895b8e768c0cdc18e4dbe0a4f1247dfea1e922e977a9795c6bcc94a48a"},
+    {file = "python_glowplug-0.1.0.tar.gz", hash = "sha256:07f3e1396cb0ae624b68807f7cccc2d705390b056b5f04da21ca15417031ce62"},
+]
+
+[package.dependencies]
+sqlalchemy = ">=2,<3"
+
+[[package]]
 name = "python-multipart"
 version = "0.0.6"
 description = "A streaming multipart parser for Python"
@@ -3337,4 +3351,4 @@ testing = ["coverage (>=5.0.3)", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "173d9daec189ffa9ae87817b9ef6f9bca2533fbcceb5795ae8f7be2b9b548b49"
+content-hash = "247c18c80787b0b1615a8f25492b5b2489ffe0ac4b3423269bae4e8d11292e47"

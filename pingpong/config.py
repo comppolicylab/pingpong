@@ -6,11 +6,11 @@ from functools import cached_property
 from pathlib import Path
 from typing import Literal, Union
 
+from glowplug import PostgresDriver, SqliteDriver
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
 from .authz import OpenFgaAuthzDriver
-from .db import PostgresDriver, SqliteDriver
 from .email import AzureEmailSender, GmailEmailSender, MockEmailSender, SmtpEmailSender
 from .support import DiscordSupportDriver
 
