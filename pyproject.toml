@@ -40,7 +40,7 @@ httpcore = "1.0.4"
 anyio = "4.3.0"
 gunicorn = "^21.2.0"
 orjson = "^3.9.15"
-python-glowplug = "^0.1.0"
+python-glowplug = "^0.3.1"
 
 
 [tool.poetry.group.dev.dependencies]

@@ -6,7 +6,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import Literal, Union
 
-from glowplug import PostgresDriver, SqliteDriver
+from glowplug import PostgresSettings, SqliteSettings
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
@@ -127,34 +127,6 @@ class SecretKey(BaseSettings):
 class AuthSettings(BaseSettings):
     autopromote_on_login: bool = Field(False)
     secret_keys: list[SecretKey]
-
-
-class PostgresSettings(BaseSettings):
-    """Settings for connecting to Postgres."""
-
-    engine: Literal["postgres"]
-    host: str = Field("localhost")
-    port: int = Field(5432)
-    user: str = Field("postgres")
-    password: str
-    database: str = Field("pingpong")
-    maintenance_db: str | None = Field(None)
-
-    @cached_property
-    def driver(self) -> PostgresDriver:
-        url = f"{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
-        return PostgresDriver(url, maintenance_db=self.maintenance_db)
-
-
-class SqliteSettings(BaseSettings):
-    """Settings for connecting to SQLite."""
-
-    engine: Literal["sqlite"]
-    path: str = Field(":memory:")
-
-    @cached_property
-    def driver(self) -> SqliteDriver:
-        return SqliteDriver(self.path)
 
 
 DbSettings = Union[PostgresSettings, SqliteSettings]
