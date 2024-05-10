@@ -2,8 +2,6 @@
   import { page } from '$app/stores';
   import {
     CloseOutline,
-    CogOutline,
-    BookOutline,
     UserSettingsOutline,
     QuestionCircleOutline,
     ArrowRightToBracketSolid,
@@ -19,8 +17,6 @@
     DropdownItem,
     DropdownDivider,
     Avatar,
-    Breadcrumb,
-    BreadcrumbItem,
     Sidebar,
     SidebarWrapper,
     SidebarItem,
@@ -48,7 +44,6 @@
   );
   $: threads = ($page.data.threads || []) as api.Thread[];
   $: currentClassId = parseInt($page.params.classId, 10);
-  $: currentClass = $page.data.class;
 
   // Toggle whether menu is open.
   const togglePanel = (state?: boolean) => {
@@ -87,25 +82,6 @@
         </NavBrand>
       </div>
     </SidebarGroup>
-
-    {#if currentClass}
-      <SidebarGroup>
-        <Breadcrumb class="pr-2 w-full" olClass="w-full">
-          <BreadcrumbItem
-            spanClass="ms-1 text-sm font-medium text-gray-500 md:ms-2 dark:text-gray-400 flex items-center justify-between w-full"
-            class="inline-flex items-center w-full"
-          >
-            <svelte:fragment slot="icon">
-              <BookOutline class="text-gray-400" size="sm" />
-            </svelte:fragment>
-            <a href={`/class/${currentClassId}`} class="eyebrow">{currentClass.name}</a>
-            <a href={`/class/${currentClassId}/assistant`}>
-              <CogOutline size="sm" />
-            </a>
-          </BreadcrumbItem>
-        </Breadcrumb>
-      </SidebarGroup>
-    {/if}
 
     <SidebarGroup border class="border-blue-dark-40 border-t-3">
       <SidebarItem
