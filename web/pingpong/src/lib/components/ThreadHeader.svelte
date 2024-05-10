@@ -5,6 +5,7 @@
   import PageHeader, { mainTextClass } from './PageHeader.svelte';
 
   export let classes: api.Class[];
+  export let isOnClassPage: boolean;
   export let current: api.Class | null = null;
   export let canManage: boolean = false;
 
@@ -31,10 +32,17 @@
     </Dropdown>
   </div>
   <div slot="right">
-    {#if canManage && !!current}
-      <a href={`/class/${current.id}/manage`} class="text-blue-dark-50 hover:text-blue-dark-100"
-        >Manage</a
-      >
+    {#if current}
+      {#if !isOnClassPage}
+        <a
+          href={`/class/${current.id}/assistant`}
+          class="text-blue-dark-50 hover:text-blue-dark-100">View class page</a
+        >
+      {:else if canManage}
+        <a href={`/class/${current.id}/manage`} class="text-blue-dark-50 hover:text-blue-dark-100"
+          >Manage Class</a
+        >
+      {/if}
     {/if}
   </div>
 </PageHeader>
