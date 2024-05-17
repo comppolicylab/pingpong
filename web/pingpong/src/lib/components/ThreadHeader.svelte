@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Button, Dropdown, DropdownItem } from 'flowbite-svelte';
-  import { ChevronDownSolid } from 'flowbite-svelte-icons';
+  import { ChevronDownSolid, ArrowRightOutline, CogSolid } from 'flowbite-svelte-icons';
   import * as api from '$lib/api';
   import PageHeader, { mainTextClass } from './PageHeader.svelte';
 
@@ -36,11 +36,11 @@
       {#if !isOnClassPage}
         <a
           href={`/class/${current.id}/assistant`}
-          class="text-blue-dark-50 hover:text-blue-dark-100">View class page</a
+          class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all">View class page <ArrowRightOutline size="md" class="text-orange inline-block ml-1" /></a
         >
       {:else if canManage}
-        <a href={`/class/${current.id}/manage`} class="text-blue-dark-50 hover:text-blue-dark-100"
-          >Manage Class</a
+        <a href={`/class/${current.id}/manage`} class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all"
+          >Manage Class <CogSolid size="sm" class="text-orange inline-block ml-1 relative -top-[1px]" /></a
         >
       {/if}
     {/if}

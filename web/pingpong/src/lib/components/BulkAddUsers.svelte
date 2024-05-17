@@ -33,10 +33,11 @@
   </div>
   <Hr />
   <div>
-    <GradientButton type="submit" color="cyanToBlue">Add Users</GradientButton>
+    <Button type="submit" pill class="bg-orange border border-orange text-white hover:bg-orange-dark">Add Users</Button>
     <Button
       type="button"
-      color="red"
+      pill
+      class="bg-blue-light-50 border rounded-full border-blue-dark-40 text-blue-dark-50 hover:bg-blue-light-40 ml-4"
       on:click={() => dispatch('cancel')}
       on:touchstart={() => dispatch('cancel')}>Cancel</Button
     >

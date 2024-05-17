@@ -142,11 +142,11 @@
 </script>
 
 <div
-  class="container py-8 space-y-12 divide-y-3 divide-blue-dark-40 dark:divide-gray-700 overflow-y-auto w-full flex flex-col justify-between h-[calc(100%-5rem)]"
+  class="container p-12 space-y-12 divide-y-3 divide-blue-dark-40 dark:divide-gray-700 overflow-y-auto w-full flex flex-col justify-between h-[calc(100%-5rem)]"
 >
-  <Heading tag="h2" class="text-3xl font-serif pt-8 text-blue-dark-40">Manage Class</Heading>
+  <Heading tag="h2" class="text-3xl font-serif font-medium text-blue-dark-40">Manage Class</Heading>
   {#if canEditClassInfo}
-    <form action="?/updateClass" class="pt-6" method="POST">
+    <form action="?/updateClass" class="pt-4" method="POST">
       <div class="grid grid-cols-3 gap-x-6 gap-y-8">
         <div>
           <Heading customSize="text-xl" tag="h3"

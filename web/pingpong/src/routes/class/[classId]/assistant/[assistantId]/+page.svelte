@@ -109,8 +109,8 @@
   };
 </script>
 
-<div class="px-2 h-full w-full overflow-y-auto">
-  <Heading tag="h2">
+<div class="h-full w-full overflow-y-auto p-12">
+  <Heading tag="h2" class="text-3xl font-serif font-medium mb-6 text-blue-dark-40">
     {#if data.isCreating}
       New assistant
     {:else}
@@ -119,11 +119,11 @@
   </Heading>
 
   <form on:submit={submitForm}>
-    <div>
+    <div class="mb-4">
       <Label for="name">Name</Label>
       <Input label="name" id="name" name="name" value={assistant?.name} />
     </div>
-    <div>
+    <div class="mb-4">
       <Label for="model">Model</Label>
       <Select
         items={modelOptions}
@@ -133,7 +133,7 @@
         value={assistant?.model || modelOptions[0].value}
       />
     </div>
-    <div class="col-span-2">
+    <div class="col-span-2 mb-4">
       <Label for="description">Description</Label>
       <Helper
         >Describe what this assistant does. This information is <strong>not</strong> included in the
@@ -146,7 +146,7 @@
         value={assistant?.description}
       />
     </div>
-    <div class="col-span-2">
+    <div class="col-span-2 mb-4">
       <Label for="instructions">Instructions</Label>
       <Helper>This is the prompt the language model will use to generate responses.</Helper>
       <Textarea
@@ -157,7 +157,7 @@
         value={assistant?.instructions}
       />
     </div>
-    <div class="col-span-2">
+    <div class="col-span-2 mb-4">
       <Checkbox
         id="hide_prompt"
         name="hide_prompt"
@@ -168,7 +168,7 @@
         creator will be able to see this prompt.</Helper
       >
     </div>
-    <div class="col-span-2">
+    <div class="col-span-2 mb-4">
       <Checkbox
         label="use_latex"
         id="use_latex"
@@ -177,20 +177,20 @@
       >
       <Helper>Enable LaTeX formatting for assistant responses.</Helper>
     </div>
-    <div class="col-span-2">
+    <div class="col-span-2 mb-4">
       <Label for="model">Tools</Label>
       <Helper>Select tools available to the assistant when generating a response.</Helper>
       <MultiSelect name="tools" items={tools} value={selectedTools} />
     </div>
 
-    <div class="col-span-2">
+    <div class="col-span-2 mb-4">
       <!-- TODO(jnu): support for uploading files here. -->
       <Label for="model">Files</Label>
       <Helper>Select which files this assistant should use for grounding.</Helper>
       <MultiSelect name="files" items={fileOptions} bind:value={selectedFiles} />
     </div>
 
-    <div class="col-span-2">
+    <div class="col-span-2 mb-4">
       <Checkbox
         label="published"
         id="published"
@@ -216,7 +216,7 @@
     <div class="border-t pt-4 mt-4 flex items-center col-span-2">
       <Button
         pill
-        class="bg-orange text-white hover:bg-orange-dark"
+        class="bg-orange border border-orange text-white hover:bg-orange-dark"
         type="submit"
         disabled={loading}>Save</Button
       >
@@ -224,7 +224,8 @@
         disabled={loading}
         href={`/class/${data.class.id}/assistant`}
         color="red"
-        class="bg-blue-light-50 border border-blue-dark-40 text-blue-dark-50 hover:bg-blue-light-40 ml-4"
+        pill
+        class="bg-blue-light-50 border rounded-full border-blue-dark-40 text-blue-dark-50 hover:bg-blue-light-40 ml-4"
         >Cancel</Button
       >
     </div>
