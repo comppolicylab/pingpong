@@ -101,7 +101,12 @@
         href={`/threads`}
         class="text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap justify-between gap-2 items-center"
       >
-        <span class="flex-1 truncate">Recent Threads</span><span class="text-xs">View All <ArrowRightOutline size="md" class="text-white inline-block p-0.5 ml-1 rounded-full bg-blue-dark-30" /></span>
+        <span class="flex-1 truncate">Recent Threads</span><span class="text-xs"
+          >View All <ArrowRightOutline
+            size="md"
+            class="text-white inline-block p-0.5 ml-1 rounded-full bg-blue-dark-30"
+          /></span
+        >
       </a>
       {#each threads as thread}
         <SidebarItem
@@ -125,7 +130,9 @@
         </SidebarItem>
       {/each}
       {#if !threads.length}
-        <div class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2">No conversations yet!</div>
+        <div class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2">
+          No conversations yet!
+        </div>
       {/if}
     </SidebarGroup>
 

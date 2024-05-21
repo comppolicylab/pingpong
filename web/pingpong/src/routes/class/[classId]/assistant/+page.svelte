@@ -9,9 +9,7 @@
     TableHead,
     TableHeadCell
   } from 'flowbite-svelte';
-  import {
-    ArrowRightOutline, CirclePlusSolid
-  } from 'flowbite-svelte-icons';
+  import { ArrowRightOutline, CirclePlusSolid } from 'flowbite-svelte-icons';
 
   export let data;
 
@@ -30,20 +28,31 @@
 
 <div class="h-full w-full overflow-y-auto p-12">
   {#if !hasApiKey}
-    <Heading tag="h2" class="font-serif mb-4 font-medium text-3xl text-dark-blue-40">No API key.</Heading>
+    <Heading tag="h2" class="font-serif mb-4 font-medium text-3xl text-dark-blue-40"
+      >No API key.</Heading
+    >
     <div>You must configure an API key for this class before you can create or use assistants.</div>
   {:else}
     {#if data.grants.canCreateAssistants}
-      <Heading tag="h2" class="text-3xl font-serif mb-4 font-medium text-dark-blue-40">Make a new assistant</Heading>
+      <Heading tag="h2" class="text-3xl font-serif mb-4 font-medium text-dark-blue-40"
+        >Make a new assistant</Heading
+      >
       <div class="bg-gold rounded-2xl p-8 mb-12 justify-between gap-12 items-start lg:flex">
-        <p class="mb-4 font-light">Build your own AI chatbot for this class. You can customize it with specific knowledge, personality, and parameters to serve as a digital assistant for this course.</p>
-        <a href="/class/{data.class.id}/assistant/new" class="text-sm text-blue-dark-50 shrink-0 flex items-center justify-center font-medium bg-white rounded-full p-2 px-4 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all"
+        <p class="mb-4 font-light">
+          Build your own AI chatbot for this class. You can customize it with specific knowledge,
+          personality, and parameters to serve as a digital assistant for this course.
+        </p>
+        <a
+          href="/class/{data.class.id}/assistant/new"
+          class="text-sm text-blue-dark-50 shrink-0 flex items-center justify-center font-medium bg-white rounded-full p-2 px-4 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all"
           >Create new assistant <ArrowRightOutline size="md" class="orange inline-block" /></a
         >
       </div>
     {/if}
 
-    <Heading tag="h2" class="text-3xl font-serif mb-4 font-medium text-dark-blue-40">Your assistants</Heading>
+    <Heading tag="h2" class="text-3xl font-serif mb-4 font-medium text-dark-blue-40"
+      >Your assistants</Heading
+    >
     <div class="grid md:grid-cols-2 gap-4 mb-12">
       {#each myAssistants as assistant}
         <ViewAssistant
@@ -56,7 +65,9 @@
       {/each}
     </div>
 
-    <Heading tag="h2" class="text-3xl font-serif font-medium mb-4 text-dark-blue-40">Course assistants</Heading>
+    <Heading tag="h2" class="text-3xl font-serif font-medium mb-4 text-dark-blue-40"
+      >Course assistants</Heading
+    >
     <div class="grid md:grid-cols-2 gap-4 mb-12">
       {#each courseAssistants as assistant}
         <ViewAssistant
@@ -69,7 +80,9 @@
       {/each}
     </div>
 
-    <Heading tag="h2" class="text-3xl font-serif font-medium mb-4 text-dark-blue-40">Other assistants</Heading>
+    <Heading tag="h2" class="text-3xl font-serif font-medium mb-4 text-dark-blue-40"
+      >Other assistants</Heading
+    >
     {#if otherAssistants.length === 0}
       <div>No other assistants</div>
     {:else}
@@ -85,16 +98,28 @@
           {#each otherAssistants as assistant}
             <TableBodyRow>
               <TableBodyCell class="font-light">{assistant.name}</TableBodyCell>
-              <TableBodyCell class="font-light">{creators[assistant.creator_id]?.email || 'unknown'}</TableBodyCell>
-              <TableBodyCell class="font-light">{assistant.published ? 'Published' : 'Private'}</TableBodyCell>
+              <TableBodyCell class="font-light"
+                >{creators[assistant.creator_id]?.email || 'unknown'}</TableBodyCell
+              >
+              <TableBodyCell class="font-light"
+                >{assistant.published ? 'Published' : 'Private'}</TableBodyCell
+              >
               <TableBodyCell>
                 {#if data.editableAssistants.has(assistant.id)}
-                  <a href="/class/{data.class.id}/assistant/{assistant.id}" class="text-sm text-blue-dark-50 font-medium bg-blue-light-40 rounded-full p-1 px-3 hover:bg-blue-dark-40 hover:text-white transition-all">Edit</a>
+                  <a
+                    href="/class/{data.class.id}/assistant/{assistant.id}"
+                    class="text-sm text-blue-dark-50 font-medium bg-blue-light-40 rounded-full p-1 px-3 hover:bg-blue-dark-40 hover:text-white transition-all"
+                    >Edit</a
+                  >
                 {/if}
               </TableBodyCell>
 
               <TableBodyCell
-                ><a href="/class/{data.class.id}?assistant={assistant.id}" class="flex items-center w-32 gap-2 text-sm text-white font-medium bg-orange rounded-full p-1 px-3 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all">Start a chat <CirclePlusSolid size="sm" class="inline" /></a></TableBodyCell
+                ><a
+                  href="/class/{data.class.id}?assistant={assistant.id}"
+                  class="flex items-center w-32 gap-2 text-sm text-white font-medium bg-orange rounded-full p-1 px-3 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all"
+                  >Start a chat <CirclePlusSolid size="sm" class="inline" /></a
+                ></TableBodyCell
               >
             </TableBodyRow>
           {/each}

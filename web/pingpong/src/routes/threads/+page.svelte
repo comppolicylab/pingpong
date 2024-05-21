@@ -1,5 +1,5 @@
 <script lang="ts">
-  import PageHeader, { mainTextClass } from '$lib/components/PageHeader.svelte';
+  import PageHeader from '$lib/components/PageHeader.svelte';
   import * as api from '$lib/api';
   import dayjs from '$lib/time';
   import { writable } from 'svelte/store';
@@ -63,15 +63,18 @@
 </script>
 
 <PageHeader>
-  <h2 class="text-3xl text-color-blue-dark-50 font-serif font-bold px-4 pb-3 pt-6" slot="left">Threads Archive</h2>
+  <h2 class="text-3xl text-color-blue-dark-50 font-serif font-bold px-4 pb-3 pt-6" slot="left">
+    Threads Archive
+  </h2>
 </PageHeader>
 
 <!-- TODO: search is not yet fully supported. -->
 
 <div class="grid gap-12 p-12 sm:grid-cols-[2fr_1fr]">
-  
   <div class="sm:col-start-2 sm:col-end-3">
-    <label for="class" class="text-xs uppercase tracking-wide block pb-2 pt-8">Filter by <b>Class</b></label>
+    <label for="class" class="text-xs uppercase tracking-wide block pb-2 pt-8"
+      >Filter by <b>Class</b></label
+    >
     <Select
       items={classOptions}
       on:change={(e) => updateSearch('class_id', getValue(e.target))}
@@ -79,14 +82,19 @@
       name="class"
     />
   </div>
-  
+
   <div class="sm:col-start-1 sm:col-end-2 sm:row-start-1">
     <h3 class="font-normal text-2xl border-b border-gray-200 pb-1">Threads</h3>
     <div class="flex flex-wrap flex-col">
       {#each data.threadArchive.threads as thread}
-        <a href={`/class/${thread.class_id}/thread/${thread.id}`} class="border-b border-gray-200 pb-4 pt-4 transition-all duration-300 hover:bg-gray-100 hover:pl-4">
+        <a
+          href={`/class/${thread.class_id}/thread/${thread.id}`}
+          class="border-b border-gray-200 pb-4 pt-4 transition-all duration-300 hover:bg-gray-100 hover:pl-4"
+        >
           <div>
-            <h4 class="eyebrow eyebrow-dark">{classNamesLookup[thread.class_id]?.name || 'Unknown'}</h4>
+            <h4 class="eyebrow eyebrow-dark">
+              {classNamesLookup[thread.class_id]?.name || 'Unknown'}
+            </h4>
             <div class="pt-2 font-light text-lg pb-2">
               {thread.name}
             </div>
@@ -99,19 +107,18 @@
           </div>
         </a>
       {/each}
-    
+
       {#if data.threadArchive.threads.length === 0}
         <div>No threads found</div>
       {/if}
-    
+
       {#if $error}
         <div>Error: {$error}</div>
       {/if}
-    
+
       {#if $hasMore}
         <button on:click={fetchNextPage}>Load more</button>
       {/if}
     </div>
   </div>
-
 </div>

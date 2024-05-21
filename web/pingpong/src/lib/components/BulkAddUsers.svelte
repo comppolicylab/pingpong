@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import * as api from '$lib/api';
-  import { Select, Helper, Button, GradientButton, Label, Textarea, Hr } from 'flowbite-svelte';
+  import { Select, Helper, Button, Label, Textarea, Hr } from 'flowbite-svelte';
 
   export let role: api.Role;
 
@@ -33,7 +33,11 @@
   </div>
   <Hr />
   <div>
-    <Button type="submit" pill class="bg-orange border border-orange text-white hover:bg-orange-dark">Add Users</Button>
+    <Button
+      type="submit"
+      pill
+      class="bg-orange border border-orange text-white hover:bg-orange-dark">Add Users</Button
+    >
     <Button
       type="button"
       pill

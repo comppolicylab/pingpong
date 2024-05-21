@@ -127,13 +127,15 @@
           {/each}
         </Dropdown>
       </div>
-      
+
       <div class="pt-20">
         <h2 class="font-bold text-6xl font-serif mb-4">What can I help you with today?</h2>
         <p class="mb-12 text-lg">Some examples of questions you can ask me are:</p>
         <div class="grid gap-4 lg:grid-cols-3">
           <div class="rounded-2xl bg-blue-light-50 p-8">
-            <p class="font-light">Make me a deadline calendar of all of my upcoming assignments and tests.</p>
+            <p class="font-light">
+              Make me a deadline calendar of all of my upcoming assignments and tests.
+            </p>
           </div>
           <div class="rounded-2xl bg-blue-light-50 p-8">
             <p class="font-light">Can you populate a mock test for me?</p>
@@ -143,7 +145,7 @@
           </div>
         </div>
       </div>
-    
+
       <div class="mt-auto mb-6">
         <ChatInput
           mimeType={data.uploadInfo.mimeType}

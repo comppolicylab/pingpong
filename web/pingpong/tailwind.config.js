@@ -29,10 +29,10 @@ const config = {
         'blue-dark-30': '#545193',
         'blue-light-50': '#F1F4FF',
         'blue-light-40': '#D9E2FF',
-        'orange': '#FC624D',
+        orange: '#FC624D',
         'orange-dark': '#E33F0C',
         'orange-light': '#FFF7F1',
-        'gold': '#FFD076',
+        gold: '#FFD076',
         'gold-light': '#FFF6E4'
       }
     }
