@@ -10,14 +10,14 @@
 <SvelteToast />
 {#if data.me.user}
   <!---<div class="h-full lg:grid lg:w-full lg:grid-cols-[320px_1fr] lg:gap-4 ">-->
-    <div class=" w-full flex lg:gap-4 h-[calc(100vh-3rem)]">
+  <div class=" w-full flex lg:gap-4 h-[calc(100vh-3rem)]">
     <div class="basis-[320px] shrink-0 grow-0">
-    <Sidebar {data} />
+      <Sidebar {data} />
     </div>
     <div class="basis-full grow">
-    <Main>
-      <slot />
-    </Main>
+      <Main>
+        <slot />
+      </Main>
     </div>
   </div>
 {:else}
