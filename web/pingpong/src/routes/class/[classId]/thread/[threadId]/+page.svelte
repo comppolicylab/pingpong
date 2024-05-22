@@ -262,7 +262,7 @@
         <div
           class="flex gap-2 px-4 py-2 items-center w-full text-sm flex-nowrap justify-between grow"
         >
-          <div class="flex flex-nowrap gap-1 grow">
+          <div class="flex gap-1 grow shrink min-w-0 flex-wrap">
             {#if !$published}
               <EyeSlashOutline size="sm" class="text-orange" />
               <Span class="text-gray-400 text-xs whitespace-nowrap"
@@ -279,7 +279,10 @@
           </div>
 
           <div class="shrink-0 grow-0 h-auto">
-            <DotsHorizontalOutline class="dots-menu dark:text-white cursor-pointer" size="sm" />
+            <DotsHorizontalOutline
+              class="dots-menu dark:text-white cursor-pointer bg-white dark:bg-slate-700"
+              size="sm"
+            />
             <Dropdown>
               <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
                 <span class:text-gray-300={!canPublishThread}>
