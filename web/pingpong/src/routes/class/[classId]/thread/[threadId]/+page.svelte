@@ -181,10 +181,10 @@
   </div>
 {/if}
 
-<div class="w-full flex flex-col justify-between h-[calc(100%-5rem)] lg:h-[calc(100%-7rem)]">
+<div class="w-full flex flex-col justify-between h-[calc(100%-5rem)] lg:h-[calc(100%-7rem)] grow-0 shrink-0">
   <div class="overflow-y-auto pb-4 px-2 lg:px-4" use:scroll={$messages}>
     {#if $canFetchMore}
-      <div class="flex justify-center py-4">
+      <div class="flex justify-center grow">
         <Button size="sm" class="text-sky-600 hover:text-sky-800" on:click={fetchMoreMessages}>
           <RefreshOutline class="w-3 h-3 me-2" /> Load earlier messages ...
         </Button>
