@@ -96,9 +96,7 @@
   };
 </script>
 
-<div
-  class="flex justify-center relative h-[calc(100%-5rem)] lg:h-[calc(100%-7rem)] grow-0 shrink-0"
->
+<div class="flex justify-center relative min-h-0 grow shrink">
   {#if $loading}
     <div class="absolute top-0 left-0 flex h-full w-full items-center">
       <div class="m-auto" transition:blur={{ amount: 10 }}>
@@ -130,7 +128,7 @@
         </Dropdown>
       </div>
 
-      <div class="grow content-center">
+      <div class="grow shrink content-center min-h-0 overflow-y-auto">
         <h2 class="font-bold text-4xl font-serif mb-4">What can I help you with today?</h2>
         <p class="mb-6 text-lg">Some examples of questions you can ask me are:</p>
         <div class="grid gap-4 lg:grid-cols-3">
@@ -159,6 +157,7 @@
           on:submit={handleSubmit}
         />
         <div class="flex gap-2 px-4 py-2 items-center w-full text-sm flex-wrap lg:flex-nowrap">
+          <EyeSlashOutline size="sm" class="text-orange" />
           <Span class="text-gray-400 text-xs"
             >This thread will be visible to yourself and the teaching team.</Span
           >
