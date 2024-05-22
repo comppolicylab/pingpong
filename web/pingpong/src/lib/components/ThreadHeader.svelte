@@ -22,7 +22,7 @@
         class="bg-white rounded-full ml-4 h-8 w-8 inline-block text-orange"
       /></Button
     >
-    <Dropdown class="w-64 overflow-y-auto py-1 h-36">
+    <Dropdown class="w-64 overflow-y-auto py-1 min-h-0 max-h-[400px]">
       {#each sortedClasses as cls}
         <DropdownItem
           class="flex items-center text-base font-semibold gap-4 py-4 text-sm tracking-wide font-medium uppercase hover:bg-blue-light-50"

@@ -181,10 +181,10 @@
   </div>
 {/if}
 
-<div class="w-full flex flex-col justify-between h-[calc(100%-5rem)] lg:h-[calc(100%-7rem)]">
+<div class="w-full flex flex-col justify-between grow min-h-0">
   <div class="overflow-y-auto pb-4 px-2 lg:px-4" use:scroll={$messages}>
     {#if $canFetchMore}
-      <div class="flex justify-center py-4">
+      <div class="flex justify-center grow">
         <Button size="sm" class="text-sky-600 hover:text-sky-800" on:click={fetchMoreMessages}>
           <RefreshOutline class="w-3 h-3 me-2" /> Load earlier messages ...
         </Button>
@@ -243,7 +243,7 @@
 
   {#if !$loading}
     <div class="w-full bg-gradient-to-t from-white to-transparent">
-      <div class="w-11/12 mx-auto relative">
+      <div class="w-11/12 mx-auto relative flex flex-col">
         {#if $waiting || $submitting}
           <div class="w-full flex justify-center absolute -top-10" transition:blur={{ amount: 10 }}>
             <DoubleBounce color="#0ea5e9" size="30" />
@@ -259,23 +259,30 @@
           remove={handleRemove}
           on:submit={handleSubmit}
         />
-        <div class="flex gap-2 px-4 py-2 items-center w-full text-sm flex-wrap lg:flex-nowrap">
-          {#if !$published}
-            <EyeSlashOutline size="sm" class="text-orange" />
-            <Span class="text-gray-400 text-xs"
-              >This thread is visible to the teaching team and</Span
-            >
-            <Span class="text-gray-600 text-xs w-full lg:w-auto"
-              >{$users.map((u) => u.email).join(', ')}</Span
-            >
-          {:else}
-            <Span class="text-gray-400 text-xs"
-              >This thread is visible to everyone in this class.</Span
-            >
-          {/if}
+        <div
+          class="flex gap-2 px-4 py-2 items-center w-full text-sm flex-nowrap justify-between grow"
+        >
+          <div class="flex gap-1 grow shrink min-w-0 flex-wrap">
+            {#if !$published}
+              <EyeSlashOutline size="sm" class="text-orange" />
+              <Span class="text-gray-400 text-xs whitespace-nowrap"
+                >This thread is visible to the teaching team and</Span
+              >
+              <Span class="text-gray-600 text-xs w-full lg:w-auto grow"
+                >{$users.map((u) => u.email).join(', ')}</Span
+              >
+            {:else}
+              <Span class="text-gray-400 text-xs"
+                >This thread is visible to everyone in this class.</Span
+              >
+            {/if}
+          </div>
 
-          <div class="ml-auto">
-            <DotsHorizontalOutline class="dots-menu dark:text-white cursor-pointer" />
+          <div class="shrink-0 grow-0 h-auto">
+            <DotsHorizontalOutline
+              class="dots-menu dark:text-white cursor-pointer bg-white dark:bg-slate-700"
+              size="sm"
+            />
             <Dropdown>
               <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
                 <span class:text-gray-300={!canPublishThread}>

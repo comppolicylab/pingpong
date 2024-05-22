@@ -61,6 +61,8 @@
    */
   export let mimeType: MimeTypeLookupFn;
 
+  // Input container
+  let containerRef: HTMLDivElement;
   // Text area reference for fixing height.
   let ref: HTMLTextAreaElement;
   // Real (visible) text area input reference.
@@ -91,9 +93,14 @@
     ref.style.width = `${el.clientWidth}px`;
     ref.value = el.value;
     const scrollHeight = ref.scrollHeight;
-    const fileListHeight = $files.length ? fileListRef.clientHeight : 0;
-    el.style.height = `${scrollHeight + 8 + fileListHeight}px`;
-    el.style.paddingTop = `${12 + fileListHeight}px`;
+    el.style.height = `${scrollHeight + 8}px`;
+    if (scrollHeight > 80) {
+      containerRef.classList.toggle('rounded-[16px]', true);
+      containerRef.classList.toggle('rounded-full', false);
+    } else {
+      containerRef.classList.toggle('rounded-[16px]', false);
+      containerRef.classList.toggle('rounded-full', true);
+    }
   };
 
   // Focus textarea when component is mounted. Since we can only use `use` on
@@ -189,13 +196,10 @@
   };
 </script>
 
-<div
-  use:init={$page.params.threadId}
-  class="w-full relative rounded-full bg-blue-light-50 shadow-inner"
->
+<div use:init={$page.params.threadId} class="w-full relative">
   <input type="hidden" name="file_ids" bind:value={fileIds} />
   <div
-    class="z-10 absolute top-0 p-2 flex gap-2"
+    class="z-10 top-0 p-2 flex gap-2 flex-wrap"
     use:fixFileListHeight={$files}
     bind:this={fileListRef}
   >
@@ -203,7 +207,10 @@
       <FilePlaceholder {mimeType} info={file} on:delete={removeFile} />
     {/each}
   </div>
-  <div class="relative flex gap-3 items-center p-2">
+  <div
+    class="relative flex gap-3 items-center p-2 rounded-full bg-blue-light-50 shadow-inner w-full"
+    bind:this={containerRef}
+  >
     <textarea
       bind:this={realRef}
       id="message"

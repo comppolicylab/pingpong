@@ -5,7 +5,7 @@
   import { page } from '$app/stores';
   import { Pulse } from 'svelte-loading-spinners';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
-  import { Button, Helper, Dropdown, DropdownItem } from 'flowbite-svelte';
+  import { Button, Helper, Dropdown, DropdownItem, Span } from 'flowbite-svelte';
   import { EyeSlashOutline, ChevronDownSolid } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
@@ -96,7 +96,7 @@
   };
 </script>
 
-<div class="flex items-center relative h-[calc(100%-5rem)] lg:h-[calc(100%-7rem)]">
+<div class="flex justify-center relative min-h-0 grow shrink">
   {#if $loading}
     <div class="absolute top-0 left-0 flex h-full w-full items-center">
       <div class="m-auto" transition:blur={{ amount: 10 }}>
@@ -105,11 +105,11 @@
     </div>
   {/if}
   <div
-    class="m-auto w-11/12 transition-opacity ease-in flex flex-col h-full py-3"
+    class="w-11/12 transition-opacity ease-in flex flex-col h-full justify-between"
     class:opacity-0={$loading}
   >
     {#if isConfigured}
-      <div class="my-2 w-full">
+      <div class="my-2 w-full shrink-0 grow-0">
         <Button
           pill
           class="bg-blue-light-50 text-xs uppercase tracking-wide font-medium text-black border-solid border border-blue-dark-40"
@@ -128,9 +128,9 @@
         </Dropdown>
       </div>
 
-      <div class="pt-20">
-        <h2 class="font-bold text-6xl font-serif mb-4">What can I help you with today?</h2>
-        <p class="mb-12 text-lg">Some examples of questions you can ask me are:</p>
+      <div class="grow shrink content-center min-h-0 overflow-y-auto">
+        <h2 class="font-bold text-4xl font-serif mb-4">What can I help you with today?</h2>
+        <p class="mb-6 text-lg">Some examples of questions you can ask me are:</p>
         <div class="grid gap-4 lg:grid-cols-3">
           <div class="rounded-2xl bg-blue-light-50 p-8">
             <p class="font-light">
@@ -146,7 +146,7 @@
         </div>
       </div>
 
-      <div class="mt-auto mb-6">
+      <div class="shrink-0 grow-0">
         <ChatInput
           mimeType={data.uploadInfo.mimeType}
           maxSize={data.uploadInfo.private_file_max_size}
@@ -156,6 +156,12 @@
           remove={handleRemove}
           on:submit={handleSubmit}
         />
+        <div class="flex gap-2 px-4 py-2 items-center w-full text-sm flex-wrap lg:flex-nowrap">
+          <EyeSlashOutline size="sm" class="text-orange" />
+          <Span class="text-gray-400 text-xs"
+            >This thread will be visible to yourself and the teaching team.</Span
+          >
+        </div>
         <input type="hidden" name="assistant_id" bind:value={$assistant.id} />
         <input type="hidden" name="parties" bind:value={parties} />
       </div>
