@@ -196,10 +196,7 @@
   };
 </script>
 
-<div
-  use:init={$page.params.threadId}
-  class="w-full relative"
->
+<div use:init={$page.params.threadId} class="w-full relative">
   <input type="hidden" name="file_ids" bind:value={fileIds} />
   <div
     class="z-10 top-0 p-2 flex gap-2 flex-wrap"
@@ -210,7 +207,10 @@
       <FilePlaceholder {mimeType} info={file} on:delete={removeFile} />
     {/each}
   </div>
-  <div class="relative flex gap-3 items-center p-2 rounded-full bg-blue-light-50 shadow-inner w-full" bind:this={containerRef}>
+  <div
+    class="relative flex gap-3 items-center p-2 rounded-full bg-blue-light-50 shadow-inner w-full"
+    bind:this={containerRef}
+  >
     <textarea
       bind:this={realRef}
       id="message"

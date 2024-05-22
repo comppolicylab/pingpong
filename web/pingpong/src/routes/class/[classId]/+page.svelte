@@ -96,7 +96,9 @@
   };
 </script>
 
-<div class="flex justify-center relative h-[calc(100%-5rem)] lg:h-[calc(100%-7rem)] grow-0 shrink-0">
+<div
+  class="flex justify-center relative h-[calc(100%-5rem)] lg:h-[calc(100%-7rem)] grow-0 shrink-0"
+>
   {#if $loading}
     <div class="absolute top-0 left-0 flex h-full w-full items-center">
       <div class="m-auto" transition:blur={{ amount: 10 }}>
@@ -157,9 +159,9 @@
           on:submit={handleSubmit}
         />
         <div class="flex gap-2 px-4 py-2 items-center w-full text-sm flex-wrap lg:flex-nowrap">
-            <Span class="text-gray-400 text-xs"
-              >This thread will be visible to yourself and the teaching team.</Span
-            >
+          <Span class="text-gray-400 text-xs"
+            >This thread will be visible to yourself and the teaching team.</Span
+          >
         </div>
         <input type="hidden" name="assistant_id" bind:value={$assistant.id} />
         <input type="hidden" name="parties" bind:value={parties} />

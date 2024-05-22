@@ -181,7 +181,9 @@
   </div>
 {/if}
 
-<div class="w-full flex flex-col justify-between h-[calc(100%-5rem)] lg:h-[calc(100%-7rem)] grow-0 shrink-0">
+<div
+  class="w-full flex flex-col justify-between h-[calc(100%-5rem)] lg:h-[calc(100%-7rem)] grow-0 shrink-0"
+>
   <div class="overflow-y-auto pb-4 px-2 lg:px-4" use:scroll={$messages}>
     {#if $canFetchMore}
       <div class="flex justify-center grow">
