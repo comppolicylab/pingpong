@@ -10,10 +10,7 @@
     CirclePlusSolid,
     DotsVerticalOutline,
     ArrowRightOutline,
-
     CogOutline
-
-
   } from 'flowbite-svelte-icons';
 
   import {
@@ -156,12 +153,12 @@
 
 <Dropdown class="w-40" placement="right" triggeredBy=".user">
   {#if $page.data.admin.showAdminPage}
-  <DropdownItem href="/admin" class="flex space-x-4 items-center">
-    <CogOutline size="sm" />
-    <span>Admin</span>
-  </DropdownItem>
-  <DropdownDivider />
-{/if}
+    <DropdownItem href="/admin" class="flex space-x-4 items-center">
+      <CogOutline size="sm" />
+      <span>Admin</span>
+    </DropdownItem>
+    <DropdownDivider />
+  {/if}
   <DropdownItem href="/profile" class="flex space-x-4 items-center">
     <UserSettingsOutline size="sm" />
     <span>Profile</span>
