@@ -4,14 +4,16 @@
   import dayjs from '$lib/time';
   import { writable } from 'svelte/store';
   import { Select } from 'flowbite-svelte';
-  import { goto } from '$app/navigation';
   import { page } from '$app/stores';
+  import { getValue, updateSearch } from '$lib/urlstate';
 
   export let data;
 
   const classOptions = [
     { value: '0', name: 'Any' },
-    ...data.classes.map((cls) => ({ value: `${cls.id}`, name: cls.name }))
+    ...data.classes
+      .map((cls) => ({ value: `${cls.id}`, name: cls.name }))
+      .sort((a, b) => a.name.localeCompare(b.name))
   ];
   let currentClass = $page.url.searchParams.get('class_id') || '0';
   const threads = writable(data.threadArchive.threads || []);
@@ -43,22 +45,6 @@
       $hasMore = !more.lastPage;
       $error = null;
     }
-  };
-
-  const updateSearch = (key: string, value: string) => {
-    const searchParams = $page.url.searchParams;
-    searchParams.set(key, value);
-    goto(`/threads?${searchParams.toString()}`);
-  };
-
-  const getValue = (el: EventTarget | null) => {
-    if (!el) {
-      return '';
-    }
-    if ((el as HTMLInputElement).value) {
-      return (el as HTMLInputElement).value;
-    }
-    return '';
   };
 </script>
 

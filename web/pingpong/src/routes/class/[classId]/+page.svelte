@@ -32,7 +32,7 @@
   let loading = writable(false);
   // Currently selected assistant.
   $: assistants = data?.assistants || [];
-  let assistant = writable(data?.assistants[0] || {});
+  $: assistant = data?.assistants[0] || {};
   // Whether billing is set up for the class (which controls everything).
   $: isConfigured = data?.hasAssistants && data?.hasBilling;
   $: parties = data.me.user?.id ? `${data.me.user.id}` : '';
@@ -42,11 +42,11 @@
     if (linkedAssistant && assistants) {
       const selectedAssistant = (assistants || []).find((asst) => asst.id === linkedAssistant);
       if (selectedAssistant) {
-        $assistant = selectedAssistant;
+        assistant = selectedAssistant;
       }
     }
   }
-  $: fileTypes = data.uploadInfo.fileTypesForAssistants($assistant);
+  $: fileTypes = data.uploadInfo.fileTypesForAssistants(assistant);
 
   // Handle file upload
   const handleUpload = (f: File, onProgress: (p: number) => void) => {
@@ -76,7 +76,7 @@
     try {
       const newThread = api.explodeResponse(
         await api.createThread(fetch, data.class.id, {
-          assistant_id: $assistant.id,
+          assistant_id: assistant.id,
           parties: partyIds,
           message: form.message,
           file_ids: form.file_ids
@@ -113,7 +113,7 @@
         <Button
           pill
           class="bg-blue-light-50 text-xs uppercase tracking-wide font-medium text-black border-solid border border-blue-dark-40"
-          >{$assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></Button
+          >{assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></Button
         >
         <Dropdown class="max-h-60 overflow-y-auto w-60">
           {#each assistants as asst}
@@ -162,7 +162,7 @@
             >This thread will be visible to yourself and the teaching team.</Span
           >
         </div>
-        <input type="hidden" name="assistant_id" bind:value={$assistant.id} />
+        <input type="hidden" name="assistant_id" bind:value={assistant.id} />
         <input type="hidden" name="parties" bind:value={parties} />
       </div>
     {:else}
