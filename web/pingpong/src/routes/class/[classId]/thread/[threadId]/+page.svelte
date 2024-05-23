@@ -211,6 +211,10 @@
                   )}
                 />
               </div>
+            {:else if content.type == 'code'}
+              <div class="leading-6">
+                <pre>{content.code}</pre>
+              </div>
             {:else if content.type == 'image_file'}
               <div class="leading-6 w-full">
                 <img

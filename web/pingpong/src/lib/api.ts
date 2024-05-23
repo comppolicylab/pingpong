@@ -1232,7 +1232,12 @@ export type MessageContentImageFile = {
   type: 'image_file';
 };
 
-export type Content = MessageContentImageFile | MessageContentText;
+export type MessageContentCode = {
+  code: string;
+  type: 'code';
+};
+
+export type Content = MessageContentImageFile | MessageContentText | MessageContentCode;
 
 export type OpenAIMessage = {
   id: string;
@@ -1353,14 +1358,36 @@ export type ThreadStreamMessageCreatedChunk = {
   message: OpenAIMessage;
 };
 
+export type ToolImageOutput = {
+  image: ImageFile;
+  index: number;
+  type: 'image';
+};
+
+export type ToolOutput = ToolImageOutput;
+
+export type ToolCallIO = {
+  input: string | null;
+  outputs: Array<ToolOutput> | null;
+};
+
+export type CodeInterpreterCall = {
+  code_interpreter: ToolCallIO;
+  id: string;
+  index: number;
+  type: 'code_interpreter';
+};
+
+export type ToolCallDelta = CodeInterpreterCall;
+
 export type ThreadStreamToolCallCreatedChunk = {
   type: 'tool_call_created';
-  tool_call: unknown; // TODO
+  tool_call: ToolCallDelta;
 };
 
 export type ThreadStreamToolCallDeltaChunk = {
   type: 'tool_call_delta';
-  delta: unknown; // TODO
+  delta: ToolCallDelta;
 };
 
 export type ThreadStreamErrorChunk = {
