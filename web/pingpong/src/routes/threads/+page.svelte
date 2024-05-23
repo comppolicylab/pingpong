@@ -11,7 +11,9 @@
 
   const classOptions = [
     { value: '0', name: 'Any' },
-    ...data.classes.map((cls) => ({ value: `${cls.id}`, name: cls.name })).sort((a, b) => a.name.localeCompare(b.name)),
+    ...data.classes
+      .map((cls) => ({ value: `${cls.id}`, name: cls.name }))
+      .sort((a, b) => a.name.localeCompare(b.name))
   ];
   let currentClass = $page.url.searchParams.get('class_id') || '0';
   const threads = writable(data.threadArchive.threads || []);

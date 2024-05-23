@@ -33,7 +33,7 @@
 
   export let data: LayoutData;
 
-  console.log("DATA", $page.data);
+  console.log('DATA', $page.data);
 
   $: avatar = data?.me?.profile?.image_url;
   $: name = data?.me?.user?.name || data?.me?.user?.email;
