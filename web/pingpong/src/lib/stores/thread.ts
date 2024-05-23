@@ -405,6 +405,7 @@ export class ThreadManager {
    * Handle a new chunk of data from a streaming response.
    */
   #handleStreamChunk(chunk: api.ThreadStreamChunk) {
+    console.debug('Received chunk', chunk);
     switch (chunk.type) {
       case 'message_created':
         this.#data.update((d) => {
@@ -435,15 +436,95 @@ export class ThreadManager {
       case 'error':
         throw new Error(chunk.detail || 'An unknown error occurred.');
       case 'tool_call_created':
-        // TODO: handle tool call created
+        this.#createToolCall(chunk.tool_call);
+        this.#appendToolCallDelta(chunk.tool_call);
         break;
       case 'tool_call_delta':
-        // TODO: handle tool call delta
+        this.#appendToolCallDelta(chunk.delta);
         break;
       default:
         console.warn('Unhandled chunk', chunk);
         break;
     }
+  }
+
+  /**
+   * Create a new tool call message.
+   */
+  #createToolCall(call: api.ToolCallDelta) {
+    this.#data.update((d) => {
+      const messages = d.data?.messages;
+      if (!messages?.length) {
+        console.warn('Received a tool call without any messages.');
+        return d;
+      }
+      const sortedMessages = messages.sort((a, b) => b.created_at - a.created_at);
+      const lastMessage = sortedMessages[0];
+      if (!lastMessage) {
+        console.warn('Received a tool call without a previous message.');
+        return d;
+      }
+
+      if (lastMessage.role !== 'assistant') {
+        d.data?.messages.push({
+          role: 'assistant',
+          content: [],
+          created_at: Date.now(),
+          id: `optimistic-${(Math.random() + 1).toString(36).substring(2)}`,
+          assistant_id: '',
+          thread_id: '',
+          metadata: {},
+          file_ids: [],
+          object: 'thread.message',
+          run_id: null
+        });
+      }
+      return { ...d };
+    });
+  }
+
+  #appendToolCallDelta(chunk: api.ToolCallDelta) {
+    this.#data.update((d) => {
+      const messages = d.data?.messages;
+      if (!messages?.length) {
+        console.warn('Received a tool call without any messages.');
+        return d;
+      }
+      const sortedMessages = messages.sort((a, b) => b.created_at - a.created_at);
+      const lastMessage = sortedMessages[0];
+      if (!lastMessage) {
+        console.warn('Received a tool call without a previous message.');
+        return d;
+      }
+
+      const lastChunk = lastMessage.content?.[lastMessage.content.length - 1];
+
+      // Add a new message chunk with the new code
+      if (chunk.code_interpreter.input) {
+        if (!lastChunk || lastChunk.type !== 'code') {
+          lastMessage.content.push({ type: 'code', code: chunk.code_interpreter.input });
+        } else {
+          // Merge code into existing chunk
+          lastChunk.code += chunk.code_interpreter.input;
+        }
+      }
+
+      // Add outputs to the last message
+      if (chunk.code_interpreter.outputs) {
+        for (const output of chunk.code_interpreter.outputs) {
+          switch (output.type) {
+            case 'image':
+              lastMessage.content.push({ type: 'image_file', image_file: output.image });
+              break;
+            default:
+              console.warn('Unhandled tool call output', output);
+              break;
+          }
+        }
+      }
+
+      return { ...d };
+    });
   }
 
   /**

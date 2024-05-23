@@ -109,26 +109,10 @@
     class:opacity-0={$loading}
   >
     {#if isConfigured}
-      <div class="my-2 w-full shrink-0 grow-0">
-        <Button
-          pill
-          class="bg-blue-light-50 text-xs uppercase tracking-wide font-medium text-black border-solid border border-blue-dark-40"
-          >{assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></Button
-        >
-        <Dropdown class="max-h-60 overflow-y-auto w-60">
-          {#each assistants as asst}
-            <DropdownItem on:click={() => selectAi(asst)} on:touchstart={() => selectAi(asst)}>
-              {#if !asst.published}
-                <EyeSlashOutline size="sm" class="inline-block mr-2 text-gray-400" />
-              {/if}
-              {asst.name}
-              <Helper class="text-xs">{data.assistantCreators[asst.creator_id].email}</Helper>
-            </DropdownItem>
-          {/each}
-        </Dropdown>
-      </div>
-
-      <div class="grow shrink content-center min-h-0 overflow-y-auto">
+      <div
+        class="grow shrink content-center min-h-0 overflow-y-auto space-y-4 mx-auto bg-gold-light rounded-2xl p-8 my-8 max-w-2xl"
+      >
+        <!-- TODO - we need a better way to show relevant examples for the chosen assistant
         <h2 class="font-bold text-4xl font-serif mb-4">What can I help you with today?</h2>
         <p class="mb-6 text-lg">Some examples of questions you can ask me are:</p>
         <div class="grid gap-4 lg:grid-cols-3">
@@ -144,6 +128,39 @@
             <p class="font-light">Teach me how to make my own bot and publish it.</p>
           </div>
         </div>
+        -->
+        <div class="dark:text-white text-gray-500">
+          Select an assistant and type a question below to get started.
+        </div>
+        <div class="text-center">
+          <Button
+            pill
+            class="bg-blue-light-50 text-xs uppercase tracking-wide font-medium text-black border-solid border border-blue-dark-40"
+            >{assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></Button
+          >
+
+          <Dropdown class="max-h-60 overflow-y-auto w-60">
+            {#each assistants as asst}
+              <DropdownItem on:click={() => selectAi(asst)} on:touchstart={() => selectAi(asst)}>
+                {#if !asst.published}
+                  <EyeSlashOutline size="sm" class="inline-block mr-2 text-gray-400" />
+                {/if}
+                {asst.name}
+                <Helper class="text-xs">{data.assistantCreators[asst.creator_id].email}</Helper>
+              </DropdownItem>
+            {/each}
+          </Dropdown>
+        </div>
+        <div>
+          <span class="dark:text-white text-gray-500">Created by:</span>
+          <span class="font-bold">{data.assistantCreators[assistant.creator_id].email}</span>
+        </div>
+        {#if assistant.description}
+          <div class="dark:text-white text-gray-500">Notes for this assistant:</div>
+          <div class="ml-4">{assistant.description}</div>
+        {:else}
+          <div class="italic">No notes are provided for this assistant.</div>
+        {/if}
       </div>
 
       <div class="shrink-0 grow-0">

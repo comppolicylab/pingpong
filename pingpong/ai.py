@@ -147,7 +147,6 @@ async def run_thread(
             event_handler=handler,
         ) as run:
             async for _ in run:
-                # Consume the stream and
                 yield handler.flush()
 
     except Exception as e:
