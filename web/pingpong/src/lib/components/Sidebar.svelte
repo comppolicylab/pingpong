@@ -85,7 +85,7 @@
       </div>
     </SidebarGroup>
 
-    <SidebarGroup class="mt-6 mb-20">
+    <SidebarGroup class="mt-6 mb-10">
       <SidebarItem
         href={`/class/${currentClassId}`}
         label="Start a new chat"
@@ -97,18 +97,19 @@
       </SidebarItem>
     </SidebarGroup>
 
-    <SidebarGroup border class="overflow-y-auto border-blue-dark-40 border-t-3 pt-1">
+    <SidebarGroup ulClass="flex flex-wrap justify-between gap-2 items-center">
+      <span class="flex-1 truncate text-white">Recent Threads</span>
       <a
         href={`/threads`}
         class="text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap justify-between gap-2 items-center"
       >
-        <span class="flex-1 truncate">Recent Threads</span><span class="text-xs"
-          >View All <ArrowRightOutline
-            size="md"
-            class="text-white inline-block p-0.5 ml-1 rounded-full bg-blue-dark-30"
-          /></span
-        >
+        <span class="text-xs">View All</span><ArrowRightOutline
+          size="md"
+          class="text-white inline-block p-0.5 ml-1 rounded-full bg-blue-dark-30"
+        />
       </a>
+    </SidebarGroup>
+    <SidebarGroup border class="overflow-y-auto border-blue-dark-40 border-t-3 pt-1">
       {#each threads as thread}
         <SidebarItem
           class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2"
