@@ -33,6 +33,8 @@
 
   export let data: LayoutData;
 
+  console.log("DATA", $page.data);
+
   $: avatar = data?.me?.profile?.image_url;
   $: name = data?.me?.user?.name || data?.me?.user?.email;
   // Index classes by ID so we can look them up easier.
@@ -151,6 +153,12 @@
 </Sidebar>
 
 <Dropdown class="w-40" placement="right" triggeredBy=".user">
+  {#if $page.data.admin.showAdminPage}
+    <DropdownItem href="/admin" class="flex space-x-4 items-center">
+      <UserSettingsOutline size="sm" />
+      <span>Admin</span>
+    </DropdownItem>
+  {/if}
   <DropdownItem href="/profile" class="flex space-x-4 items-center">
     <UserSettingsOutline size="sm" />
     <span>Profile</span>

@@ -41,20 +41,36 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 
   let classes: api.Class[] = [];
   let threads: api.Thread[] = [];
+  let institutions: api.Institution[] = [];
+  let canCreateInstitution = false;
   if (authed) {
-    [classes, threads] = await Promise.all([
+    [classes, threads, canCreateInstitution, institutions] = await Promise.all([
       api
         .getMyClasses(fetch)
         .then(api.explodeResponse)
         .then((c) => c.classes),
-      api.getRecentThreads(fetch).then((t) => t.threads)
+      api.getRecentThreads(fetch).then((t) => t.threads),
+      api.grants(fetch, {
+        canCreateInstitution: { target_type: 'root', target_id: 0, relation: 'can_create_institution' },
+      }).then((g) => g.canCreateInstitution),
+      api
+      .getInstitutions(fetch, 'can_create_class')
+      .then(api.explodeResponse)
+      .then((i) => i.institutions),
     ]);
+  }
+
+  const admin = {
+    canCreateInstitution,
+    canCreateClass: institutions,
+    showAdminPage: authed && (canCreateInstitution || institutions.length > 0),
   }
 
   return {
     me: me.data,
     authed,
     classes,
-    threads
+    threads,
+    admin,
   };
 };

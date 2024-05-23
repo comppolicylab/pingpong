@@ -9,12 +9,11 @@
 
 <SvelteToast />
 {#if data.me.user}
-  <!---<div class="h-full lg:grid lg:w-full lg:grid-cols-[320px_1fr] lg:gap-4 ">-->
   <div class=" w-full flex lg:gap-4 h-[calc(100vh-3rem)]">
-    <div class="basis-[320px] shrink-0 grow-0">
+    <div class="basis-[320px] shrink-0 grow-0 min-w-0">
       <Sidebar {data} />
     </div>
-    <div class="basis-full grow">
+    <div class="shrink grow min-w-0">
       <Main>
         <slot />
       </Main>
