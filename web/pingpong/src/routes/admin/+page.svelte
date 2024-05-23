@@ -20,7 +20,6 @@
   $: classes = (data.classes || [])
     .filter((cls) => (instSearch ? cls.institution_id === instSearch : true))
     .sort((a, b) => a.name.localeCompare(b.name));
-  $: console.log('inst', instSearch, classes);
 </script>
 
 <div class="h-full w-full flex flex-col">
