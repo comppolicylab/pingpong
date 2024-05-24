@@ -50,7 +50,7 @@
 
 <div class="h-full w-full flex flex-col">
   <PageHeader>
-    <h2 class="text-3xl text-color-blue-dark-50 font-serif font-bold px-4 pb-3 pt-6" slot="left">
+    <h2 class="text-3xl text-color-blue-dark-50 font-serif font-bold px-4 py-3" slot="left">
       Threads Archive
     </h2>
   </PageHeader>
