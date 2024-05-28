@@ -1378,7 +1378,15 @@ export type CodeInterpreterCall = {
   type: 'code_interpreter';
 };
 
-export type ToolCallDelta = CodeInterpreterCall;
+export type RetrievalCall = {
+  id: string;
+  index: number;
+  type: 'retrieval';
+  retrieval: object;
+}
+
+ // TODO(jnu): support function calling, updates for v2
+export type ToolCallDelta = CodeInterpreterCall | RetrievalCall;
 
 export type ThreadStreamToolCallCreatedChunk = {
   type: 'tool_call_created';
