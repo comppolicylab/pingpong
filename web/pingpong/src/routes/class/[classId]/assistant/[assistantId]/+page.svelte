@@ -29,11 +29,11 @@
     }
   });
 
-  $: assistant = data.assistants.find((a) => a.id === data.assistantId) || null;
+  $: assistant = data.assistant;
   $: canPublish = data.grants.canPublishAssistants;
 
+  let selectedFiles = data.selectedFiles;
   let loading = false;
-  let selectedFiles = (assistant?.files || []).map((file) => file.file_id);
   const tools = [{ value: 'code_interpreter', name: 'Code Interpreter' }];
   const defaultTools = [{ type: 'code_interpreter' }];
 
@@ -51,6 +51,7 @@
   $: asstFiles = allFiles
     .filter((f) => f.state === 'success')
     .map((f) => f.response) as ServerFile[];
+
   let fileOptions: SelectOptionType<string>[] = [];
   $: {
     const fileFilter = data.uploadInfo.getFileSupportFilter({
@@ -78,15 +79,13 @@
       }
     }
 
-    const file_ids: string[] = body.files?.toString().split(',') || [];
-
     const params = {
       name: body.name.toString(),
       description: body.description.toString(),
       instructions: body.instructions.toString(),
       model: body.model.toString(),
       tools,
-      file_ids,
+      file_ids: selectedFiles,
       published: body.published?.toString() === 'on',
       use_latex: body.use_latex?.toString() === 'on',
       hide_prompt: body.hide_prompt?.toString() === 'on'
