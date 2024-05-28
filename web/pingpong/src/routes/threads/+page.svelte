@@ -14,7 +14,7 @@
       .map((cls) => ({ value: `${cls.id}`, name: cls.name }))
       .sort((a, b) => a.name.localeCompare(b.name))
   ];
-  let currentClass = $page.url.searchParams.get('class_id') || '0';
+  $: currentClass = $page.url.searchParams.get('class_id') || '0';
   $: threads = data.threadArchive.threads || [];
   $: hasMore = !data.threadArchive.lastPage;
   $: error = data.threadArchive.error;
