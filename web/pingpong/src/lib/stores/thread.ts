@@ -500,25 +500,27 @@ export class ThreadManager {
       const lastChunk = lastMessage.content?.[lastMessage.content.length - 1];
 
       // Add a new message chunk with the new code
-      if (chunk.code_interpreter.input) {
-        if (!lastChunk || lastChunk.type !== 'code') {
-          lastMessage.content.push({ type: 'code', code: chunk.code_interpreter.input });
-        } else {
-          // Merge code into existing chunk
-          lastChunk.code += chunk.code_interpreter.input;
+      if (chunk.type === 'code_interpreter') {
+        if (chunk.code_interpreter.input) {
+          if (!lastChunk || lastChunk.type !== 'code') {
+            lastMessage.content.push({ type: 'code', code: chunk.code_interpreter.input });
+          } else {
+            // Merge code into existing chunk
+            lastChunk.code += chunk.code_interpreter.input;
+          }
         }
-      }
 
-      // Add outputs to the last message
-      if (chunk.code_interpreter.outputs) {
-        for (const output of chunk.code_interpreter.outputs) {
-          switch (output.type) {
-            case 'image':
-              lastMessage.content.push({ type: 'image_file', image_file: output.image });
-              break;
-            default:
-              console.warn('Unhandled tool call output', output);
-              break;
+        // Add outputs to the last message
+        if (chunk.code_interpreter.outputs) {
+          for (const output of chunk.code_interpreter.outputs) {
+            switch (output.type) {
+              case 'image':
+                lastMessage.content.push({ type: 'image_file', image_file: output.image });
+                break;
+              default:
+                console.warn('Unhandled tool call output', output);
+                break;
+            }
           }
         }
       }
