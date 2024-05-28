@@ -2,8 +2,7 @@
   import PageHeader from '$lib/components/PageHeader.svelte';
   import * as api from '$lib/api';
   import dayjs from '$lib/time';
-  import { writable } from 'svelte/store';
-  import { Select } from 'flowbite-svelte';
+  import { Select, Button } from 'flowbite-svelte';
   import { page } from '$app/stores';
   import { getValue, updateSearch } from '$lib/urlstate';
 
@@ -16,9 +15,9 @@
       .sort((a, b) => a.name.localeCompare(b.name))
   ];
   let currentClass = $page.url.searchParams.get('class_id') || '0';
-  const threads = writable(data.threadArchive.threads || []);
-  const hasMore = writable(!data.threadArchive.lastPage);
-  const error = writable(data.threadArchive.error);
+  $: threads = data.threadArchive.threads || [];
+  $: hasMore = !data.threadArchive.lastPage;
+  $: error = data.threadArchive.error;
 
   const classNamesLookup = data.classes.reduce(
     (acc, cls) => {
@@ -29,21 +28,22 @@
   );
 
   const fetchNextPage = async () => {
-    if (!$hasMore) {
+    if (!hasMore) {
       return;
     }
 
-    if ($error) {
+    if (error) {
       return;
     }
-    const lastTs = $threads.length ? $threads[$threads.length - 1].updated : undefined;
-    const more = await api.getAllThreads(fetch, { before: lastTs });
+    const lastTs = threads.length ? threads[threads.length - 1].updated : undefined;
+    const currentClassId = parseInt(currentClass, 10) || undefined;
+    const more = await api.getAllThreads(fetch, { before: lastTs, class_id: currentClassId });
     if (more.error) {
-      $error = more.error;
+      error = more.error;
     } else {
-      $threads = [...$threads, ...more.threads];
-      $hasMore = !more.lastPage;
-      $error = null;
+      threads = [...threads, ...more.threads];
+      hasMore = !more.lastPage;
+      error = null;
     }
   };
 </script>
@@ -73,7 +73,7 @@
     <div class="sm:col-start-1 sm:col-end-2 sm:row-start-1 h-full overflow-y-auto">
       <h3 class="font-normal text-2xl border-b border-gray-200 pb-1">Threads</h3>
       <div class="flex flex-wrap flex-col">
-        {#each data.threadArchive.threads as thread}
+        {#each threads as thread}
           <a
             href={`/class/${thread.class_id}/thread/${thread.id}`}
             class="border-b border-gray-200 pb-4 pt-4 transition-all duration-300 hover:bg-gray-100 hover:pl-4"
@@ -96,15 +96,24 @@
         {/each}
 
         {#if data.threadArchive.threads.length === 0}
-          <div>No threads found</div>
+          <div class="text-center py-8 text-gray-400 text-sm tracking-wide uppercase">
+            No threads found
+          </div>
         {/if}
 
-        {#if $error}
-          <div>Error: {$error}</div>
+        {#if error}
+          <div class="text-center py-8 text-red-400 text-sm tracking-wide uppercase">
+            Error: {error}
+          </div>
         {/if}
 
-        {#if $hasMore}
-          <button on:click={fetchNextPage}>Load more</button>
+        {#if hasMore}
+          <div class="text-center py-8 tracking-wide uppercase">
+            <Button
+              class="text-blue-dark-40 uppercase tracking-wide hover:bg-gray-100"
+              on:click={fetchNextPage}>Load more ...</Button
+            >
+          </div>
         {/if}
       </div>
     </div>
