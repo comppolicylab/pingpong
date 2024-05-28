@@ -144,7 +144,7 @@
           class="user cursor-pointer flex items-center p-2 text-base font-normal text-white rounded-lg dark:text-white hover:bg-blue-dark-40 dark:hover:bg-gray-700"
         >
           <Avatar src={avatar} alt={name} />
-          <span class="ml-3 text-sm">{name}</span>
+          <span class="ml-3 text-sm truncate" title={name}>{name}</span>
           <DotsVerticalOutline size="lg" class="ml-auto" />
         </div>
       </Li>
