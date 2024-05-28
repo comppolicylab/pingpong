@@ -1383,9 +1383,9 @@ export type RetrievalCall = {
   index: number;
   type: 'retrieval';
   retrieval: object;
-}
+};
 
- // TODO(jnu): support function calling, updates for v2
+// TODO(jnu): support function calling, updates for v2
 export type ToolCallDelta = CodeInterpreterCall | RetrievalCall;
 
 export type ThreadStreamToolCallCreatedChunk = {
