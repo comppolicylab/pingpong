@@ -150,7 +150,10 @@ const _qmethod = async <T extends BaseData, R extends BaseData>(
   path: string,
   data?: T
 ) => {
-  const params = new URLSearchParams(data as Record<string, string>);
+  // Treat args the same as when passed in the body.
+  // Specifically, we want to remove "undefined" values.
+  const filtered = data && (JSON.parse(JSON.stringify(data)) as Record<string, string>);
+  const params = new URLSearchParams(filtered);
   path = `${path}?${params}`;
   return await _fetchJSON<R>(f, method, path);
 };
