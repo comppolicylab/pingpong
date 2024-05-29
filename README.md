@@ -22,6 +22,8 @@ The easiest way to run the DB and OpenFGA is through Docker.
 
 ### Quick setup
 
+First, get access to the `config.dev.toml` file and put it in the root of your repo.
+
 Assuming you have a Docker environment available,
 the easiest way to start up development services is with the following script:
 
@@ -32,7 +34,56 @@ the easiest way to start up development services is with the following script:
 This will set up the DB (with all tables), OpenFGA, and the Python API in containers.
 
 This does **not** build/start the Web UI; for that, see the [`web/pingpong/README.md`](web/pingpong/README.md).
-You may also wish to stop the `pingpong-srv-1` container and replace it with an uncontainerized Python API for development.
+You may also wish to stop the `pingpong-srv-1` container and replace it with an uncontainerized Python API for development (see below for instructions).
+
+
+#### Running the Python API outside of Docker
+
+The **Quick Setup** runs the Python API inside of Docker.
+This makes development tedious if you need to make changes to the Python code.
+
+To run the Python API outside of Docker,
+first stop the `pingpong-srv-1` container in Docker (but keep the DB and authz containers running).
+
+Next, create a file in the root of the repo named `config.local.toml`.
+You can customize this file how you want, but the basic settings you need are:
+
+```toml
+log_level = "DEBUG"
+public_url = "http://localhost:5173"
+development = true
+
+[db]
+engine = "postgres"
+host = "localhost"
+user = "pingpong"
+password = "pingpong"
+database = "pingpong"
+
+[auth]
+
+[[auth.secret_keys]]
+key = "not actually a secret!"
+
+[authz]
+type = "openfga"
+scheme = "http"
+host = "localhost"
+store = "pingpong"
+cfg = "./pingpong/authz/authz.fga.json"
+key = "devkey"
+
+[email]
+type = "mock"
+```
+
+Then, run the following command to start the dev server:
+
+```
+CONFIG_PATH=config.local.toml poetry run uvicorn pingpong:server --port 8000 --host 0.0.0.0 --reload
+```
+
+This will start a `uvicorn` server that will automatically reload with code changes as you make them.
 
 
 #### First time logging in
