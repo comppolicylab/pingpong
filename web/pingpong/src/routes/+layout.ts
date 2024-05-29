@@ -18,6 +18,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   }
 
   const authed = me.data.status === 'valid';
+  const needsOnboarding = !!me.data?.user && !me.data.user.name;
 
   if (url.pathname === LOGIN) {
     // If the user is logged in, go to the home page.
@@ -35,6 +36,11 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
         goto(LOGIN);
       } else {
         redirect(302, LOGIN);
+      }
+    } else {
+      if (needsOnboarding && url.pathname !== '/onboarding') {
+        const destination = encodeURIComponent(`${url.pathname}${url.search}`);
+        redirect(302, `/onboarding?forward=${destination}`);
       }
     }
   }
@@ -73,6 +79,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   };
 
   return {
+    needsOnboarding,
     me: me.data,
     authed,
     classes,

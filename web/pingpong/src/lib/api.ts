@@ -266,7 +266,9 @@ export type UserClassRoles = {
  */
 export type AppUser = {
   id: number;
-  name: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  displayName: string | null;
   email: string;
   state: UserState;
   classes: UserClassRole[];
@@ -1713,4 +1715,21 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
       };
     }
   };
+};
+
+/**
+ * Self-reported information that the user can send us.
+ */
+export type ExtraUserInfo = {
+  firstName?: string;
+  lastName?: string;
+  displayName?: string;
+};
+
+/**
+ * Update self-reported information about the user.
+ */
+export const updateUserInfo = async (f: Fetcher, data: ExtraUserInfo) => {
+  const url = `me`;
+  return await PUT<ExtraUserInfo, AppUser>(f, url, data);
 };

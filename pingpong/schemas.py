@@ -247,7 +247,9 @@ class UserState(Enum):
 
 class User(BaseModel):
     id: int
-    name: str | None
+    first_name: str | None
+    last_name: str | None
+    display_name: str | None
     email: str
     state: UserState
     created: datetime
@@ -257,9 +259,19 @@ class User(BaseModel):
         from_attributes = True
 
 
+class UpdateUserInfo(BaseModel):
+    """Fields that the user can edit about themselves."""
+
+    first_name: str | None = Field(None, min_length=1, max_length=100)
+    last_name: str | None = Field(None, min_length=1, max_length=100)
+    display_name: str | None = Field(None, min_length=1, max_length=100)
+
+
 class ClassUser(BaseModel):
     id: int
-    name: str | None
+    first_name: str | None
+    last_name: str | None
+    display_name: str | None
     email: str
     state: UserState
     roles: ClassUserRoles
