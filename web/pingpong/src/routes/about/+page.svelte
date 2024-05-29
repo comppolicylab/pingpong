@@ -1,9 +1,11 @@
 <script lang="ts">
   import { Select, Label, Input, GradientButton, Textarea, Heading, P } from 'flowbite-svelte';
   import Sanitize from '$lib/components/Sanitize.svelte';
+  import { writable } from 'svelte/store';
+  import { happyToast, sadToast } from '$lib/toast.js';
+  import * as api from '$lib/api';
 
   export let data;
-  export let form;
 
   const year = new Date().getFullYear();
 
@@ -13,6 +15,39 @@
     { value: 'feature', name: 'Feature request' },
     { value: 'question', name: 'Question' }
   ];
+
+  const loading = writable(false);
+  const submitForm = async (evt: SubmitEvent) => {
+    evt.preventDefault();
+    $loading = true;
+
+    const form = evt.target as HTMLFormElement;
+    const formData = new FormData(form);
+    const d = Object.fromEntries(formData.entries());
+
+    const message = d.message?.toString();
+    if (!message) {
+      $loading = false;
+      return sadToast('Message is required');
+    }
+
+    const data = {
+      message: message,
+      email: d.email?.toString(),
+      name: d.name?.toString(),
+      category: d.category?.toString()
+    }
+
+    const result = await api.postSupportRequest(fetch, data);
+    if (result.$status < 300) {
+      $loading = false;
+      form.reset();
+      happyToast('Your message has been sent, thanks for the feedback!');
+    } else {
+      $loading = false;
+      sadToast('There was an error sending your message, please try again later.');
+    }
+  }
 </script>
 
 <div class="px-12 py-12 flex flex-col gap-8 about h-full overflow-y-auto">
@@ -138,14 +173,7 @@
           information with our other app data and will not share it with anyone else.
         </P>
         <div class="mt-6">
-          {#if form?.success}
-            <P class="text-green-500">Your message has been sent, thanks for the feedback!</P>
-          {:else if form && !form.success}
-            <P class="text-red-500"
-              >There was an error sending your message, please try again later.</P
-            >
-          {/if}
-          <form action="?/support" method="POST">
+          <form on:submit={submitForm}>
             <div class="flex flex-col gap-4">
               <div class="flex flex-col gap-2">
                 <Label for="name">Name (optional)</Label>
@@ -170,7 +198,11 @@
                 />
               </div>
               <div class="flex flex-col gap-2 mx-auto">
-                <GradientButton class="w-20" type="submit" color="cyanToBlue">Send</GradientButton>
+                <GradientButton 
+                  class="w-20" 
+                  type="submit"
+                  disabled={$loading}
+                  color="cyanToBlue">Send</GradientButton>
               </div>
             </div>
           </form>
