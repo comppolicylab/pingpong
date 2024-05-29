@@ -87,7 +87,7 @@
 
     <SidebarGroup class="mt-6 mb-10">
       <SidebarItem
-        href={isNaN(currentClassId) ? `/class/${currentClassId}`: '/'}
+        href={!isNaN(currentClassId) ? `/class/${currentClassId}`: '/'}
         label="Start a new chat"
         class="flex flex-row-reverse justify-between pr-4 bg-orange text-white rounded-full hover:bg-orange-dark"
       >
