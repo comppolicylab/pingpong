@@ -132,6 +132,8 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Name column is deprecated - use first_name and last_name instead
+    _name = Column("name", String, nullable=True)
     first_name = Column(String, nullable=True)
     last_name = Column(String, nullable=True)
     display_name = Column(String, nullable=True)
