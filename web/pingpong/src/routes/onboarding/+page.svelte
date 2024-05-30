@@ -17,15 +17,15 @@
     }
     loading = true;
     const formData = new FormData(form);
-    const firstName = formData.get('firstName')?.toString();
-    const lastName = formData.get('lastName')?.toString();
+    const first_name = formData.get('firstName')?.toString();
+    const last_name = formData.get('lastName')?.toString();
 
-    if (!firstName || !lastName) {
+    if (!first_name || !last_name) {
       loading = false;
       return sadToast('Please enter your first and last name');
     }
 
-    const response = await api.updateUserInfo(fetch, { firstName, lastName });
+    const response = await api.updateUserInfo(fetch, { first_name, last_name });
     const expanded = api.expandResponse(response);
     if (expanded.error) {
       sadToast(`Failed to profile information: ${expanded.error.detail}`);
@@ -33,7 +33,7 @@
       happyToast('Profile information saved');
       // Get `forward` parametr from URL
       const destination = $page.url.searchParams.get('forward') || '/';
-      goto(destination);
+      goto(destination, { invalidateAll: true });
     }
     loading = false;
   };
@@ -54,7 +54,7 @@
             type="text"
             placeholder="First name / given name"
             name="firstName"
-            value={data.me.user?.firstName || ''}
+            value={data.me.user?.first_name || ''}
             disabled={loading}
           />
         </div>
@@ -63,7 +63,7 @@
             type="text"
             placeholder="Surname / family name"
             name="lastName"
-            value={data.me.user?.lastName || ''}
+            value={data.me.user?.last_name || ''}
             disabled={loading}
           />
         </div>

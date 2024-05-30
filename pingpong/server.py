@@ -1366,7 +1366,7 @@ async def list_assistants(class_id: str, request: Request):
 
     return {
         "assistants": ret_assistants,
-        "creators": {c.id: schemas.Profile.from_email(c.email) for c in creators},
+        "creators": {c.id: c for c in creators},
     }
 
 
@@ -1457,7 +1457,7 @@ async def update_assistant(
                 detail="You are not allowed to publish assistants for this class.",
             )
 
-    if not req.dict():
+    if not req.model_dump():
         return asst
 
     openai_update: dict[str, Any] = {}

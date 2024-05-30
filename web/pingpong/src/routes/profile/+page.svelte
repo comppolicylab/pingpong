@@ -13,9 +13,16 @@
     </h2>
   </PageHeader>
 
-  <div class="mx-12">
-    <Heading tag="h3">Name</Heading>
-    <p>{data.me.user?.name || 'Unknown'}</p>
+  <div class="mx-12 flex gap-12 flex-wrap">
+    <div>
+      <Heading tag="h3">First Name</Heading>
+      <p>{data.me.user?.first_name || 'Unknown'}</p>
+    </div>
+
+    <div>
+      <Heading tag="h3">Last Name</Heading>
+      <p>{data.me.user?.last_name || 'Unknown'}</p>
+    </div>
   </div>
 
   <div class="mx-12">

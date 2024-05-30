@@ -10,10 +10,10 @@
     PenSolid,
     CirclePlusSolid
   } from 'flowbite-svelte-icons';
-  import type { Assistant } from '$lib/api';
+  import type { Assistant, AppUser } from '$lib/api';
 
   export let assistant: Assistant;
-  export let creator: { email: string };
+  export let creator: AppUser;
   export let editable = false;
 
   // Get the full URL to use the assistant
@@ -62,7 +62,7 @@
       >
     </div>
   </Heading>
-  <div class="text-xs mb-4">Created by <b>{creator.email}</b></div>
+  <div class="text-xs mb-4">Created by <b>{creator.name}</b></div>
   <div class="mb-4 font-light">{assistant.description || '(No description provided)'}</div>
   <div>
     <a

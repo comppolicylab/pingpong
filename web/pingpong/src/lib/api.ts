@@ -266,14 +266,48 @@ export type UserClassRoles = {
  */
 export type AppUser = {
   id: number;
-  firstName: string | null;
-  lastName: string | null;
-  displayName: string | null;
+  /**
+   * `name` is a field we can rely on to display some identifier for the user.
+   *
+   * Unlike `first_name`, `last_name`, and `display_name`, `name` is always
+   * defined. As a fallback it will be defined as the email address.
+   */
+  name: string;
+  /**
+   * First or given name of the user.
+   */
+  first_name: string | null;
+  /**
+   * Last or family name of the user.
+   */
+  last_name: string | null;
+  /**
+   * Chosen name to display in lieu of first/last name.
+   */
+  display_name: string | null;
+  /**
+   * Email address of the user.
+   */
   email: string;
+  /**
+   * Verification state of the user.
+   */
   state: UserState;
+  /**
+   * Classes the user is in.
+   */
   classes: UserClassRole[];
+  /**
+   * Institutions the user belongs to.
+   */
   institutions: Institution[];
+  /**
+   * User account creation time.
+   */
   created: string;
+  /**
+   * Last update to user account.
+   */
   updated: string | null;
 };
 
@@ -723,7 +757,7 @@ export type Assistant = {
  * Information about assistant creators.
  */
 export type AssistantCreators = {
-  [id: number]: Profile;
+  [id: number]: AppUser;
 };
 
 /**
@@ -1721,9 +1755,9 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
  * Self-reported information that the user can send us.
  */
 export type ExtraUserInfo = {
-  firstName?: string;
-  lastName?: string;
-  displayName?: string;
+  first_name?: string;
+  last_name?: string;
+  display_name?: string;
 };
 
 /**

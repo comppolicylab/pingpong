@@ -99,7 +99,7 @@
             <TableBodyRow>
               <TableBodyCell class="font-light">{assistant.name}</TableBodyCell>
               <TableBodyCell class="font-light"
-                >{creators[assistant.creator_id]?.email || 'unknown'}</TableBodyCell
+                >{creators[assistant.creator_id]?.name || 'unknown'}</TableBodyCell
               >
               <TableBodyCell class="font-light"
                 >{assistant.published ? 'Published' : 'Private'}</TableBodyCell
