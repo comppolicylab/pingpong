@@ -1138,6 +1138,7 @@ export type CreateThreadRequest = {
 export type UserPlaceholder = {
   id: number;
   email: string;
+  name: string;
 };
 
 /**

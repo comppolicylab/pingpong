@@ -76,15 +76,11 @@ class UserState(Enum):
     BANNED = "banned"
 
 
-class User(BaseModel):
-    id: int
+class UserNameMixin:
+    email: str
     first_name: str | None
     last_name: str | None
     display_name: str | None
-    email: str
-    state: UserState
-    created: datetime
-    updated: datetime | None
 
     @computed_field  # type: ignore
     @property
@@ -96,6 +92,13 @@ class User(BaseModel):
         if not parts:
             return self.email
         return " ".join(parts)
+
+
+class User(BaseModel, UserNameMixin):
+    id: int
+    state: UserState
+    created: datetime
+    updated: datetime | None
 
     class Config:
         from_attributes = True
@@ -176,9 +179,8 @@ class Assistants(BaseModel):
         from_attributes = True
 
 
-class UserPlaceholder(BaseModel):
+class UserPlaceholder(BaseModel, UserNameMixin):
     id: int
-    email: str
 
 
 class Thread(BaseModel):
