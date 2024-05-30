@@ -121,6 +121,53 @@
   const uploadFile = (f: File, onProgress: (p: number) => void) => {
     return api.uploadFile(data.class.id, f, { onProgress });
   };
+  
+  const updatingClass = writable(false);
+  // Handle class information update
+  const updateClass = async (evt: SubmitEvent) => {
+    evt.preventDefault();
+    $updatingClass = true;
+
+    const form = evt.target as HTMLFormElement;
+    const formData = new FormData(form);
+    const d = Object.fromEntries(formData.entries());
+
+    const result = await api.updateClass(fetch, data.class.id, d);
+    if (api.isErrorResponse(result)) {
+      $updatingClass = false;
+      let msg = result.detail || 'An unknown error occurred';
+      sadToast(msg);
+    } else {
+      invalidateAll();
+      $updatingClass = false;
+      happyToast('Success!');
+    }
+  };
+
+  const updatingApiKey = writable(false);
+  const updateApiKey = async (evt: SubmitEvent) => {
+    evt.preventDefault();
+    $updatingApiKey = true;
+
+    const form = evt.target as HTMLFormElement;
+    const formData = new FormData(form);
+    const d = Object.fromEntries(formData.entries());
+
+    const apiKey = (d.apiKey as string | undefined) || '';
+    const result = await api.updateApiKey(fetch, data.class.id, apiKey);
+
+    // TODO: Handle "This API Key arleady exists" error
+    if (api.isErrorResponse(result)) {
+      invalidateAll();
+      $updatingApiKey = false;
+      let msg = result.detail || 'An unknown error occurred';
+      sadToast(msg);
+    } else {
+      invalidateAll();
+      $updatingApiKey = false;
+      happyToast('Success!');
+    }
+  }
 
   /**
    * Function to fetch users from the server.
@@ -146,7 +193,7 @@
 >
   <Heading tag="h2" class="text-3xl font-serif font-medium text-blue-dark-40">Manage Class</Heading>
   {#if canEditClassInfo}
-    <form action="?/updateClass" class="pt-4" method="POST">
+    <form on:submit={updateClass} class="pt-4">
       <div class="grid grid-cols-3 gap-x-6 gap-y-8">
         <div>
           <Heading customSize="text-xl" tag="h3"
@@ -237,14 +284,14 @@
         <div></div>
         <div></div>
         <div>
-          <Button pill type="submit" class="bg-orange text-white hover:bg-orange-dark">Save</Button>
+          <Button pill type="submit" class="bg-orange text-white hover:bg-orange-dark" disabled={$updatingClass}>Save</Button>
         </div>
       </div>
     </form>
   {/if}
 
   {#if canViewApiKey}
-    <form action="?/updateApiKey" class="pt-6" method="POST">
+    <form on:submit={updateApiKey} class="pt-6">
       <div class="grid grid-cols-3 gap-x-6 gap-y-8">
         <div>
           <Heading customSize="text-xl font-bold" tag="h3"
@@ -291,7 +338,7 @@
         <div></div>
         <div></div>
         <div>
-          <Button pill type="submit" class="bg-orange text-white hover:bg-orange-dark">Save</Button>
+          <Button pill type="submit" disabled={$updatingApiKey} class="bg-orange text-white hover:bg-orange-dark">Save</Button>
         </div>
       </div>
     </form>
