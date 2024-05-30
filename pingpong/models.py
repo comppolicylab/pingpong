@@ -132,7 +132,11 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name = Column(String, nullable=True)
+    # Name column is deprecated - use first_name and last_name instead
+    _name = Column("name", String, nullable=True)
+    first_name = Column(String, nullable=True)
+    last_name = Column(String, nullable=True)
+    display_name = Column(String, nullable=True)
     email = Column(String, unique=True)
     state = Column(SQLEnum(schemas.UserState), default=schemas.UserState.UNVERIFIED)
     classes: Mapped[List["UserClassRole"]] = relationship(
@@ -154,6 +158,15 @@ class User(Base):
     async def verify(self, session: AsyncSession) -> None:
         self.state = schemas.UserState.VERIFIED
         session.add(self)
+
+    @classmethod
+    async def update_info(
+        self, session: AsyncSession, user_id: int, data: schemas.UpdateUserInfo
+    ) -> "User":
+        data_dict = data.model_dump(exclude_none=True)
+        stmt = update(User).where(User.id == int(user_id)).values(**data_dict)
+        await session.execute(stmt)
+        return await User.get_by_id(session, user_id)
 
     @classmethod
     async def get_by_email(cls, session: AsyncSession, email: str) -> "User":

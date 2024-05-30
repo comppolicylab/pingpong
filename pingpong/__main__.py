@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import webbrowser
 
 import click
@@ -11,6 +12,8 @@ from .auth import encode_auth_token
 from .authz.migrate import sync_db_to_openfga
 from .config import config
 from .models import Base, User
+
+logger = logging.getLogger(__name__)
 
 
 @click.group()
@@ -121,11 +124,17 @@ def db_init(clean, alembic_config: str) -> None:
 
 @db.command("migrate")
 @click.argument("revision", default="head")
+@click.option("--downgrade", default=False, is_flag=True)
 @click.option("--alembic-config", default="alembic.ini")
-def db_migrate(revision: str, alembic_config: str) -> None:
+def db_migrate(revision: str, downgrade: bool, alembic_config: str) -> None:
     al_cfg = _load_alembic(alembic_config)
-    # Run the Alembic upgrade command
-    alembic.command.upgrade(al_cfg, revision)
+    # Run the Alembic migration command (either up or down)
+    if downgrade:
+        logger.info(f"Downgrading to revision {revision}")
+        alembic.command.downgrade(al_cfg, revision)
+    else:
+        logger.info(f"Upgrading to revision {revision}")
+        alembic.command.upgrade(al_cfg, revision)
 
 
 @db.command("set-version")

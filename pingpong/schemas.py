@@ -4,7 +4,7 @@ from typing import Literal, Union
 
 from openai.types.beta.assistant_tool import AssistantTool as Tool
 from openai.types.beta.threads import Message as OpenAIMessage
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, computed_field
 
 from .gravatar import get_email_hash, get_gravatar_image
 
@@ -68,6 +68,40 @@ class Profile(BaseModel):
             gravatar_id=hashed,
             image_url=get_gravatar_image(email),
         )
+
+
+class UserState(Enum):
+    UNVERIFIED = "unverified"
+    VERIFIED = "verified"
+    BANNED = "banned"
+
+
+class UserNameMixin:
+    email: str
+    first_name: str | None
+    last_name: str | None
+    display_name: str | None
+
+    @computed_field  # type: ignore
+    @property
+    def name(self) -> str:
+        """Return some kind of name for the user."""
+        if self.display_name:
+            return self.display_name
+        parts = [name for name in [self.first_name, self.last_name] if name]
+        if not parts:
+            return self.email
+        return " ".join(parts)
+
+
+class User(BaseModel, UserNameMixin):
+    id: int
+    state: UserState
+    created: datetime
+    updated: datetime | None
+
+    class Config:
+        from_attributes = True
 
 
 class File(BaseModel):
@@ -139,15 +173,14 @@ class UpdateAssistant(BaseModel):
 
 class Assistants(BaseModel):
     assistants: list[Assistant]
-    creators: dict[int, Profile]
+    creators: dict[int, User]
 
     class Config:
         from_attributes = True
 
 
-class UserPlaceholder(BaseModel):
+class UserPlaceholder(BaseModel, UserNameMixin):
     id: int
-    email: str
 
 
 class Thread(BaseModel):
@@ -239,27 +272,19 @@ class CreateInvite(BaseModel):
     class_name: str = Field(..., min_length=3, max_length=100)
 
 
-class UserState(Enum):
-    UNVERIFIED = "unverified"
-    VERIFIED = "verified"
-    BANNED = "banned"
+class UpdateUserInfo(BaseModel):
+    """Fields that the user can edit about themselves."""
 
-
-class User(BaseModel):
-    id: int
-    name: str | None
-    email: str
-    state: UserState
-    created: datetime
-    updated: datetime | None
-
-    class Config:
-        from_attributes = True
+    first_name: str | None = Field(None, min_length=1, max_length=100)
+    last_name: str | None = Field(None, min_length=1, max_length=100)
+    display_name: str | None = Field(None, min_length=1, max_length=100)
 
 
 class ClassUser(BaseModel):
     id: int
-    name: str | None
+    first_name: str | None
+    last_name: str | None
+    display_name: str | None
     email: str
     state: UserState
     roles: ClassUserRoles

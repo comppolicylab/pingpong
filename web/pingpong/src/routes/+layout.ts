@@ -1,11 +1,10 @@
-import { goto } from '$app/navigation';
 import { redirect } from '@sveltejs/kit';
-import { browser } from '$app/environment';
 import * as api from '$lib/api';
 import type { LayoutLoad } from './$types';
 
 const LOGIN = '/login';
 const HOME = '/';
+const ONBOARDING = '/onboarding';
 
 /**
  * Load the current user and redirect if they are not logged in.
@@ -18,23 +17,25 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   }
 
   const authed = me.data.status === 'valid';
+  const needsOnboarding = !!me.data?.user && (!me.data.user.first_name || !me.data.user.last_name);
 
   if (url.pathname === LOGIN) {
     // If the user is logged in, go to the home page.
     if (authed) {
-      if (browser) {
-        goto(HOME);
-      } else {
-        redirect(302, HOME);
-      }
+      redirect(302, HOME);
     }
   } else {
     // If the user is not logged in, go to the login page.
     if (!authed) {
-      if (browser) {
-        goto(LOGIN);
-      } else {
-        redirect(302, LOGIN);
+      redirect(302, LOGIN);
+    } else {
+      if (needsOnboarding && url.pathname !== ONBOARDING) {
+        const destination = encodeURIComponent(`${url.pathname}${url.search}`);
+        redirect(302, `${ONBOARDING}?forward=${destination}`);
+      } else if (!needsOnboarding && url.pathname === ONBOARDING) {
+        // Just in case someone tries to go to the onboarding page when they don't need to.
+        const destination = url.searchParams.get('forward') || HOME;
+        redirect(302, destination);
       }
     }
   }
@@ -73,6 +74,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   };
 
   return {
+    needsOnboarding,
     me: me.data,
     authed,
     classes,

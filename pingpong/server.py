@@ -527,7 +527,9 @@ async def list_class_users(
         class_users.append(
             schemas.ClassUser(
                 id=u.user_id,
-                name=u.user.name,
+                first_name=u.user.first_name,
+                last_name=u.user.last_name,
+                display_name=u.user.display_name,
                 email=u.user.email,
                 state=u.user.state,
                 roles=schemas.ClassUserRoles(
@@ -1364,7 +1366,7 @@ async def list_assistants(class_id: str, request: Request):
 
     return {
         "assistants": ret_assistants,
-        "creators": {c.id: schemas.Profile.from_email(c.email) for c in creators},
+        "creators": {c.id: c for c in creators},
     }
 
 
@@ -1455,7 +1457,7 @@ async def update_assistant(
                 detail="You are not allowed to publish assistants for this class.",
             )
 
-    if not req.dict():
+    if not req.model_dump():
         return asst
 
     openai_update: dict[str, Any] = {}
@@ -1580,6 +1582,17 @@ async def download_file(
 async def get_me(request: Request):
     """Get the session information."""
     return request.state.session
+
+
+@v1.put(
+    "/me",
+    dependencies=[Depends(LoggedIn())],
+)
+async def update_me(request: Request, update: schemas.UpdateUserInfo):
+    """Update the user profile."""
+    return await models.User.update_info(
+        request.state.db, request.state.session.user.id, update
+    )
 
 
 @v1.get(

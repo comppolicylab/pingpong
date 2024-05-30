@@ -146,14 +146,14 @@
                   <EyeSlashOutline size="sm" class="inline-block mr-2 text-gray-400" />
                 {/if}
                 {asst.name}
-                <Helper class="text-xs">{data.assistantCreators[asst.creator_id].email}</Helper>
+                <Helper class="text-xs">{data.assistantCreators[asst.creator_id].name}</Helper>
               </DropdownItem>
             {/each}
           </Dropdown>
         </div>
         <div>
           <span class="dark:text-white text-gray-500">Created by:</span>
-          <span class="font-bold">{data.assistantCreators[assistant.creator_id].email}</span>
+          <span class="font-bold">{data.assistantCreators[assistant.creator_id].name}</span>
         </div>
         {#if assistant.description}
           <div class="dark:text-white text-gray-500">Notes for this assistant:</div>

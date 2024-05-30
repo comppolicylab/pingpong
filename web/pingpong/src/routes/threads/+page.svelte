@@ -89,7 +89,7 @@
                 {dayjs.utc(thread.updated).fromNow()}
               </div>
               <div class="text-gray-400 text-xs uppercase tracking-wide">
-                {thread.users.map((user) => user.email).join(', ')}
+                {thread.users.map((user) => user.name).join(', ')}
               </div>
             </div>
           </a>
