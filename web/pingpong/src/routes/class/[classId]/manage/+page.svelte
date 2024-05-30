@@ -121,7 +121,7 @@
   const uploadFile = (f: File, onProgress: (p: number) => void) => {
     return api.uploadFile(data.class.id, f, { onProgress });
   };
-  
+
   const updatingClass = writable(false);
   // Handle class information update
   const updateClass = async (evt: SubmitEvent) => {
@@ -167,7 +167,7 @@
       $updatingApiKey = false;
       happyToast('Success!');
     }
-  }
+  };
 
   /**
    * Function to fetch users from the server.
@@ -284,7 +284,12 @@
         <div></div>
         <div></div>
         <div>
-          <Button pill type="submit" class="bg-orange text-white hover:bg-orange-dark" disabled={$updatingClass}>Save</Button>
+          <Button
+            pill
+            type="submit"
+            class="bg-orange text-white hover:bg-orange-dark"
+            disabled={$updatingClass}>Save</Button
+          >
         </div>
       </div>
     </form>
@@ -338,7 +343,12 @@
         <div></div>
         <div></div>
         <div>
-          <Button pill type="submit" disabled={$updatingApiKey} class="bg-orange text-white hover:bg-orange-dark">Save</Button>
+          <Button
+            pill
+            type="submit"
+            disabled={$updatingApiKey}
+            class="bg-orange text-white hover:bg-orange-dark">Save</Button
+          >
         </div>
       </div>
     </form>

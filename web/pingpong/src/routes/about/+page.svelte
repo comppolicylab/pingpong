@@ -36,7 +36,7 @@
       email: d.email?.toString(),
       name: d.name?.toString(),
       category: d.category?.toString()
-    }
+    };
 
     const result = await api.postSupportRequest(fetch, data);
     if (result.$status < 300) {
@@ -47,7 +47,7 @@
       $loading = false;
       sadToast('There was an error sending your message, please try again later.');
     }
-  }
+  };
 </script>
 
 <div class="px-12 py-12 flex flex-col gap-8 about h-full overflow-y-auto">
@@ -198,11 +198,9 @@
                 />
               </div>
               <div class="flex flex-col gap-2 mx-auto">
-                <GradientButton 
-                  class="w-20" 
-                  type="submit"
-                  disabled={$loading}
-                  color="cyanToBlue">Send</GradientButton>
+                <GradientButton class="w-20" type="submit" disabled={$loading} color="cyanToBlue"
+                  >Send</GradientButton
+                >
               </div>
             </div>
           </form>
