@@ -34,7 +34,7 @@
       sadToast(result.detail?.toString() || 'Could not log in');
       loggingIn.set(false);
     }
-  }
+  };
 </script>
 
 <div class="h-[calc(100dvh-3rem)] v-screen flex items-center justify-center">
