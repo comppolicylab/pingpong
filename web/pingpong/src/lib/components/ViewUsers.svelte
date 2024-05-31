@@ -1,7 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { enhance } from '$app/forms';
-  import type { SubmitFunction } from '@sveltejs/kit';
   import {
     CheckCircleOutline,
     CloseOutline,
@@ -34,7 +32,7 @@
   export let pageSize: number = 10;
 
   /**
-   * The current class id to fetch users from.
+   * The current class id.
    */
   export let classId: number | undefined = undefined;
 

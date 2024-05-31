@@ -31,7 +31,7 @@
       sadToast('Emails are required');
     }
 
-    const role = d.role as string | undefined;
+    const role = d.role as api.Role | undefined;
     if (!role) {
       $loading = false;
       sadToast('Role is required');
@@ -87,6 +87,7 @@
       type="button"
       pill
       class="bg-blue-light-50 border rounded-full border-blue-dark-40 text-blue-dark-50 hover:bg-blue-light-40 ml-4"
+      disabled={$loading}
       on:click={() => dispatch('cancel')}
       on:touchstart={() => dispatch('cancel')}>Cancel</Button
     >

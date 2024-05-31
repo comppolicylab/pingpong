@@ -172,14 +172,11 @@
     const formData = new FormData(form);
     const d = Object.fromEntries(formData.entries());
 
-    const apiKey = (d.apiKey as string | undefined) || '';
-    const result = await api.updateApiKey(fetch, data.class.id, apiKey);
+    const _apiKey = (d.apiKey as string | undefined) || '';
+    const result = await api.updateApiKey(fetch, data.class.id, _apiKey);
 
-    // FIXME: Investigate "This API Key arleady exists" error
-    // FIXME: Save button might make sense to be hidden if the API key is the same
-    // TODO: Support deleting the API key
-    // TODO: Confirm that we want to keep the invalid API key in the form after an unsuccessful update -- blurred key shows correct value
     if (api.isErrorResponse(result)) {
+      apiKey = data.apiKey || '';
       invalidateAll();
       $updatingApiKey = false;
       let msg = result.detail || 'An unknown error occurred';
