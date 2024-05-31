@@ -3,7 +3,7 @@
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
   import * as api from '$lib/api';
-  import type { FileUploadInfo, ServerFile } from '$lib/api';
+  import type { FileUploadInfo, ServerFile, CreateClassUsersRequest } from '$lib/api';
   import {
     Button,
     Checkbox,
@@ -122,6 +122,24 @@
     return api.uploadFile(data.class.id, f, { onProgress });
   };
 
+  /**
+   * Bulk add users to a class.
+   */
+  const submitCreateUsers = async (e: CustomEvent<CreateClassUsersRequest>) => {
+    const result = await api.createClassUsers(fetch, data.class.id, e.detail);
+
+    if (api.isErrorResponse(result)) {
+      invalidateAll();
+      usersModalOpen = false;
+      let msg = result.detail || 'An unknown error occurred';
+      sadToast(msg);
+    } else {
+      invalidateAll();
+      usersModalOpen = false;
+      happyToast('Success!');
+    }
+  };
+
   const updatingClass = writable(false);
   // Handle class information update
   const updateClass = async (evt: SubmitEvent) => {
@@ -145,7 +163,8 @@
   };
 
   const updatingApiKey = writable(false);
-  const updateApiKey = async (evt: SubmitEvent) => {
+  // Handle API key update
+  const submitUpdateApiKey = async (evt: SubmitEvent) => {
     evt.preventDefault();
     $updatingApiKey = true;
 
@@ -156,7 +175,10 @@
     const apiKey = (d.apiKey as string | undefined) || '';
     const result = await api.updateApiKey(fetch, data.class.id, apiKey);
 
-    // TODO: Handle "This API Key arleady exists" error
+    // FIXME: Investigate "This API Key arleady exists" error
+    // FIXME: Save button might make sense to be hidden if the API key is the same
+    // TODO: Support deleting the API key
+    // TODO: Confirm that we want to keep the invalid API key in the form after an unsuccessful update -- blurred key shows correct value
     if (api.isErrorResponse(result)) {
       invalidateAll();
       $updatingApiKey = false;
@@ -177,6 +199,8 @@
     const offset = Math.max(0, (page - 1) * pageSize);
     return api.getClassUsers(fetch, data.class.id, { limit, offset, search });
   };
+
+  const classId = data.class.id;
 
   // Clean up state on navigation. Invalidate data so that any changes
   // are reflected in the rest of the app. (If performance suffers here,
@@ -296,7 +320,7 @@
   {/if}
 
   {#if canViewApiKey}
-    <form on:submit={updateApiKey} class="pt-6">
+    <form on:submit={submitUpdateApiKey} class="pt-6">
       <div class="grid grid-cols-3 gap-x-6 gap-y-8">
         <div>
           <Heading customSize="text-xl font-bold" tag="h3"
@@ -364,7 +388,11 @@
       </div>
       <div class="col-span-2">
         <div class="mb-4">
-          <ViewUsers {fetchUsers} />
+          <!-- Update the user view when we finish batch adding users. -->
+          <!-- TODO: Figure out a way to only update when the modal closes, not when it opens-->
+          {#key usersModalOpen}
+            <ViewUsers {fetchUsers} {classId} />
+          {/key}
         </div>
         <Button
           pill
@@ -378,7 +406,11 @@
         >
         {#if usersModalOpen}
           <Modal bind:open={usersModalOpen} title="Manage users">
-            <BulkAddUsers on:cancel={() => (usersModalOpen = false)} role="student" />
+            <BulkAddUsers
+              on:submit={submitCreateUsers}
+              on:cancel={() => (usersModalOpen = false)}
+              role="student"
+            />
           </Modal>
         {/if}
       </div>

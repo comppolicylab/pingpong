@@ -26,11 +26,17 @@
   import { ROLES, ROLE_LABELS } from '$lib/api';
   import type { ClassUser, Role, ClassUsersResponse } from '$lib/api';
   import { sadToast, happyToast } from '$lib/toast';
+  import * as api from '$lib/api';
 
   /**
    * Number of users to view on each page.
    */
   export let pageSize: number = 10;
+
+  /**
+   * The current class id to fetch users from.
+   */
+  export let classId: number | undefined = undefined;
 
   /**
    * Function to fetch users from the server.
@@ -158,59 +164,93 @@
   };
 
   /**
-   * Remove a user from the class.
+   * Force a re-render of the component with the current data.
    */
-  const enhanceDelete: SubmitFunction = ({ formData }) => {
-    const userId = formData.get('user_id');
-    if (!userId) {
-      sadToast('Failed to remove user: user ID is missing');
-      return;
-    }
-    const user = users.find((u) => u.id === +userId)?.email || `User ${userId}`;
-    return async ({ result }) => {
-      if (result.type === 'failure') {
-        // Force a re-render of the component with the current data
-        const detail = result.data?.detail || 'unknown error';
-        sadToast(`Failed to remove user: ${detail}`);
-        users = users.slice();
-      } else {
-        happyToast(`Removed ${user} from the class`);
-        loadUsers();
-      }
-    };
+  const showErrorAndForceCurrentDataRefresh = (detail: string) => {
+    sadToast(detail);
+    users = users.slice();
   };
 
   /**
-   * Fancy updates for user role toggles.
+   * Submit the form to update the user role.
    */
-  const enhanceToggle: SubmitFunction = ({ formData }) => {
-    const role = formData.get('role');
+  const submitUpdateUser = async (evt: SubmitEvent) => {
+    evt.preventDefault();
+
+    const form = evt.target as HTMLFormElement;
+    const formData = new FormData(form);
+    const d = Object.fromEntries(formData.entries());
+
+    const role = d.role.toString() as Role;
     if (!role) {
-      sadToast('Failed to update user role: role is missing');
+      showErrorAndForceCurrentDataRefresh('Failed to update user role: role is missing');
       return;
     }
-    const userId = formData.get('user_id');
-    if (!userId) {
-      sadToast('Failed to update user role: user ID is missing');
+
+    const userId = parseInt(d.user_id.toString(), 10);
+    if (!d.user_id) {
+      showErrorAndForceCurrentDataRefresh('Failed to update user role: user ID is missing');
       return;
     }
+
+    if (!classId) {
+      showErrorAndForceCurrentDataRefresh('Failed to update user role: class ID is missing');
+      return;
+    }
+
     const roleLabel = ROLE_LABELS[role as Role] || role;
     const user = users.find((u) => u.id === +userId)?.email || `User ${userId}`;
     const action =
-      formData.get('verdict') === 'on'
+      d.verdict === 'on'
         ? `Added ${user} to the ${roleLabel} group`
         : `Removed ${user} from the ${roleLabel} group`;
-    return async ({ result, update }) => {
-      if (result.type === 'failure') {
-        // Force a re-render of the component with the current data
-        const detail = result.data?.detail || 'unknown error';
-        sadToast(`Failed to update user role: ${detail}`);
-        users = users.slice();
-      } else {
-        happyToast(action);
-        update();
-      }
-    };
+
+    const result = await api.updateClassUser(fetch, classId, userId, {
+      role: role,
+      verdict: d.verdict === 'on' ? true : false
+    });
+
+    if (api.isErrorResponse(result)) {
+      // Force a re-render of the component with the current data
+      const detail = result.detail || 'unknown error';
+      showErrorAndForceCurrentDataRefresh(`Failed to update user role: ${detail}`);
+    } else {
+      happyToast(action);
+    }
+  };
+
+  /**
+   * Remove a user from the class.
+   */
+  const submitRemoveUser = async (evt: SubmitEvent) => {
+    evt.preventDefault();
+
+    const form = evt.target as HTMLFormElement;
+    const formData = new FormData(form);
+    const d = Object.fromEntries(formData.entries());
+
+    const userId = parseInt(d.user_id.toString(), 10);
+    if (!d.user_id) {
+      showErrorAndForceCurrentDataRefresh('Failed to remove user: user ID is missing');
+      return;
+    }
+
+    if (!classId) {
+      showErrorAndForceCurrentDataRefresh('Failed to remove user: class ID is missing');
+      return;
+    }
+
+    const user = users.find((u) => u.id === +userId)?.email || `User ${userId}`;
+    const result = await api.removeClassUser(fetch, classId, userId);
+
+    if (api.isErrorResponse(result)) {
+      // Force a re-render of the component with the current data
+      const detail = result.detail || 'unknown error';
+      showErrorAndForceCurrentDataRefresh(`Failed to remove user: ${detail}`);
+    } else {
+      happyToast(`Removed ${user} from the class`);
+      loadUsers();
+    }
   };
 
   // Load users from the server when the component is mounted.
@@ -251,7 +291,7 @@
             <TableBodyCell {tdClass}>{user.email}</TableBodyCell>
             {#each ROLES as role}
               <TableBodyCell {tdClass}>
-                <form action="?/updateUser" method="POST" use:enhance={enhanceToggle}>
+                <form on:submit={submitUpdateUser}>
                   <input type="hidden" name="user_id" value={user.id} />
                   <input type="hidden" name="role" value={role} />
                   <Toggle
@@ -278,7 +318,7 @@
               {/if}
             </TableBodyCell>
             <TableBodyCell {tdClass}>
-              <form action="?/removeUser" method="POST" use:enhance={enhanceDelete}>
+              <form on:submit={submitRemoveUser}>
                 <input type="hidden" name="user_id" value={user.id} />
                 <Button on:click={deleteUser}><TrashBinOutline color="red" /></Button>
               </form>
