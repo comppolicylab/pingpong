@@ -125,6 +125,7 @@
   /**
    * Bulk add users to a class.
    */
+  let timesAdded = 0;
   const submitCreateUsers = async (e: CustomEvent<CreateClassUsersRequest>) => {
     const result = await api.createClassUsers(fetch, data.class.id, e.detail);
 
@@ -136,6 +137,7 @@
     } else {
       invalidateAll();
       usersModalOpen = false;
+      timesAdded++;
       happyToast('Success!');
     }
   };
@@ -386,8 +388,8 @@
       <div class="col-span-2">
         <div class="mb-4">
           <!-- Update the user view when we finish batch adding users. -->
-          <!-- TODO: Figure out a way to only update when the modal closes, not when it opens-->
-          {#key usersModalOpen}
+          <!-- Uses a variable for times users have been bulk added -->
+          {#key timesAdded}
             <ViewUsers {fetchUsers} {classId} />
           {/key}
         </div>
