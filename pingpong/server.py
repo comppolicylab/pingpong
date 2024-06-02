@@ -751,7 +751,7 @@ async def update_class_api_key(
                     status_code=400,
                     detail="Invalid API key provided. Please try again.",
                 )
-        
+
         await test_proposed_key(update.api_key)
         await models.Class.update_api_key(
             request.state.db, int(class_id), update.api_key
