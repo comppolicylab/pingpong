@@ -741,6 +741,16 @@ async def update_class_api_key(
     if existing_key == update.api_key:
         return {"api_key": existing_key}
     elif not existing_key:
+        async def test_proposed_key(key: str) -> None:
+            cli = get_openai_client(key)
+            try:
+                await cli.models.list()
+            except openai.AuthenticationError as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid API key provided. Please try again.",
+                )
+        await test_proposed_key(update.api_key)
         await models.Class.update_api_key(
             request.state.db, int(class_id), update.api_key
         )
