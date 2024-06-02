@@ -68,7 +68,8 @@
       }
     }
   }
-  $: fileTypes = data.uploadInfo.fileTypesForAssistants(assistant);
+  $: supportsFileSearch = assistant.tools.includes('file_search');
+  $: supportsCodeInterpreter = assistant.tools.includes('code_interpreter');
 
   // Handle file upload
   const handleUpload = (f: File, onProgress: (p: number) => void) => {
@@ -86,6 +87,7 @@
 
   // Handle form submission
   const handleSubmit = async (e: CustomEvent<ChatInputMessage>) => {
+    console.log('submit', e.detail);
     $loading = true;
     const form = e.detail;
     if (!form.message) {
@@ -95,13 +97,23 @@
     }
 
     const partyIds = parties ? parties.split(',').map((id) => parseInt(id, 10)) : [];
+    const tools: api.Tool[] = [];
+    if (supportsFileSearch) {
+      tools.push({ type: 'file_search' });
+    }
+    if (supportsCodeInterpreter) {
+      tools.push({ type: 'code_interpreter' });
+    }
+    
     try {
       const newThread = api.explodeResponse(
         await api.createThread(fetch, data.class.id, {
           assistant_id: assistant.id,
           parties: partyIds,
           message: form.message,
-          file_ids: form.file_ids
+          tools_available: tools,
+          code_interpreter_file_ids: form.code_interpreter_file_ids,
+          file_search_file_ids: form.file_search_file_ids
         })
       );
       data.threads = [newThread, ...data.threads];
@@ -213,8 +225,13 @@
         <ChatInput
           mimeType={data.uploadInfo.mimeType}
           maxSize={data.uploadInfo.private_file_max_size}
-          accept={fileTypes}
           loading={$loading || !!$navigating}
+          fileSearchAcceptedFiles={supportsFileSearch
+            ? data.uploadInfo.fileTypes({ file_search: true, code_interpreter: false })
+            : null}
+          codeInterpreterAcceptedFiles={supportsCodeInterpreter
+            ? data.uploadInfo.fileTypes({ file_search: true, code_interpreter: false })
+            : null}
           upload={handleUpload}
           remove={handleRemove}
           on:submit={handleSubmit}

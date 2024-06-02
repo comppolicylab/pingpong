@@ -745,7 +745,7 @@ export type Assistant = {
   tools: string;
   class_id: number;
   creator_id: number;
-  files: ServerFile[];
+  vector_store_id: number | null;
   published: string | null;
   use_latex: boolean | null;
   hide_prompt: boolean | null;
@@ -778,6 +778,26 @@ export const getAssistants = async (f: Fetcher, classId: number) => {
 };
 
 /**
+ * Information about assistant files.
+ */
+export type AssistantFiles = {
+  code_interpreter_files: ServerFile[];
+  vector_store_files: ServerFile[];
+};
+
+export type AssistantFilesResponse = {
+  files: AssistantFiles;
+};
+
+/**
+ * Fetch all files for a vector store.
+ */
+export const getAssistantFiles = async (f: Fetcher, classId: number, assistantId: number) => {
+  const url = `/class/${classId}/assistant/${assistantId}/files`;
+  return await GET<never, AssistantFilesResponse>(f, url);
+};
+
+/**
  * OpenAI tool.
  */
 export type Tool = {
@@ -793,7 +813,8 @@ export type CreateAssistantRequest = {
   instructions: string;
   model: string;
   tools: Tool[];
-  file_ids: string[];
+  code_interpreter_file_ids: string[];
+  vector_store_file_ids: string[];
   published?: boolean;
   use_latex?: boolean;
   hide_prompt?: boolean;
@@ -808,7 +829,8 @@ export type UpdateAssistantRequest = {
   instructions?: string;
   model?: string;
   tools?: Tool[];
-  file_ids?: string[];
+  code_interpreter_file_ids?: string[];
+  vector_store_file_ids?: string[];
   published?: boolean;
   use_latex?: boolean;
   hide_prompt?: boolean;
@@ -1129,7 +1151,9 @@ export type CreateThreadRequest = {
   assistant_id: number;
   parties?: number[];
   message: string;
-  file_ids?: string[];
+  tools_available: Tool[];
+  file_search_file_ids?: string[];
+  code_interpreter_file_ids?: string[];
 };
 
 /**
@@ -1151,6 +1175,7 @@ export type Thread = {
   class_id: number;
   assistant_id: number;
   private: boolean;
+  tools_available: string | null;
   users: UserPlaceholder[];
   created: string;
   updated: string;
@@ -1284,7 +1309,8 @@ export type OpenAIMessage = {
   assistant_id: string | null;
   content: Content[];
   created_at: number;
-  file_ids: string[];
+  file_search_file_ids: string[];
+  code_interpreter_file_ids: string[];
   metadata: Record<string, unknown> | null;
   object: 'thread.message';
   role: 'user' | 'assistant';
@@ -1370,7 +1396,8 @@ export const getThreadMessages = async (
  */
 export type NewThreadMessageRequest = {
   message: string;
-  file_ids?: string[];
+  file_search_file_ids?: string[];
+  code_interpreter_file_ids?: string[];
 };
 
 /**
@@ -1418,15 +1445,15 @@ export type CodeInterpreterCall = {
   type: 'code_interpreter';
 };
 
-export type RetrievalCall = {
+export type FileSearchCall = {
   id: string;
   index: number;
-  type: 'retrieval';
-  retrieval: object;
+  type: 'file_search';
+  file_search: object;
 };
 
 // TODO(jnu): support function calling, updates for v2
-export type ToolCallDelta = CodeInterpreterCall | RetrievalCall;
+export type ToolCallDelta = CodeInterpreterCall | FileSearchCall;
 
 export type ThreadStreamToolCallCreatedChunk = {
   type: 'tool_call_created';
@@ -1620,7 +1647,7 @@ export const ROLE_LABELS: Record<Role, string> = {
 export type FileTypeInfo = {
   name: string;
   mime_type: string;
-  retrieval: boolean;
+  file_search: boolean;
   code_interpreter: boolean;
   extensions: string[];
 };
@@ -1641,7 +1668,7 @@ export type UploadInfo = {
 };
 
 type FileContentTypeAcceptFilters = {
-  retrieval: boolean;
+  file_search: boolean;
   code_interpreter: boolean;
 };
 
@@ -1654,10 +1681,10 @@ const _getAcceptString = (
 ) => {
   return types
     .filter((ft) => {
-      // If retrieval is enabled, we can return everything that supports retrieval.
+      // If file_search is enabled, we can return everything that supports file_search.
       // If code_interpreter is enabled, we can also return everything that supports code_interpreter.
       return (
-        (filters.retrieval && ft.retrieval) || (filters.code_interpreter && ft.code_interpreter)
+        (filters.file_search && ft.file_search) || (filters.code_interpreter && ft.code_interpreter)
       );
     })
     .map((ft) => ft.mime_type)
@@ -1728,7 +1755,7 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
       }
 
       const filters = {
-        retrieval: capabilities.has('retrieval'),
+        file_search: capabilities.has('file_search'),
         code_interpreter: capabilities.has('code_interpreter')
       };
 
@@ -1744,7 +1771,7 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
           return false;
         }
         return (
-          (!!filters.retrieval && support.retrieval) ||
+          (!!filters.file_search && support.file_search) ||
           (!!filters.code_interpreter && support.code_interpreter)
         );
       };

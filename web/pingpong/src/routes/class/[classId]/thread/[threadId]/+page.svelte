@@ -37,6 +37,8 @@
     const assts = data.assistants.filter((a) => Object.hasOwn($participants.assistant, a.id));
     fileTypes = data.uploadInfo.fileTypesForAssistants(...assts);
   }
+  $: supportsFileSearch = threadMgr.supportsFileSearch;
+  $: supportsCodeInterpreter = threadMgr.supportsCodeInterpreter
   // TODO - should figure this out by checking grants instead of participants
   $: canSubmit =
     !!$participants.user && data?.me?.user?.id && !!$participants.user[data?.me?.user?.id];
@@ -104,9 +106,9 @@
   };
 
   // Handle sending a message
-  const postMessage = async ({ message, file_ids }: ChatInputMessage) => {
+  const postMessage = async ({ message, code_interpreter_file_ids, file_search_file_ids }: ChatInputMessage) => {
     try {
-      await threadMgr.postMessage(data.me.user!.id, message, file_ids);
+      await threadMgr.postMessage(data.me.user!.id, message, code_interpreter_file_ids, file_search_file_ids);
     } catch (e) {
       sadToast(`Failed to send message. Error: ${errorMessage(e)}`);
     }
@@ -248,7 +250,12 @@
         <ChatInput
           mimeType={data.uploadInfo.mimeType}
           maxSize={data.uploadInfo.private_file_max_size}
-          accept={fileTypes}
+          fileSearchAcceptedFiles={supportsFileSearch
+            ? data.uploadInfo.fileTypes({ file_search: true, code_interpreter: false })
+            : null}
+          codeInterpreterAcceptedFiles={supportsCodeInterpreter
+            ? data.uploadInfo.fileTypes({ file_search: false, code_interpreter: true })
+            : null}
           disabled={!canSubmit || !!$navigating}
           loading={$submitting || $waiting}
           upload={handleUpload}

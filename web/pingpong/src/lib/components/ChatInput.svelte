@@ -1,6 +1,7 @@
 <script lang="ts" context="module">
   export type ChatInputMessage = {
-    file_ids: string[];
+    code_interpreter_file_ids: string[];
+    file_search_file_ids: string[];
     message: string;
     callback?: () => void;
   };
@@ -10,7 +11,7 @@
   import { createEventDispatcher } from 'svelte';
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
-  import { Button } from 'flowbite-svelte';
+  import { Button, Popover } from 'flowbite-svelte';
   import { page } from '$app/stores';
   import type {
     MimeTypeLookupFn,
@@ -33,6 +34,7 @@
    * Whether we're waiting for an in-flight request.
    */
   export let loading = false;
+
   /**
    * The maximum height of the container before scrolling.
    */
@@ -47,9 +49,13 @@
   export let remove: FileRemover | null = null;
 
   /**
-   * Files to accept.
+   * Files to accept for file search. If null, file search is disabled.
    */
-  export let accept: string = '*/*';
+  export let fileSearchAcceptedFiles: string | null = null;
+  /**
+   * Files to accept for code interpreter. If null, code interpreter is disabled.
+   */
+  export let codeInterpreterAcceptedFiles: string | null = null;
 
   /**
    * Max upload size.
@@ -68,12 +74,20 @@
   // Real (visible) text area input reference.
   let realRef: HTMLTextAreaElement;
   // Container for the list of files, for calculating height.
-  let fileListRef: HTMLDivElement;
+  let codeInterpreterFileListRef: HTMLDivElement;
+  let fileSearchFileListRef: HTMLDivElement;
 
   // The list of files being uploaded.
-  let files = writable<FileUploadInfo[]>([]);
-  $: uploading = $files.some((f) => f.state === 'pending');
-  $: fileIds = $files
+  let codeInterpreterFiles = writable<FileUploadInfo[]>([]);
+  $: uploadingCodeInterpreter = $codeInterpreterFiles.some((f) => f.state === 'pending');
+  $: codeInterpreterFileIds = $codeInterpreterFiles
+    .filter((f) => f.state === 'success')
+    .map((f) => (f.response as ServerFile).file_id)
+    .join(',');
+
+  let fileSearchFiles = writable<FileUploadInfo[]>([]);
+  $: uploadingFileSearch = $fileSearchFiles.some((f) => f.state === 'pending');
+  $: fileSearchFileIds = $fileSearchFiles
     .filter((f) => f.state === 'success')
     .map((f) => (f.response as ServerFile).file_id)
     .join(',');
@@ -117,14 +131,20 @@
 
   // Submit the form.
   const submit = () => {
-    const file_ids = fileIds ? fileIds.split(',') : [];
+    const code_interpreter_file_ids = codeInterpreterFileIds
+      ? codeInterpreterFileIds.split(',')
+      : [];
+    const file_search_file_ids = fileSearchFileIds ? fileSearchFileIds.split(',') : [];
     if (!ref.value || disabled) {
       return;
     }
     const message = ref.value;
-    $files = [];
+    $codeInterpreterFiles = [];
+    $fileSearchFiles = [];
+    console.log('submitting', code_interpreter_file_ids, file_search_file_ids, message);
     dispatcher('submit', {
-      file_ids,
+      file_search_file_ids,
+      code_interpreter_file_ids,
       message,
       callback: () => {
         document.getElementById('message')?.focus();
@@ -158,12 +178,16 @@
   };
 
   // Handle updates from the file upload component.
-  const handleFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
-    files = e.detail;
+  const handleCodeInterpreterFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
+    codeInterpreterFiles = e.detail;
+  };
+
+  const handleFileSearchFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
+    fileSearchFiles = e.detail;
   };
 
   // Remove a file from the list / the server.
-  const removeFile = (evt: CustomEvent<FileUploadInfo>) => {
+  const removeFileSearchFile = (evt: CustomEvent<FileUploadInfo>) => {
     if (!remove) {
       return;
     }
@@ -171,9 +195,9 @@
     if (file.state === 'pending' || file.state === 'deleting') {
       return;
     } else if (file.state === 'error') {
-      files.update((f) => f.filter((x) => x !== file));
+      fileSearchFiles.update((f) => f.filter((x) => x !== file));
     } else {
-      files.update((f) => {
+      fileSearchFiles.update((f) => {
         const idx = f.indexOf(file);
         if (idx >= 0) {
           f[idx].state = 'deleting';
@@ -182,7 +206,34 @@
       });
       remove((file.response as ServerFile).id)
         .then(() => {
-          files.update((f) => f.filter((x) => x !== file));
+          fileSearchFiles.update((f) => f.filter((x) => x !== file));
+        })
+        .catch(() => {
+          /* no-op */
+        });
+    }
+  };
+
+  const removeCodeInterpreterFile = (evt: CustomEvent<FileUploadInfo>) => {
+    if (!remove) {
+      return;
+    }
+    const file = evt.detail;
+    if (file.state === 'pending' || file.state === 'deleting') {
+      return;
+    } else if (file.state === 'error') {
+      codeInterpreterFiles.update((f) => f.filter((x) => x !== file));
+    } else {
+      codeInterpreterFiles.update((f) => {
+        const idx = f.indexOf(file);
+        if (idx >= 0) {
+          f[idx].state = 'deleting';
+        }
+        return f;
+      });
+      remove((file.response as ServerFile).id)
+        .then(() => {
+          codeInterpreterFiles.update((f) => f.filter((x) => x !== file));
         })
         .catch(() => {
           /* no-op */
@@ -197,14 +248,24 @@
 </script>
 
 <div use:init={$page.params.threadId} class="w-full relative">
-  <input type="hidden" name="file_ids" bind:value={fileIds} />
+  <input type="hidden" name="file_search_file_ids" bind:value={fileSearchFileIds} />
   <div
     class="z-10 top-0 p-2 flex gap-2 flex-wrap"
-    use:fixFileListHeight={$files}
-    bind:this={fileListRef}
+    use:fixFileListHeight={$fileSearchFiles}
+    bind:this={fileSearchFileListRef}
   >
-    {#each $files as file}
-      <FilePlaceholder {mimeType} info={file} on:delete={removeFile} />
+    {#each $fileSearchFiles as file}
+      <FilePlaceholder {mimeType} info={file} on:delete={removeFileSearchFile} />
+    {/each}
+  </div>
+  <input type="hidden" name="code_interpreter_file_ids" bind:value={codeInterpreterFileIds} />
+  <div
+    class="z-10 top-0 p-2 flex gap-2 flex-wrap"
+    use:fixFileListHeight={$codeInterpreterFiles}
+    bind:this={codeInterpreterFileListRef}
+  >
+    {#each $codeInterpreterFiles as file}
+      <FilePlaceholder {mimeType} info={file} on:delete={removeCodeInterpreterFile} />
     {/each}
   </div>
   <div
@@ -232,12 +293,34 @@
     {#if upload}
       <FileUpload
         {maxSize}
-        {accept}
-        disabled={loading || disabled || !upload}
+        accept={fileSearchAcceptedFiles || ''}
+        disabled={loading || disabled || !upload || !fileSearchAcceptedFiles}
+        type="file_search"
         {upload}
         on:error={(e) => sadToast(e.detail.message)}
-        on:change={handleFilesChange}
+        on:change={handleFileSearchFilesChange}
       />
+      {#if fileSearchAcceptedFiles}
+        <Popover arrow={false}>Add files for File Search</Popover>
+      {:else}
+        <Popover arrow={false}>File Search is disabled</Popover>
+      {/if}
+    {/if}
+    {#if upload}
+      <FileUpload
+        {maxSize}
+        accept={codeInterpreterAcceptedFiles || ''}
+        disabled={loading || disabled || !upload || !codeInterpreterAcceptedFiles}
+        type="code_interpreter"
+        {upload}
+        on:error={(e) => sadToast(e.detail.message)}
+        on:change={handleCodeInterpreterFilesChange}
+      />
+      {#if codeInterpreterAcceptedFiles}
+        <Popover arrow={false}>Add files for Code Interpreter</Popover>
+      {:else}
+        <Popover arrow={false}>Code Interpreter is disabled</Popover>
+      {/if}
     {/if}
     <Button
       pill
@@ -247,7 +330,7 @@
       class={`${
         loading ? 'animate-pulse cursor-progress' : ''
       } p-3 px-4 mr-2 bg-orange hover:bg-orange-dark`}
-      disabled={uploading || loading || disabled}
+      disabled={uploadingCodeInterpreter || uploadingFileSearch || loading || disabled}
     >
       Submit
     </Button>

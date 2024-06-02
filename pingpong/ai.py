@@ -7,6 +7,7 @@ from typing import Dict, List
 import openai
 import orjson
 from openai.types.beta.threads import ImageFile
+from openai.types.beta.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,21 @@ async def validate_api_key(api_key: str) -> bool:
         return True
     except openai.AuthenticationError:
         return False
+
+
+async def generate_vector_store(
+    cli: openai.AsyncClient, file_ids: List[str], metadata: Dict[str, str]
+) -> VectorStore:
+    """Generate a vector store from a list of file IDs.
+
+    :param cli: OpenAI client
+    :param file_ids: List of file IDs to generate a vector store from
+    :return: Vector store
+    """
+    vector_store = await cli.beta.vector_stores.create(
+        file_ids=file_ids, metadata=metadata
+    )
+    return vector_store
 
 
 class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
@@ -141,7 +157,6 @@ async def run_thread(
     thread_id: str,
     assistant_id: int,
     message: str | None,
-    file_ids: List[str] | None = None,
     metadata: Dict[str, str | int] | None = None,
 ):
     try:
@@ -150,12 +165,11 @@ async def run_thread(
                 thread_id,
                 role="user",
                 content=message,
-                file_ids=file_ids,
                 metadata=metadata,
             )
 
         handler = BufferedStreamHandler()
-        async with cli.beta.threads.runs.create_and_stream(
+        async with cli.beta.threads.runs.stream(
             thread_id=thread_id,
             assistant_id=assistant_id,
             event_handler=handler,

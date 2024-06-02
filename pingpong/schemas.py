@@ -144,6 +144,42 @@ class Files(BaseModel):
         from_attributes = True
 
 
+class AssistantFiles(BaseModel):
+    code_interpreter_files: list[File]
+    vector_store_files: list[File]
+
+    class Config:
+        from_attributes = True
+
+
+class AssistantFilesResponse(BaseModel):
+    files: AssistantFiles
+
+    class Config:
+        from_attributes = True
+
+
+class VectorStore(BaseModel):
+    id: int
+    vector_store_id: str
+    type: str
+    class_id: int
+    uploader_id: int
+    expires_at: datetime | None
+    created: datetime
+    updated: datetime | None
+
+    class Config:
+        from_attributes = True
+
+
+class VectorStores(BaseModel):
+    vector_stores: list[VectorStore]
+
+    class Config:
+        from_attributes = True
+
+
 class Assistant(BaseModel):
     id: int
     name: str
@@ -153,7 +189,7 @@ class Assistant(BaseModel):
     model: str
     class_id: int
     creator_id: int
-    files: list[File]
+    vector_store_id: int | None
     use_latex: bool | None
     hide_prompt: bool | None
     published: datetime | None
@@ -167,7 +203,8 @@ class Assistant(BaseModel):
 
 class CreateAssistant(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
-    file_ids: list[str]
+    code_interpreter_file_ids: list[str] | None = None
+    vector_store_file_ids: list[str] | None = None
     instructions: str = Field(..., min_length=3)
     description: str
     model: str = Field(..., min_length=3)
@@ -179,7 +216,8 @@ class CreateAssistant(BaseModel):
 
 class UpdateAssistant(BaseModel):
     name: str | None = Field(None, min_length=3, max_length=100)
-    file_ids: list[str] | None = None
+    code_interpreter_file_ids: list[str] | None = None
+    vector_store_file_ids: list[str] | None = None
     instructions: str | None = Field(None, min_length=3)
     description: str | None = None
     model: str | None = Field(None, min_length=3)
@@ -208,6 +246,7 @@ class Thread(BaseModel):
     class_id: int
     assistant_id: int
     private: bool
+    tools_available: str | None
     users: list["UserPlaceholder"]
     created: datetime
     updated: datetime | None
@@ -219,13 +258,16 @@ class Thread(BaseModel):
 class CreateThread(BaseModel):
     parties: list[int] = []
     message: str = Field(..., min_length=1)
-    file_ids: list[str] = Field([], min_length=0, max_length=10)
+    code_interpreter_file_ids: list[str] = Field([], min_length=0, max_length=10)
+    file_search_file_ids: list[str] = Field([], min_length=0, max_length=10)
+    tools_available: list[Tool]
     assistant_id: int
 
 
 class NewThreadMessage(BaseModel):
     message: str = Field(..., min_length=1)
-    file_ids: list[str] = Field([], min_length=0, max_length=10)
+    file_search_file_ids: list[str] = Field([], min_length=0, max_length=10)
+    code_interpreter_file_ids: list[str] = Field([], min_length=0, max_length=10)
 
 
 class Threads(BaseModel):
@@ -421,7 +463,6 @@ class OpenAIRun(BaseModel):
     created_at: int
     expires_at: int | None
     failed_at: int | None
-    file_ids: list[str]
     instructions: SecretStr
     last_error: OpenAIRunError | None
     metadata: dict[str, str]
@@ -518,7 +559,7 @@ class SupportRequest(BaseModel):
 class FileTypeInfo(BaseModel):
     name: str
     mime_type: str
-    retrieval: bool
+    file_search: bool
     code_interpreter: bool
     extensions: list[str]
 

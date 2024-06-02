@@ -27,14 +27,28 @@
   $: assistant = data.assistant;
   $: canPublish = data.grants.canPublishAssistants;
 
-  let selectedFiles = data.selectedFiles.slice();
+  let selectedFileSearchFiles = data.selectedFileSearchFiles.slice();
+  let selectedCodeInterpreterFiles = data.selectedCodeInterpreterFiles.slice();
   let loading = false;
-  const tools = [{ value: 'code_interpreter', name: 'Code Interpreter' }];
-  const defaultTools = [{ type: 'code_interpreter' }];
+  const fileSearchMetadata = {
+    value: 'file_search',
+    name: 'File Search',
+    description:
+      'File Search augments the Assistant with knowledge from outside its model using documents you provide.',
+    max_count: 10_000
+  };
+  const codeInterpreterMetadata = {
+    value: 'code_interpreter',
+    name: 'Code Interpreter',
+    description:
+      'Code Interpreter can process files with diverse data and formatting, and generate files with data and images of graphs. Code Interpreter allows your Assistant to run code iteratively to solve challenging code and math problems.',
+    max_count: 20
+  };
+  const defaultTools = [{ type: 'file_search' }];
 
-  $: selectedTools = (
-    assistant?.tools ? (JSON.parse(assistant.tools) as Tool[]) : defaultTools
-  ).map((t) => t.type);
+  $: initialTools = (assistant?.tools ? (JSON.parse(assistant.tools) as Tool[]) : defaultTools).map(
+    (t) => t.type
+  );
   $: modelOptions = (data.models || []).map((model) => ({ value: model.id, name: model.id }));
   $: allFiles = data.files.map((f) => ({
     state: 'success',
@@ -47,19 +61,28 @@
     .filter((f) => f.state === 'success')
     .map((f) => f.response) as ServerFile[];
 
-  let fileOptions: SelectOptionType<string>[] = [];
-  $: {
-    const fileFilter = data.uploadInfo.getFileSupportFilter({
-      code_interpreter: selectedTools.includes('code_interpreter'),
-      retrieval: true
-    });
-    fileOptions = (asstFiles || [])
-      .filter(fileFilter)
-      .map((file) => ({ value: file.file_id, name: file.name }));
-  }
+  let fileSearchOptions: SelectOptionType<string>[] = [];
+  let codeInterpreterOptions: SelectOptionType<string>[] = [];
+  const fileSearchFilter = data.uploadInfo.getFileSupportFilter({
+    code_interpreter: true,
+    file_search: true
+  });
+  const codeInterpreterFilter = data.uploadInfo.getFileSupportFilter({
+    code_interpreter: true,
+    file_search: true
+  });
+  $: fileSearchOptions = (asstFiles || [])
+    .filter(fileSearchFilter)
+    .map((file) => ({ value: file.file_id, name: file.name }));
+  $: codeInterpreterOptions = (asstFiles || [])
+    .filter(codeInterpreterFilter)
+    .map((file) => ({ value: file.file_id, name: file.name }));
+
+  $: fileSearchToolSelect = initialTools.includes('file_search');
+  $: codeInterpreterToolSelect = initialTools.includes('code_interpreter');
 
   /**
-   * Determine if a specific has changed in the form.
+   * Determine if a specific field has changed in the form.
    */
   const checkDirtyField = (
     field: keyof api.CreateAssistantRequest & keyof api.Assistant,
@@ -100,7 +123,7 @@
       case 'tools':
         dirty = !setsEqual(
           new Set((newValue as api.Tool[]).map((t) => t.type)),
-          new Set(selectedTools)
+          new Set(initialTools)
         );
         break;
       default:
@@ -143,8 +166,13 @@
     }
 
     // Check selected files separately since these are handled differently in the form.
-    if (!setsEqual(new Set(selectedFiles), new Set(data.selectedFiles))) {
-      modifiedFields.push('files');
+    if (
+      !setsEqual(new Set(selectedCodeInterpreterFiles), new Set(data.selectedCodeInterpreterFiles))
+    ) {
+      modifiedFields.push('code interpreter files');
+    }
+    if (!setsEqual(new Set(selectedFileSearchFiles), new Set(data.selectedFileSearchFiles))) {
+      modifiedFields.push('file search files');
     }
 
     return modifiedFields;
@@ -157,11 +185,12 @@
     const formData = new FormData(form);
     const body = Object.fromEntries(formData.entries());
 
-    const tools: api.Tool[] = [{ type: 'retrieval' }];
-    if (body.tools?.toString()) {
-      for (const tool of body.tools.toString().split(',')) {
-        tools.push({ type: tool });
-      }
+    const tools: api.Tool[] = [];
+    if (fileSearchToolSelect) {
+      tools.push({ type: 'file_search' });
+    }
+    if (codeInterpreterToolSelect) {
+      tools.push({ type: 'code_interpreter' });
     }
 
     const params = {
@@ -170,7 +199,8 @@
       instructions: normalizeNewlines(body.instructions.toString()),
       model: body.model.toString(),
       tools,
-      file_ids: selectedFiles,
+      code_interpreter_file_ids: selectedCodeInterpreterFiles,
+      vector_store_file_ids: selectedFileSearchFiles,
       published: body.published?.toString() === 'on',
       use_latex: body.use_latex?.toString() === 'on',
       hide_prompt: body.hide_prompt?.toString() === 'on'
@@ -299,17 +329,63 @@
       <Helper>Enable LaTeX formatting for assistant responses.</Helper>
     </div>
     <div class="col-span-2 mb-4">
-      <Label for="model">Tools</Label>
+      <Label for="tools">Tools</Label>
       <Helper>Select tools available to the assistant when generating a response.</Helper>
-      <MultiSelect name="tools" items={tools} value={selectedTools} />
+    </div>
+    <div class="col-span-2 mb-4">
+      <Checkbox
+        id={fileSearchMetadata.value}
+        name={fileSearchMetadata.value}
+        checked={fileSearchToolSelect || false}
+        on:change={() => {
+          fileSearchToolSelect = !fileSearchToolSelect;
+        }}>{fileSearchMetadata.name}</Checkbox
+      >
+      <Helper>{fileSearchMetadata.description}</Helper>
+    </div>
+    <div class="col-span-2 mb-4">
+      <Checkbox
+        id={codeInterpreterMetadata.value}
+        name={codeInterpreterMetadata.value}
+        checked={codeInterpreterToolSelect || false}
+        on:change={() => {
+          codeInterpreterToolSelect = !codeInterpreterToolSelect;
+        }}>{codeInterpreterMetadata.name}</Checkbox
+      >
+      <Helper>{codeInterpreterMetadata.description}</Helper>
     </div>
 
-    <div class="col-span-2 mb-4">
-      <!-- TODO(jnu): support for uploading files here. -->
-      <Label for="model">Files</Label>
-      <Helper>Select which files this assistant should use for grounding.</Helper>
-      <MultiSelect name="files" items={fileOptions} bind:value={selectedFiles} />
-    </div>
+    {#if fileSearchToolSelect}
+      <div class="col-span-2 mb-4">
+        <!-- TODO(jnu): support for uploading files here. -->
+        <Label for="model">{fileSearchMetadata.name} Files</Label>
+        <Helper
+          >Select which files this assistant should use for {fileSearchMetadata.name}. You can
+          select up to {fileSearchMetadata.max_count} files.</Helper
+        >
+        <MultiSelect
+          name="selectedFileSearchFiles"
+          items={fileSearchOptions}
+          bind:value={selectedFileSearchFiles}
+        />
+      </div>
+    {/if}
+
+    {#if codeInterpreterToolSelect}
+      <div class="col-span-2 mb-4">
+        <!-- TODO(jnu): support for uploading files here. -->
+        <Label for="model">{codeInterpreterMetadata.name} Files</Label>
+        <Helper
+          >Select which files this assistant should use for {codeInterpreterMetadata.name}. You can
+          select up to {codeInterpreterMetadata.max_count} files.</Helper
+        >
+        <MultiSelect
+          name="selectedCodeInterpreterFiles"
+          items={codeInterpreterOptions}
+          bind:value={selectedCodeInterpreterFiles}
+        />
+      </div>
+    {/if}
 
     <div class="col-span-2 mb-4">
       <Checkbox
