@@ -34,7 +34,7 @@
     ? 'bg-gold-light'
     : 'bg-orange-light'} rounded-2xl px-8 pt-6 py-4 pr-4 pb-8"
 >
-  <Heading tag="h4" class="flex gap-4 text-3xl font-normal items-center">
+  <Heading tag="h3" class="flex gap-4 text-3xl font-normal items-center">
     <div>
       {assistant.name}
       {#if !assistant.published}
