@@ -18,7 +18,7 @@
   $: creators = data?.assistantCreators || {};
   $: allAssistants = data?.assistants || [];
   // "Course" assistants are endorsed by the class. Right now this means
-  // they are created by the teaching time and are published.
+  // they are created by the teaching team and are published.
   let courseAssistants: Assistant[] = [];
   // "My" assistants are assistants created by the current user, except
   // for those that appear in "course" assistants.
