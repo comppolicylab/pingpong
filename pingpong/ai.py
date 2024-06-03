@@ -45,6 +45,20 @@ async def generate_name(
     return response.choices[0].message.content
 
 
+async def validate_api_key(api_key: str) -> bool:
+    """Validate an OpenAI API key.
+
+    :param key: API key to validate
+    :return: Whether the key is valid
+    """
+    cli = get_openai_client(api_key)
+    try:
+        await cli.models.list()
+        return True
+    except openai.AuthenticationError:
+        return False
+
+
 class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
