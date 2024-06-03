@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Assistant } from '$lib/api.js';
   import ViewAssistant from '$lib/components/ViewAssistant.svelte';
   import {
     Heading,
@@ -16,14 +17,28 @@
   $: hasApiKey = !!data?.class?.api_key;
   $: creators = data?.assistantCreators || {};
   $: allAssistants = data?.assistants || [];
-  $: myAssistants = allAssistants.filter((a) => a.creator_id === data.me.user!.id);
-  $: courseAssistants = allAssistants.filter((a) => a.endorsed);
+  // "Course" assistants are endorsed by the class. Right now this means
+  // they are created by the teaching time and are published.
+  let courseAssistants: Assistant[] = [];
+  // "My" assistants are assistants created by the current user, except
+  // for those that appear in "course" assistants.
+  let myAssistants: Assistant[] = [];
   // "Other" assistants are non-endorsed assistants that are not created by the current user.
   // For most people this means published assistants from other students. For people with
   // elevated permissions, this could also mean private assistants.
-  $: otherAssistants = allAssistants.filter(
-    (a) => !a.endorsed && a.creator_id !== data.me.user!.id
-  );
+  let otherAssistants: Assistant[] = [];
+  $: {
+    // Split all assistants into categories
+    for (const assistant of allAssistants) {
+      if (assistant.endorsed) {
+        courseAssistants.push(assistant);
+      } else if (assistant.creator_id === data.me.user!.id) {
+        myAssistants.push(assistant);
+      } else {
+        otherAssistants.push(assistant);
+      }
+    }
+  }
 </script>
 
 <div class="h-full w-full overflow-y-auto p-12">
