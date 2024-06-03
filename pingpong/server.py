@@ -747,7 +747,7 @@ async def update_class_api_key(
     if existing_key == update.api_key:
         return {"api_key": existing_key}
     elif not existing_key:
-        if not not validate_api_key(update.api_key):
+        if not await validate_api_key(update.api_key):
             raise HTTPException(
                 status_code=400,
                 detail="Invalid API key provided. Please try again.",
