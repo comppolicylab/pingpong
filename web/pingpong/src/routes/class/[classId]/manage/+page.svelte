@@ -3,7 +3,7 @@
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
   import * as api from '$lib/api';
-  import type { FileUploadInfo, ServerFile } from '$lib/api';
+  import type { FileUploadInfo, ServerFile, CreateClassUsersRequest } from '$lib/api';
   import {
     Button,
     Checkbox,
@@ -123,6 +123,72 @@
   };
 
   /**
+   * Bulk add users to a class.
+   */
+  let timesAdded = 0;
+  const submitCreateUsers = async (e: CustomEvent<CreateClassUsersRequest>) => {
+    const result = await api.createClassUsers(fetch, data.class.id, e.detail);
+
+    if (api.isErrorResponse(result)) {
+      invalidateAll();
+      usersModalOpen = false;
+      let msg = result.detail || 'An unknown error occurred';
+      sadToast(msg);
+    } else {
+      invalidateAll();
+      usersModalOpen = false;
+      timesAdded++;
+      happyToast('Success!');
+    }
+  };
+
+  const updatingClass = writable(false);
+  // Handle class information update
+  const updateClass = async (evt: SubmitEvent) => {
+    evt.preventDefault();
+    $updatingClass = true;
+
+    const form = evt.target as HTMLFormElement;
+    const formData = new FormData(form);
+    const d = Object.fromEntries(formData.entries());
+
+    const result = await api.updateClass(fetch, data.class.id, d);
+    if (api.isErrorResponse(result)) {
+      $updatingClass = false;
+      let msg = result.detail || 'An unknown error occurred';
+      sadToast(msg);
+    } else {
+      invalidateAll();
+      $updatingClass = false;
+      happyToast('Success!');
+    }
+  };
+
+  const updatingApiKey = writable(false);
+  // Handle API key update
+  const submitUpdateApiKey = async (evt: SubmitEvent) => {
+    evt.preventDefault();
+    $updatingApiKey = true;
+
+    const form = evt.target as HTMLFormElement;
+    const formData = new FormData(form);
+    const d = Object.fromEntries(formData.entries());
+
+    const _apiKey = (d.apiKey as string | undefined) || '';
+    const result = await api.updateApiKey(fetch, data.class.id, _apiKey);
+
+    if (api.isErrorResponse(result)) {
+      $updatingApiKey = false;
+      let msg = result.detail || 'An unknown error occurred';
+      sadToast(msg);
+    } else {
+      invalidateAll();
+      $updatingApiKey = false;
+      happyToast('Success!');
+    }
+  };
+
+  /**
    * Function to fetch users from the server.
    */
   const fetchUsers = async (page: number, pageSize: number, search?: string) => {
@@ -130,6 +196,8 @@
     const offset = Math.max(0, (page - 1) * pageSize);
     return api.getClassUsers(fetch, data.class.id, { limit, offset, search });
   };
+
+  const classId = data.class.id;
 
   // Clean up state on navigation. Invalidate data so that any changes
   // are reflected in the rest of the app. (If performance suffers here,
@@ -146,7 +214,7 @@
 >
   <Heading tag="h2" class="text-3xl font-serif font-medium text-blue-dark-40">Manage Class</Heading>
   {#if canEditClassInfo}
-    <form action="?/updateClass" class="pt-4" method="POST">
+    <form on:submit={updateClass} class="pt-4">
       <div class="grid grid-cols-3 gap-x-6 gap-y-8">
         <div>
           <Heading customSize="text-xl" tag="h3"
@@ -237,14 +305,19 @@
         <div></div>
         <div></div>
         <div>
-          <Button pill type="submit" class="bg-orange text-white hover:bg-orange-dark">Save</Button>
+          <Button
+            pill
+            type="submit"
+            class="bg-orange text-white hover:bg-orange-dark"
+            disabled={$updatingClass}>Save</Button
+          >
         </div>
       </div>
     </form>
   {/if}
 
   {#if canViewApiKey}
-    <form action="?/updateApiKey" class="pt-6" method="POST">
+    <form on:submit={submitUpdateApiKey} class="pt-6">
       <div class="grid grid-cols-3 gap-x-6 gap-y-8">
         <div>
           <Heading customSize="text-xl font-bold" tag="h3"
@@ -291,7 +364,12 @@
         <div></div>
         <div></div>
         <div>
-          <Button pill type="submit" class="bg-orange text-white hover:bg-orange-dark">Save</Button>
+          <Button
+            pill
+            type="submit"
+            disabled={$updatingApiKey}
+            class="bg-orange text-white hover:bg-orange-dark">Save</Button
+          >
         </div>
       </div>
     </form>
@@ -307,7 +385,11 @@
       </div>
       <div class="col-span-2">
         <div class="mb-4">
-          <ViewUsers {fetchUsers} />
+          <!-- Update the user view when we finish batch adding users. -->
+          <!-- Uses a variable for times users have been bulk added -->
+          {#key timesAdded}
+            <ViewUsers {fetchUsers} {classId} />
+          {/key}
         </div>
         <Button
           pill
@@ -321,7 +403,11 @@
         >
         {#if usersModalOpen}
           <Modal bind:open={usersModalOpen} title="Manage users">
-            <BulkAddUsers on:cancel={() => (usersModalOpen = false)} role="student" />
+            <BulkAddUsers
+              on:submit={submitCreateUsers}
+              on:cancel={() => (usersModalOpen = false)}
+              role="student"
+            />
           </Modal>
         {/if}
       </div>

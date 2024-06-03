@@ -1,25 +1,37 @@
 <script lang="ts">
-  import type { SubmitFunction } from '@sveltejs/kit';
-  import { enhance } from '$app/forms';
   import PingPongLogo from '$lib/components/PingPongLogo.svelte';
   import { Button, P, InputAddon, Input, Helper, Heading, ButtonGroup } from 'flowbite-svelte';
   import { EnvelopeSolid } from 'flowbite-svelte-icons';
+  import { writable } from 'svelte/store';
+  import { fail } from '@sveltejs/kit';
+  import { sadToast } from '$lib/toast';
+  import * as api from '$lib/api';
 
   export let form;
 
-  let loggingIn = false;
+  const loggingIn = writable(false);
+  const success = writable(false);
+  const loginWithMagicLink = async (evt: SubmitEvent) => {
+    evt.preventDefault();
+    loggingIn.set(true);
 
-  const login: SubmitFunction = (e) => {
-    if (!e.formData.get('email') || loggingIn) {
-      e.cancel();
-      return;
+    const form = evt.target as HTMLFormElement;
+    const formData = new FormData(form);
+    const d = Object.fromEntries(formData.entries());
+
+    const email = d.email?.toString();
+    if (!email) {
+      return fail(400, { email, success: false, error: 'Missing email' });
     }
 
-    loggingIn = true;
-    return async ({ update }) => {
-      loggingIn = false;
-      return update();
-    };
+    const result = await api.loginWithMagicLink(fetch, email);
+    if (result.$status < 300) {
+      success.set(true);
+      loggingIn.set(false);
+    } else {
+      sadToast(result.detail?.toString() || 'Could not log in');
+      loggingIn.set(false);
+    }
   };
 </script>
 
@@ -29,17 +41,17 @@
       <Heading tag="h1" class="logo w-full text-center"><PingPongLogo size="full" /></Heading>
     </header>
     <div class="px-12 py-16 bg-white">
-      {#if form?.success}
+      {#if $success}
         <div class="text-orange">Success! Follow the link in your email to finish signing in.</div>
       {:else}
-        <form action="/login?/loginWithMagicLink" method="POST" use:enhance={login}>
+        <form on:submit={loginWithMagicLink}>
           <ButtonGroup class="w-full rounded-full bg-blue-light-50 shadow-inner p-4">
             <InputAddon class="rounded-none border-none bg-transparent text-blue-light-40">
               <EnvelopeSolid />
             </InputAddon>
             <Input
               value={form?.email ?? ''}
-              readonly={loggingIn || null}
+              readonly={$loggingIn || null}
               type="email"
               placeholder="you@school.edu"
               name="email"
@@ -50,7 +62,7 @@
               pill
               class="p-3 px-6 mr-2 rounded-full bg-orange text-white hover:bg-orange-dark"
               type="submit"
-              disabled={loggingIn}>Login</Button
+              disabled={$loggingIn}>Login</Button
             >
           </ButtonGroup>
           {#if form?.error}
