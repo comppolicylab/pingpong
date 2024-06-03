@@ -24,7 +24,13 @@ import pingpong.metrics as metrics
 import pingpong.models as models
 import pingpong.schemas as schemas
 
-from .ai import format_instructions, generate_name, get_openai_client, run_thread
+from .ai import (
+    format_instructions,
+    generate_name,
+    get_openai_client,
+    run_thread,
+    validate_api_key,
+)
 from .auth import (
     decode_auth_token,
     decode_session_token,
@@ -741,6 +747,11 @@ async def update_class_api_key(
     if existing_key == update.api_key:
         return {"api_key": existing_key}
     elif not existing_key:
+        if not await validate_api_key(update.api_key):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid API key provided. Please try again.",
+            )
         await models.Class.update_api_key(
             request.state.db, int(class_id), update.api_key
         )
