@@ -5,8 +5,17 @@
   import { page } from '$app/stores';
   import { Pulse } from 'svelte-loading-spinners';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
-  import { Button, Helper, Dropdown, DropdownItem, Span } from 'flowbite-svelte';
-  import { EyeSlashOutline, ChevronDownSolid } from 'flowbite-svelte-icons';
+  import {
+    Button,
+    Helper,
+    Dropdown,
+    DropdownItem,
+    Span,
+    Heading,
+    Badge,
+    DropdownDivider
+  } from 'flowbite-svelte';
+  import { EyeSlashOutline, ChevronDownSolid, ArrowRightOutline } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
   import { errorMessage } from '$lib/errors';
@@ -28,11 +37,26 @@
     }
   });
 
+  // Get info about assistant provenance
+  const getAssistantMetadata = (assistant: Assistant) => {
+    const isCourseAssistant = assistant.endorsed;
+    const isMyAssistant = assistant.creator_id === data.me.user!.id;
+    const creator = data.assistantCreators[assistant.creator_id].name;
+    return {
+      creator: isCourseAssistant ? 'Teaching Team' : creator,
+      isCourseAssistant,
+      isMyAssistant
+    };
+  };
+
   // Whether the app is currently loading.
   let loading = writable(false);
   // Currently selected assistant.
   $: assistants = data?.assistants || [];
+  $: courseAssistants = assistants.filter((asst) => asst.endorsed);
+  $: otherAssistants = assistants.filter((asst) => !asst.endorsed);
   $: assistant = data?.assistants[0] || {};
+  $: assistantMeta = getAssistantMetadata(assistant);
   // Whether billing is set up for the class (which controls everything).
   $: isConfigured = data?.hasAssistants && data?.hasBilling;
   $: parties = data.me.user?.id ? `${data.me.user.id}` : '';
@@ -109,30 +133,9 @@
     class:opacity-0={$loading}
   >
     {#if isConfigured}
-      <div
-        class="grow shrink content-center min-h-0 overflow-y-auto space-y-4 mx-auto bg-gold-light rounded-2xl p-8 my-8 max-w-2xl"
-      >
-        <!-- TODO - we need a better way to show relevant examples for the chosen assistant
-        <h2 class="font-bold text-4xl font-serif mb-4">What can I help you with today?</h2>
-        <p class="mb-6 text-lg">Some examples of questions you can ask me are:</p>
-        <div class="grid gap-4 lg:grid-cols-3">
-          <div class="rounded-2xl bg-blue-light-50 p-8">
-            <p class="font-light">
-              Make me a deadline calendar of all of my upcoming assignments and tests.
-            </p>
-          </div>
-          <div class="rounded-2xl bg-blue-light-50 p-8">
-            <p class="font-light">Can you populate a mock test for me?</p>
-          </div>
-          <div class="rounded-2xl bg-blue-light-50 p-8">
-            <p class="font-light">Teach me how to make my own bot and publish it.</p>
-          </div>
-        </div>
-        -->
-        <div class="dark:text-white text-gray-500">
-          Select an assistant and type a question below to get started.
-        </div>
-        <div class="text-center">
+      <!-- Only show a picker if there are multiple assistants. -->
+      {#if assistants.length > 1}
+        <div class="pt-2">
           <Button
             pill
             class="bg-blue-light-50 text-xs uppercase tracking-wide font-medium text-black border-solid border border-blue-dark-40"
@@ -140,27 +143,78 @@
           >
 
           <Dropdown class="max-h-60 overflow-y-auto w-60">
-            {#each assistants as asst}
+            <!-- Show course assistants first -->
+            {#each courseAssistants as asst}
               <DropdownItem on:click={() => selectAi(asst)} on:touchstart={() => selectAi(asst)}>
                 {#if !asst.published}
                   <EyeSlashOutline size="sm" class="inline-block mr-2 text-gray-400" />
                 {/if}
                 {asst.name}
-                <Helper class="text-xs">{data.assistantCreators[asst.creator_id].name}</Helper>
+                <div>
+                  <Badge color="blue" class="text-xs">Course assistant</Badge>
+                </div>
+              </DropdownItem>
+            {/each}
+
+            <!-- Show a divider if necessary -->
+            {#if otherAssistants.length > 0 && courseAssistants.length > 0}
+              <DropdownDivider />
+            {/if}
+
+            <!-- Show non-course assistants -->
+            {#each otherAssistants as asst}
+              {@const meta = getAssistantMetadata(asst)}
+              <DropdownItem on:click={() => selectAi(asst)} on:touchstart={() => selectAi(asst)}>
+                {#if !asst.published}
+                  <EyeSlashOutline size="sm" class="inline-block mr-2 text-gray-400" />
+                {/if}
+                {asst.name}
+                <div>
+                  {#if meta.isCourseAssistant}
+                    <Badge color="blue" class="text-xs">Course assistant</Badge>
+                  {:else if meta.isMyAssistant}
+                    <Badge color="green" class="text-xs">My assistant</Badge>
+                  {:else}
+                    <Helper class="text-xs">{meta.creator}</Helper>
+                  {/if}
+                </div>
               </DropdownItem>
             {/each}
           </Dropdown>
         </div>
-        <div>
-          <span class="dark:text-white text-gray-500">Created by:</span>
-          <span class="font-bold">{data.assistantCreators[assistant.creator_id].name}</span>
+      {/if}
+
+      <div class="relative bg-gold-light rounded-2xl grow shrink mx-auto my-8 max-w-2xl">
+        <div class="content-center min-h-0 overflow-y-auto space-y-4 bg-gold-light p-8 rounded-2xl">
+          <div>
+            <Heading tag="h3">{assistant.name}</Heading>
+          </div>
+          <div>
+            {#if assistantMeta.isCourseAssistant}
+              <Badge color="blue" class="text-xs">Course assistant</Badge>
+            {:else if assistantMeta.isMyAssistant}
+              <Badge color="green" class="text-xs">My assistant</Badge>
+            {:else}
+              <Badge color="yellow" class="text-xs">{assistantMeta.creator}</Badge>
+            {/if}
+          </div>
+          {#if assistant.description}
+            <div class="dark:text-white text-gray-500">Notes for this assistant:</div>
+            <div class="ml-4 max-h-10 overflow-y-auto sm:max-h-24">{assistant.description}</div>
+          {:else}
+            <div class="italic">No notes are provided for this assistant.</div>
+          {/if}
         </div>
-        {#if assistant.description}
-          <div class="dark:text-white text-gray-500">Notes for this assistant:</div>
-          <div class="ml-4">{assistant.description}</div>
-        {:else}
-          <div class="italic">No notes are provided for this assistant.</div>
-        {/if}
+        <div class="absolute bottom-1 right-1">
+          <a
+            href={`/class/${data.class.id}/assistant`}
+            class="text-sm text-blue-dark-50 font-medium p-2 px-4 hover:text-blue-dark-100 transition-all"
+            >View all assistants <ArrowRightOutline
+              size="md"
+              class="text-orange inline-block ml-1"
+            /></a
+          >
+        </div>
       </div>
 
       <div class="shrink-0 grow-0">
