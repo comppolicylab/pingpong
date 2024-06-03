@@ -178,8 +178,6 @@
     const result = await api.updateApiKey(fetch, data.class.id, _apiKey);
 
     if (api.isErrorResponse(result)) {
-      apiKey = data.apiKey || '';
-      invalidateAll();
       $updatingApiKey = false;
       let msg = result.detail || 'An unknown error occurred';
       sadToast(msg);

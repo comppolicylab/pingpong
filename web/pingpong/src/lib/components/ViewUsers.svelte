@@ -34,7 +34,7 @@
   /**
    * The current class id.
    */
-  export let classId: number | undefined = undefined;
+  export let classId: number;
 
   /**
    * Function to fetch users from the server.
