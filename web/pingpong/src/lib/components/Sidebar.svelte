@@ -46,6 +46,7 @@
   );
   $: threads = ($page.data.threads || []) as api.Thread[];
   $: currentClassId = parseInt($page.params.classId, 10);
+  $: onNewChatPage = $page.url.pathname === `/class/${currentClassId}`;
 
   // Toggle whether menu is open.
   const togglePanel = (state?: boolean) => {
@@ -87,9 +88,14 @@
 
     <SidebarGroup class="mt-6 mb-10">
       <SidebarItem
-        href={currentClassId ? `/class/${currentClassId}` : '/'}
+        href={onNewChatPage ? undefined : currentClassId ? `/class/${currentClassId}` : '/'}
+        disabled={onNewChatPage}
         label="Start a new chat"
-        class="flex flex-row-reverse justify-between pr-4 bg-orange text-white rounded-full hover:bg-orange-dark"
+        class={`flex flex-row-reverse justify-between pr-4 text-white rounded-full ${
+          onNewChatPage
+            ? 'bg-gray-400 hover:bg-gray-400 cursor-default text-gray-100'
+            : 'bg-orange hover:bg-orange-dark'
+        }`}
       >
         <svelte:fragment slot="icon">
           <CirclePlusSolid size="sm" />
