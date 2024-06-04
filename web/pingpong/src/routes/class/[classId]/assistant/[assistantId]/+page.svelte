@@ -12,7 +12,7 @@
     type SelectOptionType
   } from 'flowbite-svelte';
   import type { Tool, ServerFile } from '$lib/api';
-  import { beforeNavigate, goto, invalidateAll } from '$app/navigation';
+  import { beforeNavigate, goto } from '$app/navigation';
   import * as api from '$lib/api';
   import { setsEqual } from '$lib/set';
   import { happyToast, sadToast } from '$lib/toast';
@@ -93,8 +93,10 @@
         dirty = newValue === undefined ? false : newValue !== oldValue;
         break;
       case 'tools':
-        const newList = newValue as api.Tool[];
-        dirty = !setsEqual(new Set(newList.map((t) => t.type)), new Set(selectedTools));
+        dirty = !setsEqual(
+          new Set((newValue as api.Tool[]).map((t) => t.type)),
+          new Set(selectedTools)
+        );
         break;
       default:
         dirty = newValue !== oldValue;
