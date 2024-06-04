@@ -12,27 +12,21 @@
     type SelectOptionType
   } from 'flowbite-svelte';
   import type { Tool, ServerFile } from '$lib/api';
-  import { beforeNavigate, goto } from '$app/navigation';
+  import { beforeNavigate, goto, invalidateAll } from '$app/navigation';
   import * as api from '$lib/api';
+  import { setsEqual } from '$lib/set';
   import { happyToast, sadToast } from '$lib/toast';
 
   export let data;
 
-  let confirmBeforeLeaving = true;
-
-  beforeNavigate((nav) => {
-    // Confirm before leaving the page
-
-    if (confirmBeforeLeaving && !confirm('Are you sure you want to leave this page?')) {
-      nav.cancel();
-      return;
-    }
-  });
+  // Flag indicating whether we should check for changes before navigating away.
+  let checkForChanges = true;
+  let assistantForm: HTMLFormElement;
 
   $: assistant = data.assistant;
   $: canPublish = data.grants.canPublishAssistants;
 
-  let selectedFiles = data.selectedFiles;
+  let selectedFiles = data.selectedFiles.slice();
   let loading = false;
   const tools = [{ value: 'code_interpreter', name: 'Code Interpreter' }];
   const defaultTools = [{ type: 'code_interpreter' }];
@@ -63,12 +57,96 @@
       .map((file) => ({ value: file.file_id, name: file.name }));
   }
 
-  // Handle save / create assistant.
-  const submitForm = async (evt: SubmitEvent) => {
-    evt.preventDefault();
-    loading = true;
+  /**
+   * Determine if a specific has changed in the form.
+   */
+  const checkDirtyField = (
+    field: keyof api.CreateAssistantRequest & keyof api.Assistant,
+    update: api.CreateAssistantRequest,
+    original: api.Assistant | null
+  ) => {
+    const newValue = update[field];
+    const oldValue = original?.[field];
 
-    const form = evt.target as HTMLFormElement;
+    let dirty = true;
+
+    switch (field) {
+      case 'name':
+        dirty = newValue !== (oldValue || '');
+        break;
+      case 'description':
+        dirty = newValue !== (oldValue || '');
+        break;
+      case 'instructions':
+        dirty = newValue !== (oldValue || '');
+        break;
+      case 'model':
+        dirty = newValue !== oldValue;
+        break;
+      case 'published':
+        dirty = newValue === undefined ? false : newValue !== !!oldValue;
+        break;
+      case 'use_latex':
+        dirty = newValue === undefined ? false : newValue !== oldValue;
+        break;
+      case 'hide_prompt':
+        dirty = newValue === undefined ? false : newValue !== oldValue;
+        break;
+      case 'tools':
+        const newList = newValue as api.Tool[];
+        dirty = !setsEqual(new Set(newList.map((t) => t.type)), new Set(selectedTools));
+        break;
+      default:
+        dirty = newValue !== oldValue;
+    }
+
+    if (dirty) {
+      console.debug(`Field ${field} is dirty: ${oldValue} -> ${newValue}`);
+      return true;
+    }
+
+    return false;
+  };
+
+  /**
+   * Check if the form has substantively changed.
+   */
+  const findAllDirtyFields = (params: api.CreateAssistantRequest) => {
+    // Check if the new params are different from the loaded assistant.
+    // If the assistant is brand new, ignore simple checkboxes and dropdowns,
+    // and only check text entry fields.
+    const fields: Array<keyof api.CreateAssistantRequest & keyof api.Assistant> = data.assistantId
+      ? [
+          'name',
+          'description',
+          'instructions',
+          'model',
+          'published',
+          'use_latex',
+          'hide_prompt',
+          'tools'
+        ]
+      : ['name', 'description', 'instructions'];
+
+    const modifiedFields: string[] = [];
+    for (const field of fields) {
+      if (checkDirtyField(field, params, assistant)) {
+        modifiedFields.push(field);
+      }
+    }
+
+    // Check selected files separately since these are handled differently in the form.
+    if (!setsEqual(new Set(selectedFiles), new Set(data.selectedFiles))) {
+      modifiedFields.push('files');
+    }
+
+    return modifiedFields;
+  };
+
+  /**
+   * Parse data from the assistants form into API request params.
+   */
+  const parseFormData = (form: HTMLFormElement): api.CreateAssistantRequest => {
     const formData = new FormData(form);
     const body = Object.fromEntries(formData.entries());
 
@@ -91,6 +169,19 @@
       hide_prompt: body.hide_prompt?.toString() === 'on'
     };
 
+    return params;
+  };
+
+  /**
+   * Create/save an assistant when form is submitted.
+   */
+  const submitForm = async (evt: SubmitEvent) => {
+    evt.preventDefault();
+    loading = true;
+
+    const form = evt.target as HTMLFormElement;
+    const params = parseFormData(form);
+
     const result = !data.assistantId
       ? await api.createAssistant(fetch, data.class.id, params)
       : await api.updateAssistant(fetch, data.class.id, data.assistantId, params);
@@ -102,10 +193,34 @@
       sadToast(`Error: ${JSON.stringify(expanded.error, null, '  ')}`);
     } else {
       happyToast('Assistant saved');
-      confirmBeforeLeaving = false;
-      goto(`/class/${data.class.id}/assistant`, { invalidateAll: true });
+      checkForChanges = false;
+      await goto(`/class/${data.class.id}/assistant`, { invalidateAll: true });
     }
   };
+
+  beforeNavigate((nav) => {
+    if (!assistantForm) {
+      return;
+    }
+
+    // Confirm before leaving the page, unless we've decided otherwise (e.g. after saving).
+    if (checkForChanges) {
+      const params = parseFormData(assistantForm);
+      const dirtyFields = findAllDirtyFields(params);
+      if (dirtyFields.length > 0) {
+        if (
+          !confirm(
+            `Your changes to the following fields have not been saved:\n\n  ${dirtyFields.join(
+              ', '
+            )}\n\nAre you sure you want to leave this page?`
+          )
+        ) {
+          nav.cancel();
+          return;
+        }
+      }
+    }
+  });
 </script>
 
 <div class="h-full w-full overflow-y-auto p-12">
@@ -117,7 +232,7 @@
     {/if}
   </Heading>
 
-  <form on:submit={submitForm}>
+  <form on:submit={submitForm} bind:this={assistantForm}>
     <div class="mb-4">
       <Label for="name">Name</Label>
       <Input label="name" id="name" name="name" value={assistant?.name} />
