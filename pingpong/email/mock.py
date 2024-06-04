@@ -24,7 +24,5 @@ Subject: {subject}
 ====== BODY ======
 {body}
 ==================
-""".format(
-                to=to, subject=subject, body=body
-            )
+""".format(to=to, subject=subject, body=body)
         )

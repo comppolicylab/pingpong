@@ -4,5 +4,4 @@ from typing import Protocol
 
 class EmailSender(Protocol):
     @abstractmethod
-    async def send(self, to: str, subject: str, message: str):
-        ...
+    async def send(self, to: str, subject: str, message: str): ...

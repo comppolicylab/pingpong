@@ -410,13 +410,16 @@ class OpenAIRun(BaseModel):
     metadata: dict[str, str]
     model: str
     object: Literal["thread.run"]
-    status: Literal["queued"] | Literal["in_progress"] | Literal[
-        "requires_action"
-    ] | Literal["cancelling"] | Literal["cancelled"] | Literal["failed"] | Literal[
-        "completed"
-    ] | Literal[
-        "expired"
-    ]
+    status: (
+        Literal["queued"]
+        | Literal["in_progress"]
+        | Literal["requires_action"]
+        | Literal["cancelling"]
+        | Literal["cancelled"]
+        | Literal["failed"]
+        | Literal["completed"]
+        | Literal["expired"]
+    )
     thread_id: str
     tools: list[Tool]
     # required_action // not shown
