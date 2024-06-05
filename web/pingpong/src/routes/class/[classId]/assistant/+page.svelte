@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Assistant } from '$lib/api.js';
+  import type { Assistant } from '$lib/api';
   import ViewAssistant from '$lib/components/ViewAssistant.svelte';
   import {
     Heading,
