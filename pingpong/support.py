@@ -8,8 +8,7 @@ from .schemas import SupportRequest
 
 class BaseSupportDriver(ABC):
     @abstractmethod
-    async def post(self, req: SupportRequest, **kwargs):
-        ...
+    async def post(self, req: SupportRequest, **kwargs): ...
 
 
 class DiscordSupportDriver(BaseSupportDriver):

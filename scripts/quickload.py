@@ -3,6 +3,7 @@
 It tries to simulate a high number of concurrent requests to the API
 to determine when we get rate-limited or when the API starts to fail.
 """
+
 import concurrent.futures
 import json
 import random
@@ -202,8 +203,7 @@ class LoadTest:
             )
 
     @abstractmethod
-    def test(self, *args, **kwargs):
-        ...
+    def test(self, *args, **kwargs): ...
 
 
 COUNTRIES = [

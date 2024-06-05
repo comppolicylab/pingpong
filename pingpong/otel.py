@@ -3,6 +3,7 @@
 Allows instrumentation with Prometheus-style syntax but using OpenTelemetry
 on the backend.
 """
+
 from typing import Callable
 
 from opentelemetry import metrics
