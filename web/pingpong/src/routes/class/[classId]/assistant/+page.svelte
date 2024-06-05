@@ -16,7 +16,6 @@
 
   $: hasApiKey = !!data?.class?.api_key;
   $: creators = data?.assistantCreators || {};
-  $: allAssistants = data?.assistants || [];
   // "Course" assistants are endorsed by the class. Right now this means
   // they are created by the teaching team and are published.
   let courseAssistants: Assistant[] = [];
@@ -28,6 +27,7 @@
   // elevated permissions, this could also mean private assistants.
   let otherAssistants: Assistant[] = [];
   $: {
+    const allAssistants = data?.assistants || [];
     // Split all assistants into categories
     for (const assistant of allAssistants) {
       if (assistant.endorsed) {

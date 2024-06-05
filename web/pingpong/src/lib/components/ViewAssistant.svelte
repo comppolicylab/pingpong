@@ -63,7 +63,9 @@
     </div>
   </Heading>
   <div class="text-xs mb-4">Created by <b>{creator.name}</b></div>
-  <div class="mb-4 font-light">{assistant.description || '(No description provided)'}</div>
+  <div class="mb-4 font-light max-h-24 overflow-y-auto">
+    {assistant.description || '(No description provided)'}
+  </div>
   <div>
     <a
       href={assistantLink}
