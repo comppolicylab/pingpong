@@ -1096,22 +1096,21 @@ export const createClassUsers = async (
 /**
  * Parameters for updating a class user.
  */
-export type UpdateClassUserRequest = {
-  role: string;
-  verdict: boolean;
+export type UpdateClassUserRoleRequest = {
+  role: Role | null;
 };
 
 /**
- * Update a class user.
+ * Update a user's role in a class.
  */
-export const updateClassUser = async (
+export const updateClassUserRole = async (
   f: Fetcher,
   classId: number,
   userId: number,
-  data: UpdateClassUserRequest
+  data: UpdateClassUserRoleRequest
 ) => {
-  const url = `class/${classId}/user/${userId}`;
-  return await PUT<UpdateClassUserRequest, UserClassRole>(f, url, data);
+  const url = `class/${classId}/user/${userId}/role`;
+  return await PUT<UpdateClassUserRoleRequest, UserClassRole>(f, url, data);
 };
 
 /**

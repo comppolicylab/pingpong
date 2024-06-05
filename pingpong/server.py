@@ -647,7 +647,7 @@ async def add_users_to_class(
 
 
 @v1.put(
-    "/class/{class_id}/user/{user_id}",
+    "/class/{class_id}/user/{user_id}/role",
     dependencies=[Depends(Authz("can_manage_users", "class:{class_id}"))],
     response_model=schemas.UserClassRole,
 )
@@ -657,22 +657,55 @@ async def update_user_class_role(
     cid = int(class_id)
     uid = int(user_id)
 
-    is_admin = await request.state.authz.test(
-        f"user:{request.state.session.user.id}", "admin", f"class:{class_id}"
+    # Weird things will happen if someone tries to modify their own role.
+    if uid == request.state.session.user.id:
+        raise HTTPException(status_code=400, detail="Cannot modify your own role")
+
+    # Query to find the current permissions for the requester and the user being modified.
+    me_ent = f"user:{request.state.session.user.id}"
+    them_ent = f"user:{uid}"
+    class_obj = f"class:{cid}"
+    perms = await request.state.authz.check(
+        [
+            (me_ent, "admin", class_obj),
+            (me_ent, "teacher", class_obj),
+            (me_ent, "student", class_obj),
+            (them_ent, "admin", class_obj),
+            (them_ent, "teacher", class_obj),
+            (them_ent, "student", class_obj),
+        ]
+    )
+    ordered_roles = ["admin", "teacher", "student", None]
+    my_perms = [r for r, p in zip(ordered_roles[:3], perms[:3]) if p]
+    their_perms = [r for r, p in zip(ordered_roles[:3], perms[3:]) if p]
+
+    # Figure out the role with maximal permissions for each user.
+    # (This is necessary because users might have multiple roles. This
+    # is especially true with inherited `admin` permissions.)
+    my_primary_role = next(
+        (r for r in ordered_roles if r in my_perms),
+        None,
+    )
+    their_primary_role = next(
+        (r for r in ordered_roles if r in their_perms),
+        None,
     )
 
-    if not is_admin and update.role != "student":
+    my_primary_idx = ordered_roles.index(my_primary_role)
+    their_primary_idx = ordered_roles.index(their_primary_role)
+    new_idx = ordered_roles.index(update.role)
+
+    # If they already have more permissions than we do, we can't downgrade them
+    if their_primary_idx < my_primary_idx:
         raise HTTPException(
-            status_code=403, detail=f"Missing permission to manage {update.role}"
+            status_code=403, detail="Lacking permission to manage this user"
         )
 
-    if (
-        uid == request.state.session.user.id
-        and is_admin
-        and update.role == "admin"
-        and not update.verdict
-    ):
-        raise HTTPException(status_code=403, detail="Cannot demote yourself")
+    # If the new permission is higher than our own, we can't upgrade them
+    if my_primary_idx > new_idx:
+        raise HTTPException(
+            status_code=403, detail=f"Missing permission to manage '{update.role}' role"
+        )
 
     existing = await models.UserClassRole.get(request.state.db, uid, cid)
     if not existing:
@@ -681,27 +714,26 @@ async def update_user_class_role(
     grants = list[Relation]()
     revokes = list[Relation]()
 
-    if update.verdict:
+    # Grant the new role and revoke all others. The new role might be None.
+    if update.role:
         grants.append((f"user:{uid}", update.role, f"class:{cid}"))
-    else:
-        revokes.append((f"user:{uid}", update.role, f"class:{cid}"))
+    for role in ["admin", "teacher", "student"]:
+        if role != update.role:
+            revokes.append((f"user:{uid}", role, f"class:{cid}"))
 
+    # Save new role info to the database.
     await request.state.authz.write_safe(grant=grants, revoke=revokes)
 
     return schemas.UserClassRole(
         user_id=existing.user_id,
         class_id=existing.class_id,
-        # TODO(jnu): optimize/batch these requests
+        # NOTE(jnu): This assumes the write to the authz server was successful,
+        # and doesn't double check. Worst case, if a write silently failed,
+        # the UI will be in an inconsistent state until the page is reloaded.
         roles=schemas.ClassUserRoles(
-            admin=await request.state.authz.test(
-                f"user:{uid}", "admin", f"class:{cid}"
-            ),
-            teacher=await request.state.authz.test(
-                f"user:{uid}", "teacher", f"class:{cid}"
-            ),
-            student=await request.state.authz.test(
-                f"user:{uid}", "student", f"class:{cid}"
-            ),
+            admin=update.role == "admin",
+            teacher=update.role == "teacher",
+            student=update.role == "student",
         ),
     )
 

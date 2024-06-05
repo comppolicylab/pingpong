@@ -262,8 +262,7 @@ class UserClassRoles(BaseModel):
 
 
 class UpdateUserClassRole(BaseModel):
-    role: Literal["admin"] | Literal["teacher"] | Literal["student"]
-    verdict: bool
+    role: Literal["admin"] | Literal["teacher"] | Literal["student"] | None
 
 
 class CreateInvite(BaseModel):

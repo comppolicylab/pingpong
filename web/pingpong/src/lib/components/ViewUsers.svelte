@@ -16,11 +16,10 @@
     Input,
     Button,
     Pagination,
+    Select,
     type LinkType
   } from 'flowbite-svelte';
   import { SearchOutline } from 'flowbite-svelte-icons';
-  import Toggle from '$lib/components/Toggle.svelte';
-  import type { ToggleChangeEvent } from '$lib/components/Toggle.svelte';
   import { ROLES, ROLE_LABELS } from '$lib/api';
   import type { ClassUser, Role, ClassUsersResponse } from '$lib/api';
   import { sadToast, happyToast } from '$lib/toast';
@@ -50,6 +49,12 @@
    * Style class for the table header cells.
    */
   export let thPad = 'px-3 py-2';
+
+  // The list of role options for the dropdown selector
+  const roleOptions = [
+    ...ROLES.map((role) => ({ value: role, name: ROLE_LABELS[role] })),
+    { value: '', name: '<Unassigned>' }
+  ];
 
   // Whether a request is in flight.
   let loading = false;
@@ -117,6 +122,37 @@
   };
 
   /**
+   * Get a list of roles for a user.
+   *
+   * Technically, roles are independent of each other, which means that a user
+   * can be defined to multiple roles. Roles can also be inherited through the
+   * permissions model (such as inheriting class admin permissions from
+   * institutional admin permissions).
+   *
+   * To simplify the UI, we try to pretend roles are mutually exclusive. This
+   * function identifies the "primary" role for a user, which is the most
+   * permissive role, as well as any other roles the user has.
+   *
+   * Currently, we can't tell if the role is inherited or assigned directly. If
+   * the role is inherited, we can't revoke it directly in this UI.
+   *
+   * @param user The user to get role information for.
+   * @returns An object with the primary role and any other roles the user has.
+   */
+  const getRoleInfoForUser = (user: ClassUser) => {
+    // Roles in order of most permissive to least.
+    const priorityRoles: Role[] = ['admin', 'teacher', 'student'];
+    // The primary role is the one the user is granted that has maximal permissions.
+    const primary = priorityRoles.find((role) => user.roles[role]);
+    const other = priorityRoles.filter((role) => user.roles[role] && role !== primary);
+    return {
+      primary: primary || '',
+      other,
+      otherLabels: other.map((role) => ROLE_LABELS[role])
+    };
+  };
+
+  /**
    * Handle clicking on a page number in the pagination component.
    */
   const handleClick = (evt: MouseEvent) => {
@@ -155,8 +191,8 @@
   /**
    * Grant a permission to the user.
    */
-  const updateUserRole = (evt: ToggleChangeEvent) => {
-    const target = evt.detail.target;
+  const updateUserRole = (evt: Event) => {
+    const target = evt.target as HTMLSelectElement;
     // Set the value of the verdict input to "on" or "off" based on the checked state of the toggle
     target.form?.requestSubmit();
   };
@@ -178,14 +214,9 @@
     const form = evt.target as HTMLFormElement;
     const formData = new FormData(form);
     const d = Object.fromEntries(formData.entries());
-
     const role = d.role.toString() as Role;
-    if (!role) {
-      showErrorAndForceCurrentDataRefresh('Failed to update user role: role is missing');
-      return;
-    }
-
     const userId = parseInt(d.user_id.toString(), 10);
+
     if (!d.user_id) {
       showErrorAndForceCurrentDataRefresh('Failed to update user role: user ID is missing');
       return;
@@ -196,16 +227,13 @@
       return;
     }
 
-    const roleLabel = ROLE_LABELS[role as Role] || role;
-    const user = users.find((u) => u.id === +userId)?.email || `User ${userId}`;
-    const action =
-      d.verdict === 'on'
-        ? `Added ${user} to the ${roleLabel} group`
-        : `Removed ${user} from the ${roleLabel} group`;
+    const roleLabel = ROLE_LABELS[role as Role] || role || 'unassigned';
+    const user = users.find((u) => u.id === +userId);
+    const userName = user?.name || user?.email || `User ${userId}`;
+    const action = `Set ${userName} role to "${roleLabel}"`;
 
-    const result = await api.updateClassUser(fetch, classId, userId, {
-      role: role,
-      verdict: d.verdict === 'on' ? true : false
+    const result = await api.updateClassUserRole(fetch, classId, userId, {
+      role: role || null
     });
 
     if (api.isErrorResponse(result)) {
@@ -238,15 +266,16 @@
       return;
     }
 
-    const user = users.find((u) => u.id === +userId)?.email || `User ${userId}`;
+    const user = users.find((u) => u.id === +userId);
+    const userName = user?.name || user?.email || `User ${userId}`;
     const result = await api.removeClassUser(fetch, classId, userId);
 
     if (api.isErrorResponse(result)) {
       // Force a re-render of the component with the current data
       const detail = result.detail || 'unknown error';
-      showErrorAndForceCurrentDataRefresh(`Failed to remove user: ${detail}`);
+      showErrorAndForceCurrentDataRefresh(`Failed to remove user ${userName}: ${detail}`);
     } else {
-      happyToast(`Removed ${user} from the class`);
+      happyToast(`Removed ${userName} from the class`);
       loadUsers();
     }
   };
@@ -276,30 +305,38 @@
   {:else}
     <Table>
       <TableHead>
-        <TableHeadCell padding={thPad}>Email</TableHeadCell>
-        {#each ROLES as role}
-          <TableHeadCell padding={thPad}>{ROLE_LABELS[role]}</TableHeadCell>
-        {/each}
+        <TableHeadCell padding={thPad}>User</TableHeadCell>
+        <TableHeadCell padding={thPad}>Role</TableHeadCell>
         <TableHeadCell padding={thPad}>Verified</TableHeadCell>
         <TableHeadCell padding={thPad}></TableHeadCell>
       </TableHead>
       <TableBody>
         {#each users as user (user.id)}
+          {@const roleInfo = getRoleInfoForUser(user)}
           <TableBodyRow>
             <TableBodyCell {tdClass}>{user.email}</TableBodyCell>
-            {#each ROLES as role}
-              <TableBodyCell {tdClass}>
-                <form on:submit={submitUpdateUser}>
-                  <input type="hidden" name="user_id" value={user.id} />
-                  <input type="hidden" name="role" value={role} />
-                  <Toggle
-                    checked={user.roles[role] || false}
-                    on:change={updateUserRole}
-                    name="verdict"
-                  />
-                </form>
-              </TableBodyCell>
-            {/each}
+            <TableBodyCell {tdClass}>
+              <form on:submit={submitUpdateUser}>
+                <input type="hidden" name="user_id" value={user.id} />
+                <Select
+                  name="role"
+                  items={roleOptions}
+                  value={roleInfo.primary}
+                  on:change={updateUserRole}
+                />
+              </form>
+              {#if !roleInfo.primary}
+                <div class="text-xs whitespace-normal text-pretty text-gray-500 mt-2">
+                  * This user is not assigned to any role currently.
+                </div>
+              {:else if roleInfo.other.length > 0}
+                <div class="text-xs whitespace-normal text-pretty text-gray-500 mt-2">
+                  * This user is also assigned to the following roles: <span class="font-bold"
+                    >{roleInfo.otherLabels.join(', ')}</span
+                  >
+                </div>
+              {/if}
+            </TableBodyCell>
             <TableBodyCell {tdClass}>
               {#if user.state === 'verified'}
                 <div title="This user is verified."><CheckCircleOutline color="green" /></div>
