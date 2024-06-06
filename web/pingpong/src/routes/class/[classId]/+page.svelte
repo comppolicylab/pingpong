@@ -43,7 +43,7 @@
   const getAssistantMetadata = (assistant: Assistant) => {
     const isCourseAssistant = assistant.endorsed;
     const isMyAssistant = assistant.creator_id === data.me.user!.id;
-    const creator = data.assistantCreators[assistant.creator_id].name;
+    const creator = data.assistantCreators[assistant.creator_id]?.name || 'Unknown creator';
     return {
       creator: isCourseAssistant ? 'Teaching Team' : creator,
       isCourseAssistant,
