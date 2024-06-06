@@ -239,7 +239,7 @@
         <input type="hidden" name="parties" bind:value={parties} />
       </div>
     {:else}
-      <div class="text-center">
+      <div class="text-center m-auto">
         {#if !data.hasAssistants}
           <h1 class="text-2xl font-bold">No assistants configured.</h1>
         {:else if !data.hasBilling}
