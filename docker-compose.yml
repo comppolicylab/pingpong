@@ -7,8 +7,8 @@ services:
     image: openfga/openfga:v1.5.0
     container_name: pingpong-authz
     command: [run]
-    expose: [8080, 8081, 3000]
-    ports: ["8080:8080", "8081:8081", "3000:3000"]
+    expose: [8080, 8081, 3003]
+    ports: ["8080:8080", "8081:8081", "3003:3000"]
     environment:
       OPENFGA_DATASTORE_MAX_OPEN_CONNS: 40
       OPENFGA_DATASTORE_MAX_IDLE_CONNS: 25
@@ -30,10 +30,13 @@ services:
       context: ./web/pingpong
       dockerfile: Dockerfile
       args:
+        host: 0.0.0.0
         port: 3000
     restart: always
+    expose: [80]
+    ports: ["80:3000"]
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 5s
       timeout: 5s
       retries: 3
