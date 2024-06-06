@@ -24,6 +24,7 @@
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
   import { invalidateAll, onNavigate } from '$app/navigation';
+  import { submitParentForm } from '$lib/form';
 
   /**
    * Application data.
@@ -192,7 +193,7 @@
     const update: api.UpdateClassRequest = {
       name: d.name.toString(),
       term: d.term.toString(),
-      any_can_publish_thread: d.any_can_publish_thread.toString() === 'on',
+      any_can_publish_thread: d.any_can_publish_thread?.toString() === 'on',
       ...parseAssistantPermissions(d.asst_perm.toString())
     };
 
@@ -204,7 +205,7 @@
     } else {
       invalidateAll();
       $updatingClass = false;
-      happyToast('Success!');
+      happyToast('Saved class info');
     }
   };
 
@@ -228,7 +229,7 @@
     } else {
       invalidateAll();
       $updatingApiKey = false;
-      happyToast('Success!');
+      happyToast('Saved API key!');
     }
   };
 
@@ -268,12 +269,26 @@
         </div>
         <div>
           <Label for="name">Name</Label>
-          <Input label="Name" id="name" name="name" value={data.class.name} />
+          <Input
+            label="Name"
+            id="name"
+            name="name"
+            value={data.class.name}
+            on:change={submitParentForm}
+            disabled={$updatingClass}
+          />
         </div>
 
         <div>
           <Label for="term">Term</Label>
-          <Input label="Term" id="term" name="term" value={data.class.term} />
+          <Input
+            label="Term"
+            id="term"
+            name="term"
+            value={data.class.term}
+            on:change={submitParentForm}
+            disabled={$updatingClass}
+          />
         </div>
 
         <div></div>
@@ -285,6 +300,8 @@
           <Checkbox
             id="any_can_publish_thread"
             name="any_can_publish_thread"
+            disabled={$updatingClass}
+            on:change={submitParentForm}
             checked={anyCanPublishThread}>Allow students to publish threads</Checkbox
           >
         </div>
@@ -295,19 +312,13 @@
           and sharing them with the class. Instructors will always be able to create and publish
           assistants.</Helper
         >
-
-        <Select items={asstPermOptions} value={assistantPermissions} name="asst_perm" />
-
-        <div></div>
-        <div></div>
-        <div>
-          <Button
-            pill
-            type="submit"
-            class="bg-orange text-white hover:bg-orange-dark"
-            disabled={$updatingClass}>Save</Button
-          >
-        </div>
+        <Select
+          items={asstPermOptions}
+          value={assistantPermissions}
+          name="asst_perm"
+          on:change={submitParentForm}
+          disabled={$updatingClass}
+        />
       </div>
     </form>
   {/if}
