@@ -9,7 +9,7 @@ services:
         origin: https://pingpong.hks.harvard.edu
 
   srv:
-    image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-srv:v0.2.8
+    image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-srv:v0.2.9
 
 
 secrets:
