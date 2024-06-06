@@ -24,6 +24,7 @@
   import type { ClassUser, Role, ClassUsersResponse } from '$lib/api';
   import { sadToast, happyToast } from '$lib/toast';
   import * as api from '$lib/api';
+  import { submitParentForm } from '$lib/form';
 
   /**
    * Number of users to view on each page.
@@ -189,15 +190,6 @@
   };
 
   /**
-   * Grant a permission to the user.
-   */
-  const updateUserRole = (evt: Event) => {
-    const target = evt.target as HTMLSelectElement;
-    // Set the value of the verdict input to "on" or "off" based on the checked state of the toggle
-    target.form?.requestSubmit();
-  };
-
-  /**
    * Force a re-render of the component with the current data.
    */
   const showErrorAndForceCurrentDataRefresh = (detail: string) => {
@@ -322,7 +314,7 @@
                   name="role"
                   items={roleOptions}
                   value={roleInfo.primary}
-                  on:change={updateUserRole}
+                  on:change={submitParentForm}
                 />
               </form>
               {#if !roleInfo.primary}

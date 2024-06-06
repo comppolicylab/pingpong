@@ -12,7 +12,8 @@
     Secondary,
     Heading,
     Label,
-    Input
+    Input,
+    Select
   } from 'flowbite-svelte';
   import BulkAddUsers from '$lib/components/BulkAddUsers.svelte';
   import ViewUsers from '$lib/components/ViewUsers.svelte';
@@ -23,6 +24,7 @@
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
   import { invalidateAll, onNavigate } from '$app/navigation';
+  import { submitParentForm } from '$lib/form';
 
   /**
    * Application data.
@@ -57,16 +59,49 @@
     }
   });
 
+  /**
+   * Format assistant permissions into a string for dropdown selector.
+   */
+  const formatAssistantPermissions = (classData: api.Class | undefined) => {
+    if (!classData) {
+      return 'create:0,publish:0,upload:0';
+    }
+
+    let create = classData.any_can_create_assistant ? 1 : 0;
+    let publish = classData.any_can_publish_assistant ? 1 : 0;
+    let upload = classData.any_can_upload_class_file ? 1 : 0;
+
+    return `create:${create},publish:${publish},upload:${upload}`;
+  };
+
+  /**
+   * Parse assistant permissions from a string.
+   */
+  const parseAssistantPermissions = (permissions: string) => {
+    let parts = permissions.split(',');
+    let create = parts[0].split(':')[1] === '1';
+    let publish = parts[1].split(':')[1] === '1';
+    let upload = parts[2].split(':')[1] === '1';
+
+    return {
+      any_can_create_assistant: create,
+      any_can_publish_assistant: publish,
+      any_can_upload_class_file: upload
+    };
+  };
+
   let usersModalOpen = false;
-  let anyCanCreateAsst = data?.class.any_can_create_assistant || false;
-  let anyCanPublishAsst = data.class.any_can_publish_assistant || false;
   let anyCanPublishThread = data?.class.any_can_publish_thread || false;
-  let anyCanUploadClassFile = data?.class.any_can_upload_class_file || false;
+  let assistantPermissions = formatAssistantPermissions(data?.class);
+  const asstPermOptions = [
+    { value: 'create:0,publish:0,upload:0', name: 'Do not allow students to create' },
+    { value: 'create:1,publish:0,upload:1', name: 'Students can create but not publish' },
+    { value: 'create:1,publish:1,upload:1', name: 'Students can create and publish' }
+  ];
 
   const blurred = writable(true);
   let uploads = writable<FileUploadInfo[]>([]);
   const trashFiles = writable<number[]>([]);
-  $: publishOptMakesSense = anyCanCreateAsst;
   $: apiKey = data.apiKey || '';
   $: apiKeyBlur =
     apiKey.substring(0, 6) + '**************' + apiKey.substring(Math.max(6, apiKey.length - 6));
@@ -143,7 +178,10 @@
   };
 
   const updatingClass = writable(false);
-  // Handle class information update
+
+  /**
+   * Save updates to class metadata and permissions.
+   */
   const updateClass = async (evt: SubmitEvent) => {
     evt.preventDefault();
     $updatingClass = true;
@@ -152,7 +190,14 @@
     const formData = new FormData(form);
     const d = Object.fromEntries(formData.entries());
 
-    const result = await api.updateClass(fetch, data.class.id, d);
+    const update: api.UpdateClassRequest = {
+      name: d.name.toString(),
+      term: d.term.toString(),
+      any_can_publish_thread: d.any_can_publish_thread?.toString() === 'on',
+      ...parseAssistantPermissions(d.asst_perm.toString())
+    };
+
+    const result = await api.updateClass(fetch, data.class.id, update);
     if (api.isErrorResponse(result)) {
       $updatingClass = false;
       let msg = result.detail || 'An unknown error occurred';
@@ -160,7 +205,7 @@
     } else {
       invalidateAll();
       $updatingClass = false;
-      happyToast('Success!');
+      happyToast('Saved class info');
     }
   };
 
@@ -184,7 +229,7 @@
     } else {
       invalidateAll();
       $updatingApiKey = false;
-      happyToast('Success!');
+      happyToast('Saved API key!');
     }
   };
 
@@ -224,94 +269,56 @@
         </div>
         <div>
           <Label for="name">Name</Label>
-          <Input label="Name" id="name" name="name" value={data.class.name} />
+          <Input
+            label="Name"
+            id="name"
+            name="name"
+            value={data.class.name}
+            on:change={submitParentForm}
+            disabled={$updatingClass}
+          />
         </div>
 
         <div>
           <Label for="term">Term</Label>
-          <Input label="Term" id="term" name="term" value={data.class.term} />
+          <Input
+            label="Term"
+            id="term"
+            name="term"
+            value={data.class.term}
+            on:change={submitParentForm}
+            disabled={$updatingClass}
+          />
         </div>
 
         <div></div>
+        <Helper
+          >Choose whether to allow students to share their threads with the rest of the class.
+          Instructors are always allowed to publish threads.</Helper
+        >
         <div>
           <Checkbox
             id="any_can_publish_thread"
             name="any_can_publish_thread"
-            checked={anyCanPublishThread}>Allow anyone to publish threads</Checkbox
+            disabled={$updatingClass}
+            on:change={submitParentForm}
+            checked={anyCanPublishThread}>Allow students to publish threads</Checkbox
           >
         </div>
+
+        <div></div>
         <Helper
-          >When this is enabled, anyone in the class can share their own threads with the rest of
-          the class. Otherwise, only teachers and admins can share threads.</Helper
+          >Choose the level of permissions students should have for creating their own assistants
+          and sharing them with the class. Instructors will always be able to create and publish
+          assistants.</Helper
         >
-
-        <div></div>
-        <Checkbox
-          id="any_can_create_assistant"
-          name="any_can_create_assistant"
-          bind:checked={anyCanCreateAsst}>Allow anyone to create assistants</Checkbox
-        >
-        <Helper
-          >When this is enabled, anyone in the class can create assistants. Otherwise, only teachers
-          and admins can create assistants.</Helper
-        >
-
-        <div></div>
-        {#if publishOptMakesSense}
-          <Checkbox
-            id="any_can_publish_assistant"
-            name="any_can_publish_assistant"
-            checked={anyCanPublishAsst}
-          >
-            Allow anyone to publish assistants
-          </Checkbox>
-        {:else}
-          <Checkbox
-            id="any_can_publish_assistant"
-            name="any_can_publish_assistant"
-            checked={false}
-            disabled
-          >
-            Allow anyone to publish assistants
-          </Checkbox>
-        {/if}
-
-        <Helper
-          >When this is enabled, anyone in the class can share their own assistants with the rest of
-          the class. Otherwise, only teachers and admins can share assistants.</Helper
-        >
-
-        <div></div>
-        {#if publishOptMakesSense}
-          <Checkbox
-            id="any_can_upload_class_file"
-            name="any_can_upload_class_file"
-            checked={anyCanUploadClassFile}>Allow anyone to upload files for assistants</Checkbox
-          >
-        {:else}
-          <Checkbox
-            id="any_can_upload_class_file"
-            name="any_can_upload_class_file"
-            checked={false}
-            disabled>Allow anyone to upload files for assistants</Checkbox
-          >
-        {/if}
-        <Helper
-          >When this is enabled, anyone in the class can upload files for use in creating
-          assistants. Otherwise, only teachers and admins can upload files. (Note that users can
-          still upload files privately to chat threads even when this setting is disabled.)</Helper
-        >
-
-        <div></div>
-        <div></div>
-        <div>
-          <Button
-            pill
-            type="submit"
-            class="bg-orange text-white hover:bg-orange-dark"
-            disabled={$updatingClass}>Save</Button
-          >
-        </div>
+        <Select
+          items={asstPermOptions}
+          value={assistantPermissions}
+          name="asst_perm"
+          on:change={submitParentForm}
+          disabled={$updatingClass}
+        />
       </div>
     </form>
   {/if}
