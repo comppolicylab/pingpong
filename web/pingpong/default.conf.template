@@ -1,6 +1,8 @@
 server {
     listen ${NGINX_LISTEN};
 
+    http2 on;
+
     gzip on;
     gzip_types text/html application/javascript application/json text/css image/svg+xml;
     gzip_comp_level 9;
