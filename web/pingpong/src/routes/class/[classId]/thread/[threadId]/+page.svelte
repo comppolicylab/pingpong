@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { page } from '$app/stores';
+  import { navigating, page } from '$app/stores';
   import { goto, invalidateAll } from '$app/navigation';
   import * as api from '$lib/api';
   import { happyToast, sadToast } from '$lib/toast';
@@ -166,22 +166,22 @@
       }
       await threadMgr.delete();
       happyToast('Thread deleted.');
-      goto(`/class/${classId}`, { invalidateAll: true });
+      await goto(`/class/${classId}`, { invalidateAll: true });
     } catch (e) {
       sadToast(`Failed to delete thread. Error: ${errorMessage(e)}`);
     }
   };
 </script>
 
-{#if $loading}
-  <div class="absolute top-0 left-0 flex h-screen w-full items-center">
-    <div class="m-auto" transition:blur={{ amount: 10 }}>
-      <Pulse color="#0ea5e9" />
+<div class="w-full flex flex-col justify-between grow min-h-0 relative">
+  {#if $loading || $navigating}
+    <div class="absolute top-0 left-0 flex h-full w-full items-center bg-white bg-opacity-75">
+      <div class="m-auto" transition:blur={{ amount: 10 }}>
+        <Pulse color="#0ea5e9" />
+      </div>
     </div>
-  </div>
-{/if}
+  {/if}
 
-<div class="w-full flex flex-col justify-between grow min-h-0">
   <div class="overflow-y-auto pb-4 px-2 lg:px-4" use:scroll={$messages}>
     {#if $canFetchMore}
       <div class="flex justify-center grow">
@@ -257,7 +257,7 @@
           mimeType={data.uploadInfo.mimeType}
           maxSize={data.uploadInfo.private_file_max_size}
           accept={fileTypes}
-          disabled={!canSubmit}
+          disabled={!canSubmit || !!$navigating}
           loading={$submitting || $waiting}
           upload={handleUpload}
           remove={handleRemove}
