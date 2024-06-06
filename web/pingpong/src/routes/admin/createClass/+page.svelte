@@ -67,7 +67,7 @@
     $loading = false;
     form.reset();
     happyToast('Class created successfully!');
-    goto(`/class/${classResponse.data.id}/manage`);
+    await goto(`/class/${classResponse.data.id}/manage`);
   };
 </script>
 

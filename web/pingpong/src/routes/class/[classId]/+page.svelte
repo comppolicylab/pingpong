@@ -2,7 +2,7 @@
   import { blur } from 'svelte/transition';
   import { writable } from 'svelte/store';
   import { goto } from '$app/navigation';
-  import { page } from '$app/stores';
+  import { navigating, page } from '$app/stores';
   import { Pulse } from 'svelte-loading-spinners';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
   import {
@@ -27,12 +27,14 @@
    */
   export let data;
 
-  onMount(() => {
+  onMount(async () => {
     // Make sure that an assistant is linked in the URL
     if (!$page.url.searchParams.has('assistant')) {
       if (data.assistants.length > 0) {
         // replace current URL with one that has the assistant ID
-        goto(`/class/${data.class.id}/?assistant=${data.assistants[0].id}`, { replaceState: true });
+        await goto(`/class/${data.class.id}/?assistant=${data.assistants[0].id}`, {
+          replaceState: true
+        });
       }
     }
   });
@@ -41,7 +43,7 @@
   const getAssistantMetadata = (assistant: Assistant) => {
     const isCourseAssistant = assistant.endorsed;
     const isMyAssistant = assistant.creator_id === data.me.user!.id;
-    const creator = data.assistantCreators[assistant.creator_id].name;
+    const creator = data.assistantCreators[assistant.creator_id]?.name || 'Unknown creator';
     return {
       creator: isCourseAssistant ? 'Teaching Team' : creator,
       isCourseAssistant,
@@ -107,7 +109,7 @@
         })
       );
       data.threads = [newThread, ...data.threads];
-      goto(`/class/${$page.params.classId}/thread/${newThread.id}`);
+      await goto(`/class/${$page.params.classId}/thread/${newThread.id}`);
     } catch (e) {
       sadToast(`Failed to create thread. Error: ${errorMessage(e)}`);
       $loading = false;
@@ -115,8 +117,8 @@
   };
 
   // Set the new assistant selection.
-  const selectAi = (asst: Assistant) => {
-    goto(`/class/${data.class.id}/?assistant=${asst.id}`);
+  const selectAi = async (asst: Assistant) => {
+    await goto(`/class/${data.class.id}/?assistant=${asst.id}`);
   };
 </script>
 
@@ -222,7 +224,7 @@
           mimeType={data.uploadInfo.mimeType}
           maxSize={data.uploadInfo.private_file_max_size}
           accept={fileTypes}
-          loading={$loading}
+          loading={$loading || !!$navigating}
           upload={handleUpload}
           remove={handleRemove}
           on:submit={handleSubmit}

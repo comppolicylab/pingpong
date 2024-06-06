@@ -33,7 +33,7 @@
       happyToast('Profile information saved');
       // Get `forward` parametr from URL
       const destination = $page.url.searchParams.get('forward') || '/';
-      goto(destination, { invalidateAll: true });
+      await goto(destination, { invalidateAll: true });
     }
     loading = false;
   };
