@@ -3,6 +3,7 @@ services:
   web:
     build:
       args:
+        port: 3000
         origin: https://pingpong.local
         node_env: development
 

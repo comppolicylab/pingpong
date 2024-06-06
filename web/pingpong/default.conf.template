@@ -1,0 +1,23 @@
+server {
+    listen ${NGINX_LISTEN};
+
+    gzip on;
+    gzip_types text/html application/javascript application/json text/css image/svg+xml;
+    gzip_comp_level 9;
+    etag on;
+
+    # Default nginx root directory
+    root /usr/share/nginx/html;
+    # Index / fallback page
+    index index.html;
+
+    location / {
+        # Serve real files first, then fallback to index.
+        try_files $uri $uri/ $uri.html /index.html;
+    }
+
+    location ~* \.(?:css|js|jpg|svg|png|woff|woff2|ttf)$ {
+        expires 30d;
+        add_header Cache-Control "public";
+    }
+}
