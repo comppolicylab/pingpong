@@ -123,8 +123,8 @@
 </script>
 
 <div class="flex justify-center relative min-h-0 grow shrink">
-  {#if $loading}
-    <div class="absolute top-0 left-0 flex h-full w-full items-center">
+  {#if $loading || !!$navigating}
+    <div class="absolute top-0 left-0 flex h-full w-full items-center bg-white bg-opacity-75 z-50">
       <div class="m-auto" transition:blur={{ amount: 10 }}>
         <Pulse color="#0ea5e9" />
       </div>
