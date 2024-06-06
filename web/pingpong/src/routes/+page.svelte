@@ -1,7 +1,7 @@
 <!-- We don't really expect anyone to ever see this page.
   -- Just add some loose directions in case we're wrong about that!
   -->
-<div>
+<div class="m-auto">
   <h1>Welcome to PingPong!</h1>
   <p>It looks like you have not been added to any classes and you are also not an admin.</p>
   <p>

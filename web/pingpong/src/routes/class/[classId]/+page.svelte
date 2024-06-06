@@ -123,8 +123,8 @@
 </script>
 
 <div class="flex justify-center relative min-h-0 grow shrink">
-  {#if $loading}
-    <div class="absolute top-0 left-0 flex h-full w-full items-center">
+  {#if $loading || !!$navigating}
+    <div class="absolute top-0 left-0 flex h-full w-full items-center bg-white bg-opacity-75 z-50">
       <div class="m-auto" transition:blur={{ amount: 10 }}>
         <Pulse color="#0ea5e9" />
       </div>
@@ -239,7 +239,7 @@
         <input type="hidden" name="parties" bind:value={parties} />
       </div>
     {:else}
-      <div class="text-center">
+      <div class="text-center m-auto">
         {#if !data.hasAssistants}
           <h1 class="text-2xl font-bold">No assistants configured.</h1>
         {:else if !data.hasBilling}
