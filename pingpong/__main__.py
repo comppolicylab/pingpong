@@ -110,16 +110,34 @@ def db() -> None:
 @click.option("--clean/--no-clean", default=False)
 @click.option("--alembic-config", default="alembic.ini")
 def db_init(clean, alembic_config: str) -> None:
-    async def init_db(drop_first: bool = False) -> None:
+    async def init_db(drop_first: bool = False) -> bool:
+        """Initialize the database.
+
+        Args:
+            drop_first: Whether to drop and recreate the database.
+
+        Returns:
+            Whether the database was initialized.
+        """
+        blank_slate = False
         if not await config.db.driver.exists():
             await config.db.driver.create()
-        await config.db.driver.init(Base, drop_first=drop_first)
+            blank_slate = True
+        # Only init the database if we just created it or we're cleaning it
+        if drop_first or blank_slate:
+            await config.db.driver.init(Base, drop_first=drop_first)
+            return True
+        return False
 
-    asyncio.run(init_db(drop_first=clean))
+    inited = asyncio.run(init_db(drop_first=clean))
 
     # Stamp the revision as current so that future migrations will work.
-    al_cfg = _load_alembic(alembic_config)
-    alembic.command.stamp(al_cfg, "head")
+    # Only do this if we initialized the database; otherwise the revision
+    # should be set already and might be inaccurate if we re-stamp to head.
+    # (To update to the latest revision, use `migrate` after calling `init`.)
+    if inited:
+        al_cfg = _load_alembic(alembic_config)
+        alembic.command.stamp(al_cfg, "head")
 
 
 @db.command("migrate")
