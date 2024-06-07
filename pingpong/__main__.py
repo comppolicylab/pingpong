@@ -13,6 +13,8 @@ from .authz.migrate import sync_db_to_openfga
 from .config import config
 from .models import Base, User
 
+from sqlalchemy import inspect
+
 logger = logging.getLogger(__name__)
 
 
@@ -119,25 +121,51 @@ def db_init(clean, alembic_config: str) -> None:
         Returns:
             Whether the database was initialized.
         """
-        blank_slate = False
         if not await config.db.driver.exists():
+            logger.info("Creating a brand new database")
             await config.db.driver.create()
-            blank_slate = True
+        else:
+            logger.info("Database already exists")
+
+        # Check to see if there are any tables in the database.
+        # If there are, we won't force initialization unless `clean` is set.
+        # This is to prevent accidental data loss.
+        # NOTE(jnu): `inspect` only has a sync interface right now so we have
+        # to call that instead of an async version.
+        engine = config.db.driver.get_sync_engine()
+        inspector = inspect(engine)
+        tables = inspector.get_table_names()
+        blank_slate = not tables
+        if blank_slate:
+            logger.info("Database is a blank slate (did not find any tables)")
+        else:
+            logger.info(
+                "Database is *not* a blank slate! found tables: %s", ", ".join(tables)
+            )
+        engine.dispose()
+
         # Only init the database if we just created it or we're cleaning it
         if drop_first or blank_slate:
+            logger.info(
+                "Initializing the database tables because %s",
+                "it's a blank slate" if blank_slate else "clean was requested",
+            )
             await config.db.driver.init(Base, drop_first=drop_first)
             return True
         return False
 
-    inited = asyncio.run(init_db(drop_first=clean))
+    did_init = asyncio.run(init_db(drop_first=clean))
 
     # Stamp the revision as current so that future migrations will work.
     # Only do this if we initialized the database; otherwise the revision
     # should be set already and might be inaccurate if we re-stamp to head.
     # (To update to the latest revision, use `migrate` after calling `init`.)
-    if inited:
+    if did_init:
+        logger.info("Stamping revision as current")
         al_cfg = _load_alembic(alembic_config)
         alembic.command.stamp(al_cfg, "head")
+    else:
+        logger.info("Database already initialized; not stamping revision")
 
 
 @db.command("migrate")
