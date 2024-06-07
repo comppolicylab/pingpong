@@ -234,6 +234,7 @@ export type SessionToken = {
  * Email with image.
  */
 export type Profile = {
+  name: string | null;
   email: string;
   gravatar_id: string;
   image_url: string;

@@ -49,7 +49,7 @@
         return 'Unknown';
       }
       const participant = $participants.user[userId];
-      return participant?.email || 'Unknown';
+      return participant?.name || participant?.email || 'Unknown';
     } else {
       if ($assistantId) {
         return $participants.assistant[$assistantId] || 'PingPong Bot';

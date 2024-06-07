@@ -55,6 +55,7 @@ class MagicLoginRequest(BaseModel):
 
 
 class Profile(BaseModel):
+    name: str | None
     email: str
     gravatar_id: str
     image_url: str
@@ -64,9 +65,26 @@ class Profile(BaseModel):
         """Return a profile from an email address."""
         hashed = get_email_hash(email)
         return cls(
+            name=None,
             email=email,
             gravatar_id=hashed,
             image_url=get_gravatar_image(email),
+        )
+
+    @classmethod
+    def from_user(cls, user: "User") -> "Profile":
+        """Return a profile from an email address and name."""
+        hashed = get_email_hash(user.email)
+        name = (
+            user.display_name
+            if user.display_name
+            else " ".join(filter(None, [user.first_name, user.last_name])) or user.email
+        )
+        return cls(
+            name=name,
+            email=user.email,
+            gravatar_id=hashed,
+            image_url=get_gravatar_image(user.email),
         )
 
 
