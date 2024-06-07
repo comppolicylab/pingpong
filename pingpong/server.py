@@ -853,7 +853,6 @@ async def get_thread(
     class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
-
     messages, assistants, runs_result = await asyncio.gather(
         openai_client.beta.threads.messages.list(
             thread.thread_id, limit=20, order="desc"
@@ -1146,9 +1145,9 @@ async def create_thread(
         "users": parties or [],
         "thread_id": thread.id,
         "assistant_id": req.assistant_id,
-        "vector_store_id" : new_vector_store.id if new_vector_store else None,
+        "vector_store_id": new_vector_store.id if new_vector_store else None,
         "code_interpreter_file_ids": req.code_interpreter_file_ids or [],
-        "tools_available": json.dumps(toolsExport["tools_available"]) or '[]',
+        "tools_available": json.dumps(toolsExport["tools_available"]) or "[]",
     }
 
     result: None | models.Thread = None
@@ -1228,10 +1227,8 @@ async def send_message(
                     vector_store.vector_store_id, file_ids=data.file_search_file_ids
                 )
             except openai.BadRequestError as e:
-                raise HTTPException(
-                    400, e.message or "OpenAI rejected this request"
-                )
-            
+                raise HTTPException(400, e.message or "OpenAI rejected this request")
+
             existing_files = await models.VectorStore.get_files_by_id(
                 request.state.db, vector_store.id
             )
@@ -1258,12 +1255,14 @@ async def send_message(
                         "creator_id": str(request.state.session.user.id),
                     },
                 )
-                tool_resources["file_search"] = {"vector_store_ids": [new_vector_store.id]}
+                tool_resources["file_search"] = {
+                    "vector_store_ids": [new_vector_store.id]
+                }
             except openai.BadRequestError as e:
-                raise HTTPException(400, e.message or "OpenAI rejected this request")        
+                raise HTTPException(400, e.message or "OpenAI rejected this request")
 
     if data.code_interpreter_file_ids:
-        existing_files = await models.Thread.get_code_interpeter_files_by_id(
+        existing_files = await models.Thread.get_code_interpreter_files_by_id(
             request.state.db, thread.id
         )
         new_files = await models.File.get_all_by_file_id(
@@ -1719,7 +1718,9 @@ async def update_assistant(
                         "creator_id": str(request.state.session.user.id),
                     },
                 )
-                tool_resources["file_search"] = {"vector_store_ids": [new_vector_store.id]}
+                tool_resources["file_search"] = {
+                    "vector_store_ids": [new_vector_store.id]
+                }
             except openai.BadRequestError as e:
                 raise HTTPException(400, e.message or "OpenAI rejected this request")
     else:
@@ -1730,7 +1731,9 @@ async def update_assistant(
                 request.state.db, asst.vector_store_id
             )
             try:
-                await openai_client.beta.vector_stores.delete(vector_store.vector_store_id)
+                await openai_client.beta.vector_stores.delete(
+                    vector_store.vector_store_id
+                )
             except openai.BadRequestError as e:
                 raise HTTPException(400, e.message or "OpenAI rejected this request")
             await models.VectorStore.delete(request.state.db, vector_store.id)

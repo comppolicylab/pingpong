@@ -141,7 +141,6 @@
     const message = ref.value;
     $codeInterpreterFiles = [];
     $fileSearchFiles = [];
-    console.log('submitting', code_interpreter_file_ids, file_search_file_ids, message);
     dispatcher('submit', {
       file_search_file_ids,
       code_interpreter_file_ids,

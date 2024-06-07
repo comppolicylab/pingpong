@@ -87,7 +87,6 @@
 
   // Handle form submission
   const handleSubmit = async (e: CustomEvent<ChatInputMessage>) => {
-    console.log('submit', e.detail);
     $loading = true;
     const form = e.detail;
     if (!form.message) {
@@ -104,7 +103,7 @@
     if (supportsCodeInterpreter) {
       tools.push({ type: 'code_interpreter' });
     }
-    
+
     try {
       const newThread = api.explodeResponse(
         await api.createThread(fetch, data.class.id, {

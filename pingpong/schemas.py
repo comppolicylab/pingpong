@@ -173,13 +173,6 @@ class VectorStore(BaseModel):
         from_attributes = True
 
 
-class VectorStores(BaseModel):
-    vector_stores: list[VectorStore]
-
-    class Config:
-        from_attributes = True
-
-
 class Assistant(BaseModel):
     id: int
     name: str

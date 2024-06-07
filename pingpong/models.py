@@ -334,6 +334,7 @@ class File(Base):
         result = await session.execute(stmt)
         return [row.File for row in result]
 
+
 class VectorStore(Base):
     __tablename__ = "vector_stores"
 
@@ -485,7 +486,7 @@ class Assistant(Base):
         stmt = select(Assistant).where(Assistant.id.in_([int(id_) for id_ in ids]))
         result = await session.execute(stmt)
         return [row.Assistant for row in result]
-    
+
     @classmethod
     async def create(
         cls,
@@ -737,7 +738,7 @@ class Thread(Base):
         return await session.scalar(stmt)
 
     @classmethod
-    async def get_code_interpeter_files_by_id(
+    async def get_code_interpreter_files_by_id(
         cls, session: AsyncSession, id_: int
     ) -> List["File"]:
         stmt = select(Thread).where(Thread.id == int(id_))

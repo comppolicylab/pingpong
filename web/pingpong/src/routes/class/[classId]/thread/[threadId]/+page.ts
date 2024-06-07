@@ -13,8 +13,15 @@ export const load: PageLoad = async ({ fetch, params }) => {
     })
   ]);
 
+  const expanded = api.expandResponse(threadData);
+  let threadAvailableTools = '';
+  if (!expanded.error) {
+    threadAvailableTools = expanded.data.thread.tools_available || '';
+  }
+
   return {
     threadData,
+    availableTools: threadAvailableTools,
     canDeleteThread: threadGrants.canDelete,
     canPublishThread: threadGrants.canPublish
   };

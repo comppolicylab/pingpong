@@ -54,16 +54,6 @@ export class ThreadManager {
   loading: Readable<boolean>;
 
   /**
-   * Whether the thread supports file search.
-   */
-  supportsFileSearch: Readable<boolean>;
-
-  /**
-   * Whether the thread supports file search.
-   */
-  supportsCodeInterpreter: Readable<boolean>;
-
-  /**
    * Whether a message is currently being generated.
    */
   waiting: Readable<boolean>;
@@ -156,10 +146,6 @@ export class ThreadManager {
     });
 
     this.loading = derived(this.#data, ($data) => !!$data?.loading);
-
-    this.supportsFileSearch = derived(this.#data, ($data) => !!$data?.supportsFileSearch);
-
-    this.supportsCodeInterpreter = derived(this.#data, ($data) => !!$data?.supportsCodeInterpreter);
 
     this.waiting = derived(this.#data, ($data) => !!$data?.waiting);
 
@@ -345,7 +331,12 @@ export class ThreadManager {
   /**
    * Send a new message to this thread.
    */
-  async postMessage(fromUserId: number, message: string, code_interpreter_file_ids?: string[], file_search_file_ids?: string[]) {
+  async postMessage(
+    fromUserId: number,
+    message: string,
+    code_interpreter_file_ids?: string[],
+    file_search_file_ids?: string[]
+  ) {
     if (!message) {
       throw new Error('Please enter a message before sending.');
     }

@@ -16,7 +16,6 @@
 
   export let data;
 
-  let fileTypes = '';
   $: classId = parseInt($page.params.classId);
   $: threadId = parseInt($page.params.threadId);
   $: threadMgr = new ThreadManager(fetch, classId, threadId, data.threadData);
@@ -32,13 +31,8 @@
   $: waiting = threadMgr.waiting;
   $: loading = threadMgr.loading;
   $: canFetchMore = threadMgr.canFetchMore;
-  $: {
-    // Figure out the capabilities of assistants in the thread
-    const assts = data.assistants.filter((a) => Object.hasOwn($participants.assistant, a.id));
-    fileTypes = data.uploadInfo.fileTypesForAssistants(...assts);
-  }
-  $: supportsFileSearch = threadMgr.supportsFileSearch;
-  $: supportsCodeInterpreter = threadMgr.supportsCodeInterpreter
+  $: supportsFileSearch = data.availableTools.includes('file_search') || false;
+  $: supportsCodeInterpreter = data.availableTools.includes('code_interpreter') || false;
   // TODO - should figure this out by checking grants instead of participants
   $: canSubmit =
     !!$participants.user && data?.me?.user?.id && !!$participants.user[data?.me?.user?.id];
@@ -106,9 +100,18 @@
   };
 
   // Handle sending a message
-  const postMessage = async ({ message, code_interpreter_file_ids, file_search_file_ids }: ChatInputMessage) => {
+  const postMessage = async ({
+    message,
+    code_interpreter_file_ids,
+    file_search_file_ids
+  }: ChatInputMessage) => {
     try {
-      await threadMgr.postMessage(data.me.user!.id, message, code_interpreter_file_ids, file_search_file_ids);
+      await threadMgr.postMessage(
+        data.me.user!.id,
+        message,
+        code_interpreter_file_ids,
+        file_search_file_ids
+      );
     } catch (e) {
       sadToast(`Failed to send message. Error: ${errorMessage(e)}`);
     }
