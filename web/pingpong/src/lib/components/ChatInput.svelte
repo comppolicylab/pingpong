@@ -249,29 +249,33 @@
 <div use:init={$page.params.threadId} class="w-full relative">
   <input type="hidden" name="file_search_file_ids" bind:value={fileSearchFileIds} />
   {#if $fileSearchFiles.length > 0}
-  <div class="z-20 p-0 pl-2 text-sm font-medium text-gray-900 dark:text-gray-300">File Search Files</div>
-  <div
-    class="z-10 top-0 p-2 flex gap-2 flex-wrap"
-    use:fixFileListHeight={$fileSearchFiles}
-    bind:this={fileSearchFileListRef}
-  >
-    {#each $fileSearchFiles as file}
-      <FilePlaceholder {mimeType} info={file} on:delete={removeFileSearchFile} />
-    {/each}
-  </div>
+    <div class="z-20 p-0 pl-2 text-sm font-medium text-gray-900 dark:text-gray-300">
+      File Search Files
+    </div>
+    <div
+      class="z-10 top-0 p-2 flex gap-2 flex-wrap"
+      use:fixFileListHeight={$fileSearchFiles}
+      bind:this={fileSearchFileListRef}
+    >
+      {#each $fileSearchFiles as file}
+        <FilePlaceholder {mimeType} info={file} on:delete={removeFileSearchFile} />
+      {/each}
+    </div>
   {/if}
   <input type="hidden" name="code_interpreter_file_ids" bind:value={codeInterpreterFileIds} />
   {#if $codeInterpreterFiles.length > 0}
-  <div class="z-20 p-0 pl-2 text-sm font-medium text-gray-900 dark:text-gray-300">Code Interpreter Files</div>
-  <div
-    class="z-10 top-0 p-2 flex gap-2 flex-wrap"
-    use:fixFileListHeight={$codeInterpreterFiles}
-    bind:this={codeInterpreterFileListRef}
-  >
-    {#each $codeInterpreterFiles as file}
-      <FilePlaceholder {mimeType} info={file} on:delete={removeCodeInterpreterFile} />
-    {/each}
-  </div>
+    <div class="z-20 p-0 pl-2 text-sm font-medium text-gray-900 dark:text-gray-300">
+      Code Interpreter Files
+    </div>
+    <div
+      class="z-10 top-0 p-2 flex gap-2 flex-wrap"
+      use:fixFileListHeight={$codeInterpreterFiles}
+      bind:this={codeInterpreterFileListRef}
+    >
+      {#each $codeInterpreterFiles as file}
+        <FilePlaceholder {mimeType} info={file} on:delete={removeCodeInterpreterFile} />
+      {/each}
+    </div>
   {/if}
   <div
     class="relative flex gap-3 items-center p-2 rounded-full bg-blue-light-50 shadow-inner w-full"
