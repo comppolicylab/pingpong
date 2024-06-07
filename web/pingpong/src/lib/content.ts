@@ -32,3 +32,8 @@ export const parseTextContent = (text: Text, baseUrl: string = '') => {
 
   return content;
 };
+
+/**
+ * Normalize newlines to use only '\n'.
+ */
+export const normalizeNewlines = (text: string) => text.replace(/\r\n/g, '\n');
