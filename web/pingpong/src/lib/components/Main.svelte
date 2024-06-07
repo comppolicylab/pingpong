@@ -1,5 +1,9 @@
 <script lang="ts">
   import { appMenuOpen } from '$lib/stores/general';
+  import { navigating } from '$app/stores';
+  import { Pulse } from 'svelte-loading-spinners';
+  import { blur } from 'svelte/transition';
+  import { loading } from '$lib/stores/general';
 </script>
 
 <div
@@ -7,7 +11,16 @@
     $appMenuOpen ? 'left-[90%]' : ''
   }`}
 >
-  <div class="h-full flex-grow bg-white rounded-t-4xl overflow-hidden">
+  <div class="h-full flex-grow bg-white rounded-t-4xl overflow-hidden relative">
+    {#if !!$navigating || $loading}
+      <div
+        class="absolute top-0 left-0 flex h-full w-full items-center bg-white bg-opacity-75 z-50"
+      >
+        <div class="m-auto" transition:blur={{ amount: 10 }}>
+          <Pulse color="#0ea5e9" />
+        </div>
+      </div>
+    {/if}
     <slot />
   </div>
 </div>

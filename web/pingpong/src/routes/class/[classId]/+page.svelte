@@ -1,9 +1,6 @@
 <script lang="ts">
-  import { blur } from 'svelte/transition';
-  import { writable } from 'svelte/store';
   import { goto } from '$app/navigation';
   import { navigating, page } from '$app/stores';
-  import { Pulse } from 'svelte-loading-spinners';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
   import {
     Button,
@@ -21,6 +18,7 @@
   import { errorMessage } from '$lib/errors';
   import type { Assistant } from '$lib/api';
   import { onMount } from 'svelte';
+  import { loading } from '$lib/stores/general';
 
   /**
    * Application data.
@@ -51,8 +49,6 @@
     };
   };
 
-  // Whether the app is currently loading.
-  let loading = writable(false);
   // Currently selected assistant.
   $: assistants = data?.assistants || [];
   $: courseAssistants = assistants.filter((asst) => asst.endorsed);
@@ -109,6 +105,7 @@
         })
       );
       data.threads = [newThread, ...data.threads];
+      $loading = false;
       await goto(`/class/${$page.params.classId}/thread/${newThread.id}`);
     } catch (e) {
       sadToast(`Failed to create thread. Error: ${errorMessage(e)}`);
@@ -123,13 +120,6 @@
 </script>
 
 <div class="flex justify-center relative min-h-0 grow shrink">
-  {#if $loading || !!$navigating}
-    <div class="absolute top-0 left-0 flex h-full w-full items-center bg-white bg-opacity-75 z-50">
-      <div class="m-auto" transition:blur={{ amount: 10 }}>
-        <Pulse color="#0ea5e9" />
-      </div>
-    </div>
-  {/if}
   <div
     class="w-11/12 transition-opacity ease-in flex flex-col h-full justify-between"
     class:opacity-0={$loading}
