@@ -91,6 +91,7 @@ async def test_me_with_valid_user(api, user, now, valid_user_token):
                 "https://www.gravatar.com/avatar/"
                 "45d4d5ec84ab81529df672c3abf0def25df67c0c64859aea0559bc867ea64b19"
             ),
+            "name": None,
         },
         "status": "valid",
         "token": {"exp": 1704153540, "iat": 1704067140, "sub": "123"},
