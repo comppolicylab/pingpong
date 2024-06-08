@@ -868,7 +868,7 @@ async def get_thread(
         "messages": list(messages.data),
         "limit": 20,
         "participants": {
-            "user": {u.id: schemas.Profile.from_email(u.email) for u in thread.users},
+            "user": {u.id: schemas.Profile.from_user(u) for u in thread.users},
             "assistant": {a.id: a.name for a in assistants},
         },
     }
