@@ -797,7 +797,7 @@ export type GetAssistantFilesOpts = {
 /**
  * Fetch all files for an assistant.
  */
-export const getCodeInterpeterFiles = async (
+export const getAssistantFiles = async (
   f: Fetcher,
   classId: number,
   assistantId: number,

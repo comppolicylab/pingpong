@@ -14,25 +14,27 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
     assistant =
       parentData.assistants.find((a) => a.id === parseInt(params.assistantId, 10)) || null;
 
-    if (assistant) {
-      const assistantFilesResponse = await getAssistantFiles(
-        fetch,
-        parentData.class.id,
-        assistant.id
-      ).then(expandResponse);
-      assistantFiles = assistantFilesResponse.error ? null : assistantFilesResponse.data.files;
-    }
+    // if (assistant) {
+    //   const assistantFilesResponse = await getAssistantFiles(
+    //     fetch,
+    //     parentData.class.id,
+    //     assistant.id
+    //   ).then(expandResponse);
+    // assistantFiles = assistantFilesResponse.error ? null : assistantFilesResponse.data.files;
+    // }
   }
 
   return {
     isCreating,
     assistantId: isCreating ? null : parseInt(params.assistantId, 10),
     assistant,
-    selectedFileSearchFiles: assistantFiles
-      ? assistantFiles.vector_store_files.map((file) => file.file_id)
-      : [],
-    selectedCodeInterpreterFiles: assistantFiles
-      ? assistantFiles.code_interpreter_files.map((file) => file.file_id)
-      : []
+    // selectedFileSearchFiles: assistantFiles
+    //   ? assistantFiles.vector_store_files.map((file) => file.file_id)
+    //   : [],
+    // selectedCodeInterpreterFiles: assistantFiles
+    //   ? assistantFiles.code_interpreter_files.map((file) => file.file_id)
+    //   : []
+    selectedFileSearchFiles: [],
+    selectedCodeInterpreterFiles: []
   };
 };
