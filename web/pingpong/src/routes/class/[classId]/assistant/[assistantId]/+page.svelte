@@ -16,6 +16,7 @@
   import * as api from '$lib/api';
   import { setsEqual } from '$lib/set';
   import { happyToast, sadToast } from '$lib/toast';
+  import { normalizeNewlines } from '$lib/content.js';
 
   export let data;
 
@@ -75,10 +76,14 @@
         dirty = newValue !== (oldValue || '');
         break;
       case 'description':
-        dirty = newValue !== (oldValue || '');
+        dirty =
+          normalizeNewlines((newValue as string | undefined) || '') !==
+          normalizeNewlines((oldValue as string) || '');
         break;
       case 'instructions':
-        dirty = newValue !== (oldValue || '');
+        dirty =
+          normalizeNewlines((newValue as string | undefined) || '') !==
+          ((oldValue as string) || '');
         break;
       case 'model':
         dirty = newValue !== oldValue;
@@ -161,8 +166,8 @@
 
     const params = {
       name: body.name.toString(),
-      description: body.description.toString(),
-      instructions: body.instructions.toString(),
+      description: normalizeNewlines(body.description.toString()),
+      instructions: normalizeNewlines(body.instructions.toString()),
       model: body.model.toString(),
       tools,
       file_ids: selectedFiles,
