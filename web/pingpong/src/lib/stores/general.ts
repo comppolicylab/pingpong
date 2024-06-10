@@ -4,3 +4,11 @@ import { writable } from 'svelte/store';
  * Store for the app menu open state.
  */
 export const appMenuOpen = writable(false);
+
+/**
+ * Store for a big loading indicator over the main page.
+ *
+ * TODO(jnu): there could be race conditions with this shared store;
+ * consider using a fancier counter-based system instead.
+ */
+export const loading = writable(false);

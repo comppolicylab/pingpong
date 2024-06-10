@@ -5,6 +5,7 @@
   import { Select, Button } from 'flowbite-svelte';
   import { page } from '$app/stores';
   import { getValue, updateSearch } from '$lib/urlstate';
+  import { loading } from '$lib/stores/general';
 
   export let data;
 
@@ -35,9 +36,13 @@
     if (error) {
       return;
     }
+
+    $loading = true;
+
     const lastTs = threads.length ? threads[threads.length - 1].updated : undefined;
     const currentClassId = parseInt(currentClass, 10) || undefined;
     const more = await api.getAllThreads(fetch, { before: lastTs, class_id: currentClassId });
+    $loading = false;
     if (more.error) {
       error = more.error;
     } else {

@@ -6,7 +6,7 @@
   import { errorMessage } from '$lib/errors';
   import { blur } from 'svelte/transition';
   import { Span, Avatar, Button, Dropdown, DropdownItem } from 'flowbite-svelte';
-  import { Pulse, DoubleBounce } from 'svelte-loading-spinners';
+  import { DoubleBounce } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
   import Logo from '$lib/components/Logo.svelte';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
@@ -174,14 +174,6 @@
 </script>
 
 <div class="w-full flex flex-col justify-between grow min-h-0 relative">
-  {#if $loading || $navigating}
-    <div class="absolute top-0 left-0 flex h-full w-full items-center bg-white bg-opacity-75">
-      <div class="m-auto" transition:blur={{ amount: 10 }}>
-        <Pulse color="#0ea5e9" />
-      </div>
-    </div>
-  {/if}
-
   <div class="overflow-y-auto pb-4 px-2 lg:px-4" use:scroll={$messages}>
     {#if $canFetchMore}
       <div class="flex justify-center grow">
