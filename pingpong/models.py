@@ -26,7 +26,7 @@ from sqlalchemy.orm import (
     relationship,
 )
 from sqlalchemy.sql import func
-
+import itertools
 import pingpong.schemas as schemas
 
 
@@ -242,23 +242,20 @@ class Institution(Base):
         stmt = select(Institution).where(Institution.id == int(id_))
         return await session.scalar(stmt)
 
-
-code_interpreter_file_assistant_association = Table(
-    "code_interpreter_files_assistants",
+file_assistant_association = Table(
+    "files_assistants",
     Base.metadata,
     Column("file_id", Integer, ForeignKey("files.id")),
     Column("assistant_id", Integer, ForeignKey("assistants.id")),
-    Index(
-        "code_interpreter_file_assistant_idx", "file_id", "assistant_id", unique=True
-    ),
+    Index( "file_assistant_idx", "file_id", "assistant_id", unique=True),
 )
 
-code_interpreter_file_thread_association = Table(
+file_thread_association = Table(
     "code_interpreter_files_threads",
     Base.metadata,
     Column("file_id", Integer, ForeignKey("files.id")),
     Column("thread_id", Integer, ForeignKey("threads.id")),
-    Index("code_interpreter_file_thread_idx", "file_id", "thread_id", unique=True),
+    Index("file_thread_idx", "file_id", "thread_id", unique=True),
 )
 
 file_vector_store_association = Table(
@@ -283,7 +280,7 @@ class File(Base):
     class_ = relationship("Class", back_populates="files")
     assistants = relationship(
         "Assistant",
-        secondary=code_interpreter_file_assistant_association,
+        secondary=file_assistant_association,
         back_populates="code_interpreter_files",
     )
     vector_stores = relationship(
@@ -291,7 +288,7 @@ class File(Base):
     )
     threads = relationship(
         "Thread",
-        secondary=code_interpreter_file_thread_association,
+        secondary=file_thread_association,
         back_populates="code_interpreter_files",
     )
 
@@ -334,15 +331,23 @@ class File(Base):
         result = await session.execute(stmt)
         return [row.File for row in result]
 
+    @classmethod
+    async def get_object_ids_by_file_id(
+        cls, session: AsyncSession, ids: List[str]
+    ) -> List[int]:
+        if not ids:
+            return []
+        stmt = select(File.id).where(File.file_id.in_(ids))
+        result = await session.execute(stmt)
+        return [row[0] for row in result]
 
 class VectorStore(Base):
     __tablename__ = "vector_stores"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     vector_store_id = Column(String, unique=True)
-    type = Column(String)
+    type = Column(SQLEnum(schemas.VectorStoreType), nullable=False)
     class_id = Column(Integer, ForeignKey("classes.id"))
-    uploader_id = Column(Integer, ForeignKey("users.id"), nullable=True, default=None)
     expires_at = Column(DateTime(timezone=True), nullable=True)
     files = relationship(
         "File",
@@ -364,22 +369,21 @@ class VectorStore(Base):
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
-    @property
-    def file_ids(self) -> List[str]:
-        return [file.file_id for file in self.files]
-
     @classmethod
     async def create(
         cls, session: AsyncSession, data: dict, file_ids: list[str]
-    ) -> "VectorStore":
-        if file_ids:
-            files = await File.get_all_by_file_id(session, file_ids)
-            data["files"] = files
-        vectorStore = VectorStore(**data)
-        session.add(vectorStore)
+    ) -> int:
+        vector_store = VectorStore(**data)
+        session.add(vector_store)
         await session.flush()
-        await session.refresh(vectorStore)
-        return vectorStore
+        
+        if file_ids:
+            file_object_ids = await File.get_object_ids_by_file_id(session, file_ids)
+            file_vector_store_pairs = list(itertools.product(file_object_ids, [vector_store.id]))
+            await session.execute(file_vector_store_association.insert().values(file_vector_store_pairs))
+        
+        await session.refresh(vector_store)
+        return vector_store.id
 
     @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "VectorStore":
@@ -399,26 +403,6 @@ class VectorStore(Base):
         await session.execute(stmt)
 
     @classmethod
-    async def get_all_by_id(
-        cls, session: AsyncSession, ids: list[int]
-    ) -> list["VectorStore"]:
-        if not ids:
-            return []
-        stmt = select(VectorStore).where(VectorStore.id.in_(ids))
-        result = await session.execute(stmt)
-        return [row.VectorStore for row in result]
-
-    @classmethod
-    async def get_all_by_vector_store_id(
-        cls, session: AsyncSession, ids: List[str]
-    ) -> List["VectorStore"]:
-        if not ids:
-            return []
-        stmt = select(VectorStore).where(VectorStore.vector_store_id.in_(ids))
-        result = await session.execute(stmt)
-        return [row.VectorStore for row in result]
-
-    @classmethod
     async def get_files_by_id(cls, session: AsyncSession, id_: int) -> List["File"]:
         stmt = select(VectorStore).where(VectorStore.id == int(id_))
         vector_store = await session.scalar(stmt)
@@ -434,6 +418,22 @@ class VectorStore(Base):
             return []
         return [file.file_id for file in vector_store.files]
 
+    @classmethod
+    async def get_object_id_by_vector_store_id(
+        cls, session: AsyncSession, vector_store_id: str
+    ) -> int:
+        stmt = select(VectorStore.id).where(VectorStore.vector_store_id == vector_store_id)
+        return await session.scalar(stmt)
+    
+    @classmethod
+    async def add_files(
+        cls, session: AsyncSession, vector_store_id: int, file_ids: list[str]
+    ) -> None:
+        if not file_ids:
+            return
+        file_object_ids = await File.get_object_ids_by_file_id(session, file_ids)
+        file_vector_store_pairs = list(itertools.product(file_object_ids, [vector_store_id]))
+        await session.execute(file_vector_store_association.insert().values(file_vector_store_pairs))
 
 class Assistant(Base):
     __tablename__ = "assistants"
@@ -450,14 +450,14 @@ class Assistant(Base):
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="assistants", foreign_keys=[class_id])
     threads = relationship("Thread", back_populates="assistant")
-    code_interpreter_files = relationship(
+    files = relationship(
         "File",
-        secondary=code_interpreter_file_assistant_association,
+        secondary=file_assistant_association,
         back_populates="assistants",
         lazy="selectin",
     )
     vector_store_id = Column(Integer, ForeignKey("vector_stores.id"))
-    vector_store = relationship("VectorStore", back_populates="assistants")
+    vector_store = relationship("VectorStore", back_populates="assistants", uselist=False)
     creator_id = Column(Integer, ForeignKey("users.id"))
     creator = relationship("User", back_populates="assistants")
     published = Column(DateTime(timezone=True), index=True, nullable=True)
@@ -496,34 +496,29 @@ class Assistant(Base):
         class_id: int,
         user_id: int,
         assistant_id: str,
-        vector_store_id: str | None = None,
+        vector_store_id: int | None = None,
     ) -> "Assistant":
         params = data.dict()
         code_interpreter_file_ids = params.pop("code_interpreter_file_ids", [])
-        code_interpreter_files = []
-        if code_interpreter_file_ids:
-            code_interpreter_files = await File.get_all_by_file_id(
-                session, code_interpreter_file_ids
-            )
-        if vector_store_id:
-            vector_store = await VectorStore.get_by_vector_store_id(
-                session, vector_store_id
-            )
-            if vector_store:
-                params["vector_store_id"] = vector_store.id
-                params["vector_store"] = vector_store
-        params["code_interpreter_files"] = code_interpreter_files
         params["tools"] = json.dumps(params["tools"])
         params["class_id"] = int(class_id)
         params["creator_id"] = int(user_id)
         params["assistant_id"] = assistant_id
-
         params["published"] = func.now() if data.published else None
         params["use_latex"] = data.use_latex
+        params["vector_store_id"] = vector_store_id
 
         assistant = Assistant(**params)
         session.add(assistant)
         await session.flush()
+        
+        if code_interpreter_file_ids:
+            code_interpreter_file_object_ids = await File.get_object_ids_by_file_id(
+            session, code_interpreter_file_ids
+            )
+            file_assistant_pairs = list(itertools.product(code_interpreter_file_object_ids, [assistant.id]))
+            await session.execute(file_assistant_association.insert().values(file_assistant_pairs))
+        
         await session.refresh(assistant)
         return assistant
 
@@ -678,7 +673,7 @@ class Thread(Base):
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="threads", lazy="selectin")
     assistant_id = Column(Integer, ForeignKey("assistants.id"))
-    assistant = relationship("Assistant", back_populates="threads")
+    assistant = relationship("Assistant", back_populates="threads", uselist=False)
     private = Column(Boolean)
     users = relationship(
         "User",
@@ -686,15 +681,15 @@ class Thread(Base):
         back_populates="threads",
         lazy="subquery",
     )
-    code_interpreter_files = relationship(
+    files = relationship(
         "File",
-        secondary=code_interpreter_file_thread_association,
+        secondary=file_thread_association,
         back_populates="threads",
         lazy="selectin",
     )
     tools_available = Column(String)
     vector_store_id = Column(Integer, ForeignKey("vector_stores.id"))
-    vector_store = relationship("VectorStore", back_populates="threads")
+    vector_store = relationship("VectorStore", back_populates="threads", uselist=False)
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(
         DateTime(timezone=True),
@@ -711,24 +706,18 @@ class Thread(Base):
 
     @classmethod
     async def create(cls, session: AsyncSession, data: dict) -> "Thread":
-        vector_store_id = data.pop("vector_store_id", None)
-        if vector_store_id:
-            vector_store = await VectorStore.get_by_vector_store_id(
-                session, vector_store_id
-            )
-            if vector_store:
-                data["vector_store_id"] = vector_store.id
-                data["vector_store"] = vector_store
-        code_interpreter_file_ids = data.pop("code_interpreter_file_ids", [])
-        code_interpreter_files = []
-        if code_interpreter_file_ids:
-            code_interpreter_files = await File.get_all_by_file_id(
-                session, code_interpreter_file_ids
-            )
-        data["code_interpreter_files"] = code_interpreter_files
+        code_interpreter_file_ids = data.pop("code_interpreter_file_ids", [])        
         thread = Thread(**data)
         session.add(thread)
         await session.flush()
+
+        if code_interpreter_file_ids:
+            code_interpreter_file_object_ids = await File.get_object_ids_by_file_id(
+            session, code_interpreter_file_ids
+            )
+            file_thread_pairs = list(itertools.product(code_interpreter_file_object_ids, [thread.id]))
+            await session.execute(file_thread_association.insert().values(file_thread_pairs))
+        
         await session.refresh(thread)
         return thread
 
@@ -836,3 +825,26 @@ class Thread(Base):
         result = await session.execute(stmt)
         for row in result:
             yield row.Thread
+
+    @classmethod
+    async def add_code_interpeter_files(
+        cls, session: AsyncSession, thread_id: int, file_ids: list[str]
+    ) -> None:
+        if not file_ids:
+            return
+        file_object_ids = await File.get_object_ids_by_file_id(session, file_ids)
+        file_thread_pairs = list(itertools.product(file_object_ids, [thread_id]))
+        await session.execute(file_thread_association.insert().values(file_thread_pairs))
+    
+    @classmethod
+    async def get_file_ids_by_id(
+        cls, 
+        session: AsyncSession, 
+        id_: int
+    ) -> AsyncGenerator["UserClassRole", None]:
+        stmt = select(Thread).where(Thread.id == int(id_))
+        thread = await session.scalar(stmt)
+        if not thread:
+            return []
+        for file in thread.files:
+            yield file.file_id

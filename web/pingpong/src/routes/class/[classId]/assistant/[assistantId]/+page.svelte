@@ -199,8 +199,8 @@
       instructions: normalizeNewlines(body.instructions.toString()),
       model: body.model.toString(),
       tools,
-      code_interpreter_file_ids: selectedCodeInterpreterFiles,
-      vector_store_file_ids: selectedFileSearchFiles,
+      code_interpreter_file_ids: codeInterpreterToolSelect ? selectedCodeInterpreterFiles : [],
+      vector_store_file_ids: fileSearchToolSelect ? selectedFileSearchFiles : [],
       published: body.published?.toString() === 'on',
       use_latex: body.use_latex?.toString() === 'on',
       hide_prompt: body.hide_prompt?.toString() === 'on'

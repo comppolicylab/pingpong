@@ -146,7 +146,7 @@ class Files(BaseModel):
 
 class AssistantFiles(BaseModel):
     code_interpreter_files: list[File]
-    vector_store_files: list[File]
+    file_search_files: list[File]
 
     class Config:
         from_attributes = True
@@ -172,6 +172,9 @@ class VectorStore(BaseModel):
     class Config:
         from_attributes = True
 
+class VectorStoreType(Enum):
+    ASSISTANT = "assistant"
+    THREAD = "thread"
 
 class Assistant(BaseModel):
     id: int
@@ -182,7 +185,6 @@ class Assistant(BaseModel):
     model: str
     class_id: int
     creator_id: int
-    vector_store_id: int | None
     use_latex: bool | None
     hide_prompt: bool | None
     published: datetime | None
@@ -197,7 +199,7 @@ class Assistant(BaseModel):
 class CreateAssistant(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
     code_interpreter_file_ids: list[str] | None = None
-    vector_store_file_ids: list[str] | None = None
+    file_search_file_ids: list[str] | None = None
     instructions: str = Field(..., min_length=3)
     description: str
     model: str = Field(..., min_length=3)
@@ -210,7 +212,7 @@ class CreateAssistant(BaseModel):
 class UpdateAssistant(BaseModel):
     name: str | None = Field(None, min_length=3, max_length=100)
     code_interpreter_file_ids: list[str] | None = None
-    vector_store_file_ids: list[str] | None = None
+    file_search_file_ids: list[str] | None = None
     instructions: str | None = Field(None, min_length=3)
     description: str | None = None
     model: str | None = Field(None, min_length=3)

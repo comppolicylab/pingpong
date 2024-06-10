@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from jwt.exceptions import PyJWTError
 from openai.types.beta.assistant_create_params import ToolResources
 from sqlalchemy.sql import func
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.metrics as metrics
 import pingpong.models as models
@@ -72,6 +73,62 @@ async def get_openai_client_for_class(request: Request) -> openai.AsyncClient:
 OpenAIClientDependency = Depends(get_openai_client_for_class)
 OpenAIClient = Annotated[openai.AsyncClient, OpenAIClientDependency]
 
+async def create_vector_store(
+    session: AsyncSession,
+    openai_client: openai.AsyncClient,
+    class_id: str,
+    file_search_file_ids: list[str],
+) -> tuple[str, int]:
+    try:
+        new_vector_store = await generate_vector_store(
+            cli=openai_client,
+            file_ids=file_search_file_ids,
+            metadata={
+                "class_id": class_id,
+            },
+        )
+            
+    except openai.BadRequestError as e:
+        raise HTTPException(400, e.message or "OpenAI rejected this request")
+
+    try:
+        data = {
+            "type": "thread",
+            "class_id": int(class_id),
+            "expires_at": None,
+            "vector_store_id": new_vector_store.id,
+        }
+        vector_store_object_id = await models.VectorStore.create(
+            session, data, file_search_file_ids
+        )
+    except Exception as e:
+        await openai_client.beta.vector_stores.delete(new_vector_store.id)
+        raise e
+    
+    return new_vector_store.id, vector_store_object_id
+
+async def update_vector_store(
+    session: AsyncSession,
+    openai_client: openai.AsyncClient,
+    vector_store_id: str,
+    file_search_file_ids: list[str],
+) -> int:
+    vector_store_object_id = await models.VectorStore.get_object_id_by_vector_store_id(
+        session, vector_store_id
+    )
+    
+    try:
+        await openai_client.beta.vector_stores.file_batches.create(
+            vector_store_id, file_ids=file_search_file_ids
+        )
+    except openai.BadRequestError as e:
+        raise HTTPException(400, e.message or "OpenAI rejected this request")
+
+    await models.VectorStore.add_files(
+        session, vector_store_object_id, file_search_file_ids
+    )
+
+    return vector_store_object_id
 
 @v1.middleware("http")
 async def parse_session_token(request: Request, call_next):
@@ -1083,40 +1140,14 @@ async def create_thread(
     openai_client: OpenAIClient,
 ):
     parties = list[models.User]()
-    class_id_int = int(class_id)
-    creator_id = request.state.session.user.id
-
     tool_resources: ToolResources = {}
-    new_vector_store = None
-
+    vector_store_id = None
+    
     if req.file_search_file_ids:
-        try:
-            new_vector_store = await generate_vector_store(
-                cli=openai_client,
-                file_ids=req.file_search_file_ids,
-                metadata={
-                    "class_id": class_id,
-                    "creator_id": str(request.state.session.user.id),
-                },
-            )
-            tool_resources["file_search"] = {"vector_store_ids": [new_vector_store.id]}
-        except openai.BadRequestError as e:
-            raise HTTPException(400, e.message or "OpenAI rejected this request")
-
-        try:
-            data = {
-                "type": "thread",
-                "class_id": class_id_int,
-                "uploader_id": creator_id,
-                "expires_at": None,
-                "vector_store_id": new_vector_store.id,
-            }
-            await models.VectorStore.create(
-                request.state.db, data, req.file_search_file_ids
-            )
-        except Exception as e:
-            await openai_client.beta.vector_stores.delete(new_vector_store.id)
-            raise e
+        vector_store_id, vector_store_object_id = await create_vector_store(
+            request.state.session, openai_client, req.file_search_file_ids, class_id
+        )
+        tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
 
     if req.code_interpreter_file_ids:
         tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
@@ -1145,7 +1176,7 @@ async def create_thread(
         "users": parties or [],
         "thread_id": thread.id,
         "assistant_id": req.assistant_id,
-        "vector_store_id": new_vector_store.id if new_vector_store else None,
+        "vector_store_id": vector_store_object_id,
         "code_interpreter_file_ids": req.code_interpreter_file_ids or [],
         "tools_available": json.dumps(toolsExport["tools_available"]) or "[]",
     }
@@ -1162,8 +1193,8 @@ async def create_thread(
         return result
     except Exception as e:
         logger.error("Error creating thread: %s", e)
-        if new_vector_store:
-            await openai_client.beta.vector_stores.delete(new_vector_store.id)
+        if vector_store_id:
+            await openai_client.beta.vector_stores.delete(vector_store_id)
         await openai_client.beta.threads.delete(thread.id)
         if result:
             # Delete users-threads mapping
@@ -1217,61 +1248,37 @@ async def send_message(
     tool_resources: ToolResources = {}
 
     if data.file_search_file_ids:
-        if thread.vector_store_id is not None:
+        if thread.vector_store_id:
             # Vector store already exists, update
-            vector_store = await models.VectorStore.get_by_id(
-                request.state.db, thread.vector_store_id
+            vector_store_object_id = await update_vector_store(
+                request.state.session, openai_client, thread.vector_store_id, data.file_search_file_ids
             )
-            try:
-                await openai_client.beta.vector_stores.file_batches.create(
-                    vector_store.vector_store_id, file_ids=data.file_search_file_ids
-                )
-            except openai.BadRequestError as e:
-                raise HTTPException(400, e.message or "OpenAI rejected this request")
-
-            existing_files = await models.VectorStore.get_files_by_id(
-                request.state.db, vector_store.id
-            )
-            new_files = await models.File.get_all_by_file_id(
-                request.state.db, data.file_search_file_ids
-            )
-            vector_store.files = existing_files + new_files
-
-            request.state.db.add(vector_store)
-            await request.state.db.flush()
-            await request.state.db.refresh(vector_store)
-
             tool_resources["file_search"] = {
-                "vector_store_ids": [vector_store.vector_store_id]
+                "vector_store_ids": [thread.vector_store_id]
             }
         else:
             # Store doesn't exist, create a new one
-            try:
-                new_vector_store = await generate_vector_store(
-                    cli=openai_client,
-                    file_ids=data.file_search_file_ids,
-                    metadata={
-                        "class_id": class_id,
-                        "creator_id": str(request.state.session.user.id),
-                    },
-                )
-                tool_resources["file_search"] = {
-                    "vector_store_ids": [new_vector_store.id]
-                }
-            except openai.BadRequestError as e:
-                raise HTTPException(400, e.message or "OpenAI rejected this request")
+            vector_store_id, vector_store_object_id = await create_vector_store(
+                request.state.session, openai_client, class_id, data.file_search_file_ids 
+            )
+            tool_resources["file_search"] = {
+                "vector_store_ids": [vector_store_id]
+            }
+        thread.vector_store_id = vector_store_object_id
 
     if data.code_interpreter_file_ids:
-        existing_files = await models.Thread.get_code_interpreter_files_by_id(
+        existing_file_ids = []
+        async for file in models.Thread.get_file_ids_by_id(
             request.state.db, thread.id
+        ):
+            existing_file_ids.append(file.file_id)
+        
+        await models.Thread.add_code_interpeter_files(
+            request.state.db, thread.id, data.code_interpreter_file_ids
         )
-        new_files = await models.File.get_all_by_file_id(
-            request.state.db, data.code_interpreter_file_ids
-        )
-        thread.code_interpreter_files = existing_files + new_files
 
         tool_resources["code_interpreter"] = {
-            "file_ids": [f.file_id for f in thread.code_interpreter_files]
+            "file_ids": existing_file_ids + data.code_interpreter_file_ids
         }
 
     try:
@@ -1547,31 +1554,10 @@ async def create_assistant(
     new_vector_store = None
 
     if req.vector_store_file_ids:
-        try:
-            new_vector_store = await generate_vector_store(
-                cli=openai_client,
-                file_ids=req.vector_store_file_ids,
-                metadata={"class_id": class_id, "creator_id": str(creator_id)},
-            )
-            tool_resources["file_search"] = {"vector_store_ids": [new_vector_store.id]}
-
-        except openai.BadRequestError as e:
-            raise HTTPException(400, e.message or "OpenAI rejected this request")
-
-        try:
-            data = {
-                "type": "assistant",
-                "class_id": class_id_int,
-                "uploader_id": creator_id,
-                "expires_at": None,
-                "vector_store_id": new_vector_store.id,
-            }
-            await models.VectorStore.create(
-                request.state.db, data, req.vector_store_file_ids
-            )
-        except Exception as e:
-            await openai_client.beta.vector_stores.delete(new_vector_store.id)
-            raise e
+        vector_store_id, vector_store_object_id = await create_vector_store(
+            request.state.session, openai_client, req.file_search_file_ids, class_id
+        )
+        tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
 
     del req.vector_store_file_ids
 
@@ -1663,16 +1649,16 @@ async def update_assistant(
 
     # TODO(@ekassos) Refactor to another function
     # TODO(@ekassos) Edge case: toggles false, but files are selected
-    if req.vector_store_file_ids is not None:
+    if req.file_search_file_ids is not None:
         # Files will need to be stored in a vector store
-        if asst.vector_store_id is not None:
+        if asst.vector_store_id:
             # Vector store already exists, update
             vector_store = await models.VectorStore.get_by_id(
                 request.state.db, asst.vector_store_id
             )
 
             file_ids_to_add = [
-                x for x in req.vector_store_file_ids if x not in vector_store.file_ids
+                x for x in req.file_search_file_ids if x not in vector_store.file_ids
             ]
             if file_ids_to_add:
                 try:
@@ -1725,7 +1711,7 @@ async def update_assistant(
                 raise HTTPException(400, e.message or "OpenAI rejected this request")
     else:
         # No files stored in vector store, remove it
-        if asst.vector_store_id is not None:
+        if asst.vector_store_id:
             tool_resources["file_search"] = {}
             vector_store = await models.VectorStore.get_by_id(
                 request.state.db, asst.vector_store_id
@@ -1816,7 +1802,7 @@ async def get_assistant_files(
 ):
     asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
     vector_store_files = []
-    if asst.vector_store_id is not None:
+    if asst.vector_store_id:
         vector_store_files = await models.VectorStore.get_files_by_id(
             request.state.db, asst.vector_store_id
         )
