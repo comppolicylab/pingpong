@@ -172,9 +172,11 @@ class VectorStore(BaseModel):
     class Config:
         from_attributes = True
 
+
 class VectorStoreType(Enum):
     ASSISTANT = "assistant"
     THREAD = "thread"
+
 
 class Assistant(BaseModel):
     id: int

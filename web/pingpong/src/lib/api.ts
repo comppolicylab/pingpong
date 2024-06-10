@@ -790,11 +790,40 @@ export type AssistantFilesResponse = {
 };
 
 /**
+ * Parameters for fetching assistant files.
+ */
+export type GetAssistantsOpts = {
+  limit?: number;
+  offset?: number;
+};
+
+/**
  * Fetch all files for a vector store.
  */
-export const getAssistantFiles = async (f: Fetcher, classId: number, assistantId: number) => {
+export const getAssistantFiles = async (
+  f: Fetcher,
+  classId: number,
+  assistantId: number,
+  opts?: GetAssistantsOpts
+) => {
   const url = `/class/${classId}/assistant/${assistantId}/files`;
   return await GET<never, AssistantFilesResponse>(f, url);
+  // const response = await GET<GetAssistantsOpts, AssistantFilesResponse>(f, url, opts);
+  // const expanded = expandResponse(response);
+  // if (expanded.error) {
+  //   return {
+  //     lastPage: true,
+  //     users: [],
+  //     error: expanded.error
+  //   };
+  // }
+  // const lastPage = expanded.data.files.code_interpreter_files.length < expanded.data.limit;
+
+  // return {
+  //   ...expanded.data,
+  //   lastPage,
+  //   error: null
+  // };
 };
 
 /**
