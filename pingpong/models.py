@@ -549,6 +549,47 @@ class Assistant(Base):
         await session.refresh(assistant)
         return assistant
 
+    @classmethod
+    async def get_code_interpreter_files(
+        cls, session: AsyncSession, id_: int, limit: int = 10, offset: int = 0
+    ) -> AsyncGenerator["File", None]:
+        condition = Assistant.id == int(id_)
+        stmt = select(Assistant.files).where(condition).limit(limit).offset(offset)
+        result = await session.execute(stmt)
+        for row in result:
+            yield row[0]
+
+    @classmethod
+    async def get_code_interpreter_file_count(
+        cls, session: AsyncSession, id_: int
+    ) -> int:
+        condition = Assistant.id == int(id_)
+        stmt = select(func.count()).where(condition)
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_file_search_files(
+        cls, session: AsyncSession, id_: int, limit: int = 10, offset: int = 0
+    ) -> AsyncGenerator["File", None]:
+        stmt = (
+            select(VectorStore.files)
+            .where(
+                VectorStore.id == select(Assistant.id).where(Assistant.id == int(id_))
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await session.execute(stmt)
+        for row in result:
+            yield row[0]
+
+    @classmethod
+    async def get_file_search_file_count(cls, session: AsyncSession, id_: int) -> int:
+        stmt = select(func.count()).where(
+            VectorStore.id == select(Assistant.id).where(Assistant.id == int(id_))
+        )
+        return await session.scalar(stmt)
+
     async def delete(self, session: AsyncSession):
         await session.delete(self)
         await session.flush()
@@ -595,7 +636,7 @@ class Class(Base):
         stmt = (
             select(UserClassRole)
             .join(User)
-            .options(joinedload(UserClassRole.user))
+            .options((UserClassRole.user))
             .where(condition)
             .order_by(User.email)
             .limit(limit)

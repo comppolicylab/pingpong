@@ -745,7 +745,6 @@ export type Assistant = {
   tools: string;
   class_id: number;
   creator_id: number;
-  vector_store_id: number | null;
   published: string | null;
   use_latex: boolean | null;
   hide_prompt: boolean | null;
@@ -781,49 +780,47 @@ export const getAssistants = async (f: Fetcher, classId: number) => {
  * Information about assistant files.
  */
 export type AssistantFiles = {
-  code_interpreter_files: ServerFile[];
-  vector_store_files: ServerFile[];
-};
-
-export type AssistantFilesResponse = {
-  files: AssistantFiles;
+  files: ServerFile[];
+  limit: number;
+  offset: number;
+  total: number;
 };
 
 /**
  * Parameters for fetching assistant files.
  */
-export type GetAssistantsOpts = {
+export type GetAssistantFilesOpts = {
   limit?: number;
   offset?: number;
 };
 
 /**
- * Fetch all files for a vector store.
+ * Fetch all files for an assistant.
  */
-export const getAssistantFiles = async (
+export const getCodeInterpeterFiles = async (
   f: Fetcher,
   classId: number,
   assistantId: number,
-  opts?: GetAssistantsOpts
+  type: 'code_interpreter' | 'file_search',
+  opts?: GetAssistantFilesOpts
 ) => {
-  const url = `/class/${classId}/assistant/${assistantId}/files`;
-  return await GET<never, AssistantFilesResponse>(f, url);
-  // const response = await GET<GetAssistantsOpts, AssistantFilesResponse>(f, url, opts);
-  // const expanded = expandResponse(response);
-  // if (expanded.error) {
-  //   return {
-  //     lastPage: true,
-  //     users: [],
-  //     error: expanded.error
-  //   };
-  // }
-  // const lastPage = expanded.data.files.code_interpreter_files.length < expanded.data.limit;
+  const url = `/class/${classId}/assistant/${assistantId}/files/${type}`;
+  const response = await GET<GetAssistantFilesOpts, AssistantFiles>(f, url, opts);
+  const expanded = expandResponse(response);
+  if (expanded.error) {
+    return {
+      lastPage: true,
+      users: [],
+      error: expanded.error
+    };
+  }
+  const lastPage = expanded.data.files.length < expanded.data.limit;
 
-  // return {
-  //   ...expanded.data,
-  //   lastPage,
-  //   error: null
-  // };
+  return {
+    ...expanded.data,
+    lastPage,
+    error: null
+  };
 };
 
 /**
@@ -843,7 +840,7 @@ export type CreateAssistantRequest = {
   model: string;
   tools: Tool[];
   code_interpreter_file_ids: string[];
-  vector_store_file_ids: string[];
+  file_search_file_ids: string[];
   published?: boolean;
   use_latex?: boolean;
   hide_prompt?: boolean;
@@ -859,7 +856,7 @@ export type UpdateAssistantRequest = {
   model?: string;
   tools?: Tool[];
   code_interpreter_file_ids?: string[];
-  vector_store_file_ids?: string[];
+  file_search_file_ids?: string[];
   published?: boolean;
   use_latex?: boolean;
   hide_prompt?: boolean;

@@ -1794,27 +1794,64 @@ async def delete_assistant(
 
 
 @v1.get(
-    "/class/{class_id}/assistant/{assistant_id}/files",
+    "/class/{class_id}/assistant/{assistant_id}/files/file_search",
     dependencies=[Depends(Authz("can_view", "assistant:{assistant_id}"))],
     response_model=schemas.AssistantFilesResponse,
 )
-async def get_assistant_files(
-    class_id: str,
-    assistant_id: str,
-    request: Request,
+async def get_file_search_files(
+    class_id: str, assistant_id: str, request: Request, limit: int = 20, offset: int = 0
 ):
-    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
-    vector_store_files = []
-    if asst.vector_store_id:
-        vector_store_files = await models.VectorStore.get_files_by_id(
-            request.state.db, asst.vector_store_id
-        )
-    code_interpreter_files = asst.code_interpreter_files
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="Offset must be non-negative")
+    if limit < 1:
+        raise HTTPException(status_code=400, detail="Limit must be positive")
+
+    files = list[models.File]()
+    async for file in models.Assistant.get_file_search_files(
+        request.state.db, int(assistant_id), limit, offset
+    ):
+        files.append(file)
+
+    total = await models.Assistant.get_file_search_files_count(
+        request.state.db, int(assistant_id)
+    )
+
     return {
-        "files": {
-            "vector_store_files": vector_store_files,
-            "code_interpreter_files": code_interpreter_files,
-        }
+        "files": files,
+        "limit": limit,
+        "offset": offset,
+        "total": total,
+    }
+
+
+@v1.get(
+    "/class/{class_id}/assistant/{assistant_id}/files/code_interpreter",
+    dependencies=[Depends(Authz("can_view", "assistant:{assistant_id}"))],
+    response_model=schemas.AssistantFilesResponse,
+)
+async def get_code_interpreter_files(
+    class_id: str, assistant_id: str, request: Request, limit: int = 20, offset: int = 0
+):
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="Offset must be non-negative")
+    if limit < 1:
+        raise HTTPException(status_code=400, detail="Limit must be positive")
+
+    files = list[models.File]()
+    async for file in models.Assistant.get_code_interpreter_files(
+        request.state.db, int(assistant_id), limit, offset
+    ):
+        files.append(file)
+
+    total = await models.Assistant.get_code_interpreter_files_count(
+        request.state.db, int(assistant_id)
+    )
+
+    return {
+        "files": files,
+        "limit": limit,
+        "offset": offset,
+        "total": total,
     }
 
 
