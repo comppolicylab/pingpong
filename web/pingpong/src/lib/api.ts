@@ -780,47 +780,20 @@ export const getAssistants = async (f: Fetcher, classId: number) => {
  * Information about assistant files.
  */
 export type AssistantFiles = {
-  files: ServerFile[];
-  limit: number;
-  offset: number;
-  total: number;
+  code_interpreter_files: ServerFile[];
+  vector_store_files: ServerFile[];
+};
+
+export type AssistantFilesResponse = {
+  files: AssistantFiles;
 };
 
 /**
- * Parameters for fetching assistant files.
+ * Fetch all files for a vector store.
  */
-export type GetAssistantFilesOpts = {
-  limit?: number;
-  offset?: number;
-};
-
-/**
- * Fetch all files for an assistant.
- */
-export const getAssistantFiles = async (
-  f: Fetcher,
-  classId: number,
-  assistantId: number,
-  type: 'code_interpreter' | 'file_search',
-  opts?: GetAssistantFilesOpts
-) => {
-  const url = `/class/${classId}/assistant/${assistantId}/files/${type}`;
-  const response = await GET<GetAssistantFilesOpts, AssistantFiles>(f, url, opts);
-  const expanded = expandResponse(response);
-  if (expanded.error) {
-    return {
-      lastPage: true,
-      users: [],
-      error: expanded.error
-    };
-  }
-  const lastPage = expanded.data.files.length < expanded.data.limit;
-
-  return {
-    ...expanded.data,
-    lastPage,
-    error: null
-  };
+export const getAssistantFiles = async (f: Fetcher, classId: number, assistantId: number) => {
+  const url = `/class/${classId}/assistant/${assistantId}/files`;
+  return await GET<never, AssistantFilesResponse>(f, url);
 };
 
 /**

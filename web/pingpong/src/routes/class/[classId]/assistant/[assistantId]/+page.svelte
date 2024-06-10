@@ -35,7 +35,7 @@
     name: 'File Search',
     description:
       'File Search augments the Assistant with knowledge from outside its model using documents you provide.',
-    max_count: 10_000
+    max_count: 50
   };
   const codeInterpreterMetadata = {
     value: 'code_interpreter',
@@ -218,6 +218,20 @@
 
     const form = evt.target as HTMLFormElement;
     const params = parseFormData(form);
+
+    if (params.file_search_file_ids.length > fileSearchMetadata.max_count) {
+      sadToast(`You can only select up to ${fileSearchMetadata.max_count} files for File Search.`);
+      loading = false;
+      return;
+    }
+
+    if (params.code_interpreter_file_ids.length > codeInterpreterMetadata.max_count) {
+      sadToast(
+        `You can only select up to ${codeInterpreterMetadata.max_count} files for Code Interpreter.`
+      );
+      loading = false;
+      return;
+    }
 
     const result = !data.assistantId
       ? await api.createAssistant(fetch, data.class.id, params)
