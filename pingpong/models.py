@@ -252,7 +252,7 @@ file_assistant_association = Table(
 )
 
 file_thread_association = Table(
-    "code_interpreter_files_threads",
+    "files_threads",
     Base.metadata,
     Column("file_id", Integer, ForeignKey("files.id")),
     Column("thread_id", Integer, ForeignKey("threads.id")),
@@ -282,7 +282,7 @@ class File(Base):
     assistants = relationship(
         "Assistant",
         secondary=file_assistant_association,
-        back_populates="code_interpreter_files",
+        back_populates="files",
     )
     vector_stores = relationship(
         "VectorStore", secondary=file_vector_store_association, back_populates="files"
@@ -290,7 +290,7 @@ class File(Base):
     threads = relationship(
         "Thread",
         secondary=file_thread_association,
-        back_populates="code_interpreter_files",
+        back_populates="files",
     )
 
     created = Column(DateTime(timezone=True), server_default=func.now())
@@ -806,7 +806,7 @@ class Thread(Base):
         thread = await session.scalar(stmt)
         if not thread:
             return []
-        return thread.code_interpreter_files
+        return thread.files
 
     @classmethod
     async def get_n_by_id(

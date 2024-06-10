@@ -1,6 +1,7 @@
 import type { PageLoad } from './$types';
-import type { Assistant, AssistantFiles } from '$lib/api';
-import { getAssistantFiles, expandResponse } from '$lib/api';
+import type { Assistant } from '$lib/api';
+// import type { AssistantFiles } from '$lib/api';
+// import { getAssistantFiles, expandResponse } from '$lib/api';
 
 /**
  * Load additional data needed for managing the class.
@@ -8,7 +9,7 @@ import { getAssistantFiles, expandResponse } from '$lib/api';
 export const load: PageLoad = async ({ params, fetch, parent }) => {
   const isCreating = params.assistantId === 'new';
   let assistant: Assistant | null = null;
-  let assistantFiles: AssistantFiles | null = null;
+  // let assistantFiles: AssistantFiles | null = null;
   if (!isCreating) {
     const parentData = await parent();
     assistant =
