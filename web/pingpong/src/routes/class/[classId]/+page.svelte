@@ -128,7 +128,7 @@
       <!-- Only show a picker if there are multiple assistants. -->
       {#if assistants.length > 1}
         <div class="pt-2 mt-4 relative flex items-center gap-2">
-          <p class="eyebrow eyebrow-dark">Change Bot</p>
+          <p class="eyebrow eyebrow-dark">Change Assistant</p>
           <Button
             pill
             class="bg-blue-light-50 text-xs uppercase tracking-wide font-medium text-black border-solid border border-blue-dark-40"
@@ -180,6 +180,7 @@
       <div class="relative bg-blue-light-40 rounded-2xl my-8 max-w-md mb-auto">
         <div class="min-h-0 overflow-y-auto bg-blue-light-50 p-6 rounded-2xl">
           <div>
+            <p class="eyebrow eyebrow-dark">Current assistant</p>
             <Heading tag="h3" class="font-normal tracking-wide text-3xl mb-1">{assistant.name}</Heading>
           </div>
           <div class="mb-6">
