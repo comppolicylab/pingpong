@@ -68,8 +68,8 @@
       }
     }
   }
-  $: supportsFileSearch = assistant.tools.includes('file_search');
-  $: supportsCodeInterpreter = assistant.tools.includes('code_interpreter');
+  $: supportsFileSearch = assistant.tools?.includes('file_search') || false;
+  $: supportsCodeInterpreter = assistant.tools?.includes('code_interpreter') || false;
 
   // Handle file upload
   const handleUpload = (f: File, onProgress: (p: number) => void) => {

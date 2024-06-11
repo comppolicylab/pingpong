@@ -20,7 +20,6 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from jwt.exceptions import PyJWTError
 from openai.types.beta.assistant_create_params import ToolResources
 from sqlalchemy.sql import func
-from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.metrics as metrics
 import pingpong.models as models
@@ -29,7 +28,6 @@ import pingpong.schemas as schemas
 from .ai import (
     format_instructions,
     generate_name,
-    generate_vector_store,
     get_openai_client,
     run_thread,
     validate_api_key,
@@ -47,6 +45,12 @@ from .files import FILE_TYPES, handle_create_file, handle_delete_file
 from .invite import send_invite
 from .now import NowFn, utcnow
 from .permission import Authz, LoggedIn
+from .vector_stores import (
+    create_vector_store,
+    append_vector_store_files,
+    sync_vector_store_files,
+    delete_vector_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,119 +76,6 @@ async def get_openai_client_for_class(request: Request) -> openai.AsyncClient:
 
 OpenAIClientDependency = Depends(get_openai_client_for_class)
 OpenAIClient = Annotated[openai.AsyncClient, OpenAIClientDependency]
-
-
-async def create_vector_store(
-    session: AsyncSession,
-    openai_client: openai.AsyncClient,
-    class_id: str,
-    file_search_file_ids: list[str],
-) -> tuple[str, int]:
-    try:
-        new_vector_store = await generate_vector_store(
-            cli=openai_client,
-            file_ids=file_search_file_ids,
-            metadata={
-                "class_id": class_id,
-            },
-        )
-
-    except openai.BadRequestError as e:
-        raise HTTPException(400, e.message or "OpenAI rejected this request")
-
-    try:
-        data = {
-            "type": "thread",
-            "class_id": int(class_id),
-            "expires_at": None,
-            "vector_store_id": new_vector_store.id,
-        }
-        vector_store_object_id = await models.VectorStore.create(
-            session, data, file_search_file_ids
-        )
-    except Exception as e:
-        await openai_client.beta.vector_stores.delete(new_vector_store.id)
-        raise e
-
-    return new_vector_store.id, vector_store_object_id
-
-
-async def add_to_vector_store(
-    session: AsyncSession,
-    openai_client: openai.AsyncClient,
-    vector_store_id: str,
-    file_search_file_ids: list[str],
-) -> int:
-    vector_store_object_id = await models.VectorStore.get_object_id_by_vector_store_id(
-        session, vector_store_id
-    )
-
-    try:
-        await openai_client.beta.vector_stores.file_batches.create(
-            vector_store_id, file_ids=file_search_file_ids
-        )
-    except openai.BadRequestError as e:
-        raise HTTPException(400, e.message or "OpenAI rejected this request")
-
-    await models.VectorStore.add_files(
-        session, vector_store_object_id, file_search_file_ids
-    )
-
-    return vector_store_object_id
-
-
-async def update_vector_store(
-    session: AsyncSession,
-    openai_client: openai.AsyncClient,
-    vector_store_object_id: int,
-    file_search_file_ids: list[str],
-) -> str:
-    current_file_ids = set()
-    async for file_id in models.VectorStore.get_file_ids_by_id(
-        session, vector_store_object_id
-    ):
-        current_file_ids.add(file_id)
-
-    new_file_ids = set(file_search_file_ids)
-
-    file_ids_to_add = new_file_ids - current_file_ids
-    file_ids_to_remove = current_file_ids - new_file_ids
-
-    vector_store_id = await models.VectorStore.get_vector_store_id_by_id(
-        session, vector_store_object_id
-    )
-
-    if file_ids_to_add:
-        try:
-            await openai_client.beta.vector_stores.file_batches.create(
-                vector_store_id, file_ids=file_ids_to_add
-            )
-        except openai.BadRequestError as e:
-            raise HTTPException(400, e.message or "OpenAI rejected this request")
-
-    for file_id in file_ids_to_remove:
-        try:
-            await openai_client.beta.vector_stores.files.delete(
-                file_id, vector_store_id=vector_store_id
-            )
-        except openai.BadRequestError as e:
-            raise HTTPException(400, e.message or "OpenAI rejected this request")
-    return vector_store_id
-
-
-async def delete_vector_store(
-    session: AsyncSession,
-    openai_client: openai.AsyncClient,
-    vector_store_object_id: int,
-) -> None:
-    vector_store_id = await models.VectorStore.get_vector_store_id_by_id(
-        session, vector_store_object_id
-    )
-    try:
-        await openai_client.beta.vector_stores.delete(vector_store_id)
-    except openai.BadRequestError as e:
-        raise HTTPException(400, e.message or "OpenAI rejected this request")
-    await models.VectorStore.delete(session, vector_store_object_id)
 
 
 @v1.middleware("http")
@@ -1202,7 +1093,11 @@ async def create_thread(
 
     if req.file_search_file_ids:
         vector_store_id, vector_store_object_id = await create_vector_store(
-            request.state.session, openai_client, class_id, req.file_search_file_ids
+            request.state.session,
+            openai_client,
+            class_id,
+            req.file_search_file_ids,
+            type=schemas.VectorStoreType.THREAD,
         )
         tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
 
@@ -1307,7 +1202,7 @@ async def send_message(
     if data.file_search_file_ids:
         if thread.vector_store_id:
             # Vector store already exists, update
-            vectore_store_id = await add_to_vector_store(
+            vectore_store_id = await append_vector_store_files(
                 request.state.session,
                 openai_client,
                 thread.vector_store_id,
@@ -1321,14 +1216,18 @@ async def send_message(
                 openai_client,
                 class_id,
                 data.file_search_file_ids,
+                type=schemas.VectorStoreType.THREAD,
             )
             tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
         thread.vector_store_id = vector_store_object_id
 
     if data.code_interpreter_file_ids:
-        existing_file_ids = []
-        async for file in models.Thread.get_file_ids_by_id(request.state.db, thread.id):
-            existing_file_ids.append(file.file_id)
+        existing_file_ids = [
+            file_id
+            async for file_id in models.Thread.get_file_ids_by_id(
+                request.state.db, thread.id
+            )
+        ]
 
         await models.Thread.add_code_interpeter_files(
             request.state.db, thread.id, data.code_interpreter_file_ids
@@ -1612,7 +1511,11 @@ async def create_assistant(
 
     if req.file_search_file_ids:
         vector_store_id, vector_store_object_id = await create_vector_store(
-            request.state.session, openai_client, class_id, req.file_search_file_ids
+            request.state.session,
+            openai_client,
+            class_id,
+            req.file_search_file_ids,
+            type=schemas.VectorStoreType.ASSISTANT,
         )
         tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
 
@@ -1708,7 +1611,7 @@ async def update_assistant(
         # Files will need to be stored in a vector store
         if asst.vector_store_id:
             # Vector store already exists, update
-            vectore_store_id = await add_to_vector_store(
+            vectore_store_id = await sync_vector_store_files(
                 request.state.session,
                 openai_client,
                 asst.vector_store_id,
@@ -1717,14 +1620,21 @@ async def update_assistant(
             tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
         else:
             # Store doesn't exist, create a new one
-            _, vector_store_object_id = await create_vector_store(
-                request.state.session, openai_client, class_id, req.file_search_file_ids
+            vectore_store_id, vector_store_object_id = await create_vector_store(
+                request.state.session,
+                openai_client,
+                class_id,
+                req.file_search_file_ids,
+                type=schemas.VectorStoreType.THREAD,
             )
             asst.vector_store_id = vector_store_object_id
+            tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
     else:
         # No files stored in vector store, remove it
         if asst.vector_store_id:
-            await models.VectorStore.delete(request.state.db, asst.vector_store_id)
+            await delete_vector_store(
+                request.state.session, openai_client, asst.vector_store_id
+            )
             tool_resources["file_search"] = {}
 
     openai_update["tool_resources"] = tool_resources
@@ -1791,68 +1701,6 @@ async def delete_assistant(
     await openai_client.beta.assistants.delete(asst.assistant_id)
     # TODO clean up grants
     return {"status": "ok"}
-
-
-@v1.get(
-    "/class/{class_id}/assistant/{assistant_id}/files/file_search",
-    dependencies=[Depends(Authz("can_view", "assistant:{assistant_id}"))],
-    response_model=schemas.AssistantFilesResponse,
-)
-async def get_file_search_files(
-    class_id: str, assistant_id: str, request: Request, limit: int = 20, offset: int = 0
-):
-    if offset < 0:
-        raise HTTPException(status_code=400, detail="Offset must be non-negative")
-    if limit < 1:
-        raise HTTPException(status_code=400, detail="Limit must be positive")
-
-    files = list[models.File]()
-    async for file in models.Assistant.get_file_search_files(
-        request.state.db, int(assistant_id), limit, offset
-    ):
-        files.append(file)
-
-    total = await models.Assistant.get_file_search_files_count(
-        request.state.db, int(assistant_id)
-    )
-
-    return {
-        "files": files,
-        "limit": limit,
-        "offset": offset,
-        "total": total,
-    }
-
-
-@v1.get(
-    "/class/{class_id}/assistant/{assistant_id}/files/code_interpreter",
-    dependencies=[Depends(Authz("can_view", "assistant:{assistant_id}"))],
-    response_model=schemas.AssistantFilesResponse,
-)
-async def get_code_interpreter_files(
-    class_id: str, assistant_id: str, request: Request, limit: int = 20, offset: int = 0
-):
-    if offset < 0:
-        raise HTTPException(status_code=400, detail="Offset must be non-negative")
-    if limit < 1:
-        raise HTTPException(status_code=400, detail="Limit must be positive")
-
-    files = list[models.File]()
-    async for file in models.Assistant.get_code_interpreter_files(
-        request.state.db, int(assistant_id), limit, offset
-    ):
-        files.append(file)
-
-    total = await models.Assistant.get_code_interpreter_files_count(
-        request.state.db, int(assistant_id)
-    )
-
-    return {
-        "files": files,
-        "limit": limit,
-        "offset": offset,
-        "total": total,
-    }
 
 
 @v1.get(

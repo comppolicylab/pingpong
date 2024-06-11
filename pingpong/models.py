@@ -26,7 +26,6 @@ from sqlalchemy.orm import (
     relationship,
 )
 from sqlalchemy.sql import func
-import itertools
 import pingpong.schemas as schemas
 
 
@@ -342,6 +341,15 @@ class File(Base):
         result = await session.execute(stmt)
         return [row[0] for row in result]
 
+    @classmethod
+    async def get_id_tuple_by_file_id(
+        cls, session: AsyncSession, ids: List[str]
+    ) -> AsyncGenerator[tuple[str, int], None]:
+        stmt = select(File.file_id, File.id).where(File.file_id.in_(ids))
+        result = await session.execute(stmt)
+        for row in result:
+            yield row
+
 
 class VectorStore(Base):
     __tablename__ = "vector_stores"
@@ -381,9 +389,9 @@ class VectorStore(Base):
 
         if file_ids:
             file_object_ids = await File.get_object_ids_by_file_id(session, file_ids)
-            file_vector_store_pairs = list(
-                itertools.product(file_object_ids, [vector_store.id])
-            )
+            file_vector_store_pairs = [
+                (obj_id, vector_store.id) for obj_id in file_object_ids
+            ]
             await session.execute(
                 file_vector_store_association.insert().values(file_vector_store_pairs)
             )
@@ -424,13 +432,13 @@ class VectorStore(Base):
     @classmethod
     async def get_file_ids_by_id(
         cls, session: AsyncSession, id_: int
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[tuple[str, int], None]:
         stmt = select(VectorStore).where(VectorStore.id == int(id_))
         vector_store = await session.scalar(stmt)
         if not vector_store:
             return
         for file in vector_store.files:
-            yield file.file_id
+            yield file.file_id, file.id
 
     @classmethod
     async def get_object_id_by_vector_store_id(
@@ -448,11 +456,75 @@ class VectorStore(Base):
         if not file_ids:
             return
         file_object_ids = await File.get_object_ids_by_file_id(session, file_ids)
-        file_vector_store_pairs = list(
-            itertools.product(file_object_ids, [vector_store_id])
+        file_vector_store_pairs = [
+            (obj_id, vector_store_id) for obj_id in file_object_ids
+        ]
+
+        stmt = (
+            _get_upsert_stmt(session)(file_vector_store_association)
+            .values(file_vector_store_pairs)
+            .on_conflict_do_nothing(
+                index_elements=["file_id", "vector_store_id"],
+            )
         )
-        await session.execute(
-            file_vector_store_association.insert().values(file_vector_store_pairs)
+        await session.execute(stmt)
+
+    @classmethod
+    async def add_files_return_id(
+        cls, session: AsyncSession, vector_store_obj_id: int, file_ids: list[str]
+    ) -> str:
+        vector_store_id = await cls.get_vector_store_id_by_id(
+            session, vector_store_obj_id
+        )
+        await cls.add_files(session, vector_store_obj_id, file_ids)
+        return vector_store_id
+
+    @classmethod
+    async def sync_files(
+        cls, session: AsyncSession, vector_store_obj_id: int, file_ids: list[str]
+    ) -> tuple[str, list[str], list[str]]:
+        current_file_ids = dict()
+        current_file_ids = {
+            file_id: file_obj_id
+            async for file_id, file_obj_id in cls.get_file_ids_by_id(
+                session, vector_store_obj_id
+            )
+        }
+
+        new_file_ids = dict()
+        new_file_ids = {
+            file_id: file_obj_id
+            async for file_id, file_obj_id in File.get_id_tuple_by_file_id(
+                session, file_ids
+            )
+        }
+
+        file_ids_to_add = {
+            k: v for k, v in new_file_ids.items() if k not in current_file_ids
+        }
+        file_ids_to_remove = {
+            k: v for k, v in current_file_ids.items() if k not in new_file_ids
+        }
+
+        vector_store_id = await cls.get_vector_store_id_by_id(
+            session, vector_store_obj_id
+        )
+
+        stmt = (
+            delete(file_vector_store_association)
+            .where(file_vector_store_association.c.vector_store_id == vector_store_id)
+            .where(
+                file_vector_store_association.c.file_id.in_(file_ids_to_remove.values())
+            )
+        )
+        await session.execute(stmt)
+
+        await cls.add_files(session, vector_store_obj_id, list(file_ids_to_add.keys()))
+
+        return (
+            vector_store_id,
+            list(file_ids_to_add.keys()),
+            list(file_ids_to_remove.keys()),
         )
 
 
@@ -539,60 +611,15 @@ class Assistant(Base):
             code_interpreter_file_object_ids = await File.get_object_ids_by_file_id(
                 session, code_interpreter_file_ids
             )
-            file_assistant_pairs = list(
-                itertools.product(code_interpreter_file_object_ids, [assistant.id])
-            )
+            file_assistant_pairs = [
+                (obj_id, assistant.id) for obj_id in code_interpreter_file_object_ids
+            ]
             await session.execute(
                 file_assistant_association.insert().values(file_assistant_pairs)
             )
 
         await session.refresh(assistant)
         return assistant
-
-    @classmethod
-    async def get_code_interpreter_files(
-        cls, session: AsyncSession, id_: int, limit: int = 10, offset: int = 0
-    ) -> AsyncGenerator["File", None]:
-        condition = Assistant.id == int(id_)
-        stmt = select(Assistant.files).where(condition).limit(limit).offset(offset)
-        result = await session.execute(stmt)
-        for row in result:
-            yield row[0]
-
-    @classmethod
-    async def get_code_interpreter_file_count(
-        cls, session: AsyncSession, id_: int
-    ) -> int:
-        condition = Assistant.id == int(id_)
-        stmt = select(func.count()).where(condition)
-        return await session.scalar(stmt)
-
-    @classmethod
-    async def get_file_search_files(
-        cls, session: AsyncSession, id_: int, limit: int = 10, offset: int = 0
-    ) -> AsyncGenerator["File", None]:
-        stmt = (
-            select(VectorStore.files)
-            .where(
-                VectorStore.id == select(Assistant.id).where(Assistant.id == int(id_))
-            )
-            .limit(limit)
-            .offset(offset)
-        )
-        result = await session.execute(stmt)
-        for row in result:
-            yield row[0]
-
-    @classmethod
-    async def get_file_search_file_count(cls, session: AsyncSession, id_: int) -> int:
-        stmt = select(func.count()).where(
-            VectorStore.id == select(Assistant.id).where(Assistant.id == int(id_))
-        )
-        return await session.scalar(stmt)
-
-    async def delete(self, session: AsyncSession):
-        await session.delete(self)
-        await session.flush()
 
 
 class Class(Base):
@@ -636,7 +663,7 @@ class Class(Base):
         stmt = (
             select(UserClassRole)
             .join(User)
-            .options((UserClassRole.user))
+            .options(joinedload(UserClassRole.user))
             .where(condition)
             .order_by(User.email)
             .limit(limit)
@@ -783,9 +810,9 @@ class Thread(Base):
             code_interpreter_file_object_ids = await File.get_object_ids_by_file_id(
                 session, code_interpreter_file_ids
             )
-            file_thread_pairs = list(
-                itertools.product(code_interpreter_file_object_ids, [thread.id])
-            )
+            file_thread_pairs = [
+                (obj_id, thread.id) for obj_id in code_interpreter_file_object_ids
+            ]
             await session.execute(
                 file_thread_association.insert().values(file_thread_pairs)
             )
@@ -797,16 +824,6 @@ class Thread(Base):
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "Thread":
         stmt = select(Thread).where(Thread.id == int(id_))
         return await session.scalar(stmt)
-
-    @classmethod
-    async def get_code_interpreter_files_by_id(
-        cls, session: AsyncSession, id_: int
-    ) -> List["File"]:
-        stmt = select(Thread).where(Thread.id == int(id_))
-        thread = await session.scalar(stmt)
-        if not thread:
-            return []
-        return thread.files
 
     @classmethod
     async def get_n_by_id(
@@ -905,7 +922,7 @@ class Thread(Base):
         if not file_ids:
             return
         file_object_ids = await File.get_object_ids_by_file_id(session, file_ids)
-        file_thread_pairs = list(itertools.product(file_object_ids, [thread_id]))
+        file_thread_pairs = [(obj_id, thread_id) for obj_id in file_object_ids]
         await session.execute(
             file_thread_association.insert().values(file_thread_pairs)
         )
@@ -913,7 +930,7 @@ class Thread(Base):
     @classmethod
     async def get_file_ids_by_id(
         cls, session: AsyncSession, id_: int
-    ) -> AsyncGenerator["UserClassRole", None]:
+    ) -> AsyncGenerator[str, None]:
         stmt = select(Thread).where(Thread.id == int(id_))
         thread = await session.scalar(stmt)
         if not thread:
