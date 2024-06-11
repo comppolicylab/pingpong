@@ -2,12 +2,11 @@ import functools
 import io
 import logging
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict
 
 import openai
 import orjson
 from openai.types.beta.threads import ImageFile
-from openai.types.beta.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 

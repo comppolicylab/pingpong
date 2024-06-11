@@ -5,6 +5,7 @@ from .schemas import VectorStoreType
 
 import pingpong.models as models
 
+
 async def create_vector_store(
     session: AsyncSession,
     openai_client: openai.AsyncClient,
@@ -27,10 +28,11 @@ async def create_vector_store(
     """
     try:
         new_vector_store = await openai_client.beta.vector_stores.create(
-        file_ids=file_search_file_ids, metadata={
+            file_ids=file_search_file_ids,
+            metadata={
                 "class_id": class_id,
             },
-    )
+        )
 
     except openai.BadRequestError as e:
         raise HTTPException(400, e.message or "OpenAI rejected this request")
@@ -98,12 +100,18 @@ async def sync_vector_store_files(
         openai_client (openai.AsyncClient): OpenAI client
         vector_store_object_id (int): DB PK of the vector store
         file_search_file_ids (list[str]): final list of file ids the vector store should end up with
-    
+
     Returns:
         str: OpenAI API vector store id
     """
-    vector_store_id, file_ids_to_add, file_ids_to_remove = await models.VectorStore.sync_files(session, vector_store_obj_id, file_search_file_ids)
-    
+    (
+        vector_store_id,
+        file_ids_to_add,
+        file_ids_to_remove,
+    ) = await models.VectorStore.sync_files(
+        session, vector_store_obj_id, file_search_file_ids
+    )
+
     if file_ids_to_add:
         try:
             await openai_client.beta.vector_stores.file_batches.create(
