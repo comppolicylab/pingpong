@@ -4,6 +4,7 @@
   import * as api from '$lib/api';
   import { happyToast, sadToast } from '$lib/toast';
   import { goto } from '$app/navigation';
+  import PingPongLogo from '$lib/components/PingPongLogo.svelte';
 
   export let data;
 
@@ -39,20 +40,18 @@
   };
 </script>
 
-<div class="w-full h-full flex align-center justify-center">
-  <div class="m-auto w-[30rem] bg-white rounded-2xl">
-    <div class="bg-orange rounded-t-2xl">
-      <Heading tag="h1" customSize="text-4xl" class="px-16 py-8 w-full text-center text-white"
-        >PingPong.</Heading
-      >
-    </div>
-    <div class="px-8 py-4">
+<div class="h-[calc(100dvh-3rem)] v-screen flex items-center justify-center">
+  <div class="flex flex-col w-11/12 lg:w-6/12 max-w-2xl rounded-4xl overflow-hidden">
+    <header class="bg-blue-dark-40 px-12 py-8">
+      <Heading tag="h1" class="logo w-full text-center"><PingPongLogo size="full" /></Heading>
+    </header>
+    <div class="px-8 py-8 bg-white">
       <form on:submit={saveName}>
-        <section class="flex flex-col gap-4">
-          <div class="w-full text-center">
+        <section class="flex flex-col gap-2">
+          <div class="w-full text-md">
             Welcome, {data.me.user?.email || 'Unknown'}.
           </div>
-          <div class="w-full text-center">Please enter your name to continue.</div>
+          <div class="w-full text-xs mb-6">Please enter your name to continue.</div>
           <div>
             <Input
               type="text"
@@ -71,7 +70,7 @@
               disabled={loading}
             />
           </div>
-          <div class="text-center">
+          <div class="text-center flex justify-end mt-4">
             <Button
               type="submit"
               class="text-white bg-orange rounded-full hover:bg-orange-dark"
