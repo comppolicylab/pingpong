@@ -127,7 +127,8 @@
     {#if isConfigured}
       <!-- Only show a picker if there are multiple assistants. -->
       {#if assistants.length > 1}
-        <div class="pt-2">
+        <div class="pt-2 mt-4 relative flex items-center gap-2">
+          <p class="eyebrow eyebrow-dark">Change Bot</p>
           <Button
             pill
             class="bg-blue-light-50 text-xs uppercase tracking-wide font-medium text-black border-solid border border-blue-dark-40"
@@ -137,13 +138,13 @@
           <Dropdown class="max-h-60 overflow-y-auto w-60">
             <!-- Show course assistants first -->
             {#each courseAssistants as asst}
-              <DropdownItem on:click={() => selectAi(asst)} on:touchstart={() => selectAi(asst)}>
+              <DropdownItem on:click={() => selectAi(asst)} on:touchstart={() => selectAi(asst)} class="uppercase tracking-wide font-medium">
                 {#if !asst.published}
                   <EyeSlashOutline size="sm" class="inline-block mr-2 text-gray-400" />
                 {/if}
                 {asst.name}
                 <div>
-                  <Badge color="blue" class="text-xs">Course assistant</Badge>
+                  <Badge class="bg-blue-light-50 mt-1 text-blue-dark-30 text-xs normal-case">Course assistant</Badge>
                 </div>
               </DropdownItem>
             {/each}
@@ -156,18 +157,18 @@
             <!-- Show non-course assistants -->
             {#each otherAssistants as asst}
               {@const meta = getAssistantMetadata(asst)}
-              <DropdownItem on:click={() => selectAi(asst)} on:touchstart={() => selectAi(asst)}>
+              <DropdownItem on:click={() => selectAi(asst)} on:touchstart={() => selectAi(asst)} class="uppercase tracking-wide font-medium">
                 {#if !asst.published}
                   <EyeSlashOutline size="sm" class="inline-block mr-2 text-gray-400" />
                 {/if}
                 {asst.name}
                 <div>
                   {#if meta.isCourseAssistant}
-                    <Badge color="blue" class="text-xs">Course assistant</Badge>
+                    <Badge class="bg-blue-light-50 mt-1 text-blue-dark-30 text-xs normal-case">Course assistant</Badge>
                   {:else if meta.isMyAssistant}
-                    <Badge color="green" class="text-xs">My assistant</Badge>
+                    <Badge class="bg-blue-light-50 mt-1 text-blue-dark-30 text-xs normal-case">My assistant</Badge>
                   {:else}
-                    <Helper class="text-xs">{meta.creator}</Helper>
+                    <Badge class="bg-blue-light-50 mt-1 text-blue-dark-30 text-xs normal-case">{meta.creator}</Badge>
                   {/if}
                 </div>
               </DropdownItem>
@@ -176,34 +177,34 @@
         </div>
       {/if}
 
-      <div class="relative bg-gold-light rounded-2xl grow shrink mx-auto my-8 max-w-2xl">
-        <div class="content-center min-h-0 overflow-y-auto space-y-4 bg-gold-light p-8 rounded-2xl">
+      <div class="relative bg-blue-light-40 rounded-2xl my-8 max-w-md mb-auto">
+        <div class="min-h-0 overflow-y-auto bg-blue-light-50 p-6 rounded-2xl">
           <div>
-            <Heading tag="h3">{assistant.name}</Heading>
+            <Heading tag="h3" class="font-normal tracking-wide text-3xl mb-1">{assistant.name}</Heading>
           </div>
-          <div>
+          <div class="mb-6">
             {#if assistantMeta.isCourseAssistant}
-              <Badge color="blue" class="text-xs">Course assistant</Badge>
+              <Badge class="bg-blue-light-40 mt-1 text-blue-dark-30 text-xs normal-case">Course assistant</Badge>
             {:else if assistantMeta.isMyAssistant}
-              <Badge color="green" class="text-xs">My assistant</Badge>
+              <Badge class="bg-blue-light-40 mt-1 text-blue-dark-30 text-xs normal-case">My assistant</Badge>
             {:else}
-              <Badge color="yellow" class="text-xs">{assistantMeta.creator}</Badge>
+              <Badge class="bg-blue-light-40 mt-1 text-blue-dark-30 text-xs normal-case">{assistantMeta.creator}</Badge>
             {/if}
           </div>
           {#if assistant.description}
-            <div class="dark:text-white text-gray-500">Notes for this assistant:</div>
-            <div class="ml-4 max-h-10 overflow-y-auto sm:max-h-24">{assistant.description}</div>
+            <div class="dark:text-white text-gray-500 eyebrow eyebrow-dark">Notes for this assistant</div>
+            <div class="pb-12 overflow-y-auto">{assistant.description}</div>
           {:else}
             <div class="italic">No notes are provided for this assistant.</div>
           {/if}
         </div>
-        <div class="absolute bottom-1 right-1">
+        <div class="absolute bottom-5 right-4">
           <a
             href={`/class/${data.class.id}/assistant`}
-            class="text-sm text-blue-dark-50 font-medium p-2 px-4 hover:text-blue-dark-100 transition-all"
+            class="bg-orange-light text-orange-dark rounded rounded-2xl p-2 text-xs px-4 pr-2 hover:bg-orange-dark hover:text-orange-light transition-all"
             >View all assistants <ArrowRightOutline
               size="md"
-              class="text-orange inline-block ml-1"
+              class="text-orange-dark inline-block ml-1"
             /></a
           >
         </div>
