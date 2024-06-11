@@ -93,7 +93,7 @@
         label="Start a new chat"
         class={`flex flex-row-reverse justify-between pr-4 text-white rounded-full ${
           onNewChatPage
-            ? 'bg-gray-400 hover:bg-gray-400 cursor-default text-gray-100'
+            ? 'bg-blue-dark-40 hover:bg-blue-dark-40 cursor-default text-blue-dark-30'
             : 'bg-orange hover:bg-orange-dark'
         }`}
       >
