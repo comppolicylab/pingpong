@@ -1119,7 +1119,7 @@ async def create_thread(
         models.User.get_all_by_id(request.state.db, req.parties),
     )
 
-    toolsExport = req.dict(include={"tools_available"})
+    tools_export = req.dict(include={"tools_available"})
 
     new_thread = {
         "class_id": int(class_id),
@@ -1130,7 +1130,7 @@ async def create_thread(
         "assistant_id": req.assistant_id,
         "vector_store_id": vector_store_object_id,
         "code_interpreter_file_ids": req.code_interpreter_file_ids or [],
-        "tools_available": json.dumps(toolsExport["tools_available"]) or "[]",
+        "tools_available": json.dumps(tools_export["tools_available"] or []),
     }
 
     result: None | models.Thread = None
