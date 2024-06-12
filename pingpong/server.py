@@ -1218,8 +1218,8 @@ async def send_message(
                 data.file_search_file_ids,
                 type=schemas.VectorStoreType.THREAD,
             )
-            tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
             thread.vector_store_id = vector_store_object_id
+            tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
 
     if data.code_interpreter_file_ids:
         existing_file_ids = [
