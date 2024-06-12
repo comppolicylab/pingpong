@@ -158,7 +158,7 @@
   </SidebarWrapper>
 </Sidebar>
 
-<Dropdown class="w-40" placement="right" triggeredBy=".user">
+<Dropdown class="w-40" placement="left-end" triggeredBy=".user">
   {#if $page.data.admin.showAdminPage}
     <DropdownItem href="/admin" class="flex space-x-4 items-center">
       <CogOutline size="sm" />
