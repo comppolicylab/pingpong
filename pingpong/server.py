@@ -1621,7 +1621,7 @@ async def update_assistant(
         else:
             # Store doesn't exist, create a new one
             vectore_store_id, vector_store_object_id = await create_vector_store(
-                request.state.session,
+                request.state.db,
                 openai_client,
                 class_id,
                 req.file_search_file_ids,
