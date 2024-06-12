@@ -82,7 +82,7 @@
     <P class="m-4 p-2 bg-amber-100 rounded" color="text-gray-600">
       Please note we do not share any of this information with third parties.
     </P>
-    <ol class="list-decimal mx-24">
+    <ol class="list-decimal">
       <li class="my-2">
         Our developers collect and analyze anonymized usage information, such as number of users,
         request / token volume, and error rates.
@@ -130,7 +130,7 @@
   <div>
     <Heading tag="h3" class="my-4">What else should I know?</Heading>
     <P>Here are a few disclosures, rules, and disclaimers about this app:</P>
-    <ol class="list-decimal mx-24">
+    <ol class="list-decimal">
       <li class="my-2">
         We are monitoring the app for signs of abuse and will take action if we see it.
       </li>
