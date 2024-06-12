@@ -355,7 +355,7 @@ class VectorStore(Base):
     __tablename__ = "vector_stores"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    version = Column(Integer, default=1)
+    version = Column(Integer, default=2)
     vector_store_id = Column(String, unique=True)
     type = Column(SQLEnum(schemas.VectorStoreType), nullable=False)
     class_id = Column(Integer, ForeignKey("classes.id"))
