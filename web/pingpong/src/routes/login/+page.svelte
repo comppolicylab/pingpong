@@ -37,10 +37,10 @@
 
 <div class="h-[calc(100dvh-3rem)] v-screen flex items-center justify-center">
   <div class="flex flex-col w-11/12 lg:w-6/12 max-w-2xl rounded-4xl overflow-hidden">
-    <header class="bg-blue-dark-40 px-12 py-8">
+    <header class="bg-blue-dark-40 px-5 md:px-12 py-8">
       <Heading tag="h1" class="logo w-full text-center"><PingPongLogo size="full" /></Heading>
     </header>
-    <div class="px-12 py-16 bg-white">
+    <div class="px-5 md:px-12 py-16 bg-white">
       {#if $success}
         <div class="text-orange">Success! Follow the link in your email to finish signing in.</div>
       {:else}
