@@ -260,7 +260,7 @@
   <Heading tag="h2" class="text-3xl font-serif font-medium text-blue-dark-40">Manage Class</Heading>
   {#if canEditClassInfo}
     <form on:submit={updateClass} class="pt-4">
-      <div class="grid grid-cols-3 gap-x-6 gap-y-8">
+      <div class="grid md:grid-cols-3 gap-x-6 gap-y-8">
         <div>
           <Heading customSize="text-xl" tag="h3"
             ><Secondary class="text-3xl text-black font-normal">Class Details</Secondary></Heading
@@ -325,7 +325,7 @@
 
   {#if canViewApiKey}
     <form on:submit={submitUpdateApiKey} class="pt-6">
-      <div class="grid grid-cols-3 gap-x-6 gap-y-8">
+      <div class="grid md:grid-cols-3 gap-x-6 gap-y-8">
         <div>
           <Heading customSize="text-xl font-bold" tag="h3"
             ><Secondary class="text-3xl text-black font-normal">Billing</Secondary></Heading
@@ -383,7 +383,7 @@
   {/if}
 
   {#if canManageClassUsers}
-    <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
+    <div class="grid md:grid-cols-3 gap-x-6 gap-y-8 pt-6">
       <div>
         <Heading customSize="text-xl font-bold" tag="h3"
           ><Secondary class="text-3xl text-black font-normal">Users</Secondary></Heading
@@ -422,7 +422,7 @@
   {/if}
 
   {#if canUploadClassFiles}
-    <div class="grid grid-cols-3 gap-x-6 gap-y-8 pt-6">
+    <div class="grid md:grid-cols-3 gap-x-6 gap-y-8 pt-6">
       <div>
         <Heading tag="h3" customSize="text-xl font-bold"
           ><Secondary class="text-3xl text-black font-normal">Files</Secondary></Heading
