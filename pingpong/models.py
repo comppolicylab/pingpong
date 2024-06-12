@@ -355,6 +355,7 @@ class VectorStore(Base):
     __tablename__ = "vector_stores"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    version = Column(Integer, default=1)
     vector_store_id = Column(String, unique=True)
     type = Column(SQLEnum(schemas.VectorStoreType), nullable=False)
     class_id = Column(Integer, ForeignKey("classes.id"))
@@ -392,9 +393,14 @@ class VectorStore(Base):
             file_vector_store_pairs = [
                 (obj_id, vector_store.id) for obj_id in file_object_ids
             ]
-            await session.execute(
-                file_vector_store_association.insert().values(file_vector_store_pairs)
+            stmt = (
+                _get_upsert_stmt(session)(file_vector_store_association)
+                .values(file_vector_store_pairs)
+                .on_conflict_do_nothing(
+                    index_elements=["file_id", "vector_store_id"],
+                )
             )
+            await session.execute(stmt)
 
         await session.refresh(vector_store)
         return vector_store.id
@@ -533,6 +539,7 @@ class Assistant(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String)
+    version = Column(Integer, default=1)
     instructions = Column(String)
     description = Column(String)
     assistant_id = Column(String)
@@ -549,7 +556,12 @@ class Assistant(Base):
         back_populates="assistants",
         lazy="selectin",
     )
-    vector_store_id = Column(Integer, ForeignKey("vector_stores.id"))
+    vector_store_id = Column(
+        Integer,
+        ForeignKey(
+            "vector_stores.id", name="fk_assistants_vector_store_id_vector_store"
+        ),
+    )
     vector_store = relationship(
         "VectorStore", back_populates="assistants", uselist=False
     )
@@ -764,6 +776,7 @@ class Thread(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String)
+    version = Column(Integer, default=1)
     thread_id = Column(String, unique=True)
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="threads", lazy="selectin")
@@ -783,7 +796,10 @@ class Thread(Base):
         lazy="selectin",
     )
     tools_available = Column(String)
-    vector_store_id = Column(Integer, ForeignKey("vector_stores.id"))
+    vector_store_id = Column(
+        Integer,
+        ForeignKey("vector_stores.id", name="fk_threads_vector_store_id_vector_store"),
+    )
     vector_store = relationship("VectorStore", back_populates="threads", uselist=False)
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(

@@ -1093,7 +1093,7 @@ async def create_thread(
 
     if req.file_search_file_ids:
         vector_store_id, vector_store_object_id = await create_vector_store(
-            request.state.session,
+            request.state.db,
             openai_client,
             class_id,
             req.file_search_file_ids,
@@ -1203,7 +1203,7 @@ async def send_message(
         if thread.vector_store_id:
             # Vector store already exists, update
             vectore_store_id = await append_vector_store_files(
-                request.state.session,
+                request.state.db,
                 openai_client,
                 thread.vector_store_id,
                 data.file_search_file_ids,
@@ -1212,14 +1212,14 @@ async def send_message(
         else:
             # Store doesn't exist, create a new one
             vector_store_id, vector_store_object_id = await create_vector_store(
-                request.state.session,
+                request.state.db,
                 openai_client,
                 class_id,
                 data.file_search_file_ids,
                 type=schemas.VectorStoreType.THREAD,
             )
+            thread.vector_store_id = vector_store_object_id
             tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
-        thread.vector_store_id = vector_store_object_id
 
     if data.code_interpreter_file_ids:
         existing_file_ids = [
@@ -1511,7 +1511,7 @@ async def create_assistant(
 
     if req.file_search_file_ids:
         vector_store_id, vector_store_object_id = await create_vector_store(
-            request.state.session,
+            request.state.db,
             openai_client,
             class_id,
             req.file_search_file_ids,
@@ -1612,7 +1612,7 @@ async def update_assistant(
         if asst.vector_store_id:
             # Vector store already exists, update
             vectore_store_id = await sync_vector_store_files(
-                request.state.session,
+                request.state.db,
                 openai_client,
                 asst.vector_store_id,
                 req.file_search_file_ids,
@@ -1633,7 +1633,7 @@ async def update_assistant(
         # No files stored in vector store, remove it
         if asst.vector_store_id:
             await delete_vector_store(
-                request.state.session, openai_client, asst.vector_store_id
+                request.state.db, openai_client, asst.vector_store_id
             )
             tool_resources["file_search"] = {}
 
