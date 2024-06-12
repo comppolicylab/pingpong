@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import webbrowser
-import json
 
 import click
 
@@ -13,8 +12,8 @@ from .ai import get_openai_client
 from .auth import encode_auth_token
 from .authz.migrate import sync_db_to_openfga
 from .config import config
-from .models import Base, User, Class, Assistant, VectorStore, Thread
-from .schemas import VectorStoreType
+from .migrate import migrate_object
+from .models import Base, User, Class, Assistant, Thread
 
 from sqlalchemy import inspect, update
 
@@ -202,126 +201,35 @@ def migrate_version_2() -> None:
         await config.authz.driver.init()
         async with config.db.driver.async_session() as session:
             print("Setting versions for all old assistants ...")
-            stmt = update(Assistant).values(version=1).where(Assistant.version.is_(None))
+            stmt = (
+                update(Assistant).values(version=1).where(Assistant.version.is_(None))
+            )
             await session.execute(stmt)
 
             print("Setting versions for all old threads ...")
             stmt = update(Thread).values(version=1).where(Thread.version.is_(None))
             await session.execute(stmt)
 
-            print("Getting all classes ...")
+            print("Migrating ...")
             async for _class in Class.get_all_with_api_key(session):
-                print(f"Migrating class {_class.id} ...")
                 # Create a new client for each API key
                 openai_client = get_openai_client(_class.api_key)
 
-                # Get all assistants for the class that are unmigrated
+                # Get all assistants for the class that haven't been migrated
                 async for assistant in Assistant.get_by_class_id_and_version(
-                    session, _class.id, 1
+                    session, class_id=_class.id, version=1
                 ):
-                    # Get the assistant record from OpenAI
-                    openai_asst_record = await openai_client.beta.assistants.retrieve(
-                        assistant.assistant_id
-                    )
+                    await migrate_object(openai_client, session, assistant, _class.id)
 
-                    # Assistant has file search (retrieval) tool enabled
-                    if openai_asst_record.tool_resources.file_search.vector_store_ids:
-                        # Get the vector store files
-                        vector_store_files = await openai_client.beta.vector_stores.files.list(
-                            openai_asst_record.tool_resources.file_search.vector_store_ids[
-                                0
-                            ]
-                        )
-                        # Extract the file ids
-                        vector_store_file_ids = [f.id for f in vector_store_files.data]
-                        data = {
-                            "type": VectorStoreType.ASSISTANT,
-                            "class_id": _class.id,
-                            "expires_at": None,
-                            "vector_store_id": openai_asst_record.tool_resources.file_search.vector_store_ids[
-                                0
-                            ],
-                        }
-                        # Create a new vector store
-                        vector_store_object_id = await VectorStore.create(
-                            session,
-                            data,
-                            vector_store_file_ids,
-                        )
-                        # Associate the vector store with the assistant
-                        assistant.vector_store_id = vector_store_object_id
-
-                    # NOTE: Because we did not differentiate between the two tools in v1,
-                    # any files in column `files` might be associated with only file search
-                    # (retrieval), or both file search and code interpreter tools. If code
-                    # interpreter is disabled, we need to delete the files from the `files`
-                    # column.
-                    try:
-                        # Check if the code interpreter tool is enabled
-                        if not openai_asst_record.tool_resources.code_interpreter.file_ids:
-                            assistant.files = []
-                    except Exception:
-                        assistant.files = []
-
-                    assistant.version = 2
-                    assistant.tools = json.dumps(
-                        [t.model_dump() for t in openai_asst_record.tools]
-                    )
-
-                    session.add(assistant)
-                    await session.flush()
-                    await session.refresh(assistant)
-
-                # Get all threads for the class that are unmigrated
+                # Get all threads for the class that haven't been migrated
                 async for thread in Thread.get_by_class_id_and_version(
-                    session, _class.id, 1
+                    session, class_id=_class.id, version=1
                 ):
-                    # Get the thread record from OpenAI
-                    openai_thread_record = await openai_client.beta.threads.retrieve(
-                        thread.thread_id
-                    )
+                    await migrate_object(openai_client, session, thread, _class.id)
 
-                    # Thread has file search (retrieval) tool enabled
-                    if openai_thread_record.tool_resources and openai_thread_record.tool_resources.file_search and openai_thread_record.tool_resources.file_search.vector_store_ids:
-                        # Get the vector store files
-                        vector_store_files = await openai_client.beta.vector_stores.files.list(
-                            openai_thread_record.tool_resources.file_search.vector_store_ids[
-                                0
-                            ]
-                        )
-                        # Extract the file ids
-                        vector_store_file_ids = [f.id for f in vector_store_files.data]
-                        data = {
-                            "type": VectorStoreType.THREAD,
-                            "class_id": _class.id,
-                            "expires_at": None,
-                            "vector_store_id": openai_thread_record.tool_resources.file_search.vector_store_ids[
-                                0
-                            ],
-                        }
-                        # Create a new vector store
-                        vector_store_object_id = await VectorStore.create(
-                            session,
-                            data,
-                            vector_store_file_ids,
-                        )
-                        # Associate the vector store with the thread
-                        thread.vector_store_id = vector_store_object_id
-
-                    try:
-                        # Check if the code interpreter tool is enabled
-                        if not openai_thread_record.tool_resources.code_interpreter.file_ids:
-                            thread.files = []
-                    except Exception:
-                        thread.files = []
-
-                    thread.tools_available = thread.assistant.tools
-                    thread.version = 2
-                    session.add(thread)
-                    await session.flush()
-                    await session.refresh(thread)
-
+            print("Committing ...")
             await session.commit()
+            print("Done!")
 
     asyncio.run(_migrate_version_2())
 
