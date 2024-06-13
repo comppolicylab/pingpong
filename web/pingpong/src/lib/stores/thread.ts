@@ -16,6 +16,8 @@ export type ThreadManagerState = {
   loading: boolean;
   waiting: boolean;
   submitting: boolean;
+  supportsFileSearch: boolean;
+  supportsCodeInterpreter: boolean;
 };
 
 /**
@@ -112,6 +114,9 @@ export class ThreadManager {
       error: expanded.error || null,
       limit: expanded.data?.limit || 20,
       canFetchMore: expanded.data ? expanded.data.messages.length == expanded.data.limit : false,
+      supportsFileSearch: expanded.data?.thread?.tools_available?.includes('file_search') || false,
+      supportsCodeInterpreter:
+        expanded.data?.thread?.tools_available?.includes('code_interpreter') || false,
       optimistic: [],
       loading: false,
       waiting: false,
@@ -326,7 +331,12 @@ export class ThreadManager {
   /**
    * Send a new message to this thread.
    */
-  async postMessage(fromUserId: number, message: string, file_ids?: string[]) {
+  async postMessage(
+    fromUserId: number,
+    message: string,
+    code_interpreter_file_ids?: string[],
+    file_search_file_ids?: string[]
+  ) {
     if (!message) {
       throw new Error('Please enter a message before sending.');
     }
@@ -349,7 +359,8 @@ export class ThreadManager {
       metadata: { user_id: fromUserId },
       assistant_id: '',
       thread_id: '',
-      file_ids: file_ids || [],
+      file_search_file_ids: file_search_file_ids || [],
+      code_interpreter_file_ids: code_interpreter_file_ids || [],
       run_id: null,
       object: 'thread.message'
     };
@@ -362,7 +373,8 @@ export class ThreadManager {
     }));
     const chunks = await api.postMessage(this.#fetcher, this.classId, this.threadId, {
       message,
-      file_ids
+      file_search_file_ids,
+      code_interpreter_file_ids
     });
     await this.#handleStreamChunks(chunks);
   }
@@ -474,7 +486,8 @@ export class ThreadManager {
           assistant_id: '',
           thread_id: '',
           metadata: {},
-          file_ids: [],
+          file_search_file_ids: [],
+          code_interpreter_file_ids: [],
           object: 'thread.message',
           run_id: null
         });

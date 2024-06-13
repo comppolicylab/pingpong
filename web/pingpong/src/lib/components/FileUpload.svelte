@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { PaperClipOutline } from 'flowbite-svelte-icons';
+  // Could also consider using CodeOutline, SearchOutline
+  import { FileCodeOutline, FileSearchOutline } from 'flowbite-svelte-icons';
   import { createEventDispatcher } from 'svelte';
   import { writable } from 'svelte/store';
   import { Button } from 'flowbite-svelte';
@@ -24,6 +25,11 @@
    * File types to accept.
    */
   export let accept = '*/*';
+
+  /**
+   * Type of icon to display.
+   */
+  export let type: 'file_search' | 'code_interpreter' = 'file_search';
 
   /**
    * Max upload size in bytes.
@@ -216,7 +222,11 @@
       on:click={() => uploadRef.click()}
     >
       <slot name="icon">
-        <PaperClipOutline size="sm" />
+        {#if type === 'file_search'}
+          <FileSearchOutline size="sm" />
+        {:else}
+          <FileCodeOutline size="sm" />
+        {/if}
       </slot>
     </Button>
     <slot name="label" />

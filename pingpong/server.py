@@ -18,6 +18,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from jwt.exceptions import PyJWTError
+from openai.types.beta.assistant_create_params import ToolResources
 from sqlalchemy.sql import func
 
 import pingpong.metrics as metrics
@@ -44,6 +45,12 @@ from .files import FILE_TYPES, handle_create_file, handle_delete_file
 from .invite import send_invite
 from .now import NowFn, utcnow
 from .permission import Authz, LoggedIn
+from .vector_stores import (
+    create_vector_store,
+    append_vector_store_files,
+    sync_vector_store_files,
+    delete_vector_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -851,7 +858,6 @@ async def get_thread(
     class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
-
     messages, assistants, runs_result = await asyncio.gather(
         openai_client.beta.threads.messages.list(
             thread.thread_id, limit=20, order="desc"
@@ -1082,21 +1088,38 @@ async def create_thread(
     openai_client: OpenAIClient,
 ):
     parties = list[models.User]()
+    tool_resources: ToolResources = {}
+    vector_store_id = None
+
+    if req.file_search_file_ids:
+        vector_store_id, vector_store_object_id = await create_vector_store(
+            request.state.db,
+            openai_client,
+            class_id,
+            req.file_search_file_ids,
+            type=schemas.VectorStoreType.THREAD,
+        )
+        tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
+
+    if req.code_interpreter_file_ids:
+        tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
 
     name, thread, parties = await asyncio.gather(
         generate_name(openai_client, req.message),
         openai_client.beta.threads.create(
             messages=[
                 {
-                    "metadata": {"user_id": request.state.session.user.id},
+                    "metadata": {"user_id": str(request.state.session.user.id)},
                     "role": "user",
                     "content": req.message,
-                    "file_ids": req.file_ids,
                 }
-            ]
+            ],
+            tool_resources=tool_resources,
         ),
         models.User.get_all_by_id(request.state.db, req.parties),
     )
+
+    tools_export = req.dict(include={"tools_available"})
 
     new_thread = {
         "class_id": int(class_id),
@@ -1105,6 +1128,9 @@ async def create_thread(
         "users": parties or [],
         "thread_id": thread.id,
         "assistant_id": req.assistant_id,
+        "vector_store_id": vector_store_object_id,
+        "code_interpreter_file_ids": req.code_interpreter_file_ids or [],
+        "tools_available": json.dumps(tools_export["tools_available"] or []),
     }
 
     result: None | models.Thread = None
@@ -1119,6 +1145,8 @@ async def create_thread(
         return result
     except Exception as e:
         logger.error("Error creating thread: %s", e)
+        if vector_store_id:
+            await openai_client.beta.vector_stores.delete(vector_store_id)
         await openai_client.beta.threads.delete(thread.id)
         if result:
             # Delete users-threads mapping
@@ -1148,7 +1176,6 @@ async def create_run(
         thread_id=thread.thread_id,
         assistant_id=asst.assistant_id,
         message=None,
-        file_ids=None,
     )
 
     return StreamingResponse(stream, media_type="text/event-stream")
@@ -1170,6 +1197,53 @@ async def send_message(
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
     asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
 
+    tool_resources: ToolResources = {}
+
+    if data.file_search_file_ids:
+        if thread.vector_store_id:
+            # Vector store already exists, update
+            vectore_store_id = await append_vector_store_files(
+                request.state.db,
+                openai_client,
+                thread.vector_store_id,
+                data.file_search_file_ids,
+            )
+            tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
+        else:
+            # Store doesn't exist, create a new one
+            vector_store_id, vector_store_object_id = await create_vector_store(
+                request.state.db,
+                openai_client,
+                class_id,
+                data.file_search_file_ids,
+                type=schemas.VectorStoreType.THREAD,
+            )
+            thread.vector_store_id = vector_store_object_id
+            tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
+
+    if data.code_interpreter_file_ids:
+        existing_file_ids = [
+            file_id
+            async for file_id in models.Thread.get_file_ids_by_id(
+                request.state.db, thread.id
+            )
+        ]
+
+        await models.Thread.add_code_interpeter_files(
+            request.state.db, thread.id, data.code_interpreter_file_ids
+        )
+
+        tool_resources["code_interpreter"] = {
+            "file_ids": existing_file_ids + data.code_interpreter_file_ids
+        }
+
+    try:
+        await openai_client.beta.threads.update(
+            thread.thread_id, tool_resources=tool_resources
+        )
+    except openai.BadRequestError as e:
+        raise HTTPException(400, e.message or "OpenAI rejected this request")
+
     thread.updated = func.now()
     request.state.db.add(thread)
 
@@ -1186,8 +1260,7 @@ async def send_message(
         thread_id=thread.thread_id,
         assistant_id=asst.assistant_id,
         message=data.message,
-        file_ids=data.file_ids,
-        metadata={"user_id": request.state.session.user.id},
+        metadata={"user_id": str(request.state.session.user.id)},
     )
     return StreamingResponse(stream, media_type="text/event-stream")
 
@@ -1433,13 +1506,31 @@ async def create_assistant(
         ):
             raise HTTPException(403, "You lack permission to publish an assistant.")
 
+    tool_resources: ToolResources = {}
+    vector_store_object_id = None
+
+    if req.file_search_file_ids:
+        vector_store_id, vector_store_object_id = await create_vector_store(
+            request.state.db,
+            openai_client,
+            class_id,
+            req.file_search_file_ids,
+            type=schemas.VectorStoreType.ASSISTANT,
+        )
+        tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
+
+    del req.file_search_file_ids
+
+    if req.code_interpreter_file_ids:
+        tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
+
     try:
         new_asst = await openai_client.beta.assistants.create(
             instructions=format_instructions(req.instructions, use_latex=req.use_latex),
             model=req.model,
             tools=req.tools,
-            metadata={"class_id": class_id_int, "creator_id": creator_id},
-            file_ids=req.file_ids,
+            metadata={"class_id": class_id, "creator_id": str(creator_id)},
+            tool_resources=tool_resources,
         )
     except openai.BadRequestError as e:
         raise HTTPException(400, e.message or "OpenAI rejected this request")
@@ -1451,6 +1542,7 @@ async def create_assistant(
             class_id=class_id_int,
             user_id=creator_id,
             assistant_id=new_asst.id,
+            vector_store_id=vector_store_object_id,
         )
 
         grants = [
@@ -1467,6 +1559,8 @@ async def create_assistant(
 
         return asst
     except Exception as e:
+        if vector_store_object_id:
+            await openai_client.beta.vector_stores.delete(vector_store_id)
         await openai_client.beta.assistants.delete(new_asst.id)
         raise e
 
@@ -1505,11 +1599,45 @@ async def update_assistant(
 
     openai_update: dict[str, Any] = {}
     # Update the assistant
-    if req.file_ids is not None:
-        openai_update["file_ids"] = req.file_ids
-        asst.files = await models.File.get_all_by_file_id(
-            request.state.db, req.file_ids
+    tool_resources: ToolResources = {}
+
+    if req.code_interpreter_file_ids is not None:
+        tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
+        asst.code_interpreter_files = await models.File.get_all_by_file_id(
+            request.state.db, req.code_interpreter_file_ids
         )
+
+    if req.file_search_file_ids is not None:
+        # Files will need to be stored in a vector store
+        if asst.vector_store_id:
+            # Vector store already exists, update
+            vectore_store_id = await sync_vector_store_files(
+                request.state.db,
+                openai_client,
+                asst.vector_store_id,
+                req.file_search_file_ids,
+            )
+            tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
+        else:
+            # Store doesn't exist, create a new one
+            vectore_store_id, vector_store_object_id = await create_vector_store(
+                request.state.db,
+                openai_client,
+                class_id,
+                req.file_search_file_ids,
+                type=schemas.VectorStoreType.THREAD,
+            )
+            asst.vector_store_id = vector_store_object_id
+            tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
+    else:
+        # No files stored in vector store, remove it
+        if asst.vector_store_id:
+            await delete_vector_store(
+                request.state.db, openai_client, asst.vector_store_id
+            )
+            tool_resources["file_search"] = {}
+
+    openai_update["tool_resources"] = tool_resources
     if req.use_latex is not None:
         asst.use_latex = req.use_latex
     if req.hide_prompt is not None:
@@ -1573,6 +1701,31 @@ async def delete_assistant(
     await openai_client.beta.assistants.delete(asst.assistant_id)
     # TODO clean up grants
     return {"status": "ok"}
+
+
+@v1.get(
+    "/class/{class_id}/assistant/{assistant_id}/files",
+    dependencies=[Depends(Authz("can_view", "assistant:{assistant_id}"))],
+    response_model=schemas.AssistantFilesResponse,
+)
+async def get_assistant_files(
+    class_id: str,
+    assistant_id: str,
+    request: Request,
+):
+    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    file_search_files = []
+    if asst.vector_store_id:
+        file_search_files = await models.VectorStore.get_files_by_id(
+            request.state.db, asst.vector_store_id
+        )
+    code_interpreter_files = asst.files
+    return {
+        "files": {
+            "file_search_files": file_search_files,
+            "code_interpreter_files": code_interpreter_files,
+        }
+    }
 
 
 @v1.get(

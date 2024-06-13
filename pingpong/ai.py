@@ -2,7 +2,7 @@ import functools
 import io
 import logging
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict
 
 import openai
 import orjson
@@ -141,7 +141,6 @@ async def run_thread(
     thread_id: str,
     assistant_id: int,
     message: str | None,
-    file_ids: List[str] | None = None,
     metadata: Dict[str, str | int] | None = None,
 ):
     try:
@@ -150,12 +149,11 @@ async def run_thread(
                 thread_id,
                 role="user",
                 content=message,
-                file_ids=file_ids,
                 metadata=metadata,
             )
 
         handler = BufferedStreamHandler()
-        async with cli.beta.threads.runs.create_and_stream(
+        async with cli.beta.threads.runs.stream(
             thread_id=thread_id,
             assistant_id=assistant_id,
             event_handler=handler,
