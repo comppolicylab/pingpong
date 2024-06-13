@@ -153,10 +153,7 @@ class AssistantFiles(BaseModel):
 
 
 class AssistantFilesResponse(BaseModel):
-    files: list[File]
-    limit: int
-    offset: int
-    total: int
+    files: AssistantFiles
 
     class Config:
         from_attributes = True

@@ -1702,6 +1702,30 @@ async def delete_assistant(
     # TODO clean up grants
     return {"status": "ok"}
 
+@v1.get(
+    "/class/{class_id}/assistant/{assistant_id}/files",
+    dependencies=[Depends(Authz("can_view", "assistant:{assistant_id}"))],
+    response_model=schemas.AssistantFilesResponse,
+)
+async def get_assistant_files(
+    class_id: str,
+    assistant_id: str,
+    request: Request,
+):
+    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    vector_store_files = []
+    if asst.vector_store_id:
+        vector_store_files = await models.VectorStore.get_files_by_id(
+            request.state.db, asst.vector_store_id
+        )
+    code_interpreter_files = asst.code_interpreter_files
+    return {
+        "files": {
+            "vector_store_files": vector_store_files,
+            "code_interpreter_files": code_interpreter_files,
+        }
+    }
+
 
 @v1.get(
     "/class/{class_id}/thread/{thread_id}/image/{file_id}",
