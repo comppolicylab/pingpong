@@ -3,10 +3,14 @@ import json
 from openai import AsyncClient
 from openai.types.beta import Assistant as OpenAIAssistant
 from openai.types.beta import Thread as OpenAIThread
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from .models import Assistant, VectorStore, Thread
 from .schemas import VectorStoreType
+
+from typing import AsyncGenerator, TypeVar
 
 
 async def migrate_object(
@@ -65,12 +69,14 @@ async def migrate_object(
     # column.
 
     # Check if the code interpreter tool is enabled
-    if not (
+    if (
         openai_obj.tool_resources
         and openai_obj.tool_resources.code_interpreter
         and openai_obj.tool_resources.code_interpreter.file_ids
     ):
-        local_obj.files = []
+        local_obj.code_interpreter_files = local_obj.files
+    else:
+        local_obj.code_interpreter_files = []
 
     # Bump object version
     local_obj.version = 2
@@ -82,5 +88,24 @@ async def migrate_object(
         local_obj.tools_available = local_obj.assistant.tools
 
     session.add(local_obj)
-    await session.flush()
-    await session.refresh(local_obj)
+    await session.commit()
+
+
+T = TypeVar("T", Thread, Assistant)
+
+
+async def get_by_class_id_and_version(
+    session: AsyncSession,
+    object_type: type[T],
+    class_id: int,
+    version: int,
+) -> AsyncGenerator["T", None]:
+    stmt = (
+        select(object_type)
+        .options(joinedload(object_type.assistant))
+        .where(object_type.class_id == int(class_id))
+        .where(object_type.version == version)
+    )
+    result = await session.execute(stmt)
+    for row in result:
+        yield row.object_type

@@ -250,8 +250,16 @@ file_assistant_association = Table(
     Index("file_assistant_idx", "file_id", "assistant_id", unique=True),
 )
 
-file_thread_association = Table(
-    "files_threads",
+code_interpreter_file_assistant_association = Table(
+    "code_interpreter_files_assistants",
+    Base.metadata,
+    Column("file_id", Integer, ForeignKey("files.id")),
+    Column("assistant_id", Integer, ForeignKey("assistants.id")),
+    Index("file_assistant_idx", "file_id", "assistant_id", unique=True),
+)
+
+code_interpreter_file_thread_association = Table(
+    "code_interpreter_files_threads",
     Base.metadata,
     Column("file_id", Integer, ForeignKey("files.id")),
     Column("thread_id", Integer, ForeignKey("threads.id")),
@@ -280,7 +288,7 @@ class File(Base):
     class_ = relationship("Class", back_populates="files")
     assistants = relationship(
         "Assistant",
-        secondary=file_assistant_association,
+        secondary=code_interpreter_file_assistant_association,
         back_populates="files",
     )
     vector_stores = relationship(
@@ -288,7 +296,7 @@ class File(Base):
     )
     threads = relationship(
         "Thread",
-        secondary=file_thread_association,
+        secondary=code_interpreter_file_thread_association,
         back_populates="files",
     )
 
@@ -565,6 +573,12 @@ class Assistant(Base):
         back_populates="assistants",
         lazy="selectin",
     )
+    code_interpreter_files = relationship(
+        "File",
+        secondary=code_interpreter_file_assistant_association,
+        back_populates="assistants",
+        lazy="selectin",
+    )
     vector_store_id = Column(
         Integer,
         ForeignKey(
@@ -648,9 +662,14 @@ class Assistant(Base):
             file_assistant_pairs = [
                 (obj_id, assistant.id) for obj_id in code_interpreter_file_object_ids
             ]
-            await session.execute(
-                file_assistant_association.insert().values(file_assistant_pairs)
+            stmt = (
+                _get_upsert_stmt(session)(code_interpreter_file_assistant_association)
+                .values(file_assistant_pairs)
+                .on_conflict_do_nothing(
+                    index_elements=["file_id", "assistant_id"],
+                )
             )
+            await session.execute(stmt)
 
         await session.refresh(assistant)
         return assistant
@@ -820,9 +839,9 @@ class Thread(Base):
         back_populates="threads",
         lazy="subquery",
     )
-    files = relationship(
+    code_interpreter_files = relationship(
         "File",
-        secondary=file_thread_association,
+        secondary=code_interpreter_file_thread_association,
         back_populates="threads",
         lazy="selectin",
     )
@@ -860,9 +879,14 @@ class Thread(Base):
             file_thread_pairs = [
                 (obj_id, thread.id) for obj_id in code_interpreter_file_object_ids
             ]
-            await session.execute(
-                file_thread_association.insert().values(file_thread_pairs)
+            stmt = (
+                _get_upsert_stmt(session)(code_interpreter_file_thread_association)
+                .values(file_thread_pairs)
+                .on_conflict_do_nothing(
+                    index_elements=["file_id", "thread_id"],
+                )
             )
+            await session.execute(stmt)
 
         await session.refresh(thread)
         return thread
@@ -970,9 +994,14 @@ class Thread(Base):
             return
         file_object_ids = await File.get_object_ids_by_file_id(session, file_ids)
         file_thread_pairs = [(obj_id, thread_id) for obj_id in file_object_ids]
-        await session.execute(
-            file_thread_association.insert().values(file_thread_pairs)
+        stmt = (
+            _get_upsert_stmt(session)(code_interpreter_file_thread_association)
+            .values(file_thread_pairs)
+            .on_conflict_do_nothing(
+                index_elements=["file_id", "thread_id"],
+            )
         )
+        await session.execute(stmt)
 
     @classmethod
     async def get_file_ids_by_id(
@@ -982,7 +1011,7 @@ class Thread(Base):
         thread = await session.scalar(stmt)
         if not thread:
             return
-        for file in thread.files:
+        for file in thread.code_interpreter_files:
             yield file.file_id
 
     @classmethod

@@ -12,7 +12,7 @@ from .ai import get_openai_client
 from .auth import encode_auth_token
 from .authz.migrate import sync_db_to_openfga
 from .config import config
-from .migrate import migrate_object
+from .migrate import migrate_object, get_by_class_id_and_version
 from .models import Base, User, Class, Assistant, Thread
 
 from sqlalchemy import inspect, update
@@ -216,19 +216,17 @@ def migrate_version_2() -> None:
                 openai_client = get_openai_client(_class.api_key)
 
                 # Get all assistants for the class that haven't been migrated
-                async for assistant in Assistant.get_by_class_id_and_version(
-                    session, class_id=_class.id, version=1
+                async for assistant in get_by_class_id_and_version(
+                    session, object_type=Assistant, class_id=_class.id, version=1
                 ):
                     await migrate_object(openai_client, session, assistant, _class.id)
 
                 # Get all threads for the class that haven't been migrated
-                async for thread in Thread.get_by_class_id_and_version(
-                    session, class_id=_class.id, version=1
+                async for thread in get_by_class_id_and_version(
+                    session, object_type=Thread, class_id=_class.id, version=1
                 ):
                     await migrate_object(openai_client, session, thread, _class.id)
 
-            print("Committing ...")
-            await session.commit()
             print("Done!")
 
     asyncio.run(_migrate_version_2())

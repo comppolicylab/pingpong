@@ -1719,7 +1719,7 @@ async def get_assistant_files(
         file_search_files = await models.VectorStore.get_files_by_id(
             request.state.db, asst.vector_store_id
         )
-    code_interpreter_files = asst.files
+    code_interpreter_files = asst.code_interpreter_files
     return {
         "files": {
             "file_search_files": file_search_files,
