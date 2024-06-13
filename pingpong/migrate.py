@@ -77,7 +77,9 @@ async def migrate_object(
         if isinstance(local_obj, Assistant):
             local_obj.code_interpreter_files = local_obj.files
         elif isinstance(local_obj, Thread):
-            files = await File.get_all_by_file_id(session, openai_obj.tool_resources.code_interpreter.file_ids)
+            files = await File.get_all_by_file_id(
+                session, openai_obj.tool_resources.code_interpreter.file_ids
+            )
             local_obj.code_interpreter_files = files
     else:
         local_obj.code_interpreter_files = []
