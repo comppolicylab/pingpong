@@ -35,7 +35,7 @@ def upgrade() -> None:
         ),
     )
     op.create_index(
-        "file_assistant_idx",
+        "code_interpreter_file_assistant_idx",
         "code_interpreter_files_assistants",
         ["file_id", "assistant_id"],
         unique=True,
@@ -54,7 +54,7 @@ def upgrade() -> None:
         ),
     )
     op.create_index(
-        "file_thread_idx",
+        "code_interpreter_file_thread_idx",
         "code_interpreter_files_threads",
         ["file_id", "thread_id"],
         unique=True,

@@ -255,7 +255,9 @@ code_interpreter_file_assistant_association = Table(
     Base.metadata,
     Column("file_id", Integer, ForeignKey("files.id")),
     Column("assistant_id", Integer, ForeignKey("assistants.id")),
-    Index("file_assistant_idx", "file_id", "assistant_id", unique=True),
+    Index(
+        "code_interpreter_file_assistant_idx", "file_id", "assistant_id", unique=True
+    ),
 )
 
 code_interpreter_file_thread_association = Table(
@@ -263,7 +265,7 @@ code_interpreter_file_thread_association = Table(
     Base.metadata,
     Column("file_id", Integer, ForeignKey("files.id")),
     Column("thread_id", Integer, ForeignKey("threads.id")),
-    Index("file_thread_idx", "file_id", "thread_id", unique=True),
+    Index("code_interpreter_file_thread_idx", "file_id", "thread_id", unique=True),
 )
 
 file_vector_store_association = Table(
