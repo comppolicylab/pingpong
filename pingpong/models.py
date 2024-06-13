@@ -519,15 +519,22 @@ class VectorStore(Base):
         if file_ids_to_remove:
             stmt = (
                 delete(file_vector_store_association)
-                .where(file_vector_store_association.c.vector_store_id == vector_store_obj_id)
                 .where(
-                    file_vector_store_association.c.file_id.in_(file_ids_to_remove.values())
+                    file_vector_store_association.c.vector_store_id
+                    == vector_store_obj_id
+                )
+                .where(
+                    file_vector_store_association.c.file_id.in_(
+                        file_ids_to_remove.values()
+                    )
                 )
             )
             await session.execute(stmt)
 
         if file_ids_to_add:
-            await cls.add_files(session, vector_store_obj_id, list(file_ids_to_add.keys()))
+            await cls.add_files(
+                session, vector_store_obj_id, list(file_ids_to_add.keys())
+            )
 
         return (
             vector_store_id,
