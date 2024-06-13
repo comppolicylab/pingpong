@@ -594,6 +594,19 @@ class Assistant(Base):
         return [row.Assistant for row in result]
 
     @classmethod
+    async def get_by_class_id_and_version(
+        cls, session: AsyncSession, class_id: int, version: int
+    ) -> AsyncGenerator["Assistant", None]:
+        stmt = (
+            select(Assistant)
+            .where(Assistant.class_id == int(class_id))
+            .where(Assistant.version == version)
+        )
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.Assistant
+
+    @classmethod
     async def get_all_by_id(
         cls, session: AsyncSession, ids: List[int]
     ) -> List["Assistant"]:
@@ -779,6 +792,15 @@ class Class(Base):
         result = await session.execute(stmt)
         return [row.Class for row in result]
 
+    @classmethod
+    async def get_all_with_api_key(
+        cls, session: AsyncSession
+    ) -> AsyncGenerator["Class", None]:
+        stmt = select(Class).where(Class.api_key.is_not(None))
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.Class
+
 
 class Thread(Base):
     __tablename__ = "threads"
@@ -962,3 +984,17 @@ class Thread(Base):
             return
         for file in thread.files:
             yield file.file_id
+
+    @classmethod
+    async def get_by_class_id_and_version(
+        cls, session: AsyncSession, class_id: int, version: int
+    ) -> AsyncGenerator["Thread", None]:
+        stmt = (
+            select(Thread)
+            .options(joinedload(Thread.assistant))
+            .where(Thread.class_id == int(class_id))
+            .where(Thread.version == version)
+        )
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.Thread

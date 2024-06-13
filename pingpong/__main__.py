@@ -8,12 +8,14 @@ import alembic
 import alembic.command
 import alembic.config
 
+from .ai import get_openai_client
 from .auth import encode_auth_token
 from .authz.migrate import sync_db_to_openfga
 from .config import config
-from .models import Base, User
+from .migrate import migrate_object
+from .models import Base, User, Class, Assistant, Thread
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, update
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +192,46 @@ def db_set_version(version: str, alembic_config: str) -> None:
     al_cfg = _load_alembic(alembic_config)
     # Run the Alembic upgrade command
     alembic.command.stamp(al_cfg, version)
+
+
+@db.command("migrate-version-2")
+def migrate_version_2() -> None:
+    async def _migrate_version_2() -> None:
+        print("Migrating assistants ...")
+        await config.authz.driver.init()
+        async with config.db.driver.async_session() as session:
+            print("Setting versions for all old assistants ...")
+            stmt = (
+                update(Assistant).values(version=1).where(Assistant.version.is_(None))
+            )
+            await session.execute(stmt)
+
+            print("Setting versions for all old threads ...")
+            stmt = update(Thread).values(version=1).where(Thread.version.is_(None))
+            await session.execute(stmt)
+
+            print("Migrating ...")
+            async for _class in Class.get_all_with_api_key(session):
+                # Create a new client for each API key
+                openai_client = get_openai_client(_class.api_key)
+
+                # Get all assistants for the class that haven't been migrated
+                async for assistant in Assistant.get_by_class_id_and_version(
+                    session, class_id=_class.id, version=1
+                ):
+                    await migrate_object(openai_client, session, assistant, _class.id)
+
+                # Get all threads for the class that haven't been migrated
+                async for thread in Thread.get_by_class_id_and_version(
+                    session, class_id=_class.id, version=1
+                ):
+                    await migrate_object(openai_client, session, thread, _class.id)
+
+            print("Committing ...")
+            await session.commit()
+            print("Done!")
+
+    asyncio.run(_migrate_version_2())
 
 
 if __name__ == "__main__":
