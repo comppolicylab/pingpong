@@ -41,6 +41,7 @@ async def create_vector_store(
         data = {
             "type": type,
             "class_id": int(class_id),
+            "version": 2,
             "expires_at": None,
             "vector_store_id": new_vector_store.id,
         }

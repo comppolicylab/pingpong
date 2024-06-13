@@ -1131,6 +1131,7 @@ async def create_thread(
         "vector_store_id": vector_store_object_id,
         "code_interpreter_file_ids": req.code_interpreter_file_ids or [],
         "tools_available": json.dumps(tools_export["tools_available"] or []),
+        "version": 2,
     }
 
     result: None | models.Thread = None
@@ -1543,6 +1544,7 @@ async def create_assistant(
             user_id=creator_id,
             assistant_id=new_asst.id,
             vector_store_id=vector_store_object_id,
+            version=2,
         )
 
         grants = [

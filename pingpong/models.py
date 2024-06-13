@@ -640,6 +640,7 @@ class Assistant(Base):
         user_id: int,
         assistant_id: str,
         vector_store_id: int | None = None,
+        version: int = 1,
     ) -> "Assistant":
         params = data.dict()
         code_interpreter_file_ids = params.pop("code_interpreter_file_ids", [])
@@ -650,6 +651,7 @@ class Assistant(Base):
         params["published"] = func.now() if data.published else None
         params["use_latex"] = data.use_latex
         params["vector_store_id"] = vector_store_id
+        params["version"] = version
 
         assistant = Assistant(**params)
         session.add(assistant)
