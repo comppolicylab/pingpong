@@ -221,7 +221,9 @@
             </div>
             <div class="pb-12 overflow-y-auto">{assistant.description}</div>
           {:else}
-            <div class="italic pb-12 overflow-y-auto">No notes are provided for this assistant.</div>
+            <div class="italic pb-12 overflow-y-auto">
+              No notes are provided for this assistant.
+            </div>
           {/if}
         </div>
         <div class="absolute bottom-5 right-4">
