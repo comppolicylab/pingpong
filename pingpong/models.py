@@ -290,8 +290,13 @@ class File(Base):
     class_ = relationship("Class", back_populates="files")
     assistants = relationship(
         "Assistant",
-        secondary=code_interpreter_file_assistant_association,
+        secondary=file_assistant_association,
         back_populates="files",
+    )
+    assistants_v2 = relationship(
+        "Assistant",
+        secondary=code_interpreter_file_assistant_association,
+        back_populates="code_interpreter_files",
     )
     vector_stores = relationship(
         "VectorStore", secondary=file_vector_store_association, back_populates="files"
@@ -299,7 +304,7 @@ class File(Base):
     threads = relationship(
         "Thread",
         secondary=code_interpreter_file_thread_association,
-        back_populates="files",
+        back_populates="code_interpreter_files",
     )
 
     created = Column(DateTime(timezone=True), server_default=func.now())
@@ -578,7 +583,7 @@ class Assistant(Base):
     code_interpreter_files = relationship(
         "File",
         secondary=code_interpreter_file_assistant_association,
-        back_populates="assistants",
+        back_populates="assistants_v2",
         lazy="selectin",
     )
     vector_store_id = Column(

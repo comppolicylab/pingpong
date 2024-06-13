@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from .models import Assistant, VectorStore, Thread
+from .models import Assistant, VectorStore, Thread, File
 from .schemas import VectorStoreType
 
 from typing import AsyncGenerator, TypeVar
@@ -74,7 +74,11 @@ async def migrate_object(
         and openai_obj.tool_resources.code_interpreter
         and openai_obj.tool_resources.code_interpreter.file_ids
     ):
-        local_obj.code_interpreter_files = local_obj.files
+        if isinstance(local_obj, Assistant):
+            local_obj.code_interpreter_files = local_obj.files
+        elif isinstance(local_obj, Thread):
+            files = await File.get_all_by_file_id(session, openai_obj.tool_resources.code_interpreter.file_ids)
+            local_obj.code_interpreter_files = files
     else:
         local_obj.code_interpreter_files = []
 
@@ -102,10 +106,15 @@ async def get_by_class_id_and_version(
 ) -> AsyncGenerator["T", None]:
     stmt = (
         select(object_type)
-        .options(joinedload(object_type.assistant))
         .where(object_type.class_id == int(class_id))
         .where(object_type.version == version)
     )
+    if object_type == Thread:
+        stmt = stmt.options(joinedload(Thread.assistant))
     result = await session.execute(stmt)
-    for row in result:
-        yield row.object_type
+    if object_type == Thread:
+        for row in result:
+            yield row.Thread
+    else:
+        for row in result:
+            yield row.Assistant
