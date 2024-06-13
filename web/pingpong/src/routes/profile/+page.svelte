@@ -69,7 +69,9 @@
     </div>
 
     <div>
-      <Label class="mb-1" for="lastName" color={inputState.last_name.error ? 'red' : undefined}>Last Name</Label>
+      <Label class="mb-1" for="lastName" color={inputState.last_name.error ? 'red' : undefined}
+        >Last Name</Label
+      >
       <Input
         name="lastName"
         color={inputState.last_name.error ? 'red' : undefined}
@@ -93,12 +95,12 @@
       <Heading tag="h3" class="font-serif text-xl">Email</Heading>
       <p>{data.me.user?.email || 'Unknown'}</p>
     </div>
-  
+
     <div class="mb-5">
       <Heading tag="h3" class="font-serif text-xl">State</Heading>
       <p>{data.me.user?.state || 'Unknown'}</p>
     </div>
-  
+
     <div class="">
       <Heading tag="h3" class="font-serif text-xl">Account created</Heading>
       <p>{data.me.user?.created ? dayjs(data.me.user.created).toString() : 'Unknown'}</p>
