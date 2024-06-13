@@ -1702,6 +1702,7 @@ async def delete_assistant(
     # TODO clean up grants
     return {"status": "ok"}
 
+
 @v1.get(
     "/class/{class_id}/assistant/{assistant_id}/files",
     dependencies=[Depends(Authz("can_view", "assistant:{assistant_id}"))],
