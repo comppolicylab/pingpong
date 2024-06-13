@@ -4,7 +4,6 @@
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
   import {
     Button,
-    Helper,
     Dropdown,
     DropdownItem,
     Span,
