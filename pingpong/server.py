@@ -1714,15 +1714,15 @@ async def get_assistant_files(
     request: Request,
 ):
     asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
-    vector_store_files = []
+    file_search_files = []
     if asst.vector_store_id:
-        vector_store_files = await models.VectorStore.get_files_by_id(
+        file_search_files = await models.VectorStore.get_files_by_id(
             request.state.db, asst.vector_store_id
         )
-    code_interpreter_files = asst.code_interpreter_files
+    code_interpreter_files = asst.files
     return {
         "files": {
-            "vector_store_files": vector_store_files,
+            "file_search_files": file_search_files,
             "code_interpreter_files": code_interpreter_files,
         }
     }

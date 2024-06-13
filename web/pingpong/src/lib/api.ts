@@ -781,7 +781,7 @@ export const getAssistants = async (f: Fetcher, classId: number) => {
  */
 export type AssistantFiles = {
   code_interpreter_files: ServerFile[];
-  vector_store_files: ServerFile[];
+  file_search_files: ServerFile[];
 };
 
 export type AssistantFilesResponse = {

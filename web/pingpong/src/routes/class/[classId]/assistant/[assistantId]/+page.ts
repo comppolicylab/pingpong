@@ -29,7 +29,7 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
     assistantId: isCreating ? null : parseInt(params.assistantId, 10),
     assistant,
     selectedFileSearchFiles: assistantFiles
-      ? assistantFiles.vector_store_files.map((file) => file.file_id)
+      ? assistantFiles.file_search_files.map((file) => file.file_id)
       : [],
     selectedCodeInterpreterFiles: assistantFiles
       ? assistantFiles.code_interpreter_files.map((file) => file.file_id)
