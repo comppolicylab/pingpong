@@ -93,7 +93,7 @@
         label="Start a new chat"
         class={`flex flex-row-reverse justify-between pr-4 text-white rounded-full ${
           onNewChatPage
-            ? 'bg-blue-dark-40 hover:bg-blue-dark-40 cursor-default text-blue-dark-30'
+            ? 'bg-blue-dark-40 hover:bg-blue-dark-40 cursor-default text-blue-dark-30 select-none'
             : 'bg-orange hover:bg-orange-dark'
         }`}
       >
@@ -158,7 +158,7 @@
   </SidebarWrapper>
 </Sidebar>
 
-<Dropdown class="w-40" placement="left-end" triggeredBy=".user">
+<Dropdown class="w-40" placement="right" triggeredBy=".user">
   {#if $page.data.admin.showAdminPage}
     <DropdownItem href="/admin" class="flex space-x-4 items-center">
       <CogOutline size="sm" />
