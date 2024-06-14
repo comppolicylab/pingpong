@@ -433,6 +433,8 @@ class AssistantModel(BaseModel):
     id: str
     created: datetime
     owner: str
+    description: str
+    latest: bool
 
 
 class AssistantModels(BaseModel):

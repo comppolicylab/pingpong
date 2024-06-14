@@ -609,6 +609,8 @@ export type AssistantModel = {
   id: string;
   created: string;
   owner: string;
+  description: string;
+  latest: boolean;
 };
 
 /**

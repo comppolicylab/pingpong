@@ -822,15 +822,18 @@ async def list_class_models(
 ):
     """List available models for the class assistants."""
     all_models = await openai_client.models.list()
-    # Models known to work with file_retrieval, which we always have on.
+    # Models known to work with file_search, which we always have on.
     known_models = {
-        "gpt-4o"
-        "gpt-4-0125-preview",
-        "gpt-4-1106-preview",
-        "gpt-4-turbo-2024-04-09",
-        "gpt-4-turbo",
-        "gpt-4-turbo-preview",
-        "gpt-3.5-turbo-1106",
+        "gpt-4o" : [0, True, "The latest GPT-4o model, OpenAI's most advanced model."],
+        "gpt-4-turbo" : [1, True, "The latest GPT-4 Turbo model."],
+        "gpt-4-turbo-preview" : [2, True, "The latest GPT-4 Turbo preview model."],
+        "gpt-3.5-turbo" : [3, True, "The latest GPT-3.5 Turbo model."],
+        "gpt-4o-2024-05-13": [4, False, "GPT-4o initial release version, 2x faster than GPT-4 Turbo."],
+        "gpt-4-turbo-2024-04-09" : [5, False, "GPT-4 Turbo with Vision model."],
+        "gpt-4-0125-preview" : [6, False, "GPT-4 Turbo preview model with a fix for \"laziness,\" where the model doesn't complete a task."],
+        "gpt-4-1106-preview" : [7, False, "GPT-4 Turbo preview model with improved instruction following, reproducible outputs, and more."],
+        "gpt-3.5-turbo-0125" : [8, False, "GPT-3.5 Turbo model with higher accuracy at responding in requested formats."],
+        "gpt-3.5-turbo-1106"  : [9, False, "GPT-3.5 Turbo model with improved instruction following, reproducible outputs, and more."],
     }
     # Only GPT-* models are currently available for assistants.
     # TODO - there might be other filters we need.
@@ -839,10 +842,13 @@ async def list_class_models(
             "id": m.id,
             "created": datetime.fromtimestamp(m.created),
             "owner": m.owned_by,
+            "description": known_models[m.id][2],
+            "latest": known_models[m.id][1],
         }
         for m in all_models.data
-        if m.id in known_models
+        if m.id in known_models.keys()
     ]
+    filtered.sort(key=lambda x: known_models[x["id"]][0])
     return {"models": filtered}
 
 
