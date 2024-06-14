@@ -49,7 +49,18 @@
   $: initialTools = (assistant?.tools ? (JSON.parse(assistant.tools) as Tool[]) : defaultTools).map(
     (t) => t.type
   );
-  $: modelOptions = (data.models || []).map((model) => ({ value: model.id, name: model.id }));
+  $: latestModelOptions = (data.models.filter((model) => model.is_latest) || []).map((model) => ({
+    value: model.id,
+    name: model.id,
+    description: model.description
+  }));
+  $: versionedModelOptions = (data.models.filter((model) => !model.is_latest) || []).map(
+    (model) => ({
+      value: model.id,
+      name: model.id,
+      description: model.description
+    })
+  );
   $: allFiles = data.files.map((f) => ({
     state: 'success',
     progress: 100,
@@ -290,13 +301,32 @@
     </div>
     <div class="mb-4">
       <Label for="model">Model</Label>
+      <Helper
+        >Select the model to use for this assistant. You can update your model selection at any
+        time. Latest Models will always point to the latest version of the model available. Select a
+        Pinned Model Version to continue using a specific model version regardless of future model
+        updates. See <a
+          href="https://platform.openai.com/docs/models"
+          rel="noopener noreferrer"
+          target="_blank">OpenAI's Documentation</a
+        > for detailed descriptions of model capabilities.</Helper
+      >
       <Select
-        items={modelOptions}
         label="model"
         id="model"
         name="model"
-        value={assistant?.model || modelOptions[0].value}
-      />
+        value={assistant?.model || latestModelOptions[0].value}
+      >
+        <option value="latest" disabled={true}>Latest Models</option>
+        {#each latestModelOptions as { value, name, description }}
+          <option {value}>{name}: {description}</option>
+        {/each}
+        <hr />
+        <option value="pinned" disabled={true}>Pinned Version Models</option>
+        {#each versionedModelOptions as { value, name, description }}
+          <option {value}>{name}: {description}</option>
+        {/each}
+      </Select>
     </div>
     <div class="col-span-2 mb-4">
       <Label for="description">Description</Label>

@@ -822,14 +822,58 @@ async def list_class_models(
 ):
     """List available models for the class assistants."""
     all_models = await openai_client.models.list()
-    # Models known to work with file_retrieval, which we always have on.
-    known_models = {
-        "gpt-4-0125-preview",
-        "gpt-4-1106-preview",
-        "gpt-4-turbo-2024-04-09",
-        "gpt-4-turbo",
-        "gpt-4-turbo-preview",
-        "gpt-3.5-turbo-1106",
+    # Models known to work with file_search, which we always have on.
+    known_models: dict[str, schemas.AssistantModelDict] = {
+        "gpt-4o": {
+            "sort_order": 0,
+            "is_latest": True,
+            "description": "The latest GPT-4o model, OpenAI's most advanced model.",
+        },
+        "gpt-4-turbo": {
+            "sort_order": 1,
+            "is_latest": True,
+            "description": "The latest GPT-4 Turbo model.",
+        },
+        "gpt-4-turbo-preview": {
+            "sort_order": 2,
+            "is_latest": True,
+            "description": "The latest GPT-4 Turbo preview model.",
+        },
+        "gpt-3.5-turbo": {
+            "sort_order": 3,
+            "is_latest": True,
+            "description": "The latest GPT-3.5 Turbo model.",
+        },
+        "gpt-4o-2024-05-13": {
+            "sort_order": 4,
+            "is_latest": False,
+            "description": "GPT-4o initial release version, 2x faster than GPT-4 Turbo.",
+        },
+        "gpt-4-turbo-2024-04-09": {
+            "sort_order": 5,
+            "is_latest": False,
+            "description": "GPT-4 Turbo with Vision model.",
+        },
+        "gpt-4-0125-preview": {
+            "sort_order": 6,
+            "is_latest": False,
+            "description": 'GPT-4 Turbo preview model with a fix for "laziness," where the model doesn\'t complete a task.',
+        },
+        "gpt-4-1106-preview": {
+            "sort_order": 7,
+            "is_latest": False,
+            "description": "GPT-4 Turbo preview model with improved instruction following, reproducible outputs, and more.",
+        },
+        "gpt-3.5-turbo-0125": {
+            "sort_order": 8,
+            "is_latest": False,
+            "description": "GPT-3.5 Turbo model with higher accuracy at responding in requested formats.",
+        },
+        "gpt-3.5-turbo-1106": {
+            "sort_order": 9,
+            "is_latest": False,
+            "description": "GPT-3.5 Turbo model with improved instruction following, reproducible outputs, and more.",
+        },
     }
     # Only GPT-* models are currently available for assistants.
     # TODO - there might be other filters we need.
@@ -838,10 +882,13 @@ async def list_class_models(
             "id": m.id,
             "created": datetime.fromtimestamp(m.created),
             "owner": m.owned_by,
+            "description": known_models[m.id]["description"],
+            "is_latest": known_models[m.id]["is_latest"],
         }
         for m in all_models.data
-        if m.id in known_models
+        if m.id in known_models.keys()
     ]
+    filtered.sort(key=lambda x: known_models[x["id"]]["sort_order"])
     return {"models": filtered}
 
 

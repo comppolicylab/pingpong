@@ -24,3 +24,4 @@ Dockerfile
 .db/
 docker.env
 *.swp
+.venv
