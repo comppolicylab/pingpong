@@ -287,7 +287,7 @@
           <div class="shrink-0 grow-0 h-auto">
             <DotsHorizontalOutline
               class="dots-menu dark:text-white cursor-pointer bg-white dark:bg-slate-700"
-              size="sm"
+              size="lg"
             />
             <Dropdown>
               <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>

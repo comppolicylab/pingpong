@@ -8,9 +8,10 @@ export const sadToast = (message: string) => {
     duration: 5000,
     theme: {
       // Error color
-      '--toastBackground': '#F87171',
-      '--toastBarBackground': '#EF4444',
-      '--toastColor': '#fff'
+      '--toastBackground': '#FFBA89',
+      '--toastBarBackground': '#FF7043',
+      '--toastColor': '#201E45',
+      '--toastWidth': '20rem'
     }
   });
 };
@@ -23,9 +24,10 @@ export const happyToast = (message: string) => {
     duration: 2000,
     theme: {
       // Success color
-      '--toastBackground': '#A7F3D0',
-      '--toastBarBackground': '#22C55E',
-      '--toastColor': '#000'
+      '--toastBackground': '#B4F9E9',
+      '--toastBarBackground': '#61DCBA',
+      '--toastColor': '#201E45',
+      '--toastWidth': '20rem'
     }
   });
 };

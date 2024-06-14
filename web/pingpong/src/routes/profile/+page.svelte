@@ -48,7 +48,7 @@
 
   <div class="mx-12 flex gap-12 flex-wrap">
     <div>
-      <Label for="firstName" color={inputState.first_name.error ? 'red' : undefined}
+      <Label class="mb-1" for="firstName" color={inputState.first_name.error ? 'red' : undefined}
         >First Name</Label
       >
       <Input
@@ -69,7 +69,9 @@
     </div>
 
     <div>
-      <Label for="lastName" color={inputState.last_name.error ? 'red' : undefined}>Last Name</Label>
+      <Label class="mb-1" for="lastName" color={inputState.last_name.error ? 'red' : undefined}
+        >Last Name</Label
+      >
       <Input
         name="lastName"
         color={inputState.last_name.error ? 'red' : undefined}
@@ -88,18 +90,20 @@
     </div>
   </div>
 
-  <div class="mx-12">
-    <Heading tag="h3">Email</Heading>
-    <p>{data.me.user?.email || 'Unknown'}</p>
-  </div>
+  <div class="bg-gray-100 p-8 mx-12 rounded">
+    <div class="mb-5">
+      <Heading tag="h3" class="font-serif text-xl">Email</Heading>
+      <p>{data.me.user?.email || 'Unknown'}</p>
+    </div>
 
-  <div class="mx-12">
-    <Heading tag="h3">State</Heading>
-    <p>{data.me.user?.state || 'Unknown'}</p>
-  </div>
+    <div class="mb-5">
+      <Heading tag="h3" class="font-serif text-xl">State</Heading>
+      <p>{data.me.user?.state || 'Unknown'}</p>
+    </div>
 
-  <div class="mx-12">
-    <Heading tag="h3">Account created</Heading>
-    <p>{data.me.user?.created ? dayjs(data.me.user.created).toString() : 'Unknown'}</p>
+    <div class="">
+      <Heading tag="h3" class="font-serif text-xl">Account created</Heading>
+      <p>{data.me.user?.created ? dayjs(data.me.user.created).toString() : 'Unknown'}</p>
+    </div>
   </div>
 </div>
