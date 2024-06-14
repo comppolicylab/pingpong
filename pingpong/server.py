@@ -824,6 +824,7 @@ async def list_class_models(
     all_models = await openai_client.models.list()
     # Models known to work with file_retrieval, which we always have on.
     known_models = {
+        "gpt-4o"
         "gpt-4-0125-preview",
         "gpt-4-1106-preview",
         "gpt-4-turbo-2024-04-09",
