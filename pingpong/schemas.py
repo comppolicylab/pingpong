@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum, StrEnum, auto
-from typing import Literal, Union
+from typing import Literal, Union, TypedDict
 
 from openai.types.beta.assistant_tool import AssistantTool as Tool
 from openai.types.beta.threads import Message as OpenAIMessage
@@ -435,6 +435,12 @@ class AssistantModel(BaseModel):
     owner: str
     description: str
     latest: bool
+
+
+class AssistantModelDict(TypedDict):
+    sort_order: int
+    is_latest: bool
+    description: str
 
 
 class AssistantModels(BaseModel):
