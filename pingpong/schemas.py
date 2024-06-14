@@ -434,7 +434,7 @@ class AssistantModel(BaseModel):
     created: datetime
     owner: str
     description: str
-    latest: bool
+    is_latest: bool
 
 
 class AssistantModelDict(TypedDict):

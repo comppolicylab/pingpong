@@ -883,7 +883,7 @@ async def list_class_models(
             "created": datetime.fromtimestamp(m.created),
             "owner": m.owned_by,
             "description": known_models[m.id]["description"],
-            "latest": known_models[m.id]["is_latest"],
+            "is_latest": known_models[m.id]["is_latest"],
         }
         for m in all_models.data
         if m.id in known_models.keys()

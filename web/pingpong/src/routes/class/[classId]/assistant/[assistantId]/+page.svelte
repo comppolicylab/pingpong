@@ -49,16 +49,18 @@
   $: initialTools = (assistant?.tools ? (JSON.parse(assistant.tools) as Tool[]) : defaultTools).map(
     (t) => t.type
   );
-  $: latestModelOptions = (data.models.filter((model) => model.latest) || []).map((model) => ({
+  $: latestModelOptions = (data.models.filter((model) => model.is_latest) || []).map((model) => ({
     value: model.id,
     name: model.id,
-    label: model.description
+    description: model.description
   }));
-  $: versionedModelOptions = (data.models.filter((model) => !model.latest) || []).map((model) => ({
-    value: model.id,
-    name: model.id,
-    label: model.description
-  }));
+  $: versionedModelOptions = (data.models.filter((model) => !model.is_latest) || []).map(
+    (model) => ({
+      value: model.id,
+      name: model.id,
+      description: model.description
+    })
+  );
   $: allFiles = data.files.map((f) => ({
     state: 'success',
     progress: 100,
@@ -316,13 +318,13 @@
         value={assistant?.model || latestModelOptions[0].value}
       >
         <option value="latest" disabled={true}>Latest Models</option>
-        {#each latestModelOptions as { value, name, label }}
-          <option {value}>{name}: {label}</option>
+        {#each latestModelOptions as { value, name, description }}
+          <option {value}>{name}: {description}</option>
         {/each}
         <hr />
         <option value="pinned" disabled={true}>Pinned Version Models</option>
-        {#each versionedModelOptions as { value, name, label }}
-          <option {value}>{name}: {label}</option>
+        {#each versionedModelOptions as { value, name, description }}
+          <option {value}>{name}: {description}</option>
         {/each}
       </Select>
     </div>

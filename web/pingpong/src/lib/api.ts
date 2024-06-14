@@ -610,7 +610,7 @@ export type AssistantModel = {
   created: string;
   owner: string;
   description: string;
-  latest: boolean;
+  is_latest: boolean;
 };
 
 /**
