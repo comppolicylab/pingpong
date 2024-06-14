@@ -1090,6 +1090,7 @@ async def create_thread(
     parties = list[models.User]()
     tool_resources: ToolResources = {}
     vector_store_id = None
+    vector_store_object_id = None
 
     if req.file_search_file_ids:
         vector_store_id, vector_store_object_id = await create_vector_store(
