@@ -250,12 +250,22 @@ file_assistant_association = Table(
     Index("file_assistant_idx", "file_id", "assistant_id", unique=True),
 )
 
-file_thread_association = Table(
-    "files_threads",
+code_interpreter_file_assistant_association = Table(
+    "code_interpreter_files_assistants",
+    Base.metadata,
+    Column("file_id", Integer, ForeignKey("files.id")),
+    Column("assistant_id", Integer, ForeignKey("assistants.id")),
+    Index(
+        "code_interpreter_file_assistant_idx", "file_id", "assistant_id", unique=True
+    ),
+)
+
+code_interpreter_file_thread_association = Table(
+    "code_interpreter_files_threads",
     Base.metadata,
     Column("file_id", Integer, ForeignKey("files.id")),
     Column("thread_id", Integer, ForeignKey("threads.id")),
-    Index("file_thread_idx", "file_id", "thread_id", unique=True),
+    Index("code_interpreter_file_thread_idx", "file_id", "thread_id", unique=True),
 )
 
 file_vector_store_association = Table(
@@ -283,13 +293,18 @@ class File(Base):
         secondary=file_assistant_association,
         back_populates="files",
     )
+    assistants_v2 = relationship(
+        "Assistant",
+        secondary=code_interpreter_file_assistant_association,
+        back_populates="code_interpreter_files",
+    )
     vector_stores = relationship(
         "VectorStore", secondary=file_vector_store_association, back_populates="files"
     )
     threads = relationship(
         "Thread",
-        secondary=file_thread_association,
-        back_populates="files",
+        secondary=code_interpreter_file_thread_association,
+        back_populates="code_interpreter_files",
     )
 
     created = Column(DateTime(timezone=True), server_default=func.now())
@@ -565,6 +580,12 @@ class Assistant(Base):
         back_populates="assistants",
         lazy="selectin",
     )
+    code_interpreter_files = relationship(
+        "File",
+        secondary=code_interpreter_file_assistant_association,
+        back_populates="assistants_v2",
+        lazy="selectin",
+    )
     vector_store_id = Column(
         Integer,
         ForeignKey(
@@ -594,6 +615,19 @@ class Assistant(Base):
         return [row.Assistant for row in result]
 
     @classmethod
+    async def get_by_class_id_and_version(
+        cls, session: AsyncSession, class_id: int, version: int
+    ) -> AsyncGenerator["Assistant", None]:
+        stmt = (
+            select(Assistant)
+            .where(Assistant.class_id == int(class_id))
+            .where(Assistant.version == version)
+        )
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.Assistant
+
+    @classmethod
     async def get_all_by_id(
         cls, session: AsyncSession, ids: List[int]
     ) -> List["Assistant"]:
@@ -613,6 +647,7 @@ class Assistant(Base):
         user_id: int,
         assistant_id: str,
         vector_store_id: int | None = None,
+        version: int = 1,
     ) -> "Assistant":
         params = data.dict()
         code_interpreter_file_ids = params.pop("code_interpreter_file_ids", [])
@@ -623,6 +658,7 @@ class Assistant(Base):
         params["published"] = func.now() if data.published else None
         params["use_latex"] = data.use_latex
         params["vector_store_id"] = vector_store_id
+        params["version"] = version
 
         assistant = Assistant(**params)
         session.add(assistant)
@@ -635,9 +671,14 @@ class Assistant(Base):
             file_assistant_pairs = [
                 (obj_id, assistant.id) for obj_id in code_interpreter_file_object_ids
             ]
-            await session.execute(
-                file_assistant_association.insert().values(file_assistant_pairs)
+            stmt = (
+                _get_upsert_stmt(session)(code_interpreter_file_assistant_association)
+                .values(file_assistant_pairs)
+                .on_conflict_do_nothing(
+                    index_elements=["file_id", "assistant_id"],
+                )
             )
+            await session.execute(stmt)
 
         await session.refresh(assistant)
         return assistant
@@ -779,6 +820,15 @@ class Class(Base):
         result = await session.execute(stmt)
         return [row.Class for row in result]
 
+    @classmethod
+    async def get_all_with_api_key(
+        cls, session: AsyncSession
+    ) -> AsyncGenerator["Class", None]:
+        stmt = select(Class).where(Class.api_key.is_not(None))
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.Class
+
 
 class Thread(Base):
     __tablename__ = "threads"
@@ -798,9 +848,9 @@ class Thread(Base):
         back_populates="threads",
         lazy="subquery",
     )
-    files = relationship(
+    code_interpreter_files = relationship(
         "File",
-        secondary=file_thread_association,
+        secondary=code_interpreter_file_thread_association,
         back_populates="threads",
         lazy="selectin",
     )
@@ -838,9 +888,14 @@ class Thread(Base):
             file_thread_pairs = [
                 (obj_id, thread.id) for obj_id in code_interpreter_file_object_ids
             ]
-            await session.execute(
-                file_thread_association.insert().values(file_thread_pairs)
+            stmt = (
+                _get_upsert_stmt(session)(code_interpreter_file_thread_association)
+                .values(file_thread_pairs)
+                .on_conflict_do_nothing(
+                    index_elements=["file_id", "thread_id"],
+                )
             )
+            await session.execute(stmt)
 
         await session.refresh(thread)
         return thread
@@ -948,9 +1003,14 @@ class Thread(Base):
             return
         file_object_ids = await File.get_object_ids_by_file_id(session, file_ids)
         file_thread_pairs = [(obj_id, thread_id) for obj_id in file_object_ids]
-        await session.execute(
-            file_thread_association.insert().values(file_thread_pairs)
+        stmt = (
+            _get_upsert_stmt(session)(code_interpreter_file_thread_association)
+            .values(file_thread_pairs)
+            .on_conflict_do_nothing(
+                index_elements=["file_id", "thread_id"],
+            )
         )
+        await session.execute(stmt)
 
     @classmethod
     async def get_file_ids_by_id(
@@ -960,5 +1020,19 @@ class Thread(Base):
         thread = await session.scalar(stmt)
         if not thread:
             return
-        for file in thread.files:
+        for file in thread.code_interpreter_files:
             yield file.file_id
+
+    @classmethod
+    async def get_by_class_id_and_version(
+        cls, session: AsyncSession, class_id: int, version: int
+    ) -> AsyncGenerator["Thread", None]:
+        stmt = (
+            select(Thread)
+            .options(joinedload(Thread.assistant))
+            .where(Thread.class_id == int(class_id))
+            .where(Thread.version == version)
+        )
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.Thread
