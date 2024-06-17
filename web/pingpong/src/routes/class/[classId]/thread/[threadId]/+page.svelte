@@ -5,7 +5,7 @@
   import { happyToast, sadToast } from '$lib/toast';
   import { errorMessage } from '$lib/errors';
   import { blur } from 'svelte/transition';
-  import { Span, Avatar, Button, Dropdown, DropdownItem } from 'flowbite-svelte';
+  import { Span, Accordion, AccordionItem, Avatar, Button, Dropdown, DropdownItem } from 'flowbite-svelte';
   import { DoubleBounce } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
   import Logo from '$lib/components/Logo.svelte';
@@ -209,9 +209,19 @@
                 />
               </div>
             {:else if content.type == 'code'}
-              <div class="leading-6">
+            <div class="leading-6 min-w-full shrink-0">
+            <Accordion flush>
+              <AccordionItem open>
+                <span slot="header">Code Interpreter</span>
+                <div class="leading-6 min-w-full">
+                  <pre style="white-space: pre-wrap;">{content.code}</pre>
+                </div>
+              </AccordionItem>
+            </Accordion>
+            </div>
+              <!-- <div class="leading-6">
                 <pre>{content.code}</pre>
-              </div>
+              </div> -->
             {:else if content.type == 'image_file'}
               <div class="leading-6 w-full">
                 <img
