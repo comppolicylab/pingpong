@@ -465,19 +465,19 @@ export class ThreadManager {
    */
   #createToolCall(call: api.ToolCallDelta) {
     this.#data.update((d) => {
-      const messages = d.data?.messages;
+      const messages = get(this.messages);
       if (!messages?.length) {
         console.warn('Received a tool call without any messages.');
         return d;
       }
-      const sortedMessages = messages.sort((a, b) => b.created_at - a.created_at);
+      const sortedMessages = messages.sort((a, b) => b.data.created_at - a.data.created_at);
       const lastMessage = sortedMessages[0];
       if (!lastMessage) {
         console.warn('Received a tool call without a previous message.');
         return d;
       }
 
-      if (lastMessage.role !== 'assistant') {
+      if (lastMessage.data.role !== 'assistant' && call.type == 'code_interpreter') {
         d.data?.messages.push({
           role: 'assistant',
           content: [],
@@ -528,7 +528,10 @@ export class ThreadManager {
           for (const output of chunk.code_interpreter.outputs) {
             switch (output.type) {
               case 'image':
-                lastMessage.content.push({ type: 'image_file', image_file: output.image });
+                lastMessage.content.push({
+                  type: 'code_output_image_file',
+                  image_file: output.image
+                });
                 break;
               default:
                 console.warn('Unhandled tool call output', output);
