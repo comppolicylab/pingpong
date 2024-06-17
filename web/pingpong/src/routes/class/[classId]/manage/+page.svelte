@@ -13,8 +13,7 @@
     Heading,
     Label,
     Input,
-    Select,
-    A
+    Select
   } from 'flowbite-svelte';
   import BulkAddUsers from '$lib/components/BulkAddUsers.svelte';
   import ViewUsers from '$lib/components/ViewUsers.svelte';
