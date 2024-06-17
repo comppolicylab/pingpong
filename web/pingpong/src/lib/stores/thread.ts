@@ -528,7 +528,10 @@ export class ThreadManager {
           for (const output of chunk.code_interpreter.outputs) {
             switch (output.type) {
               case 'image':
-                lastMessage.content.push({ type: 'code_output_image_file', image_file: output.image });
+                lastMessage.content.push({
+                  type: 'code_output_image_file',
+                  image_file: output.image
+                });
                 break;
               default:
                 console.warn('Unhandled tool call output', output);

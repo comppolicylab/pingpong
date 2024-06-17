@@ -1308,7 +1308,11 @@ export type MessageContentCode = {
   type: 'code';
 };
 
-export type Content = MessageContentImageFile | MessageContentText | MessageContentCode | MessageContentCodeOutputImageFile;
+export type Content =
+  | MessageContentImageFile
+  | MessageContentText
+  | MessageContentCode
+  | MessageContentCodeOutputImageFile;
 
 export type OpenAIMessage = {
   id: string;
