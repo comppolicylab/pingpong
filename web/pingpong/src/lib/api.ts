@@ -1298,12 +1298,17 @@ export type MessageContentImageFile = {
   type: 'image_file';
 };
 
+export type MessageContentCodeOutputImageFile = {
+  image_file: ImageFile;
+  type: 'code_output_image_file';
+};
+
 export type MessageContentCode = {
   code: string;
   type: 'code';
 };
 
-export type Content = MessageContentImageFile | MessageContentText | MessageContentCode;
+export type Content = MessageContentImageFile | MessageContentText | MessageContentCode | MessageContentCodeOutputImageFile;
 
 export type OpenAIMessage = {
   id: string;
