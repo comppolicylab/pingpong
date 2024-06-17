@@ -134,6 +134,13 @@ export class ThreadManager {
         error: null,
         persisted: true
       }));
+      const codeInterpreterMessages = ($data.data?.code_interpreter_messages || []).map(
+        (message) => ({
+          data: message,
+          error: null,
+          persisted: true
+        })
+      );
       const optimisticMessages = $data.optimistic.map((message) => ({
         data: message,
         error: null,
@@ -141,6 +148,7 @@ export class ThreadManager {
       }));
       // Sort messages together by created_at timestamp
       return realMessages
+        .concat(codeInterpreterMessages)
         .concat(optimisticMessages)
         .sort((a, b) => a.data.created_at - b.data.created_at);
     });

@@ -1345,6 +1345,7 @@ export type ThreadWithMeta = {
   limit: number;
   messages: OpenAIMessage[];
   participants: ThreadParticipants;
+  code_interpreter_messages: OpenAIMessage[];
 };
 
 /**

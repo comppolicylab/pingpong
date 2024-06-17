@@ -507,12 +507,46 @@ class ThreadMessages(BaseModel):
     messages: list[OpenAIMessage]
 
 
+class ImageFile(BaseModel):
+    file_id: str
+
+
+class MessageContentCodeOutputImageFile(BaseModel):
+    image_file: ImageFile
+    type: Literal["code_output_image_file"]
+
+
+class MessageContentCode(BaseModel):
+    code: str
+    type: Literal["code"]
+
+
+CodeInterpreterMessageContent = Union[
+    MessageContentCodeOutputImageFile, MessageContentCode
+]
+
+
+class CodeInterpreterMessage(BaseModel):
+    id: str
+    assistant_id: str
+    created_at: int
+    content: list[CodeInterpreterMessageContent]
+    file_search_file_ids: list[str]
+    code_interpreter: list
+    metadata: dict[str, str]
+    object: Literal["thread.message"]
+    role: Literal["assistant"]
+    run_id: str
+    thread_id: str
+
+
 class ThreadWithMeta(BaseModel):
     thread: Thread
     run: OpenAIRun | None
     messages: list[OpenAIMessage]
     limit: int
     participants: ThreadParticipants
+    code_interpreter_messages: list[CodeInterpreterMessage] | None
 
     class Config:
         from_attributes = True

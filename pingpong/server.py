@@ -19,6 +19,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from jwt.exceptions import PyJWTError
 from openai.types.beta.assistant_create_params import ToolResources
+from openai.types.beta.assistant_tool import CodeInterpreterTool
 from sqlalchemy.sql import func
 
 import pingpong.metrics as metrics
@@ -45,6 +46,7 @@ from .files import FILE_TYPES, handle_create_file, handle_delete_file
 from .invite import send_invite
 from .now import NowFn, utcnow
 from .permission import Authz, LoggedIn
+from .runs import process_run_steps
 from .vector_stores import (
     create_vector_store,
     append_vector_store_files,
@@ -912,18 +914,54 @@ async def get_thread(
         models.Assistant.get_all_by_id(request.state.db, [thread.assistant_id]),
         openai_client.beta.threads.runs.list(thread.thread_id, limit=1, order="desc"),
     )
+    last_run = [r async for r in runs_result]
+    code_messages_list = []
 
-    runs = [r async for r in runs_result]
+    # Only run the extra steps if code_interpreter is available
+    if "code_interpreter" in thread.tools_available:
+        num_of_runs_to_fetch = len(set([message.run_id for message in messages.data]))
+        last_message_id = messages.data[-1].id
+
+        _runs_result = await openai_client.beta.threads.runs.list(
+            thread.thread_id, limit=num_of_runs_to_fetch, order="desc"
+        )
+        async for r in _runs_result:
+            if CodeInterpreterTool in r.tools:
+                run_steps = await openai_client.beta.threads.runs.steps.list(
+                    r.id, thread_id=thread.thread_id, order="desc"
+                )
+
+                code_messages, found_last_message = await process_run_steps(
+                    run_steps, last_message_id
+                )
+
+                code_messages_list.extend(code_messages)
+
+                if found_last_message:
+                    break
+
+                while run_steps.has_next_page():
+                    run_steps = await run_steps.get_next_page()
+
+                    code_messages, found_last_message = await process_run_steps(
+                        run_steps, last_message_id
+                    )
+
+                    code_messages_list.extend(code_messages)
+
+                    if found_last_message:
+                        break
 
     return {
         "thread": thread,
-        "run": runs[0] if runs else None,
+        "run": last_run[0] if last_run else None,
         "messages": list(messages.data),
         "limit": 20,
         "participants": {
             "user": {u.id: schemas.Profile.from_user(u) for u in thread.users},
             "assistant": {a.id: a.name for a in assistants},
         },
+        "code_interpreter_messages": code_messages_list,
     }
 
 
