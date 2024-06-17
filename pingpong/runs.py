@@ -1,6 +1,6 @@
 from openai.types.beta.threads.runs import RunStep
 from openai.pagination import AsyncCursorPage
-from .schemas import OpenAIMessage
+
 
 async def process_run_steps(run_steps: AsyncCursorPage[RunStep], last_message_id: str):
     messages = []
