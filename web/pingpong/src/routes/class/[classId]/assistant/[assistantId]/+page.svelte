@@ -308,7 +308,8 @@
         updates. See <a
           href="https://platform.openai.com/docs/models"
           rel="noopener noreferrer"
-          target="_blank">OpenAI's Documentation</a
+          target="_blank"
+          class="underline">OpenAI's Documentation</a
         > for detailed descriptions of model capabilities.</Helper
       >
       <Select

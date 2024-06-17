@@ -13,7 +13,8 @@
     Heading,
     Label,
     Input,
-    Select
+    Select,
+    A
   } from 'flowbite-svelte';
   import BulkAddUsers from '$lib/components/BulkAddUsers.svelte';
   import ViewUsers from '$lib/components/ViewUsers.svelte';
@@ -432,7 +433,8 @@
           <a
             href="https://platform.openai.com/docs/api-reference/files/create"
             rel="noopener noreferrer"
-            target="_blank">OpenAI API docs</a
+            target="_blank"
+            class="underline">OpenAI API docs</a
           > for more information.
         </Info>
       </div>
