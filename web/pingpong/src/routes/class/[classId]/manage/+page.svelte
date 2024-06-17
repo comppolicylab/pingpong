@@ -432,7 +432,8 @@
           <a
             href="https://platform.openai.com/docs/api-reference/files/create"
             rel="noopener noreferrer"
-            target="_blank">OpenAI API docs</a
+            target="_blank"
+            class="underline">OpenAI API docs</a
           > for more information.
         </Info>
       </div>
