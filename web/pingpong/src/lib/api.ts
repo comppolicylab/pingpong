@@ -1353,7 +1353,7 @@ export type ThreadWithMeta = {
   limit: number;
   messages: OpenAIMessage[];
   participants: ThreadParticipants;
-  code_interpreter_messages: OpenAIMessage[];
+  ci_messages: OpenAIMessage[];
 };
 
 /**
@@ -1364,20 +1364,20 @@ export const getThread = async (f: Fetcher, classId: number, threadId: number) =
   return await GET<never, ThreadWithMeta>(f, url);
 };
 
-export type CodeInterpreterCallOutput = {
-  messages: OpenAIMessage[];
+export type CodeInterpreterMessages = {
+  ci_messages: OpenAIMessage[];
 };
 
-export type CallInterpreterCallOpts = {
+export type GetCIMessagesOpts = {
   openai_thread_id: string;
   run_id: string;
   step_id: string;
 };
 
 /**
- * Get a code_interpreter_result by the placeholder.
+ * Get code interpreter messages based on placeholder.
  */
-export const getCodeInterpreterResult = async (
+export const getCIMessages = async (
   f: Fetcher,
   classId: number,
   threadId: number,
@@ -1385,23 +1385,23 @@ export const getCodeInterpreterResult = async (
   run_id: string,
   step_id: string
 ) => {
-  const url = `class/${classId}/thread/${threadId}/code_interpreter_result`;
+  const url = `class/${classId}/thread/${threadId}/ci_messages`;
   const opts = {
     openai_thread_id: openai_thread_id,
     run_id: run_id,
     step_id: step_id
   };
   const expanded = expandResponse(
-    await GET<CallInterpreterCallOpts, CodeInterpreterCallOutput>(f, url, opts)
+    await GET<GetCIMessagesOpts, CodeInterpreterMessages>(f, url, opts)
   );
   if (expanded.error) {
     return {
-      messages: [],
+      ci_messages: [],
       error: expanded.error
     };
   } else {
     return {
-      messages: expanded.data.messages,
+      ci_messages: expanded.data.ci_messages,
       error: null
     };
   }
@@ -1420,7 +1420,7 @@ export type GetThreadMessagesOpts = {
  */
 export type ThreadMessages = {
   messages: OpenAIMessage[];
-  code_interpreter_messages: OpenAIMessage[];
+  ci_messages: OpenAIMessage[];
   limit: number;
 };
 
@@ -1440,7 +1440,7 @@ export const getThreadMessages = async (
       lastPage: true,
       limit: null,
       messages: [],
-      code_interpreter_messages: [],
+      ci_messages: [],
       error: expanded.error
     };
   }
@@ -1449,7 +1449,7 @@ export const getThreadMessages = async (
   const lastPage = n < expanded.data.limit;
   return {
     messages: expanded.data.messages,
-    code_interpreter_messages: expanded.data.code_interpreter_messages,
+    ci_messages: expanded.data.ci_messages,
     limit: expanded.data.limit,
     lastPage,
     error: null

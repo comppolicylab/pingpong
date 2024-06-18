@@ -134,13 +134,11 @@ export class ThreadManager {
         error: null,
         persisted: true
       }));
-      const codeInterpreterMessages = ($data.data?.code_interpreter_messages || []).map(
-        (message) => ({
-          data: message,
-          error: null,
-          persisted: true
-        })
-      );
+      const ci_messages = ($data.data?.ci_messages || []).map((message) => ({
+        data: message,
+        error: null,
+        persisted: true
+      }));
       const optimisticMessages = $data.optimistic.map((message) => ({
         data: message,
         error: null,
@@ -148,7 +146,7 @@ export class ThreadManager {
       }));
       // Sort messages together by created_at timestamp
       return realMessages
-        .concat(codeInterpreterMessages)
+        .concat(ci_messages)
         .concat(optimisticMessages)
         .sort((a, b) => a.data.created_at - b.data.created_at);
     });
@@ -316,10 +314,7 @@ export class ThreadManager {
         ...d,
         data: {
           ...d.data,
-          code_interpreter_messages: [
-            ...response.code_interpreter_messages,
-            ...d.data.code_interpreter_messages
-          ],
+          ci_messages: [...response.ci_messages, ...d.data.ci_messages],
           messages: [...response.messages, ...d.data.messages].sort(
             (a, b) => a.created_at - b.created_at
           )
@@ -335,7 +330,7 @@ export class ThreadManager {
   async fetchCodeInterpreterResult(openai_thread_id: string, run_id: string, step_id: string) {
     this.#data.update((d) => ({ ...d, error: null, loading: true }));
     try {
-      const result = await api.getCodeInterpreterResult(
+      const result = await api.getCIMessages(
         this.#fetcher,
         this.classId,
         this.threadId,
@@ -354,7 +349,7 @@ export class ThreadManager {
           ...d,
           data: {
             ...d.data,
-            code_interpreter_messages: [...result.messages, ...d.data.code_interpreter_messages]
+            ci_messages: [...result.ci_messages, ...d.data.ci_messages]
               .sort((a, b) => a.created_at - b.created_at)
               .filter((message) => {
                 return !(

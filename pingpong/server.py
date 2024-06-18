@@ -935,12 +935,12 @@ async def get_thread(
             "user": {u.id: schemas.Profile.from_user(u) for u in thread.users},
             "assistant": {a.id: a.name for a in assistants},
         },
-        "code_interpreter_calls": placeholder_ci_calls,
+        "ci_messages": placeholder_ci_calls,
     }
 
 
 @v1.get(
-    "/class/{class_id}/thread/{thread_id}/ci_call",
+    "/class/{class_id}/thread/{thread_id}/ci_messages",
     dependencies=[
         Depends(
             Authz("can_view", "thread:{thread_id}"),
@@ -962,7 +962,7 @@ async def get_ci_messages(
     )
 
     return {
-        "messages": messages,
+        "ci_messages": messages,
     }
 
 
@@ -1009,7 +1009,7 @@ async def list_thread_messages(
 
     return {
         "messages": list(messages.data),
-        "code_interpreter_calls": placeholder_ci_calls,
+        "ci_messages": placeholder_ci_calls,
         "limit": limit,
     }
 
