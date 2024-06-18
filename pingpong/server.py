@@ -923,7 +923,9 @@ async def get_thread(
         ):
             new_message = {
                 "id": str(tool_call.id),
-                "assistant_id": messages.data[0].assistant_id if messages.data[0].assistant_id else 'None',
+                "assistant_id": messages.data[0].assistant_id
+                if messages.data[0].assistant_id
+                else "None",
                 "created_at": tool_call.created_at,
                 "content": [
                     {
@@ -1059,7 +1061,9 @@ async def list_thread_messages(
         ):
             new_message = {
                 "id": str(tool_call.id),
-                "assistant_id": messages.data[0].assistant_id if messages.data[0].assistant_id else 'None',
+                "assistant_id": messages.data[0].assistant_id
+                if messages.data[0].assistant_id
+                else "None",
                 "created_at": tool_call.created_at,
                 "content": [
                     {
