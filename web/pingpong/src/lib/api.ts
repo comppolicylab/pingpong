@@ -1308,11 +1308,19 @@ export type MessageContentCode = {
   type: 'code';
 };
 
+export type CodeInterpreterCallPlaceholder = {
+  run_id: string;
+  step_id: string;
+  thread_id: string;
+  type: 'code_interpreter_call_placeholder';
+};
+
 export type Content =
   | MessageContentImageFile
   | MessageContentText
   | MessageContentCode
-  | MessageContentCodeOutputImageFile;
+  | MessageContentCodeOutputImageFile
+  | CodeInterpreterCallPlaceholder;
 
 export type OpenAIMessage = {
   id: string;
@@ -1322,7 +1330,7 @@ export type OpenAIMessage = {
   file_search_file_ids: string[];
   code_interpreter_file_ids: string[];
   metadata: Record<string, unknown> | null;
-  object: 'thread.message';
+  object: 'thread.message' | 'thread.message.code_interpreter';
   role: 'user' | 'assistant';
   run_id: string | null;
   thread_id: string;
@@ -1354,6 +1362,49 @@ export type ThreadWithMeta = {
 export const getThread = async (f: Fetcher, classId: number, threadId: number) => {
   const url = `class/${classId}/thread/${threadId}`;
   return await GET<never, ThreadWithMeta>(f, url);
+};
+
+export type CodeInterpreterCallOutput = {
+  messages: OpenAIMessage[];
+};
+
+export type CallInterpreterCallOpts = {
+  openai_thread_id: string;
+  run_id: string;
+  step_id: string;
+};
+
+/**
+ * Get a code_interpreter_result by the placeholder.
+ */
+export const getCodeInterpreterResult = async (
+  f: Fetcher,
+  classId: number,
+  threadId: number,
+  openai_thread_id: string,
+  run_id: string,
+  step_id: string
+) => {
+  const url = `class/${classId}/thread/${threadId}/code_interpreter_result`;
+  const opts = {
+    openai_thread_id: openai_thread_id,
+    run_id: run_id,
+    step_id: step_id
+  };
+  const expanded = expandResponse(
+    await GET<CallInterpreterCallOpts, CodeInterpreterCallOutput>(f, url, opts)
+  );
+  if (expanded.error) {
+    return {
+      messages: [],
+      error: expanded.error
+    };
+  } else {
+    return {
+      messages: expanded.data.messages,
+      error: null
+    };
+  }
 };
 
 /**

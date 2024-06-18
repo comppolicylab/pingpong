@@ -526,18 +526,29 @@ CodeInterpreterMessageContent = Union[
 ]
 
 
+class CodeInterpreterCallPlaceholder(BaseModel):
+    run_id: str
+    step_id: str
+    thread_id: str
+    type: Literal["code_interpreter_call_placeholder"]
+
+
 class CodeInterpreterMessage(BaseModel):
     id: str
     assistant_id: str
     created_at: int
-    content: list[CodeInterpreterMessageContent]
+    content: list[CodeInterpreterMessageContent] | list[CodeInterpreterCallPlaceholder]
     file_search_file_ids: list[str]
     code_interpreter: list
     metadata: dict[str, str]
-    object: Literal["thread.message"]
+    object: Literal["thread.message"] | Literal["thread.message.code_interpreter"]
     role: Literal["assistant"]
     run_id: str
     thread_id: str
+
+
+class CodeInterpreterCallResult(BaseModel):
+    messages: list[CodeInterpreterMessage]
 
 
 class ThreadWithMeta(BaseModel):

@@ -830,6 +830,59 @@ class Class(Base):
             yield row.Class
 
 
+class CodeInterpreterCall(Base):
+    __tablename__ = "code_interpreter_calls"
+
+    id = Column(Integer, primary_key=True)
+    version = Column(Integer, default=2)
+    run_id = Column(String)
+    step_id = Column(String, unique=True)
+    thread_id = Column(Integer, ForeignKey("threads.id"))
+    thread = relationship(
+        "Thread", back_populates="code_interpreter_calls", uselist=False
+    )
+    created_at = Column(Integer)
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        index=True,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> None:
+        data["thread_id"] = await Thread.get_id_by_thread_id(session, data["thread_id"])
+        code_interpreter_call = CodeInterpreterCall(**data)
+        session.add(code_interpreter_call)
+        await session.commit()
+
+    @classmethod
+    async def get_calls(
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        after: int,
+        before: int | None = None,
+        desc: bool = True,
+    ) -> AsyncGenerator["CodeInterpreterCall", None]:
+        stmt = (
+            select(CodeInterpreterCall)
+            .where(CodeInterpreterCall.thread_id == thread_id)
+            .where(CodeInterpreterCall.created_at >= after)
+            .order_by(
+                CodeInterpreterCall.created_at.desc()
+                if desc
+                else CodeInterpreterCall.created_at.asc()
+            )
+        )
+        if before:
+            stmt = stmt.where(CodeInterpreterCall.created_at <= before)
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.CodeInterpreterCall
+
+
 class Thread(Base):
     __tablename__ = "threads"
 
@@ -853,6 +906,10 @@ class Thread(Base):
         secondary=code_interpreter_file_thread_association,
         back_populates="threads",
         lazy="selectin",
+    )
+    code_interpreter_calls = relationship(
+        "CodeInterpreterCall",
+        back_populates="thread",
     )
     tools_available = Column(String)
     vector_store_id = Column(
@@ -903,6 +960,11 @@ class Thread(Base):
     @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "Thread":
         stmt = select(Thread).where(Thread.id == int(id_))
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_id_by_thread_id(cls, session: AsyncSession, thread_id: str) -> int:
+        stmt = select(Thread.id).where(Thread.thread_id == thread_id)
         return await session.scalar(stmt)
 
     @classmethod

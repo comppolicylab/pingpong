@@ -328,6 +328,49 @@ export class ThreadManager {
     });
   }
 
+  async fetchCodeInterpreterResult(openai_thread_id: string, run_id: string, step_id: string) {
+    this.#data.update((d) => ({ ...d, error: null, loading: true }));
+    try {
+      const result = await api.getCodeInterpreterResult(
+        this.#fetcher,
+        this.classId,
+        this.threadId,
+        openai_thread_id,
+        run_id,
+        step_id
+      );
+      if (result.error) {
+        throw result.error;
+      }
+      this.#data.update((d) => {
+        if (!d.data) {
+          return d;
+        }
+        return {
+          ...d,
+          data: {
+            ...d.data,
+            code_interpreter_messages: [...result.messages, ...d.data.code_interpreter_messages]
+              .sort((a, b) => a.created_at - b.created_at)
+              .filter((message) => {
+                return !(
+                  message.object == 'thread.message.code_interpreter' &&
+                  message.metadata &&
+                  message.metadata.step_id &&
+                  message.metadata.step_id == step_id
+                );
+              })
+          },
+          loading: false
+        };
+      });
+      return result;
+    } catch (e) {
+      this.#data.update((d) => ({ ...d, error: e as Error, loading: false }));
+      throw e;
+    }
+  }
+
   /**
    * Get the current thread data.
    */
