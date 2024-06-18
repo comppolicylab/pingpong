@@ -530,7 +530,7 @@ class CodeInterpreterMessage(BaseModel):
 
 
 class CodeInterpreterMessages(BaseModel):
-    messages: list[CodeInterpreterMessage]
+    ci_messages: list[CodeInterpreterMessage]
 
 
 class ThreadRun(BaseModel):

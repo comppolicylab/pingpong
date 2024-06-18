@@ -1330,7 +1330,7 @@ export type OpenAIMessage = {
   file_search_file_ids: string[];
   code_interpreter_file_ids: string[];
   metadata: Record<string, unknown> | null;
-  object: 'thread.message' | 'thread.message.code_interpreter';
+  object: 'thread.message' | 'code_interpreter_call_placeholder';
   role: 'user' | 'assistant';
   run_id: string | null;
   thread_id: string;

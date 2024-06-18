@@ -353,7 +353,7 @@ export class ThreadManager {
               .sort((a, b) => a.created_at - b.created_at)
               .filter((message) => {
                 return !(
-                  message.object == 'thread.message.code_interpreter' &&
+                  message.object == 'code_interpreter_call_placeholder' &&
                   message.metadata &&
                   message.metadata.step_id &&
                   message.metadata.step_id == step_id
