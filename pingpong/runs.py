@@ -1,42 +1,60 @@
-from openai.types.beta.threads.runs import RunStep
-from openai.pagination import AsyncCursorPage
+import pingpong.models as models
+
+from pingpong.schemas import CodeInterpreterMessage
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
-async def process_run_steps(run_steps: AsyncCursorPage[RunStep], last_message_id: str):
-    messages = []
-    async for step in run_steps:
-        match step.type:
-            case "tool_calls":
-                for tool_call in step.step_details.tool_calls:
-                    if tool_call.type == "code_interpreter":
-                        new_message = {
-                            "id": tool_call.id,
-                            "assistant_id": step.assistant_id,
-                            "created_at": step.created_at,
-                            "content": [
-                                {
-                                    "code": tool_call.code_interpreter.input,
-                                    "type": "code",
-                                }
-                            ],
-                            "file_search_file_ids": [],
-                            "code_interpreter": [],
-                            "metadata": {},
-                            "object": "thread.message",
-                            "role": "assistant",
-                            "run_id": step.run_id,
-                            "thread_id": step.thread_id,
-                        }
-                        for output in tool_call.code_interpreter.outputs:
-                            if output.type == "image":
-                                new_message["content"].append(
-                                    {
-                                        "image_file": {"file_id": output.image.file_id},
-                                        "type": "code_output_image_file",
-                                    }
-                                )
-                        messages.append(new_message)
-            case "message_creation":
-                if step.step_details.message_creation.message_id == last_message_id:
-                    return messages, True
-    return messages, False
+async def get_placeholder_ci_calls(
+    session: AsyncSession,
+    assistant_id: str,
+    thread_id: str,
+    thread_obj_id: int,
+    after: int,
+    before: int | None = None,
+    desc: bool = True,
+) -> list[CodeInterpreterMessage]:
+    """
+    Get placeholder code interpreter calls for a thread.
+
+    Args:
+        session (AsyncSession): SQLAlchemy session
+        assistant_id (str): assistant id
+        thread_id (str): thread id
+        thread_obj_id (int): thread object id
+        after (int): timestamp of message after which to get the calls (measured by the created_at field of the message)
+        before (int | None): timestamp of message before which to get the calls (measured by the created_at field of the message)
+        desc (bool): whether to sort the calls in descending order
+
+    Returns:
+        list[CodeInterpreterMessage]: list of placeholder code interpreter calls
+    """
+    placeholder_code_interpreter_calls = []
+    async for tool_call in models.CodeInterpreterCall.get_calls(
+        session=session, thread_id=thread_obj_id, after=after, before=before, desc=desc
+    ):
+        new_message = CodeInterpreterMessage.model_validate(
+            {
+                "id": str(tool_call.id),
+                "assistant_id": assistant_id,
+                "created_at": tool_call.created_at,
+                "content": [
+                    {
+                        "run_id": tool_call.run_id,
+                        "step_id": tool_call.step_id,
+                        "thread_id": thread_id,
+                        "type": "code_interpreter_call_placeholder",
+                    }
+                ],
+                "file_search_file_ids": [],
+                "code_interpreter": [],
+                "metadata": {
+                    "step_id": tool_call.step_id,
+                },
+                "object": "code_interpreter_call_placeholder",
+                "role": "assistant",
+                "run_id": tool_call.run_id,
+                "thread_id": thread_id,
+            }
+        )
+        placeholder_code_interpreter_calls.append(new_message)
+    return placeholder_code_interpreter_calls

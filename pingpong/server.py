@@ -31,7 +31,7 @@ from .ai import (
     get_openai_client,
     run_thread,
     validate_api_key,
-    get_code_interpreter_result,
+    get_ci_messages_from_step,
 )
 from .auth import (
     decode_auth_token,
@@ -46,6 +46,7 @@ from .files import FILE_TYPES, handle_create_file, handle_delete_file
 from .invite import send_invite
 from .now import NowFn, utcnow
 from .permission import Authz, LoggedIn
+from .runs import get_placeholder_ci_calls
 from .vector_stores import (
     create_vector_store,
     append_vector_store_files,
@@ -914,71 +915,16 @@ async def get_thread(
         openai_client.beta.threads.runs.list(thread.thread_id, limit=1, order="desc"),
     )
     last_run = [r async for r in runs_result]
-    code_messages_list = []
+    placeholder_ci_calls = []
 
-    # Only run the extra steps if code_interpreter is available
     if "code_interpreter" in thread.tools_available:
-        async for tool_call in models.CodeInterpreterCall.get_calls(
-            request.state.db, thread_id=thread.id, after=messages.data[-1].created_at
-        ):
-            new_message = {
-                "id": str(tool_call.id),
-                "assistant_id": messages.data[0].assistant_id
-                if messages.data[0].assistant_id
-                else "None",
-                "created_at": tool_call.created_at,
-                "content": [
-                    {
-                        "run_id": tool_call.run_id,
-                        "step_id": tool_call.step_id,
-                        "thread_id": thread.thread_id,
-                        "type": "code_interpreter_call_placeholder",
-                    }
-                ],
-                "file_search_file_ids": [],
-                "code_interpreter": [],
-                "metadata": {
-                    "step_id": tool_call.step_id,
-                },
-                "object": "thread.message.code_interpreter",
-                "role": "assistant",
-                "run_id": tool_call.run_id,
-                "thread_id": thread.thread_id,
-            }
-            code_messages_list.append(new_message)
-
-        # num_of_runs_to_fetch = len(set([message.run_id for message in messages.data]))
-        # last_message_id = messages.data[-1].id
-
-        # _runs_result = await openai_client.beta.threads.runs.list(
-        #     thread.thread_id, limit=num_of_runs_to_fetch, order="desc"
-        # )
-        # async for r in _runs_result:
-        #     if CodeInterpreterTool in r.tools:
-        #         run_steps = await openai_client.beta.threads.runs.steps.list(
-        #             r.id, thread_id=thread.thread_id, order="desc"
-        #         )
-
-        #         code_messages, found_last_message = await process_run_steps(
-        #             run_steps, last_message_id
-        #         )
-
-        #         code_messages_list.extend(code_messages)
-
-        #         if found_last_message:
-        #             break
-
-        #         while run_steps.has_next_page():
-        #             run_steps = await run_steps.get_next_page()
-
-        #             code_messages, found_last_message = await process_run_steps(
-        #                 run_steps, last_message_id
-        #             )
-
-        #             code_messages_list.extend(code_messages)
-
-        #             if found_last_message:
-        #                 break
+        placeholder_ci_calls = await get_placeholder_ci_calls(
+            request.state.db,
+            messages.data[0].assistant_id if messages.data[0].assistant_id else "None",
+            thread.thread_id,
+            thread.id,
+            messages.data[-1].created_at,
+        )
 
     return {
         "thread": thread,
@@ -989,20 +935,20 @@ async def get_thread(
             "user": {u.id: schemas.Profile.from_user(u) for u in thread.users},
             "assistant": {a.id: a.name for a in assistants},
         },
-        "code_interpreter_messages": code_messages_list,
+        "code_interpreter_calls": placeholder_ci_calls,
     }
 
 
 @v1.get(
-    "/class/{class_id}/thread/{thread_id}/code_interpreter_result",
+    "/class/{class_id}/thread/{thread_id}/ci_call",
     dependencies=[
         Depends(
             Authz("can_view", "thread:{thread_id}"),
         )
     ],
-    response_model=schemas.CodeInterpreterCallResult,
+    response_model=schemas.CodeInterpreterMessages,
 )
-async def get_thread_code_interpreter_results(
+async def get_ci_messages(
     class_id: str,
     thread_id: str,
     request: Request,
@@ -1011,7 +957,7 @@ async def get_thread_code_interpreter_results(
     run_id: str,
     step_id: str,
 ):
-    messages = await get_code_interpreter_result(
+    messages = await get_ci_messages_from_step(
         openai_client, openai_thread_id, run_id, step_id
     )
 
@@ -1049,46 +995,21 @@ async def list_thread_messages(
     messages = await openai_client.beta.threads.messages.list(
         thread.thread_id, limit=limit, order="asc", before=before
     )
-    code_messages_list = []
+    placeholder_ci_calls = []
     # Only run the extra steps if code_interpreter is available
     if "code_interpreter" in thread.tools_available and messages.data:
-        async for tool_call in models.CodeInterpreterCall.get_calls(
+        placeholder_ci_calls = await get_placeholder_ci_calls(
             request.state.db,
-            thread_id=thread.id,
-            after=messages.data[0].created_at,
-            before=messages.data[-1].created_at,
-            desc=False,
-        ):
-            new_message = {
-                "id": str(tool_call.id),
-                "assistant_id": messages.data[0].assistant_id
-                if messages.data[0].assistant_id
-                else "None",
-                "created_at": tool_call.created_at,
-                "content": [
-                    {
-                        "run_id": tool_call.run_id,
-                        "step_id": tool_call.step_id,
-                        "thread_id": thread.thread_id,
-                        "type": "code_interpreter_call_placeholder",
-                    }
-                ],
-                "file_search_file_ids": [],
-                "code_interpreter": [],
-                "metadata": {
-                    "step_id": tool_call.step_id,
-                },
-                "object": "thread.message.code_interpreter",
-                "role": "assistant",
-                "run_id": tool_call.run_id,
-                "thread_id": thread.thread_id,
-            }
-            code_messages_list.append(new_message)
+            messages.data[0].assistant_id if messages.data[0].assistant_id else "None",
+            thread.thread_id,
+            thread.id,
+            messages.data[0].created_at,
+            messages.data[-1].created_at,
+        )
 
-    print(json.dumps(code_messages_list, indent=2))
     return {
         "messages": list(messages.data),
-        "code_interpreter_messages": code_messages_list,
+        "code_interpreter_calls": placeholder_ci_calls,
         "limit": limit,
     }
 

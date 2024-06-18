@@ -508,7 +508,7 @@ CodeInterpreterMessageContent = Union[
 ]
 
 
-class CodeInterpreterCallPlaceholder(BaseModel):
+class CodeInterpreterPlaceholderContent(BaseModel):
     run_id: str
     step_id: str
     thread_id: str
@@ -519,17 +519,17 @@ class CodeInterpreterMessage(BaseModel):
     id: str
     assistant_id: str
     created_at: int
-    content: list[CodeInterpreterMessageContent] | list[CodeInterpreterCallPlaceholder]
-    file_search_file_ids: list[str]
-    code_interpreter: list
+    content: (
+        list[CodeInterpreterMessageContent] | list[CodeInterpreterPlaceholderContent]
+    )
     metadata: dict[str, str]
-    object: Literal["thread.message"] | Literal["thread.message.code_interpreter"]
+    object: Literal["thread.message"] | Literal["code_interpreter_call_placeholder"]
     role: Literal["assistant"]
     run_id: str
     thread_id: str
 
 
-class CodeInterpreterCallResult(BaseModel):
+class CodeInterpreterMessages(BaseModel):
     messages: list[CodeInterpreterMessage]
 
 
@@ -549,7 +549,7 @@ class ThreadParticipants(BaseModel):
 class ThreadMessages(BaseModel):
     limit: int
     messages: list[OpenAIMessage]
-    code_interpreter_messages: list[CodeInterpreterMessage] | None
+    ci_messages: list[CodeInterpreterMessage] | None
 
 
 class ThreadWithMeta(BaseModel):
@@ -558,7 +558,7 @@ class ThreadWithMeta(BaseModel):
     messages: list[OpenAIMessage]
     limit: int
     participants: ThreadParticipants
-    code_interpreter_messages: list[CodeInterpreterMessage] | None
+    ci_messages: list[CodeInterpreterMessage] | None
 
     class Config:
         from_attributes = True
