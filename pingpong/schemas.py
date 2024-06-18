@@ -489,24 +489,6 @@ class OpenAIRun(BaseModel):
     # usage // not shown
 
 
-class ThreadRun(BaseModel):
-    thread: Thread
-    run: OpenAIRun | None
-
-    class Config:
-        from_attributes = True
-
-
-class ThreadParticipants(BaseModel):
-    user: dict[int, Profile]
-    assistant: dict[int, str]
-
-
-class ThreadMessages(BaseModel):
-    limit: int
-    messages: list[OpenAIMessage]
-
-
 class ImageFile(BaseModel):
     file_id: str
 
@@ -549,6 +531,25 @@ class CodeInterpreterMessage(BaseModel):
 
 class CodeInterpreterCallResult(BaseModel):
     messages: list[CodeInterpreterMessage]
+
+
+class ThreadRun(BaseModel):
+    thread: Thread
+    run: OpenAIRun | None
+
+    class Config:
+        from_attributes = True
+
+
+class ThreadParticipants(BaseModel):
+    user: dict[int, Profile]
+    assistant: dict[int, str]
+
+
+class ThreadMessages(BaseModel):
+    limit: int
+    messages: list[OpenAIMessage]
+    code_interpreter_messages: list[CodeInterpreterMessage] | None
 
 
 class ThreadWithMeta(BaseModel):

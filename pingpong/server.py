@@ -923,7 +923,7 @@ async def get_thread(
         ):
             new_message = {
                 "id": str(tool_call.id),
-                "assistant_id": messages.data[0].assistant_id,
+                "assistant_id": messages.data[0].assistant_id if messages.data[0].assistant_id else 'None',
                 "created_at": tool_call.created_at,
                 "content": [
                     {
@@ -1047,9 +1047,44 @@ async def list_thread_messages(
     messages = await openai_client.beta.threads.messages.list(
         thread.thread_id, limit=limit, order="asc", before=before
     )
+    code_messages_list = []
+    # Only run the extra steps if code_interpreter is available
+    if "code_interpreter" in thread.tools_available and messages.data:
+        async for tool_call in models.CodeInterpreterCall.get_calls(
+            request.state.db,
+            thread_id=thread.id,
+            after=messages.data[0].created_at,
+            before=messages.data[-1].created_at,
+            desc=False,
+        ):
+            new_message = {
+                "id": str(tool_call.id),
+                "assistant_id": messages.data[0].assistant_id if messages.data[0].assistant_id else 'None',
+                "created_at": tool_call.created_at,
+                "content": [
+                    {
+                        "run_id": tool_call.run_id,
+                        "step_id": tool_call.step_id,
+                        "thread_id": thread.thread_id,
+                        "type": "code_interpreter_call_placeholder",
+                    }
+                ],
+                "file_search_file_ids": [],
+                "code_interpreter": [],
+                "metadata": {
+                    "step_id": tool_call.step_id,
+                },
+                "object": "thread.message.code_interpreter",
+                "role": "assistant",
+                "run_id": tool_call.run_id,
+                "thread_id": thread.thread_id,
+            }
+            code_messages_list.append(new_message)
 
+    print(json.dumps(code_messages_list, indent=2))
     return {
         "messages": list(messages.data),
+        "code_interpreter_messages": code_messages_list,
         "limit": limit,
     }
 

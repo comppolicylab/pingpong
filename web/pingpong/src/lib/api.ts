@@ -1420,6 +1420,7 @@ export type GetThreadMessagesOpts = {
  */
 export type ThreadMessages = {
   messages: OpenAIMessage[];
+  code_interpreter_messages: OpenAIMessage[];
   limit: number;
 };
 
@@ -1439,6 +1440,7 @@ export const getThreadMessages = async (
       lastPage: true,
       limit: null,
       messages: [],
+      code_interpreter_messages: [],
       error: expanded.error
     };
   }
@@ -1447,6 +1449,7 @@ export const getThreadMessages = async (
   const lastPage = n < expanded.data.limit;
   return {
     messages: expanded.data.messages,
+    code_interpreter_messages: expanded.data.code_interpreter_messages,
     limit: expanded.data.limit,
     lastPage,
     error: null

@@ -316,6 +316,7 @@ export class ThreadManager {
         ...d,
         data: {
           ...d.data,
+          code_interpreter_messages: [...response.code_interpreter_messages, ...d.data.code_interpreter_messages],
           messages: [...response.messages, ...d.data.messages].sort(
             (a, b) => a.created_at - b.created_at
           )
