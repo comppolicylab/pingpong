@@ -3,11 +3,10 @@ from openai.pagination import AsyncCursorPage
 from openai.types.beta.assistant_tool import CodeInterpreterTool
 from openai.types.beta.threads import Run
 from openai.types.beta.threads.runs import RunStep
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
 
 from .models import CodeInterpreterCall
+
 
 async def migrate_thread_ci_calls(
     openai_client: AsyncClient,
@@ -30,6 +29,7 @@ async def migrate_thread_ci_calls(
         runs_result = await runs_result.get_next_page()
         await process_runs(openai_client, session, runs_result, thread_obj_id)
 
+
 async def process_runs(
     openai_client: AsyncClient,
     session: AsyncSession,
@@ -47,7 +47,7 @@ async def process_runs(
         while run_steps.has_next_page():
             run_steps = await run_steps.get_next_page()
             await process_run_steps(session, run_steps, thread_obj_id)
-        
+
 
 async def process_run_steps(
     session: AsyncSession,
@@ -61,10 +61,10 @@ async def process_run_steps(
             if tool_call.type != "code_interpreter":
                 continue
             data = {
-                        "version": 2,
-                        "run_id": run_step.run_id,
-                        "step_id": run_step.id,
-                        "thread_id": run_step.thread_id,
-                        "created_at": run_step.created_at,
-                    }
+                "version": 2,
+                "run_id": run_step.run_id,
+                "step_id": run_step.id,
+                "thread_id": run_step.thread_id,
+                "created_at": run_step.created_at,
+            }
             await CodeInterpreterCall.create(session, data, thread_obj_id)

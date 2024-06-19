@@ -861,14 +861,14 @@ class CodeInterpreterCall(Base):
         )
         print("HERE", data)
         stmt = (
-                _get_upsert_stmt(session)(CodeInterpreterCall)
-                .values(
-                    **data,
-                )
-                .on_conflict_do_nothing(
-                    index_elements=["step_id"],
-                )
+            _get_upsert_stmt(session)(CodeInterpreterCall)
+            .values(
+                **data,
             )
+            .on_conflict_do_nothing(
+                index_elements=["step_id"],
+            )
+        )
         await session.execute(stmt)
         await session.commit()
 
@@ -1065,15 +1065,13 @@ class Thread(Base):
         condition = Thread.class_id == int(class_id)
         if before:
             condition = and_(condition, Thread.updated < before)
-        stmt = (
-            select(Thread).order_by(Thread.updated.desc()).where(condition)
-        )
+        stmt = select(Thread).order_by(Thread.updated.desc()).where(condition)
         if limit:
             stmt = stmt.limit(limit)
         result = await session.execute(stmt)
         for row in result:
             yield row.Thread
-    
+
     @classmethod
     async def add_code_interpeter_files(
         cls, session: AsyncSession, thread_id: int, file_ids: list[str]

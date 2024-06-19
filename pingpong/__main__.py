@@ -244,7 +244,9 @@ def migrate_ci_calls() -> None:
                 openai_client = get_openai_client(_class.api_key)
 
                 # Get all threads for the class
-                async for thread in Thread.get_by_class_id(session, _class.id, limit=None):
+                async for thread in Thread.get_by_class_id(
+                    session, _class.id, limit=None
+                ):
                     await migrate_thread_ci_calls(
                         openai_client, session, thread.thread_id, thread.id
                     )
