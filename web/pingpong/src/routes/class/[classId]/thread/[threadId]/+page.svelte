@@ -41,6 +41,20 @@
   $: error = threadMgr.error;
   $: assistantId = threadMgr.assistantId;
   $: users = threadMgr.users;
+  let externalUserString: string = '';
+  $: {
+    const externalUsers = $users
+      .filter((user) => user.email != data.me.profile?.email)
+      .map((user) => user.name);
+    if (externalUsers.length > 0) {
+      if (externalUsers.length === 1) {
+        externalUserString = ' and ' + externalUsers[0];
+      } else {
+        externalUserString =
+          ', ' + externalUsers.slice(0, -1).join(', ') + ' and ' + externalUsers.slice(-1);
+      }
+    }
+  }
   $: submitting = threadMgr.submitting;
   $: waiting = threadMgr.waiting;
   $: loading = threadMgr.loading;
@@ -316,10 +330,10 @@
             {#if !$published}
               <EyeSlashOutline size="sm" class="text-orange" />
               <Span class="text-gray-400 text-xs whitespace-nowrap"
-                >This thread is visible to the teaching team and</Span
+                >This thread is visible to the teaching team</Span
               >
-              <Span class="text-gray-600 text-xs w-full lg:w-auto grow"
-                >{$users.map((u) => u.email).join(', ')}</Span
+              <Span class="text-gray-400 text-xs w-full lg:w-auto grow"
+                >{externalUserString ? `, yourself${externalUserString}` : ' and yourself'}.</Span
               >
             {:else}
               <Span class="text-gray-400 text-xs"
