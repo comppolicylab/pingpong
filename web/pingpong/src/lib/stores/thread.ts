@@ -328,7 +328,7 @@ export class ThreadManager {
   }
 
   async fetchCodeInterpreterResult(openai_thread_id: string, run_id: string, step_id: string) {
-    this.#data.update((d) => ({ ...d, error: null, loading: true }));
+    this.#data.update((d) => ({ ...d, error: null, waiting: true }));
     try {
       const result = await api.getCIMessages(
         this.#fetcher,
@@ -360,12 +360,12 @@ export class ThreadManager {
                 );
               })
           },
-          loading: false
+          waiting: false
         };
       });
       return result;
     } catch (e) {
-      this.#data.update((d) => ({ ...d, error: e as Error, loading: false }));
+      this.#data.update((d) => ({ ...d, error: e as Error, waiting: false }));
       throw e;
     }
   }

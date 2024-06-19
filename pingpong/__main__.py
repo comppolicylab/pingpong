@@ -11,6 +11,7 @@ import alembic.config
 from .ai import get_openai_client
 from .auth import encode_auth_token
 from .authz.migrate import sync_db_to_openfga
+from .ci_calls import migrate_thread_ci_calls
 from .config import config
 from .migrate import migrate_object, get_by_class_id_and_version
 from .models import Base, User, Class, Assistant, Thread
@@ -230,6 +231,27 @@ def migrate_version_2() -> None:
             print("Done!")
 
     asyncio.run(_migrate_version_2())
+
+
+@db.command("migrate-ci-calls")
+def migrate_ci_calls() -> None:
+    async def _migrate_ci_calls() -> None:
+        print("Migrating code interpreter calls ...")
+        await config.authz.driver.init()
+        async with config.db.driver.async_session() as session:
+            async for _class in Class.get_all_with_api_key(session):
+                # Create a new client for each API key
+                openai_client = get_openai_client(_class.api_key)
+
+                # Get all threads for the class
+                async for thread in Thread.get_by_class_id(session, _class.id, limit=None):
+                    await migrate_thread_ci_calls(
+                        openai_client, session, thread.thread_id, thread.id
+                    )
+
+        print("Done!")
+
+    asyncio.run(_migrate_ci_calls())
 
 
 if __name__ == "__main__":

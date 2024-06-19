@@ -851,10 +851,25 @@ class CodeInterpreterCall(Base):
     )
 
     @classmethod
-    async def create(cls, session: AsyncSession, data: dict) -> None:
-        data["thread_id"] = await Thread.get_id_by_thread_id(session, data["thread_id"])
-        code_interpreter_call = CodeInterpreterCall(**data)
-        session.add(code_interpreter_call)
+    async def create(
+        cls, session: AsyncSession, data: dict, thread_obj_id: int | None = None
+    ) -> None:
+        data["thread_id"] = (
+            thread_obj_id
+            if thread_obj_id
+            else await Thread.get_id_by_thread_id(session, data["thread_id"])
+        )
+        print("HERE", data)
+        stmt = (
+                _get_upsert_stmt(session)(CodeInterpreterCall)
+                .values(
+                    **data,
+                )
+                .on_conflict_do_nothing(
+                    index_elements=["step_id"],
+                )
+            )
+        await session.execute(stmt)
         await session.commit()
 
     @classmethod
@@ -1044,19 +1059,21 @@ class Thread(Base):
         cls,
         session: AsyncSession,
         class_id: int,
-        limit: int = 10,
+        limit: int | None = 10,
         before: datetime | None = None,
     ) -> AsyncGenerator["Thread", None]:
         condition = Thread.class_id == int(class_id)
         if before:
             condition = and_(condition, Thread.updated < before)
         stmt = (
-            select(Thread).order_by(Thread.updated.desc()).where(condition).limit(limit)
+            select(Thread).order_by(Thread.updated.desc()).where(condition)
         )
+        if limit:
+            stmt = stmt.limit(limit)
         result = await session.execute(stmt)
         for row in result:
             yield row.Thread
-
+    
     @classmethod
     async def add_code_interpeter_files(
         cls, session: AsyncSession, thread_id: int, file_ids: list[str]
