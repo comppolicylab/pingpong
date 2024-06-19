@@ -267,7 +267,7 @@
         <div class="flex gap-2 px-4 py-2 items-center w-full text-sm flex-wrap lg:flex-nowrap">
           <EyeSlashOutline size="sm" class="text-orange" />
           <Span class="text-gray-400 text-xs"
-            >This thread will be visible to yourself and the teaching team.</Span
+            >This thread will be visible the teaching team and yourself.</Span
           >
         </div>
         <input type="hidden" name="assistant_id" bind:value={assistant.id} />
