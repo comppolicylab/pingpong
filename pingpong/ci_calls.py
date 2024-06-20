@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .models import CodeInterpreterCall, Thread
 from typing import AsyncGenerator
 
+
 async def get_threads_by_class_id(
     session: AsyncSession,
     class_id: int,
@@ -18,6 +19,7 @@ async def get_threads_by_class_id(
     result = await session.execute(stmt)
     for row in result:
         yield row.Thread
+
 
 async def migrate_thread_ci_calls(
     openai_client: AsyncClient,

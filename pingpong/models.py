@@ -878,13 +878,21 @@ class CodeInterpreterCall(Base):
         before: int | None = None,
         desc: bool = True,
     ) -> AsyncGenerator["CodeInterpreterCall", None]:
-        conditions = [CodeInterpreterCall.thread_id == thread_id, CodeInterpreterCall.created_at >= after]
+        conditions = [
+            CodeInterpreterCall.thread_id == thread_id,
+            CodeInterpreterCall.created_at >= after,
+        ]
         if before:
             conditions.append(CodeInterpreterCall.created_at <= before)
-        stmt = select(CodeInterpreterCall).where(and_(*conditions)).order_by(CodeInterpreterCall.created_at.desc()
+        stmt = (
+            select(CodeInterpreterCall)
+            .where(and_(*conditions))
+            .order_by(
+                CodeInterpreterCall.created_at.desc()
                 if desc
                 else CodeInterpreterCall.created_at.asc()
             )
+        )
         result = await session.execute(stmt)
         for row in result:
             yield row.CodeInterpreterCall

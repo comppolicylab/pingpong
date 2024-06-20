@@ -6,7 +6,6 @@ from typing import Dict
 
 import openai
 import orjson
-from sqlalchemy.ext.asyncio import AsyncSession
 from openai.types.beta.assistant_stream_event import ThreadRunStepCompleted
 from openai.types.beta.threads import ImageFile
 from openai.types.beta.threads.runs import ToolCallsStepDetails, CodeInterpreterToolCall
@@ -83,7 +82,7 @@ async def get_ci_messages_from_step(
     )
     if not isinstance(run_step.step_details, ToolCallsStepDetails):
         return []
-    messages : list[CodeInterpreterMessage] = []
+    messages: list[CodeInterpreterMessage] = []
     for tool_call in run_step.step_details.tool_calls:
         if tool_call.type == "code_interpreter":
             new_message = CodeInterpreterMessage.model_validate(
