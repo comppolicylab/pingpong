@@ -6,6 +6,7 @@
   import type { FileUploadInfo, ServerFile, CreateClassUsersRequest } from '$lib/api';
   import {
     Button,
+    ButtonGroup,
     Checkbox,
     Helper,
     Modal,
@@ -13,14 +14,20 @@
     Heading,
     Label,
     Input,
-    Select
+    Select,
+    InputAddon
   } from 'flowbite-svelte';
   import BulkAddUsers from '$lib/components/BulkAddUsers.svelte';
   import ViewUsers from '$lib/components/ViewUsers.svelte';
   import FileUpload from '$lib/components/FileUpload.svelte';
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import Info from '$lib/components/Info.svelte';
-  import { PenOutline, CloudArrowUpOutline } from 'flowbite-svelte-icons';
+  import {
+    PenOutline,
+    CloudArrowUpOutline,
+    EyeOutline,
+    EyeSlashOutline
+  } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
   import { invalidateAll, onNavigate } from '$app/navigation';
@@ -219,6 +226,12 @@
     const formData = new FormData(form);
     const d = Object.fromEntries(formData.entries());
 
+    if (!d.apiKey) {
+      $updatingApiKey = false;
+      sadToast('API key cannot be empty');
+      return;
+    }
+
     const _apiKey = (d.apiKey as string | undefined) || '';
     const result = await api.updateApiKey(fetch, data.class.id, _apiKey);
 
@@ -335,49 +348,68 @@
 
         <div class="col-span-2">
           <Label for="apiKey">API Key</Label>
-          <div class="w-full relative" class:cursor-pointer={$blurred}>
-            <Input
-              autocomplete="off"
-              class={$blurred ? 'cursor-pointer' : undefined}
-              label="API Key"
-              id="apiKey"
-              name="apiKey"
-              value={apiKey}
-              on:blur={() => ($blurred = true)}
-              on:focus={() => ($blurred = false)}
-            />
-            {#if $blurred}
-              <div
-                class="cursor-pointer flex items-center gap-2 w-full h-full absolute top-0 left-0 bg-white font-mono pointer-events-none"
-              >
-                {#if hasApiKey}
-                  <span>{apiKeyBlur}</span>
-                {:else}
-                  <span class="text-gray-400">No API key set</span>
-                {/if}
-                <PenOutline size="sm" />
-              </div>
+          <div class="w-full relative pt-2 pb-2" class:cursor-pointer={$blurred}>
+            {#if !hasApiKey}
+              <ButtonGroup class="w-full">
+                <InputAddon>
+                  <PenOutline class="w-6 h-6" />
+                </InputAddon>
+                <Input
+                  id="apiKey"
+                  name="apiKey"
+                  label="API Key"
+                  autocomplete="off"
+                  value={apiKey}
+                  placeholder="Your API key here"
+                />
+              </ButtonGroup>
+            {:else}
+              <ButtonGroup class="w-full">
+                <InputAddon>
+                  <button type="button" on:click={() => ($blurred = !$blurred)}>
+                    {#if !$blurred}
+                      <EyeOutline class="w-6 h-6" />
+                    {:else}
+                      <EyeSlashOutline class="w-6 h-6" />
+                    {/if}
+                  </button>
+                </InputAddon>
+                <Input
+                  id="apiKey"
+                  name="apiKey"
+                  label="API Key"
+                  autocomplete="off"
+                  class={$blurred ? 'cursor-pointer' : undefined}
+                  value={$blurred ? apiKeyBlur : apiKey}
+                  on:focus={() => ($blurred = false)}
+                  on:blur={() => ($blurred = true)}
+                  readonly
+                  placeholder="Your API key here"
+                />
+              </ButtonGroup>
             {/if}
           </div>
 
-          {#if apiKey && !$blurred}
+          {#if hasApiKey}
             <Helper
-              >Note: changing the API key will break all threads and assistants in the class, so it
+              >Note: Changing the API key will break all threads and assistants in the class, so it
               is not currently supported.</Helper
             >
           {/if}
         </div>
 
-        <div></div>
-        <div></div>
-        <div>
-          <Button
-            pill
-            type="submit"
-            disabled={$updatingApiKey}
-            class="bg-orange text-white hover:bg-orange-dark">Save</Button
-          >
-        </div>
+        {#if !hasApiKey}
+          <div></div>
+          <div></div>
+          <div>
+            <Button
+              pill
+              type="submit"
+              disabled={$updatingApiKey}
+              class="bg-orange text-white hover:bg-orange-dark">Save</Button
+            >
+          </div>
+        {/if}
       </div>
     </form>
   {/if}
