@@ -242,14 +242,6 @@ class Institution(Base):
         return await session.scalar(stmt)
 
 
-file_assistant_association = Table(
-    "files_assistants",
-    Base.metadata,
-    Column("file_id", Integer, ForeignKey("files.id")),
-    Column("assistant_id", Integer, ForeignKey("assistants.id")),
-    Index("file_assistant_idx", "file_id", "assistant_id", unique=True),
-)
-
 code_interpreter_file_assistant_association = Table(
     "code_interpreter_files_assistants",
     Base.metadata,
@@ -288,11 +280,6 @@ class File(Base):
     uploader_id = Column(Integer, ForeignKey("users.id"), nullable=True, default=None)
     private = Column(Boolean, default=False)
     class_ = relationship("Class", back_populates="files")
-    assistants = relationship(
-        "Assistant",
-        secondary=file_assistant_association,
-        back_populates="files",
-    )
     assistants_v2 = relationship(
         "Assistant",
         secondary=code_interpreter_file_assistant_association,
@@ -426,18 +413,6 @@ class VectorStore(Base):
         return await session.scalar(stmt)
 
     @classmethod
-    async def get_by_id(cls, session: AsyncSession, id_: int) -> "VectorStore":
-        stmt = select(VectorStore).where(VectorStore.id == int(id_))
-        return await session.scalar(stmt)
-
-    @classmethod
-    async def get_by_vector_store_id(
-        cls, session: AsyncSession, id_: str
-    ) -> "VectorStore":
-        stmt = select(VectorStore).where(VectorStore.vector_store_id == id_)
-        return await session.scalar(stmt)
-
-    @classmethod
     async def delete(cls, session: AsyncSession, id_: int) -> None:
         stmt = delete(VectorStore).where(VectorStore.id == int(id_))
         await session.execute(stmt)
@@ -460,15 +435,6 @@ class VectorStore(Base):
             return
         for file in vector_store.files:
             yield file.file_id, file.id
-
-    @classmethod
-    async def get_object_id_by_vector_store_id(
-        cls, session: AsyncSession, vector_store_id: str
-    ) -> int:
-        stmt = select(VectorStore.id).where(
-            VectorStore.vector_store_id == vector_store_id
-        )
-        return await session.scalar(stmt)
 
     @classmethod
     async def add_files(
@@ -574,12 +540,6 @@ class Assistant(Base):
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="assistants", foreign_keys=[class_id])
     threads = relationship("Thread", back_populates="assistant")
-    files = relationship(
-        "File",
-        secondary=file_assistant_association,
-        back_populates="assistants",
-        lazy="selectin",
-    )
     code_interpreter_files = relationship(
         "File",
         secondary=code_interpreter_file_assistant_association,
@@ -613,19 +573,6 @@ class Assistant(Base):
         stmt = select(Assistant).where(Assistant.class_id == int(class_id))
         result = await session.execute(stmt)
         return [row.Assistant for row in result]
-
-    @classmethod
-    async def get_by_class_id_and_version(
-        cls, session: AsyncSession, class_id: int, version: int
-    ) -> AsyncGenerator["Assistant", None]:
-        stmt = (
-            select(Assistant)
-            .where(Assistant.class_id == int(class_id))
-            .where(Assistant.version == version)
-        )
-        result = await session.execute(stmt)
-        for row in result:
-            yield row.Assistant
 
     @classmethod
     async def get_all_by_id(
@@ -819,15 +766,6 @@ class Class(Base):
         )
         result = await session.execute(stmt)
         return [row.Class for row in result]
-
-    @classmethod
-    async def get_all_with_api_key(
-        cls, session: AsyncSession
-    ) -> AsyncGenerator["Class", None]:
-        stmt = select(Class).where(Class.api_key.is_not(None))
-        result = await session.execute(stmt)
-        for row in result:
-            yield row.Class
 
 
 class CodeInterpreterCall(Base):
@@ -1056,9 +994,7 @@ class Thread(Base):
         condition = Thread.class_id == int(class_id)
         if before:
             condition = and_(condition, Thread.updated < before)
-        stmt = select(Thread).order_by(Thread.updated.desc()).where(condition)
-        if limit:
-            stmt = stmt.limit(limit)
+        stmt = select(Thread).order_by(Thread.updated.desc()).where(condition).limit(limit)
         result = await session.execute(stmt)
         for row in result:
             yield row.Thread
@@ -1091,16 +1027,3 @@ class Thread(Base):
         for file in thread.code_interpreter_files:
             yield file.file_id
 
-    @classmethod
-    async def get_by_class_id_and_version(
-        cls, session: AsyncSession, class_id: int, version: int
-    ) -> AsyncGenerator["Thread", None]:
-        stmt = (
-            select(Thread)
-            .options(joinedload(Thread.assistant))
-            .where(Thread.class_id == int(class_id))
-            .where(Thread.version == version)
-        )
-        result = await session.execute(stmt)
-        for row in result:
-            yield row.Thread
