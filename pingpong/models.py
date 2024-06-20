@@ -876,7 +876,6 @@ class CodeInterpreterCall(Base):
         thread_id: int,
         after: int,
         before: int | None = None,
-        desc: bool = True,
     ) -> AsyncGenerator["CodeInterpreterCall", None]:
         conditions = [
             CodeInterpreterCall.thread_id == thread_id,
@@ -887,11 +886,6 @@ class CodeInterpreterCall(Base):
         stmt = (
             select(CodeInterpreterCall)
             .where(and_(*conditions))
-            .order_by(
-                CodeInterpreterCall.created_at.desc()
-                if desc
-                else CodeInterpreterCall.created_at.asc()
-            )
         )
         result = await session.execute(stmt)
         for row in result:
