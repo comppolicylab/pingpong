@@ -883,10 +883,7 @@ class CodeInterpreterCall(Base):
         ]
         if before:
             conditions.append(CodeInterpreterCall.created_at <= before)
-        stmt = (
-            select(CodeInterpreterCall)
-            .where(and_(*conditions))
-        )
+        stmt = select(CodeInterpreterCall).where(and_(*conditions))
         result = await session.execute(stmt)
         for row in result:
             yield row.CodeInterpreterCall
