@@ -994,7 +994,9 @@ class Thread(Base):
         condition = Thread.class_id == int(class_id)
         if before:
             condition = and_(condition, Thread.updated < before)
-        stmt = select(Thread).order_by(Thread.updated.desc()).where(condition).limit(limit)
+        stmt = (
+            select(Thread).order_by(Thread.updated.desc()).where(condition).limit(limit)
+        )
         result = await session.execute(stmt)
         for row in result:
             yield row.Thread
@@ -1026,4 +1028,3 @@ class Thread(Base):
             return
         for file in thread.code_interpreter_files:
             yield file.file_id
-
