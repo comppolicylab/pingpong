@@ -829,51 +829,61 @@ async def list_class_models(
         "gpt-4o": {
             "sort_order": 0,
             "is_latest": True,
+            "supports_vision": True,
             "description": "The latest GPT-4o model, OpenAI's most advanced model.",
         },
         "gpt-4-turbo": {
             "sort_order": 1,
             "is_latest": True,
+            "supports_vision": True,
             "description": "The latest GPT-4 Turbo model.",
         },
         "gpt-4-turbo-preview": {
             "sort_order": 2,
             "is_latest": True,
+            "supports_vision": False,
             "description": "The latest GPT-4 Turbo preview model.",
         },
         "gpt-3.5-turbo": {
             "sort_order": 3,
             "is_latest": True,
+            "supports_vision": False,
             "description": "The latest GPT-3.5 Turbo model.",
         },
         "gpt-4o-2024-05-13": {
             "sort_order": 4,
             "is_latest": False,
+            "supports_vision": True,
             "description": "GPT-4o initial release version, 2x faster than GPT-4 Turbo.",
         },
         "gpt-4-turbo-2024-04-09": {
             "sort_order": 5,
             "is_latest": False,
+            "supports_vision": True,
             "description": "GPT-4 Turbo with Vision model.",
         },
         "gpt-4-0125-preview": {
             "sort_order": 6,
             "is_latest": False,
+            "supports_vision": False,
             "description": 'GPT-4 Turbo preview model with a fix for "laziness," where the model doesn\'t complete a task.',
         },
         "gpt-4-1106-preview": {
             "sort_order": 7,
             "is_latest": False,
+            "supports_vision": False,
             "description": "GPT-4 Turbo preview model with improved instruction following, reproducible outputs, and more.",
         },
         "gpt-3.5-turbo-0125": {
             "sort_order": 8,
             "is_latest": False,
+            "supports_vision": False,
             "description": "GPT-3.5 Turbo model with higher accuracy at responding in requested formats.",
         },
         "gpt-3.5-turbo-1106": {
             "sort_order": 9,
             "is_latest": False,
+            "supports_vision": False,
             "description": "GPT-3.5 Turbo model with improved instruction following, reproducible outputs, and more.",
         },
     }
@@ -886,6 +896,7 @@ async def list_class_models(
             "owner": m.owned_by,
             "description": known_models[m.id]["description"],
             "is_latest": known_models[m.id]["is_latest"],
+            "supports_vision": known_models[m.id]["supports_vision"],
         }
         for m in all_models.data
         if m.id in known_models.keys()

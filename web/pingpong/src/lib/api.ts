@@ -611,6 +611,7 @@ export type AssistantModel = {
   owner: string;
   description: string;
   is_latest: boolean;
+  supports_vision: boolean;
 };
 
 /**

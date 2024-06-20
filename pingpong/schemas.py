@@ -435,6 +435,7 @@ class AssistantModel(BaseModel):
     owner: str
     description: str
     is_latest: bool
+    supports_vision: bool
 
 
 class AssistantModelDict(TypedDict):
