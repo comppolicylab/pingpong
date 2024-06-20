@@ -71,7 +71,7 @@ async def process_run_steps(
         if run_step.type != "tool_calls":
             continue
         for tool_call in run_step.step_details.tool_calls:
-            if type(tool_call) == dict:
+            if isinstance(tool_call, dict):
                 print("Tool call keys", tool_call.keys())
                 print("Tool call type", tool_call.get("type"))
             if tool_call.type != "code_interpreter":
