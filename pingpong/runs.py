@@ -11,7 +11,6 @@ async def get_placeholder_ci_calls(
     thread_obj_id: int,
     after: int,
     before: int | None = None,
-    desc: bool = True,
 ) -> list[CodeInterpreterMessage]:
     """
     Get placeholder code interpreter calls for a thread.
@@ -30,7 +29,7 @@ async def get_placeholder_ci_calls(
     """
     placeholder_code_interpreter_calls = []
     async for tool_call in models.CodeInterpreterCall.get_calls(
-        session=session, thread_id=thread_obj_id, after=after, before=before, desc=desc
+        session=session, thread_id=thread_obj_id, after=after, before=before
     ):
         new_message = CodeInterpreterMessage.model_validate(
             {
