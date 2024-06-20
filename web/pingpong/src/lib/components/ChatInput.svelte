@@ -299,7 +299,7 @@
       bind:this={ref}
       style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
     />
-    {#if upload}
+    {#if upload && fileSearchAcceptedFiles}
       <FileUpload
         {maxSize}
         accept={fileSearchAcceptedFiles || ''}
@@ -315,7 +315,7 @@
         <Popover arrow={false}>File Search is disabled</Popover>
       {/if}
     {/if}
-    {#if upload}
+    {#if upload && codeInterpreterAcceptedFiles}
       <FileUpload
         {maxSize}
         accept={codeInterpreterAcceptedFiles || ''}
