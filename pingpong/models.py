@@ -841,11 +841,10 @@ class CodeInterpreterCall(Base):
     thread = relationship(
         "Thread", back_populates="code_interpreter_calls", uselist=False
     )
-    created_at = Column(Integer)
+    created_at = Column(Integer, index=True)
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(
         DateTime(timezone=True),
-        index=True,
         server_default=func.now(),
         onupdate=func.now(),
     )
@@ -859,7 +858,6 @@ class CodeInterpreterCall(Base):
             if thread_obj_id
             else await Thread.get_id_by_thread_id(session, data["thread_id"])
         )
-        print("HERE", data)
         stmt = (
             _get_upsert_stmt(session)(CodeInterpreterCall)
             .values(
@@ -870,7 +868,6 @@ class CodeInterpreterCall(Base):
             )
         )
         await session.execute(stmt)
-        await session.commit()
 
     @classmethod
     async def get_calls(
@@ -881,18 +878,13 @@ class CodeInterpreterCall(Base):
         before: int | None = None,
         desc: bool = True,
     ) -> AsyncGenerator["CodeInterpreterCall", None]:
-        stmt = (
-            select(CodeInterpreterCall)
-            .where(CodeInterpreterCall.thread_id == thread_id)
-            .where(CodeInterpreterCall.created_at >= after)
-            .order_by(
-                CodeInterpreterCall.created_at.desc()
+        conditions = [CodeInterpreterCall.thread_id == thread_id, CodeInterpreterCall.created_at >= after]
+        if before:
+            conditions.append(CodeInterpreterCall.created_at <= before)
+        stmt = select(CodeInterpreterCall).where(and_(*conditions)).order_by(CodeInterpreterCall.created_at.desc()
                 if desc
                 else CodeInterpreterCall.created_at.asc()
             )
-        )
-        if before:
-            stmt = stmt.where(CodeInterpreterCall.created_at <= before)
         result = await session.execute(stmt)
         for row in result:
             yield row.CodeInterpreterCall
@@ -1059,7 +1051,7 @@ class Thread(Base):
         cls,
         session: AsyncSession,
         class_id: int,
-        limit: int | None = 10,
+        limit: int = 10,
         before: datetime | None = None,
     ) -> AsyncGenerator["Thread", None]:
         condition = Thread.class_id == int(class_id)

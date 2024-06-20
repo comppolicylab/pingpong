@@ -3,10 +3,21 @@ from openai.pagination import AsyncCursorPage
 from openai.types.beta.assistant_tool import CodeInterpreterTool
 from openai.types.beta.threads import Run
 from openai.types.beta.threads.runs import RunStep
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import CodeInterpreterCall
+from .models import CodeInterpreterCall, Thread
+from typing import AsyncGenerator
 
+async def get_threads_by_class_id(
+    session: AsyncSession,
+    class_id: int,
+) -> AsyncGenerator["Thread", None]:
+    condition = Thread.class_id == int(class_id)
+    stmt = select(Thread).where(condition)
+    result = await session.execute(stmt)
+    for row in result:
+        yield row.Thread
 
 async def migrate_thread_ci_calls(
     openai_client: AsyncClient,
@@ -68,3 +79,4 @@ async def process_run_steps(
                 "created_at": run_step.created_at,
             }
             await CodeInterpreterCall.create(session, data, thread_obj_id)
+            await session.commit()

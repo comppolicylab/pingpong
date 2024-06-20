@@ -1276,7 +1276,6 @@ async def create_run(
         thread_id=thread.thread_id,
         assistant_id=asst.assistant_id,
         message=None,
-        session=request.state.db,
     )
 
     return StreamingResponse(stream, media_type="text/event-stream")
@@ -1362,7 +1361,6 @@ async def send_message(
         assistant_id=asst.assistant_id,
         message=data.message,
         metadata={"user_id": str(request.state.session.user.id)},
-        session=request.state.db,
     )
     return StreamingResponse(stream, media_type="text/event-stream")
 

@@ -13,6 +13,7 @@ from openai.types.beta.threads.runs import ToolCallsStepDetails, CodeInterpreter
 from pingpong.schemas import CodeInterpreterMessage
 
 import pingpong.models as models
+from .config import config
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ async def get_ci_messages_from_step(
     )
     if not isinstance(run_step.step_details, ToolCallsStepDetails):
         return []
-    messages = []
+    messages : list[CodeInterpreterMessage] = []
     for tool_call in run_step.step_details.tool_calls:
         if tool_call.type == "code_interpreter":
             new_message = CodeInterpreterMessage.model_validate(
@@ -200,7 +201,6 @@ async def run_thread(
     assistant_id: int,
     message: str | None,
     metadata: Dict[str, str | int] | None = None,
-    session: AsyncSession,
 ):
     try:
         if message is not None:
@@ -233,7 +233,11 @@ async def run_thread(
                         "thread_id": step.data.thread_id,
                         "created_at": step.data.created_at,
                     }
-                    await models.CodeInterpreterCall.create(session, data)
+                    # Create a new DB session to commit the new CI call
+                    await config.authz.driver.init()
+                    async with config.db.driver.async_session() as session:
+                        await models.CodeInterpreterCall.create(session, data)
+                        await session.commit()
                 yield handler.flush()
 
     except Exception as e:

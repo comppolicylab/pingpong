@@ -11,7 +11,7 @@ import alembic.config
 from .ai import get_openai_client
 from .auth import encode_auth_token
 from .authz.migrate import sync_db_to_openfga
-from .ci_calls import migrate_thread_ci_calls
+from .ci_calls import migrate_thread_ci_calls, get_threads_by_class_id
 from .config import config
 from .migrate import migrate_object, get_by_class_id_and_version
 from .models import Base, User, Class, Assistant, Thread
@@ -244,8 +244,8 @@ def migrate_ci_calls() -> None:
                 openai_client = get_openai_client(_class.api_key)
 
                 # Get all threads for the class
-                async for thread in Thread.get_by_class_id(
-                    session, _class.id, limit=None
+                async for thread in get_threads_by_class_id(
+                    session, _class.id,
                 ):
                     await migrate_thread_ci_calls(
                         openai_client, session, thread.thread_id, thread.id
