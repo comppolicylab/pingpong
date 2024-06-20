@@ -31,6 +31,7 @@ from .ai import (
     get_openai_client,
     run_thread,
     validate_api_key,
+    get_ci_messages_from_step,
 )
 from .auth import (
     decode_auth_token,
@@ -45,6 +46,7 @@ from .files import FILE_TYPES, handle_create_file, handle_delete_file
 from .invite import send_invite
 from .now import NowFn, utcnow
 from .permission import Authz, LoggedIn
+from .runs import get_placeholder_ci_calls
 from .vector_stores import (
     create_vector_store,
     append_vector_store_files,
@@ -912,18 +914,55 @@ async def get_thread(
         models.Assistant.get_all_by_id(request.state.db, [thread.assistant_id]),
         openai_client.beta.threads.runs.list(thread.thread_id, limit=1, order="desc"),
     )
+    last_run = [r async for r in runs_result]
+    placeholder_ci_calls = []
 
-    runs = [r async for r in runs_result]
+    if "code_interpreter" in thread.tools_available:
+        placeholder_ci_calls = await get_placeholder_ci_calls(
+            request.state.db,
+            messages.data[0].assistant_id if messages.data[0].assistant_id else "None",
+            thread.thread_id,
+            thread.id,
+            messages.data[-1].created_at,
+        )
 
     return {
         "thread": thread,
-        "run": runs[0] if runs else None,
+        "run": last_run[0] if last_run else None,
         "messages": list(messages.data),
         "limit": 20,
         "participants": {
             "user": {u.id: schemas.Profile.from_user(u) for u in thread.users},
             "assistant": {a.id: a.name for a in assistants},
         },
+        "ci_messages": placeholder_ci_calls,
+    }
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/ci_messages",
+    dependencies=[
+        Depends(
+            Authz("can_view", "thread:{thread_id}"),
+        )
+    ],
+    response_model=schemas.CodeInterpreterMessages,
+)
+async def get_ci_messages(
+    class_id: str,
+    thread_id: str,
+    request: Request,
+    openai_client: OpenAIClient,
+    openai_thread_id: str,
+    run_id: str,
+    step_id: str,
+):
+    messages = await get_ci_messages_from_step(
+        openai_client, openai_thread_id, run_id, step_id
+    )
+
+    return {
+        "ci_messages": messages,
     }
 
 
@@ -956,9 +995,21 @@ async def list_thread_messages(
     messages = await openai_client.beta.threads.messages.list(
         thread.thread_id, limit=limit, order="asc", before=before
     )
+    placeholder_ci_calls = []
+    # Only run the extra steps if code_interpreter is available
+    if "code_interpreter" in thread.tools_available and messages.data:
+        placeholder_ci_calls = await get_placeholder_ci_calls(
+            request.state.db,
+            messages.data[0].assistant_id if messages.data[0].assistant_id else "None",
+            thread.thread_id,
+            thread.id,
+            messages.data[0].created_at,
+            messages.data[-1].created_at,
+        )
 
     return {
         "messages": list(messages.data),
+        "ci_messages": placeholder_ci_calls,
         "limit": limit,
     }
 

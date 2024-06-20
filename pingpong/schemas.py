@@ -489,6 +489,50 @@ class OpenAIRun(BaseModel):
     # usage // not shown
 
 
+class ImageFile(BaseModel):
+    file_id: str
+
+
+class MessageContentCodeOutputImageFile(BaseModel):
+    image_file: ImageFile
+    type: Literal["code_output_image_file"]
+
+
+class MessageContentCode(BaseModel):
+    code: str
+    type: Literal["code"]
+
+
+CodeInterpreterMessageContent = Union[
+    MessageContentCodeOutputImageFile, MessageContentCode
+]
+
+
+class CodeInterpreterPlaceholderContent(BaseModel):
+    run_id: str
+    step_id: str
+    thread_id: str
+    type: Literal["code_interpreter_call_placeholder"]
+
+
+class CodeInterpreterMessage(BaseModel):
+    id: str
+    assistant_id: str
+    created_at: int
+    content: (
+        list[CodeInterpreterMessageContent] | list[CodeInterpreterPlaceholderContent]
+    )
+    metadata: dict[str, str]
+    object: Literal["thread.message"] | Literal["code_interpreter_call_placeholder"]
+    role: Literal["assistant"]
+    run_id: str
+    thread_id: str
+
+
+class CodeInterpreterMessages(BaseModel):
+    ci_messages: list[CodeInterpreterMessage]
+
+
 class ThreadRun(BaseModel):
     thread: Thread
     run: OpenAIRun | None
@@ -505,6 +549,7 @@ class ThreadParticipants(BaseModel):
 class ThreadMessages(BaseModel):
     limit: int
     messages: list[OpenAIMessage]
+    ci_messages: list[CodeInterpreterMessage] | None
 
 
 class ThreadWithMeta(BaseModel):
@@ -513,6 +558,7 @@ class ThreadWithMeta(BaseModel):
     messages: list[OpenAIMessage]
     limit: int
     participants: ThreadParticipants
+    ci_messages: list[CodeInterpreterMessage] | None
 
     class Config:
         from_attributes = True

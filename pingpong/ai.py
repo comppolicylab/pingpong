@@ -6,7 +6,13 @@ from typing import Dict
 
 import openai
 import orjson
+from openai.types.beta.assistant_stream_event import ThreadRunStepCompleted
 from openai.types.beta.threads import ImageFile
+from openai.types.beta.threads.runs import ToolCallsStepDetails, CodeInterpreterToolCall
+from pingpong.schemas import CodeInterpreterMessage
+
+import pingpong.models as models
+from .config import config
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +63,58 @@ async def validate_api_key(api_key: str) -> bool:
         return True
     except openai.AuthenticationError:
         return False
+
+
+async def get_ci_messages_from_step(
+    cli: openai.AsyncClient, thread_id: str, run_id: str, step_id: str
+) -> list[CodeInterpreterMessage]:
+    """
+    Get code interpreter messages from a thread run step.
+
+    :param cli: OpenAI client
+    :param thread_id: Thread ID
+    :param run_id: Run ID
+    :param step_id: Step ID
+    :return: List of code interpreter messages
+    """
+    run_step = await cli.beta.threads.runs.steps.retrieve(
+        thread_id=thread_id, run_id=run_id, step_id=step_id
+    )
+    if not isinstance(run_step.step_details, ToolCallsStepDetails):
+        return []
+    messages: list[CodeInterpreterMessage] = []
+    for tool_call in run_step.step_details.tool_calls:
+        if tool_call.type == "code_interpreter":
+            new_message = CodeInterpreterMessage.model_validate(
+                {
+                    "id": tool_call.id,
+                    "assistant_id": run_step.assistant_id,
+                    "created_at": run_step.created_at,
+                    "content": [
+                        {
+                            "code": tool_call.code_interpreter.input,
+                            "type": "code",
+                        }
+                    ],
+                    "file_search_file_ids": [],
+                    "code_interpreter": [],
+                    "metadata": {},
+                    "object": "thread.message",
+                    "role": "assistant",
+                    "run_id": run_step.run_id,
+                    "thread_id": run_step.thread_id,
+                }
+            )
+            for output in tool_call.code_interpreter.outputs:
+                if output.type == "image":
+                    new_message.content.append(
+                        {
+                            "image_file": {"file_id": output.image.file_id},
+                            "type": "code_output_image_file",
+                        }
+                    )
+            messages.append(new_message)
+    return messages
 
 
 class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
@@ -158,7 +216,27 @@ async def run_thread(
             assistant_id=assistant_id,
             event_handler=handler,
         ) as run:
-            async for _ in run:
+            async for step in run:
+                if (
+                    isinstance(step, ThreadRunStepCompleted)
+                    and isinstance(step.data.step_details, ToolCallsStepDetails)
+                    and any(
+                        isinstance(tool_call, CodeInterpreterToolCall)
+                        for tool_call in step.data.step_details.tool_calls
+                    )
+                ):
+                    data = {
+                        "version": 2,
+                        "run_id": step.data.run_id,
+                        "step_id": step.data.id,
+                        "thread_id": step.data.thread_id,
+                        "created_at": step.data.created_at,
+                    }
+                    # Create a new DB session to commit the new CI call
+                    await config.authz.driver.init()
+                    async with config.db.driver.async_session() as session:
+                        await models.CodeInterpreterCall.create(session, data)
+                        await session.commit()
                 yield handler.flush()
 
     except Exception as e:

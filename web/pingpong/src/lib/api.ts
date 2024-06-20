@@ -1308,11 +1308,19 @@ export type MessageContentCode = {
   type: 'code';
 };
 
+export type CodeInterpreterCallPlaceholder = {
+  run_id: string;
+  step_id: string;
+  thread_id: string;
+  type: 'code_interpreter_call_placeholder';
+};
+
 export type Content =
   | MessageContentImageFile
   | MessageContentText
   | MessageContentCode
-  | MessageContentCodeOutputImageFile;
+  | MessageContentCodeOutputImageFile
+  | CodeInterpreterCallPlaceholder;
 
 export type OpenAIMessage = {
   id: string;
@@ -1322,7 +1330,7 @@ export type OpenAIMessage = {
   file_search_file_ids: string[];
   code_interpreter_file_ids: string[];
   metadata: Record<string, unknown> | null;
-  object: 'thread.message';
+  object: 'thread.message' | 'code_interpreter_call_placeholder';
   role: 'user' | 'assistant';
   run_id: string | null;
   thread_id: string;
@@ -1345,6 +1353,7 @@ export type ThreadWithMeta = {
   limit: number;
   messages: OpenAIMessage[];
   participants: ThreadParticipants;
+  ci_messages: OpenAIMessage[];
 };
 
 /**
@@ -1353,6 +1362,49 @@ export type ThreadWithMeta = {
 export const getThread = async (f: Fetcher, classId: number, threadId: number) => {
   const url = `class/${classId}/thread/${threadId}`;
   return await GET<never, ThreadWithMeta>(f, url);
+};
+
+export type CodeInterpreterMessages = {
+  ci_messages: OpenAIMessage[];
+};
+
+export type GetCIMessagesOpts = {
+  openai_thread_id: string;
+  run_id: string;
+  step_id: string;
+};
+
+/**
+ * Get code interpreter messages based on placeholder.
+ */
+export const getCIMessages = async (
+  f: Fetcher,
+  classId: number,
+  threadId: number,
+  openai_thread_id: string,
+  run_id: string,
+  step_id: string
+) => {
+  const url = `class/${classId}/thread/${threadId}/ci_messages`;
+  const opts = {
+    openai_thread_id: openai_thread_id,
+    run_id: run_id,
+    step_id: step_id
+  };
+  const expanded = expandResponse(
+    await GET<GetCIMessagesOpts, CodeInterpreterMessages>(f, url, opts)
+  );
+  if (expanded.error) {
+    return {
+      ci_messages: [],
+      error: expanded.error
+    };
+  } else {
+    return {
+      ci_messages: expanded.data.ci_messages,
+      error: null
+    };
+  }
 };
 
 /**
@@ -1368,6 +1420,7 @@ export type GetThreadMessagesOpts = {
  */
 export type ThreadMessages = {
   messages: OpenAIMessage[];
+  ci_messages: OpenAIMessage[];
   limit: number;
 };
 
@@ -1387,6 +1440,7 @@ export const getThreadMessages = async (
       lastPage: true,
       limit: null,
       messages: [],
+      ci_messages: [],
       error: expanded.error
     };
   }
@@ -1395,6 +1449,7 @@ export const getThreadMessages = async (
   const lastPage = n < expanded.data.limit;
   return {
     messages: expanded.data.messages,
+    ci_messages: expanded.data.ci_messages,
     limit: expanded.data.limit,
     lastPage,
     error: null

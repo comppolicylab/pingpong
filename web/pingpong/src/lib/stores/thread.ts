@@ -134,6 +134,11 @@ export class ThreadManager {
         error: null,
         persisted: true
       }));
+      const ci_messages = ($data.data?.ci_messages || []).map((message) => ({
+        data: message,
+        error: null,
+        persisted: true
+      }));
       const optimisticMessages = $data.optimistic.map((message) => ({
         data: message,
         error: null,
@@ -141,6 +146,7 @@ export class ThreadManager {
       }));
       // Sort messages together by created_at timestamp
       return realMessages
+        .concat(ci_messages)
         .concat(optimisticMessages)
         .sort((a, b) => a.data.created_at - b.data.created_at);
     });
@@ -308,6 +314,7 @@ export class ThreadManager {
         ...d,
         data: {
           ...d.data,
+          ci_messages: [...response.ci_messages, ...d.data.ci_messages],
           messages: [...response.messages, ...d.data.messages].sort(
             (a, b) => a.created_at - b.created_at
           )
@@ -318,6 +325,49 @@ export class ThreadManager {
         canFetchMore: !response.lastPage
       };
     });
+  }
+
+  async fetchCodeInterpreterResult(openai_thread_id: string, run_id: string, step_id: string) {
+    this.#data.update((d) => ({ ...d, error: null, waiting: true }));
+    try {
+      const result = await api.getCIMessages(
+        this.#fetcher,
+        this.classId,
+        this.threadId,
+        openai_thread_id,
+        run_id,
+        step_id
+      );
+      if (result.error) {
+        throw result.error;
+      }
+      this.#data.update((d) => {
+        if (!d.data) {
+          return d;
+        }
+        return {
+          ...d,
+          data: {
+            ...d.data,
+            ci_messages: [...result.ci_messages, ...d.data.ci_messages]
+              .sort((a, b) => a.created_at - b.created_at)
+              .filter((message) => {
+                return !(
+                  message.object == 'code_interpreter_call_placeholder' &&
+                  message.metadata &&
+                  message.metadata.step_id &&
+                  message.metadata.step_id == step_id
+                );
+              })
+          },
+          waiting: false
+        };
+      });
+      return result;
+    } catch (e) {
+      this.#data.update((d) => ({ ...d, error: e as Error, waiting: false }));
+      throw e;
+    }
   }
 
   /**

@@ -12,7 +12,8 @@
     Avatar,
     Button,
     Dropdown,
-    DropdownItem
+    DropdownItem,
+    Card
   } from 'flowbite-svelte';
   import { DoubleBounce } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
@@ -125,6 +126,23 @@
   // Fetch an earlier page of messages
   const fetchMoreMessages = async () => {
     await threadMgr.fetchMore();
+  };
+
+  // Fetch a singular code interpreter step result
+  const fetchCodeInterpreterResult = async (content: api.Content) => {
+    if (content.type !== 'code_interpreter_call_placeholder') {
+      sadToast('Invalid code interpreter request.');
+      return;
+    }
+    try {
+      await threadMgr.fetchCodeInterpreterResult(
+        content.thread_id,
+        content.run_id,
+        content.step_id
+      );
+    } catch (e) {
+      sadToast(`Failed to load code interpreter results. Error: ${errorMessage(e)}`);
+    }
   };
 
   // Handle sending a message
@@ -250,6 +268,27 @@
                   </AccordionItem>
                 </Accordion>
               </div>
+            {:else if content.type == 'code_interpreter_call_placeholder'}
+              <Card padding="md" class="max-w-full flex-row flex items-center justify-between">
+                <div class="flex-row flex items-center space-x-2">
+                  <div><CodeSolid size="lg" /></div>
+                  <div>Code Interpreter</div>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2">
+                  <Button
+                    outline
+                    disabled={$loading || $submitting || $waiting}
+                    pill
+                    size="xs"
+                    color="alternative"
+                    on:click={() => fetchCodeInterpreterResult(content)}
+                    on:touchstart={() => fetchCodeInterpreterResult(content)}
+                  >
+                    Load Code Interpreter Results
+                  </Button>
+                </div></Card
+              >
             {:else if content.type == 'code_output_image_file'}
               <Accordion flush>
                 <AccordionItem>

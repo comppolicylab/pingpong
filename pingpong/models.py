@@ -830,6 +830,65 @@ class Class(Base):
             yield row.Class
 
 
+class CodeInterpreterCall(Base):
+    __tablename__ = "code_interpreter_calls"
+
+    id = Column(Integer, primary_key=True)
+    version = Column(Integer, default=2)
+    run_id = Column(String)
+    step_id = Column(String, unique=True)
+    thread_id = Column(Integer, ForeignKey("threads.id"))
+    thread = relationship(
+        "Thread", back_populates="code_interpreter_calls", uselist=False
+    )
+    created_at = Column(Integer, index=True)
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    @classmethod
+    async def create(
+        cls, session: AsyncSession, data: dict, thread_obj_id: int | None = None
+    ) -> None:
+        data["thread_id"] = (
+            thread_obj_id
+            if thread_obj_id
+            else await Thread.get_id_by_thread_id(session, data["thread_id"])
+        )
+        stmt = (
+            _get_upsert_stmt(session)(CodeInterpreterCall)
+            .values(
+                **data,
+            )
+            .on_conflict_do_nothing(
+                index_elements=["step_id"],
+            )
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def get_calls(
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        after: int,
+        before: int | None = None,
+    ) -> AsyncGenerator["CodeInterpreterCall", None]:
+        conditions = [
+            CodeInterpreterCall.thread_id == thread_id,
+            CodeInterpreterCall.created_at >= after,
+        ]
+        if before:
+            conditions.append(CodeInterpreterCall.created_at <= before)
+        stmt = select(CodeInterpreterCall).where(and_(*conditions))
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.CodeInterpreterCall
+
+
 class Thread(Base):
     __tablename__ = "threads"
 
@@ -853,6 +912,10 @@ class Thread(Base):
         secondary=code_interpreter_file_thread_association,
         back_populates="threads",
         lazy="selectin",
+    )
+    code_interpreter_calls = relationship(
+        "CodeInterpreterCall",
+        back_populates="thread",
     )
     tools_available = Column(String)
     vector_store_id = Column(
@@ -903,6 +966,11 @@ class Thread(Base):
     @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "Thread":
         stmt = select(Thread).where(Thread.id == int(id_))
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_id_by_thread_id(cls, session: AsyncSession, thread_id: str) -> int:
+        stmt = select(Thread.id).where(Thread.thread_id == thread_id)
         return await session.scalar(stmt)
 
     @classmethod
@@ -988,9 +1056,9 @@ class Thread(Base):
         condition = Thread.class_id == int(class_id)
         if before:
             condition = and_(condition, Thread.updated < before)
-        stmt = (
-            select(Thread).order_by(Thread.updated.desc()).where(condition).limit(limit)
-        )
+        stmt = select(Thread).order_by(Thread.updated.desc()).where(condition)
+        if limit:
+            stmt = stmt.limit(limit)
         result = await session.execute(stmt)
         for row in result:
             yield row.Thread
