@@ -46,6 +46,7 @@
   );
   $: threads = ($page.data.threads || []) as api.Thread[];
   $: currentClassId = parseInt($page.params.classId, 10);
+  $: currentAssistantId = $page.data.threadData?.thread?.assistant_id;
   $: onNewChatPage = $page.url.pathname === `/class/${currentClassId}`;
 
   // Toggle whether menu is open.
@@ -88,7 +89,13 @@
 
     <SidebarGroup class="mt-6 mb-10">
       <SidebarItem
-        href={onNewChatPage ? undefined : currentClassId ? `/class/${currentClassId}` : '/'}
+        href={onNewChatPage
+          ? undefined
+          : currentClassId
+            ? `/class/${currentClassId}${
+                currentAssistantId ? `?assistant=${currentAssistantId}` : ''
+              }`
+            : '/'}
         disabled={onNewChatPage}
         label="Start a new chat"
         class={`flex flex-row-reverse justify-between pr-4 text-white rounded-full ${
