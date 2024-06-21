@@ -7,8 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .authz import AuthzClient, Relation
 from .models import File
 from .schemas import FileTypeInfo, GenericStatus, FileUploadPurpose
+from .schemas import File as FileSchema
 
 from typing import BinaryIO
+
 
 def _file_grants(file: File) -> list[Relation]:
     target_type = "user_file" if file.private else "class_file"
@@ -51,6 +53,7 @@ async def handle_delete_file(
     await oai_client.files.delete(remote_file_id)
     return GenericStatus(status="ok")
 
+
 def encode_image(image: BinaryIO) -> str:
     image.seek(0)  # Ensure we are at the beginning of the stream
     return base64.b64encode(image.read()).decode("utf-8")
@@ -66,7 +69,7 @@ async def handle_create_file(
     uploader_id: int,
     private: bool,
     purpose: FileUploadPurpose = "assistants",
-) -> File:
+) -> FileSchema:
     """Handle file creation.
 
     Args:
@@ -108,18 +111,18 @@ async def handle_create_file(
         f = await File.create(session, data)
         await authz.write(grant=_file_grants(f))
 
-        return {
-            "id": f.id,
-            "file_id": new_f.id,
-            "name": f.name,
-            "content_type": f.content_type,
-            "private": f.private,
-            "uploader_id": f.uploader_id,
-            "class_id": f.class_id,
-            "created": f.created,
-            "updated": f.updated,
-            "encoded": encoded_image,
-        }
+        return FileSchema(
+            id=f.id,
+            name=f.name,
+            content_type=f.content_type,
+            file_id=f.file_id,
+            class_id=f.class_id,
+            private=f.private,
+            uploader_id=f.uploader_id,
+            created=f.created,
+            updated=f.updated,
+            encoded=encoded_image,
+        )
     except Exception as e:
         await oai_client.files.delete(new_f.id)
         raise e

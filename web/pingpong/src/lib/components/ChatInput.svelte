@@ -105,9 +105,9 @@
     .map((f) => (f.response as ServerFile).file_id)
     .join(',');
   $: visionFileEncodings = $visionFiles
-  .filter((f) => f.state === 'success')
-  .map((f) => (f.response as ServerFile).encoded)
-  .join(',');
+    .filter((f) => f.state === 'success')
+    .map((f) => (f.response as ServerFile).encoded)
+    .join(',');
 
   // Fix the height of the textarea to match the content.
   // The technique is to render an off-screen textarea with a scrollheight,

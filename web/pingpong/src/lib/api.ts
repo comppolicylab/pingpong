@@ -900,7 +900,7 @@ export const uploadUserFile = (
   purpose: FileUploadPurpose = 'assistants'
 ) => {
   const url = fullPath(`class/${classId}/user/${userId}/file`);
-  let data = _doUpload(url, file, opts, purpose);
+  const data = _doUpload(url, file, opts, purpose);
   return data;
 };
 
@@ -1172,7 +1172,7 @@ export type CreateThreadRequest = {
   file_search_file_ids?: string[];
   code_interpreter_file_ids?: string[];
   vision_file_ids?: string[];
-  vision_file_encodings?: string[]
+  vision_file_encodings?: string[];
 };
 
 /**

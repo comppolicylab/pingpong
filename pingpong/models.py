@@ -995,7 +995,7 @@ class Thread(Base):
                 )
             )
             await session.execute(stmt)
-            
+
         await session.refresh(thread)
         return thread
 

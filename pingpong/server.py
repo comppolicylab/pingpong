@@ -3,7 +3,7 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import Annotated, Any, Tuple
+from typing import Annotated, Any
 import jwt
 import openai
 from fastapi import (
@@ -1222,7 +1222,10 @@ async def create_thread(
     if req.vision_file_encodings:
         [
             messageContent.append(
-                {"type": "image_url", "image_url": {"url": f"data:image/jpg;base64,{encoding}"}}
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpg;base64,{encoding}"},
+                }
             )
             for encoding in req.vision_file_encodings
         ]
@@ -1370,7 +1373,10 @@ async def send_message(
         )
         [
             messageContent.append(
-                {"type": "image_url", "image_url": {"url": f"data:image/jpg;base64,{encoding}"}}
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpg;base64,{encoding}"},
+                }
             )
             for encoding in data.vision_file_encodings
         ]
@@ -1493,7 +1499,7 @@ async def create_user_file(
     upload: UploadFile,
     openai_client: OpenAIClient,
     purpose: schemas.FileUploadPurpose = Header(None, alias="X-Upload-Purpose"),
-):
+) -> schemas.File:
     if upload.size > config.upload.private_file_max_size:
         raise HTTPException(
             status_code=413,
