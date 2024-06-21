@@ -56,6 +56,13 @@
       }
     }
   }
+  let supportsVision = false;
+  $: {
+    const supportVisionModels = (data.models.filter((model) => model.supports_vision) || []).map(
+      (model) => model.id
+    );
+    supportsVision = supportVisionModels.includes(data.threadModel);
+  }
   $: submitting = threadMgr.submitting;
   $: waiting = threadMgr.waiting;
   $: loading = threadMgr.loading;
@@ -170,8 +177,12 @@
   };
 
   // Handle file upload
-  const handleUpload = (f: File, onProgress: (p: number) => void) => {
-    return api.uploadUserFile(data.class.id, data.me.user!.id, f, { onProgress });
+  const handleUpload = (
+    f: File,
+    onProgress: (p: number) => void,
+    purpose: api.FileUploadPurpose = 'assistants'
+  ) => {
+    return api.uploadUserFile(data.class.id, data.me.user!.id, f, { onProgress }, purpose);
   };
 
   // Handle file removal
@@ -350,11 +361,26 @@
         <ChatInput
           mimeType={data.uploadInfo.mimeType}
           maxSize={data.uploadInfo.private_file_max_size}
+          visionAcceptedFiles={supportsVision
+            ? data.uploadInfo.fileTypes({
+                file_search: false,
+                code_interpreter: false,
+                vision: true
+              })
+            : null}
           fileSearchAcceptedFiles={supportsFileSearch
-            ? data.uploadInfo.fileTypes({ file_search: true, code_interpreter: false })
+            ? data.uploadInfo.fileTypes({
+                file_search: true,
+                code_interpreter: false,
+                vision: false
+              })
             : null}
           codeInterpreterAcceptedFiles={supportsCodeInterpreter
-            ? data.uploadInfo.fileTypes({ file_search: false, code_interpreter: true })
+            ? data.uploadInfo.fileTypes({
+                file_search: false,
+                code_interpreter: true,
+                vision: false
+              })
             : null}
           disabled={!canSubmit || !!$navigating}
           loading={$submitting || $waiting}

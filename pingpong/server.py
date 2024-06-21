@@ -4,7 +4,7 @@ import logging
 import time
 from datetime import datetime
 from typing import Annotated, Any
-
+from starlette.middleware.base import BaseHTTPMiddleware
 import jwt
 import openai
 from fastapi import (
@@ -15,6 +15,7 @@ from fastapi import (
     Request,
     Response,
     UploadFile,
+    Header,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from jwt.exceptions import PyJWTError
@@ -918,11 +919,11 @@ async def get_thread(
     class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
-    messages, assistants, runs_result = await asyncio.gather(
+    messages, assistant, runs_result = await asyncio.gather(
         openai_client.beta.threads.messages.list(
             thread.thread_id, limit=20, order="desc"
         ),
-        models.Assistant.get_all_by_id(request.state.db, [thread.assistant_id]),
+        models.Assistant.get_by_id(request.state.db, thread.assistant_id),
         openai_client.beta.threads.runs.list(thread.thread_id, limit=1, order="desc"),
     )
     last_run = [r async for r in runs_result]
@@ -939,12 +940,14 @@ async def get_thread(
 
     return {
         "thread": thread,
+        "model": assistant.model,
+        "tools_available": thread.tools_available,
         "run": last_run[0] if last_run else None,
         "messages": list(messages.data),
         "limit": 20,
         "participants": {
             "user": {u.id: schemas.Profile.from_user(u) for u in thread.users},
-            "assistant": {a.id: a.name for a in assistants},
+            "assistant": {assistant.id: assistant.name},
         },
         "ci_messages": placeholder_ci_calls,
     }
@@ -1465,7 +1468,8 @@ async def create_user_file(
     request: Request,
     upload: UploadFile,
     openai_client: OpenAIClient,
-):
+    purpose: schemas.FileUploadPurpose = Header(None, alias="X-Upload-Purpose"),
+):  
     if upload.size > config.upload.private_file_max_size:
         raise HTTPException(
             status_code=413,
@@ -1480,6 +1484,7 @@ async def create_user_file(
         class_id=int(class_id),
         uploader_id=request.state.session.user.id,
         private=True,
+        purpose=purpose,
     )
 
 
@@ -1778,6 +1783,7 @@ async def update_assistant(
     if req.name is not None:
         asst.name = req.name
 
+    await models.Thread.update_tools_available(request.state.db, asst.id, asst.tools)
     request.state.db.add(asst)
     await request.state.db.flush()
     await request.state.db.refresh(asst)

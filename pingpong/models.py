@@ -268,6 +268,14 @@ code_interpreter_file_thread_association = Table(
     Index("code_interpreter_file_thread_idx", "file_id", "thread_id", unique=True),
 )
 
+image_file_thread_association = Table(
+    "image_files_threads",
+    Base.metadata,
+    Column("file_id", Integer, ForeignKey("files.id")),
+    Column("thread_id", Integer, ForeignKey("threads.id")),
+    Index("image_file_thread_idx", "file_id", "thread_id", unique=True),
+)
+
 file_vector_store_association = Table(
     "file_vector_stores",
     Base.metadata,
@@ -305,6 +313,11 @@ class File(Base):
         "Thread",
         secondary=code_interpreter_file_thread_association,
         back_populates="code_interpreter_files",
+    )
+    threads_images = relationship(
+        "Thread",
+        secondary=image_file_thread_association,
+        back_populates="image_files",
     )
 
     created = Column(DateTime(timezone=True), server_default=func.now())
@@ -898,7 +911,7 @@ class Thread(Base):
     thread_id = Column(String, unique=True)
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="threads", lazy="selectin")
-    assistant_id = Column(Integer, ForeignKey("assistants.id"))
+    assistant_id = Column(Integer, ForeignKey("assistants.id"), index=True)
     assistant = relationship("Assistant", back_populates="threads", uselist=False)
     private = Column(Boolean)
     users = relationship(
@@ -906,6 +919,12 @@ class Thread(Base):
         secondary=user_thread_association,
         back_populates="threads",
         lazy="subquery",
+    )
+    image_files = relationship(
+        "File",
+        secondary=image_file_thread_association,
+        back_populates="threads_images",
+        lazy="selectin",
     )
     code_interpreter_files = relationship(
         "File",
@@ -1104,3 +1123,14 @@ class Thread(Base):
         result = await session.execute(stmt)
         for row in result:
             yield row.Thread
+
+    @classmethod
+    async def update_tools_available(
+        cls, session: AsyncSession, assistant_id: int, tools: str
+    ) -> None:
+        stmt = (
+            update(Thread)
+            .where(Thread.assistant_id == int(assistant_id))
+            .values(tools=tools)
+        )
+        await session.execute(stmt)

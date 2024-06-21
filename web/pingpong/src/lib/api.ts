@@ -878,6 +878,8 @@ export interface UploadOptions {
   onProgress?: (percent: number) => void;
 }
 
+export type FileUploadPurpose = 'assistants' | 'vision';
+
 /**
  * Upload a file to a class.
  */
@@ -893,10 +895,11 @@ export const uploadUserFile = (
   classId: number,
   userId: number,
   file: File,
-  opts?: UploadOptions
+  opts?: UploadOptions,
+  purpose: FileUploadPurpose = 'assistants'
 ) => {
   const url = fullPath(`class/${classId}/user/${userId}/file`);
-  return _doUpload(url, file, opts);
+  return _doUpload(url, file, opts, purpose);
 };
 
 /**
@@ -927,7 +930,11 @@ export interface FileUploadInfo {
  *
  * Does not need to be used, but helpful for the UI.
  */
-export type FileUploader = (file: File, progress: (p: number) => void) => FileUploadInfo;
+export type FileUploader = (
+  file: File,
+  progress: (p: number) => void,
+  purpose: FileUploadPurpose
+) => FileUploadInfo;
 
 /**
  * Wrapper function to call the file deleter more easily.
@@ -939,7 +946,12 @@ export type FileRemover = (fileId: number) => Promise<void>;
 /**
  * Upload a file to the given endpoint.
  */
-const _doUpload = (url: string, file: File, opts?: UploadOptions): FileUploadInfo => {
+const _doUpload = (
+  url: string,
+  file: File,
+  opts?: UploadOptions,
+  purpose: FileUploadPurpose = 'assistants'
+): FileUploadInfo => {
   if (!browser) {
     throw new Error('File uploads are not supported in this environment.');
   }
@@ -969,6 +981,7 @@ const _doUpload = (url: string, file: File, opts?: UploadOptions): FileUploadInf
   const promise = new Promise<FileUploadResult>((resolve, reject) => {
     xhr.open('POST', url, true);
     xhr.setRequestHeader('Accept', 'application/json');
+    xhr.setRequestHeader('X-Upload-Purpose', purpose);
     xhr.upload.onprogress = onProgress;
     xhr.onreadystatechange = () => {
       if (xhr.readyState === 4) {
@@ -1350,6 +1363,8 @@ export type ThreadParticipants = {
  */
 export type ThreadWithMeta = {
   thread: Thread;
+  model: string;
+  tools_available: string;
   run: OpenAIRun | null;
   limit: number;
   messages: OpenAIMessage[];
@@ -1715,6 +1730,7 @@ export type FileTypeInfo = {
   mime_type: string;
   file_search: boolean;
   code_interpreter: boolean;
+  vision: boolean;
   extensions: string[];
 };
 
@@ -1736,6 +1752,7 @@ export type UploadInfo = {
 type FileContentTypeAcceptFilters = {
   file_search: boolean;
   code_interpreter: boolean;
+  vision: boolean;
 };
 
 /**
@@ -1750,7 +1767,9 @@ const _getAcceptString = (
       // If file_search is enabled, we can return everything that supports file_search.
       // If code_interpreter is enabled, we can also return everything that supports code_interpreter.
       return (
-        (filters.file_search && ft.file_search) || (filters.code_interpreter && ft.code_interpreter)
+        (filters.file_search && ft.file_search) ||
+        (filters.code_interpreter && ft.code_interpreter) ||
+        (filters.vision && ft.vision)
       );
     })
     .map((ft) => ft.mime_type)
@@ -1838,7 +1857,8 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
         }
         return (
           (!!filters.file_search && support.file_search) ||
-          (!!filters.code_interpreter && support.code_interpreter)
+          (!!filters.code_interpreter && support.code_interpreter) ||
+          (!!filters.vision && support.vision)
         );
       };
     }

@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .authz import AuthzClient, Relation
 from .models import File
-from .schemas import FileTypeInfo, GenericStatus
+from .schemas import FileTypeInfo, GenericStatus, FileUploadPurpose
 
 
 def _file_grants(file: File) -> list[Relation]:
@@ -59,6 +59,7 @@ async def handle_create_file(
     class_id: int,
     uploader_id: int,
     private: bool,
+    purpose: FileUploadPurpose = "assistants",
 ) -> File:
     """Handle file creation.
 
@@ -83,7 +84,7 @@ async def handle_create_file(
         # we use here to force correctness.
         # https://github.com/stanford-policylab/pingpong/issues/147
         file=(upload.filename, upload.file, upload.content_type),
-        purpose="assistants",
+        purpose=purpose,
     )
 
     data = {
@@ -112,6 +113,7 @@ FILE_TYPES = [
         name="C",
         file_search=True,
         code_interpreter=True,
+        vision=False,
         extensions=["c"],
     ),
     FileTypeInfo(
@@ -119,6 +121,7 @@ FILE_TYPES = [
         name="C++",
         file_search=True,
         code_interpreter=True,
+        vision=False,
         extensions=["cpp", "cc", "cxx", "c++"],
     ),
     FileTypeInfo(
@@ -126,6 +129,7 @@ FILE_TYPES = [
         name="CSV",
         file_search=False,
         code_interpreter=True,
+        vision=False,
         extensions=["csv"],
     ),
     FileTypeInfo(
@@ -133,6 +137,7 @@ FILE_TYPES = [
         name="Word Doc",
         file_search=True,
         code_interpreter=True,
+        vision=False,
         extensions=["docx"],
     ),
     FileTypeInfo(
@@ -140,6 +145,7 @@ FILE_TYPES = [
         name="HTML",
         file_search=True,
         code_interpreter=True,
+        vision=False,
         extensions=["html", "htm"],
     ),
     FileTypeInfo(
@@ -147,6 +153,7 @@ FILE_TYPES = [
         name="Java",
         file_search=True,
         code_interpreter=True,
+        vision=False,
         extensions=["java"],
     ),
     FileTypeInfo(
@@ -154,6 +161,7 @@ FILE_TYPES = [
         name="JSON",
         file_search=True,
         code_interpreter=True,
+        vision=False,
         extensions=["json"],
     ),
     FileTypeInfo(
@@ -161,6 +169,7 @@ FILE_TYPES = [
         name="Markdown",
         file_search=True,
         code_interpreter=True,
+        vision=False,
         extensions=["md", "markdown"],
     ),
     FileTypeInfo(
@@ -168,6 +177,7 @@ FILE_TYPES = [
         name="PDF",
         file_search=True,
         code_interpreter=True,
+        vision=False,
         extensions=["pdf"],
     ),
     FileTypeInfo(
@@ -175,6 +185,7 @@ FILE_TYPES = [
         name="PHP",
         file_search=True,
         code_interpreter=True,
+        vision=False,
         extensions=["php"],
     ),
     FileTypeInfo(
@@ -182,6 +193,7 @@ FILE_TYPES = [
         name="PowerPoint",
         file_search=True,
         code_interpreter=True,
+        vision=False,
         extensions=["pptx"],
     ),
     FileTypeInfo(
@@ -189,6 +201,7 @@ FILE_TYPES = [
         name="Python",
         file_search=True,
         code_interpreter=True,
+        vision=False,
         extensions=["py"],
     ),
     FileTypeInfo(
@@ -196,6 +209,7 @@ FILE_TYPES = [
         name="Python",
         file_search=True,
         code_interpreter=True,
+        vision=False,
         extensions=["py"],
     ),
     FileTypeInfo(
@@ -203,6 +217,7 @@ FILE_TYPES = [
         name="Ruby",
         file_search=True,
         code_interpreter=True,
+        vision=False,
         extensions=["rb"],
     ),
     FileTypeInfo(
@@ -210,6 +225,7 @@ FILE_TYPES = [
         name="LaTeX",
         file_search=True,
         code_interpreter=True,
+        vision=False,
         extensions=["tex"],
     ),
     FileTypeInfo(
@@ -217,6 +233,7 @@ FILE_TYPES = [
         name="Text",
         file_search=True,
         code_interpreter=True,
+        vision=False,
         extensions=["txt"],
     ),
     FileTypeInfo(
@@ -224,6 +241,7 @@ FILE_TYPES = [
         name="CSS",
         file_search=False,
         code_interpreter=True,
+        vision=False,
         extensions=["css"],
     ),
     FileTypeInfo(
@@ -231,6 +249,7 @@ FILE_TYPES = [
         name="JPEG",
         file_search=False,
         code_interpreter=True,
+        vision=True,
         extensions=["jpeg", "jpg"],
     ),
     FileTypeInfo(
@@ -238,6 +257,7 @@ FILE_TYPES = [
         name="JavaScript",
         file_search=False,
         code_interpreter=True,
+        vision=False,
         extensions=["js"],
     ),
     FileTypeInfo(
@@ -245,6 +265,7 @@ FILE_TYPES = [
         name="GIF",
         file_search=False,
         code_interpreter=True,
+        vision=True,
         extensions=["gif"],
     ),
     FileTypeInfo(
@@ -252,13 +273,23 @@ FILE_TYPES = [
         name="PNG",
         file_search=False,
         code_interpreter=True,
+        vision=True,
         extensions=["png"],
+    ),
+    FileTypeInfo(
+        mime_type="image/webp",
+        name="WEBP",
+        file_search=False,
+        code_interpreter=False,
+        vision=True,
+        extensions=["webp"],
     ),
     FileTypeInfo(
         mime_type="application/x-tar",
         name="Tarball",
         file_search=False,
         code_interpreter=True,
+        vision=False,
         extensions=["tar"],
     ),
     FileTypeInfo(
@@ -266,6 +297,7 @@ FILE_TYPES = [
         name="TypeScript",
         file_search=False,
         code_interpreter=True,
+        vision=False,
         extensions=["ts"],
     ),
     FileTypeInfo(
@@ -273,6 +305,7 @@ FILE_TYPES = [
         name="Excel",
         file_search=False,
         code_interpreter=True,
+        vision=False,
         extensions=["xlsx"],
     ),
     FileTypeInfo(
@@ -280,6 +313,7 @@ FILE_TYPES = [
         name="XML",
         file_search=False,
         code_interpreter=True,
+        vision=False,
         extensions=["xml"],
     ),
     FileTypeInfo(
@@ -287,6 +321,7 @@ FILE_TYPES = [
         name="XML",
         file_search=False,
         code_interpreter=True,
+        vision=False,
         extensions=["xml"],
     ),
     FileTypeInfo(
@@ -294,6 +329,7 @@ FILE_TYPES = [
         name="Zip Archive",
         file_search=False,
         code_interpreter=True,
+        vision=False,
         extensions=["zip"],
     ),
 ]

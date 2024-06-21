@@ -55,9 +55,9 @@
     name: model.id,
     description: model.description
   }));
-  let selectedModel = assistant?.model || '';
+  let selectedModel = '';
   $: if (latestModelOptions.length > 0 && !selectedModel) {
-    selectedModel = latestModelOptions[0].value;
+    selectedModel = assistant?.model || latestModelOptions[0].value;
   }
   $: versionedModelOptions = (data.models.filter((model) => !model.is_latest) || []).map(
     (model) => ({
@@ -69,6 +69,7 @@
   $: supportVisionModels = (data.models.filter((model) => model.supports_vision) || []).map(
     (model) => model.id
   );
+  $: supportsVision = supportVisionModels.includes(selectedModel);
   $: allFiles = data.files.map((f) => ({
     state: 'success',
     progress: 100,
@@ -107,7 +108,7 @@
     event.preventDefault();
     const target = event.target as HTMLInputElement;
     selectedModel = target.value;
-  }
+  };
   /**
    * Determine if a specific field has changed in the form.
    */
@@ -318,7 +319,7 @@
     <div class="mb-4">
       <div class="flex flex-row gap-10 items-center">
         <Label for="model">Model</Label>
-        {#if supportVisionModels.includes(selectedModel)}
+        {#if supportsVision}
           <div class="flex flex-row items-center">
             <ImageOutline class="inline-block w-5 h-5 mr-1 text-emerald-700" /><Label
               class="text-emerald-700"
@@ -371,7 +372,9 @@
     </div>
     <div class="col-span-2 mb-4">
       <Label for="instructions">Instructions</Label>
-      <Helper class="pb-1">This is the prompt the language model will use to generate responses.</Helper>
+      <Helper class="pb-1"
+        >This is the prompt the language model will use to generate responses.</Helper
+      >
       <Textarea
         label="instructions"
         id="instructions"

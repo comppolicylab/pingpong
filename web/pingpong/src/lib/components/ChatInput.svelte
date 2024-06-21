@@ -56,7 +56,10 @@
    * Files to accept for code interpreter. If null, code interpreter is disabled.
    */
   export let codeInterpreterAcceptedFiles: string | null = null;
-
+  /**
+   * Files to accept for code interpreter. If null, vision capabilities are disabled.
+   */
+  export let visionAcceptedFiles: string | null = null;
   /**
    * Max upload size.
    */
@@ -76,6 +79,7 @@
   // Container for the list of files, for calculating height.
   let codeInterpreterFileListRef: HTMLDivElement;
   let fileSearchFileListRef: HTMLDivElement;
+  let visionFileListRef: HTMLDivElement;
 
   // The list of files being uploaded.
   let codeInterpreterFiles = writable<FileUploadInfo[]>([]);
@@ -88,6 +92,13 @@
   let fileSearchFiles = writable<FileUploadInfo[]>([]);
   $: uploadingFileSearch = $fileSearchFiles.some((f) => f.state === 'pending');
   $: fileSearchFileIds = $fileSearchFiles
+    .filter((f) => f.state === 'success')
+    .map((f) => (f.response as ServerFile).file_id)
+    .join(',');
+
+  let visionFiles = writable<FileUploadInfo[]>([]);
+  $: uploadingVision = $visionFiles.some((f) => f.state === 'pending');
+  $: visionFileIds = $visionFiles
     .filter((f) => f.state === 'success')
     .map((f) => (f.response as ServerFile).file_id)
     .join(',');
@@ -185,6 +196,10 @@
     fileSearchFiles = e.detail;
   };
 
+  const handleVisionFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
+    visionFiles = e.detail;
+  };
+
   // Remove a file from the list / the server.
   const removeFileSearchFile = (evt: CustomEvent<FileUploadInfo>) => {
     if (!remove) {
@@ -240,6 +255,33 @@
     }
   };
 
+  const removeVisionFile = (evt: CustomEvent<FileUploadInfo>) => {
+    if (!remove) {
+      return;
+    }
+    const file = evt.detail;
+    if (file.state === 'pending' || file.state === 'deleting') {
+      return;
+    } else if (file.state === 'error') {
+      visionFiles.update((f) => f.filter((x) => x !== file));
+    } else {
+      visionFiles.update((f) => {
+        const idx = f.indexOf(file);
+        if (idx >= 0) {
+          f[idx].state = 'deleting';
+        }
+        return f;
+      });
+      remove((file.response as ServerFile).id)
+        .then(() => {
+          visionFiles.update((f) => f.filter((x) => x !== file));
+        })
+        .catch(() => {
+          /* no-op */
+        });
+    }
+  };
+
   const handleTextAreaInput = (e: Event) => {
     const target = e.target as HTMLTextAreaElement;
     fixHeight(target);
@@ -247,6 +289,19 @@
 </script>
 
 <div use:init={$page.params.threadId} class="w-full relative">
+  <input type="hidden" name="vision_file_ids" bind:value={visionFileIds} />
+  {#if $visionFiles.length > 0}
+    <div class="z-20 p-0 pl-2 text-sm font-medium text-gray-900 dark:text-gray-300">Images</div>
+    <div
+      class="z-10 top-0 p-2 flex gap-2 flex-wrap"
+      use:fixFileListHeight={$visionFiles}
+      bind:this={visionFileListRef}
+    >
+      {#each $visionFiles as file}
+        <FilePlaceholder {mimeType} info={file} purpose="vision" on:delete={removeVisionFile} />
+      {/each}
+    </div>
+  {/if}
   <input type="hidden" name="file_search_file_ids" bind:value={fileSearchFileIds} />
   {#if $fileSearchFiles.length > 0}
     <div class="z-20 p-0 pl-2 text-sm font-medium text-gray-900 dark:text-gray-300">
@@ -299,6 +354,23 @@
       bind:this={ref}
       style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
     />
+    {#if upload && visionAcceptedFiles}
+      <FileUpload
+        {maxSize}
+        accept={visionAcceptedFiles || ''}
+        disabled={loading || disabled || !upload || !visionAcceptedFiles}
+        type="image"
+        {upload}
+        purpose="vision"
+        on:error={(e) => sadToast(e.detail.message)}
+        on:change={handleVisionFilesChange}
+      />
+      {#if visionAcceptedFiles}
+        <Popover arrow={false}>Add images</Popover>
+      {:else}
+        <Popover arrow={false}>Vision capabilities are disabled</Popover>
+      {/if}
+    {/if}
     {#if upload && fileSearchAcceptedFiles}
       <FileUpload
         {maxSize}
@@ -339,7 +411,11 @@
       class={`${
         loading ? 'animate-pulse cursor-progress' : ''
       } p-3 px-4 mr-2 bg-orange hover:bg-orange-dark`}
-      disabled={uploadingCodeInterpreter || uploadingFileSearch || loading || disabled}
+      disabled={uploadingVision ||
+        uploadingCodeInterpreter ||
+        uploadingFileSearch ||
+        loading ||
+        disabled}
     >
       Submit
     </Button>

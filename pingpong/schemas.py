@@ -159,6 +159,9 @@ class AssistantFilesResponse(BaseModel):
         from_attributes = True
 
 
+FileUploadPurpose = Union[Literal["assistants"], Literal["vision"]]
+
+
 class VectorStore(BaseModel):
     id: int
     vector_store_id: str
@@ -441,6 +444,7 @@ class AssistantModel(BaseModel):
 class AssistantModelDict(TypedDict):
     sort_order: int
     is_latest: bool
+    supports_vision: bool
     description: str
 
 
@@ -555,6 +559,8 @@ class ThreadMessages(BaseModel):
 
 class ThreadWithMeta(BaseModel):
     thread: Thread
+    model: str
+    tools_available: str
     run: OpenAIRun | None
     messages: list[OpenAIMessage]
     limit: int
@@ -613,6 +619,7 @@ class FileTypeInfo(BaseModel):
     mime_type: str
     file_search: bool
     code_interpreter: bool
+    vision: bool
     extensions: list[str]
 
 
