@@ -2,6 +2,7 @@
   export type ChatInputMessage = {
     code_interpreter_file_ids: string[];
     file_search_file_ids: string[];
+    vision_file_ids: string[];
     message: string;
     callback?: () => void;
   };
@@ -146,15 +147,18 @@
       ? codeInterpreterFileIds.split(',')
       : [];
     const file_search_file_ids = fileSearchFileIds ? fileSearchFileIds.split(',') : [];
+    const vision_file_ids = visionFileIds ? visionFileIds.split(',') : [];
     if (!ref.value || disabled) {
       return;
     }
     const message = ref.value;
     $codeInterpreterFiles = [];
     $fileSearchFiles = [];
+    $visionFiles = [];
     dispatcher('submit', {
       file_search_file_ids,
       code_interpreter_file_ids,
+      vision_file_ids,
       message,
       callback: () => {
         document.getElementById('message')?.focus();

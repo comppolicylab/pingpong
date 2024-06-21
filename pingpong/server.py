@@ -4,7 +4,6 @@ import logging
 import time
 from datetime import datetime
 from typing import Annotated, Any
-from starlette.middleware.base import BaseHTTPMiddleware
 import jwt
 import openai
 from fastapi import (
@@ -20,6 +19,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from jwt.exceptions import PyJWTError
 from openai.types.beta.assistant_create_params import ToolResources
+from openai.types.beta.threads import MessageContentPartParam
 from sqlalchemy.sql import func
 
 import pingpong.metrics as metrics
@@ -1217,6 +1217,16 @@ async def create_thread(
     if req.code_interpreter_file_ids:
         tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
 
+    messageContent: MessageContentPartParam = [{"type": "text", "text": req.message}]
+
+    if req.vision_file_ids:
+        [
+            messageContent.append(
+                {"type": "image_file", "image_file": {"file_id": file_id}}
+            )
+            for file_id in req.vision_file_ids
+        ]
+
     name, thread, parties = await asyncio.gather(
         generate_name(openai_client, req.message),
         openai_client.beta.threads.create(
@@ -1224,7 +1234,7 @@ async def create_thread(
                 {
                     "metadata": {"user_id": str(request.state.session.user.id)},
                     "role": "user",
-                    "content": req.message,
+                    "content": messageContent,
                 }
             ],
             tool_resources=tool_resources,
@@ -1232,7 +1242,7 @@ async def create_thread(
         models.User.get_all_by_id(request.state.db, req.parties),
     )
 
-    tools_export = req.dict(include={"tools_available"})
+    tools_export = req.model_dump(include={"tools_available"})
 
     new_thread = {
         "class_id": int(class_id),
@@ -1243,6 +1253,7 @@ async def create_thread(
         "assistant_id": req.assistant_id,
         "vector_store_id": vector_store_object_id,
         "code_interpreter_file_ids": req.code_interpreter_file_ids or [],
+        "image_file_ids": req.vision_file_ids or [],
         "tools_available": json.dumps(tools_export["tools_available"] or []),
         "version": 2,
     }
@@ -1289,7 +1300,7 @@ async def create_run(
         openai_client,
         thread_id=thread.thread_id,
         assistant_id=asst.assistant_id,
-        message=None,
+        message=[],
     )
 
     return StreamingResponse(stream, media_type="text/event-stream")
@@ -1351,6 +1362,20 @@ async def send_message(
             "file_ids": existing_file_ids + data.code_interpreter_file_ids
         }
 
+    messageContent: MessageContentPartParam = [{"type": "text", "text": data.message}]
+
+    if data.vision_file_ids:
+        await models.Thread.add_image_files(
+            request.state.db, thread.id, data.vision_file_ids
+        )
+        [
+            messageContent.append(
+                {"type": "image_file", "image_file": {"file_id": file_id}}
+            )
+            for file_id in data.vision_file_ids
+        ]
+
+    print("HERE", messageContent)
     try:
         await openai_client.beta.threads.update(
             thread.thread_id, tool_resources=tool_resources
@@ -1373,7 +1398,7 @@ async def send_message(
         openai_client,
         thread_id=thread.thread_id,
         assistant_id=asst.assistant_id,
-        message=data.message,
+        message=messageContent,
         metadata={"user_id": str(request.state.session.user.id)},
     )
     return StreamingResponse(stream, media_type="text/event-stream")
@@ -1469,7 +1494,7 @@ async def create_user_file(
     upload: UploadFile,
     openai_client: OpenAIClient,
     purpose: schemas.FileUploadPurpose = Header(None, alias="X-Upload-Purpose"),
-):  
+):
     if upload.size > config.upload.private_file_max_size:
         raise HTTPException(
             status_code=413,

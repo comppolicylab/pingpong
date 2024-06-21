@@ -7,7 +7,7 @@ from typing import Dict
 import openai
 import orjson
 from openai.types.beta.assistant_stream_event import ThreadRunStepCompleted
-from openai.types.beta.threads import ImageFile
+from openai.types.beta.threads import ImageFile, MessageContentPartParam
 from openai.types.beta.threads.runs import ToolCallsStepDetails, CodeInterpreterToolCall
 from pingpong.schemas import CodeInterpreterMessage
 
@@ -198,11 +198,11 @@ async def run_thread(
     *,
     thread_id: str,
     assistant_id: int,
-    message: str | None,
+    message: list[MessageContentPartParam],
     metadata: Dict[str, str | int] | None = None,
 ):
     try:
-        if message is not None:
+        if message:
             await cli.beta.threads.messages.create(
                 thread_id,
                 role="user",

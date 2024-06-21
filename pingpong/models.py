@@ -959,6 +959,7 @@ class Thread(Base):
     @classmethod
     async def create(cls, session: AsyncSession, data: dict) -> "Thread":
         code_interpreter_file_ids = data.pop("code_interpreter_file_ids", [])
+        image_file_ids = data.pop("image_file_ids", [])
         thread = Thread(**data)
         session.add(thread)
         await session.flush()
@@ -979,6 +980,22 @@ class Thread(Base):
             )
             await session.execute(stmt)
 
+        if image_file_ids:
+            image_file_object_ids = await File.get_object_ids_by_file_id(
+                session, image_file_ids
+            )
+            file_thread_pairs = [
+                (obj_id, thread.id) for obj_id in image_file_object_ids
+            ]
+            stmt = (
+                _get_upsert_stmt(session)(image_file_thread_association)
+                .values(file_thread_pairs)
+                .on_conflict_do_nothing(
+                    index_elements=["file_id", "thread_id"],
+                )
+            )
+            await session.execute(stmt)
+            
         await session.refresh(thread)
         return thread
 
@@ -1131,6 +1148,26 @@ class Thread(Base):
         stmt = (
             update(Thread)
             .where(Thread.assistant_id == int(assistant_id))
-            .values(tools=tools)
+            .values(tools_available=tools)
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def add_image_files(
+        cls, session: AsyncSession, thread_id: int, file_ids: list[str]
+    ) -> None:
+        if not file_ids:
+            return
+        image_file_object_ids = await File.get_object_ids_by_file_id(session, file_ids)
+        image_file_thread_pairs = [
+            (obj_id, thread_id) for obj_id in image_file_object_ids
+        ]
+
+        stmt = (
+            _get_upsert_stmt(session)(image_file_thread_association)
+            .values(image_file_thread_pairs)
+            .on_conflict_do_nothing(
+                index_elements=["file_id", "thread_id"],
+            )
         )
         await session.execute(stmt)

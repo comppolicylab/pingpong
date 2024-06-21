@@ -260,6 +260,7 @@ class CreateThread(BaseModel):
     message: str = Field(..., min_length=1)
     code_interpreter_file_ids: list[str] = Field([], min_length=0, max_length=10)
     file_search_file_ids: list[str] = Field([], min_length=0, max_length=10)
+    vision_file_ids: list[str] = Field([], min_length=0, max_length=10)
     tools_available: list[Tool]
     assistant_id: int
 
@@ -268,6 +269,7 @@ class NewThreadMessage(BaseModel):
     message: str = Field(..., min_length=1)
     file_search_file_ids: list[str] = Field([], min_length=0, max_length=10)
     code_interpreter_file_ids: list[str] = Field([], min_length=0, max_length=10)
+    vision_file_ids: list[str] = Field([], min_length=0, max_length=10)
 
 
 class Threads(BaseModel):

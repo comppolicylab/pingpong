@@ -1169,6 +1169,7 @@ export type CreateThreadRequest = {
   tools_available: Tool[];
   file_search_file_ids?: string[];
   code_interpreter_file_ids?: string[];
+  vision_file_ids?: string[];
 };
 
 /**
@@ -1341,8 +1342,9 @@ export type OpenAIMessage = {
   assistant_id: string | null;
   content: Content[];
   created_at: number;
-  file_search_file_ids: string[];
-  code_interpreter_file_ids: string[];
+  file_search_file_ids?: string[];
+  code_interpreter_file_ids?: string[];
+  vision_file_ids?: string[];
   metadata: Record<string, unknown> | null;
   object: 'thread.message' | 'code_interpreter_call_placeholder';
   role: 'user' | 'assistant';
@@ -1479,6 +1481,7 @@ export type NewThreadMessageRequest = {
   message: string;
   file_search_file_ids?: string[];
   code_interpreter_file_ids?: string[];
+  vision_file_ids?: string[];
 };
 
 /**

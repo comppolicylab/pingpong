@@ -156,14 +156,16 @@
   const postMessage = async ({
     message,
     code_interpreter_file_ids,
-    file_search_file_ids
+    file_search_file_ids,
+    vision_file_ids
   }: ChatInputMessage) => {
     try {
       await threadMgr.postMessage(
         data.me.user!.id,
         message,
         code_interpreter_file_ids,
-        file_search_file_ids
+        file_search_file_ids,
+        vision_file_ids
       );
     } catch (e) {
       sadToast(`Failed to send message. Error: ${errorMessage(e)}`);
