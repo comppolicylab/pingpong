@@ -3,7 +3,7 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Tuple
 import jwt
 import openai
 from fastapi import (
@@ -1219,12 +1219,12 @@ async def create_thread(
 
     messageContent: MessageContentPartParam = [{"type": "text", "text": req.message}]
 
-    if req.vision_file_ids:
+    if req.vision_file_encodings:
         [
             messageContent.append(
-                {"type": "image_file", "image_file": {"file_id": file_id}}
+                {"type": "image_url", "image_url": {"url": f"data:image/jpg;base64,{encoding}"}}
             )
-            for file_id in req.vision_file_ids
+            for encoding in req.vision_file_encodings
         ]
 
     name, thread, parties = await asyncio.gather(
@@ -1370,12 +1370,11 @@ async def send_message(
         )
         [
             messageContent.append(
-                {"type": "image_file", "image_file": {"file_id": file_id}}
+                {"type": "image_url", "image_url": {"url": f"data:image/jpg;base64,{encoding}"}}
             )
-            for file_id in data.vision_file_ids
+            for encoding in data.vision_file_encodings
         ]
 
-    print("HERE", messageContent)
     try:
         await openai_client.beta.threads.update(
             thread.thread_id, tool_resources=tool_resources

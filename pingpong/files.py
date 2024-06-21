@@ -1,3 +1,4 @@
+import base64
 import openai
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.exc import IntegrityError
@@ -7,6 +8,7 @@ from .authz import AuthzClient, Relation
 from .models import File
 from .schemas import FileTypeInfo, GenericStatus, FileUploadPurpose
 
+from typing import BinaryIO
 
 def _file_grants(file: File) -> list[Relation]:
     target_type = "user_file" if file.private else "class_file"
@@ -49,6 +51,10 @@ async def handle_delete_file(
     await oai_client.files.delete(remote_file_id)
     return GenericStatus(status="ok")
 
+def encode_image(image: BinaryIO) -> str:
+    image.seek(0)  # Ensure we are at the beginning of the stream
+    return base64.b64encode(image.read()).decode("utf-8")
+
 
 async def handle_create_file(
     session: AsyncSession,
@@ -87,6 +93,8 @@ async def handle_create_file(
         purpose=purpose,
     )
 
+    encoded_image = encode_image(upload.file) if purpose == "vision" else None
+
     data = {
         "file_id": new_f.id,
         "class_id": int(class_id),
@@ -99,7 +107,19 @@ async def handle_create_file(
     try:
         f = await File.create(session, data)
         await authz.write(grant=_file_grants(f))
-        return f
+
+        return {
+            "id": f.id,
+            "file_id": new_f.id,
+            "name": f.name,
+            "content_type": f.content_type,
+            "private": f.private,
+            "uploader_id": f.uploader_id,
+            "class_id": f.class_id,
+            "created": f.created,
+            "updated": f.updated,
+            "encoded": encoded_image,
+        }
     except Exception as e:
         await oai_client.files.delete(new_f.id)
         raise e

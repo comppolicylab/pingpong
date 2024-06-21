@@ -336,6 +336,7 @@ export type ServerFile = {
   uploader_id: number | null;
   created: string;
   updated: string | null;
+  encoded: string | null;
 };
 
 /**
@@ -899,7 +900,8 @@ export const uploadUserFile = (
   purpose: FileUploadPurpose = 'assistants'
 ) => {
   const url = fullPath(`class/${classId}/user/${userId}/file`);
-  return _doUpload(url, file, opts, purpose);
+  let data = _doUpload(url, file, opts, purpose);
+  return data;
 };
 
 /**
@@ -1170,6 +1172,7 @@ export type CreateThreadRequest = {
   file_search_file_ids?: string[];
   code_interpreter_file_ids?: string[];
   vision_file_ids?: string[];
+  vision_file_encodings?: string[]
 };
 
 /**

@@ -3,6 +3,7 @@
     code_interpreter_file_ids: string[];
     file_search_file_ids: string[];
     vision_file_ids: string[];
+    vision_file_encodings: string[];
     message: string;
     callback?: () => void;
   };
@@ -103,6 +104,10 @@
     .filter((f) => f.state === 'success')
     .map((f) => (f.response as ServerFile).file_id)
     .join(',');
+  $: visionFileEncodings = $visionFiles
+  .filter((f) => f.state === 'success')
+  .map((f) => (f.response as ServerFile).encoded)
+  .join(',');
 
   // Fix the height of the textarea to match the content.
   // The technique is to render an off-screen textarea with a scrollheight,
@@ -148,6 +153,7 @@
       : [];
     const file_search_file_ids = fileSearchFileIds ? fileSearchFileIds.split(',') : [];
     const vision_file_ids = visionFileIds ? visionFileIds.split(',') : [];
+    const vision_file_encodings = visionFileEncodings ? visionFileEncodings.split(',') : [];
     if (!ref.value || disabled) {
       return;
     }
@@ -159,6 +165,7 @@
       file_search_file_ids,
       code_interpreter_file_ids,
       vision_file_ids,
+      vision_file_encodings,
       message,
       callback: () => {
         document.getElementById('message')?.focus();
@@ -294,6 +301,7 @@
 
 <div use:init={$page.params.threadId} class="w-full relative">
   <input type="hidden" name="vision_file_ids" bind:value={visionFileIds} />
+  <input type="hidden" name="vision_file_encodings" bind:value={visionFileEncodings} />
   {#if $visionFiles.length > 0}
     <div class="z-20 p-0 pl-2 text-sm font-medium text-gray-900 dark:text-gray-300">Images</div>
     <div
