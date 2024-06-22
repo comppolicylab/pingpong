@@ -142,7 +142,7 @@
   };
 
   // Submit the form.
-  const submit = async () => {
+  const submit = () => {
     const code_interpreter_file_ids = codeInterpreterFileIds
       ? codeInterpreterFileIds.split(',')
       : [];
@@ -359,7 +359,7 @@
       bind:this={ref}
       style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
     />
-    <div class="flex gap-0">
+    <div class="flex flex-row gap-1.5">
       {#if upload && visionAcceptedFiles}
         <FileUpload
           {maxSize}

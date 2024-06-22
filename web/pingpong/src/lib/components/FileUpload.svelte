@@ -222,18 +222,18 @@
       type="button"
       color={drop ? 'alternative' : 'blue'}
       {disabled}
-      class={`p-3 rounded-full bg-blue-light-40 border-transparent ${
+      class={`p-2.5 bg-blue-light-40 border-transparent ${
         drop ? 'bg-blue-light-40 border-transparent' : ''
       } ${dropzoneActive ? 'animate-bounce' : ''}`}
       on:click={() => uploadRef.click()}
     >
       <slot name="icon">
         {#if type === 'file_search'}
-          <FileSearchOutline size="sm" />
+          <FileSearchOutline size="md" />
         {:else if type === 'image'}
-          <ImageOutline size="sm" />
+          <ImageOutline size="md" />
         {:else}
-          <FileCodeOutline size="sm" />
+          <FileCodeOutline size="md" />
         {/if}
       </slot>
     </Button>

@@ -899,8 +899,7 @@ export const uploadUserFile = (
   purpose: FileUploadPurpose = 'assistants'
 ) => {
   const url = fullPath(`class/${classId}/user/${userId}/file`);
-  const data = _doUpload(url, file, opts, purpose);
-  return data;
+  return _doUpload(url, file, opts, purpose);
 };
 
 /**
