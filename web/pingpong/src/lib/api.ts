@@ -336,7 +336,6 @@ export type ServerFile = {
   uploader_id: number | null;
   created: string;
   updated: string | null;
-  encoded: string | null;
 };
 
 /**
@@ -1172,7 +1171,6 @@ export type CreateThreadRequest = {
   file_search_file_ids?: string[];
   code_interpreter_file_ids?: string[];
   vision_file_ids?: string[];
-  vision_file_encodings?: string[];
 };
 
 /**

@@ -1219,15 +1219,10 @@ async def create_thread(
 
     messageContent: MessageContentPartParam = [{"type": "text", "text": req.message}]
 
-    if req.vision_file_encodings:
+    if req.vision_file_ids:
         [
-            messageContent.append(
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpg;base64,{encoding}"},
-                }
-            )
-            for encoding in req.vision_file_encodings
+            messageContent.append({"type": "image_file", "image_file": {"file_id": id}})
+            for id in req.vision_file_ids
         ]
 
     name, thread, parties = await asyncio.gather(
@@ -1372,13 +1367,8 @@ async def send_message(
             request.state.db, thread.id, data.vision_file_ids
         )
         [
-            messageContent.append(
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpg;base64,{encoding}"},
-                }
-            )
-            for encoding in data.vision_file_encodings
+            messageContent.append({"type": "image_file", "image_file": {"file_id": id}})
+            for id in data.vision_file_ids
         ]
 
     try:
