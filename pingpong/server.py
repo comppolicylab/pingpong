@@ -4,7 +4,6 @@ import logging
 import time
 from datetime import datetime
 from typing import Annotated, Any
-
 import jwt
 import openai
 from fastapi import (
@@ -15,10 +14,12 @@ from fastapi import (
     Request,
     Response,
     UploadFile,
+    Header,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from jwt.exceptions import PyJWTError
 from openai.types.beta.assistant_create_params import ToolResources
+from openai.types.beta.threads import MessageContentPartParam
 from sqlalchemy.sql import func
 
 import pingpong.metrics as metrics
@@ -829,51 +830,61 @@ async def list_class_models(
         "gpt-4o": {
             "sort_order": 0,
             "is_latest": True,
+            "supports_vision": True,
             "description": "The latest GPT-4o model, OpenAI's most advanced model.",
         },
         "gpt-4-turbo": {
             "sort_order": 1,
             "is_latest": True,
+            "supports_vision": True,
             "description": "The latest GPT-4 Turbo model.",
         },
         "gpt-4-turbo-preview": {
             "sort_order": 2,
             "is_latest": True,
+            "supports_vision": False,
             "description": "The latest GPT-4 Turbo preview model.",
         },
         "gpt-3.5-turbo": {
             "sort_order": 3,
             "is_latest": True,
+            "supports_vision": False,
             "description": "The latest GPT-3.5 Turbo model.",
         },
         "gpt-4o-2024-05-13": {
             "sort_order": 4,
             "is_latest": False,
+            "supports_vision": True,
             "description": "GPT-4o initial release version, 2x faster than GPT-4 Turbo.",
         },
         "gpt-4-turbo-2024-04-09": {
             "sort_order": 5,
             "is_latest": False,
+            "supports_vision": True,
             "description": "GPT-4 Turbo with Vision model.",
         },
         "gpt-4-0125-preview": {
             "sort_order": 6,
             "is_latest": False,
+            "supports_vision": False,
             "description": 'GPT-4 Turbo preview model with a fix for "laziness," where the model doesn\'t complete a task.',
         },
         "gpt-4-1106-preview": {
             "sort_order": 7,
             "is_latest": False,
+            "supports_vision": False,
             "description": "GPT-4 Turbo preview model with improved instruction following, reproducible outputs, and more.",
         },
         "gpt-3.5-turbo-0125": {
             "sort_order": 8,
             "is_latest": False,
+            "supports_vision": False,
             "description": "GPT-3.5 Turbo model with higher accuracy at responding in requested formats.",
         },
         "gpt-3.5-turbo-1106": {
             "sort_order": 9,
             "is_latest": False,
+            "supports_vision": False,
             "description": "GPT-3.5 Turbo model with improved instruction following, reproducible outputs, and more.",
         },
     }
@@ -886,6 +897,7 @@ async def list_class_models(
             "owner": m.owned_by,
             "description": known_models[m.id]["description"],
             "is_latest": known_models[m.id]["is_latest"],
+            "supports_vision": known_models[m.id]["supports_vision"],
         }
         for m in all_models.data
         if m.id in known_models.keys()
@@ -907,11 +919,11 @@ async def get_thread(
     class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
-    messages, assistants, runs_result = await asyncio.gather(
+    messages, assistant, runs_result = await asyncio.gather(
         openai_client.beta.threads.messages.list(
             thread.thread_id, limit=20, order="desc"
         ),
-        models.Assistant.get_all_by_id(request.state.db, [thread.assistant_id]),
+        models.Assistant.get_by_id(request.state.db, thread.assistant_id),
         openai_client.beta.threads.runs.list(thread.thread_id, limit=1, order="desc"),
     )
     last_run = [r async for r in runs_result]
@@ -928,12 +940,14 @@ async def get_thread(
 
     return {
         "thread": thread,
+        "model": assistant.model,
+        "tools_available": thread.tools_available,
         "run": last_run[0] if last_run else None,
         "messages": list(messages.data),
         "limit": 20,
         "participants": {
             "user": {u.id: schemas.Profile.from_user(u) for u in thread.users},
-            "assistant": {a.id: a.name for a in assistants},
+            "assistant": {assistant.id: assistant.name},
         },
         "ci_messages": placeholder_ci_calls,
     }
@@ -1203,6 +1217,14 @@ async def create_thread(
     if req.code_interpreter_file_ids:
         tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
 
+    messageContent: MessageContentPartParam = [{"type": "text", "text": req.message}]
+
+    if req.vision_file_ids:
+        [
+            messageContent.append({"type": "image_file", "image_file": {"file_id": id}})
+            for id in req.vision_file_ids
+        ]
+
     name, thread, parties = await asyncio.gather(
         generate_name(openai_client, req.message),
         openai_client.beta.threads.create(
@@ -1210,7 +1232,7 @@ async def create_thread(
                 {
                     "metadata": {"user_id": str(request.state.session.user.id)},
                     "role": "user",
-                    "content": req.message,
+                    "content": messageContent,
                 }
             ],
             tool_resources=tool_resources,
@@ -1218,7 +1240,7 @@ async def create_thread(
         models.User.get_all_by_id(request.state.db, req.parties),
     )
 
-    tools_export = req.dict(include={"tools_available"})
+    tools_export = req.model_dump(include={"tools_available"})
 
     new_thread = {
         "class_id": int(class_id),
@@ -1229,6 +1251,7 @@ async def create_thread(
         "assistant_id": req.assistant_id,
         "vector_store_id": vector_store_object_id,
         "code_interpreter_file_ids": req.code_interpreter_file_ids or [],
+        "image_file_ids": req.vision_file_ids or [],
         "tools_available": json.dumps(tools_export["tools_available"] or []),
         "version": 2,
     }
@@ -1275,7 +1298,7 @@ async def create_run(
         openai_client,
         thread_id=thread.thread_id,
         assistant_id=asst.assistant_id,
-        message=None,
+        message=[],
     )
 
     return StreamingResponse(stream, media_type="text/event-stream")
@@ -1337,6 +1360,17 @@ async def send_message(
             "file_ids": existing_file_ids + data.code_interpreter_file_ids
         }
 
+    messageContent: MessageContentPartParam = [{"type": "text", "text": data.message}]
+
+    if data.vision_file_ids:
+        await models.Thread.add_image_files(
+            request.state.db, thread.id, data.vision_file_ids
+        )
+        [
+            messageContent.append({"type": "image_file", "image_file": {"file_id": id}})
+            for id in data.vision_file_ids
+        ]
+
     try:
         await openai_client.beta.threads.update(
             thread.thread_id, tool_resources=tool_resources
@@ -1359,7 +1393,7 @@ async def send_message(
         openai_client,
         thread_id=thread.thread_id,
         assistant_id=asst.assistant_id,
-        message=data.message,
+        message=messageContent,
         metadata={"user_id": str(request.state.session.user.id)},
     )
     return StreamingResponse(stream, media_type="text/event-stream")
@@ -1454,7 +1488,8 @@ async def create_user_file(
     request: Request,
     upload: UploadFile,
     openai_client: OpenAIClient,
-):
+    purpose: schemas.FileUploadPurpose = Header(None, alias="X-Upload-Purpose"),
+) -> schemas.File:
     if upload.size > config.upload.private_file_max_size:
         raise HTTPException(
             status_code=413,
@@ -1469,6 +1504,7 @@ async def create_user_file(
         class_id=int(class_id),
         uploader_id=request.state.session.user.id,
         private=True,
+        purpose=purpose,
     )
 
 
@@ -1767,6 +1803,7 @@ async def update_assistant(
     if req.name is not None:
         asst.name = req.name
 
+    await models.Thread.update_tools_available(request.state.db, asst.id, asst.tools)
     request.state.db.add(asst)
     await request.state.db.flush()
     await request.state.db.refresh(asst)
