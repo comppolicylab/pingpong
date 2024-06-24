@@ -18,6 +18,7 @@
   import { happyToast, sadToast } from '$lib/toast';
   import { normalizeNewlines } from '$lib/content.js';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
+  import { writable } from 'svelte/store';
 
   export let data;
 
@@ -28,9 +29,7 @@
   $: assistant = data.assistant;
   $: canPublish = data.grants.canPublishAssistants;
 
-  let selectedFileSearchFiles = data.selectedFileSearchFiles.slice();
-  import { writable } from 'svelte/store';
-  
+  let selectedFileSearchFiles = writable(data.selectedFileSearchFiles.slice());
   let selectedCodeInterpreterFiles = writable(data.selectedCodeInterpreterFiles.slice());
   let loading = false;
   const fileSearchMetadata = {
@@ -185,7 +184,7 @@
     ) {
       modifiedFields.push('code interpreter files');
     }
-    if (!setsEqual(new Set(selectedFileSearchFiles), new Set(data.selectedFileSearchFiles))) {
+    if (!setsEqual(new Set($selectedFileSearchFiles), new Set(data.selectedFileSearchFiles))) {
       modifiedFields.push('file search files');
     }
 
@@ -214,7 +213,7 @@
       model: body.model.toString(),
       tools,
       code_interpreter_file_ids: codeInterpreterToolSelect ? $selectedCodeInterpreterFiles : [],
-      file_search_file_ids: fileSearchToolSelect ? selectedFileSearchFiles : [],
+      file_search_file_ids: fileSearchToolSelect ? $selectedFileSearchFiles : [],
       published: body.published?.toString() === 'on',
       use_latex: body.use_latex?.toString() === 'on',
       hide_prompt: body.hide_prompt?.toString() === 'on'
@@ -263,6 +262,11 @@
     }
   };
 
+  // Handle file upload
+  const handleUpload = (f: File, onProgress: (p: number) => void) => {
+    return api.uploadFile(data.class.id, f, { onProgress });
+  };
+
   beforeNavigate((nav) => {
     if (!assistantForm) {
       return;
@@ -287,12 +291,6 @@
     }
   });
 
-  const addMoreFilesOption = { name: "+ Add more files", value: "add_more_files" };
-
-  const handleUploadFromDropDown = (e: Event) => {
-    const target = e.target as HTMLSelectElement;
-    console.log(target.value);
-  }
 </script>
 
 <div class="h-full w-full overflow-y-auto p-12">
@@ -418,11 +416,17 @@
           >Select which files this assistant should use for {fileSearchMetadata.name}. You can
           select up to {fileSearchMetadata.max_count} files.</Helper
         >
-        <MultiSelect
+        <MultiSelectWithUpload
           name="selectedFileSearchFiles"
-          items={[addMoreFilesOption, ...fileSearchOptions]}
+          items={fileSearchOptions}
           bind:value={selectedFileSearchFiles}
+          on:error={(e) => sadToast(e.detail.message)}
+          upload={handleUpload}
+          maxSize={data.uploadInfo.private_file_max_size}
+          accept={fileSearchAcceptedFiles || ''}
+          disabled={loading || !handleUpload || !fileSearchOptions}
         />
+        
       </div>
     {/if}
 
