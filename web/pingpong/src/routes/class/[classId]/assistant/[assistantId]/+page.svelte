@@ -70,6 +70,7 @@
     (model) => model.id
   );
   $: supportsVision = supportVisionModels.includes(selectedModel);
+  let allowVisionUpload = false;
   $: allFiles = data.files.map((f) => ({
     state: 'success',
     progress: 100,
@@ -319,7 +320,7 @@
     <div class="mb-4">
       <div class="flex flex-row gap-10 items-center">
         <Label for="model">Model</Label>
-        {#if supportsVision}
+        {#if supportsVision && allowVisionUpload}
           <div class="flex flex-row items-center">
             <ImageOutline class="inline-block w-5 h-5 mr-1 text-emerald-700" /><Label
               class="text-emerald-700"
