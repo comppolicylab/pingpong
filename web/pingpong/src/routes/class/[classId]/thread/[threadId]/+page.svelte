@@ -21,6 +21,7 @@
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
   import {
     EyeSlashOutline,
+    EyeOutline,
     RefreshOutline,
     DotsHorizontalOutline,
     CodeSolid,
@@ -369,12 +370,12 @@
             {#if !$published}
               <EyeSlashOutline size="sm" class="text-orange" />
               <Span class="text-gray-400 text-xs whitespace-nowrap"
-                >This thread is visible to the teaching team</Span
-              >
-              <Span class="text-gray-400 text-xs w-full lg:w-auto grow"
-                >{externalUserString ? `, yourself${externalUserString}` : ' and yourself'}.</Span
+                >This thread is visible to the teaching team{externalUserString
+                  ? `, yourself${externalUserString}`
+                  : ' and yourself'}.</Span
               >
             {:else}
+              <EyeOutline size="sm" class="text-orange" />
               <Span class="text-gray-400 text-xs"
                 >This thread is visible to everyone in this class.</Span
               >
