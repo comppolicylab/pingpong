@@ -231,22 +231,20 @@
               Notes for this assistant
             </div>
             <div class="pb-12 overflow-y-auto">{assistant.description}</div>
-          {:else}
-            <div class="italic pb-12 overflow-y-auto">
-              No notes are provided for this assistant.
-            </div>
           {/if}
         </div>
-        <div class="absolute bottom-5 right-4">
-          <a
-            href={`/class/${data.class.id}/assistant`}
-            class="bg-orange-light text-orange-dark rounded rounded-2xl p-2 text-xs px-4 pr-2 hover:bg-orange-dark hover:text-orange-light transition-all"
-            >View all assistants <ArrowRightOutline
-              size="md"
-              class="text-orange-dark inline-block ml-1"
-            /></a
-          >
-        </div>
+        {#if assistants.length > 1}
+          <div class="absolute bottom-5 right-4">
+            <a
+              href={`/class/${data.class.id}/assistant`}
+              class="bg-orange-light text-orange-dark rounded rounded-2xl p-2 text-xs px-4 pr-2 hover:bg-orange-dark hover:text-orange-light transition-all"
+              >View all assistants <ArrowRightOutline
+                size="md"
+                class="text-orange-dark inline-block ml-1"
+              /></a
+            >
+          </div>
+        {/if}
       </div>
 
       <div class="shrink-0 grow-0">
