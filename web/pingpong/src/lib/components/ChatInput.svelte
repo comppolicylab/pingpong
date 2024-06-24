@@ -2,6 +2,7 @@
   export type ChatInputMessage = {
     code_interpreter_file_ids: string[];
     file_search_file_ids: string[];
+    vision_file_ids: string[];
     message: string;
     callback?: () => void;
   };
@@ -56,7 +57,11 @@
    * Files to accept for code interpreter. If null, code interpreter is disabled.
    */
   export let codeInterpreterAcceptedFiles: string | null = null;
-
+  /**
+   * Files to accept for code interpreter. If null, vision capabilities are disabled.
+   */
+  export let visionAcceptedFiles: string | null = null;
+  let allowVisionUpload = false;
   /**
    * Max upload size.
    */
@@ -76,6 +81,7 @@
   // Container for the list of files, for calculating height.
   let codeInterpreterFileListRef: HTMLDivElement;
   let fileSearchFileListRef: HTMLDivElement;
+  let visionFileListRef: HTMLDivElement;
 
   // The list of files being uploaded.
   let codeInterpreterFiles = writable<FileUploadInfo[]>([]);
@@ -88,6 +94,13 @@
   let fileSearchFiles = writable<FileUploadInfo[]>([]);
   $: uploadingFileSearch = $fileSearchFiles.some((f) => f.state === 'pending');
   $: fileSearchFileIds = $fileSearchFiles
+    .filter((f) => f.state === 'success')
+    .map((f) => (f.response as ServerFile).file_id)
+    .join(',');
+
+  let visionFiles = writable<FileUploadInfo[]>([]);
+  $: uploadingVision = $visionFiles.some((f) => f.state === 'pending');
+  $: visionFileIds = $visionFiles
     .filter((f) => f.state === 'success')
     .map((f) => (f.response as ServerFile).file_id)
     .join(',');
@@ -135,15 +148,19 @@
       ? codeInterpreterFileIds.split(',')
       : [];
     const file_search_file_ids = fileSearchFileIds ? fileSearchFileIds.split(',') : [];
+    const vision_file_ids = visionFileIds ? visionFileIds.split(',') : [];
+
     if (!ref.value || disabled) {
       return;
     }
     const message = ref.value;
     $codeInterpreterFiles = [];
     $fileSearchFiles = [];
+    $visionFiles = [];
     dispatcher('submit', {
       file_search_file_ids,
       code_interpreter_file_ids,
+      vision_file_ids,
       message,
       callback: () => {
         document.getElementById('message')?.focus();
@@ -183,6 +200,10 @@
 
   const handleFileSearchFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
     fileSearchFiles = e.detail;
+  };
+
+  const handleVisionFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
+    visionFiles = e.detail;
   };
 
   // Remove a file from the list / the server.
@@ -240,6 +261,33 @@
     }
   };
 
+  const removeVisionFile = (evt: CustomEvent<FileUploadInfo>) => {
+    if (!remove) {
+      return;
+    }
+    const file = evt.detail;
+    if (file.state === 'pending' || file.state === 'deleting') {
+      return;
+    } else if (file.state === 'error') {
+      visionFiles.update((f) => f.filter((x) => x !== file));
+    } else {
+      visionFiles.update((f) => {
+        const idx = f.indexOf(file);
+        if (idx >= 0) {
+          f[idx].state = 'deleting';
+        }
+        return f;
+      });
+      remove((file.response as ServerFile).id)
+        .then(() => {
+          visionFiles.update((f) => f.filter((x) => x !== file));
+        })
+        .catch(() => {
+          /* no-op */
+        });
+    }
+  };
+
   const handleTextAreaInput = (e: Event) => {
     const target = e.target as HTMLTextAreaElement;
     fixHeight(target);
@@ -247,6 +295,19 @@
 </script>
 
 <div use:init={$page.params.threadId} class="w-full relative">
+  <input type="hidden" name="vision_file_ids" bind:value={visionFileIds} />
+  {#if $visionFiles.length > 0}
+    <div class="z-20 p-0 pl-2 text-sm font-medium text-gray-900 dark:text-gray-300">Images</div>
+    <div
+      class="z-10 top-0 p-2 flex gap-2 flex-wrap"
+      use:fixFileListHeight={$visionFiles}
+      bind:this={visionFileListRef}
+    >
+      {#each $visionFiles as file}
+        <FilePlaceholder {mimeType} info={file} purpose="vision" on:delete={removeVisionFile} />
+      {/each}
+    </div>
+  {/if}
   <input type="hidden" name="file_search_file_ids" bind:value={fileSearchFileIds} />
   {#if $fileSearchFiles.length > 0}
     <div class="z-20 p-0 pl-2 text-sm font-medium text-gray-900 dark:text-gray-300">
@@ -299,38 +360,57 @@
       bind:this={ref}
       style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
     />
-    {#if upload && fileSearchAcceptedFiles}
-      <FileUpload
-        {maxSize}
-        accept={fileSearchAcceptedFiles || ''}
-        disabled={loading || disabled || !upload || !fileSearchAcceptedFiles}
-        type="file_search"
-        {upload}
-        on:error={(e) => sadToast(e.detail.message)}
-        on:change={handleFileSearchFilesChange}
-      />
-      {#if fileSearchAcceptedFiles}
-        <Popover arrow={false}>Add files for File Search</Popover>
-      {:else}
-        <Popover arrow={false}>File Search is disabled</Popover>
+    <div class="flex flex-row gap-1.5">
+      {#if upload && visionAcceptedFiles && allowVisionUpload}
+        <FileUpload
+          {maxSize}
+          accept={visionAcceptedFiles || ''}
+          disabled={loading || disabled || !upload || !visionAcceptedFiles}
+          type="image"
+          {upload}
+          purpose="vision"
+          on:error={(e) => sadToast(e.detail.message)}
+          on:change={handleVisionFilesChange}
+        />
+        {#if visionAcceptedFiles}
+          <Popover arrow={false}>Add images</Popover>
+        {:else}
+          <Popover arrow={false}>Vision capabilities are disabled</Popover>
+        {/if}
       {/if}
-    {/if}
-    {#if upload && codeInterpreterAcceptedFiles}
-      <FileUpload
-        {maxSize}
-        accept={codeInterpreterAcceptedFiles || ''}
-        disabled={loading || disabled || !upload || !codeInterpreterAcceptedFiles}
-        type="code_interpreter"
-        {upload}
-        on:error={(e) => sadToast(e.detail.message)}
-        on:change={handleCodeInterpreterFilesChange}
-      />
-      {#if codeInterpreterAcceptedFiles}
-        <Popover arrow={false}>Add files for Code Interpreter</Popover>
-      {:else}
-        <Popover arrow={false}>Code Interpreter is disabled</Popover>
+      {#if upload && fileSearchAcceptedFiles}
+        <FileUpload
+          {maxSize}
+          accept={fileSearchAcceptedFiles || ''}
+          disabled={loading || disabled || !upload || !fileSearchAcceptedFiles}
+          type="file_search"
+          {upload}
+          on:error={(e) => sadToast(e.detail.message)}
+          on:change={handleFileSearchFilesChange}
+        />
+        {#if fileSearchAcceptedFiles}
+          <Popover arrow={false}>Add files for File Search</Popover>
+        {:else}
+          <Popover arrow={false}>File Search is disabled</Popover>
+        {/if}
       {/if}
-    {/if}
+      {#if upload && codeInterpreterAcceptedFiles}
+        <FileUpload
+          {maxSize}
+          accept={codeInterpreterAcceptedFiles || ''}
+          disabled={loading || disabled || !upload || !codeInterpreterAcceptedFiles}
+          type="code_interpreter"
+          {upload}
+          on:error={(e) => sadToast(e.detail.message)}
+          on:change={handleCodeInterpreterFilesChange}
+        />
+        {#if codeInterpreterAcceptedFiles}
+          <Popover arrow={false}>Add files for Code Interpreter</Popover>
+        {:else}
+          <Popover arrow={false}>Code Interpreter is disabled</Popover>
+        {/if}
+      {/if}
+    </div>
     <Button
       pill
       on:click={submit}
@@ -339,7 +419,11 @@
       class={`${
         loading ? 'animate-pulse cursor-progress' : ''
       } p-3 px-4 mr-2 bg-orange hover:bg-orange-dark`}
-      disabled={uploadingCodeInterpreter || uploadingFileSearch || loading || disabled}
+      disabled={uploadingVision ||
+        uploadingCodeInterpreter ||
+        uploadingFileSearch ||
+        loading ||
+        disabled}
     >
       Submit
     </Button>

@@ -8,16 +8,23 @@ import type { LayoutLoad } from './$types';
 export const load: LayoutLoad = async ({ fetch, params }) => {
   const classId = parseInt(params.classId, 10);
 
-  const [classDataResponse, assistantsResponse, filesResponse, uploadInfoResponse, grants] =
-    await Promise.all([
-      api.getClass(fetch, classId).then(api.expandResponse),
-      api.getAssistants(fetch, classId).then(api.expandResponse),
-      api.getClassFiles(fetch, classId).then(api.expandResponse),
-      api.getClassUploadInfo(fetch, classId),
-      api.grants(fetch, {
-        canManage: { target_type: 'class', target_id: classId, relation: 'supervisor' }
-      })
-    ]);
+  const [
+    classDataResponse,
+    assistantsResponse,
+    filesResponse,
+    uploadInfoResponse,
+    grants,
+    modelsResponse
+  ] = await Promise.all([
+    api.getClass(fetch, classId).then(api.expandResponse),
+    api.getAssistants(fetch, classId).then(api.expandResponse),
+    api.getClassFiles(fetch, classId).then(api.expandResponse),
+    api.getClassUploadInfo(fetch, classId),
+    api.grants(fetch, {
+      canManage: { target_type: 'class', target_id: classId, relation: 'supervisor' }
+    }),
+    api.getModels(fetch, classId).then(api.expandResponse)
+  ]);
 
   if (classDataResponse.error) {
     error(classDataResponse.$status, classDataResponse.error.detail || 'Unknown error');
@@ -30,6 +37,8 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
     assistantCreators = assistantsResponse.data.creators;
   }
 
+  const models = modelsResponse.error ? [] : modelsResponse.data.models;
+
   return {
     hasAssistants: !!assistants && assistants.length > 0,
     hasBilling: !!classDataResponse.data.api_key,
@@ -38,6 +47,7 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
     assistantCreators,
     files: filesResponse.data?.files || [],
     uploadInfo: uploadInfoResponse,
-    canManage: grants.canManage
+    canManage: grants.canManage,
+    models
   };
 };

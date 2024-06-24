@@ -1,7 +1,17 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { MimeTypeLookupFn, FileUploadInfo, FileUploadFailure } from '$lib/api';
-  import { CloseSolid, FileSolid, ExclamationCircleOutline } from 'flowbite-svelte-icons';
+  import type {
+    MimeTypeLookupFn,
+    FileUploadInfo,
+    FileUploadFailure,
+    FileUploadPurpose
+  } from '$lib/api';
+  import {
+    CloseSolid,
+    FileSolid,
+    ExclamationCircleOutline,
+    ImageSolid
+  } from 'flowbite-svelte-icons';
   import { Tooltip, Button } from 'flowbite-svelte';
   import ProgressCircle from './ProgressCircle.svelte';
   import { Jumper } from 'svelte-loading-spinners';
@@ -10,6 +20,8 @@
    * Information about a file that is being uploaded.
    */
   export let info: FileUploadInfo;
+
+  export let purpose: FileUploadPurpose = 'assistants';
 
   export let mimeType: MimeTypeLookupFn;
 
@@ -44,9 +56,13 @@
       {:else}
         <Jumper size="20" color="#0ea5e9" />
       {/if}
-    {:else if state === 'deleting'}
+    {:else if state === 'deleting' && purpose === 'vision'}
+      <ImageSolid class="w-6 h-6 text-red-500 animate-pulse" />
+    {:else if state === 'deleting' && purpose !== 'vision'}
       <FileSolid class="w-6 h-6 text-red-500 animate-pulse" />
-    {:else if state === 'success'}
+    {:else if state === 'success' && purpose === 'vision'}
+      <ImageSolid class="w-6 h-6 text-green-500" />
+    {:else if state === 'success' && purpose !== 'vision'}
       <FileSolid class="w-6 h-6 text-green-500" />
     {:else}
       <ExclamationCircleOutline class="w-6 h-6 text-red-500" />

@@ -478,7 +478,11 @@
           <div class="my-4">
             <FileUpload
               drop
-              accept={data.uploadInfo.fileTypes({ code_interpreter: true, file_search: true })}
+              accept={data.uploadInfo.fileTypes({
+                code_interpreter: true,
+                file_search: true,
+                vision: false
+              })}
               maxSize={data.uploadInfo.class_file_max_size}
               upload={uploadFile}
               on:change={handleNewFiles}

@@ -385,7 +385,8 @@ export class ThreadManager {
     fromUserId: number,
     message: string,
     code_interpreter_file_ids?: string[],
-    file_search_file_ids?: string[]
+    file_search_file_ids?: string[],
+    vision_file_ids?: string[]
   ) {
     if (!message) {
       throw new Error('Please enter a message before sending.');
@@ -401,16 +402,22 @@ export class ThreadManager {
 
     // Generate an optimistic update for the UI
     const optimisticMsgId = `optimistic-${(Math.random() + 1).toString(36).substring(2)}`;
+    const optimisticImageContent: api.MessageContentImageFile[] =
+      vision_file_ids?.map((id) => ({ type: 'image_file', image_file: { file_id: id } })) ?? [];
     const optimistic: api.OpenAIMessage = {
       id: optimisticMsgId,
       role: 'user',
-      content: [{ type: 'text', text: { value: message, annotations: [] } }],
+      content: [
+        { type: 'text', text: { value: message, annotations: [] } },
+        ...optimisticImageContent
+      ],
       created_at: Date.now(),
       metadata: { user_id: fromUserId },
       assistant_id: '',
       thread_id: '',
       file_search_file_ids: file_search_file_ids || [],
       code_interpreter_file_ids: code_interpreter_file_ids || [],
+      vision_file_ids: vision_file_ids || [],
       run_id: null,
       object: 'thread.message'
     };
@@ -424,7 +431,8 @@ export class ThreadManager {
     const chunks = await api.postMessage(this.#fetcher, this.classId, this.threadId, {
       message,
       file_search_file_ids,
-      code_interpreter_file_ids
+      code_interpreter_file_ids,
+      vision_file_ids
     });
     await this.#handleStreamChunks(chunks);
   }

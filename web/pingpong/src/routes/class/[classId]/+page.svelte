@@ -15,7 +15,7 @@
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
   import { errorMessage } from '$lib/errors';
-  import type { Assistant } from '$lib/api';
+  import type { Assistant, FileUploadPurpose } from '$lib/api';
   import { onMount } from 'svelte';
   import { loading } from '$lib/stores/general';
 
@@ -69,10 +69,21 @@
   }
   $: supportsFileSearch = assistant.tools?.includes('file_search') || false;
   $: supportsCodeInterpreter = assistant.tools?.includes('code_interpreter') || false;
+  let supportsVision = false;
+  $: {
+    const supportVisionModels = (data.models.filter((model) => model.supports_vision) || []).map(
+      (model) => model.id
+    );
+    supportsVision = supportVisionModels.includes(assistant.model);
+  }
 
   // Handle file upload
-  const handleUpload = (f: File, onProgress: (p: number) => void) => {
-    return api.uploadUserFile(data.class.id, data.me.user!.id, f, { onProgress });
+  const handleUpload = (
+    f: File,
+    onProgress: (p: number) => void,
+    purpose: FileUploadPurpose = 'assistants'
+  ) => {
+    return api.uploadUserFile(data.class.id, data.me.user!.id, f, { onProgress }, purpose);
   };
 
   // Handle file removal
@@ -111,7 +122,8 @@
           message: form.message,
           tools_available: tools,
           code_interpreter_file_ids: form.code_interpreter_file_ids,
-          file_search_file_ids: form.file_search_file_ids
+          file_search_file_ids: form.file_search_file_ids,
+          vision_file_ids: form.vision_file_ids
         })
       );
       data.threads = [newThread, ...data.threads];
@@ -252,11 +264,26 @@
           mimeType={data.uploadInfo.mimeType}
           maxSize={data.uploadInfo.private_file_max_size}
           loading={$loading || !!$navigating}
+          visionAcceptedFiles={supportsVision
+            ? data.uploadInfo.fileTypes({
+                file_search: false,
+                code_interpreter: false,
+                vision: true
+              })
+            : null}
           fileSearchAcceptedFiles={supportsFileSearch
-            ? data.uploadInfo.fileTypes({ file_search: true, code_interpreter: false })
+            ? data.uploadInfo.fileTypes({
+                file_search: true,
+                code_interpreter: false,
+                vision: false
+              })
             : null}
           codeInterpreterAcceptedFiles={supportsCodeInterpreter
-            ? data.uploadInfo.fileTypes({ file_search: true, code_interpreter: false })
+            ? data.uploadInfo.fileTypes({
+                file_search: false,
+                code_interpreter: true,
+                vision: false
+              })
             : null}
           upload={handleUpload}
           remove={handleRemove}

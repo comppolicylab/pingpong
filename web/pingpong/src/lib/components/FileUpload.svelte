@@ -1,10 +1,10 @@
 <script lang="ts">
   // Could also consider using CodeOutline, SearchOutline
-  import { FileCodeOutline, FileSearchOutline } from 'flowbite-svelte-icons';
+  import { FileCodeOutline, FileSearchOutline, ImageOutline } from 'flowbite-svelte-icons';
   import { createEventDispatcher } from 'svelte';
   import { writable } from 'svelte/store';
   import { Button } from 'flowbite-svelte';
-  import type { FileUploader, FileUploadInfo } from '$lib/api';
+  import type { FileUploader, FileUploadInfo, FileUploadPurpose } from '$lib/api';
 
   /**
    * Whether to allow uploading.
@@ -15,6 +15,8 @@
    * Function to run file upload.
    */
   export let upload: FileUploader;
+
+  export let purpose: FileUploadPurpose = 'assistants';
 
   /**
    * Additional classes to apply to wrapper.
@@ -29,7 +31,7 @@
   /**
    * Type of icon to display.
    */
-  export let type: 'file_search' | 'code_interpreter' = 'file_search';
+  export let type: 'file_search' | 'code_interpreter' | 'image' = 'file_search';
 
   /**
    * Max upload size in bytes.
@@ -70,12 +72,16 @@
         return;
       }
 
-      const fp = upload(f, (progress) => {
-        const idx = $files.findIndex((file) => file.file === f);
-        if (idx !== -1) {
-          $files[idx].progress = progress;
-        }
-      });
+      const fp = upload(
+        f,
+        (progress) => {
+          const idx = $files.findIndex((file) => file.file === f);
+          if (idx !== -1) {
+            $files[idx].progress = progress;
+          }
+        },
+        purpose
+      );
 
       // Update the file list when the upload is complete.
       fp.promise
@@ -216,16 +222,18 @@
       type="button"
       color={drop ? 'alternative' : 'blue'}
       {disabled}
-      class={`p-3 rounded-full bg-blue-light-40 border-transparent ${
+      class={`p-2.5 bg-blue-light-40 border-transparent ${
         drop ? 'bg-blue-light-40 border-transparent' : ''
       } ${dropzoneActive ? 'animate-bounce' : ''}`}
       on:click={() => uploadRef.click()}
     >
       <slot name="icon">
         {#if type === 'file_search'}
-          <FileSearchOutline size="sm" />
+          <FileSearchOutline size="md" />
+        {:else if type === 'image'}
+          <ImageOutline size="md" />
         {:else}
-          <FileCodeOutline size="sm" />
+          <FileCodeOutline size="md" />
         {/if}
       </slot>
     </Button>

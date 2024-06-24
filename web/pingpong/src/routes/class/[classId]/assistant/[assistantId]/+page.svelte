@@ -17,6 +17,7 @@
   import { setsEqual } from '$lib/set';
   import { happyToast, sadToast } from '$lib/toast';
   import { normalizeNewlines } from '$lib/content.js';
+  import { ImageOutline } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
   import { writable } from 'svelte/store';
 
@@ -56,6 +57,10 @@
     name: model.id,
     description: model.description
   }));
+  let selectedModel = '';
+  $: if (latestModelOptions.length > 0 && !selectedModel) {
+    selectedModel = assistant?.model || latestModelOptions[0].value;
+  }
   $: versionedModelOptions = (data.models.filter((model) => !model.is_latest) || []).map(
     (model) => ({
       value: model.id,
@@ -63,6 +68,11 @@
       description: model.description
     })
   );
+  $: supportVisionModels = (data.models.filter((model) => model.supports_vision) || []).map(
+    (model) => model.id
+  );
+  $: supportsVision = supportVisionModels.includes(selectedModel);
+  let allowVisionUpload = false;
   $: allFiles = data.files.map((f) => ({
     state: 'success',
     progress: 100,
@@ -94,6 +104,14 @@
   $: fileSearchToolSelect = initialTools.includes('file_search');
   $: codeInterpreterToolSelect = initialTools.includes('code_interpreter');
 
+  /**
+   * Check if the assistant model supports vision capabilities.
+   */
+  const updateSelectedModel = (event: Event) => {
+    event.preventDefault();
+    const target = event.target as HTMLInputElement;
+    selectedModel = target.value;
+  };
   /**
    * Determine if a specific field has changed in the form.
    */
@@ -304,12 +322,22 @@
 
   <form on:submit={submitForm} bind:this={assistantForm}>
     <div class="mb-4">
-      <Label for="name">Name</Label>
+      <Label class="pb-1" for="name">Name</Label>
       <Input label="name" id="name" name="name" value={assistant?.name} />
     </div>
     <div class="mb-4">
-      <Label for="model">Model</Label>
-      <Helper
+      <div class="flex flex-row gap-10 items-center">
+        <Label for="model">Model</Label>
+        {#if supportsVision && allowVisionUpload}
+          <div class="flex flex-row items-center">
+            <ImageOutline class="inline-block w-5 h-5 mr-1 text-emerald-700" /><Label
+              class="text-emerald-700"
+              for="model">Supports Vision capabilities</Label
+            >
+          </div>
+        {/if}
+      </div>
+      <Helper class="pb-1"
         >Select the model to use for this assistant. You can update your model selection at any
         time. Latest Models will always point to the latest version of the model available. Select a
         Pinned Model Version to continue using a specific model version regardless of future model
@@ -325,6 +353,7 @@
         id="model"
         name="model"
         value={assistant?.model || latestModelOptions[0].value}
+        on:change={updateSelectedModel}
       >
         <option value="latest" disabled={true}>Latest Models</option>
         {#each latestModelOptions as { value, name, description }}
@@ -339,7 +368,7 @@
     </div>
     <div class="col-span-2 mb-4">
       <Label for="description">Description</Label>
-      <Helper
+      <Helper class="pb-1"
         >Describe what this assistant does. This information is <strong>not</strong> included in the
         prompt, but <strong>is</strong> shown to users.</Helper
       >
@@ -352,7 +381,9 @@
     </div>
     <div class="col-span-2 mb-4">
       <Label for="instructions">Instructions</Label>
-      <Helper>This is the prompt the language model will use to generate responses.</Helper>
+      <Helper class="pb-1"
+        >This is the prompt the language model will use to generate responses.</Helper
+      >
       <Textarea
         label="instructions"
         id="instructions"
@@ -412,7 +443,7 @@
       <div class="col-span-2 mb-4">
         <!-- TODO(jnu): support for uploading files here. -->
         <Label for="model">{fileSearchMetadata.name} Files</Label>
-        <Helper
+        <Helper class="pb-1"
           >Select which files this assistant should use for {fileSearchMetadata.name}. You can
           select up to {fileSearchMetadata.max_count} files.</Helper
         >
@@ -434,7 +465,7 @@
       <div class="col-span-2 mb-4">
         <!-- TODO(jnu): support for uploading files here. -->
         <Label for="model">{codeInterpreterMetadata.name} Files</Label>
-        <Helper
+        <Helper class="pb-1"
           >Select which files this assistant should use for {codeInterpreterMetadata.name}. You can
           select up to {codeInterpreterMetadata.max_count} files.</Helper
         >

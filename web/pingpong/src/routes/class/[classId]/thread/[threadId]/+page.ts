@@ -14,14 +14,17 @@ export const load: PageLoad = async ({ fetch, params }) => {
   ]);
 
   const expanded = api.expandResponse(threadData);
-  let threadAvailableTools = '';
+  let threadModel = '';
+  let threadTools = '';
   if (!expanded.error) {
-    threadAvailableTools = expanded.data.thread.tools_available || '';
+    threadTools = expanded.data.tools_available || '';
+    threadModel = expanded.data.model || '';
   }
 
   return {
     threadData,
-    availableTools: threadAvailableTools,
+    threadModel,
+    availableTools: threadTools,
     canDeleteThread: threadGrants.canDelete,
     canPublishThread: threadGrants.canPublish
   };

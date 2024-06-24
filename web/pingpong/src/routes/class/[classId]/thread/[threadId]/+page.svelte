@@ -21,6 +21,7 @@
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
   import {
     EyeSlashOutline,
+    EyeOutline,
     RefreshOutline,
     DotsHorizontalOutline,
     CodeSolid,
@@ -55,6 +56,13 @@
           ', ' + externalUsers.slice(0, -1).join(', ') + ' and ' + externalUsers.slice(-1);
       }
     }
+  }
+  let supportsVision = false;
+  $: {
+    const supportVisionModels = (data.models.filter((model) => model.supports_vision) || []).map(
+      (model) => model.id
+    );
+    supportsVision = supportVisionModels.includes(data.threadModel);
   }
   $: submitting = threadMgr.submitting;
   $: waiting = threadMgr.waiting;
@@ -149,14 +157,16 @@
   const postMessage = async ({
     message,
     code_interpreter_file_ids,
-    file_search_file_ids
+    file_search_file_ids,
+    vision_file_ids
   }: ChatInputMessage) => {
     try {
       await threadMgr.postMessage(
         data.me.user!.id,
         message,
         code_interpreter_file_ids,
-        file_search_file_ids
+        file_search_file_ids,
+        vision_file_ids
       );
     } catch (e) {
       sadToast(`Failed to send message. Error: ${errorMessage(e)}`);
@@ -170,8 +180,12 @@
   };
 
   // Handle file upload
-  const handleUpload = (f: File, onProgress: (p: number) => void) => {
-    return api.uploadUserFile(data.class.id, data.me.user!.id, f, { onProgress });
+  const handleUpload = (
+    f: File,
+    onProgress: (p: number) => void,
+    purpose: api.FileUploadPurpose = 'assistants'
+  ) => {
+    return api.uploadUserFile(data.class.id, data.me.user!.id, f, { onProgress }, purpose);
   };
 
   // Handle file removal
@@ -350,11 +364,26 @@
         <ChatInput
           mimeType={data.uploadInfo.mimeType}
           maxSize={data.uploadInfo.private_file_max_size}
+          visionAcceptedFiles={supportsVision
+            ? data.uploadInfo.fileTypes({
+                file_search: false,
+                code_interpreter: false,
+                vision: true
+              })
+            : null}
           fileSearchAcceptedFiles={supportsFileSearch
-            ? data.uploadInfo.fileTypes({ file_search: true, code_interpreter: false })
+            ? data.uploadInfo.fileTypes({
+                file_search: true,
+                code_interpreter: false,
+                vision: false
+              })
             : null}
           codeInterpreterAcceptedFiles={supportsCodeInterpreter
-            ? data.uploadInfo.fileTypes({ file_search: false, code_interpreter: true })
+            ? data.uploadInfo.fileTypes({
+                file_search: false,
+                code_interpreter: true,
+                vision: false
+              })
             : null}
           disabled={!canSubmit || !!$navigating}
           loading={$submitting || $waiting}
@@ -369,12 +398,12 @@
             {#if !$published}
               <EyeSlashOutline size="sm" class="text-orange" />
               <Span class="text-gray-400 text-xs whitespace-nowrap"
-                >This thread is visible to the teaching team</Span
-              >
-              <Span class="text-gray-400 text-xs w-full lg:w-auto grow"
-                >{externalUserString ? `, yourself${externalUserString}` : ' and yourself'}.</Span
+                >This thread is visible to the teaching team{externalUserString
+                  ? `, yourself${externalUserString}`
+                  : ' and yourself'}.</Span
               >
             {:else}
+              <EyeOutline size="sm" class="text-orange" />
               <Span class="text-gray-400 text-xs"
                 >This thread is visible to everyone in this class.</Span
               >
