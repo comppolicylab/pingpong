@@ -17,6 +17,7 @@
   import { setsEqual } from '$lib/set';
   import { happyToast, sadToast } from '$lib/toast';
   import { normalizeNewlines } from '$lib/content.js';
+  import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
 
   export let data;
 
@@ -28,7 +29,9 @@
   $: canPublish = data.grants.canPublishAssistants;
 
   let selectedFileSearchFiles = data.selectedFileSearchFiles.slice();
-  let selectedCodeInterpreterFiles = data.selectedCodeInterpreterFiles.slice();
+  import { writable } from 'svelte/store';
+  
+  let selectedCodeInterpreterFiles = writable(data.selectedCodeInterpreterFiles.slice());
   let loading = false;
   const fileSearchMetadata = {
     value: 'file_search',
@@ -178,7 +181,7 @@
 
     // Check selected files separately since these are handled differently in the form.
     if (
-      !setsEqual(new Set(selectedCodeInterpreterFiles), new Set(data.selectedCodeInterpreterFiles))
+      !setsEqual(new Set($selectedCodeInterpreterFiles), new Set(data.selectedCodeInterpreterFiles))
     ) {
       modifiedFields.push('code interpreter files');
     }
@@ -210,7 +213,7 @@
       instructions: normalizeNewlines(body.instructions.toString()),
       model: body.model.toString(),
       tools,
-      code_interpreter_file_ids: codeInterpreterToolSelect ? selectedCodeInterpreterFiles : [],
+      code_interpreter_file_ids: codeInterpreterToolSelect ? $selectedCodeInterpreterFiles : [],
       file_search_file_ids: fileSearchToolSelect ? selectedFileSearchFiles : [],
       published: body.published?.toString() === 'on',
       use_latex: body.use_latex?.toString() === 'on',
@@ -283,6 +286,13 @@
       }
     }
   });
+
+  const addMoreFilesOption = { name: "+ Add more files", value: "add_more_files" };
+
+  const handleUploadFromDropDown = (e: Event) => {
+    const target = e.target as HTMLSelectElement;
+    console.log(target.value);
+  }
 </script>
 
 <div class="h-full w-full overflow-y-auto p-12">
@@ -410,7 +420,7 @@
         >
         <MultiSelect
           name="selectedFileSearchFiles"
-          items={fileSearchOptions}
+          items={[addMoreFilesOption, ...fileSearchOptions]}
           bind:value={selectedFileSearchFiles}
         />
       </div>
@@ -424,7 +434,7 @@
           >Select which files this assistant should use for {codeInterpreterMetadata.name}. You can
           select up to {codeInterpreterMetadata.max_count} files.</Helper
         >
-        <MultiSelect
+        <MultiSelectWithUpload
           name="selectedCodeInterpreterFiles"
           items={codeInterpreterOptions}
           bind:value={selectedCodeInterpreterFiles}
