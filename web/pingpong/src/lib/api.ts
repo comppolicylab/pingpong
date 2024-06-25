@@ -529,14 +529,14 @@ export type Classes = {
  * Get all the classes at an institution.
  */
 export const getClasses = async (f: Fetcher, id: string) => {
-  return await GET<never, Classes>(f, `institution/${id}/classes`);
+  return await GET<never, Classes>(f, `institution/${id}/groups`);
 };
 
 /**
  * Get classes visible to the current user.
  */
 export const getMyClasses = async (f: Fetcher) => {
-  return await GET<never, Classes>(f, `classes`);
+  return await GET<never, Classes>(f, `groups`);
 };
 
 /**
@@ -567,7 +567,7 @@ export type UpdateClassRequest = {
  * Create a new class.
  */
 export const createClass = async (f: Fetcher, instId: number, data: CreateClassRequest) => {
-  const url = `institution/${instId}/class`;
+  const url = `institution/${instId}/group`;
   return await POST<CreateClassRequest, Class>(f, url, data);
 };
 
@@ -575,7 +575,7 @@ export const createClass = async (f: Fetcher, instId: number, data: CreateClassR
  * Parameters for updating a class.
  */
 export const updateClass = async (f: Fetcher, classId: number, data: UpdateClassRequest) => {
-  const url = `class/${classId}`;
+  const url = `group/${classId}`;
   return await PUT<UpdateClassRequest, Class>(f, url, data);
 };
 
@@ -590,7 +590,7 @@ export type ApiKey = {
  * Update the API key for a class.
  */
 export const updateApiKey = async (f: Fetcher, classId: number, apiKey: string) => {
-  const url = `class/${classId}/api_key`;
+  const url = `group/${classId}/api_key`;
   return await PUT<ApiKey, ApiKey>(f, url, { api_key: apiKey });
 };
 
@@ -598,7 +598,7 @@ export const updateApiKey = async (f: Fetcher, classId: number, apiKey: string) 
  * Fetch the API key for a class.
  */
 export const getApiKey = async (f: Fetcher, classId: number) => {
-  const url = `class/${classId}/api_key`;
+  const url = `group/${classId}/api_key`;
   return await GET<never, ApiKey>(f, url);
 };
 
@@ -625,7 +625,7 @@ export type AssistantModels = {
  * Get models available with the api key for the class.
  */
 export const getModels = async (f: Fetcher, classId: number) => {
-  const url = `class/${classId}/models`;
+  const url = `group/${classId}/models`;
   return await GET<never, AssistantModels>(f, url);
 };
 
@@ -633,7 +633,7 @@ export const getModels = async (f: Fetcher, classId: number) => {
  * Fetch a class by ID.
  */
 export const getClass = async (f: Fetcher, classId: number) => {
-  const url = `class/${classId}`;
+  const url = `group/${classId}`;
   return await GET<never, Class>(f, url);
 };
 
@@ -641,7 +641,7 @@ export const getClass = async (f: Fetcher, classId: number) => {
  * Fetch all files for a class.
  */
 export const getClassFiles = async (f: Fetcher, classId: number) => {
-  const url = `class/${classId}/files`;
+  const url = `group/${classId}/files`;
   return await GET<never, ServerFiles>(f, url);
 };
 
@@ -710,7 +710,7 @@ const getThreads = async (f: Fetcher, url: string, opts?: GetThreadsOpts) => {
  * Fetch all (visible) threads for a class.
  */
 export const getClassThreads = async (f: Fetcher, classId: number, opts?: GetThreadsOpts) => {
-  const url = `class/${classId}/threads`;
+  const url = `group/${classId}/threads`;
   return getThreads(f, url, opts);
 };
 
@@ -775,7 +775,7 @@ export type Assistants = {
  * Fetch all assistants for a class.
  */
 export const getAssistants = async (f: Fetcher, classId: number) => {
-  const url = `class/${classId}/assistants`;
+  const url = `group/${classId}/assistants`;
   return await GET<never, Assistants>(f, url);
 };
 
@@ -795,7 +795,7 @@ export type AssistantFilesResponse = {
  * Fetch all files for a vector store.
  */
 export const getAssistantFiles = async (f: Fetcher, classId: number, assistantId: number) => {
-  const url = `/class/${classId}/assistant/${assistantId}/files`;
+  const url = `/group/${classId}/assistant/${assistantId}/files`;
   return await GET<never, AssistantFilesResponse>(f, url);
 };
 
@@ -846,7 +846,7 @@ export const createAssistant = async (
   classId: number,
   data: CreateAssistantRequest
 ) => {
-  const url = `class/${classId}/assistant`;
+  const url = `group/${classId}/assistant`;
   return await POST<CreateAssistantRequest, Assistant>(f, url, data);
 };
 
@@ -859,7 +859,7 @@ export const updateAssistant = async (
   assistantId: number,
   data: UpdateAssistantRequest
 ) => {
-  const url = `class/${classId}/assistant/${assistantId}`;
+  const url = `group/${classId}/assistant/${assistantId}`;
   return await PUT<UpdateAssistantRequest, Assistant>(f, url, data);
 };
 
@@ -867,7 +867,7 @@ export const updateAssistant = async (
  * Delete an assistant.
  */
 export const deleteAssistant = async (f: Fetcher, classId: number, assistantId: number) => {
-  const url = `class/${classId}/assistant/${assistantId}`;
+  const url = `group/${classId}/assistant/${assistantId}`;
   return await DELETE<never, GenericStatus>(f, url);
 };
 
@@ -884,7 +884,7 @@ export type FileUploadPurpose = 'assistants' | 'vision';
  * Upload a file to a class.
  */
 export const uploadFile = (classId: number, file: File, opts?: UploadOptions) => {
-  const url = fullPath(`class/${classId}/file`);
+  const url = fullPath(`group/${classId}/file`);
   return _doUpload(url, file, opts);
 };
 
@@ -898,7 +898,7 @@ export const uploadUserFile = (
   opts?: UploadOptions,
   purpose: FileUploadPurpose = 'assistants'
 ) => {
-  const url = fullPath(`class/${classId}/user/${userId}/file`);
+  const url = fullPath(`group/${classId}/user/${userId}/file`);
   return _doUpload(url, file, opts, purpose);
 };
 
@@ -1008,7 +1008,7 @@ const _doUpload = (
  * Delete a file.
  */
 export const deleteFile = async (f: Fetcher, classId: number, fileId: number) => {
-  const url = `class/${classId}/file/${fileId}`;
+  const url = `group/${classId}/file/${fileId}`;
   return await DELETE<never, GenericStatus>(f, url);
 };
 
@@ -1021,7 +1021,7 @@ export const deleteUserFile = async (
   userId: number,
   fileId: number
 ) => {
-  const url = `class/${classId}/user/${userId}/file/${fileId}`;
+  const url = `group/${classId}/user/${userId}/file/${fileId}`;
   return await DELETE<never, GenericStatus>(f, url);
 };
 
@@ -1068,7 +1068,7 @@ export type GetClassUsersOpts = {
  * Fetch users in a class.
  */
 export const getClassUsers = async (f: Fetcher, classId: number, opts?: GetClassUsersOpts) => {
-  const url = `class/${classId}/users`;
+  const url = `group/${classId}/users`;
 
   const response = await GET<GetClassUsersOpts, ClassUsers>(f, url, opts);
   const expanded = expandResponse(response);
@@ -1127,7 +1127,7 @@ export const createClassUsers = async (
   classId: number,
   data: CreateClassUsersRequest
 ) => {
-  const url = `class/${classId}/user`;
+  const url = `group/${classId}/user`;
   return await POST<CreateClassUsersRequest, UserClassRoles>(f, url, data);
 };
 
@@ -1147,7 +1147,7 @@ export const updateClassUserRole = async (
   userId: number,
   data: UpdateClassUserRoleRequest
 ) => {
-  const url = `class/${classId}/user/${userId}/role`;
+  const url = `group/${classId}/user/${userId}/role`;
   return await PUT<UpdateClassUserRoleRequest, UserClassRole>(f, url, data);
 };
 
@@ -1155,7 +1155,7 @@ export const updateClassUserRole = async (
  * Remove a user from a class.
  */
 export const removeClassUser = async (f: Fetcher, classId: number, userId: number) => {
-  const url = `class/${classId}/user/${userId}`;
+  const url = `group/${classId}/user/${userId}`;
   return await DELETE<never, GenericStatus>(f, url);
 };
 
@@ -1201,7 +1201,7 @@ export type Thread = {
  * Create a new conversation thread.
  */
 export const createThread = async (f: Fetcher, classId: number, data: CreateThreadRequest) => {
-  const url = `class/${classId}/thread`;
+  const url = `group/${classId}/thread`;
   return await POST<CreateThreadRequest, Thread>(f, url, data);
 };
 
@@ -1209,7 +1209,7 @@ export const createThread = async (f: Fetcher, classId: number, data: CreateThre
  * Delete a thread.
  */
 export const deleteThread = async (f: Fetcher, classId: number, threadId: number) => {
-  const url = `class/${classId}/thread/${threadId}`;
+  const url = `group/${classId}/thread/${threadId}`;
   return await DELETE<never, GenericStatus>(f, url);
 };
 
@@ -1217,7 +1217,7 @@ export const deleteThread = async (f: Fetcher, classId: number, threadId: number
  * Publish a thread.
  */
 export const publishThread = async (f: Fetcher, classId: number, threadId: number) => {
-  const url = `class/${classId}/thread/${threadId}/publish`;
+  const url = `group/${classId}/thread/${threadId}/publish`;
   return await POST<never, GenericStatus>(f, url);
 };
 
@@ -1225,7 +1225,7 @@ export const publishThread = async (f: Fetcher, classId: number, threadId: numbe
  * Unpublish a thread.
  */
 export const unpublishThread = async (f: Fetcher, classId: number, threadId: number) => {
-  const url = `class/${classId}/thread/${threadId}/publish`;
+  const url = `group/${classId}/thread/${threadId}/publish`;
   return await DELETE<never, GenericStatus>(f, url);
 };
 
@@ -1378,7 +1378,7 @@ export type ThreadWithMeta = {
  * Get a thread by ID.
  */
 export const getThread = async (f: Fetcher, classId: number, threadId: number) => {
-  const url = `class/${classId}/thread/${threadId}`;
+  const url = `group/${classId}/thread/${threadId}`;
   return await GET<never, ThreadWithMeta>(f, url);
 };
 
@@ -1403,7 +1403,7 @@ export const getCIMessages = async (
   run_id: string,
   step_id: string
 ) => {
-  const url = `class/${classId}/thread/${threadId}/ci_messages`;
+  const url = `group/${classId}/thread/${threadId}/ci_messages`;
   const opts = {
     openai_thread_id: openai_thread_id,
     run_id: run_id,
@@ -1451,7 +1451,7 @@ export const getThreadMessages = async (
   threadId: number,
   opts?: GetThreadMessagesOpts
 ) => {
-  const url = `class/${classId}/thread/${threadId}/messages`;
+  const url = `group/${classId}/thread/${threadId}/messages`;
   const expanded = expandResponse(await GET<GetThreadMessagesOpts, ThreadMessages>(f, url, opts));
   if (expanded.error) {
     return {
@@ -1600,7 +1600,7 @@ export const postMessage = async (
   threadId: number,
   data: NewThreadMessageRequest
 ) => {
-  const url = `class/${classId}/thread/${threadId}`;
+  const url = `group/${classId}/thread/${threadId}`;
   const res = await _fetch(
     f,
     'POST',
@@ -1616,7 +1616,7 @@ export const postMessage = async (
  * Create a new thread run.
  */
 export const createThreadRun = async (f: Fetcher, classId: number, threadId: number) => {
-  const url = `class/${classId}/thread/${threadId}/run`;
+  const url = `group/${classId}/thread/${threadId}/run`;
   const res = await _fetch(f, 'POST', url);
   return streamThreadChunks(res);
 };
@@ -1637,7 +1637,7 @@ export const getLastThreadRun = async (
   threadId: number,
   block: boolean = true
 ) => {
-  const url = `class/${classId}/thread/${threadId}/last_run`;
+  const url = `group/${classId}/thread/${threadId}/last_run`;
   return await GET<GetLastRunParams, ThreadRun>(f, url, { block });
 };
 
@@ -1721,8 +1721,8 @@ export type Role = (typeof ROLES)[number];
  */
 export const ROLE_LABELS: Record<Role, string> = {
   admin: 'Administrator',
-  teacher: 'Instructor',
-  student: 'Student'
+  teacher: 'Moderator',
+  student: 'Member'
 };
 
 /**
@@ -1795,7 +1795,7 @@ export type GetFileSupportFilter = (
  * Get information about uploading files.
  */
 export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
-  const url = `class/${classId}/upload_info`;
+  const url = `group/${classId}/upload_info`;
   const infoResponse = expandResponse(await GET<never, UploadInfo>(f, url));
 
   const info = infoResponse.data || {

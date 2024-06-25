@@ -101,9 +101,9 @@
   let anyCanPublishThread = data?.class.any_can_publish_thread || false;
   let assistantPermissions = formatAssistantPermissions(data?.class);
   const asstPermOptions = [
-    { value: 'create:0,publish:0,upload:0', name: 'Do not allow students to create' },
-    { value: 'create:1,publish:0,upload:1', name: 'Students can create but not publish' },
-    { value: 'create:1,publish:1,upload:1', name: 'Students can create and publish' }
+    { value: 'create:0,publish:0,upload:0', name: 'Do not allow members to create' },
+    { value: 'create:1,publish:0,upload:1', name: 'Members can create but not publish' },
+    { value: 'create:1,publish:1,upload:1', name: 'Members can create and publish' }
   ];
 
   const blurred = writable(true);
@@ -212,7 +212,7 @@
     } else {
       invalidateAll();
       $updatingClass = false;
-      happyToast('Saved class info');
+      happyToast('Saved group info');
     }
   };
 
@@ -270,15 +270,15 @@
 <div
   class="container p-12 space-y-12 divide-y-3 divide-blue-dark-40 dark:divide-gray-700 overflow-y-auto w-full flex flex-col justify-between h-[calc(100%-5rem)]"
 >
-  <Heading tag="h2" class="text-3xl font-serif font-medium text-blue-dark-40">Manage Class</Heading>
+  <Heading tag="h2" class="text-3xl font-serif font-medium text-blue-dark-40">Manage Group</Heading>
   {#if canEditClassInfo}
     <form on:submit={updateClass} class="pt-4">
       <div class="grid md:grid-cols-3 gap-x-6 gap-y-8">
         <div>
           <Heading customSize="text-xl" tag="h3"
-            ><Secondary class="text-3xl text-black font-normal">Class Details</Secondary></Heading
+            ><Secondary class="text-3xl text-black font-normal">Group Details</Secondary></Heading
           >
-          <Info>General information about the class.</Info>
+          <Info>General information about the group.</Info>
         </div>
         <div>
           <Label for="name">Name</Label>
@@ -306,8 +306,8 @@
 
         <div></div>
         <Helper
-          >Choose whether to allow students to share their threads with the rest of the class.
-          Instructors are always allowed to publish threads.</Helper
+          >Choose whether to allow members to share their threads with the rest of the group.
+          Moderators are always allowed to publish threads.</Helper
         >
         <div>
           <Checkbox
@@ -315,14 +315,14 @@
             name="any_can_publish_thread"
             disabled={$updatingClass}
             on:change={submitParentForm}
-            checked={anyCanPublishThread}>Allow students to publish threads</Checkbox
+            checked={anyCanPublishThread}>Allow members to publish threads</Checkbox
           >
         </div>
 
         <div></div>
         <Helper
-          >Choose the level of permissions students should have for creating their own assistants
-          and sharing them with the class. Instructors will always be able to create and publish
+          >Choose the level of permissions members should have for creating their own assistants
+          and sharing them with the group. Moderators will always be able to create and publish
           assistants.</Helper
         >
         <Select
@@ -392,7 +392,7 @@
 
           {#if hasApiKey}
             <Helper
-              >Note: Changing the API key will break all threads and assistants in the class, so it
+              >Note: Changing the API key will break all threads and assistants in the group, so it
               is not currently supported.</Helper
             >
           {/if}
@@ -420,7 +420,7 @@
         <Heading customSize="text-xl font-bold" tag="h3"
           ><Secondary class="text-3xl text-black font-normal">Users</Secondary></Heading
         >
-        <Info>Manage users who have access to this class.</Info>
+        <Info>Manage users who have access to this group.</Info>
       </div>
       <div class="col-span-2">
         <div class="mb-4">

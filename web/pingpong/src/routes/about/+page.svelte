@@ -60,7 +60,7 @@
     <P>PingPong is a tool for using large language models in a pedagogical setting.</P>
     <P
       >This app lets you create GPT models that are customized with documents relevant to your
-      course or workshop, and share them with a group of students.</P
+      course or workshop, and share them with a group of members.</P
     >
     <P>
       PingPong is built on top of <a
@@ -96,12 +96,12 @@
         information about any user who might have triggered the error.
       </li>
       <li class="my-2">
-        The teaching team of a class can view all threads in that class, including the content of
+        The moderation team of a group can view all threads in that group, including the content of
         messages and the users participating in them.
       </li>
       <li class="my-2">
-        Anyone with access to the OpenAI API key used in a class is able to view the content of all
-        messages and files used in that class. The people with access to the API key may or may not
+        Anyone with access to the OpenAI API key used in a group is able to view the content of all
+        messages and files used in that group. The people with access to the API key may or may not
         be PingPong users; we cannot stop the API key owner from sharing the key with others outside
         of PingPong.
       </li>

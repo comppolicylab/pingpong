@@ -62,15 +62,15 @@
 
     <Label for="role">Role</Label>
     <Helper>
-      <div>Choose a role to grant permissions to these users to view the class.</div>
+      <div>Choose a role to grant permissions to these users to view the group.</div>
       <ul class="list-disc pl-8 my-2">
         <li>
-          <strong>Students</strong> can create chats and view their own personal chat history.
+          <strong>Members</strong> can create chats and view their own personal chat history.
         </li>
         <li>
-          <strong>Teachers</strong> can view everyone's chat history and manage students.
+          <strong>Moderators</strong> can view everyone's chat history and manage members.
         </li>
-        <li><strong>Admins</strong> can view everyone's chat history and manage the class.</li>
+        <li><strong>Admins</strong> can view everyone's chat history and manage the group.</li>
       </ul>
     </Helper>
     <Select id="role" name="role" value={role} items={roles} />

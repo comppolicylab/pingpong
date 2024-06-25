@@ -274,7 +274,7 @@
     } else {
       happyToast('Assistant saved');
       checkForChanges = false;
-      await goto(`/class/${data.class.id}/assistant`, { invalidateAll: true });
+      await goto(`/group/${data.class.id}/assistant`, { invalidateAll: true });
     }
   };
 
@@ -391,7 +391,7 @@
         checked={(assistant ? assistant.hide_prompt : false) || false}>Hide Prompt</Checkbox
       >
       <Helper
-        >Hide the prompt from other users. When checked, only the teaching team and the assistant's
+        >Hide the prompt from other users. When checked, only the moderation team and the assistant's
         creator will be able to see this prompt.</Helper
       >
     </div>
@@ -473,13 +473,13 @@
       >
       {#if !canPublish}
         <Helper
-          >Publishing assistants has been disabled for this class. Contact your admin if you need to
+          >Publishing assistants has been disabled for this group. Contact your admin if you need to
           share this assistant.</Helper
         >
       {:else}
         <Helper
           >By default only you can see and interact with this assistant. If you would like to share
-          the assistant with the rest of your class, select this option.</Helper
+          the assistant with the rest of your group, select this option.</Helper
         >
       {/if}
     </div>
@@ -495,7 +495,7 @@
       >
       <Button
         disabled={loading}
-        href={`/class/${data.class.id}/assistant`}
+        href={`/group/${data.class.id}/assistant`}
         color="red"
         pill
         class="bg-blue-light-50 border rounded-full border-blue-dark-40 text-blue-dark-50 hover:bg-blue-light-40 ml-4"

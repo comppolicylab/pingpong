@@ -80,7 +80,7 @@
       <div class="flex flex-wrap flex-col">
         {#each threads as thread}
           <a
-            href={`/class/${thread.class_id}/thread/${thread.id}`}
+            href={`/group/${thread.class_id}/thread/${thread.id}`}
             class="border-b border-gray-200 pb-4 pt-4 transition-all duration-300 hover:bg-gray-100 hover:pl-4"
           >
             <div>

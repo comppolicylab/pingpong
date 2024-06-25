@@ -11,9 +11,9 @@ export const load: PageLoad = async ({ parent }) => {
     const latestThread = parentData.threads[0];
     const classId = latestThread.class_id;
     const asstId = latestThread.assistant_id;
-    return redirect(302, `/class/${classId}?assistant=${asstId}`);
+    return redirect(302, `/group/${classId}?assistant=${asstId}`);
   } else if (parentData.classes.length > 0) {
-    return redirect(302, `/class/${parentData.classes[0].id}`);
+    return redirect(302, `/group/${parentData.classes[0].id}`);
   } else if (parentData.admin.showAdminPage) {
     // If we get here, the app is not configured yet (i.e., a new installation).
     // Since the user is an admin, we can redirect them to a page where they can

@@ -47,7 +47,7 @@
   $: threads = ($page.data.threads || []) as api.Thread[];
   $: currentClassId = parseInt($page.params.classId, 10);
   $: currentAssistantId = $page.data.threadData?.thread?.assistant_id;
-  $: onNewChatPage = $page.url.pathname === `/class/${currentClassId}`;
+  $: onNewChatPage = $page.url.pathname === `/group/${currentClassId}`;
 
   // Toggle whether menu is open.
   const togglePanel = (state?: boolean) => {
@@ -92,7 +92,7 @@
         href={onNewChatPage
           ? undefined
           : currentClassId
-            ? `/class/${currentClassId}${
+            ? `/group/${currentClassId}${
                 currentAssistantId ? `?assistant=${currentAssistantId}` : ''
               }`
             : '/'}
@@ -127,7 +127,7 @@
         <SidebarItem
           class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2"
           spanClass="flex-1 truncate"
-          href={`/class/${thread.class_id}/thread/${thread.id}`}
+          href={`/group/${thread.class_id}/thread/${thread.id}`}
           label={thread.name || 'Undefined'}
           activeClass="bg-blue-dark-40"
         >

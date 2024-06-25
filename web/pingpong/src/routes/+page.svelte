@@ -3,7 +3,7 @@
   -->
 <div class="m-auto p-16 gap-4 flex flex-col">
   <h1 class="text-2xl">Welcome to PingPong!</h1>
-  <p>It looks like you have not been added to any classes and you are also not an admin.</p>
+  <p>It looks like you have not been added to any group and you are also not an admin.</p>
   <p>
     This suggests something might be misconfigured. Please contact your site admin, or see our <a
       href="/about"
