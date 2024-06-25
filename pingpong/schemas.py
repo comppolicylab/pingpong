@@ -399,6 +399,7 @@ class Class(BaseModel):
     created: datetime
     updated: datetime | None
     api_key: SecretStr | None
+    private: bool | None = None
     any_can_create_assistant: bool | None = None
     any_can_publish_assistant: bool | None = None
     any_can_publish_thread: bool | None = None
@@ -411,6 +412,7 @@ class Class(BaseModel):
 class CreateClass(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
     term: str = Field(..., min_length=1, max_length=100)
+    private: bool = False
     any_can_create_assistant: bool = False
     any_can_publish_assistant: bool = False
     any_can_publish_thread: bool = False
@@ -420,6 +422,7 @@ class CreateClass(BaseModel):
 class UpdateClass(BaseModel):
     name: str | None = Field(None, min_length=3, max_length=100)
     term: str | None = Field(None, min_length=1, max_length=100)
+    private: bool | None = None
     any_can_create_assistant: bool | None = None
     any_can_publish_assistant: bool | None = None
     any_can_publish_thread: bool | None = None

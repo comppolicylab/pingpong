@@ -99,6 +99,7 @@
 
   let usersModalOpen = false;
   let anyCanPublishThread = data?.class.any_can_publish_thread || false;
+  let makePrivate = data?.class.private || false;
   let assistantPermissions = formatAssistantPermissions(data?.class);
   const asstPermOptions = [
     { value: 'create:0,publish:0,upload:0', name: 'Do not allow members to create' },
@@ -201,6 +202,7 @@
       name: d.name.toString(),
       term: d.term.toString(),
       any_can_publish_thread: d.any_can_publish_thread?.toString() === 'on',
+      private: d.make_private?.toString() === 'on',
       ...parseAssistantPermissions(d.asst_perm.toString())
     };
 
@@ -306,6 +308,21 @@
 
         <div></div>
         <Helper
+          >Choose whether to make this group private. In private groups, only members can view
+          threads and assistants they create.</Helper
+        >
+        <div>
+          <Checkbox
+            id="make_private"
+            name="make_private"
+            disabled={$updatingClass}
+            on:change={submitParentForm}
+            checked={makePrivate}>Make this group private</Checkbox
+          >
+        </div>
+
+        <div></div>
+        <Helper
           >Choose whether to allow members to share their threads with the rest of the group.
           Moderators are always allowed to publish threads.</Helper
         >
@@ -321,8 +338,8 @@
 
         <div></div>
         <Helper
-          >Choose the level of permissions members should have for creating their own assistants
-          and sharing them with the group. Moderators will always be able to create and publish
+          >Choose the level of permissions members should have for creating their own assistants and
+          sharing them with the group. Moderators will always be able to create and publish
           assistants.</Helper
         >
         <Select

@@ -512,6 +512,7 @@ export type Class = {
   created: string;
   updated: string | null;
   api_key: string | null;
+  private: boolean | null;
   any_can_create_assistant: boolean | null;
   any_can_publish_assistant: boolean | null;
   any_can_publish_thread: boolean | null;
@@ -545,6 +546,7 @@ export const getMyClasses = async (f: Fetcher) => {
 export type CreateClassRequest = {
   name: string;
   term: string;
+  private?: boolean;
   any_can_create_assistant?: boolean;
   any_can_publish_assistant?: boolean;
   any_can_publish_thread?: boolean;
@@ -557,6 +559,7 @@ export type CreateClassRequest = {
 export type UpdateClassRequest = {
   name?: string;
   term?: string;
+  private?: boolean;
   any_can_create_assistant?: boolean;
   any_can_publish_assistant?: boolean;
   any_can_publish_thread?: boolean;

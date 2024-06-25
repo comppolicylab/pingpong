@@ -70,7 +70,9 @@
         <li>
           <strong>Moderators</strong> can view everyone's chat history and manage members.
         </li>
-        <li><strong>Admins</strong> can view everyone's chat history and manage the group.</li>
+        <li>
+          <strong>Administrators</strong> can view everyone's chat history and manage the group.
+        </li>
       </ul>
     </Helper>
     <Select id="role" name="role" value={role} items={roles} />

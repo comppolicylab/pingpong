@@ -391,8 +391,8 @@
         checked={(assistant ? assistant.hide_prompt : false) || false}>Hide Prompt</Checkbox
       >
       <Helper
-        >Hide the prompt from other users. When checked, only the moderation team and the assistant's
-        creator will be able to see this prompt.</Helper
+        >Hide the prompt from other users. When checked, only the moderation team and the
+        assistant's creator will be able to see this prompt.</Helper
       >
     </div>
     <div class="col-span-2 mb-4">

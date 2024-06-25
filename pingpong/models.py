@@ -657,6 +657,7 @@ class Class(Base):
     )
     term = Column(String)
     api_key = Column(String, nullable=True)
+    private = Column(Boolean, default=False)
     any_can_create_assistant = Column(Boolean, default=False)
     any_can_publish_assistant = Column(Boolean, default=False)
     any_can_publish_thread = Column(Boolean, default=False)

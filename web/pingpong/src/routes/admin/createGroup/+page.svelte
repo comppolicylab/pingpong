@@ -5,7 +5,7 @@
   import { happyToast, sadToast } from '$lib/toast';
   import { goto } from '$app/navigation';
 
-  export let data../createGroup/$types.js;
+  export let data;
 
   const loading = writable(false);
   $: institutions = (data.admin.canCreateClass || []).sort((a, b) => a.name.localeCompare(b.name));
