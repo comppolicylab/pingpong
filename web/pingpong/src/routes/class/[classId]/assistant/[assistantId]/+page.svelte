@@ -11,7 +11,7 @@
     Textarea,
     type SelectOptionType
   } from 'flowbite-svelte';
-  import type { Tool, ServerFile } from '$lib/api';
+  import type { Tool, ServerFile, FileUploadInfo } from '$lib/api';
   import { beforeNavigate, goto } from '$app/navigation';
   import * as api from '$lib/api';
   import { setsEqual } from '$lib/set';
@@ -19,7 +19,7 @@
   import { normalizeNewlines } from '$lib/content.js';
   import { ImageOutline } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
-  import { writable } from 'svelte/store';
+  import { writable, type Writable } from 'svelte/store';
 
   export let data;
 
@@ -30,9 +30,21 @@
   $: assistant = data.assistant;
   $: canPublish = data.grants.canPublishAssistants;
 
-  let selectedFileSearchFiles = writable(data.selectedFileSearchFiles.slice());
-  let selectedCodeInterpreterFiles = writable(data.selectedCodeInterpreterFiles.slice());
+  $: selectedFileSearchFiles = writable(data.selectedFileSearchFiles.slice());
+  $: selectedCodeInterpreterFiles = writable(data.selectedCodeInterpreterFiles.slice());
+
+  // The list of adhoc files being uploaded.
+  let optimisticUploadFileInfo = writable<FileUploadInfo[]>([]);
+  $: uploadingOptimistic = $optimisticUploadFileInfo.some((f) => f.state === 'pending');
+  $: optimisticFiles = $optimisticUploadFileInfo
+    .filter((f) => f.state === 'success')
+    .map((f) => f.response as ServerFile);
+  $: optimisticFileIds = $optimisticUploadFileInfo
+    .filter((f) => f.state === 'success')
+    .map((f) => (f.response as ServerFile).file_id);
+  $: currentSelectedFileSearchFiles = writable([...$selectedFileSearchFiles, ...optimisticFileIds]);
   let loading = false;
+
   const fileSearchMetadata = {
     value: 'file_search',
     name: 'File Search',
@@ -73,7 +85,7 @@
   );
   $: supportsVision = supportVisionModels.includes(selectedModel);
   let allowVisionUpload = false;
-  $: allFiles = data.files.map((f) => ({
+  $: allFiles = [...data.files, ...optimisticFiles].map((f) => ({
     state: 'success',
     progress: 100,
     file: { type: f.content_type, name: f.name },
@@ -103,6 +115,11 @@
 
   $: fileSearchToolSelect = initialTools.includes('file_search');
   $: codeInterpreterToolSelect = initialTools.includes('code_interpreter');
+
+  // Handle updates from the file upload component.
+  const handleOptimisticFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
+    optimisticUploadFileInfo = e.detail;
+  };
 
   /**
    * Check if the assistant model supports vision capabilities.
@@ -308,7 +325,6 @@
       }
     }
   });
-
 </script>
 
 <div class="h-full w-full overflow-y-auto p-12">
@@ -450,14 +466,19 @@
         <MultiSelectWithUpload
           name="selectedFileSearchFiles"
           items={fileSearchOptions}
-          bind:value={selectedFileSearchFiles}
-          on:error={(e) => sadToast(e.detail.message)}
+          bind:value={currentSelectedFileSearchFiles}
+          disabled={loading || !handleUpload}
           upload={handleUpload}
+          accept={data.uploadInfo.fileTypes({
+            file_search: true,
+            code_interpreter: false,
+            vision: false
+          })}
           maxSize={data.uploadInfo.private_file_max_size}
-          accept={fileSearchAcceptedFiles || ''}
-          disabled={loading || !handleUpload || !fileSearchOptions}
+          {uploadingOptimistic}
+          on:error={(e) => sadToast(e.detail.message)}
+          on:change={handleOptimisticFilesChange}
         />
-        
       </div>
     {/if}
 
@@ -471,8 +492,17 @@
         >
         <MultiSelectWithUpload
           name="selectedCodeInterpreterFiles"
-          items={codeInterpreterOptions}
+          bind:items={codeInterpreterOptions}
           bind:value={selectedCodeInterpreterFiles}
+          disabled={loading || !handleUpload}
+          upload={handleUpload}
+          accept={data.uploadInfo.fileTypes({
+            file_search: false,
+            code_interpreter: true,
+            vision: false
+          })}
+          maxSize={data.uploadInfo.private_file_max_size}
+          on:error={(e) => sadToast(e.detail.message)}
         />
       </div>
     {/if}
@@ -505,10 +535,10 @@
         pill
         class="bg-orange border border-orange text-white hover:bg-orange-dark"
         type="submit"
-        disabled={loading}>Save</Button
+        disabled={loading || uploadingOptimistic}>Save</Button
       >
       <Button
-        disabled={loading}
+        disabled={loading || uploadingOptimistic}
         href={`/class/${data.class.id}/assistant`}
         color="red"
         pill
