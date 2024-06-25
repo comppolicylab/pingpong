@@ -245,6 +245,26 @@ async def manage_authz(data: schemas.ManageAuthzRequest, request: Request):
 @v1.post("/login/magic", response_model=schemas.GenericStatus)
 async def login(body: schemas.MagicLoginRequest, request: Request):
     """Provide a magic link to the auth endpoint."""
+    # Get the magic link config.
+    try:
+        ml_config = next(
+            method
+            for method in config.auth.authn_methods
+            if method.method == "magic_link"
+        )
+    except StopIteration:
+        raise HTTPException(
+            status_code=400, detail="Magic links are not supported by this server"
+        )
+
+    # We can only support email magic links right now. In theory we could support
+    # SMS and others, but haven't done so yet.
+    if ml_config.transport.protocol != "email":
+        raise HTTPException(
+            status_code=501,
+            detail="Server is trying to use an unsupported transport for magic links",
+        )
+
     # Get the email from the request.
     email = body.email
     # Look up the user by email
@@ -263,7 +283,7 @@ async def login(body: schemas.MagicLoginRequest, request: Request):
             raise HTTPException(status_code=401, detail="User does not exist")
 
     nowfn = get_now_fn(request)
-    magic_link = generate_auth_link(user.id, expiry=86_400, nowfn=nowfn)
+    magic_link = generate_auth_link(user.id, expiry=ml_config.expiry, nowfn=nowfn)
 
     message = message_template.substitute(
         {
@@ -280,7 +300,7 @@ async def login(body: schemas.MagicLoginRequest, request: Request):
 
     await config.email.sender.send(
         email,
-        "Log back in to PingPong",
+        ml_config.transport.template.subject,
         message,
     )
 

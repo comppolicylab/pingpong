@@ -124,9 +124,38 @@ class SecretKey(BaseSettings):
     algorithm: str = Field("HS256")
 
 
+class EmailTemplate(BaseSettings):
+    subject: str
+    body: str
+
+
+class EmailMessageTransport(BaseSettings):
+    protocol: Literal["email"]
+    template: EmailTemplate
+
+
+MessageTransport = Union[EmailMessageTransport]
+
+
+class SamlAuthnSettings(BaseSettings):
+    method: Literal["saml"]
+
+
+class MagicLinkAuthnSettings(BaseSettings):
+    method: Literal["magic_link"]
+    transport: MessageTransport
+    expiry: int = Field(86_400)
+
+
+AuthnSettings = Union[SamlAuthnSettings, MagicLinkAuthnSettings]
+
+
 class AuthSettings(BaseSettings):
+    """Authentication and related configuration."""
+
     autopromote_on_login: bool = Field(False)
     secret_keys: list[SecretKey]
+    authn_methods: list[AuthnSettings]
 
 
 DbSettings = Union[PostgresSettings, SqliteSettings]
