@@ -31,7 +31,7 @@
   $: canPublish = data.grants.canPublishAssistants;
 
   $: selectedFileSearchFiles = writable(data.selectedFileSearchFiles.slice());
-  $: selectedCodeInterpreterFiles = writable(data.selectedCodeInterpreterFiles.slice());
+  let selectedCodeInterpreterFiles = data.selectedCodeInterpreterFiles.slice();
 
   // The list of adhoc files being uploaded.
   let optimisticUploadFileInfo = writable<FileUploadInfo[]>([]);
@@ -215,7 +215,7 @@
 
     // Check selected files separately since these are handled differently in the form.
     if (
-      !setsEqual(new Set($selectedCodeInterpreterFiles), new Set(data.selectedCodeInterpreterFiles))
+      !setsEqual(new Set(selectedCodeInterpreterFiles), new Set(data.selectedCodeInterpreterFiles))
     ) {
       modifiedFields.push('code interpreter files');
     }
@@ -247,7 +247,7 @@
       instructions: normalizeNewlines(body.instructions.toString()),
       model: body.model.toString(),
       tools,
-      code_interpreter_file_ids: codeInterpreterToolSelect ? $selectedCodeInterpreterFiles : [],
+      code_interpreter_file_ids: codeInterpreterToolSelect ? selectedCodeInterpreterFiles : [],
       file_search_file_ids: fileSearchToolSelect ? $selectedFileSearchFiles : [],
       published: body.published?.toString() === 'on',
       use_latex: body.use_latex?.toString() === 'on',
@@ -490,19 +490,10 @@
           >Select which files this assistant should use for {codeInterpreterMetadata.name}. You can
           select up to {codeInterpreterMetadata.max_count} files.</Helper
         >
-        <MultiSelectWithUpload
+        <MultiSelect
           name="selectedCodeInterpreterFiles"
-          bind:items={codeInterpreterOptions}
+          items={codeInterpreterOptions}
           bind:value={selectedCodeInterpreterFiles}
-          disabled={loading || !handleUpload}
-          upload={handleUpload}
-          accept={data.uploadInfo.fileTypes({
-            file_search: false,
-            code_interpreter: true,
-            vision: false
-          })}
-          maxSize={data.uploadInfo.private_file_max_size}
-          on:error={(e) => sadToast(e.detail.message)}
         />
       </div>
     {/if}
