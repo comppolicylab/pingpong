@@ -211,6 +211,12 @@
             ]
           }
         },
+        "moderator": {
+          "this": {}
+        },
+        "auditor": {
+          "this": {}
+        },
         "can_view": {
           "computedUserset": {
             "relation": "member"
@@ -292,7 +298,12 @@
               },
               {
                 "computedUserset": {
-                  "relation": "supervisor"
+                  "relation": "moderator"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "auditor"
                 }
               }
             ]
@@ -353,6 +364,22 @@
           },
           "member": {
             "directly_related_user_types": []
+          },
+          "moderator": {
+            "directly_related_user_types": [
+              {
+                "type": "class",
+                "relation": "supervisor"
+              }
+            ]
+          },
+          "auditor": {
+            "directly_related_user_types": [
+              {
+                "type": "class",
+                "relation": "supervisor"
+              }
+            ]
           },
           "can_view": {
             "directly_related_user_types": []
@@ -436,7 +463,17 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "supervisor"
+                    "relation": "moderator"
+                  },
+                  "tupleset": {
+                    "relation": "parent"
+                  }
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "auditor"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -452,13 +489,29 @@
           }
         },
         "can_delete": {
-          "tupleToUserset": {
-            "computedUserset": {
-              "relation": "supervisor"
-            },
-            "tupleset": {
-              "relation": "parent"
-            }
+          "union": {
+            "child": [
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "moderator"
+                  },
+                  "tupleset": {
+                    "relation": "parent"
+                  }
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "auditor"
+                  },
+                  "tupleset": {
+                    "relation": "parent"
+                  }
+                }
+              }
+            ]
           }
         },
         "can_publish": {
@@ -488,7 +541,17 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "supervisor"
+                    "relation": "moderator"
+                  },
+                  "tupleset": {
+                    "relation": "parent"
+                  }
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "auditor"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -555,7 +618,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "admin"
+                    "relation": "auditor"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -576,7 +639,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "admin"
+                    "relation": "auditor"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -600,7 +663,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "admin"
+                    "relation": "auditor"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -699,7 +762,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "admin"
+                    "relation": "auditor"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -720,7 +783,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "admin"
+                    "relation": "auditor"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -793,7 +856,17 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "supervisor"
+                    "relation": "moderator"
+                  },
+                  "tupleset": {
+                    "relation": "parent"
+                  }
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "auditor"
                   },
                   "tupleset": {
                     "relation": "parent"
