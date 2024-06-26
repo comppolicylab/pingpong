@@ -242,8 +242,14 @@ async def manage_authz(data: schemas.ManageAuthzRequest, request: Request):
     return {"status": "ok"}
 
 
+@v1.post("/login/saml", response_model=schemas.GenericStatus)
+async def login_saml(request: Request):
+    """Handle SAML login."""
+    raise HTTPException(status_code=501, detail="SAML login not implemented")
+
+
 @v1.post("/login/magic", response_model=schemas.GenericStatus)
-async def login(body: schemas.MagicLoginRequest, request: Request):
+async def login_magic(body: schemas.MagicLoginRequest, request: Request):
     """Provide a magic link to the auth endpoint."""
     # Get the magic link config.
     try:

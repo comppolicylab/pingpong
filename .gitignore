@@ -192,5 +192,5 @@ load_test_results_*
 *_results.json
 
 # Saml
-saml/*/*.key
-saml/*/*.crt
+saml/**/*.key
+saml/**/*.crt
