@@ -369,7 +369,7 @@
             "directly_related_user_types": [
               {
                 "type": "class",
-                "relation": "supervisor"
+                "relation": "teacher"
               }
             ]
           },
@@ -377,7 +377,7 @@
             "directly_related_user_types": [
               {
                 "type": "class",
-                "relation": "supervisor"
+                "relation": "admin"
               }
             ]
           },

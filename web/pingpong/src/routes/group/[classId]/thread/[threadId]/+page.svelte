@@ -25,7 +25,8 @@
     RefreshOutline,
     DotsHorizontalOutline,
     CodeSolid,
-    ImageSolid
+    ImageSolid,
+    LockSolid
   } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
@@ -35,6 +36,7 @@
   $: classId = parseInt($page.params.classId);
   $: threadId = parseInt($page.params.threadId);
   $: threadMgr = new ThreadManager(fetch, classId, threadId, data.threadData);
+  $: isPrivate = data.class.private || false;
   $: canDeleteThread = data.canDeleteThread;
   $: canPublishThread = data.canPublishThread;
   $: messages = threadMgr.messages;
@@ -395,7 +397,14 @@
           class="flex gap-2 px-4 py-2 items-center w-full text-sm flex-nowrap justify-between grow"
         >
           <div class="flex gap-1 grow shrink min-w-0 flex-wrap">
-            {#if !$published}
+            {#if !$published && isPrivate}
+              <div
+                class="flex gap-2 px-4 py-2 items-center w-full text-sm flex-wrap lg:flex-nowrap"
+              >
+                <LockSolid size="sm" class="text-orange" />
+                <Span class="text-gray-400 text-xs">This thread is only visible to you.</Span>
+              </div>
+            {:else if !$published}
               <EyeSlashOutline size="sm" class="text-orange" />
               <Span class="text-gray-400 text-xs whitespace-nowrap"
                 >This thread is visible to the moderation team{externalUserString

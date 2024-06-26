@@ -10,7 +10,8 @@
     CirclePlusSolid,
     DotsVerticalOutline,
     ArrowRightOutline,
-    CogOutline
+    CogOutline,
+    EyeOutline
   } from 'flowbite-svelte-icons';
 
   import {
@@ -133,10 +134,11 @@
         >
           <svelte:fragment slot="icon">
             <span class="eyebrow w-full">{classesById[thread.class_id].name}</span>
-            <EyeSlashOutline
-              size="sm"
-              class={`text-white ${thread.private ? 'visible' : 'invisible'}`}
-            />
+            {#if thread.private}
+              <EyeSlashOutline size="sm" class="text-white" />
+            {:else}
+              <EyeOutline size="sm" class="text-white" />
+            {/if}
           </svelte:fragment>
 
           <svelte:fragment slot="subtext">

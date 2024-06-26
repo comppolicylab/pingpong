@@ -25,8 +25,8 @@ type class
     define student: [user]
     define supervisor: admin or teacher
     define member: admin or teacher or student
-    define moderator: [class#supervisor]
-    define auditor: [class#supervisor]
+    define moderator: [class#teacher]
+    define auditor: [class#admin]
     define can_view: member
     define can_view_users: supervisor
     define can_view_api_key: admin from parent

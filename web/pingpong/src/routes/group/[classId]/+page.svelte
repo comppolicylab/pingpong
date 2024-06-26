@@ -11,7 +11,12 @@
     Badge,
     DropdownDivider
   } from 'flowbite-svelte';
-  import { EyeSlashOutline, ChevronDownSolid, ArrowRightOutline } from 'flowbite-svelte-icons';
+  import {
+    EyeSlashOutline,
+    ChevronDownSolid,
+    ArrowRightOutline,
+    LockSolid
+  } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
   import { errorMessage } from '$lib/errors';
@@ -48,6 +53,7 @@
     };
   };
 
+  $: isPrivate = data.class.private || false;
   // Currently selected assistant.
   $: assistants = data?.assistants || [];
   $: courseAssistants = assistants.filter((asst) => asst.endorsed);
@@ -289,12 +295,19 @@
           remove={handleRemove}
           on:submit={handleSubmit}
         />
-        <div class="flex gap-2 px-4 py-2 items-center w-full text-sm flex-wrap lg:flex-nowrap">
-          <EyeSlashOutline size="sm" class="text-orange" />
-          <Span class="text-gray-400 text-xs"
-            >This thread will be visible the moderation team and yourself.</Span
-          >
-        </div>
+        {#if isPrivate}
+          <div class="flex gap-2 px-4 py-2 items-center w-full text-sm flex-wrap lg:flex-nowrap">
+            <LockSolid size="sm" class="text-orange" />
+            <Span class="text-gray-400 text-xs">This thread will only be visible to you.</Span>
+          </div>
+        {:else}
+          <div class="flex gap-2 px-4 py-2 items-center w-full text-sm flex-wrap lg:flex-nowrap">
+            <EyeSlashOutline size="sm" class="text-orange" />
+            <Span class="text-gray-400 text-xs"
+              >This thread will be visible the moderation team and yourself.</Span
+            >
+          </div>
+        {/if}
         <input type="hidden" name="assistant_id" bind:value={assistant.id} />
         <input type="hidden" name="parties" bind:value={parties} />
       </div>
