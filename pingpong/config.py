@@ -139,6 +139,7 @@ MessageTransport = Union[EmailMessageTransport]
 
 class SamlAuthnSettings(BaseSettings):
     method: Literal["saml"]
+    path: str
 
 
 class MagicLinkAuthnSettings(BaseSettings):
