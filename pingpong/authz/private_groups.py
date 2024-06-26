@@ -1,7 +1,7 @@
 import logging
 
 from .base import AuthzClient, Relation
-from sqlalchemy import false, select, true
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import Class
 
@@ -18,10 +18,14 @@ async def add_private_class_migration(db: AsyncSession, authz: AuthzClient) -> N
         authz (AuthzClient): The OpenFga driver.
     """
 
-    logger.info(" Getting all classes ...")
-    stmt = select(Class.id)
+    logger.info(" Getting all unmigrated classes ...")
+    stmt = select(Class.id, Class.private).where(Class.private.is_(None))
     classes = await db.execute(stmt)
+    
+    classesToUpdate = list[int]()
     grants = list[Relation]()
+    revokes = list[Relation]()
+    
     for class_id in classes.scalars():
         logger.info(f" - Adding permissions for class {class_id} ...")
         grants.append(
@@ -38,4 +42,9 @@ async def add_private_class_migration(db: AsyncSession, authz: AuthzClient) -> N
                 f"class:{class_id}",
             )
         )
-    await authz.write_safe(grant=grants)
+        classesToUpdate.append(class_id)
+    
+    await authz.write_safe(grant=grants, revoke=revokes)
+    
+    stmt_ = update(Class).values(private = False).where(Class.id.in_(classesToUpdate))
+    await db.execute(stmt_)
