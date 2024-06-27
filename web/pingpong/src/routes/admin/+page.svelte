@@ -63,9 +63,17 @@
             class="border-b border-gray-200 pb-4 pt-4 transition-all duration-300 hover:bg-gray-100 hover:pl-4"
           >
             <div>
-              <h4 class="eyebrow eyebrow-dark">
-                {cls.institution?.name || 'Unknown'}
-              </h4>
+              <div class="flex flex-row gap-1">
+                <h4 class="eyebrow eyebrow-dark">
+                  {cls.institution?.name || 'Unknown Class Name'}
+                </h4>
+                <h4 class="eyebrow eyebrow-dark">
+                  |
+                </h4>
+                <h4 class="eyebrow eyebrow-dark">
+                  {cls.term || 'Unknown Session'}
+                </h4>
+              </div>
               <div class="pt-2 font-light text-lg pb-2">
                 {cls.name || 'Unknown'}
               </div>

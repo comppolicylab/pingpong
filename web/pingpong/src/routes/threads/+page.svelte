@@ -10,7 +10,7 @@
   export let data;
 
   const classOptions = [
-    { value: '0', name: 'All Groups' },
+    { value: '0', name: 'All' },
     ...data.classes
       .map((cls) => ({ value: `${cls.id}`, name: cls.name }))
       .sort((a, b) => a.name.localeCompare(b.name))
