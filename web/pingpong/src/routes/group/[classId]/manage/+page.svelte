@@ -297,7 +297,7 @@
         <div>
           <Label for="term">Session</Label>
           <Input
-            label="Term"
+            label="Session"
             id="term"
             name="term"
             value={data.class.term}

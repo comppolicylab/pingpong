@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Select, Button, Label, Input, Heading } from 'flowbite-svelte';
+  import { Select, Button, Label, Input, Heading, Helper } from 'flowbite-svelte';
   import * as api from '$lib/api';
   import { writable } from 'svelte/store';
   import { happyToast, sadToast } from '$lib/toast';
@@ -31,7 +31,7 @@
     const term = d.term?.toString();
     if (!term) {
       $loading = false;
-      return sadToast('Term is required');
+      return sadToast('Session is required');
     }
 
     let instId = parseInt(d.institution?.toString(), 10);
@@ -79,7 +79,8 @@
       <Input type="text" name="name" id="name" disabled={$loading} />
     </div>
     <div>
-      <Label for="term">Term</Label>
+      <Label for="term">Session</Label>
+      <Helper>Use this field to distinguish between groups that might be reoccuring, such as a class being offered every academic year.</Helper>
       <Input type="text" name="term" id="term" disabled={$loading} />
     </div>
     <div>

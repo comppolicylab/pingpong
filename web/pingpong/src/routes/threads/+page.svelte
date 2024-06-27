@@ -10,7 +10,7 @@
   export let data;
 
   const classOptions = [
-    { value: '0', name: 'Any' },
+    { value: '0', name: 'All Groups' },
     ...data.classes
       .map((cls) => ({ value: `${cls.id}`, name: cls.name }))
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -65,7 +65,7 @@
   <div class="grid gap-12 p-12 sm:grid-cols-[2fr_1fr] min-h-0 grow shrink">
     <div class="sm:col-start-2 sm:col-end-3">
       <label for="class" class="text-xs uppercase tracking-wide block pb-2 pt-8"
-        >Filter by <b>Class</b></label
+        >Filter by <b>Group</b></label
       >
       <Select
         items={classOptions}
@@ -85,7 +85,7 @@
           >
             <div>
               <h4 class="eyebrow eyebrow-dark">
-                {classNamesLookup[thread.class_id]?.name || 'Unknown'}
+                {classNamesLookup[thread.class_id]?.name || 'Unknown Group'}
               </h4>
               <div class="pt-2 font-light text-lg pb-2">
                 {thread.name}

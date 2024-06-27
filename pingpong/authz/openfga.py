@@ -179,7 +179,7 @@ class OpenFgaAuthzClient(AuthzClient):
             await self._cli.write(query)
 
     async def create_root_user(self, user_id: int):
-        return await self.grant(f"user:{user_id}", "admin", self.root)
+        return await self.write_safe(grant=[(f"user:{user_id}", "admin", self.root)])
 
     async def write_safe(
         self,
