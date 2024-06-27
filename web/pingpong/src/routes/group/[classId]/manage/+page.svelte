@@ -317,7 +317,7 @@
             name="make_private"
             disabled={$updatingClass}
             on:change={submitParentForm}
-            checked={makePrivate}>Make this group private</Checkbox
+            bind:checked={makePrivate}>Make this group private</Checkbox
           >
         </div>
 
