@@ -7,6 +7,24 @@ from onelogin.saml2.auth import OneLogin_Saml2_Auth
 from .config import Saml2AuthnSettings, config
 
 
+def get_saml2_settings(provider: str) -> Saml2AuthnSettings:
+    """Get the SAML2 settings for the given provider."""
+    # try:
+    #     return next(
+    #         method
+    #         for method in config.auth.authn_methods
+    #         if method.method == "sso" and method.provider == provider
+    #     )
+    # except StopIteration:
+    #     raise ValueError(f"Provider {provider} not found in SAML2 authn settings.")
+    return Saml2AuthnSettings(
+        method="sso",
+        protocol="saml",
+        provider=provider,
+        name="Harvard University",
+    )
+
+
 async def from_fastapi_request(request: Request) -> dict:
     """Format a FastAPI request into a SAML request data object."""
     public_url = urlparse(config.public_url)

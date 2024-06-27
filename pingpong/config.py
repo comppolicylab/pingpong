@@ -159,7 +159,7 @@ class AuthSettings(BaseSettings):
 
     autopromote_on_login: bool = Field(False)
     secret_keys: list[SecretKey]
-    authn_methods: list[AuthnSettings]
+    # authn_methods: list[AuthnSettings]
 
 
 DbSettings = Union[PostgresSettings, SqliteSettings]
