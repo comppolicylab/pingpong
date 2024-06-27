@@ -295,7 +295,7 @@
         </div>
 
         <div>
-          <Label for="term">Term</Label>
+          <Label for="term">Session</Label>
           <Input
             label="Term"
             id="term"
