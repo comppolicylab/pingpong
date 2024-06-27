@@ -395,7 +395,7 @@
         selectedFiles.length + selectedAvailable.length > maxCount}
       aria-label="Move selected files to Selected list">▶</button
     >
-    {#if selectedFiles.length === maxCount}
+    {#if selectedFiles.length === maxCount && selectedAvailable.length > 0}
       <Popover
         class="w-64 text-sm font-light"
         title="File limit reached"
