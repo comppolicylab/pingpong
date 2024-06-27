@@ -132,7 +132,7 @@
           vision_file_ids: form.vision_file_ids
         })
       );
-      data.threads = [newThread, ...data.threads];
+      data.threads = [newThread as api.LoadedThread, ...data.threads];
       $loading = false;
       await goto(`/group/${$page.params.classId}/thread/${newThread.id}`);
     } catch (e) {

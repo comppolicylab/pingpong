@@ -655,6 +655,10 @@ export type Threads = {
   threads: Thread[];
 };
 
+export type LoadedThreads = {
+  threads: LoadedThread[];
+};
+
 /**
  * Parameters for fetching threads.
  */
@@ -681,12 +685,12 @@ const getThreads = async (f: Fetcher, url: string, opts?: GetThreadsOpts) => {
     opts.limit = 20;
   }
 
-  const result = expandResponse(await GET<GetThreadsOpts, Threads>(f, url, opts));
+  const result = expandResponse(await GET<GetThreadsOpts, LoadedThreads>(f, url, opts));
 
   if (result.error) {
     return {
       lastPage: true,
-      threads: [] as Thread[],
+      threads: [] as LoadedThread[],
       error: result.error
     };
   }
@@ -1192,6 +1196,23 @@ export type Thread = {
   name: string;
   thread_id: string;
   class_id: number;
+  assistant_id: number;
+  private: boolean;
+  tools_available: string | null;
+  users: UserPlaceholder[];
+  created: string;
+  updated: string;
+};
+
+/**
+ * Thread information.
+ */
+export type LoadedThread = {
+  id: number;
+  name: string;
+  thread_id: string;
+  class_id: number;
+  assistant_name?: string | null;
   assistant_id: number;
   private: boolean;
   tools_available: string | null;

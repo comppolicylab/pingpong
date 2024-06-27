@@ -255,6 +255,23 @@ class Thread(BaseModel):
         from_attributes = True
 
 
+class LoadedThread(BaseModel):
+    id: int
+    name: str
+    thread_id: str
+    class_id: int
+    assistant_name: str | None
+    assistant_id: int
+    private: bool
+    tools_available: str | None
+    users: list["UserPlaceholder"]
+    created: datetime
+    updated: datetime | None
+
+    class Config:
+        from_attributes = True
+
+
 class CreateThread(BaseModel):
     parties: list[int] = []
     message: str = Field(..., min_length=1)
@@ -270,6 +287,13 @@ class NewThreadMessage(BaseModel):
     file_search_file_ids: list[str] = Field([], min_length=0, max_length=10)
     code_interpreter_file_ids: list[str] = Field([], min_length=0, max_length=10)
     vision_file_ids: list[str] = Field([], min_length=0, max_length=10)
+
+
+class LoadedThreads(BaseModel):
+    threads: list[LoadedThread]
+
+    class Config:
+        from_attributes = True
 
 
 class Threads(BaseModel):

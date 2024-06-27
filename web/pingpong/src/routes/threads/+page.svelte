@@ -84,9 +84,15 @@
             class="border-b border-gray-200 pb-4 pt-4 transition-all duration-300 hover:bg-gray-100 hover:pl-4"
           >
             <div>
-              <h4 class="eyebrow eyebrow-dark">
-                {classNamesLookup[thread.class_id]?.name || 'Unknown Group'}
-              </h4>
+              <div class="flex flex-row gap-1">
+                <h4 class="eyebrow eyebrow-dark shrink-0">
+                  {classNamesLookup[thread.class_id]?.name || 'Unknown Group'}
+                </h4>
+                <h4 class="eyebrow eyebrow-dark shrink-0">|</h4>
+                <h4 class="eyebrow eyebrow-dark shrink truncate">
+                  {thread.assistant_name || 'Unknown Session'}
+                </h4>
+              </div>
               <div class="pt-2 font-light text-lg pb-2">
                 {thread.name}
               </div>

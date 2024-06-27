@@ -64,13 +64,11 @@
           >
             <div>
               <div class="flex flex-row gap-1">
-                <h4 class="eyebrow eyebrow-dark">
-                  {cls.institution?.name || 'Unknown Class Name'}
+                <h4 class="eyebrow eyebrow-dark shrink-0">
+                  {cls.institution?.name || 'Unknown Institution'}
                 </h4>
-                <h4 class="eyebrow eyebrow-dark">
-                  |
-                </h4>
-                <h4 class="eyebrow eyebrow-dark">
+                <h4 class="eyebrow eyebrow-dark shrink-0">|</h4>
+                <h4 class="eyebrow eyebrow-dark shrink truncate">
                   {cls.term || 'Unknown Session'}
                 </h4>
               </div>

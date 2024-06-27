@@ -80,7 +80,10 @@
     </div>
     <div>
       <Label for="term">Session</Label>
-      <Helper>Use this field to distinguish between groups that might be reoccuring, such as a class being offered every academic year.</Helper>
+      <Helper
+        >Use this field to distinguish between groups that might be reoccuring, such as a class
+        being offered every academic year.</Helper
+      >
       <Input type="text" name="term" id="term" disabled={$loading} />
     </div>
     <div>

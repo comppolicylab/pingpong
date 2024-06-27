@@ -64,16 +64,26 @@
 
     <Label for="role">Role</Label>
     <Helper>
-      <div>Choose a role to grant permissions to these users to view the group.{isPrivate ? ' As a private group, permissions are more restrictive compared to a non-private group.' : ''}</div>
+      <div>
+        Choose a role to grant permissions to these users to view the group.{isPrivate
+          ? ' As a private group, permissions are more restrictive compared to a non-private group.'
+          : ''}
+      </div>
       <ul class="list-disc pl-8 my-2">
         <li>
           <strong>Members</strong> can create chats and view their own personal chat history.
         </li>
         <li>
-          <strong>Moderators</strong> {isPrivate ? 'can manage members, but cannot view unpublished chat histories or assistants.' : 'can view everyone\'s chat history and manage members.'}
+          <strong>Moderators</strong>
+          {isPrivate
+            ? 'can manage members, but cannot view unpublished chat histories or assistants.'
+            : "can view everyone's chat history and manage members."}
         </li>
         <li>
-          <strong>Administrators</strong> {isPrivate ? 'can manage the group, but cannot view unpublished chat histories or assistants.' : 'can view everyone\'s chat history and assistants, and manage the group.'}
+          <strong>Administrators</strong>
+          {isPrivate
+            ? 'can manage the group, but cannot view unpublished chat histories or assistants.'
+            : "can view everyone's chat history and assistants, and manage the group."}
         </li>
       </ul>
     </Helper>

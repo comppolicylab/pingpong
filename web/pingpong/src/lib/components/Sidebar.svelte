@@ -45,7 +45,7 @@
     },
     {}
   );
-  $: threads = ($page.data.threads || []) as api.Thread[];
+  $: threads = ($page.data.threads || []) as api.LoadedThread[];
   $: currentClassId = parseInt($page.params.classId, 10);
   $: currentAssistantId = $page.data.threadData?.thread?.assistant_id;
   $: onNewChatPage = $page.url.pathname === `/group/${currentClassId}`;
@@ -133,7 +133,17 @@
           activeClass="bg-blue-dark-40"
         >
           <svelte:fragment slot="icon">
-            <span class="eyebrow w-full">{classesById[thread.class_id].name}</span>
+            <span class="eyebrow w-full"
+              ><div class="flex flex-row gap-1">
+                <h4 class="shrink-0">
+                  {classesById[thread.class_id].name}
+                </h4>
+                <h4 class="shrink-0">|</h4>
+                <h4 class="shrink truncate">
+                  {thread.assistant_name || 'Unknown Assistant'}
+                </h4>
+              </div></span
+            >
             {#if thread.private}
               <EyeSlashOutline size="sm" class="text-white" />
             {:else}

@@ -7,6 +7,7 @@ from ..models import Class
 
 logger = logging.getLogger(__name__)
 
+
 async def add_private_class_migration(db: AsyncSession, authz: AuthzClient) -> None:
     """
     Add permissions for non-private classes to OpenFga.
@@ -21,11 +22,11 @@ async def add_private_class_migration(db: AsyncSession, authz: AuthzClient) -> N
     logger.info(" Getting all unmigrated classes ...")
     stmt = select(Class.id, Class.private).where(Class.private.is_(None))
     classes = await db.execute(stmt)
-    
+
     classesToUpdate = list[int]()
     grants = list[Relation]()
     revokes = list[Relation]()
-    
+
     for class_id in classes.scalars():
         logger.info(f" - Adding permissions for class {class_id} ...")
         grants.append(
@@ -43,8 +44,8 @@ async def add_private_class_migration(db: AsyncSession, authz: AuthzClient) -> N
             )
         )
         classesToUpdate.append(class_id)
-    
+
     await authz.write_safe(grant=grants, revoke=revokes)
-    
-    stmt_ = update(Class).values(private = False).where(Class.id.in_(classesToUpdate))
+
+    stmt_ = update(Class).values(private=False).where(Class.id.in_(classesToUpdate))
     await db.execute(stmt_)
