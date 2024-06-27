@@ -248,7 +248,6 @@
       use_latex: body.use_latex?.toString() === 'on',
       hide_prompt: body.hide_prompt?.toString() === 'on'
     };
-    console.debug('Parsed form data:', params);
     return params;
   };
 
