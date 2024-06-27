@@ -5,7 +5,6 @@
     Select,
     Checkbox,
     Label,
-    MultiSelect,
     Input,
     Heading,
     Textarea,
@@ -30,8 +29,8 @@
   $: assistant = data.assistant;
   $: canPublish = data.grants.canPublishAssistants;
 
-  $: selectedFileSearchFiles = writable(data.selectedFileSearchFiles.slice());
-  let selectedCodeInterpreterFiles = data.selectedCodeInterpreterFiles.slice();
+  let selectedFileSearchFiles = writable(data.selectedFileSearchFiles.slice());
+  let selectedCodeInterpreterFiles = writable(data.selectedCodeInterpreterFiles.slice());
 
   // The list of adhoc files being uploaded.
   let optimisticUploadFileInfo = writable<FileUploadInfo[]>([]);
@@ -39,10 +38,6 @@
   $: optimisticFiles = $optimisticUploadFileInfo
     .filter((f) => f.state === 'success')
     .map((f) => f.response as ServerFile);
-  $: optimisticFileIds = $optimisticUploadFileInfo
-    .filter((f) => f.state === 'success')
-    .map((f) => (f.response as ServerFile).file_id);
-  $: currentSelectedFileSearchFiles = writable([...$selectedFileSearchFiles, ...optimisticFileIds]);
   let loading = false;
 
   const fileSearchMetadata = {
@@ -215,7 +210,7 @@
 
     // Check selected files separately since these are handled differently in the form.
     if (
-      !setsEqual(new Set(selectedCodeInterpreterFiles), new Set(data.selectedCodeInterpreterFiles))
+      !setsEqual(new Set($selectedCodeInterpreterFiles), new Set(data.selectedCodeInterpreterFiles))
     ) {
       modifiedFields.push('code interpreter files');
     }
@@ -247,13 +242,13 @@
       instructions: normalizeNewlines(body.instructions.toString()),
       model: body.model.toString(),
       tools,
-      code_interpreter_file_ids: codeInterpreterToolSelect ? selectedCodeInterpreterFiles : [],
+      code_interpreter_file_ids: codeInterpreterToolSelect ? $selectedCodeInterpreterFiles : [],
       file_search_file_ids: fileSearchToolSelect ? $selectedFileSearchFiles : [],
       published: body.published?.toString() === 'on',
       use_latex: body.use_latex?.toString() === 'on',
       hide_prompt: body.hide_prompt?.toString() === 'on'
     };
-
+    console.debug('Parsed form data:', params);
     return params;
   };
 
@@ -458,7 +453,7 @@
     {#if fileSearchToolSelect}
       <div class="col-span-2 mb-4">
         <!-- TODO(jnu): support for uploading files here. -->
-        <Label for="model">{fileSearchMetadata.name} Files</Label>
+        <Label for="selectedFileSearchFiles">{fileSearchMetadata.name} Files</Label>
         <Helper class="pb-1"
           >Select which files this assistant should use for {fileSearchMetadata.name}. You can
           select up to {fileSearchMetadata.max_count} files.</Helper
@@ -466,7 +461,7 @@
         <MultiSelectWithUpload
           name="selectedFileSearchFiles"
           items={fileSearchOptions}
-          bind:value={currentSelectedFileSearchFiles}
+          bind:value={selectedFileSearchFiles}
           disabled={loading || !handleUpload}
           upload={handleUpload}
           accept={data.uploadInfo.fileTypes({
@@ -474,8 +469,9 @@
             code_interpreter: false,
             vision: false
           })}
+          maxCount={fileSearchMetadata.max_count}
+          uploadType="File Search"
           maxSize={data.uploadInfo.private_file_max_size}
-          {uploadingOptimistic}
           on:error={(e) => sadToast(e.detail.message)}
           on:change={handleOptimisticFilesChange}
         />
@@ -485,15 +481,27 @@
     {#if codeInterpreterToolSelect}
       <div class="col-span-2 mb-4">
         <!-- TODO(jnu): support for uploading files here. -->
-        <Label for="model">{codeInterpreterMetadata.name} Files</Label>
+        <Label for="selectedCodeInterpreterFiles">{codeInterpreterMetadata.name} Files</Label>
         <Helper class="pb-1"
           >Select which files this assistant should use for {codeInterpreterMetadata.name}. You can
           select up to {codeInterpreterMetadata.max_count} files.</Helper
         >
-        <MultiSelect
+        <MultiSelectWithUpload
           name="selectedCodeInterpreterFiles"
           items={codeInterpreterOptions}
           bind:value={selectedCodeInterpreterFiles}
+          disabled={loading || !handleUpload}
+          upload={handleUpload}
+          accept={data.uploadInfo.fileTypes({
+            file_search: false,
+            code_interpreter: true,
+            vision: false
+          })}
+          maxSize={data.uploadInfo.private_file_max_size}
+          maxCount={codeInterpreterMetadata.max_count}
+          uploadType="Code Interpreter"
+          on:error={(e) => sadToast(e.detail.message)}
+          on:change={handleOptimisticFilesChange}
         />
       </div>
     {/if}
