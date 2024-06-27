@@ -1016,7 +1016,12 @@ class Thread(Base):
             condition = and_(condition, Thread.private == private)
 
         stmt = (
-            select(Thread).join(Thread.assistant).options(contains_eager(Thread.assistant).load_only(Assistant.name)).order_by(Thread.updated.desc()).where(condition).limit(limit)
+            select(Thread)
+            .join(Thread.assistant)
+            .options(contains_eager(Thread.assistant).load_only(Assistant.name))
+            .order_by(Thread.updated.desc())
+            .where(condition)
+            .limit(limit)
         )
         result = await session.execute(stmt)
         for row in result:
