@@ -43,35 +43,37 @@ async def from_fastapi_request(request: Request) -> dict:
 
 
 async def get_saml2_client(
-    config: Saml2AuthnSettings, request: Request
+    cfg: Saml2AuthnSettings, request: Request
 ) -> OneLogin_Saml2_Auth:
     """Get the SAML2 auth client for the given request and config.
 
     Args:
-        config: The SAML2 authn settings.
+        cfg: The SAML2 authn settings.
         request_data: The request data.
 
     Returns:
         The SAML2 auth client.
     """
     request_data = await from_fastapi_request(request)
-    settings_dir = Path(config.base_path) / config.provider
+    settings_dir = Path(cfg.base_path) / cfg.provider
 
     # Detect if the certs are stored in the env. If so, load settings manually.
     # This adds support for environments like ECS where we can't mount files from secrets,
     # but can only set environment variables.
-    sp_cert = settings_dir / "certs" / "sp.crt"
-    if sp_cert.exists():
-        return OneLogin_Saml2_Auth(request_data, custom_base_path=str(settings_dir))
-    else:
+    env_sfx = cfg.provider.upper().replace("-", "_")
+    env_key = f"SAML_{env_sfx}"
+    print("SAML CONFIG", env_key, os.environ.get(env_key, "no secret available")[0:10])
+
+    if env_key in os.environ:
         settings_path = settings_dir / "settings.json"
         settings = json.loads(settings_path.read_text())
-        # Pull the certificates from the env
-        env_pfx = config.provider.upper().replace("-", "_")
-        settings["sp"]["x509cert"] = os.environ.get(
-            f"{env_pfx}_X509CERT", settings["sp"]["x509cert"]
+        cert_info = json.loads(os.environ[env_key])
+        settings["sp"]["x509cert"] = cert_info.get(
+            "x509cert", settings["sp"]["x509cert"]
         )
-        settings["sp"]["privateKey"] = os.environ.get(
-            f"{env_pfx}_PRIVATEKEY", settings["sp"]["privateKey"]
+        settings["sp"]["privateKey"] = cert_info.get(
+            "privateKey", settings["sp"]["privateKey"]
         )
         return OneLogin_Saml2_Auth(request_data, OneLogin_Saml2_Settings(settings))
+    else:
+        return OneLogin_Saml2_Auth(request_data, custom_base_path=str(settings_dir))
