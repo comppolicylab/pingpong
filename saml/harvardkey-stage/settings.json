@@ -1,0 +1,53 @@
+{
+    "strict": false,
+    "debug": true,
+    "sp": {
+        "entityId": "https://pingpong.hks.harvard.edu/sp",
+        "assertionConsumerService": {
+            "url": "http://localhost:5173/api/v1/login/sso/saml/acs?provider=harvardkey-stage",
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
+        },
+        "singleLogoutService": {
+            "url": "http://localhost:5173/api/v1/logout/slo/saml?provider=harvardkey-stage",
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+        },
+        "NameIDFormat": "urn:oasis:names:tc:SAML:2.0:nameid-format:transient",
+        "x509cert": "",
+        "privateKey": ""
+    },
+    "idp": {
+        "entityId": "https://stage.fed.huit.harvard.edu/idp/shibboleth",
+        "singleSignOnService": {
+            "url": "https://key-idp.stage.iam.harvard.edu/idp/profile/SAML2/Redirect/SSO",
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+        },
+        "singleLogoutService": {
+            "url": "https://key-idp.stage.iam.harvard.edu/idp/profile/SAML2/Redirect/SLO",
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+        },
+        "x509cert": "MIIDXDCCAkSgAwIBAgIUX70XzpDd3czVVVgMHAMjrVWZe50wDQYJKoZIhvcNAQELBQAwKDEmMCQG\nA1UEAwwda2V5LWlkcC5zdGFnZS5pYW0uaGFydmFyZC5lZHUwHhcNMTYwNjA5MTQwOTQyWhcNMzYw\nNjA5MTQwOTQyWjAoMSYwJAYDVQQDDB1rZXktaWRwLnN0YWdlLmlhbS5oYXJ2YXJkLmVkdTCCASIw\nDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAJtwvk/OboUMGy3ojXXB3MiLwkpzEyPvnHhNDhBd\n+aCJ8tIvxSgLe0r+jnjAKGoKjxJ/VqGBYgHNn/8oUNNOl9iPPOZSXUw9wsQqb2mWmPsVim/+9YVv\n+w+hn/P/dAk7NZU7bDMgn2kgWmm7osyzNYecJMyMLkZmwahA8/m8RRVSZBILMM8b/9cWOTN2vzFI\nkiOpQpjegZ6dw+gUUE/DzAVCDct1O03UmydHKRmT97xV6JpWfiHC1/RzFxgLcdRpuoBD2JqycA3Z\n9EkVAV8SBzAbKJxABGxPSFyA6YUKyY9g/Cvd0KFLgLnDB8NFRU9WW1fWco10l1g1giTE6smYWakC\nAwEAAaN+MHwwHQYDVR0OBBYEFAmQGAp65E1Xy43rs5GIV9TF0l9gMFsGA1UdEQRUMFKCHWtleS1p\nZHAuc3RhZ2UuaWFtLmhhcnZhcmQuZWR1hjFodHRwczovL3N0YWdlLmZlZC5odWl0LmhhcnZhcmQu\nZWR1L2lkcC9zaGliYm9sZXRoMA0GCSqGSIb3DQEBCwUAA4IBAQAq4yThR//VPPmRySI6I0EvUBt4\nIv+K5HfkLn8LDRpMSa4hRXSm+ZLSULqxvqxony1gY7xviQdu9sVp2fnE3YjTRFvEzRDk/emsQOsC\nP+FQvUFJKmokKT3aVupuP8snmwOgEbmE0Q3upNhZCr3Ygs8ZDpCG6Ol99kFjedHATOYqSvpd+VOW\nHdeAKj8lyiy+Z0QQjpRNfZluSqUpfthjSeXJXFqq2ABnQZmdQNG+5wfLOcnRJu3UnBqk1J2/daqT\ng67kGKBA4IS+MwhyF1VSb3UxCCwQJk56rcFy8RoFh8KStsOwj5hY0gMCPSFWnfZ4KNc9nYGQV25a\n+SAZT1uCpunZ"
+    },
+    "security": {
+        "nameIdEncrypted": false,
+        "authnRequestsSigned": true,
+        "logoutRequestSigned": true,
+        "logoutResponseSigned": true,
+        "signMetadata": true,
+        "wantMessagesSigned": false,
+        "wantAssertionsSigned": false,
+        "wantNameId" : true,
+        "wantNameIdEncrypted": false,
+        "wantAssertionsEncrypted": false,
+        "allowSingleLabelDomains": false,
+        "signatureAlgorithm": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
+        "digestAlgorithm": "http://www.w3.org/2001/04/xmlenc#sha256",
+        "rejectDeprecatedAlgorithm": true
+    },
+    "organization": {
+        "en-US": {
+            "name": "Computational Policy Lab",
+            "displayname": "CPL",
+            "url": "https://policylab.hks.harvard.edu"
+        }
+    }
+}

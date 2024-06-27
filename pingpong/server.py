@@ -25,7 +25,8 @@ from sqlalchemy.sql import func
 import pingpong.metrics as metrics
 import pingpong.models as models
 import pingpong.schemas as schemas
-from pingpong.template import email_template as message_template
+from .template import email_template as message_template
+from .saml import get_saml2_client
 
 from .ai import (
     format_instructions,
@@ -242,10 +243,51 @@ async def manage_authz(data: schemas.ManageAuthzRequest, request: Request):
     return {"status": "ok"}
 
 
-@v1.post("/login/saml", response_model=schemas.GenericStatus)
-async def login_saml(request: Request):
-    """Handle SAML login."""
-    raise HTTPException(status_code=501, detail="SAML login not implemented")
+@v1.post("/login/sso/saml/acs", response_model=schemas.GenericStatus)
+async def login_sso_saml_acs(provider: str, request: Request):
+    """SAML login assertion consumer service."""
+    try:
+        sso_config = next(
+            method
+            for method in config.auth.authn_methods
+            if method.method == "sso" and method.provider == provider
+        )
+    except StopIteration:
+        raise HTTPException(status_code=400, detail="SSO provider not found")
+    saml_client = await get_saml2_client(sso_config, request)
+    saml_client.process_response()
+
+    errors = saml_client.get_errors()
+    if errors:
+        raise HTTPException(status_code=400, detail=errors)
+
+    if not saml_client.is_authenticated():
+        raise HTTPException(status_code=401, detail="SAML authentication failed")
+
+    attrs = saml_client.get_attributes()
+    print("SAML ATTRS", attrs)
+    return {"status": "ok"}
+
+
+@v1.get("/login/sso")
+async def login_sso(provider: str, request: Request):
+    # Find the SSO method
+    try:
+        sso_config = next(
+            method
+            for method in config.auth.authn_methods
+            if method.method == "sso" and method.provider == provider
+        )
+    except StopIteration:
+        raise HTTPException(status_code=400, detail="SSO provider not found")
+
+    if sso_config.protocol == "saml":
+        saml_client = await get_saml2_client(sso_config, request)
+        return RedirectResponse(saml_client.login())
+    else:
+        raise HTTPException(
+            status_code=501, detail=f"SSO protocol {sso_config.protocol} not supported"
+        )
 
 
 @v1.post("/login/magic", response_model=schemas.GenericStatus)

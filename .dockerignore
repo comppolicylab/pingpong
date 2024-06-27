@@ -1,10 +1,13 @@
 .DS_Store
 LICENSE
 *.yml
+*.sh
+*.sqlite
 nginx.conf
-deploy.sh
 cert/
 docs/
+analysis/
+scripts/
 config.toml
 config.*.toml
 .vscode
@@ -25,3 +28,8 @@ Dockerfile
 docker.env
 *.swp
 .venv
+.ruff_cache/
+.pytest_cache/
+__pycache__/
+.mypy_cache/
+saml/**/certs/*

@@ -137,9 +137,12 @@ class EmailMessageTransport(BaseSettings):
 MessageTransport = Union[EmailMessageTransport]
 
 
-class SamlAuthnSettings(BaseSettings):
-    method: Literal["saml"]
-    path: str
+class Saml2AuthnSettings(BaseSettings):
+    method: Literal["sso"]
+    protocol: Literal["saml"]
+    provider: str
+    name: str
+    base_path: str = Field("saml")
 
 
 class MagicLinkAuthnSettings(BaseSettings):
@@ -148,7 +151,7 @@ class MagicLinkAuthnSettings(BaseSettings):
     expiry: int = Field(86_400)
 
 
-AuthnSettings = Union[SamlAuthnSettings, MagicLinkAuthnSettings]
+AuthnSettings = Union[Saml2AuthnSettings, MagicLinkAuthnSettings]
 
 
 class AuthSettings(BaseSettings):
