@@ -1,8 +1,10 @@
 from pathlib import Path
 from urllib.parse import urlparse
+import json
+import os
 
 from fastapi import Request
-from onelogin.saml2.auth import OneLogin_Saml2_Auth
+from onelogin.saml2.auth import OneLogin_Saml2_Auth, OneLogin_Saml2_Settings
 
 from .config import Saml2AuthnSettings, config
 
@@ -53,5 +55,23 @@ async def get_saml2_client(
         The SAML2 auth client.
     """
     request_data = await from_fastapi_request(request)
-    settings_path = Path(config.base_path) / config.provider
-    return OneLogin_Saml2_Auth(request_data, custom_base_path=str(settings_path))
+    settings_dir = Path(config.base_path) / config.provider
+
+    # Detect if the certs are stored in the env. If so, load settings manually.
+    # This adds support for environments like ECS where we can't mount files from secrets,
+    # but can only set environment variables.
+    sp_cert = settings_dir / "certs" / "sp.crt"
+    if sp_cert.exists():
+        return OneLogin_Saml2_Auth(request_data, custom_base_path=str(settings_dir))
+    else:
+        settings_path = settings_dir / "settings.json"
+        settings = json.loads(settings_path.read_text())
+        # Pull the certificates from the env
+        env_pfx = config.provider.upper().replace("-", "_")
+        settings["sp"]["x509cert"] = os.environ.get(
+            f"{env_pfx}_X509CERT", settings["sp"]["x509cert"]
+        )
+        settings["sp"]["privateKey"] = os.environ.get(
+            f"{env_pfx}_PRIVATEKEY", settings["sp"]["privateKey"]
+        )
+        return OneLogin_Saml2_Auth(request_data, OneLogin_Saml2_Settings(settings))
