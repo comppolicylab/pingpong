@@ -6,7 +6,7 @@
     files: Writable<FileUploadInfo[]>,
     maxSize = 0,
     purpose: FileUploadPurpose = 'assistants',
-    dispatch: EventDispatcher<any>
+    dispatch = createEventDispatcher(),
   ) => {
     if (!upload) {
       return;
@@ -98,7 +98,7 @@
 <script lang="ts">
   // Could also consider using CodeOutline, SearchOutline
   import { FileCodeOutline, FileSearchOutline, ImageOutline } from 'flowbite-svelte-icons';
-  import { createEventDispatcher, type EventDispatcher } from 'svelte';
+  import { createEventDispatcher, type EventDispatcher, type EventMap } from 'svelte';
   import { writable, type Writable } from 'svelte/store';
   import { Button } from 'flowbite-svelte';
   import type { FileUploader, FileUploadInfo, FileUploadPurpose } from '$lib/api';
