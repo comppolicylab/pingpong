@@ -308,8 +308,8 @@
 
         <div></div>
         <Helper
-          >Choose whether to make this group private. In private groups, only members can view
-          threads and assistants they create.</Helper
+          >Choose whether to make threads and assistants in ths group private. When checked, only
+          members can view unpublished threads and assistants they create.</Helper
         >
         <div>
           <Checkbox
@@ -317,7 +317,7 @@
             name="make_private"
             disabled={$updatingClass}
             on:change={submitParentForm}
-            bind:checked={makePrivate}>Make this group private</Checkbox
+            bind:checked={makePrivate}>Make threads and assistants private</Checkbox
           >
         </div>
 
