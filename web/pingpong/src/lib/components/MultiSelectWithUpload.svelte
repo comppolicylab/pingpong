@@ -82,7 +82,7 @@
       return;
     }
 
-    autoupload(Array.from(input.files), upload, files, maxSize, 'assistants', dispatch);
+    autoupload(Array.from(input.files), upload, files, maxSize, 'assistants');
   };
 
   $: availableFiles = items.filter((item) => !$value.includes(item.value));
@@ -268,7 +268,7 @@
   style="display: none;"
   bind:this={uploadRef}
   on:change={handleFileInputChange}
-  use:bindToForm={{ dispatch: dispatch, files: files }}
+  use:bindToForm={{ files: files }}
 />
 <div id={name} class="flex space-between">
   <div class="w-[45%]">
