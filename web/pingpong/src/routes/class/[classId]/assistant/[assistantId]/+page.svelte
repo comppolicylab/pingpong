@@ -461,7 +461,8 @@
           name="selectedFileSearchFiles"
           items={fileSearchOptions}
           bind:value={selectedFileSearchFiles}
-          disabled={loading || !handleUpload}
+          disabled={loading || !handleUpload || uploadingOptimistic}
+          uploading={uploadingOptimistic}
           upload={handleUpload}
           accept={data.uploadInfo.fileTypes({
             file_search: true,
@@ -489,6 +490,7 @@
           items={codeInterpreterOptions}
           bind:value={selectedCodeInterpreterFiles}
           disabled={loading || !handleUpload}
+          uploading={uploadingOptimistic}
           upload={handleUpload}
           accept={data.uploadInfo.fileTypes({
             file_search: false,

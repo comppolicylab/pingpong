@@ -5,18 +5,22 @@
     upload: FileUploader,
     files: Writable<FileUploadInfo[]>,
     maxSize = 0,
-    purpose: FileUploadPurpose = 'assistants'
+    purpose: FileUploadPurpose = 'assistants',
+    dispatch = createEventDispatcher(),
+    value?: Writable<string[]>
   ) => {
     if (!upload) {
       return;
     }
 
-    const dispatch = createEventDispatcher();
     // Run upload for every newly added file.
     const newFiles: FileUploadInfo[] = [];
     toUpload.forEach((f) => {
       if (maxSize && f.size > maxSize) {
-        dispatch('error', { file: f, message: `File is too large. Max size is ${maxSize} bytes.` });
+        dispatch('error', {
+          file: f,
+          message: `<strong>Upload unsuccessful: File is too large</strong><br>Max size is ${maxSize} bytes.`
+        });
         return;
       }
 
@@ -45,6 +49,9 @@
             }
             return existingFiles;
           });
+          if ('id' in result && value) {
+            value.update((existing) => [...existing, result.file_id]);
+          }
         })
         .catch((error) => {
           files.update((existingFiles) => {
@@ -55,6 +62,7 @@
             }
             return existingFiles;
           });
+          dispatch('error', { file: f, message: `Could not upload file ${f.name}: ${error}.` });
         });
 
       newFiles.push(fp);

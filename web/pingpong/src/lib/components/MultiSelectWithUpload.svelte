@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { Label, type SelectOptionType, Popover } from 'flowbite-svelte';
+  import { Label, type SelectOptionType, Popover, Spinner } from 'flowbite-svelte';
   import { autoupload, bindToForm } from './FileUpload.svelte';
   import { writable, type Writable } from 'svelte/store';
   import type { FileUploader, FileUploadInfo } from '$lib/api';
   import { createEventDispatcher, onMount } from 'svelte';
-  import { CloudArrowUpOutline } from 'flowbite-svelte-icons';
+  import { CloudArrowUpOutline, InboxFullOutline } from 'flowbite-svelte-icons';
 
   /**
    * Name of field.
@@ -25,6 +25,7 @@
    * Whether to allow uploading.
    */
   export let disabled = false;
+  export let uploading = false;
 
   /**
    * Function to run file upload.
@@ -70,7 +71,7 @@
     if (!input.files || !input.files.length) {
       return;
     }
-
+    console.log('input.files', input.files.length);
     if (input.files.length + selectedFiles.length > maxCount) {
       dispatch('error', {
         message: `<strong>Upload unsuccessful: File limit reached</strong><br>You can upload up to ${availableSpace} additional ${
@@ -82,7 +83,9 @@
       return;
     }
 
-    autoupload(Array.from(input.files), upload, files, maxSize, 'assistants');
+    $loading = true;
+    autoupload(Array.from(input.files), upload, files, maxSize, 'assistants', dispatch, value);
+    $loading = false;
   };
 
   $: availableFiles = items.filter((item) => !$value.includes(item.value));
@@ -270,7 +273,7 @@
   on:change={handleFileInputChange}
   use:bindToForm={{ files: files }}
 />
-<div id={name} class="flex space-between">
+<div id={name} class="flex justify-between">
   <div class="w-[45%]">
     <div class="pl-0.5 pr-[5px] pb-px"><Label for="available-files">Available files</Label></div>
     <div
@@ -285,23 +288,40 @@
       {#each availableFileNames as name, index}
         <button
           type="button"
-          class="block text-xs w-full pt-[3px] pr-0 pb-[3px] pl-2 border-none bg-none overflow-y-auto cursor-pointer hover:bg-gray-100 selected:bg-blue-600 selected:text-white"
+          class="block text-sm w-full pt-[3px] pr-0 pb-[3px] pl-2 border-none bg-none overflow-y-auto cursor-pointer text-left"
           role="option"
           aria-selected={selectedAvailable.includes(index)}
-          class:selected={selectedAvailable.includes(index)}
+          class:bg-blue-600={selectedAvailable.includes(index)}
+          class:text-white={selectedAvailable.includes(index)}
+          class:hover:bg-gray-100={!selectedAvailable.includes(index)}
           class:focused={focusedList === 'available' && focusedIndex === index}
           on:click={(e) => toggleSelection('available', index, e)}
         >
           {name}
         </button>
       {/each}
+      {#if availableFileNames.length === 0}
+        <div class="flex flex-col justify-center h-full gap-0">
+          <div class="flex justify-center">
+            <InboxFullOutline class="h-20 w-20 text-gray-500" strokeWidth="1.5" />
+          </div>
+          <div class="text-lg font-medium text-gray-500 text-center">No files available</div>
+          <div class="flex flex-row justify-center text-md text-gray-500 text-center gap-1">
+            <div class="shrink-0">Use the Upload Files button</div>
+            <CloudArrowUpOutline />
+          </div>
+          <div class="flex flex-row justify-center text-md text-gray-500 text-center gap-1">
+            <div class="shrink-0">to upload files to your assistant.</div>
+          </div>
+        </div>
+      {/if}
     </div>
   </div>
-  <div class="flex flex-row py-0 px-2.5">
+  <div class="flex flex-col justify-center py-0 px-2.5">
     <button
       type="button"
       id="move-to-selected"
-      class="my-[5px] mx-0 px-[5px] py-2.5 bg-none rounded border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-disabled"
+      class="my-[5px] mx-0 py-[5px] px-2.5 bg-none rounded border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
       on:click={moveToSelected}
       disabled={selectedAvailable.length === 0 ||
         disabled ||
@@ -328,21 +348,27 @@
     {/if}
     <button
       type="button"
-      class="my-[5px] mx-0 px-[5px] py-2.5 bg-none rounded border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-disabled"
+      class="my-[5px] mx-0 py-[5px] px-2.5 bg-none rounded border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
       on:click={moveToAvailable}
       disabled={selectedSelected.length === 0 || disabled || $loading}
       aria-label="Move selected files to Available list">◀</button
     >
-    <button
-      type="button"
-      id="upload"
-      class="my-[5px] mx-0 px-[5px] py-2.5 bg-none rounded border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-disabled"
-      on:click={() => {
-        uploadRef.click();
-      }}
-      disabled={!upload || disabled || $loading || selectedFiles.length >= maxCount}
-      aria-label="Upload files to add to your assistant"><CloudArrowUpOutline size="lg" /></button
-    >
+    <div>
+      <button
+        type="button"
+        id="upload"
+        class="my-[5px] mx-0 py-[5px] px-2.5 bg-none rounded border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+        on:click={() => {
+          uploadRef.click();
+        }}
+        disabled={!upload || disabled || $loading || selectedFiles.length >= maxCount}
+        aria-label="Upload files to add to your assistant"
+        >{#if uploading}<Spinner color="gray" size="6" />{:else}<CloudArrowUpOutline
+            size="lg"
+          />{/if}</button
+      >
+      <div class="text-xs text-center text-gray-500">Upload<br />Files</div>
+    </div>
     {#if selectedFiles.length >= maxCount}
       <Popover
         class="w-64 text-sm font-light"
@@ -373,10 +399,12 @@
       {#each selectedFileNames as name, index}
         <button
           type="button"
-          class="block text-xs w-full pt-[3px] pr-0 pb-[3px] pl-2 border-none bg-none overflow-y-auto cursor-pointer hover:bg-gray-100 selected:bg-blue-600 selected:text-white"
+          class="block text-sm w-full pt-[3px] pr-0 pb-[3px] pl-2 border-none bg-none overflow-y-auto cursor-pointer text-left"
           role="option"
           aria-selected={selectedSelected.includes(index)}
-          class:selected={selectedSelected.includes(index)}
+          class:bg-blue-600={selectedSelected.includes(index)}
+          class:text-white={selectedSelected.includes(index)}
+          class:hover:bg-gray-100={!selectedSelected.includes(index)}
           class:focused={focusedList === 'selected' && focusedIndex === index}
           on:click={(e) => toggleSelection('selected', index, e)}
         >
