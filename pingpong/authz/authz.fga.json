@@ -211,12 +211,6 @@
             ]
           }
         },
-        "moderator": {
-          "this": {}
-        },
-        "auditor": {
-          "this": {}
-        },
         "can_view": {
           "computedUserset": {
             "relation": "member"
@@ -276,6 +270,9 @@
             ]
           }
         },
+        "can_manage_assistants": {
+          "this": {}
+        },
         "can_publish_assistants": {
           "union": {
             "child": [
@@ -290,6 +287,9 @@
             ]
           }
         },
+        "can_manage_threads": {
+          "this": {}
+        },
         "can_publish_threads": {
           "union": {
             "child": [
@@ -298,12 +298,7 @@
               },
               {
                 "computedUserset": {
-                  "relation": "moderator"
-                }
-              },
-              {
-                "computedUserset": {
-                  "relation": "auditor"
+                  "relation": "can_manage_threads"
                 }
               }
             ]
@@ -365,22 +360,6 @@
           "member": {
             "directly_related_user_types": []
           },
-          "moderator": {
-            "directly_related_user_types": [
-              {
-                "type": "class",
-                "relation": "teacher"
-              }
-            ]
-          },
-          "auditor": {
-            "directly_related_user_types": [
-              {
-                "type": "class",
-                "relation": "admin"
-              }
-            ]
-          },
           "can_view": {
             "directly_related_user_types": []
           },
@@ -410,11 +389,27 @@
               }
             ]
           },
+          "can_manage_assistants": {
+            "directly_related_user_types": [
+              {
+                "type": "class",
+                "relation": "admin"
+              }
+            ]
+          },
           "can_publish_assistants": {
             "directly_related_user_types": [
               {
                 "type": "class",
                 "relation": "student"
+              }
+            ]
+          },
+          "can_manage_threads": {
+            "directly_related_user_types": [
+              {
+                "type": "class",
+                "relation": "supervisor"
               }
             ]
           },
@@ -463,17 +458,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "moderator"
-                  },
-                  "tupleset": {
-                    "relation": "parent"
-                  }
-                }
-              },
-              {
-                "tupleToUserset": {
-                  "computedUserset": {
-                    "relation": "auditor"
+                    "relation": "can_manage_threads"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -489,29 +474,13 @@
           }
         },
         "can_delete": {
-          "union": {
-            "child": [
-              {
-                "tupleToUserset": {
-                  "computedUserset": {
-                    "relation": "moderator"
-                  },
-                  "tupleset": {
-                    "relation": "parent"
-                  }
-                }
-              },
-              {
-                "tupleToUserset": {
-                  "computedUserset": {
-                    "relation": "auditor"
-                  },
-                  "tupleset": {
-                    "relation": "parent"
-                  }
-                }
-              }
-            ]
+          "tupleToUserset": {
+            "computedUserset": {
+              "relation": "can_manage_threads"
+            },
+            "tupleset": {
+              "relation": "parent"
+            }
           }
         },
         "can_publish": {
@@ -541,17 +510,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "moderator"
-                  },
-                  "tupleset": {
-                    "relation": "parent"
-                  }
-                }
-              },
-              {
-                "tupleToUserset": {
-                  "computedUserset": {
-                    "relation": "auditor"
+                    "relation": "can_manage_threads"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -618,7 +577,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "auditor"
+                    "relation": "can_manage_assistants"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -639,7 +598,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "auditor"
+                    "relation": "can_manage_assistants"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -663,7 +622,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "auditor"
+                    "relation": "can_manage_assistants"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -762,7 +721,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "auditor"
+                    "relation": "can_manage_assistants"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -783,7 +742,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "auditor"
+                    "relation": "can_manage_assistants"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -856,7 +815,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "moderator"
+                    "relation": "teacher"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -866,7 +825,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "auditor"
+                    "relation": "admin"
                   },
                   "tupleset": {
                     "relation": "parent"

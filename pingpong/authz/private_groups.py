@@ -8,26 +8,52 @@ from ..models import Class
 logger = logging.getLogger(__name__)
 
 
-async def add_private_class_migration(db: AsyncSession, authz: AuthzClient) -> None:
+async def fetch_classes_to_migrate(session: AsyncSession, limit: int = 10) -> list[int]:
     """
-    Add permissions for non-private classes to OpenFga.
-    Since all current classes are non-private, we can just add
-      - all admins as auditors
-      - all teachers as moderators
+    Fetch classes that need to be migrated to OpenFga.
+
+    Args:
+        session (AsyncSession): The database session.
+        limit (int, optional): The maximum number of classes to fetch. Defaults to 10.
+
+    Returns:
+        list[int]: The list of class IDs.
+    """
+    stmt = (
+        select(Class.id).where(Class.private.is_(None)).with_for_update().limit(limit)
+    )
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+
+async def update_objs_in_db(
+    session: AsyncSession, classes_to_migrate: list[int]
+) -> None:
+    """
+    Update the classes in the database.
+
+    Args:
+        session (AsyncSession): The database session.
+        classes (list[int]): The list of class IDs.
+    """
+    stmt = update(Class).values(private=False).where(Class.id.in_(classes_to_migrate))
+    await session.execute(stmt)
+
+
+async def write_grants_to_openfga(
+    authz: AuthzClient, classes_to_migrate: list[int]
+) -> None:
+    """
+    Write the grants to OpenFga.
 
     Args:
         authz (AuthzClient): The OpenFga driver.
+        classes_to_migrate (list[int]): The list of class IDs.
+
     """
-
-    logger.info(" Getting all unmigrated classes ...")
-    stmt = select(Class.id, Class.private).where(Class.private.is_(None))
-    classes = await db.execute(stmt)
-
-    classesToUpdate = list[int]()
     grants = list[Relation]()
-    revokes = list[Relation]()
 
-    for class_id in classes.scalars():
+    for class_id in classes_to_migrate:
         logger.info(f" - Adding permissions for class {class_id} ...")
         grants.append(
             (
@@ -43,9 +69,5 @@ async def add_private_class_migration(db: AsyncSession, authz: AuthzClient) -> N
                 f"class:{class_id}",
             )
         )
-        classesToUpdate.append(class_id)
 
-    await authz.write_safe(grant=grants, revoke=revokes)
-
-    stmt_ = update(Class).values(private=False).where(Class.id.in_(classesToUpdate))
-    await db.execute(stmt_)
+    await authz.write_safe(grant=grants)

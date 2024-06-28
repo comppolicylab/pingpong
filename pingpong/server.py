@@ -339,7 +339,7 @@ async def get_institution(institution_id: str, request: Request):
 
 
 @v1.get(
-    "/institution/{institution_id}/groups",
+    "/institution/{institution_id}/classes",
     dependencies=[Depends(Authz("can_view", "institution:{institution_id}"))],
     response_model=schemas.Classes,
 )
@@ -351,7 +351,7 @@ async def get_institution_classes(institution_id: str, request: Request):
 
 
 @v1.post(
-    "/institution/{institution_id}/group",
+    "/institution/{institution_id}/class",
     dependencies=[Depends(Authz("can_create_class", "institution:{institution_id}"))],
     response_model=schemas.Class,
 )
@@ -430,7 +430,7 @@ async def create_class(
 
 
 @v1.get(
-    "/groups",
+    "/classes",
     dependencies=[Depends(LoggedIn())],
     response_model=schemas.Classes,
 )
@@ -445,7 +445,7 @@ async def get_my_classes(request: Request):
 
 
 @v1.get(
-    "/group/{class_id}",
+    "/class/{class_id}",
     dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
     response_model=schemas.Class,
 )
@@ -454,7 +454,7 @@ async def get_class(class_id: str, request: Request):
 
 
 @v1.get(
-    "/group/{class_id}/upload_info",
+    "/class/{class_id}/upload_info",
     dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
     response_model=schemas.FileUploadSupport,
 )
@@ -468,7 +468,7 @@ async def get_class_upload_info(class_id: str, request: Request):
 
 
 @v1.put(
-    "/group/{class_id}",
+    "/class/{class_id}",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.Class,
 )
@@ -541,7 +541,7 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
 
 
 @v1.get(
-    "/group/{class_id}/users",
+    "/class/{class_id}/users",
     dependencies=[Depends(Authz("can_view_users", "class:{class_id}"))],
     response_model=schemas.ClassUsers,
 )
@@ -594,7 +594,7 @@ async def list_class_users(
 
 
 @v1.post(
-    "/group/{class_id}/user",
+    "/class/{class_id}/user",
     dependencies=[Depends(Authz("can_manage_users", "class:{class_id}"))],
     response_model=schemas.UserClassRoles,
 )
@@ -690,7 +690,7 @@ async def add_users_to_class(
 
 
 @v1.put(
-    "/group/{class_id}/user/{user_id}/role",
+    "/class/{class_id}/user/{user_id}/role",
     dependencies=[Depends(Authz("can_manage_users", "class:{class_id}"))],
     response_model=schemas.UserClassRole,
 )
@@ -782,7 +782,7 @@ async def update_user_class_role(
 
 
 @v1.delete(
-    "/group/{class_id}/user/{user_id}",
+    "/class/{class_id}/user/{user_id}",
     dependencies=[Depends(Authz("admin", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
@@ -811,7 +811,7 @@ async def remove_user_from_class(class_id: str, user_id: str, request: Request):
 
 
 @v1.put(
-    "/group/{class_id}/api_key",
+    "/class/{class_id}/api_key",
     dependencies=[Depends(Authz("admin", "class:{class_id}"))],
     response_model=schemas.ApiKey,
 )
@@ -839,7 +839,7 @@ async def update_class_api_key(
 
 
 @v1.get(
-    "/group/{class_id}/api_key",
+    "/class/{class_id}/api_key",
     dependencies=[Depends(Authz("can_view_api_key", "class:{class_id}"))],
     response_model=schemas.ApiKey,
 )
@@ -849,7 +849,7 @@ async def get_class_api_key(class_id: str, request: Request):
 
 
 @v1.get(
-    "/group/{class_id}/models",
+    "/class/{class_id}/models",
     dependencies=[Depends(Authz("can_create_assistants", "class:{class_id}"))],
     response_model=schemas.AssistantModels,
 )
@@ -940,7 +940,7 @@ async def list_class_models(
 
 
 @v1.get(
-    "/group/{class_id}/thread/{thread_id}",
+    "/class/{class_id}/thread/{thread_id}",
     dependencies=[
         Depends(
             Authz("can_view", "thread:{thread_id}"),
@@ -987,7 +987,7 @@ async def get_thread(
 
 
 @v1.get(
-    "/group/{class_id}/thread/{thread_id}/ci_messages",
+    "/class/{class_id}/thread/{thread_id}/ci_messages",
     dependencies=[
         Depends(
             Authz("can_view", "thread:{thread_id}"),
@@ -1014,7 +1014,7 @@ async def get_ci_messages(
 
 
 @v1.get(
-    "/group/{class_id}/thread/{thread_id}/messages",
+    "/class/{class_id}/thread/{thread_id}/messages",
     dependencies=[
         Depends(
             Authz("can_view", "thread:{thread_id}"),
@@ -1062,7 +1062,7 @@ async def list_thread_messages(
 
 
 @v1.get(
-    "/group/{class_id}/thread/{thread_id}/last_run",
+    "/class/{class_id}/thread/{thread_id}/last_run",
     dependencies=[
         Depends(Authz("can_view", "thread:{thread_id}")),
     ],
@@ -1185,7 +1185,7 @@ async def list_all_threads(
 
 
 @v1.get(
-    "/group/{class_id}/threads",
+    "/class/{class_id}/threads",
     dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
     response_model=schemas.LoadedThreads,
 )
@@ -1222,7 +1222,7 @@ async def list_threads(
 
 
 @v1.post(
-    "/group/{class_id}/thread",
+    "/class/{class_id}/thread",
     dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
     response_model=schemas.Thread,
 )
@@ -1313,7 +1313,7 @@ async def create_thread(
 
 
 @v1.post(
-    "/group/{class_id}/thread/{thread_id}/run",
+    "/class/{class_id}/thread/{thread_id}/run",
     dependencies=[
         Depends(Authz("can_participate", "thread:{thread_id}")),
     ],
@@ -1338,7 +1338,7 @@ async def create_run(
 
 
 @v1.post(
-    "/group/{class_id}/thread/{thread_id}",
+    "/class/{class_id}/thread/{thread_id}",
     dependencies=[
         Depends(Authz("can_participate", "thread:{thread_id}")),
     ],
@@ -1433,7 +1433,7 @@ async def send_message(
 
 
 @v1.post(
-    "/group/{class_id}/thread/{thread_id}/publish",
+    "/class/{class_id}/thread/{thread_id}/publish",
     dependencies=[
         Depends(Authz("can_publish", "thread:{thread_id}")),
     ],
@@ -1450,7 +1450,7 @@ async def publish_thread(class_id: str, thread_id: str, request: Request):
 
 
 @v1.delete(
-    "/group/{class_id}/thread/{thread_id}/publish",
+    "/class/{class_id}/thread/{thread_id}/publish",
     dependencies=[
         Depends(Authz("can_publish", "thread:{thread_id}")),
     ],
@@ -1467,7 +1467,7 @@ async def unpublish_thread(class_id: str, thread_id: str, request: Request):
 
 
 @v1.delete(
-    "/group/{class_id}/thread/{thread_id}",
+    "/class/{class_id}/thread/{thread_id}",
     dependencies=[Depends(Authz("can_delete", "thread:{thread_id}"))],
     response_model=schemas.GenericStatus,
 )
@@ -1486,7 +1486,7 @@ async def delete_thread(
 
 
 @v1.post(
-    "/group/{class_id}/file",
+    "/class/{class_id}/file",
     dependencies=[Depends(Authz("can_upload_class_files", "class:{class_id}"))],
     response_model=schemas.File,
 )
@@ -1511,7 +1511,7 @@ async def create_file(
 
 
 @v1.post(
-    "/group/{class_id}/user/{user_id}/file",
+    "/class/{class_id}/user/{user_id}/file",
     dependencies=[Depends(Authz("can_upload_user_files", "class:{class_id}"))],
     response_model=schemas.File,
 )
@@ -1542,7 +1542,7 @@ async def create_user_file(
 
 
 @v1.delete(
-    "/group/{class_id}/file/{file_id}",
+    "/class/{class_id}/file/{file_id}",
     dependencies=[Depends(Authz("can_delete", "class_file:{file_id}"))],
     response_model=schemas.GenericStatus,
 )
@@ -1555,7 +1555,7 @@ async def delete_file(
 
 
 @v1.delete(
-    "/group/{class_id}/user/{user_id}/file/{file_id}",
+    "/class/{class_id}/user/{user_id}/file/{file_id}",
     dependencies=[
         Depends(Authz("can_delete", "user_file:{file_id}")),
     ],
@@ -1574,7 +1574,7 @@ async def delete_user_file(
 
 
 @v1.get(
-    "/group/{class_id}/files",
+    "/class/{class_id}/files",
     dependencies=[Depends(Authz("member", "class:{class_id}"))],
     response_model=schemas.Files,
 )
@@ -1594,7 +1594,7 @@ async def list_files(class_id: str, request: Request):
 
 
 @v1.get(
-    "/group/{class_id}/assistants",
+    "/class/{class_id}/assistants",
     dependencies=[Depends(Authz("member", "class:{class_id}"))],
     response_model=schemas.Assistants,
 )
@@ -1656,7 +1656,7 @@ async def list_assistants(class_id: str, request: Request):
 
 
 @v1.post(
-    "/group/{class_id}/assistant",
+    "/class/{class_id}/assistant",
     dependencies=[Depends(Authz("can_create_assistants", "class:{class_id}"))],
     response_model=schemas.Assistant,
 )
@@ -1736,7 +1736,7 @@ async def create_assistant(
 
 
 @v1.put(
-    "/group/{class_id}/assistant/{assistant_id}",
+    "/class/{class_id}/assistant/{assistant_id}",
     dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
     response_model=schemas.Assistant,
 )
@@ -1860,7 +1860,7 @@ async def update_assistant(
 
 
 @v1.delete(
-    "/group/{class_id}/assistant/{assistant_id}",
+    "/class/{class_id}/assistant/{assistant_id}",
     dependencies=[Depends(Authz("can_delete", "assistant:{assistant_id}"))],
     response_model=schemas.GenericStatus,
 )
@@ -1875,7 +1875,7 @@ async def delete_assistant(
 
 
 @v1.get(
-    "/group/{class_id}/assistant/{assistant_id}/files",
+    "/class/{class_id}/assistant/{assistant_id}/files",
     dependencies=[Depends(Authz("can_view", "assistant:{assistant_id}"))],
     response_model=schemas.AssistantFilesResponse,
 )
@@ -1900,7 +1900,7 @@ async def get_assistant_files(
 
 
 @v1.get(
-    "/group/{class_id}/thread/{thread_id}/image/{file_id}",
+    "/class/{class_id}/thread/{thread_id}/image/{file_id}",
     dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
 )
 async def get_image(file_id: str, request: Request, openai_client: OpenAIClient):
@@ -1914,7 +1914,7 @@ async def get_image(file_id: str, request: Request, openai_client: OpenAIClient)
 
 
 @v1.get(
-    "/group/{class_id}/thread/{thread_id}/file/{file_id}",
+    "/class/{class_id}/thread/{thread_id}/file/{file_id}",
     dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
 )
 async def download_file(

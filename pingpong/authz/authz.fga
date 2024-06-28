@@ -25,8 +25,6 @@ type class
     define student: [user]
     define supervisor: admin or teacher
     define member: admin or teacher or student
-    define moderator: [class#teacher]
-    define auditor: [class#admin]
     define can_view: member
     define can_view_users: supervisor
     define can_view_api_key: admin from parent
@@ -35,8 +33,10 @@ type class
     define can_manage_users: supervisor
     define can_create_thread: member
     define can_create_assistants: [class#student] or supervisor
+    define can_manage_assistants: [class#admin]
     define can_publish_assistants: [class#student] or supervisor
-    define can_publish_threads: [class#student] or moderator or auditor
+    define can_manage_threads: [class#supervisor]
+    define can_publish_threads: [class#student] or can_manage_threads
     define can_upload_class_files: [class#student] or supervisor
     define can_upload_user_files: can_create_thread
 
@@ -44,18 +44,18 @@ type thread
   relations
     define parent: [class]
     define party: [user]
-    define can_view: [class#member] or party or moderator from parent or auditor from parent
+    define can_view: [class#member] or party or can_manage_threads from parent
     define can_participate: party
-    define can_delete: moderator from parent or auditor from parent
-    define can_publish: (party and can_publish_threads from parent) or moderator from parent or auditor from parent
+    define can_delete: can_manage_threads from parent
+    define can_publish: (party and can_publish_threads from parent) or can_manage_threads from parent
 
 type assistant
   relations
     define parent: [class]
     define owner: [user]
-    define can_edit: owner or auditor from parent
-    define can_delete: owner or auditor from parent
-    define can_view: [class#member] or owner or auditor from parent
+    define can_edit: owner or can_manage_assistants from parent
+    define can_delete: owner or can_manage_assistants from parent
+    define can_view: [class#member] or owner or can_manage_assistants from parent
     define can_interact_with: can_view
     define can_publish: owner and can_publish_assistants from parent
 
@@ -64,12 +64,12 @@ type user_file
     define parent: [class]
     define owner: [user]
     define thread: [thread]
-    define can_delete: owner or auditor from parent
-    define can_view: owner or auditor from parent or can_view from thread
+    define can_delete: owner or can_manage_assistants from parent
+    define can_view: owner or can_manage_assistants from parent or can_view from thread
 
 type class_file
   relations
     define parent: [class]
     define owner: [user]
-    define can_delete: owner or moderator from parent or auditor from parent
+    define can_delete: owner or teacher from parent or admin from parent
     define can_view: member from parent
