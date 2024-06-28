@@ -71,5 +71,5 @@ type class_file
   relations
     define parent: [class]
     define owner: [user]
-    define can_delete: owner or teacher from parent or admin from parent
+    define can_delete: owner or supervisor from parent
     define can_view: member from parent

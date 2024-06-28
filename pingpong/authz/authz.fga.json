@@ -815,17 +815,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "teacher"
-                  },
-                  "tupleset": {
-                    "relation": "parent"
-                  }
-                }
-              },
-              {
-                "tupleToUserset": {
-                  "computedUserset": {
-                    "relation": "admin"
+                    "relation": "supervisor"
                   },
                   "tupleset": {
                     "relation": "parent"
