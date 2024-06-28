@@ -297,7 +297,7 @@
       {/each}
     </div>
   </div>
-  <div class="flex flex-column justify-center py-0 px-2.5">
+  <div class="flex flex-row py-0 px-2.5">
     <button
       type="button"
       id="move-to-selected"
