@@ -470,7 +470,6 @@
           })}
           maxCount={fileSearchMetadata.max_count}
           uploadType="File Search"
-          maxSize={data.uploadInfo.private_file_max_size}
           on:error={(e) => sadToast(e.detail.message)}
           on:change={handleOptimisticFilesChange}
         />
@@ -496,7 +495,6 @@
             code_interpreter: true,
             vision: false
           })}
-          maxSize={data.uploadInfo.private_file_max_size}
           maxCount={codeInterpreterMetadata.max_count}
           uploadType="Code Interpreter"
           on:error={(e) => sadToast(e.detail.message)}

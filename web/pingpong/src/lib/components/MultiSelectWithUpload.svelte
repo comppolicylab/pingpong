@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Label, type SelectOptionType, Popover } from 'flowbite-svelte';
+  import { autoupload, bindToForm } from './FileUpload.svelte';
   import { writable, type Writable } from 'svelte/store';
   import type { FileUploader, FileUploadInfo } from '$lib/api';
   import { createEventDispatcher, onMount } from 'svelte';
@@ -61,66 +62,6 @@
   // Reference to the file upload HTML input element.
   let uploadRef: HTMLInputElement;
 
-  // Automatically upload files when they are selected.
-  const autoupload = (toUpload: File[]) => {
-    $loading = true;
-    if (!upload) {
-      $loading = false;
-      return;
-    }
-
-    // Run upload for every newly added file.
-    const newFiles: FileUploadInfo[] = [];
-    toUpload.forEach((f) => {
-      if (maxSize && f.size > maxSize) {
-        dispatch('error', {
-          file: f,
-          message: `<strong>Upload unsuccessful: File is too large</strong><br>Max size is ${maxSize} bytes.`
-        });
-        return;
-      }
-
-      const fp = upload(
-        f,
-        (progress) => {
-          const idx = $files.findIndex((file) => file.file === f);
-          if (idx !== -1) {
-            $files[idx].progress = progress;
-          }
-        },
-        'assistants'
-      );
-
-      // Update the file list when the upload is complete.
-      fp.promise
-        .then((result) => {
-          const idx = $files.findIndex((file) => file.file === f);
-          if (idx !== -1) {
-            $files[idx].response = result;
-            $files[idx].state = 'success';
-          }
-          if ('id' in result) {
-            value.update((v) => [...v, result.file_id]);
-          }
-        })
-        .catch((error) => {
-          const idx = $files.findIndex((file) => file.file === f);
-          if (idx !== -1) {
-            $files[idx].response = error;
-            $files[idx].state = 'error';
-          }
-          dispatch('error', { file: f, message: `Could not upload file ${f.name}: ${error}.` });
-        });
-
-      newFiles.push(fp);
-    });
-
-    const curFiles = $files;
-    $files = [...curFiles, ...newFiles];
-    $loading = false;
-    dispatch('change', files);
-  };
-
   /**
    * Handle file input change.
    */
@@ -141,34 +82,7 @@
       return;
     }
 
-    autoupload(Array.from(input.files));
-  };
-
-  // Make sure the input resets when the form submits.
-  // The component can be used outside of a form, too.
-  const bindToForm = (el: HTMLInputElement) => {
-    const reset = () => {
-      // Clear the file list after the form is reset or submitted.
-      setTimeout(() => {
-        $files = [];
-        dispatch('change', files);
-      }, 0);
-    };
-    const form = el.form;
-    if (form) {
-      form.addEventListener('reset', reset);
-      form.addEventListener('submit', reset);
-    }
-
-    return {
-      destroy() {
-        if (!form) {
-          return;
-        }
-        form.removeEventListener('reset', reset);
-        form.removeEventListener('submit', reset);
-      }
-    };
+    autoupload(Array.from(input.files), upload, files, maxSize, 'assistants', dispatch);
   };
 
   $: availableFiles = items.filter((item) => !$value.includes(item.value));
@@ -354,15 +268,15 @@
   style="display: none;"
   bind:this={uploadRef}
   on:change={handleFileInputChange}
-  use:bindToForm
+  use:bindToForm={{ dispatch: dispatch, files: files }}
 />
-<div id={name} class="selector-container">
-  <div class="column">
-    <div class="label"><Label for="available-files">Available files</Label></div>
+<div id={name} class="flex space-between">
+  <div class="w-[45%]">
+    <div class="pl-0.5 pr-[5px] pb-px"><Label for="available-files">Available files</Label></div>
     <div
       bind:this={availableListElement}
       id="available-files"
-      class="file-box"
+      class="rounded border border-inherit border-solid h-[200px] overflow-y-auto"
       role="listbox"
       aria-label="Available files"
       tabindex="0"
@@ -371,7 +285,7 @@
       {#each availableFileNames as name, index}
         <button
           type="button"
-          class="file-item"
+          class="block text-xs w-full pt-[3px] pr-0 pb-[3px] pl-2 border-none bg-none overflow-y-auto cursor-pointer hover:bg-gray-100 selected:bg-blue-600 selected:text-white"
           role="option"
           aria-selected={selectedAvailable.includes(index)}
           class:selected={selectedAvailable.includes(index)}
@@ -383,11 +297,11 @@
       {/each}
     </div>
   </div>
-  <div class="controls">
+  <div class="flex flex-column justify-center py-0 px-2.5">
     <button
       type="button"
       id="move-to-selected"
-      class="control-button"
+      class="my-[5px] mx-0 px-[5px] py-2.5 bg-none rounded border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-disabled"
       on:click={moveToSelected}
       disabled={selectedAvailable.length === 0 ||
         disabled ||
@@ -414,7 +328,7 @@
     {/if}
     <button
       type="button"
-      class="control-button"
+      class="my-[5px] mx-0 px-[5px] py-2.5 bg-none rounded border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-disabled"
       on:click={moveToAvailable}
       disabled={selectedSelected.length === 0 || disabled || $loading}
       aria-label="Move selected files to Available list">◀</button
@@ -422,7 +336,7 @@
     <button
       type="button"
       id="upload"
-      class="control-button"
+      class="my-[5px] mx-0 px-[5px] py-2.5 bg-none rounded border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-disabled"
       on:click={() => {
         uploadRef.click();
       }}
@@ -440,17 +354,17 @@
       >
     {/if}
   </div>
-  <div class="column">
+  <div class="w-[45%]">
     <div class="flex flex-row justify-between">
-      <div class="label"><Label for="selected-files">Selected files</Label></div>
-      <div class="count-label text-sm text-gray-500">
+      <div class="pl-0.5 pr-[3px] pb-px"><Label for="selected-files">Selected files</Label></div>
+      <div class="pr-[3px] pb-px text-sm text-gray-500">
         {selectedFiles.length}/{maxCount} files selected
       </div>
     </div>
     <div
       bind:this={selectedListElement}
       id="selected-files"
-      class="file-box"
+      class="rounded border border-inherit border-solid h-[200px] overflow-y-auto"
       role="listbox"
       aria-label="Selected files"
       tabindex="0"
@@ -459,7 +373,7 @@
       {#each selectedFileNames as name, index}
         <button
           type="button"
-          class="file-item"
+          class="block text-xs w-full pt-[3px] pr-0 pb-[3px] pl-2 border-none bg-none overflow-y-auto cursor-pointer hover:bg-gray-100 selected:bg-blue-600 selected:text-white"
           role="option"
           aria-selected={selectedSelected.includes(index)}
           class:selected={selectedSelected.includes(index)}
@@ -472,80 +386,3 @@
     </div>
   </div>
 </div>
-
-<style>
-  .selector-container {
-    display: flex;
-    justify-content: space-between;
-  }
-
-  .label {
-    padding-left: 2px;
-    padding-right: 3px;
-    padding-bottom: 1px;
-  }
-
-  .count-label {
-    padding-right: 3px;
-    padding-bottom: 1px;
-  }
-
-  .column {
-    width: 45%;
-  }
-
-  .file-box {
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    height: 200px;
-    overflow-y: auto;
-  }
-
-  .file-item {
-    display: block;
-    font-size: 0.75rem; /* 12px */
-    line-height: 1rem; /* 16px */
-    width: 100%;
-    padding: 3px 0px 3px 8px;
-    text-align: left;
-    border: none;
-    background: none;
-    overflow-y: auto;
-    cursor: pointer;
-  }
-
-  .file-item:hover {
-    background-color: #f0f0f0;
-  }
-
-  .file-item.selected {
-    background-color: #1c64f2;
-    color: white;
-  }
-
-  .controls {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    padding: 0 10px;
-  }
-
-  .control-button {
-    margin: 5px 0;
-    padding: 5px 10px;
-    background: none;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    cursor: pointer;
-  }
-
-  .control-button:enabled:hover {
-    background-color: #e7ecf5;
-    color: #1c64f2;
-  }
-
-  .control-button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-</style>
