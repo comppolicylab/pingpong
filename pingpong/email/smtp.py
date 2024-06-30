@@ -33,15 +33,14 @@ class SmtpEmailSender(EmailSender):
         msg["Subject"] = subject
         msg["From"] = self.from_address
         msg["To"] = to
-        
+
         # If message is a string, treat it as HTML content
         if isinstance(message, str):
-            msg.add_alternative(message, subtype='html')
+            msg.add_alternative(message, subtype="html")
         elif isinstance(message, EmailMessage):
             msg = message
         else:
             raise ValueError("Message must be either a string or EmailMessage object.")
-
 
         tls_context: ssl.SSLContext | None = None
         if self.use_ssl:

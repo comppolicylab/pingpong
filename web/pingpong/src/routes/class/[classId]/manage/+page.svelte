@@ -37,7 +37,7 @@
    * Application data.
    */
   export let data;
-
+  console.log(data.me.user?.name);
   /**
    * Form submission.
    */

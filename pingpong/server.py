@@ -637,7 +637,7 @@ async def add_users_to_class(
                     user_id=user.id,
                     email=user.email,
                     class_name=class_.name,
-                    inviter_name=new_ucr.inviter_name,
+                    inviter_name=new_ucr.inviterName,
                     formatted_role=", ".join(new_roles) if new_roles else None,
                 )
             )

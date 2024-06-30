@@ -306,7 +306,7 @@ class CreateUserClassRole(BaseModel):
 
 
 class CreateUserClassRoles(BaseModel):
-    inviter_name: str | None = None
+    inviterName: str | None = None
     roles: list[CreateUserClassRole]
     silent: bool = False
 
