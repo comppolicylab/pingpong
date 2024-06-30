@@ -469,7 +469,7 @@ email_template = Template("""
       <div>
       <div class="mobile mobile-bg" style="width: 0; max-height: 0; overflow: hidden; display: none;"">
          <div class="m-gutter">
-            <h1 class="m-title" style="margin-top: 50px; margin-bottom: 30px; font-weight: 600; font-size: 40px; line-height:42px;letter-spacing:-1px;border-bottom:0; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-weight:700;"> $title</h1>
+            <h1 class="m-title" style="margin-top: 50px; margin-bottom: 30px; font-weight: 600; font-size: 40px; line-height:42px;letter-spacing:-1px;border-bottom:0; font-family: STIX Two Text, serif; font-weight:700;"> $title</h1>
          </div>
       </div>
       <div class="mobile mobile-bg" style="width: 0; max-height: 0; overflow: hidden; display: none;">

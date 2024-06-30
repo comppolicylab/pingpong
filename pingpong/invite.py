@@ -12,9 +12,9 @@ async def send_invite(
     message = messageTemplate.substitute(
         {
             "title": f"You&#8217;re invited to join {invite.class_name} on PingPong.",
-            "subtitle": f"{invite.inviter_name} has invited you"
+            "subtitle": (f"{invite.inviter_name} has invited you"
             if invite.inviter_name
-            else "You have been invited"
+            else "You have been invited")
             + "to join"
             + invite.class_name
             + f" as {invite.formatted_role}"
