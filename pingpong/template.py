@@ -26,19 +26,15 @@ email_template = Template("""
          .desktop-button-bg {
          background-color: rgb(252, 98, 77);
          }
-         .legend {
-         width: 100%;
-         }
-         .legend td {
-         color: red;
-         text-align: center;
-         font-weight: bold;
-         }
          body {
          width: 100% !important;
          padding: 0;
          margin: 0;
          background-color: #201e45;
+         font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+         font-weight: normal;
+         text-rendering: optimizelegibility;
+         -webkit-font-smoothing: antialiased;
          }
          a, a:link {
          color: #0070c9;
@@ -56,12 +52,6 @@ email_template = Template("""
          b {
          font-weight: 600 !important;
          }
-         body {
-         font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-         font-weight: normal;
-         text-rendering: optimizelegibility;
-         -webkit-font-smoothing: antialiased;
-         }
          td {
          color: #333333;
          font-size: 17px;
@@ -72,48 +62,9 @@ email_template = Template("""
          font-size: 14px;
          line-height: 20px;
          }
-         .type-caption-d, .type-caption-m {
-         font-size: 12px;
-         font-weight: normal;
-         line-height: 16px;
-         }
-         .type-marketing-headline-d, .type-marketing-headline-m {
-         font-size: 17px;
-         line-height: 21px;
-         color: #111111;
-         font-weight: 600;
-         }
-         .type-marketing-copy-d, .type-marketing-copy-m {
-         font-size: 14px;
-         line-height: 20px;
-         color: #333333;
-         }
-         .type-marketing-caption-d, .type-marketing-caption-m {
-         font-size: 11px;
-         line-height: 15px;
-         color: #666666;
-         }
-         .type-marketing-bg-d {
-         background-color: #f2f2f2;
-         }
-         p, ul, ol {
+         p {
          margin: 0 0 16px 0;
          padding: 0;
-         }
-         ul li {
-         list-style-type: disc;
-         margin: 0 0 8px 20px;
-         }
-         ul ul li {
-         list-style-type: circle;
-         margin: 0 0 8px 50px;
-         }
-         ol li {
-         margin: 0 0 8px 20px;
-         list-style-position: outside;
-         }
-         .cta {
-         margin-top: 13px;
          }
          .f-complete {
          color: #6F6363;
@@ -123,40 +74,11 @@ email_template = Template("""
          .f-complete p {
          margin-bottom: 9px;
          }
-         .f-numbered {
-         color: #888888;
-         font-size: 12px;
-         line-height: 15px;
-         padding: 0 0 9px 0;
-         }
-         .f-links-shop {
-         border-bottom: 1px solid #d6d6d6;
-         color: #d6d6d6;
-         font-size: 14px;
-         line-height: 18px;
-         padding: 18px 0 16px 0;
-         text-align: center;
-         }
-         .f-links-shop a, .f-links-shop a:visited, .f-legal a, .f-legal a:visited, .f-complete a, .f-complete a:visited {
-         color: #555555;
-         }
-         .f-links-legal {
-         color: #d6d6d6;
-         }
-         .f-links-shop a:hover, .f-legal a:hover {
-         text-decoration: underline;
-         }
          .f-legal {
          padding: 0 0% 0 0%;
          }
-         .f-legal ol {
-         padding: 0 17px;
-         }
          .preheader-hide {
          display: none !important;
-         }
-         img.headline-image+div, img.hero-image+div {
-         display: none;
          }
          /* DARK MODE DESKTOP */
          @media (prefers-color-scheme: dark) {
@@ -178,12 +100,6 @@ email_template = Template("""
          }
          a, a:link {
          color: #62adf6 !important;
-         }
-         .type-marketing-headline-d, .type-marketing-headline-m, .type-marketing-copy-d, .type-marketing-copy-m, .type-marketing-caption-d, .type-marketing-caption-m {
-         color: #ffffff;
-         }
-         .type-marketing-bg-d {
-         background-color: #333333 !important;
          }
          td {
          border-color: #808080 !important;
@@ -218,27 +134,6 @@ email_template = Template("""
          .mobile-button-bg {
          background-color: rgb(252, 98, 77);
          }
-         .mobile .m-copy, .mobile .m-links {
-         padding: 0 6.25%;
-         }
-         .m-title {
-         color:#111111;
-         }
-         .mobile .m-copy {
-         padding-bottom: 9px;
-         }
-         .mobile .keyline {
-         border-color: #d6d6d6;
-         border-top-style: solid;
-         border-top-width: 1px;
-         padding: 0;
-         margin: 0 auto;
-         text-align: center;
-         height: 0;
-         }
-         .blue-number {
-         white-space: nowrap;
-         }
          sup {
          font-size: .55em;
          }
@@ -264,15 +159,6 @@ email_template = Template("""
          height: 126px;
          padding-bottom: 0;
          }
-         .header-bg {
-         height: 126px;
-         background-size: 414px 126px;
-         background-position: top center;
-         background-repeat: no-repeat;
-         }
-         .m-customer-info {
-         overflow-wrap: break-word;
-         }
          .m-gutter .row {
          position: relative;
          width: 100%;
@@ -288,79 +174,10 @@ email_template = Template("""
          .m-gutter .row .column img {
          margin-right: 12px;
          }
-         .m-max {
-         max-width: 300px;
-         margin: 0 auto;
-         padding-left: 10px;
-         padding-right: 10px;
-         }
-         .m-max.last {
-         padding-bottom: 38px;
-         }
-         .m-table {
-         padding-bottom: 16px;
-         }
-         .m-table .m-table-head {
-         border-bottom: 1px solid #000000;
-         padding: 20px 0 14px 0;
-         }
-         .m-table .m-table-cell {
-         border-top: 1px solid #000000;
-         padding: 16px 0 12px 0;
-         }
-         .m-table .m-table-footer {
-         border-top: 2px solid #000000;
-         padding: 20px 0 14px 0;
-         }
-         .m-table.m-table-centered-narrow {
-         text-align: center;
-         width: 200px;
-         margin-left: auto;
-         margin-right: auto;
-         }
-         .m-table .m-table-cell.last {
-         border-bottom: none !important;
-         }
-         .m-table-with-border {
-         border: 2px solid #000000;
-         }
-         .m-table-with-border .m-table-head, .m-table-with-border .m-table-cell {
-         padding-left: 10px;
-         padding-right: 10px;
-         }
-         .m-table-with-border .m-table-head {
-         background: #000000;
-         color: #ffffff;
-         }
-         .get-in-touch-m {
-         padding-bottom: 30px;
-         }
-         .marketing-m {
-         margin: 10px 0 40px;
-         padding: 25px 25px 14px 25px;
-         background: #f2f2f2;
-         text-align: center;
-         }
-         .marketing-with-caption-m {
-         margin: 10px 0 15px 0;
-         }
-         .marketing-caption-m {
-         margin: 0px 40px 34px 40px;
-         text-align: center;
-         }
          u+.body a.gmail-unlink {
          color: #333333 !important;
          }
-         .m-chat {
-         width: 200px;
-         margin-top: 2px;
-         }
          /* M-FOOT */
-         .m-width {
-         padding: 0 6.25%;
-         margin: 0 auto;
-         box-sizing: border-box;
-         }
          .m-footer {
          background: #f1f4ff;
          padding: 19px 0 28px;
@@ -369,15 +186,6 @@ email_template = Template("""
          .m-footer p, .m-footer li {
          font-size: 12px;
          line-height: 16px;
-         }
-         .m-footer ol {
-         padding: 0 17px;
-         margin: 0;
-         list-style-type: decimal;
-         list-style-position: outside;
-         }
-         .m-footer ol li {
-         list-style-type: decimal;
          }
          ul.m-bnav {
          border-top: 1px solid #d6d6d6;
@@ -419,18 +227,6 @@ email_template = Template("""
          .m-divider {
          border-top: solid 1px #808080;
          }
-         .m-table .m-table-head {
-         border-bottom: 1px solid #808080 !important;
-         }
-         .m-table .m-table-cell {
-         border-top: 1px solid #808080 !important;
-         }
-         .m-table .m-table-footer {
-         border-top: 2px solid #808080 !important;
-         }
-         .marketing-m {
-         background: #333333;
-         }
          .m-footer {
          background: #333333;
          }
@@ -464,7 +260,6 @@ email_template = Template("""
          </div>
       </div>
       <!-- end mobile addressee include -->
-      <!-- CMS start mobile include -->
       <!-- BEGIN MOBILE BODY -->
       <div>
       <div class="mobile mobile-bg" style="width: 0; max-height: 0; overflow: hidden; display: none;"">
@@ -491,14 +286,14 @@ email_template = Template("""
          </div>
       </div>
       <!-- END MOBILE BODY -->
-      <!-- mobile get-in-touch-cta include -->
-      <!-- BEGIN MOBILE get-in-touch-cta -->
+      <!-- mobile include -->
+      <!-- BEGIN MOBILE -->
       <div class="mobile get-in-touch-m mobile-bg" style="width: 0; max-height: 0; overflow: hidden; display: none;">
          <div class="m-gutter">
             <p class="m3 type-body-m"><b>Button not working?</b> Paste the following link into your browser:<br><span style="overflow-wrap: break-word; word-wrap: break-word; -ms-word-break: break-all; word-break: break-all;"><a href="$link" style="color:#0070c9;">$link</a></p>
          </div>
       </div>
-      <!-- END MOBILE get-in-touch-cta -->
+      <!-- END MOBILE -->
       <!-- BEGIN MOBILE FOOTER -->
       <div class="mobile m-footer" style="width:0; max-height:0; overflow:hidden; display:none; margin-bottom: 20px; padding-bottom: 0px; border-radius: 0px 0px 15px 15px;">
          <div class="f-legal" style="padding-left: 0px; padding-right: 0px;">
@@ -538,7 +333,6 @@ email_template = Template("""
          </tbody>
       </table>
       <!-- end desktop header include -->
-      <!-- CMS start desktop include -->
       <!-- BEGIN DESKTOP BODY -->
       <table role="presentation" class="desktop desktop-bg" width="736" class="desktop" cellspacing="0" cellpadding="0" border="0" align="center">
          <tbody>
