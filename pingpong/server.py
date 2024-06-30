@@ -25,6 +25,7 @@ from sqlalchemy.sql import func
 import pingpong.metrics as metrics
 import pingpong.models as models
 import pingpong.schemas as schemas
+from pingpong.template import email_template as messageTemplate
 
 from .ai import (
     format_instructions,
@@ -264,10 +265,23 @@ async def login(body: schemas.MagicLoginRequest, request: Request):
     nowfn = get_now_fn(request)
     magic_link = generate_auth_link(user.id, expiry=86_400, nowfn=nowfn)
 
+    message = messageTemplate.substitute(
+        {
+            "title": "Welcome back!",
+            "subtitle": "You're only one click away from logging in to PingPong. Just click on the button below to sign-in to your account, no password required. It's secure, super easy, and basically like magic.",
+            "type": "login link",
+            "cta": "Login to PingPong",
+            "underline": "",
+            "link": magic_link,
+            "email": email,
+            "legal_text": "because you requested a login link from PingPong",
+        }
+    )
+
     await config.email.sender.send(
         email,
         "Your PingPong login link!",
-        f"Click this link to log in to PingPong: {magic_link}",
+        message,
     )
 
     return {"status": "ok"}
