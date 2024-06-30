@@ -446,6 +446,7 @@
               on:submit={submitCreateUsers}
               on:cancel={() => (usersModalOpen = false)}
               role="student"
+              inviterName={data.me.user?.name || null}
             />
           </Modal>
         {/if}

@@ -1107,15 +1107,17 @@ export type CreateClassUserRequest = {
 export const createClassUser = async (
   f: Fetcher,
   classId: number,
+  inviterName: string | null,
   data: CreateClassUserRequest
 ) => {
-  return createClassUsers(f, classId, { roles: [data] });
+  return createClassUsers(f, classId, { inviterName: inviterName, roles: [data] });
 };
 
 /**
  * Plural version of CreateClassUserRequest.
  */
 export type CreateClassUsersRequest = {
+  inviterName: string | null;
   roles: CreateClassUserRequest[];
 };
 

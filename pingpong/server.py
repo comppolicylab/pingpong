@@ -583,6 +583,12 @@ async def add_users_to_class(
         f"user:{request.state.session.user.id}", "admin", f"class:{class_id}"
     )
 
+    formatted_roles = {
+        "admin": "an Administrator",
+        "teacher": "a Moderator",
+        "student": "a Member",
+    }
+
     for ucr in new_ucr.roles:
         if not is_admin and ucr.roles.admin:
             raise HTTPException(
@@ -602,9 +608,11 @@ async def add_users_to_class(
                 )
 
         existing = await models.UserClassRole.get(request.state.db, user.id, cid)
+        new_roles = []
         for role in ["admin", "teacher", "student"]:
             if getattr(ucr.roles, role):
                 grants.append((f"user:{user.id}", role, f"class:{cid}"))
+                new_roles.append(formatted_roles[role])
             else:
                 revokes.append((f"user:{user.id}", role, f"class:{cid}"))
 
@@ -629,6 +637,8 @@ async def add_users_to_class(
                     user_id=user.id,
                     email=user.email,
                     class_name=class_.name,
+                    inviter_name=new_ucr.inviter_name,
+                    formatted_role=", ".join(new_roles) if new_roles else None,
                 )
             )
             result.append(

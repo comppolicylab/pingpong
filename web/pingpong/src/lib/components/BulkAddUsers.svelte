@@ -7,6 +7,8 @@
 
   export let role: api.Role;
 
+  export let inviterName: string | null = null;
+
   const dispatch = createEventDispatcher();
 
   const loading = writable(false);
@@ -38,6 +40,7 @@
     }
 
     const request: api.CreateClassUsersRequest = {
+      inviterName: inviterName,
       roles: emailList.map((e) => ({
         email: e,
         roles: {
