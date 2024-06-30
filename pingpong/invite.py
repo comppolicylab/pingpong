@@ -17,7 +17,7 @@ async def send_invite(
                 if invite.inviter_name
                 else "You have been invited"
             )
-            + " to join"
+            + " to join "
             + invite.class_name
             + (f" as {invite.formatted_role}" if invite.formatted_role else "")
             + " on PingPong. Click the link below to accept "
