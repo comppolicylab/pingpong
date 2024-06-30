@@ -17,12 +17,12 @@ async def send_invite(
                 if invite.inviter_name
                 else "You have been invited"
             )
-            + "to join"
+            + " to join"
             + invite.class_name
             + (f" as {invite.formatted_role}" if invite.formatted_role else "")
-            + " on PingPong. Click the link below to accept"
+            + " on PingPong. Click the link below to accept "
             + ("their" if invite.formatted_role else "this")
-            + "invitation.",
+            + " invitation.",
             "type": "invitation",
             "cta": f"Join {invite.class_name} on PingPong",
             "underline": "PingPong is a tool for using large language models in a group setting. PingPong is built on top of GPT-4, a large language model developed by OpenAI.",
