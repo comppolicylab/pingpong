@@ -867,5 +867,5 @@ async def test_magic_link_login(api, config, monkeypatch):
       <!-- end desktop footer include -->
    </body>
 </html>
-"""
+""",
     )
