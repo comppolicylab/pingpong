@@ -39,6 +39,15 @@ async def update_objs_in_db(
     stmt = update(Class).values(private=False).where(Class.id.in_(classes_to_migrate))
     await session.execute(stmt)
 
+async def revert_all_classes_to_none(session: AsyncSession) -> None:
+    """
+    Revert all classes' private field to None in the database.
+
+    Args:
+        session (AsyncSession): The database session.
+    """
+    stmt = update(Class).values(private=None)
+    await session.execute(stmt)
 
 async def write_grants_to_openfga(
     authz: AuthzClient, classes_to_migrate: list[int]
