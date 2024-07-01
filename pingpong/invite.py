@@ -1,6 +1,6 @@
 from .email import EmailSender
 from .schemas import CreateInvite
-from .template import email_template as messageTemplate
+from .template import email_template as message_template
 
 
 async def send_invite(
@@ -9,7 +9,7 @@ async def send_invite(
     """Send an email invitation for a user to join a class."""
     subject = f"You're invited to join {invite.class_name}!"
 
-    message = messageTemplate.substitute(
+    message = message_template.substitute(
         {
             "title": f"You&#8217;re invited to join {invite.class_name} on PingPong.",
             "subtitle": (
