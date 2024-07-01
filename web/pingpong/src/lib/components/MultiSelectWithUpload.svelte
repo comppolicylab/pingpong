@@ -209,10 +209,7 @@
           focusedIndex = Math.max(0, focusedIndex - 1);
           toggleSelection(listIsAvailable, focusedIndex, event);
         }
-        scrollIntoView(
-          listIsAvailable ? availableListElement : selectedListElement,
-          focusedIndex
-        );
+        scrollIntoView(listIsAvailable ? availableListElement : selectedListElement, focusedIndex);
         break;
       case 'ArrowDown':
         event.preventDefault();
@@ -222,10 +219,7 @@
           focusedIndex = Math.min(currentList.length - 1, focusedIndex + 1);
           toggleSelection(listIsAvailable, focusedIndex, event);
         }
-        scrollIntoView(
-          listIsAvailable ? availableListElement : selectedListElement,
-          focusedIndex
-        );
+        scrollIntoView(listIsAvailable ? availableListElement : selectedListElement, focusedIndex);
         break;
       case ' ':
         if (isCtrlPressed) {
@@ -256,7 +250,6 @@
           }
         }
         break;
-
     }
   }
 
@@ -298,10 +291,12 @@
       on:keydown={(e) => handleKeydown(e, true)}
     >
       {#each availableFileNames as name, index}
-      {@const isSelected = selectedAvailable.includes(index)} 
+        {@const isSelected = selectedAvailable.includes(index)}
         <button
           type="button"
-          class="block text-sm w-full pt-1 pr-0 pb-1 pl-2 border-none bg-none overflow-y-auto cursor-pointer text-left {isSelected ? 'text-white bg-blue-600' : 'hover:bg-gray-100'}"
+          class="block text-sm w-full pt-1 pr-0 pb-1 pl-2 border-none bg-none overflow-y-auto cursor-pointer text-left {isSelected
+            ? 'text-white bg-blue-600'
+            : 'hover:bg-gray-100'}"
           role="option"
           aria-selected={isSelected}
           class:focused={focusedListIsAvailable && focusedIndex === index}
@@ -315,10 +310,14 @@
           <div class="flex justify-center">
             <InboxFullOutline class="h-20 w-20 text-gray-500" strokeWidth="1.5" />
           </div>
-          <div class="text-lg font-medium text-gray-500 text-center">No {items.length > 0 ? 'more ' : ''}files available</div>
-          <div class="flex justify-center text-md text-gray-500 text-center text-wrap mx-14 flex-wrap">
+          <div class="text-lg font-medium text-gray-500 text-center">
+            No {items.length > 0 ? 'more ' : ''}files available
+          </div>
+          <div
+            class="flex justify-center text-md text-gray-500 text-center text-wrap mx-14 flex-wrap"
+          >
             <div class="shrink-0">Use the Upload Files button</div>
-            <CloudArrowUpOutline class="ml-1"/>
+            <CloudArrowUpOutline class="ml-1" />
             <div class="shrink-0">to upload files to your assistant.</div>
           </div>
         </div>
@@ -405,10 +404,12 @@
       on:keydown={(e) => handleKeydown(e, false)}
     >
       {#each selectedFileNames as name, index}
-      {@const isSelected = selectedSelected.includes(index)} 
+        {@const isSelected = selectedSelected.includes(index)}
         <button
           type="button"
-          class="block text-sm w-full pt-1 pr-0 pb-1 pl-2 border-none bg-none overflow-y-auto cursor-pointer text-left {isSelected ? 'text-white bg-blue-600' : 'hover:bg-gray-100'}"
+          class="block text-sm w-full pt-1 pr-0 pb-1 pl-2 border-none bg-none overflow-y-auto cursor-pointer text-left {isSelected
+            ? 'text-white bg-blue-600'
+            : 'hover:bg-gray-100'}"
           role="option"
           aria-selected={isSelected}
           class:focused={!focusedListIsAvailable && focusedIndex === index}
