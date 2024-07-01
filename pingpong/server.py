@@ -268,7 +268,7 @@ async def login(body: schemas.MagicLoginRequest, request: Request):
     message = messageTemplate.substitute(
         {
             "title": "Welcome back!",
-            "subtitle": "You're only one click away from logging in to PingPong. Just click on the button below to sign-in to your account, no password required. It's secure, super easy, and basically like magic.",
+            "subtitle": "Click the button below to log in to PingPong. No password required. It&#8217;s secure and easy.",
             "type": "login link",
             "cta": "Login to PingPong",
             "underline": "",
@@ -684,7 +684,7 @@ async def add_users_to_class(
                     user_id=user.id,
                     email=user.email,
                     class_name=class_.name,
-                    inviter_name=new_ucr.inviterName,
+                    inviter_name=new_ucr.inviter_name,
                     formatted_role=", ".join(new_roles) if new_roles else None,
                 )
             )

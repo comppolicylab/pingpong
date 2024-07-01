@@ -1109,18 +1109,6 @@ export type CreateClassUserRequest = {
 };
 
 /**
- * Create a new class user.
- */
-export const createClassUser = async (
-  f: Fetcher,
-  classId: number,
-  inviterName: string | null,
-  data: CreateClassUserRequest
-) => {
-  return createClassUsers(f, classId, { inviterName: inviterName, roles: [data] });
-};
-
-/**
  * Plural version of CreateClassUserRequest.
  */
 export type CreateClassUsersRequest = {
