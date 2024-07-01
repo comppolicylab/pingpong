@@ -57,14 +57,7 @@ async def write_grants_to_openfga(
         logger.info(f" - Adding permissions for class {class_id} ...")
         grants.append(
             (
-                f"class:{class_id}#teacher",
-                "can_manage_threads",
-                f"class:{class_id}",
-            )
-        )
-        grants.append(
-            (
-                f"class:{class_id}#admin",
+                f"class:{class_id}#supervisor",
                 "can_manage_threads",
                 f"class:{class_id}",
             )
