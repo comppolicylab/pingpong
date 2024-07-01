@@ -67,23 +67,22 @@ def migrate_private() -> None:
     async def _migrate_private() -> None:
         print("Adding permissions for non-private to OpenFga ...")
         await config.authz.driver.init()
-        async with config.db.driver.async_session() as session:
-            async with config.authz.driver.get_client() as c:
-                while True:
-                    with session.begin_nested() as tx:
-                        try:
-                            classes_to_migrate = await fetch_classes_to_migrate(
-                                session, limit=10
-                            )
+        async with config.authz.driver.get_client() as c:
+            while True:
+                async with config.db.driver.async_session() as session:
+                    try:
+                        classes_to_migrate = await fetch_classes_to_migrate(
+                            session, limit=10
+                        )
 
-                            if not classes_to_migrate:
-                                break
+                        if not classes_to_migrate:
+                            break
 
-                            await update_objs_in_db(session, classes_to_migrate)
-                            await write_grants_to_openfga(c, classes_to_migrate)
-                            await tx.commit()
-                        except Exception:
-                            await tx.rollback()
+                        await update_objs_in_db(session, classes_to_migrate)
+                        await write_grants_to_openfga(c, classes_to_migrate)
+                        await session.commit()
+                    except Exception:
+                        await session.rollback()
 
         print("Migration finished!")
 
