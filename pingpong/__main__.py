@@ -77,7 +77,7 @@ def migrate_private() -> None:
                     print(f"Error: {e}, Rolling back and exiting ...")
                     await _session.rollback()
                     return
-            
+
             while True:
                 async with config.db.driver.async_session() as session:
                     try:
