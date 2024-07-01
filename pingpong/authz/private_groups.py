@@ -58,14 +58,21 @@ async def write_grants_to_openfga(
         grants.append(
             (
                 f"class:{class_id}#teacher",
-                "moderator",
+                "can_manage_threads",
                 f"class:{class_id}",
             )
         )
         grants.append(
             (
                 f"class:{class_id}#admin",
-                "auditor",
+                "can_manage_threads",
+                f"class:{class_id}",
+            )
+        )
+        grants.append(
+            (
+                f"class:{class_id}#admin",
+                "can_manage_assistants",
                 f"class:{class_id}",
             )
         )

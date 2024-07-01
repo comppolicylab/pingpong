@@ -376,14 +376,21 @@ async def create_class(
         grants.append(
             (
                 f"class:{new_class.id}#teacher",
-                "moderator",
+                "can_manage_threads",
                 f"class:{new_class.id}",
             )
         )
         grants.append(
             (
                 f"class:{new_class.id}#admin",
-                "auditor",
+                "can_manage_threads",
+                f"class:{new_class.id}",
+            )
+        )
+        grants.append(
+            (
+                f"class:{new_class.id}#admin",
+                "can_manage_assistants",
                 f"class:{new_class.id}",
             )
         )
@@ -497,14 +504,19 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
         "can_upload_class_files",
         f"class:{class_id}",
     )
-    teacher_as_moderator = (
+    teacher_as_can_manage_threads = (
         f"class:{class_id}#teacher",
-        "moderator",
+        "can_manage_threads",
         f"class:{class_id}",
     )
-    admin_as_auditor = (
+    admin_as_can_manage_threads = (
         f"class:{class_id}#admin",
-        "auditor",
+        "can_manage_threads",
+        f"class:{class_id}",
+    )
+    admin_as_can_manage_assistants = (
+        f"class:{class_id}#admin",
+        "can_manage_assistants",
         f"class:{class_id}",
     )
 
@@ -529,11 +541,13 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
         revokes.append(can_upload_class_file)
 
     if cls.private:
-        revokes.append(teacher_as_moderator)
-        revokes.append(admin_as_auditor)
+        revokes.append(teacher_as_can_manage_threads)
+        revokes.append(admin_as_can_manage_assistants)
+        revokes.append(admin_as_can_manage_threads)
     else:
-        grants.append(teacher_as_moderator)
-        grants.append(admin_as_auditor)
+        grants.append(teacher_as_can_manage_threads)
+        grants.append(admin_as_can_manage_assistants)
+        grants.append(admin_as_can_manage_threads)
 
     await request.state.authz.write_safe(grant=grants, revoke=revokes)
 
