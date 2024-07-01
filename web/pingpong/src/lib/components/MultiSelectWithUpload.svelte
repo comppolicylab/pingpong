@@ -71,7 +71,6 @@
     if (!input.files || !input.files.length) {
       return;
     }
-    console.log('input.files', input.files.length);
     if (input.files.length + selectedFiles.length > maxCount) {
       dispatch('error', {
         message: `<strong>Upload unsuccessful: File limit reached</strong><br>You can upload up to ${availableSpace} additional ${

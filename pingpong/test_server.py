@@ -209,7 +209,7 @@ async def test_magic_link_login(api, config, monkeypatch):
     assert response.json() == {"status": "ok"}
     send_mock.assert_called_once_with(
         "user_123@domain.test",
-        "Your PingPong login link!",
+        "Log back in to PingPong",
         """
 <!doctype html>
 <html>
@@ -480,7 +480,7 @@ async def test_magic_link_login(api, config, monkeypatch):
             <p>This login link will expire in 7 days.</p>
             <p>
                <span style="white-space: nowrap;">
-            <div><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/" class="mobile-button-bg" style="display: flex; align-items: center; width: fit-content; row-gap: 8px; column-gap: 8px; font-size: 17px; line-height: 20px;font-weight: 500; border-radius: 9999px; padding: 8px 16px; color: white !important; flex-shrink: 0;">Login to PingPong<svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" fill="none" role="img" aria-label="circle plus solid" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M12 2c5.514 0 10 4.486 10 10s-4.486 10-10 10-10-4.486-10-10 4.486-10 10-10zm0-2c-6.627 0-12 5.373-12 12s5.373 12 12 12 12-5.373 12-12-5.373-12-12-12zm2 12l-4.5 4.5 1.527 1.5 5.973-6-5.973-6-1.527 1.5 4.5 4.5z" clip-rule="evenodd"/></svg></a></div></span></p>
+            <div><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/" class="mobile-button-bg" style="display: flex; align-items: center; width: fit-content; row-gap: 8px; column-gap: 8px; font-size: 17px; line-height: 20px;font-weight: 500; border-radius: 9999px; padding: 8px 16px; color: white !important; flex-shrink: 0;">Login to PingPong<source srcset="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png"><img src="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png" width="17" height="17" class="hero-image" style="display: block;" border="0" alt="right pointing arrow"></a></div></span></p>
             <p></p>
             </p>
             <p><b>Note:</b> This login link was intended for <span style="white-space: nowrap;"><a href="mailto:user_123@domain.test" style="color:#0070c9;">user_123@domain.test</a></span>. If you weren&#8217;t expecting this login link, there&#8217;s nothing to worry about — you can safely ignore it.</p>
@@ -567,7 +567,7 @@ async def test_magic_link_login(api, config, monkeypatch):
                               <p>This login link will expire in 7 days.</p>
                               <p>
                                  <span style="white-space: nowrap;">
-                              <div><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/" class="desktop-button-bg" style="display: flex; align-items: center; width: fit-content; row-gap: 8px; column-gap: 8px; font-size: 17px; line-height: 20px;font-weight: 500; border-radius: 9999px; padding: 8px 16px; color: white !important; flex-shrink: 0;">Login to PingPong<svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" fill="none" role="img" aria-label="circle plus solid" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M12 2c5.514 0 10 4.486 10 10s-4.486 10-10 10-10-4.486-10-10 4.486-10 10-10zm0-2c-6.627 0-12 5.373-12 12s5.373 12 12 12 12-5.373 12-12-5.373-12-12-12zm2 12l-4.5 4.5 1.527 1.5 5.973-6-5.973-6-1.527 1.5 4.5 4.5z" clip-rule="evenodd"/></svg></a></div></span></p>
+                              <div><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/" class="desktop-button-bg" style="display: flex; align-items: center; width: fit-content; row-gap: 8px; column-gap: 8px; font-size: 17px; line-height: 20px;font-weight: 500; border-radius: 9999px; padding: 8px 16px; color: white !important; flex-shrink: 0;">Login to PingPong<source srcset="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png"><img src="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png" width="17" height="17" class="hero-image" style="display: block;" border="0" alt="right pointing arrow"></a></div></span></p>
                               <p></p>
                               </p>
                               <p><b>Note:</b> This login link was intended for <span style="white-space: nowrap;"><a href="mailto:user_123@domain.test" style="color:#0070c9;">user_123@domain.test</a></span>. If you weren&#8217;t expecting this login link, there&#8217;s nothing to worry about — you can safely ignore it.</p>

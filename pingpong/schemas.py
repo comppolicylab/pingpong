@@ -353,6 +353,7 @@ class UpdateUserClassRole(BaseModel):
 
 class CreateInvite(BaseModel):
     user_id: int
+    inviter_name: str | None
     email: str = Field(..., min_length=3, max_length=100)
     class_name: str = Field(..., min_length=3, max_length=100)
     formatted_role: str | None = None

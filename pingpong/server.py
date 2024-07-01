@@ -280,7 +280,7 @@ async def login(body: schemas.MagicLoginRequest, request: Request):
 
     await config.email.sender.send(
         email,
-        "Your PingPong login link!",
+        "Log back in to PingPong",
         message,
     )
 
