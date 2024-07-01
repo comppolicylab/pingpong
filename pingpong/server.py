@@ -375,15 +375,15 @@ async def create_class(
     if not new_class.private:
         grants.append(
             (
-                f"class:{new_class.id}#teacher",
-                "moderator",
+                f"class:{new_class.id}#supervisor",
+                "can_manage_threads",
                 f"class:{new_class.id}",
             )
         )
         grants.append(
             (
                 f"class:{new_class.id}#admin",
-                "auditor",
+                "can_manage_assistants",
                 f"class:{new_class.id}",
             )
         )
@@ -497,14 +497,14 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
         "can_upload_class_files",
         f"class:{class_id}",
     )
-    teacher_as_moderator = (
-        f"class:{class_id}#teacher",
-        "moderator",
+    supervisor_as_can_manage_threads = (
+        f"class:{class_id}#supervisor",
+        "can_manage_threads",
         f"class:{class_id}",
     )
-    admin_as_auditor = (
+    admin_as_can_manage_assistants = (
         f"class:{class_id}#admin",
-        "auditor",
+        "can_manage_assistants",
         f"class:{class_id}",
     )
 
@@ -529,11 +529,11 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
         revokes.append(can_upload_class_file)
 
     if cls.private:
-        revokes.append(teacher_as_moderator)
-        revokes.append(admin_as_auditor)
+        revokes.append(supervisor_as_can_manage_threads)
+        revokes.append(admin_as_can_manage_assistants)
     else:
-        grants.append(teacher_as_moderator)
-        grants.append(admin_as_auditor)
+        grants.append(supervisor_as_can_manage_threads)
+        grants.append(admin_as_can_manage_assistants)
 
     await request.state.authz.write_safe(grant=grants, revoke=revokes)
 
