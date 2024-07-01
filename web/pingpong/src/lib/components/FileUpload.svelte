@@ -1,8 +1,122 @@
+<script context="module" lang="ts">
+  // Automatically upload files when they are selected.
+  export const autoupload = (
+    toUpload: File[],
+    upload: FileUploader,
+    files: Writable<FileUploadInfo[]>,
+    maxSize = 0,
+    purpose: FileUploadPurpose = 'assistants',
+    dispatch: (
+      type: string,
+      detail: { file: File; message: string } | Writable<FileUploadInfo[]>
+    ) => void,
+    value?: Writable<string[]>
+  ) => {
+    if (!upload) {
+      return;
+    }
+
+    // Run upload for every newly added file.
+    const newFiles: FileUploadInfo[] = [];
+    toUpload.forEach((f) => {
+      if (maxSize && f.size > maxSize) {
+        dispatch('error', {
+          file: f,
+          message: `<strong>Upload unsuccessful: File is too large</strong><br>Max size is ${maxSize} bytes.`
+        });
+        return;
+      }
+
+      const fp = upload(
+        f,
+        (progress) => {
+          files.update((existingFiles) => {
+            const idx = existingFiles.findIndex((file) => file.file === f);
+            if (idx !== -1) {
+              existingFiles[idx].progress = progress;
+            }
+            return existingFiles;
+          });
+        },
+        purpose
+      );
+
+      // Update the file list when the upload is complete.
+      fp.promise
+        .then((result) => {
+          files.update((existingFiles) => {
+            const idx = existingFiles.findIndex((file) => file.file === f);
+            if (idx !== -1) {
+              existingFiles[idx].response = result;
+              existingFiles[idx].state = 'success';
+            }
+            return existingFiles;
+          });
+          if ('id' in result && value) {
+            value.update((existing) => [...existing, result.file_id]);
+          }
+        })
+        .catch((error) => {
+          files.update((existingFiles) => {
+            const idx = existingFiles.findIndex((file) => file.file === f);
+            if (idx !== -1) {
+              existingFiles[idx].response = error;
+              existingFiles[idx].state = 'error';
+            }
+            return existingFiles;
+          });
+          dispatch('error', { file: f, message: `Could not upload file ${f.name}: ${error}.` });
+        });
+
+      newFiles.push(fp);
+    });
+
+    files.update((existingFiles) => [...existingFiles, ...newFiles]);
+    dispatch('change', files);
+  };
+
+  // Make sure the input resets when the form submits.
+  // The component can be used outside of a form, too.
+  export const bindToForm = (
+    el: HTMLInputElement,
+    options: {
+      files: Writable<FileUploadInfo[]>;
+      dispatch: (
+        type: string,
+        detail: { file: File; message: string } | Writable<FileUploadInfo[]>
+      ) => void;
+    }
+  ) => {
+    const reset = () => {
+      // Clear the file list after the form is reset or submitted.
+      setTimeout(() => {
+        options.files.set([]);
+        options.dispatch('change', options.files);
+      }, 0);
+    };
+    const form = el.form;
+    if (form) {
+      form.addEventListener('reset', reset);
+      form.addEventListener('submit', reset);
+    }
+
+    return {
+      destroy() {
+        if (!form) {
+          return;
+        }
+        form.removeEventListener('reset', reset);
+        form.removeEventListener('submit', reset);
+      }
+    };
+  };
+</script>
+
 <script lang="ts">
   // Could also consider using CodeOutline, SearchOutline
   import { FileCodeOutline, FileSearchOutline, ImageOutline } from 'flowbite-svelte-icons';
   import { createEventDispatcher } from 'svelte';
-  import { writable } from 'svelte/store';
+  import { writable, type Writable } from 'svelte/store';
   import { Button } from 'flowbite-svelte';
   import type { FileUploader, FileUploadInfo, FileUploadPurpose } from '$lib/api';
 
@@ -58,83 +172,6 @@
   // Reference to the file upload HTML input element.
   let uploadRef: HTMLInputElement;
 
-  // Automatically upload files when they are selected.
-  const autoupload = (toUpload: File[]) => {
-    if (!upload) {
-      return;
-    }
-
-    // Run upload for every newly added file.
-    const newFiles: FileUploadInfo[] = [];
-    toUpload.forEach((f) => {
-      if (maxSize && f.size > maxSize) {
-        dispatch('error', { file: f, message: `File is too large. Max size is ${maxSize} bytes.` });
-        return;
-      }
-
-      const fp = upload(
-        f,
-        (progress) => {
-          const idx = $files.findIndex((file) => file.file === f);
-          if (idx !== -1) {
-            $files[idx].progress = progress;
-          }
-        },
-        purpose
-      );
-
-      // Update the file list when the upload is complete.
-      fp.promise
-        .then((result) => {
-          const idx = $files.findIndex((file) => file.file === f);
-          if (idx !== -1) {
-            $files[idx].response = result;
-            $files[idx].state = 'success';
-          }
-        })
-        .catch((error) => {
-          const idx = $files.findIndex((file) => file.file === f);
-          if (idx !== -1) {
-            $files[idx].response = error;
-            $files[idx].state = 'error';
-          }
-        });
-
-      newFiles.push(fp);
-    });
-
-    const curFiles = $files;
-    $files = [...curFiles, ...newFiles];
-    dispatch('change', files);
-  };
-
-  // Make sure the input resets when the form submits.
-  // The component can be used outside of a form, too.
-  const bindToForm = (el: HTMLInputElement) => {
-    const reset = () => {
-      // Clear the file list after the form is reset or submitted.
-      setTimeout(() => {
-        $files = [];
-        dispatch('change', files);
-      }, 0);
-    };
-    const form = el.form;
-    if (form) {
-      form.addEventListener('reset', reset);
-      form.addEventListener('submit', reset);
-    }
-
-    return {
-      destroy() {
-        if (!form) {
-          return;
-        }
-        form.removeEventListener('reset', reset);
-        form.removeEventListener('submit', reset);
-      }
-    };
-  };
-
   /**
    * Handle file drop.
    */
@@ -146,7 +183,7 @@
       return;
     }
 
-    autoupload(Array.from(e.dataTransfer.files));
+    autoupload(Array.from(e.dataTransfer.files), upload, files, maxSize, purpose, dispatch);
   };
 
   /**
@@ -158,7 +195,7 @@
       return;
     }
 
-    autoupload(Array.from(input.files));
+    autoupload(Array.from(input.files), upload, files, maxSize, purpose, dispatch);
   };
 
   // Due to how drag events are handled on child elements, we need to keep
@@ -215,7 +252,7 @@
       style="display: none;"
       bind:this={uploadRef}
       on:change={handleFileInputChange}
-      use:bindToForm
+      use:bindToForm={{ files: files, dispatch: dispatch }}
     />
     <Button
       outline={!drop}
