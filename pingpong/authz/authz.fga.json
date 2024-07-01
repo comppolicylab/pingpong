@@ -270,6 +270,9 @@
             ]
           }
         },
+        "can_manage_assistants": {
+          "this": {}
+        },
         "can_publish_assistants": {
           "union": {
             "child": [
@@ -284,6 +287,9 @@
             ]
           }
         },
+        "can_manage_threads": {
+          "this": {}
+        },
         "can_publish_threads": {
           "union": {
             "child": [
@@ -292,7 +298,7 @@
               },
               {
                 "computedUserset": {
-                  "relation": "supervisor"
+                  "relation": "can_manage_threads"
                 }
               }
             ]
@@ -383,11 +389,27 @@
               }
             ]
           },
+          "can_manage_assistants": {
+            "directly_related_user_types": [
+              {
+                "type": "class",
+                "relation": "admin"
+              }
+            ]
+          },
           "can_publish_assistants": {
             "directly_related_user_types": [
               {
                 "type": "class",
                 "relation": "student"
+              }
+            ]
+          },
+          "can_manage_threads": {
+            "directly_related_user_types": [
+              {
+                "type": "class",
+                "relation": "supervisor"
               }
             ]
           },
@@ -436,7 +458,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "supervisor"
+                    "relation": "can_manage_threads"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -454,7 +476,7 @@
         "can_delete": {
           "tupleToUserset": {
             "computedUserset": {
-              "relation": "supervisor"
+              "relation": "can_manage_threads"
             },
             "tupleset": {
               "relation": "parent"
@@ -488,7 +510,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "supervisor"
+                    "relation": "can_manage_threads"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -555,7 +577,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "admin"
+                    "relation": "can_manage_assistants"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -576,7 +598,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "admin"
+                    "relation": "can_manage_assistants"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -600,7 +622,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "admin"
+                    "relation": "can_manage_assistants"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -699,7 +721,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "admin"
+                    "relation": "can_manage_assistants"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -720,7 +742,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "admin"
+                    "relation": "can_manage_assistants"
                   },
                   "tupleset": {
                     "relation": "parent"

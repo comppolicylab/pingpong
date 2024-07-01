@@ -10,7 +10,7 @@
   export let data;
 
   const classOptions = [
-    { value: '0', name: 'Any' },
+    { value: '0', name: 'All' },
     ...data.classes
       .map((cls) => ({ value: `${cls.id}`, name: cls.name }))
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -65,7 +65,7 @@
   <div class="grid gap-12 p-12 sm:grid-cols-[2fr_1fr] min-h-0 grow shrink">
     <div class="sm:col-start-2 sm:col-end-3">
       <label for="class" class="text-xs uppercase tracking-wide block pb-2 pt-8"
-        >Filter by <b>Class</b></label
+        >Filter by <b>Group</b></label
       >
       <Select
         items={classOptions}
@@ -80,13 +80,19 @@
       <div class="flex flex-wrap flex-col">
         {#each threads as thread}
           <a
-            href={`/class/${thread.class_id}/thread/${thread.id}`}
+            href={`/group/${thread.class_id}/thread/${thread.id}`}
             class="border-b border-gray-200 pb-4 pt-4 transition-all duration-300 hover:bg-gray-100 hover:pl-4"
           >
             <div>
-              <h4 class="eyebrow eyebrow-dark">
-                {classNamesLookup[thread.class_id]?.name || 'Unknown'}
-              </h4>
+              <div class="flex flex-row gap-1">
+                <h4 class="eyebrow eyebrow-dark shrink-0">
+                  {classNamesLookup[thread.class_id]?.name || 'Unknown Group'}
+                </h4>
+                <h4 class="eyebrow eyebrow-dark shrink-0">|</h4>
+                <h4 class="eyebrow eyebrow-dark shrink truncate">
+                  {thread.assistant_name || 'Unknown Session'}
+                </h4>
+              </div>
               <div class="pt-2 font-light text-lg pb-2">
                 {thread.name}
               </div>

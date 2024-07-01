@@ -46,7 +46,7 @@
     <Heading tag="h2" class="font-serif mb-4 font-medium text-3xl text-dark-blue-40"
       >No API key.</Heading
     >
-    <div>You must configure an API key for this class before you can create or use assistants.</div>
+    <div>You must configure an API key for this group before you can create or use assistants.</div>
   {:else}
     {#if data.grants.canCreateAssistants}
       <Heading tag="h2" class="text-3xl font-serif mb-4 font-medium text-dark-blue-40"
@@ -54,11 +54,11 @@
       >
       <div class="bg-gold rounded-2xl p-8 mb-12 justify-between gap-12 items-start lg:flex">
         <p class="mb-4 font-light">
-          Build your own AI chatbot for this class. You can customize it with specific knowledge,
-          personality, and parameters to serve as a digital assistant for this course.
+          Build your own AI chatbot for this group. You can customize it with specific knowledge,
+          personality, and parameters to serve as a digital assistant for this group.
         </p>
         <a
-          href="/class/{data.class.id}/assistant/new"
+          href="/group/{data.class.id}/assistant/new"
           class="text-sm text-blue-dark-50 shrink-0 flex items-center justify-center font-medium bg-white rounded-full p-2 px-4 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all"
           >Create new assistant <ArrowRightOutline size="md" class="orange inline-block" /></a
         >
@@ -81,7 +81,7 @@
     </div>
 
     <Heading tag="h2" class="text-3xl font-serif font-medium mb-4 text-dark-blue-40"
-      >Course assistants</Heading
+      >Group assistants</Heading
     >
     <div class="grid md:grid-cols-2 gap-4 mb-12">
       {#each courseAssistants as assistant}
@@ -91,7 +91,7 @@
           editable={data.editableAssistants.has(assistant.id)}
         />
       {:else}
-        <div>No course assistants</div>
+        <div>No group assistants</div>
       {/each}
     </div>
 
@@ -122,7 +122,7 @@
               <TableBodyCell>
                 {#if data.editableAssistants.has(assistant.id)}
                   <a
-                    href="/class/{data.class.id}/assistant/{assistant.id}"
+                    href="/group/{data.class.id}/assistant/{assistant.id}"
                     class="text-sm text-blue-dark-50 font-medium bg-blue-light-40 rounded-full p-1 px-3 hover:bg-blue-dark-40 hover:text-white transition-all"
                     >Edit</a
                   >
@@ -131,7 +131,7 @@
 
               <TableBodyCell
                 ><a
-                  href="/class/{data.class.id}?assistant={assistant.id}"
+                  href="/group/{data.class.id}?assistant={assistant.id}"
                   class="flex items-center w-32 gap-2 text-sm text-white font-medium bg-orange rounded-full p-1 px-3 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all"
                   >Start a chat <CirclePlusSolid size="sm" class="inline" /></a
                 ></TableBodyCell

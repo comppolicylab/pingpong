@@ -11,7 +11,12 @@
     Badge,
     DropdownDivider
   } from 'flowbite-svelte';
-  import { EyeSlashOutline, ChevronDownSolid, ArrowRightOutline } from 'flowbite-svelte-icons';
+  import {
+    EyeSlashOutline,
+    ChevronDownSolid,
+    ArrowRightOutline,
+    LockSolid
+  } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
   import { errorMessage } from '$lib/errors';
@@ -29,7 +34,7 @@
     if (!$page.url.searchParams.has('assistant')) {
       if (data.assistants.length > 0) {
         // replace current URL with one that has the assistant ID
-        await goto(`/class/${data.class.id}/?assistant=${data.assistants[0].id}`, {
+        await goto(`/group/${data.class.id}/?assistant=${data.assistants[0].id}`, {
           replaceState: true
         });
       }
@@ -42,12 +47,13 @@
     const isMyAssistant = assistant.creator_id === data.me.user!.id;
     const creator = data.assistantCreators[assistant.creator_id]?.name || 'Unknown creator';
     return {
-      creator: isCourseAssistant ? 'Teaching Team' : creator,
+      creator: isCourseAssistant ? 'Moderation Team' : creator,
       isCourseAssistant,
       isMyAssistant
     };
   };
 
+  $: isPrivate = data.class.private || false;
   // Currently selected assistant.
   $: assistants = data?.assistants || [];
   $: courseAssistants = assistants.filter((asst) => asst.endorsed);
@@ -126,9 +132,9 @@
           vision_file_ids: form.vision_file_ids
         })
       );
-      data.threads = [newThread, ...data.threads];
+      data.threads = [newThread as api.LoadedThread, ...data.threads];
       $loading = false;
-      await goto(`/class/${$page.params.classId}/thread/${newThread.id}`);
+      await goto(`/group/${$page.params.classId}/thread/${newThread.id}`);
     } catch (e) {
       sadToast(`Failed to create thread. Error: ${errorMessage(e)}`);
       $loading = false;
@@ -137,7 +143,7 @@
 
   // Set the new assistant selection.
   const selectAi = async (asst: Assistant) => {
-    await goto(`/class/${data.class.id}/?assistant=${asst.id}`);
+    await goto(`/group/${data.class.id}/?assistant=${asst.id}`);
   };
 </script>
 
@@ -226,7 +232,7 @@
           <div class="mb-6">
             {#if assistantMeta.isCourseAssistant}
               <Badge class="bg-blue-light-40 mt-1 text-blue-dark-30 text-xs normal-case"
-                >Course assistant</Badge
+                >Group assistant</Badge
               >
             {:else if assistantMeta.isMyAssistant}
               <Badge class="bg-blue-light-40 mt-1 text-blue-dark-30 text-xs normal-case"
@@ -248,7 +254,7 @@
         {#if assistants.length > 1}
           <div class="absolute bottom-5 right-4">
             <a
-              href={`/class/${data.class.id}/assistant`}
+              href={`/group/${data.class.id}/assistant`}
               class="bg-orange-light text-orange-dark rounded rounded-2xl p-2 text-xs px-4 pr-2 hover:bg-orange-dark hover:text-orange-light transition-all"
               >View all assistants <ArrowRightOutline
                 size="md"
@@ -289,12 +295,19 @@
           remove={handleRemove}
           on:submit={handleSubmit}
         />
-        <div class="flex gap-2 px-4 py-2 items-center w-full text-sm flex-wrap lg:flex-nowrap">
-          <EyeSlashOutline size="sm" class="text-orange" />
-          <Span class="text-gray-400 text-xs"
-            >This thread will be visible the teaching team and yourself.</Span
-          >
-        </div>
+        {#if isPrivate}
+          <div class="flex gap-2 px-4 py-2 items-center w-full text-sm flex-wrap lg:flex-nowrap">
+            <LockSolid size="sm" class="text-orange" />
+            <Span class="text-gray-400 text-xs">This thread will only be visible to you.</Span>
+          </div>
+        {:else}
+          <div class="flex gap-2 px-4 py-2 items-center w-full text-sm flex-wrap lg:flex-nowrap">
+            <EyeSlashOutline size="sm" class="text-orange" />
+            <Span class="text-gray-400 text-xs"
+              >This thread will be visible the moderation team and yourself.</Span
+            >
+          </div>
+        {/if}
         <input type="hidden" name="assistant_id" bind:value={assistant.id} />
         <input type="hidden" name="parties" bind:value={parties} />
       </div>
@@ -305,7 +318,7 @@
         {:else if !data.hasBilling}
           <h1 class="text-2xl font-bold">No billing configured.</h1>
         {:else}
-          <h1 class="text-2xl font-bold">Class is not configured.</h1>
+          <h1 class="text-2xl font-bold">Group is not configured.</h1>
         {/if}
       </div>
     {/if}

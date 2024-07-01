@@ -386,6 +386,22 @@ async def create_class(
         (f"user:{request.state.session.user.id}", "admin", f"class:{new_class.id}"),
     ]
 
+    if not new_class.private:
+        grants.append(
+            (
+                f"class:{new_class.id}#teacher",
+                "moderator",
+                f"class:{new_class.id}",
+            )
+        )
+        grants.append(
+            (
+                f"class:{new_class.id}#admin",
+                "auditor",
+                f"class:{new_class.id}",
+            )
+        )
+
     if new_class.any_can_create_assistant:
         grants.append(
             (
@@ -495,6 +511,16 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
         "can_upload_class_files",
         f"class:{class_id}",
     )
+    teacher_as_moderator = (
+        f"class:{class_id}#teacher",
+        "moderator",
+        f"class:{class_id}",
+    )
+    admin_as_auditor = (
+        f"class:{class_id}#admin",
+        "auditor",
+        f"class:{class_id}",
+    )
 
     if cls.any_can_create_assistant:
         grants.append(can_create_asst)
@@ -515,6 +541,13 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
         grants.append(can_upload_class_file)
     else:
         revokes.append(can_upload_class_file)
+
+    if cls.private:
+        revokes.append(teacher_as_moderator)
+        revokes.append(admin_as_auditor)
+    else:
+        grants.append(teacher_as_moderator)
+        grants.append(admin_as_auditor)
 
     await request.state.authz.write_safe(grant=grants, revoke=revokes)
 
@@ -1108,7 +1141,7 @@ async def get_last_run(
 @v1.get(
     "/threads/recent",
     dependencies=[Depends(LoggedIn())],
-    response_model=schemas.Threads,
+    response_model=schemas.LoadedThreads,
 )
 async def list_recent_threads(
     request: Request, limit: int = 5, before: str | None = None
@@ -1139,7 +1172,7 @@ async def list_recent_threads(
 @v1.get(
     "/threads",
     dependencies=[Depends(LoggedIn())],
-    response_model=schemas.Threads,
+    response_model=schemas.LoadedThreads,
 )
 async def list_all_threads(
     request: Request,
@@ -1178,7 +1211,7 @@ async def list_all_threads(
 @v1.get(
     "/class/{class_id}/threads",
     dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
-    response_model=schemas.Threads,
+    response_model=schemas.LoadedThreads,
 )
 async def list_threads(
     class_id: str, request: Request, limit: int = 20, before: str | None = None

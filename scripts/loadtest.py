@@ -47,17 +47,17 @@ class WebUser(HttpUser):
 
     @task(2)
     def get_stuff(self):
-        self.client.get("/api/v1/classes")
-        self.client.get(f"/api/v1/class/{TEST_INST.cls_id}/threads")
-        self.client.get(f"/api/v1/class/{TEST_INST.cls_id}/assistants")
-        self.client.get(f"/api/v1/class/{TEST_INST.cls_id}")
-        self.client.get(f"/api/v1/class/{TEST_INST.cls_id}/files")
+        self.client.get("/api/v1/groups")
+        self.client.get(f"/api/v1/group/{TEST_INST.cls_id}/threads")
+        self.client.get(f"/api/v1/group/{TEST_INST.cls_id}/assistants")
+        self.client.get(f"/api/v1/group/{TEST_INST.cls_id}")
+        self.client.get(f"/api/v1/group/{TEST_INST.cls_id}/files")
         self.client.get("/api/v1/institutions")
 
     @task(1)
     def new_thread(self):
         resp = self.client.post(
-            f"/api/v1/class/{TEST_INST.cls_id}/thread",
+            f"/api/v1/group/{TEST_INST.cls_id}/thread",
             json={
                 "parties": [self.user["id"]],
                 "message": "Hi, can you help me understand what a normal distribution is?",
@@ -69,7 +69,7 @@ class WebUser(HttpUser):
         with self.thread_lock(thread_id):
             self.threads.append(thread_id)
             self.client.get(
-                f"/api/v1/class/{TEST_INST.cls_id}/thread/{thread_id}/last_run"
+                f"/api/v1/group/{TEST_INST.cls_id}/thread/{thread_id}/last_run"
             )
 
     @task(2)
@@ -86,7 +86,7 @@ class WebUser(HttpUser):
 
         thread_id = random.choice(self.threads)
         self.client.post(
-            f"/api/v1/class/{TEST_INST.cls_id}/thread/{thread_id}",
+            f"/api/v1/group/{TEST_INST.cls_id}/thread/{thread_id}",
             json={
                 "message": (
                     "I'm not sure I understand, "
@@ -94,7 +94,7 @@ class WebUser(HttpUser):
                 )
             },
         )
-        self.client.get(f"/api/v1/class/{TEST_INST.cls_id}/thread/{thread_id}/last_run")
+        self.client.get(f"/api/v1/group/{TEST_INST.cls_id}/thread/{thread_id}/last_run")
 
     @task(4)
     def poll_last_thread_run(self):
@@ -103,7 +103,7 @@ class WebUser(HttpUser):
         some_thread = random.choice(self.threads)
         with self.thread_lock(some_thread):
             self.client.get(
-                f"/api/v1/class/{TEST_INST.cls_id}/thread/{some_thread}/last_run"
+                f"/api/v1/group/{TEST_INST.cls_id}/thread/{some_thread}/last_run"
             )
 
     def thread_lock(self, thread_id):
@@ -153,7 +153,7 @@ class TestInstance:
         # Create the class
         print("Creating class ...")
         resp = self.session.post(
-            f"/institution/{inst_id}/class", json={"name": name, "term": "test term"}
+            f"/institution/{inst_id}/group", json={"name": name, "term": "test term"}
         )
         return resp.json()["id"]
 
@@ -163,9 +163,9 @@ class TestInstance:
         # Create the AI
         # TODO do this with file retrieval?
         print("Creating AI ...")
-        s.put(f"/class/{cls_id}/api_key", json={"api_key": api_key})
+        s.put(f"/group/{cls_id}/api_key", json={"api_key": api_key})
         resp = s.post(
-            f"/class/{cls_id}/assistant",
+            f"/group/{cls_id}/assistant",
             json={
                 "name": f"test ai - {self.test_id}",
                 "file_ids": [],
@@ -181,7 +181,7 @@ class TestInstance:
         return ai_id
 
     def _delete_test_ai(self, cls_id: int, ai_id: int):
-        self.session.delete(f"/class/{cls_id}/assistant/{ai_id}")
+        self.session.delete(f"/group/{cls_id}/assistant/{ai_id}")
 
     def create_test_user(self):
         return self.create_test_users(1)[0]
@@ -196,7 +196,7 @@ class TestInstance:
 
         print("Creating users ...")
         resp = self.session.post(
-            f"/class/{cls_id}/user",
+            f"/group/{cls_id}/user",
             json={
                 "roles": [
                     {

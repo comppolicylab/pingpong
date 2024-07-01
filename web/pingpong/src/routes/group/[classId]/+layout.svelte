@@ -7,7 +7,7 @@
   // Figure out if we're on the assistant page.
   // When we are, we want to show the "Manage Class" link.
   // For every other page, we show the "View Class Page" link.
-  $: isOnClassPage = $page.url.pathname === `/class/${data.class?.id}/assistant`;
+  $: isOnClassPage = $page.url.pathname === `/group/${data.class?.id}/assistant`;
 </script>
 
 <div class="relative pb-8 h-full w-full flex flex-col">

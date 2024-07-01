@@ -254,7 +254,7 @@
     }
 
     if (!classId) {
-      showErrorAndForceCurrentDataRefresh('Failed to remove user: class ID is missing');
+      showErrorAndForceCurrentDataRefresh('Failed to remove user: group ID is missing');
       return;
     }
 
@@ -267,7 +267,7 @@
       const detail = result.detail || 'unknown error';
       showErrorAndForceCurrentDataRefresh(`Failed to remove user ${userName}: ${detail}`);
     } else {
-      happyToast(`Removed ${userName} from the class`);
+      happyToast(`Removed ${userName} from the group`);
       loadUsers();
     }
   };
