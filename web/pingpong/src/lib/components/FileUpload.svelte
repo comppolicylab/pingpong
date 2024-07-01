@@ -6,7 +6,10 @@
     files: Writable<FileUploadInfo[]>,
     maxSize = 0,
     purpose: FileUploadPurpose = 'assistants',
-    dispatch = createEventDispatcher(),
+    dispatch: (
+      type: string,
+      detail: { file: File; message: string } | Writable<FileUploadInfo[]>
+    ) => void,
     value?: Writable<string[]>
   ) => {
     if (!upload) {
@@ -76,14 +79,19 @@
   // The component can be used outside of a form, too.
   export const bindToForm = (
     el: HTMLInputElement,
-    options: { files: Writable<FileUploadInfo[]> }
+    options: {
+      files: Writable<FileUploadInfo[]>;
+      dispatch: (
+        type: string,
+        detail: { file: File; message: string } | Writable<FileUploadInfo[]>
+      ) => void;
+    }
   ) => {
-    const dispatch = createEventDispatcher();
     const reset = () => {
       // Clear the file list after the form is reset or submitted.
       setTimeout(() => {
         options.files.set([]);
-        dispatch('change', options.files);
+        options.dispatch('change', options.files);
       }, 0);
     };
     const form = el.form;
@@ -155,6 +163,9 @@
   // Whether the dropzone is being targeted by a file.
   let dropzoneActive = false;
 
+  // Event dispatcher for custom events.
+  const dispatch = createEventDispatcher();
+
   // List of files being uploaded.
   const files = writable<FileUploadInfo[]>([]);
 
@@ -172,7 +183,7 @@
       return;
     }
 
-    autoupload(Array.from(e.dataTransfer.files), upload, files, maxSize, purpose);
+    autoupload(Array.from(e.dataTransfer.files), upload, files, maxSize, purpose, dispatch);
   };
 
   /**
@@ -184,7 +195,7 @@
       return;
     }
 
-    autoupload(Array.from(input.files), upload, files, maxSize, purpose);
+    autoupload(Array.from(input.files), upload, files, maxSize, purpose, dispatch);
   };
 
   // Due to how drag events are handled on child elements, we need to keep
@@ -241,7 +252,7 @@
       style="display: none;"
       bind:this={uploadRef}
       on:change={handleFileInputChange}
-      use:bindToForm={{ files: files }}
+      use:bindToForm={{ files: files, dispatch: dispatch }}
     />
     <Button
       outline={!drop}

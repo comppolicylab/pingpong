@@ -99,7 +99,7 @@
 
   $: availableSpace = maxCount - selectedFiles.length;
 
-  let focusedList: 'available' | 'selected' = 'available';
+  let focusedListIsAvailable: boolean = true;
   let focusedIndex = -1;
   let lastClickedIndex = -1;
 
@@ -110,14 +110,14 @@
     availableListElement?.addEventListener(
       'focus',
       () => {
-        focusedList = 'available';
+        focusedListIsAvailable = true;
       },
       true
     );
     selectedListElement?.addEventListener(
       'focus',
       () => {
-        focusedList = 'selected';
+        focusedListIsAvailable = true;
       },
       true
     );
@@ -130,7 +130,7 @@
         value.update((v) => [...v, availableFileIds[index]]);
       });
     selectedAvailable = [];
-    focusedList = 'selected';
+    focusedListIsAvailable = false;
     focusedIndex = selectedFileNames.length - 1;
     scrollIntoView(selectedListElement, focusedIndex);
   }
@@ -142,26 +142,26 @@
         value.update((v) => v.filter((item) => item !== selectedFileIds[index]));
       });
     selectedSelected = [];
-    focusedList = 'available';
+    focusedListIsAvailable = true;
     focusedIndex = availableFileNames.length - 1;
     scrollIntoView(availableListElement, focusedIndex);
   }
 
   function toggleSelection(
-    list: 'available' | 'selected',
+    listIsAvailable: boolean,
     index: number,
     event: MouseEvent | KeyboardEvent
   ) {
     const isShiftPressed = event.shiftKey;
     const isCtrlPressed = event.ctrlKey || event.metaKey;
-    const currentSelected = list === 'available' ? selectedAvailable : selectedSelected;
+    const currentSelected = listIsAvailable ? selectedAvailable : selectedSelected;
 
     if (isShiftPressed && lastClickedIndex !== -1) {
       const start = Math.min(lastClickedIndex, index);
       const end = Math.max(lastClickedIndex, index);
       const newSelection = Array.from({ length: end - start + 1 }, (_, i) => start + i);
 
-      if (list === 'available') {
+      if (listIsAvailable) {
         selectedAvailable = Array.from(new Set([...selectedAvailable, ...newSelection]));
         selectedSelected = [];
       } else {
@@ -169,7 +169,7 @@
         selectedAvailable = [];
       }
     } else if (isCtrlPressed) {
-      if (list === 'available') {
+      if (listIsAvailable) {
         selectedAvailable = currentSelected.includes(index)
           ? currentSelected.filter((i) => i !== index)
           : [...currentSelected, index];
@@ -181,7 +181,7 @@
         selectedAvailable = [];
       }
     } else {
-      if (list === 'available') {
+      if (listIsAvailable) {
         selectedAvailable = [index];
         selectedSelected = [];
       } else {
@@ -191,14 +191,14 @@
     }
 
     lastClickedIndex = index;
-    focusedList = list;
+    focusedListIsAvailable = listIsAvailable;
     focusedIndex = index;
-    scrollIntoView(list === 'available' ? availableListElement : selectedListElement, index);
+    scrollIntoView(listIsAvailable ? availableListElement : selectedListElement, index);
   }
 
-  function handleKeydown(event: KeyboardEvent, list: 'available' | 'selected') {
+  function handleKeydown(event: KeyboardEvent, listIsAvailable: boolean) {
     const isCtrlPressed = event.ctrlKey || event.metaKey;
-    const currentList = list === 'available' ? availableFileNames : selectedFileNames;
+    const currentList = listIsAvailable ? availableFileNames : selectedFileNames;
 
     switch (event.key) {
       case 'ArrowUp':
@@ -207,10 +207,10 @@
           focusedIndex = Math.max(0, focusedIndex - 1);
         } else {
           focusedIndex = Math.max(0, focusedIndex - 1);
-          toggleSelection(list, focusedIndex, event);
+          toggleSelection(listIsAvailable, focusedIndex, event);
         }
         scrollIntoView(
-          list === 'available' ? availableListElement : selectedListElement,
+          listIsAvailable ? availableListElement : selectedListElement,
           focusedIndex
         );
         break;
@@ -220,31 +220,43 @@
           focusedIndex = Math.min(currentList.length - 1, focusedIndex + 1);
         } else {
           focusedIndex = Math.min(currentList.length - 1, focusedIndex + 1);
-          toggleSelection(list, focusedIndex, event);
+          toggleSelection(listIsAvailable, focusedIndex, event);
         }
         scrollIntoView(
-          list === 'available' ? availableListElement : selectedListElement,
+          listIsAvailable ? availableListElement : selectedListElement,
           focusedIndex
         );
         break;
       case ' ':
         if (isCtrlPressed) {
           event.preventDefault();
-          toggleSelection(list, focusedIndex, event);
+          toggleSelection(listIsAvailable, focusedIndex, event);
         }
         break;
       case 'ArrowRight':
-        if (isCtrlPressed && list === 'available') {
+        if (listIsAvailable) {
           event.preventDefault();
           moveToSelected();
         }
         break;
       case 'ArrowLeft':
-        if (isCtrlPressed && list === 'selected') {
+        if (!listIsAvailable) {
           event.preventDefault();
           moveToAvailable();
         }
         break;
+      case 'a':
+      case 'A':
+        if (isCtrlPressed) {
+          event.preventDefault();
+          if (listIsAvailable) {
+            selectedAvailable = Array.from({ length: availableFileNames.length }, (_, i) => i);
+          } else {
+            selectedSelected = Array.from({ length: selectedFileNames.length }, (_, i) => i);
+          }
+        }
+        break;
+
     }
   }
 
@@ -271,11 +283,11 @@
   style="display: none;"
   bind:this={uploadRef}
   on:change={handleFileInputChange}
-  use:bindToForm={{ files: files }}
+  use:bindToForm={{ files: files, dispatch: dispatch }}
 />
 <div id={name} class="flex justify-between">
   <div class="w-[45%]">
-    <div class="pl-0.5 pr-[5px] pb-px"><Label for="available-files">Available files</Label></div>
+    <div class="pl-0.5 pr-1 pb-px"><Label for="available-files">Available files</Label></div>
     <div
       bind:this={availableListElement}
       id="available-files"
@@ -283,34 +295,30 @@
       role="listbox"
       aria-label="Available files"
       tabindex="0"
-      on:keydown={(e) => handleKeydown(e, 'available')}
+      on:keydown={(e) => handleKeydown(e, true)}
     >
       {#each availableFileNames as name, index}
+      {@const isSelected = selectedAvailable.includes(index)} 
         <button
           type="button"
-          class="block text-sm w-full pt-[3px] pr-0 pb-[3px] pl-2 border-none bg-none overflow-y-auto cursor-pointer text-left"
+          class="block text-sm w-full pt-1 pr-0 pb-1 pl-2 border-none bg-none overflow-y-auto cursor-pointer text-left {isSelected ? 'text-white bg-blue-600' : 'hover:bg-gray-100'}"
           role="option"
-          aria-selected={selectedAvailable.includes(index)}
-          class:bg-blue-600={selectedAvailable.includes(index)}
-          class:text-white={selectedAvailable.includes(index)}
-          class:hover:bg-gray-100={!selectedAvailable.includes(index)}
-          class:focused={focusedList === 'available' && focusedIndex === index}
-          on:click={(e) => toggleSelection('available', index, e)}
+          aria-selected={isSelected}
+          class:focused={focusedListIsAvailable && focusedIndex === index}
+          on:click={(e) => toggleSelection(true, index, e)}
         >
           {name}
         </button>
       {/each}
       {#if availableFileNames.length === 0}
-        <div class="flex flex-col justify-center h-full gap-0">
+        <div class="flex flex-col justify-center h-full justify-center gap-0 flex-wrap">
           <div class="flex justify-center">
             <InboxFullOutline class="h-20 w-20 text-gray-500" strokeWidth="1.5" />
           </div>
-          <div class="text-lg font-medium text-gray-500 text-center">No files available</div>
-          <div class="flex flex-row justify-center text-md text-gray-500 text-center gap-1">
+          <div class="text-lg font-medium text-gray-500 text-center">No {items.length > 0 ? 'more ' : ''}files available</div>
+          <div class="flex justify-center text-md text-gray-500 text-center text-wrap mx-14 flex-wrap">
             <div class="shrink-0">Use the Upload Files button</div>
-            <CloudArrowUpOutline />
-          </div>
-          <div class="flex flex-row justify-center text-md text-gray-500 text-center gap-1">
+            <CloudArrowUpOutline class="ml-1"/>
             <div class="shrink-0">to upload files to your assistant.</div>
           </div>
         </div>
@@ -321,7 +329,7 @@
     <button
       type="button"
       id="move-to-selected"
-      class="my-[5px] mx-0 py-[5px] px-2.5 bg-none rounded border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+      class="my-1 mx-0 py-1 px-2.5 bg-none rounded border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
       on:click={moveToSelected}
       disabled={selectedAvailable.length === 0 ||
         disabled ||
@@ -348,7 +356,7 @@
     {/if}
     <button
       type="button"
-      class="my-[5px] mx-0 py-[5px] px-2.5 bg-none rounded border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+      class="my-1 mx-0 py-1 px-2.5 bg-none rounded border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
       on:click={moveToAvailable}
       disabled={selectedSelected.length === 0 || disabled || $loading}
       aria-label="Move selected files to Available list">◀</button
@@ -357,7 +365,7 @@
       <button
         type="button"
         id="upload"
-        class="my-[5px] mx-0 py-[5px] px-2.5 bg-none rounded border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+        class="my-1 mx-0 py-1 px-2.5 bg-none rounded border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
         on:click={() => {
           uploadRef.click();
         }}
@@ -382,8 +390,8 @@
   </div>
   <div class="w-[45%]">
     <div class="flex flex-row justify-between">
-      <div class="pl-0.5 pr-[3px] pb-px"><Label for="selected-files">Selected files</Label></div>
-      <div class="pr-[3px] pb-px text-sm text-gray-500">
+      <div class="pl-0.5 pr-1 pb-px"><Label for="selected-files">Selected files</Label></div>
+      <div class="pr-1 pb-px text-sm text-gray-500">
         {selectedFiles.length}/{maxCount} files selected
       </div>
     </div>
@@ -394,19 +402,17 @@
       role="listbox"
       aria-label="Selected files"
       tabindex="0"
-      on:keydown={(e) => handleKeydown(e, 'selected')}
+      on:keydown={(e) => handleKeydown(e, false)}
     >
       {#each selectedFileNames as name, index}
+      {@const isSelected = selectedSelected.includes(index)} 
         <button
           type="button"
-          class="block text-sm w-full pt-[3px] pr-0 pb-[3px] pl-2 border-none bg-none overflow-y-auto cursor-pointer text-left"
+          class="block text-sm w-full pt-1 pr-0 pb-1 pl-2 border-none bg-none overflow-y-auto cursor-pointer text-left {isSelected ? 'text-white bg-blue-600' : 'hover:bg-gray-100'}"
           role="option"
-          aria-selected={selectedSelected.includes(index)}
-          class:bg-blue-600={selectedSelected.includes(index)}
-          class:text-white={selectedSelected.includes(index)}
-          class:hover:bg-gray-100={!selectedSelected.includes(index)}
-          class:focused={focusedList === 'selected' && focusedIndex === index}
-          on:click={(e) => toggleSelection('selected', index, e)}
+          aria-selected={isSelected}
+          class:focused={!focusedListIsAvailable && focusedIndex === index}
+          on:click={(e) => toggleSelection(false, index, e)}
         >
           {name}
         </button>
