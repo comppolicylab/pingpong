@@ -1,48 +1,7 @@
-import * as api from '$lib/api';
 import type { PageLoad } from './$types';
+import { redirect } from '@sveltejs/kit';
 
-/**
- * Load additional data needed for managing the class.
- */
-export const load: PageLoad = async ({ fetch, params }) => {
+export const load: PageLoad = async ({ params }) => {
   const classId = parseInt(params.classId, 10);
-  const [grants] = await Promise.all([
-    api.grants(fetch, {
-      canEditInfo: { target_type: 'class', target_id: classId, relation: 'can_edit_info' },
-      canPublishThreads: {
-        target_type: 'class',
-        target_id: classId,
-        relation: 'can_publish_threads'
-      },
-      canUploadClassFiles: {
-        target_type: 'class',
-        target_id: classId,
-        relation: 'can_upload_class_files'
-      },
-      isAdmin: {
-        target_type: 'class',
-        target_id: classId,
-        relation: 'admin'
-      },
-      canViewApiKey: { target_type: 'class', target_id: classId, relation: 'can_view_api_key' },
-      canViewUsers: { target_type: 'class', target_id: classId, relation: 'can_view_users' },
-      canDelete: { target_type: 'class', target_id: classId, relation: 'can_delete' },
-      canManageUsers: { target_type: 'class', target_id: classId, relation: 'can_manage_users' }
-    })
-  ]);
-
-  let api_key = '';
-  if (grants.canViewApiKey) {
-    const apiKeyResponse = api.expandResponse(await api.getApiKey(fetch, classId));
-    if (apiKeyResponse.error) {
-      api_key = '[error fetching API key!]';
-    } else {
-      api_key = apiKeyResponse.data.api_key;
-    }
-  }
-
-  return {
-    apiKey: api_key || '',
-    grants
-  };
+  redirect(302, `/group/${classId}/manage/`);
 };

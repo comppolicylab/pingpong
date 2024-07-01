@@ -41,7 +41,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   }
 
   let classes: api.Class[] = [];
-  let threads: api.Thread[] = [];
+  let threads: api.LoadedThread[] = [];
   let institutions: api.Institution[] = [];
   let canCreateInstitution = false;
   if (authed) {

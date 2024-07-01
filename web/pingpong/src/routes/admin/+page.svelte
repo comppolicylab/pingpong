@@ -48,24 +48,30 @@
         <div>
           <Button
             class="bg-orange text-white rounded-full hover:bg-orange-dark"
-            href="/admin/createClass">Create a new class</Button
+            href="/admin/createGroup">Create a new group</Button
           >
         </div>
       </div>
     </div>
 
     <div class="sm:col-start-1 sm:col-end-2 sm:row-start-1 h-full overflow-y-auto">
-      <h3 class="font-normal text-2xl border-b border-gray-200 pb-1">Classes</h3>
+      <h3 class="font-normal text-2xl border-b border-gray-200 pb-1">Groups</h3>
       <div class="flex flex-wrap flex-col">
         {#each classes as cls}
           <a
-            href={`/class/${cls.id}`}
+            href={`/group/${cls.id}`}
             class="border-b border-gray-200 pb-4 pt-4 transition-all duration-300 hover:bg-gray-100 hover:pl-4"
           >
             <div>
-              <h4 class="eyebrow eyebrow-dark">
-                {cls.institution?.name || 'Unknown'}
-              </h4>
+              <div class="flex flex-row gap-1">
+                <h4 class="eyebrow eyebrow-dark shrink-0">
+                  {cls.institution?.name || 'Unknown Institution'}
+                </h4>
+                <h4 class="eyebrow eyebrow-dark shrink-0">|</h4>
+                <h4 class="eyebrow eyebrow-dark shrink truncate">
+                  {cls.term || 'Unknown Session'}
+                </h4>
+              </div>
               <div class="pt-2 font-light text-lg pb-2">
                 {cls.name || 'Unknown'}
               </div>
@@ -77,7 +83,7 @@
         {/each}
 
         {#if classes.length === 0}
-          <div>No classes found</div>
+          <div>No groups found</div>
         {/if}
       </div>
     </div>

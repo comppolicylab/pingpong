@@ -512,6 +512,7 @@ export type Class = {
   created: string;
   updated: string | null;
   api_key: string | null;
+  private: boolean | null;
   any_can_create_assistant: boolean | null;
   any_can_publish_assistant: boolean | null;
   any_can_publish_thread: boolean | null;
@@ -545,6 +546,7 @@ export const getMyClasses = async (f: Fetcher) => {
 export type CreateClassRequest = {
   name: string;
   term: string;
+  private?: boolean;
   any_can_create_assistant?: boolean;
   any_can_publish_assistant?: boolean;
   any_can_publish_thread?: boolean;
@@ -557,6 +559,7 @@ export type CreateClassRequest = {
 export type UpdateClassRequest = {
   name?: string;
   term?: string;
+  private?: boolean;
   any_can_create_assistant?: boolean;
   any_can_publish_assistant?: boolean;
   any_can_publish_thread?: boolean;
@@ -652,6 +655,10 @@ export type Threads = {
   threads: Thread[];
 };
 
+export type LoadedThreads = {
+  threads: LoadedThread[];
+};
+
 /**
  * Parameters for fetching threads.
  */
@@ -678,12 +685,12 @@ const getThreads = async (f: Fetcher, url: string, opts?: GetThreadsOpts) => {
     opts.limit = 20;
   }
 
-  const result = expandResponse(await GET<GetThreadsOpts, Threads>(f, url, opts));
+  const result = expandResponse(await GET<GetThreadsOpts, LoadedThreads>(f, url, opts));
 
   if (result.error) {
     return {
       lastPage: true,
-      threads: [] as Thread[],
+      threads: [] as LoadedThread[],
       error: result.error
     };
   }
@@ -1189,6 +1196,23 @@ export type Thread = {
   name: string;
   thread_id: string;
   class_id: number;
+  assistant_id: number;
+  private: boolean;
+  tools_available: string | null;
+  users: UserPlaceholder[];
+  created: string;
+  updated: string;
+};
+
+/**
+ * Thread information.
+ */
+export type LoadedThread = {
+  id: number;
+  name: string;
+  thread_id: string;
+  class_id: number;
+  assistant_name?: string | null;
   assistant_id: number;
   private: boolean;
   tools_available: string | null;
@@ -1721,8 +1745,8 @@ export type Role = (typeof ROLES)[number];
  */
 export const ROLE_LABELS: Record<Role, string> = {
   admin: 'Administrator',
-  teacher: 'Instructor',
-  student: 'Student'
+  teacher: 'Moderator',
+  student: 'Member'
 };
 
 /**

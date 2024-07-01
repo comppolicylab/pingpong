@@ -7,6 +7,8 @@
 
   export let role: api.Role;
 
+  export let isPrivate: boolean = false;
+
   const dispatch = createEventDispatcher();
 
   const loading = writable(false);
@@ -62,15 +64,27 @@
 
     <Label for="role">Role</Label>
     <Helper>
-      <div>Choose a role to grant permissions to these users to view the class.</div>
+      <div>
+        Choose a role to grant permissions to these users to view the group.{isPrivate
+          ? ' As a private group, permissions are more restrictive compared to a non-private group.'
+          : ''}
+      </div>
       <ul class="list-disc pl-8 my-2">
         <li>
-          <strong>Students</strong> can create chats and view their own personal chat history.
+          <strong>Members</strong> can create chats and view their own personal chat history.
         </li>
         <li>
-          <strong>Teachers</strong> can view everyone's chat history and manage students.
+          <strong>Moderators</strong>
+          {isPrivate
+            ? 'can manage members, but cannot view unpublished chat histories or assistants.'
+            : "can view everyone's chat history and manage members."}
         </li>
-        <li><strong>Admins</strong> can view everyone's chat history and manage the class.</li>
+        <li>
+          <strong>Administrators</strong>
+          {isPrivate
+            ? 'can manage the group, but cannot view unpublished chat histories or assistants.'
+            : "can view everyone's chat history and assistants, and manage the group."}
+        </li>
       </ul>
     </Helper>
     <Select id="role" name="role" value={role} items={roles} />

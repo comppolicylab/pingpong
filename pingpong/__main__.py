@@ -10,6 +10,11 @@ import alembic.config
 
 from .auth import encode_auth_token
 from .authz.migrate import sync_db_to_openfga
+from .authz.private_groups import (
+    fetch_classes_to_migrate,
+    update_objs_in_db,
+    write_grants_to_openfga,
+)
 from .config import config
 from .models import Base, User
 
@@ -55,6 +60,33 @@ def migrate_authz() -> None:
         print("Migration finished!")
 
     asyncio.run(_migrate())
+
+
+@auth.command("migrate-private")
+def migrate_private() -> None:
+    async def _migrate_private() -> None:
+        print("Adding permissions for non-private to OpenFga ...")
+        await config.authz.driver.init()
+        async with config.authz.driver.get_client() as c:
+            while True:
+                async with config.db.driver.async_session() as session:
+                    try:
+                        classes_to_migrate = await fetch_classes_to_migrate(
+                            session, limit=10
+                        )
+
+                        if not classes_to_migrate:
+                            break
+
+                        await update_objs_in_db(session, classes_to_migrate)
+                        await write_grants_to_openfga(c, classes_to_migrate)
+                        await session.commit()
+                    except Exception:
+                        await session.rollback()
+
+        print("Migration finished!")
+
+    asyncio.run(_migrate_private())
 
 
 @auth.command("update_model")

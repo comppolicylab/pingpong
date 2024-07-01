@@ -17,7 +17,7 @@
   export let editable = false;
 
   // Get the full URL to use the assistant
-  $: assistantLink = `${$page.url.protocol}//${$page.url.host}/class/${assistant.class_id}?assistant=${assistant.id}`;
+  $: assistantLink = `${$page.url.protocol}//${$page.url.host}/group/${assistant.class_id}?assistant=${assistant.id}`;
 
   // Show info that we copied the link to the clipboard
   const showCopiedLink = (e: Event) => {
@@ -48,7 +48,7 @@
       {#if editable}
         <a
           class="text-blue-dark-30 hover:text-blue-dark-50"
-          href="/class/{assistant.class_id}/assistant/{assistant.id}"><PenSolid size="md" /></a
+          href="/group/{assistant.class_id}/assistant/{assistant.id}"><PenSolid size="md" /></a
         >
       {/if}
 

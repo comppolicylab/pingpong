@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Select, Button, Label, Input, Heading } from 'flowbite-svelte';
+  import { Select, Button, Label, Input, Heading, Helper } from 'flowbite-svelte';
   import * as api from '$lib/api';
   import { writable } from 'svelte/store';
   import { happyToast, sadToast } from '$lib/toast';
@@ -31,7 +31,7 @@
     const term = d.term?.toString();
     if (!term) {
       $loading = false;
-      return sadToast('Term is required');
+      return sadToast('Session is required');
     }
 
     let instId = parseInt(d.institution?.toString(), 10);
@@ -61,25 +61,29 @@
     const classResponse = api.expandResponse(rawClass);
     if (classResponse.error) {
       $loading = false;
-      return sadToast(classResponse.error.detail || 'Unknown error creating class');
+      return sadToast(classResponse.error.detail || 'Unknown error creating group');
     }
 
     $loading = false;
     form.reset();
-    happyToast('Class created successfully!');
-    await goto(`/class/${classResponse.data.id}/manage`);
+    happyToast('Group created successfully!');
+    await goto(`/group/${classResponse.data.id}/manage`);
   };
 </script>
 
 <div class="h-full w-full flex flex-col p-8 gap-8 items-center">
-  <Heading tag="h2" class="serif">Create a new class</Heading>
+  <Heading tag="h2" class="serif">Create a new group</Heading>
   <form on:submit={submitCreateClass} class="flex flex-col gap-4 max-w-lg sm:min-w-[32rem]">
     <div>
       <Label for="name">Name</Label>
       <Input type="text" name="name" id="name" disabled={$loading} />
     </div>
     <div>
-      <Label for="term">Term</Label>
+      <Label for="term">Session</Label>
+      <Helper
+        >Use this field to distinguish between groups that might be reoccuring, such as a class
+        being offered every academic year.</Helper
+      >
       <Input type="text" name="term" id="term" disabled={$loading} />
     </div>
     <div>
