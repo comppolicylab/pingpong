@@ -9,13 +9,6 @@ import alembic.command
 import alembic.config
 
 from .auth import encode_auth_token
-from .authz.migrate import sync_db_to_openfga
-from .authz.private_groups import (
-    fetch_classes_to_migrate,
-    update_objs_in_db,
-    write_grants_to_openfga,
-    revert_all_classes_to_none,
-)
 from .config import config
 from .models import Base, User
 
@@ -47,58 +40,6 @@ def make_root(email: str) -> None:
             print(f"User {user.id} promoted to root")
 
     asyncio.run(_make_root())
-
-
-@auth.command("migrate")
-def migrate_authz() -> None:
-    async def _migrate() -> None:
-        print("Syncing permissions from database to OpenFga ...")
-        await config.authz.driver.init()
-        async with config.db.driver.async_session() as session:
-            async with config.authz.driver.get_client() as c:
-                await sync_db_to_openfga(session, c)
-
-        print("Migration finished!")
-
-    asyncio.run(_migrate())
-
-
-@auth.command("migrate-private")
-def migrate_private() -> None:
-    async def _migrate_private() -> None:
-        print("Adding permissions for non-private to OpenFga ...")
-        await config.authz.driver.init()
-        async with config.authz.driver.get_client() as c:
-            async with config.db.driver.async_session() as _session:
-                try:
-                    await revert_all_classes_to_none(_session)
-                    await _session.commit()
-                except Exception as e:
-                    print(f"Error: {e}, Rolling back and exiting ...")
-                    await _session.rollback()
-                    return
-
-            while True:
-                async with config.db.driver.async_session() as session:
-                    try:
-                        classes_to_migrate = await fetch_classes_to_migrate(
-                            session, limit=10
-                        )
-
-                        if not classes_to_migrate:
-                            break
-
-                        await update_objs_in_db(session, classes_to_migrate)
-                        await write_grants_to_openfga(c, classes_to_migrate)
-                        await session.commit()
-                    except Exception as e:
-                        print(f"Error: {e}, Rolling back and exiting...")
-                        await session.rollback()
-                        return
-
-        print("Migration finished!")
-
-    asyncio.run(_migrate_private())
 
 
 @auth.command("update_model")
