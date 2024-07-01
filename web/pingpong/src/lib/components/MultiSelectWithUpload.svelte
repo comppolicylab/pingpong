@@ -311,7 +311,7 @@
             <InboxFullOutline class="h-20 w-20 text-gray-500" strokeWidth="1.5" />
           </div>
           <div class="text-lg font-medium text-gray-500 text-center">
-            No {items.length > 0 ? 'more ' : ''}files available
+            {items.length > 0 ? 'All files selected' : 'No files available'}
           </div>
           <div
             class="flex justify-center text-md text-gray-500 text-center text-wrap mx-14 flex-wrap"
