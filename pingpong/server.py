@@ -636,6 +636,8 @@ async def add_users_to_class(
         "student": "a Member",
     }
 
+    user_display_name = models.User.get_display_name(request.state.db, request.state.session.user.id)
+
     for ucr in new_ucr.roles:
         if not is_admin and ucr.roles.admin:
             raise HTTPException(
@@ -684,7 +686,7 @@ async def add_users_to_class(
                     user_id=user.id,
                     email=user.email,
                     class_name=class_.name,
-                    inviter_name=new_ucr.inviter_name,
+                    inviter_name=user_display_name,
                     formatted_role=", ".join(new_roles) if new_roles else None,
                 )
             )
