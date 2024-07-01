@@ -94,12 +94,14 @@
   let fileSearchOptions: SelectOptionType<string>[] = [];
   let codeInterpreterOptions: SelectOptionType<string>[] = [];
   const fileSearchFilter = data.uploadInfo.getFileSupportFilter({
-    code_interpreter: true,
-    file_search: true
+    code_interpreter: false,
+    file_search: true,
+    vision: false
   });
   const codeInterpreterFilter = data.uploadInfo.getFileSupportFilter({
     code_interpreter: true,
-    file_search: true
+    file_search: false,
+    vision: false
   });
   $: fileSearchOptions = (asstFiles || [])
     .filter(fileSearchFilter)
