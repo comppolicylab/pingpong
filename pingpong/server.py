@@ -636,7 +636,9 @@ async def add_users_to_class(
         "student": "a Member",
     }
 
-    user_display_name = models.User.get_display_name(request.state.db, request.state.session.user.id)
+    user_display_name = await models.User.get_display_name(
+        request.state.db, request.state.session.user.id
+    )
 
     for ucr in new_ucr.roles:
         if not is_admin and ucr.roles.admin:

@@ -330,7 +330,6 @@ class CreateUserClassRole(BaseModel):
 
 
 class CreateUserClassRoles(BaseModel):
-    inviter_name: str | None = None
     roles: list[CreateUserClassRole]
     silent: bool = False
 
@@ -356,7 +355,6 @@ class CreateInvite(BaseModel):
     user_id: int
     email: str = Field(..., min_length=3, max_length=100)
     class_name: str = Field(..., min_length=3, max_length=100)
-    inviter_name: str | None = None
     formatted_role: str | None = None
 
 

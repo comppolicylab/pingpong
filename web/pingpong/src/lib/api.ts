@@ -1112,7 +1112,6 @@ export type CreateClassUserRequest = {
  * Plural version of CreateClassUserRequest.
  */
 export type CreateClassUsersRequest = {
-  inviterName: string | null;
   roles: CreateClassUserRequest[];
 };
 

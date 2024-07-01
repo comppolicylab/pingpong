@@ -7,7 +7,6 @@
 
   export let role: api.Role;
 
-  export let inviterName: string | null = null;
   export let isPrivate: boolean = false;
 
   const dispatch = createEventDispatcher();
@@ -41,7 +40,6 @@
     }
 
     const request: api.CreateClassUsersRequest = {
-      inviterName: inviterName,
       roles: emailList.map((e) => ({
         email: e,
         roles: {
