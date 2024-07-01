@@ -81,7 +81,8 @@ def migrate_private() -> None:
                         await update_objs_in_db(session, classes_to_migrate)
                         await write_grants_to_openfga(c, classes_to_migrate)
                         await session.commit()
-                    except Exception:
+                    except Exception as e:
+                        print(f"Error: {e}, Rolling back ...")
                         await session.rollback()
 
         print("Migration finished!")
