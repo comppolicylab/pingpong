@@ -5,19 +5,20 @@
     Select,
     Checkbox,
     Label,
-    MultiSelect,
     Input,
     Heading,
     Textarea,
     type SelectOptionType
   } from 'flowbite-svelte';
-  import type { Tool, ServerFile } from '$lib/api';
+  import type { Tool, ServerFile, FileUploadInfo } from '$lib/api';
   import { beforeNavigate, goto } from '$app/navigation';
   import * as api from '$lib/api';
   import { setsEqual } from '$lib/set';
   import { happyToast, sadToast } from '$lib/toast';
   import { normalizeNewlines } from '$lib/content.js';
   import { ImageOutline } from 'flowbite-svelte-icons';
+  import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
+  import { writable, type Writable } from 'svelte/store';
 
   export let data;
 
@@ -28,9 +29,17 @@
   $: assistant = data.assistant;
   $: canPublish = data.grants.canPublishAssistants;
 
-  let selectedFileSearchFiles = data.selectedFileSearchFiles.slice();
-  let selectedCodeInterpreterFiles = data.selectedCodeInterpreterFiles.slice();
+  let selectedFileSearchFiles = writable(data.selectedFileSearchFiles.slice());
+  let selectedCodeInterpreterFiles = writable(data.selectedCodeInterpreterFiles.slice());
+
+  // The list of adhoc files being uploaded.
+  let optimisticUploadFileInfo = writable<FileUploadInfo[]>([]);
+  $: uploadingOptimistic = $optimisticUploadFileInfo.some((f) => f.state === 'pending');
+  $: optimisticFiles = $optimisticUploadFileInfo
+    .filter((f) => f.state === 'success')
+    .map((f) => f.response as ServerFile);
   let loading = false;
+
   const fileSearchMetadata = {
     value: 'file_search',
     name: 'File Search',
@@ -71,7 +80,7 @@
   );
   $: supportsVision = supportVisionModels.includes(selectedModel);
   let allowVisionUpload = false;
-  $: allFiles = data.files.map((f) => ({
+  $: allFiles = [...data.files, ...optimisticFiles].map((f) => ({
     state: 'success',
     progress: 100,
     file: { type: f.content_type, name: f.name },
@@ -101,6 +110,11 @@
 
   $: fileSearchToolSelect = initialTools.includes('file_search');
   $: codeInterpreterToolSelect = initialTools.includes('code_interpreter');
+
+  // Handle updates from the file upload component.
+  const handleOptimisticFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
+    optimisticUploadFileInfo = e.detail;
+  };
 
   /**
    * Check if the assistant model supports vision capabilities.
@@ -196,11 +210,11 @@
 
     // Check selected files separately since these are handled differently in the form.
     if (
-      !setsEqual(new Set(selectedCodeInterpreterFiles), new Set(data.selectedCodeInterpreterFiles))
+      !setsEqual(new Set($selectedCodeInterpreterFiles), new Set(data.selectedCodeInterpreterFiles))
     ) {
       modifiedFields.push('code interpreter files');
     }
-    if (!setsEqual(new Set(selectedFileSearchFiles), new Set(data.selectedFileSearchFiles))) {
+    if (!setsEqual(new Set($selectedFileSearchFiles), new Set(data.selectedFileSearchFiles))) {
       modifiedFields.push('file search files');
     }
 
@@ -228,13 +242,12 @@
       instructions: normalizeNewlines(body.instructions.toString()),
       model: body.model.toString(),
       tools,
-      code_interpreter_file_ids: codeInterpreterToolSelect ? selectedCodeInterpreterFiles : [],
-      file_search_file_ids: fileSearchToolSelect ? selectedFileSearchFiles : [],
+      code_interpreter_file_ids: codeInterpreterToolSelect ? $selectedCodeInterpreterFiles : [],
+      file_search_file_ids: fileSearchToolSelect ? $selectedFileSearchFiles : [],
       published: body.published?.toString() === 'on',
       use_latex: body.use_latex?.toString() === 'on',
       hide_prompt: body.hide_prompt?.toString() === 'on'
     };
-
     return params;
   };
 
@@ -276,6 +289,11 @@
       checkForChanges = false;
       await goto(`/class/${data.class.id}/assistant`, { invalidateAll: true });
     }
+  };
+
+  // Handle file upload
+  const handleUpload = (f: File, onProgress: (p: number) => void) => {
+    return api.uploadFile(data.class.id, f, { onProgress });
   };
 
   beforeNavigate((nav) => {
@@ -434,15 +452,27 @@
     {#if fileSearchToolSelect}
       <div class="col-span-2 mb-4">
         <!-- TODO(jnu): support for uploading files here. -->
-        <Label for="model">{fileSearchMetadata.name} Files</Label>
+        <Label for="selectedFileSearchFiles">{fileSearchMetadata.name} Files</Label>
         <Helper class="pb-1"
           >Select which files this assistant should use for {fileSearchMetadata.name}. You can
           select up to {fileSearchMetadata.max_count} files.</Helper
         >
-        <MultiSelect
+        <MultiSelectWithUpload
           name="selectedFileSearchFiles"
           items={fileSearchOptions}
           bind:value={selectedFileSearchFiles}
+          disabled={loading || !handleUpload || uploadingOptimistic}
+          uploading={uploadingOptimistic}
+          upload={handleUpload}
+          accept={data.uploadInfo.fileTypes({
+            file_search: true,
+            code_interpreter: false,
+            vision: false
+          })}
+          maxCount={fileSearchMetadata.max_count}
+          uploadType="File Search"
+          on:error={(e) => sadToast(e.detail.message)}
+          on:change={handleOptimisticFilesChange}
         />
       </div>
     {/if}
@@ -450,15 +480,27 @@
     {#if codeInterpreterToolSelect}
       <div class="col-span-2 mb-4">
         <!-- TODO(jnu): support for uploading files here. -->
-        <Label for="model">{codeInterpreterMetadata.name} Files</Label>
+        <Label for="selectedCodeInterpreterFiles">{codeInterpreterMetadata.name} Files</Label>
         <Helper class="pb-1"
           >Select which files this assistant should use for {codeInterpreterMetadata.name}. You can
           select up to {codeInterpreterMetadata.max_count} files.</Helper
         >
-        <MultiSelect
+        <MultiSelectWithUpload
           name="selectedCodeInterpreterFiles"
           items={codeInterpreterOptions}
           bind:value={selectedCodeInterpreterFiles}
+          disabled={loading || !handleUpload}
+          uploading={uploadingOptimistic}
+          upload={handleUpload}
+          accept={data.uploadInfo.fileTypes({
+            file_search: false,
+            code_interpreter: true,
+            vision: false
+          })}
+          maxCount={codeInterpreterMetadata.max_count}
+          uploadType="Code Interpreter"
+          on:error={(e) => sadToast(e.detail.message)}
+          on:change={handleOptimisticFilesChange}
         />
       </div>
     {/if}
@@ -491,10 +533,10 @@
         pill
         class="bg-orange border border-orange text-white hover:bg-orange-dark"
         type="submit"
-        disabled={loading}>Save</Button
+        disabled={loading || uploadingOptimistic}>Save</Button
       >
       <Button
-        disabled={loading}
+        disabled={loading || uploadingOptimistic}
         href={`/class/${data.class.id}/assistant`}
         color="red"
         pill
