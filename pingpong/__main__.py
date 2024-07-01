@@ -14,6 +14,7 @@ from .authz.private_groups import (
     fetch_classes_to_migrate,
     update_objs_in_db,
     write_grants_to_openfga,
+    revert_all_classes_to_none,
 )
 from .config import config
 from .models import Base, User
@@ -68,6 +69,15 @@ def migrate_private() -> None:
         print("Adding permissions for non-private to OpenFga ...")
         await config.authz.driver.init()
         async with config.authz.driver.get_client() as c:
+            async with config.db.driver.async_session() as _session:
+                try:
+                    await revert_all_classes_to_none(_session)
+                    await _session.commit()
+                except Exception as e:
+                    print(f"Error: {e}, Rolling back and exiting ...")
+                    await _session.rollback()
+                    return
+
             while True:
                 async with config.db.driver.async_session() as session:
                     try:
@@ -82,8 +92,9 @@ def migrate_private() -> None:
                         await write_grants_to_openfga(c, classes_to_migrate)
                         await session.commit()
                     except Exception as e:
-                        print(f"Error: {e}, Rolling back ...")
+                        print(f"Error: {e}, Rolling back and exiting...")
                         await session.rollback()
+                        return
 
         print("Migration finished!")
 
