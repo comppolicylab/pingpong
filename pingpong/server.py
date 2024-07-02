@@ -251,8 +251,6 @@ async def login_sso_saml_acs(provider: str, request: Request):
     except ValueError:
         raise HTTPException(status_code=400, detail="SSO provider not found")
     saml_client = await get_saml2_client(sso_config, request)
-    print("SAML CLIENT", saml_client)
-    print("PROCESSING RESPONSE")
     saml_client.process_response()
 
     errors = saml_client.get_errors()
@@ -263,7 +261,11 @@ async def login_sso_saml_acs(provider: str, request: Request):
         raise HTTPException(status_code=401, detail="SAML authentication failed")
 
     attrs = saml_client.get_attributes()
+
+    ## TODO - create/update user based on SAML attributes
+    # Blocked by HUIT updating metadata before we have access to these attrs
     print("SAML ATTRS", attrs)
+
     return {"status": "ok"}
 
 

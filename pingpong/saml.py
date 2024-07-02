@@ -10,7 +10,14 @@ from .config import Saml2AuthnSettings, config
 
 
 def get_saml2_settings(provider: str) -> Saml2AuthnSettings:
-    """Get the SAML2 settings for the given provider."""
+    """Get the SAML2 settings for the given provider.
+
+    Args:
+        provider: The SAML2 provider name.
+
+    Returns:
+        The SAML2 settings from the config.
+    """
     try:
         return next(
             method
@@ -22,7 +29,15 @@ def get_saml2_settings(provider: str) -> Saml2AuthnSettings:
 
 
 async def from_fastapi_request(request: Request) -> dict:
-    """Format a FastAPI request into a SAML request data object."""
+    """Format a FastAPI request into a SAML request data object.
+
+    Args:
+        request: The FastAPI request.
+
+    Returns:
+        The SAML request data object. See python3-saml docs for more info.
+        https://github.com/SAML-Toolkits/python3-saml?tab=readme-ov-file#settings
+    """
     public_url = urlparse(config.public_url)
     post_data = await request.form()
 
