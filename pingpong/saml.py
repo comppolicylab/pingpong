@@ -11,20 +11,14 @@ from .config import Saml2AuthnSettings, config
 
 def get_saml2_settings(provider: str) -> Saml2AuthnSettings:
     """Get the SAML2 settings for the given provider."""
-    # try:
-    #     return next(
-    #         method
-    #         for method in config.auth.authn_methods
-    #         if method.method == "sso" and method.provider == provider
-    #     )
-    # except StopIteration:
-    #     raise ValueError(f"Provider {provider} not found in SAML2 authn settings.")
-    return Saml2AuthnSettings(
-        method="sso",
-        protocol="saml",
-        provider=provider,
-        name="Harvard University",
-    )
+    try:
+        return next(
+            method
+            for method in config.auth.authn_methods
+            if method.method == "sso" and method.provider == provider
+        )
+    except StopIteration:
+        raise ValueError(f"Provider {provider} not found in SAML2 authn settings.")
 
 
 async def from_fastapi_request(request: Request) -> dict:
@@ -59,10 +53,9 @@ async def get_saml2_client(
 
     # Detect if the certs are stored in the env. If so, load settings manually.
     # This adds support for environments like ECS where we can't mount files from secrets,
-    # but can only set environment variables.
+    # and can only set environment variables.
     env_sfx = cfg.provider.upper().replace("-", "_")
     env_key = f"SAML_{env_sfx}"
-    print("SAML CONFIG", env_key, os.environ.get(env_key, "no secret available")[0:10])
 
     if env_key in os.environ:
         settings_path = settings_dir / "settings.json"

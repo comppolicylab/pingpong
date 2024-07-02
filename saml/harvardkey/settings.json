@@ -4,14 +4,14 @@
     "sp": {
         "entityId": "https://pingpong.hks.harvard.edu/sp",
         "assertionConsumerService": {
-            "url": "https://pingpong.hks.harvard.edu/login/sso/saml/acs?provider=harvardkey",
+            "url": "https://pingpong.hks.harvard.edu/api/v1/login/sso/saml/acs?provider=harvardkey",
             "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
         },
         "singleLogoutService": {
-            "url": "https://pingpong.hks.harvard.edu/logout/slo/saml?provider=harvardkey",
+            "url": "https://pingpong.hks.harvard.edu/api/v1/logout/slo/saml?provider=harvardkey",
             "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
         },
-        "NameIDFormat": "urn:oasis:names:tc:SAML:1.1:nameid-format:transient",
+        "NameIDFormat": "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent",
         "x509cert": "",
         "privateKey": ""
     },
@@ -29,13 +29,13 @@
     },
     "security": {
         "nameIdEncrypted": false,
-        "authnRequestsSigned": true,
+        "authnRequestsSigned": false,
         "logoutRequestSigned": true,
         "logoutResponseSigned": true,
-        "signMetadata": true,
+        "signMetadata": false,
         "wantMessagesSigned": false,
         "wantAssertionsSigned": false,
-        "wantNameId" : true,
+        "wantNameId" : false,
         "wantNameIdEncrypted": false,
         "wantAssertionsEncrypted": false,
         "allowSingleLabelDomains": false,

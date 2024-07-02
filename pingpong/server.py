@@ -251,6 +251,8 @@ async def login_sso_saml_acs(provider: str, request: Request):
     except ValueError:
         raise HTTPException(status_code=400, detail="SSO provider not found")
     saml_client = await get_saml2_client(sso_config, request)
+    print("SAML CLIENT", saml_client)
+    print("PROCESSING RESPONSE")
     saml_client.process_response()
 
     errors = saml_client.get_errors()
@@ -286,24 +288,24 @@ async def login_sso(provider: str, request: Request):
 async def login_magic(body: schemas.MagicLoginRequest, request: Request):
     """Provide a magic link to the auth endpoint."""
     # Get the magic link config.
-    # try:
-    #     ml_config = next(
-    #         method
-    #         for method in config.auth.authn_methods
-    #         if method.method == "magic_link"
-    #     )
-    # except StopIteration:
-    #     raise HTTPException(
-    #         status_code=400, detail="Magic links are not supported by this server"
-    #     )
+    try:
+        ml_config = next(
+            method
+            for method in config.auth.authn_methods
+            if method.method == "magic_link"
+        )
+    except StopIteration:
+        raise HTTPException(
+            status_code=400, detail="Magic links are not supported by this server"
+        )
 
     # We can only support email magic links right now. In theory we could support
     # SMS and others, but haven't done so yet.
-    # if ml_config.transport.protocol != "email":
-    #     raise HTTPException(
-    #         status_code=501,
-    #         detail="Server is trying to use an unsupported transport for magic links",
-    #     )
+    if ml_config.transport.protocol != "email":
+        raise HTTPException(
+            status_code=501,
+            detail="Server is trying to use an unsupported transport for magic links",
+        )
 
     # Get the email from the request.
     email = body.email
@@ -322,9 +324,9 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
         else:
             raise HTTPException(status_code=401, detail="User does not exist")
 
-    email_subj = "Your PingPong login link"  # ml_config.transport.template.subject
-    email_body = "Click this link to log in to PingPong: {magic_link}"  # ml_config.transport.template.body
-    expiry = 86_400  # ml_config.expiry
+    email_subj = ml_config.transport.template.subject
+    email_body = ml_config.transport.template.body
+    expiry = ml_config.expiry
 
     nowfn = get_now_fn(request)
     magic_link = generate_auth_link(user.id, expiry=expiry, nowfn=nowfn)
