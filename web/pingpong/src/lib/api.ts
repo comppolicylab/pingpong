@@ -1109,17 +1109,6 @@ export type CreateClassUserRequest = {
 };
 
 /**
- * Create a new class user.
- */
-export const createClassUser = async (
-  f: Fetcher,
-  classId: number,
-  data: CreateClassUserRequest
-) => {
-  return createClassUsers(f, classId, { roles: [data] });
-};
-
-/**
  * Plural version of CreateClassUserRequest.
  */
 export type CreateClassUsersRequest = {

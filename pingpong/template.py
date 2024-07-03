@@ -1,216 +1,6 @@
-from unittest.mock import AsyncMock
+from string import Template
 
-from .auth import encode_session_token
-from .now import offset
-from .testutil import with_authz, with_authz_series, with_user
-
-
-async def test_me_without_token(api):
-    response = api.get("/api/v1/me")
-    assert response.status_code == 200
-    assert response.json() == {
-        "error": None,
-        "profile": None,
-        "status": "missing",
-        "token": None,
-        "user": None,
-    }
-
-
-async def test_me_with_expired_token(api, now):
-    response = api.get(
-        "/api/v1/me",
-        cookies={
-            "session": encode_session_token(123, nowfn=offset(now, seconds=-100_000)),
-        },
-    )
-    assert response.status_code == 200
-    assert response.json() == {
-        "error": "Token expired",
-        "profile": None,
-        "status": "invalid",
-        "token": None,
-        "user": None,
-    }
-
-
-async def test_me_with_invalid_token(api):
-    response = api.get(
-        "/api/v1/me",
-        cookies={
-            # Token with invalid signature
-            "session": (
-                "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
-                "eyJzdWIiOiIxMjMiLCJleHAiOjE3MDk0NDg1MzQsImlhdCI6MTcwOTQ0ODUzM30."
-                "pRnnClaC1a6yIBFKMdA32pqoaJOcpHyY4lq_NU28gQ"
-            ),
-        },
-    )
-    assert response.status_code == 200
-    assert response.json() == {
-        "error": "Signature verification failed",
-        "profile": None,
-        "status": "invalid",
-        "token": None,
-        "user": None,
-    }
-
-
-async def test_me_with_valid_token_but_missing_user(api, now):
-    response = api.get(
-        "/api/v1/me",
-        cookies={
-            "session": encode_session_token(123, nowfn=offset(now, seconds=-5)),
-        },
-    )
-    assert response.status_code == 200
-    assert response.json() == {
-        "error": "User does not exist",
-        "profile": None,
-        "status": "error",
-        "token": None,
-        "user": None,
-    }
-
-
-@with_user(123)
-async def test_me_with_valid_user(api, user, now, valid_user_token):
-    response = api.get(
-        "/api/v1/me",
-        cookies={
-            "session": valid_user_token,
-        },
-    )
-    assert response.status_code == 200
-    assert response.json() == {
-        "error": None,
-        "profile": {
-            "email": "user_123@domain.test",
-            "gravatar_id": "45d4d5ec84ab81529df672c3abf0def25df67c0c64859aea0559bc867ea64b19",
-            "image_url": (
-                "https://www.gravatar.com/avatar/"
-                "45d4d5ec84ab81529df672c3abf0def25df67c0c64859aea0559bc867ea64b19"
-            ),
-            "name": None,
-        },
-        "status": "valid",
-        "token": {"exp": 1704153540, "iat": 1704067140, "sub": "123"},
-        "user": {
-            "created": "2024-01-01T00:00:00",
-            "email": "user_123@domain.test",
-            "id": 123,
-            "name": "user_123@domain.test",
-            "first_name": None,
-            "last_name": None,
-            "display_name": None,
-            "state": "verified",
-            "updated": None,
-        },
-    }
-
-
-@with_user(123)
-@with_authz_series(
-    [
-        {"grants": []},
-        {"grants": [("user:123", "admin", "institution:1")]},
-        {"grants": [("user:123", "can_create_institution", "root:0")]},
-        {"grants": [("user:123", "can_create_class", "institution:1")]},
-        {"grants": [("user:122", "admin", "root:0")]},
-    ]
-)
-async def test_config_no_permissions(api, valid_user_token):
-    response = api.get(
-        "/api/v1/config",
-        cookies={
-            "session": valid_user_token,
-        },
-    )
-    assert response.status_code == 403
-    assert response.json() == {"detail": "Missing required role"}
-
-
-@with_user(123)
-@with_authz(
-    grants=[
-        ("user:123", "admin", "root:0"),
-    ],
-)
-async def test_config_correct_permissions(api, valid_user_token):
-    response = api.get(
-        "/api/v1/config",
-        cookies={
-            "session": valid_user_token,
-        },
-    )
-    assert response.status_code == 200
-
-
-async def test_auth_with_invalid_token(api):
-    invalid_token = (
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
-        "eyJzdWIiOiIxMjMiLCJleHAiOjE3MDk0NDg1MzQsImlhdCI6MTcwOTQ0ODUzM30."
-        "pRnnClaC1a6yIBFKMdA32pqoaJOcpHyY4lq_NU28gQ"
-    )
-    response = api.get(f"/api/v1/auth?token={invalid_token}")
-    assert response.status_code == 401
-    assert response.json() == {"detail": "Signature verification failed"}
-
-
-async def test_auth_with_expired_token(api, now):
-    expired_token = encode_session_token(123, nowfn=offset(now, seconds=-100_000))
-    response = api.get(f"/api/v1/auth?token={expired_token}")
-    assert response.status_code == 401
-    assert response.json() == {"detail": "Token expired"}
-
-
-async def test_auth_valid_token(api, now):
-    valid_token = encode_session_token(123, nowfn=offset(now, seconds=-5))
-    response = api.get(f"/api/v1/auth?token={valid_token}", allow_redirects=False)
-    assert response.status_code == 303
-    # Check where redirect goes
-    assert response.headers["location"] == "http://localhost:5173/"
-
-
-async def test_auth_valid_token_with_redirect(api, now):
-    valid_token = encode_session_token(123, nowfn=offset(now, seconds=-5))
-    response = api.get(
-        f"/api/v1/auth?token={valid_token}&redirect=/foo/bar", allow_redirects=False
-    )
-    assert response.status_code == 303
-    # Check where redirect goes
-    assert response.headers["location"] == "http://localhost:5173/foo/bar"
-
-
-async def test_magic_link_login_no_user(api, config, monkeypatch):
-    # Patch the email driver in config.email
-    send_mock = AsyncMock()
-    monkeypatch.setattr(config.email.sender, "send", send_mock)
-    response = api.post(
-        "/api/v1/login/magic",
-        json={"email": "me@org.test"},
-    )
-    assert response.status_code == 401
-    assert response.json() == {"detail": "User does not exist"}
-    # Send should not have been called
-    send_mock.assert_not_called()
-
-
-@with_user(123)
-async def test_magic_link_login(api, config, monkeypatch):
-    # Patch the email driver in config.email
-    send_mock = AsyncMock()
-    monkeypatch.setattr(config.email.sender, "send", send_mock)
-    response = api.post(
-        "/api/v1/login/magic",
-        json={"email": "user_123@domain.test"},
-    )
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
-    send_mock.assert_called_once_with(
-        "user_123@domain.test",
-        "Log back in to PingPong",
-        """
+email_template = Template("""
 <!doctype html>
 <html>
    <head>
@@ -460,19 +250,19 @@ async def test_magic_link_login(api, config, monkeypatch):
       <div>
       <div class="mobile mobile-bg" style="width: 0; max-height: 0; overflow: hidden; display: none;"">
          <div class="m-gutter">
-            <h1 class="m-title" style="margin-top: 50px; margin-bottom: 30px; font-weight: 600; font-size: 40px; line-height:42px;letter-spacing:-1px;border-bottom:0; font-family: STIX Two Text, serif; font-weight:700;">Welcome back!</h1>
+            <h1 class="m-title" style="margin-top: 50px; margin-bottom: 30px; font-weight: 600; font-size: 40px; line-height:42px;letter-spacing:-1px;border-bottom:0; font-family: STIX Two Text, serif; font-weight:700;">$title</h1>
          </div>
       </div>
       <div class="mobile mobile-bg" style="width: 0; max-height: 0; overflow: hidden; display: none;">
          <div class="m-gutter">
-            <p>Click the button below to log in to PingPong. No password required. It&#8217;s secure and easy.</p>
-            <p>This login link will expire in 7 days.</p>
+            <p>$subtitle</p>
+            <p>This $type will expire in 7 days.</p>
             <p>
                <span style="white-space: nowrap;">
-            <div><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/" class="mobile-button-bg" style="display: flex; align-items: center; width: fit-content; row-gap: 8px; column-gap: 8px; font-size: 17px; line-height: 20px;font-weight: 500; border-radius: 9999px; padding: 8px 16px; color: white !important; flex-shrink: 0;">Login to PingPong<source srcset="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png"><img src="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png" width="17" height="17" class="hero-image" style="display: block;" border="0" alt="right pointing arrow"></a></div></span></p>
-            <p></p>
+            <div><a href="$link" class="mobile-button-bg" style="display: flex; align-items: center; width: fit-content; row-gap: 8px; column-gap: 8px; font-size: 17px; line-height: 20px;font-weight: 500; border-radius: 9999px; padding: 8px 16px; color: white !important; flex-shrink: 0;">$cta<source srcset="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png"><img src="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png" width="17" height="17" class="hero-image" style="display: block;" border="0" alt="right pointing arrow"></a></div></span></p>
+            <p>$underline</p>
             </p>
-            <p><b>Note:</b> This login link was intended for <span style="white-space: nowrap;"><a href="mailto:user_123@domain.test" style="color:#0070c9;">user_123@domain.test</a></span>. If you weren&#8217;t expecting this login link, there&#8217;s nothing to worry about — you can safely ignore it.</p>
+            <p><b>Note:</b> This $type was intended for <span style="white-space: nowrap;"><a href="mailto:$email" style="color:#0070c9;">$email</a></span>. If you weren&#8217;t expecting this $type, there&#8217;s nothing to worry about — you can safely ignore it.</p>
             <br>
          </div>
       </div>
@@ -486,7 +276,7 @@ async def test_magic_link_login(api, config, monkeypatch):
       <!-- BEGIN MOBILE -->
       <div class="mobile get-in-touch-m mobile-bg" style="width: 0; max-height: 0; overflow: hidden; display: none;">
          <div class="m-gutter">
-            <p class="m3 type-body-m"><b>Button not working?</b> Paste the following link into your browser:<br><span style="overflow-wrap: break-word; word-wrap: break-word; -ms-word-break: break-all; word-break: break-all;"><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/" style="color:#0070c9;">http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/</a></p>
+            <p class="m3 type-body-m"><b>Button not working?</b> Paste the following link into your browser:<br><span style="overflow-wrap: break-word; word-wrap: break-word; -ms-word-break: break-all; word-break: break-all;"><a href="$link" style="color:#0070c9;">$link</a></p>
          </div>
       </div>
       <!-- END MOBILE -->
@@ -494,7 +284,7 @@ async def test_magic_link_login(api, config, monkeypatch):
       <div class="mobile m-footer" style="width:0; max-height:0; overflow:hidden; display:none; margin-bottom: 20px; padding-bottom: 0px; border-radius: 0px 0px 15px 15px;">
          <div class="f-legal" style="padding-left: 0px; padding-right: 0px;">
             <div class="m-gutter">
-               <p>You&#8217;re receiving this email because because you requested a login link from PingPong.
+               <p>You&#8217;re receiving this email because $legal_text.
                </p>
                <p>Pingpong is developed by the Computational Policy Lab at the Harvard Kennedy School. All content © 2024 Computational Policy Lab. All rights reserved.</p>
             </div>
@@ -533,7 +323,7 @@ async def test_magic_link_login(api, config, monkeypatch):
                      <tbody>
                         <tr>
                            <td align="" style="padding-top:50px;padding-bottom:25px">
-                              <p style="font-family: STIX Two Text, serif;color:#111111; font-weight:700;font-size:40px;line-height:44px;letter-spacing:-1px;border-bottom:0;">Welcome back!</p>
+                              <p style="font-family: STIX Two Text, serif;color:#111111; font-weight:700;font-size:40px;line-height:44px;letter-spacing:-1px;border-bottom:0;">$title</p>
                            </td>
                         </tr>
                      </tbody>
@@ -550,18 +340,18 @@ async def test_magic_link_login(api, config, monkeypatch):
                      <tbody>
                         <tr>
                            <td class="d1" align="left" valign="top" style="padding: 0;">
-                              <p>Click the button below to log in to PingPong. No password required. It&#8217;s secure and easy.</p>
-                              <p>This login link will expire in 7 days.</p>
+                              <p>$subtitle</p>
+                              <p>This $type will expire in 7 days.</p>
                               <p>
                                  <span style="white-space: nowrap;">
-                              <div><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/" class="desktop-button-bg" style="display: flex; align-items: center; width: fit-content; row-gap: 8px; column-gap: 8px; font-size: 17px; line-height: 20px;font-weight: 500; border-radius: 9999px; padding: 8px 16px; color: white !important; background-color: rgb(252, 98, 77); flex-shrink: 0;">
-                              Login to PingPong
+                              <div><a href="$link" class="desktop-button-bg" style="display: flex; align-items: center; width: fit-content; row-gap: 8px; column-gap: 8px; font-size: 17px; line-height: 20px;font-weight: 500; border-radius: 9999px; padding: 8px 16px; color: white !important; background-color: rgb(252, 98, 77); flex-shrink: 0;">
+                              $cta
                               <source srcset="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png">
                               <img src="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png" width="17" height="17" class="hero-image" style="display: block;" border="0" alt="right pointing arrow">
                               </a></div></span></p>
-                              <p></p>
+                              <p>$underline</p>
                               </p>
-                              <p><b>Note:</b> This login link was intended for <span style="white-space: nowrap;"><a href="mailto:user_123@domain.test" style="color:#0070c9;">user_123@domain.test</a></span>. If you weren&#8217;t expecting this login link, there&#8217;s nothing to worry about — you can safely ignore it.</p>
+                              <p><b>Note:</b> This $type was intended for <span style="white-space: nowrap;"><a href="mailto:$email" style="color:#0070c9;">$email</a></span>. If you weren&#8217;t expecting this $type, there&#8217;s nothing to worry about — you can safely ignore it.</p>
                            </td>
                         </tr>
                      </tbody>
@@ -601,7 +391,7 @@ async def test_magic_link_login(api, config, monkeypatch):
                   <table role="presentation" width="550" cellspacing="0" cellpadding="0" border="0" align="center">
                      <tbody>
                         <tr>
-                           <td class="type-body-d" align="left" valign="top" style="padding: 3px 0 0 0;"> <b>Button not working?</b> Paste the following link into your browser:<br><span style="overflow-wrap: break-word; word-wrap: break-word; -ms-word-break: break-all; word-break: break-all;"><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/" style="color:#0070c9;">http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/</a></td>
+                           <td class="type-body-d" align="left" valign="top" style="padding: 3px 0 0 0;"> <b>Button not working?</b> Paste the following link into your browser:<br><span style="overflow-wrap: break-word; word-wrap: break-word; -ms-word-break: break-all; word-break: break-all;"><a href="$link" style="color:#0070c9;">$link</a></td>
                         </tr>
                         <tr height="4"></tr>
                      </tbody>
@@ -631,7 +421,7 @@ async def test_magic_link_login(api, config, monkeypatch):
                      <tbody>
                         <td align="left" class="f-complete" style="padding: 19px 0 20px 0;">
                            <div class="f-legal">
-                              <p>You&#8217;re receiving this email because because you requested a login link from PingPong.
+                              <p>You&#8217;re receiving this email because $legal_text.
                               </p>
                               <p>Pingpong is developed by the Computational Policy Lab at the Harvard Kennedy School.<br>All content © 2024 Computational Policy Lab. All rights reserved.</p>
                            </div>
@@ -646,5 +436,4 @@ async def test_magic_link_login(api, config, monkeypatch):
       <!-- end desktop footer include -->
    </body>
 </html>
-""",
-    )
+""")

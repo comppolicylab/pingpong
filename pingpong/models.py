@@ -202,6 +202,17 @@ class User(Base):
         result = await session.execute(stmt)
         return [row.User for row in result]
 
+    @classmethod
+    async def get_display_name(cls, session: AsyncSession, id_: int) -> str | None:
+        stmt = select(User.display_name, User.first_name, User.last_name).where(
+            User.id == int(id_)
+        )
+        response = await session.execute(stmt)
+        result = response.first()
+        if result:
+            return result[0] or f"{result[1]} {result[2]}" or None
+        return None
+
 
 class Institution(Base):
     __tablename__ = "institutions"

@@ -25,6 +25,7 @@ from sqlalchemy.sql import func
 import pingpong.metrics as metrics
 import pingpong.models as models
 import pingpong.schemas as schemas
+from pingpong.template import email_template as message_template
 
 from .ai import (
     format_instructions,
@@ -264,10 +265,23 @@ async def login(body: schemas.MagicLoginRequest, request: Request):
     nowfn = get_now_fn(request)
     magic_link = generate_auth_link(user.id, expiry=86_400, nowfn=nowfn)
 
+    message = message_template.substitute(
+        {
+            "title": "Welcome back!",
+            "subtitle": "Click the button below to log in to PingPong. No password required. It&#8217;s secure and easy.",
+            "type": "login link",
+            "cta": "Login to PingPong",
+            "underline": "",
+            "link": magic_link,
+            "email": email,
+            "legal_text": "because you requested a login link from PingPong",
+        }
+    )
+
     await config.email.sender.send(
         email,
-        "Your PingPong login link!",
-        f"Click this link to log in to PingPong: {magic_link}",
+        "Log back in to PingPong",
+        message,
     )
 
     return {"status": "ok"}
@@ -616,6 +630,16 @@ async def add_users_to_class(
         f"user:{request.state.session.user.id}", "admin", f"class:{class_id}"
     )
 
+    formatted_roles = {
+        "admin": "an Administrator",
+        "teacher": "a Moderator",
+        "student": "a Member",
+    }
+
+    user_display_name = await models.User.get_display_name(
+        request.state.db, request.state.session.user.id
+    )
+
     for ucr in new_ucr.roles:
         if not is_admin and ucr.roles.admin:
             raise HTTPException(
@@ -635,9 +659,11 @@ async def add_users_to_class(
                 )
 
         existing = await models.UserClassRole.get(request.state.db, user.id, cid)
+        new_roles = []
         for role in ["admin", "teacher", "student"]:
             if getattr(ucr.roles, role):
                 grants.append((f"user:{user.id}", role, f"class:{cid}"))
+                new_roles.append(formatted_roles[role])
             else:
                 revokes.append((f"user:{user.id}", role, f"class:{cid}"))
 
@@ -662,6 +688,8 @@ async def add_users_to_class(
                     user_id=user.id,
                     email=user.email,
                     class_name=class_.name,
+                    inviter_name=user_display_name,
+                    formatted_role=", ".join(new_roles) if new_roles else None,
                 )
             )
             result.append(
