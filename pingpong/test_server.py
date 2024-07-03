@@ -227,15 +227,6 @@ async def test_magic_link_login(api, config, monkeypatch):
       <meta name="color-scheme" content="light dark">
       <meta name="supported-color-schemes" content="light dark">
       <style type="text/css">
-         .header-pingpong {
-         background-color: #2d2a62;
-         }
-         .desktop-bg {
-         background-color: white;
-         }
-         .desktop-button-bg {
-         background-color: rgb(252, 98, 77);
-         }
          body {
          width: 100% !important;
          padding: 0;
@@ -293,19 +284,19 @@ async def test_magic_link_login(api, config, monkeypatch):
          /* DARK MODE DESKTOP */
          @media (prefers-color-scheme: dark) {
          .header-pingpong {
-         background-color: #1A1834;
+         background-color: #1A1834 !important;
          }
          .desktop-bg {
-         background-color: #111517;
+         background-color: #111517 !important;
          }
          .desktop-button-bg {
-         background-color: #b6320a;
+         background-color: #b6320a !important;
          }
          .d-divider {
          border-top: solid 1px #808080 !important;
          }
          body {
-         background-color: transparent;
+         background-color: transparent !important;
          color: #ffffff !important;
          }
          a, a:link {
@@ -450,7 +441,6 @@ async def test_magic_link_login(api, config, monkeypatch):
       <![endif]-->
       <!-- END HEAD -->
       <!-- end head include -->
-      <!-- mobile header include -->
       <div class="mobile" style="width: 0; max-height: 0; overflow: hidden; display: none;">
          <div style="display:none !important;position: absolute; font-size:0; line-height:1; max-height:0; max-width:0; opacity:0; overflow:hidden; color: #333333" class="preheader-hide">
             &nbsp;
@@ -458,7 +448,7 @@ async def test_magic_link_login(api, config, monkeypatch):
          <div class="m-hero-section">
             <div class="m-content-hero">
                <div class="m1 hero-head-container" style="padding:0; margin-top: 20px;">
-                  <div class="header-pingpong" style="height:126px; display: flex; align-items:center; border-radius: 15px 15px 0px 0px; justify-content: center;">
+                  <div class="header-pingpong" style="height:126px; display: flex; align-items:center; background-color: #2d2a62; border-radius: 15px 15px 0px 0px; justify-content: center;">
                      <source srcset="https://pingpong.hks.harvard.edu/pingpong_logo_2x.png">
                      <img src="https://pingpong.hks.harvard.edu/pingpong_logo_2x.png" width="165" height="47.45" class="hero-image" style="display: block;" border="0" alt="PingPong">
                   </div>
@@ -466,12 +456,11 @@ async def test_magic_link_login(api, config, monkeypatch):
             </div>
          </div>
       </div>
-      <!-- end mobile addressee include -->
       <!-- BEGIN MOBILE BODY -->
       <div>
       <div class="mobile mobile-bg" style="width: 0; max-height: 0; overflow: hidden; display: none;"">
          <div class="m-gutter">
-            <h1 class="m-title" style="margin-top: 50px; margin-bottom: 30px; font-weight: 600; font-size: 40px; line-height:42px;letter-spacing:-1px;border-bottom:0; font-family: STIX Two Text, serif; font-weight:700;"> Welcome back!</h1>
+            <h1 class="m-title" style="margin-top: 50px; margin-bottom: 30px; font-weight: 600; font-size: 40px; line-height:42px;letter-spacing:-1px;border-bottom:0; font-family: STIX Two Text, serif; font-weight:700;">Welcome back!</h1>
          </div>
       </div>
       <div class="mobile mobile-bg" style="width: 0; max-height: 0; overflow: hidden; display: none;">
@@ -519,15 +508,13 @@ async def test_magic_link_login(api, config, monkeypatch):
             <tr>
                <td align="center">
                   <!-- Hero -->
-                  <table width="712" role="presentation" cellspacing="0" cellpadding="0" outline="0" border="0" align="center" style="
+                  <table width="736" role="presentation" cellspacing="0" cellpadding="0" outline="0" border="0" align="center" style="
                      margin-top: 20px;"">
                      <tbody>
                         <tr>
-                           <td class="d1" align="center" style="padding: 0 0 0 0;">
-                              <div class="header-pingpong" style="width:736px; height:166px; display: flex; align-items:center; border-radius: 15px 15px 0px 0px; justify-content: center;">
-                                 <source media="(min-device-width: 568px)" srcset="https://pingpong.hks.harvard.edu/pingpong_logo_2x.png">
-                                 <img src="https://pingpong.hks.harvard.edu/pingpong_logo_2x.png" width="233" height="67" class="hero-image" style="display: block;" border="0" alt="PingPong">
-                              </div>
+                           <td class="d1 header-pingpong" align="center" style="width:736px; height:166px; background-color: #2d2a62; border-radius: 15px 15px 0px 0px; padding: 0 0 0 0;">
+                              <source media="(min-device-width: 568px)" srcset="https://pingpong.hks.harvard.edu/pingpong_logo_2x.png">
+                              <img src="https://pingpong.hks.harvard.edu/pingpong_logo_2x.png" width="233" height="67" class="hero-image" style="display: block;" border="0" alt="PingPong">
                            </td>
                         </tr>
                      </tbody>
@@ -538,7 +525,7 @@ async def test_magic_link_login(api, config, monkeypatch):
       </table>
       <!-- end desktop header include -->
       <!-- BEGIN DESKTOP BODY -->
-      <table role="presentation" class="desktop desktop-bg" width="736" class="desktop" cellspacing="0" cellpadding="0" border="0" align="center">
+      <table role="presentation" class="desktop desktop-bg" width="736" class="desktop" cellspacing="0" cellpadding="0" border="0" align="center" style="background-color: white;">
          <tbody>
             <tr>
                <td>
@@ -555,7 +542,7 @@ async def test_magic_link_login(api, config, monkeypatch):
             </tr>
          </tbody>
       </table>
-      <table role="presentation" class="desktop desktop-bg"  width="736" class="desktop" cellspacing="0" cellpadding="0" border="0" align="center">
+      <table role="presentation" class="desktop desktop-bg" width="736" class="desktop" cellspacing="0" cellpadding="0" border="0" align="center" style="background-color: white;">
          <tbody>
             <tr>
                <td align="center">
@@ -567,7 +554,11 @@ async def test_magic_link_login(api, config, monkeypatch):
                               <p>This login link will expire in 7 days.</p>
                               <p>
                                  <span style="white-space: nowrap;">
-                              <div><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/" class="desktop-button-bg" style="display: flex; align-items: center; width: fit-content; row-gap: 8px; column-gap: 8px; font-size: 17px; line-height: 20px;font-weight: 500; border-radius: 9999px; padding: 8px 16px; color: white !important; flex-shrink: 0;">Login to PingPong<source srcset="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png"><img src="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png" width="17" height="17" class="hero-image" style="display: block;" border="0" alt="right pointing arrow"></a></div></span></p>
+                              <div><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/" class="desktop-button-bg" style="display: flex; align-items: center; width: fit-content; row-gap: 8px; column-gap: 8px; font-size: 17px; line-height: 20px;font-weight: 500; border-radius: 9999px; padding: 8px 16px; color: white !important; background-color: rgb(252, 98, 77); flex-shrink: 0;">
+                              Login to PingPong
+                              <source srcset="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png">
+                              <img src="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png" width="17" height="17" class="hero-image" style="display: block;" border="0" alt="right pointing arrow">
+                              </a></div></span></p>
                               <p></p>
                               </p>
                               <p><b>Note:</b> This login link was intended for <span style="white-space: nowrap;"><a href="mailto:user_123@domain.test" style="color:#0070c9;">user_123@domain.test</a></span>. If you weren&#8217;t expecting this login link, there&#8217;s nothing to worry about — you can safely ignore it.</p>
@@ -579,7 +570,7 @@ async def test_magic_link_login(api, config, monkeypatch):
             </tr>
          </tbody>
       </table>
-      <table role="presentation" class="desktop desktop-bg" width="736" class="desktop" cellspacing="0" cellpadding="0" border="0" align="center">
+      <table role="presentation" class="desktop desktop-bg" width="736" class="desktop" cellspacing="0" cellpadding="0" border="0" align="center" style="background-color: white;">
          <tbody>
             <tr>
                <td align="center">
@@ -603,7 +594,7 @@ async def test_magic_link_login(api, config, monkeypatch):
       <!-- END DESKTOP BODY -->
       <!-- desktop footer include -->
       <!-- BEGIN DESKTOP get-in-touch-cta -->
-      <table role="presentation" class="desktop desktop-bg" width="736" class="desktop" cellspacing="0" cellpadding="0" border="0" align="center">
+      <table role="presentation" class="desktop desktop-bg" width="736" class="desktop" cellspacing="0" cellpadding="0" border="0" align="center" style="background-color: white;">
          <tbody>
             <tr>
                <td align="center">
@@ -623,8 +614,8 @@ async def test_magic_link_login(api, config, monkeypatch):
       <!-- BEGIN DESKTOP FOOTER -->
       <table role="presentation" width="736" class="desktop" cellspacing="0" cellpadding="0" border="0" align="center" style="margin-bottom: 20px;">
          <tbody>
-            <tr>
-               <td align="center" class="desktop-bg" style="margin: 0 auto; padding:0 20px 0 20px;">
+            <tr class="desktop-bg" style="background-color: white;">
+               <td align="center" class="desktop-bg" style="margin: 0 auto; padding:0 20px 0 20px;" style="background-color: white;">
                   <table role="presentation" cellspacing="0" cellpadding="0" border="0" class="footer">
                      <tbody>
                         <tr>
