@@ -2,6 +2,8 @@
 
 FROM python:3.11.6-bookworm
 
+RUN apt-get update && apt-get install ca-certificates -y && update-ca-certificates
+
 ENV PYTHONFAULTHANDLER=1 \
       PYTHONUNBUFFERED=1 \
       PYTHONHASHSEED=random \
