@@ -26,7 +26,8 @@
     PenOutline,
     CloudArrowUpOutline,
     EyeOutline,
-    EyeSlashOutline
+    EyeSlashOutline,
+    LockSolid
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
@@ -475,10 +476,14 @@
     <div class="grid md:grid-cols-3 gap-x-6 gap-y-8 pt-6">
       <div>
         <Heading tag="h3" customSize="text-xl font-bold"
-          ><Secondary class="text-3xl text-black font-normal">Files</Secondary></Heading
+          ><Secondary class="text-3xl text-black font-normal">Shared Files</Secondary></Heading
         >
+        {#if makePrivate}
+          <Info>Files sharing isn&#8217;t available for groups with private assistants.</Info>
+        {:else}
         <Info
-          >Upload files for use in assistants. Files must be under {maxUploadSize}. See the
+          >Upload files for use in assistants. Group files are available to everyone in the group with
+          permissions to create an assistant. Files must be under {maxUploadSize}. See the
           <a
             href="https://platform.openai.com/docs/api-reference/files/create"
             rel="noopener noreferrer"
@@ -486,12 +491,27 @@
             class="underline">OpenAI API docs</a
           > for more information.
         </Info>
+        {/if}
       </div>
       <div class="col-span-2">
         {#if !hasApiKey}
           <div class="text-gray-400 mb-4">
             You need to set an API key before you can upload files.
           </div>
+        {:else if makePrivate}
+        <div class="flex flex-col justify-center h-full justify-center gap-0 flex-wrap">
+          <div class="flex justify-center">
+              <LockSolid class="h-20 w-20 text-gray-500" strokeWidth="1.5" />
+          </div>
+          <div class="text-lg font-medium text-gray-500 text-center">
+            Shared files are not supported
+          </div>
+          <div
+            class="flex justify-center text-md text-gray-500 text-center text-wrap mx-14 flex-wrap"
+          >
+            Because your group&#8217;s assistants are private, group file sharing is not supported. You can upload private files when you create assistants.
+          </div>
+        </div>
         {:else}
           <div class="my-4">
             <FileUpload

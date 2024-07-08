@@ -29,15 +29,24 @@
   $: assistant = data.assistant;
   $: canPublish = data.grants.canPublishAssistants;
 
-  let selectedFileSearchFiles = writable(data.selectedFileSearchFiles.slice());
-  let selectedCodeInterpreterFiles = writable(data.selectedCodeInterpreterFiles.slice());
+  let selectedFileSearchFiles = writable(
+    data.selectedFileSearchFiles.slice().map((f) => f.file_id)
+  );
+  let selectedCodeInterpreterFiles = writable(
+    data.selectedCodeInterpreterFiles.slice().map((f) => f.file_id)
+  );
 
   // The list of adhoc files being uploaded.
-  let optimisticUploadFileInfo = writable<FileUploadInfo[]>([]);
-  $: uploadingOptimistic = $optimisticUploadFileInfo.some((f) => f.state === 'pending');
-  $: optimisticFiles = $optimisticUploadFileInfo
+  let privateUploadFileInfo = writable<FileUploadInfo[]>([]);
+  const trashFiles = writable<number[]>([]);
+  $: uploadingPrivate = $privateUploadFileInfo.some((f) => f.state === 'pending');
+  $: privateSessionFiles = $privateUploadFileInfo
     .filter((f) => f.state === 'success')
     .map((f) => f.response as ServerFile);
+  $: allPrivateFiles = [
+    ...data.selectedFileSearchFiles.slice().filter((f) => f.private),
+    ...privateSessionFiles
+  ];
   let loading = false;
 
   const fileSearchMetadata = {
@@ -80,16 +89,7 @@
   );
   $: supportsVision = supportVisionModels.includes(selectedModel);
   let allowVisionUpload = false;
-  $: allFiles = [...data.files, ...optimisticFiles].map((f) => ({
-    state: 'success',
-    progress: 100,
-    file: { type: f.content_type, name: f.name },
-    response: f,
-    promise: Promise.resolve(f)
-  }));
-  $: asstFiles = allFiles
-    .filter((f) => f.state === 'success')
-    .map((f) => f.response) as ServerFile[];
+  $: asstFiles = [...data.files, ...allPrivateFiles];
 
   let fileSearchOptions: SelectOptionType<string>[] = [];
   let codeInterpreterOptions: SelectOptionType<string>[] = [];
@@ -114,8 +114,22 @@
   $: codeInterpreterToolSelect = initialTools.includes('code_interpreter');
 
   // Handle updates from the file upload component.
-  const handleOptimisticFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
-    optimisticUploadFileInfo = e.detail;
+  const handlePrivateFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
+    privateUploadFileInfo = e.detail;
+  };
+
+  // Handle file deletion.
+  const removeFile = async (evt: CustomEvent<Array<FileUploadInfo>>) => {
+    const files = evt.detail;
+    for (const file of files) {
+      if (file.state === 'pending' || file.state === 'deleting') {
+        return;
+      } else if (file.state === 'error') {
+        privateUploadFileInfo.update((u) => u.filter((f) => f !== file));
+      } else {
+        $trashFiles = [...$trashFiles, (file.response as ServerFile).id];
+      }
+    }
   };
 
   /**
@@ -295,7 +309,7 @@
 
   // Handle file upload
   const handleUpload = (f: File, onProgress: (p: number) => void) => {
-    return api.uploadFile(data.class.id, f, { onProgress });
+    return api.uploadUserFile(data.class.id, data.me.user!.id, f, { onProgress });
   };
 
   beforeNavigate((nav) => {
@@ -453,56 +467,64 @@
 
     {#if fileSearchToolSelect}
       <div class="col-span-2 mb-4">
-        <!-- TODO(jnu): support for uploading files here. -->
         <Label for="selectedFileSearchFiles">{fileSearchMetadata.name} Files</Label>
         <Helper class="pb-1"
           >Select which files this assistant should use for {fileSearchMetadata.name}. You can
-          select up to {fileSearchMetadata.max_count} files.</Helper
+          select up to {fileSearchMetadata.max_count} files. You can also upload private files specific
+          to this assistant. If you want to make files available for the entire group, upload them in
+          the Manage Group page.</Helper
         >
         <MultiSelectWithUpload
           name="selectedFileSearchFiles"
           items={fileSearchOptions}
           bind:value={selectedFileSearchFiles}
-          disabled={loading || !handleUpload || uploadingOptimistic}
-          uploading={uploadingOptimistic}
+          disabled={loading || !handleUpload || uploadingPrivate}
+          privateFiles={allPrivateFiles}
+          uploading={uploadingPrivate}
           upload={handleUpload}
           accept={data.uploadInfo.fileTypes({
             file_search: true,
             code_interpreter: false,
             vision: false
           })}
+          isPrivateClass={data.class.private || false}
           maxCount={fileSearchMetadata.max_count}
           uploadType="File Search"
           on:error={(e) => sadToast(e.detail.message)}
-          on:change={handleOptimisticFilesChange}
+          on:change={handlePrivateFilesChange}
+          on:delete={removeFile}
         />
       </div>
     {/if}
 
     {#if codeInterpreterToolSelect}
       <div class="col-span-2 mb-4">
-        <!-- TODO(jnu): support for uploading files here. -->
         <Label for="selectedCodeInterpreterFiles">{codeInterpreterMetadata.name} Files</Label>
         <Helper class="pb-1"
           >Select which files this assistant should use for {codeInterpreterMetadata.name}. You can
-          select up to {codeInterpreterMetadata.max_count} files.</Helper
+          select up to {codeInterpreterMetadata.max_count} files. You can also upload private files specific
+          to this assistant. If you want to make files available for the entire group, upload them in
+          the Manage Group page.</Helper
         >
         <MultiSelectWithUpload
           name="selectedCodeInterpreterFiles"
           items={codeInterpreterOptions}
           bind:value={selectedCodeInterpreterFiles}
-          disabled={loading || !handleUpload}
-          uploading={uploadingOptimistic}
+          disabled={loading || !handleUpload || uploadingPrivate}
+          privateFiles={allPrivateFiles}
+          uploading={uploadingPrivate}
           upload={handleUpload}
           accept={data.uploadInfo.fileTypes({
             file_search: false,
             code_interpreter: true,
             vision: false
           })}
+          isPrivateClass={data.class.private || false}
           maxCount={codeInterpreterMetadata.max_count}
           uploadType="Code Interpreter"
           on:error={(e) => sadToast(e.detail.message)}
-          on:change={handleOptimisticFilesChange}
+          on:change={handlePrivateFilesChange}
+          on:delete={removeFile}
         />
       </div>
     {/if}
@@ -535,10 +557,10 @@
         pill
         class="bg-orange border border-orange text-white hover:bg-orange-dark"
         type="submit"
-        disabled={loading || uploadingOptimistic}>Save</Button
+        disabled={loading || uploadingPrivate}>Save</Button
       >
       <Button
-        disabled={loading || uploadingOptimistic}
+        disabled={loading || uploadingPrivate}
         href={`/group/${data.class.id}/assistant`}
         color="red"
         pill
