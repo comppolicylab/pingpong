@@ -110,7 +110,6 @@
       if (!userId) {
         return '';
       }
-      const participant = $participants.user[userId];
       if (!!$participants.user && data?.me?.user?.id && !!$participants.user[data?.me?.user?.id]) {
         return $participants.user[userId]?.profile.image_url;
       }
