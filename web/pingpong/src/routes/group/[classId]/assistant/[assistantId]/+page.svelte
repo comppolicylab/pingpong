@@ -38,7 +38,7 @@
 
   // The list of adhoc files being uploaded.
   let privateUploadFileInfo = writable<FileUploadInfo[]>([]);
-  const trashPrivateFiles = writable<number[]>([]);
+  const trashPrivateFileIds = writable<number[]>([]);
   $: uploadingPrivate = $privateUploadFileInfo.some((f) => f.state === 'pending');
   $: privateSessionFiles = $privateUploadFileInfo
     .filter((f) => f.state === 'success')
@@ -119,17 +119,9 @@
   };
 
   // Handle file deletion.
-  const removePrivateFile = async (evt: CustomEvent<Array<FileUploadInfo>>) => {
+  const removePrivateFiles = async (evt: CustomEvent<Array<number>>) => {
     const files = evt.detail;
-    for (const file of files) {
-      if (file.state === 'pending' || file.state === 'deleting') {
-        return;
-      } else if (file.state === 'error') {
-        privateUploadFileInfo.update((u) => u.filter((f) => f !== file));
-      } else {
-        $trashPrivateFiles = [...$trashPrivateFiles, (file.response as ServerFile).id];
-      }
-    }
+    $trashPrivateFileIds = [...$trashPrivateFileIds, ...files];
   };
 
   /**
@@ -263,7 +255,7 @@
       published: body.published?.toString() === 'on',
       use_latex: body.use_latex?.toString() === 'on',
       hide_prompt: body.hide_prompt?.toString() === 'on',
-      deleted_private_files: data.assistantId ? $trashPrivateFiles : []
+      deleted_private_files: data.assistantId ? $trashPrivateFileIds : []
     };
     return params;
   };
@@ -492,7 +484,7 @@
           uploadType="File Search"
           on:error={(e) => sadToast(e.detail.message)}
           on:change={handlePrivateFilesChange}
-          on:delete={removePrivateFile}
+          on:delete={removePrivateFiles}
         />
       </div>
     {/if}
@@ -523,7 +515,7 @@
           uploadType="Code Interpreter"
           on:error={(e) => sadToast(e.detail.message)}
           on:change={handlePrivateFilesChange}
-          on:delete={removePrivateFile}
+          on:delete={removePrivateFiles}
         />
       </div>
     {/if}

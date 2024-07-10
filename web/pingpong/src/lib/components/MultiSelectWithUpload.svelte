@@ -161,13 +161,7 @@
       'delete',
       privateFiles
         .filter((file) => privateIdsToDelete.includes(file.file_id))
-        .map((f) => ({
-          state: 'success',
-          progress: 100,
-          file: { type: f.content_type, name: f.name },
-          response: f,
-          promise: Promise.resolve(f)
-        }))
+        .map((f) => f.id)
     );
     selectedSelected = [];
     focusedListIsAvailable = true;
