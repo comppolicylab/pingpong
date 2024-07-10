@@ -1733,6 +1733,7 @@ async def create_assistant(
         raise HTTPException(400, e.message or "OpenAI rejected this request")
 
     try:
+        # Delete private files uploaded but not attached to the assistant
         for file_id in req.deleted_private_files:
             await handle_delete_file(
                 request.state.db, request.state.authz, openai_client, int(file_id)
