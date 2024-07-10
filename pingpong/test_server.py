@@ -496,7 +496,7 @@ async def test_magic_link_login(api, config, monkeypatch):
             <div class="m-gutter">
                <p>You&#8217;re receiving this email because because you requested a login link from PingPong.
                </p>
-               <p>Pingpong is developed by the Computational Policy Lab at the Harvard Kennedy School. All content © 2024 Computational Policy Lab. All rights reserved.</p>
+               <p>Pingpong is developed by the Computational Policy Lab at the Harvard Kennedy School.</p>
             </div>
          </div>
       </div>
@@ -633,7 +633,7 @@ async def test_magic_link_login(api, config, monkeypatch):
                            <div class="f-legal">
                               <p>You&#8217;re receiving this email because because you requested a login link from PingPong.
                               </p>
-                              <p>Pingpong is developed by the Computational Policy Lab at the Harvard Kennedy School.<br>All content © 2024 Computational Policy Lab. All rights reserved.</p>
+                              <p>Pingpong is developed by the Computational Policy Lab at the Harvard Kennedy School.</p>
                            </div>
                         </td>
                      </tbody>
