@@ -327,7 +327,6 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
             raise HTTPException(status_code=401, detail="User does not exist")
 
     email_subj = ml_config.transport.template.subject
-    email_body = ml_config.transport.template.body
     expiry = ml_config.expiry
 
     nowfn = get_now_fn(request)
@@ -348,13 +347,8 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
 
     await config.email.sender.send(
         email,
-<<<<<<< HEAD
-        ml_config.transport.template.subject,
-        message,
-=======
         email_subj,
-        email_body.format(magic_link=magic_link),
->>>>>>> 705df2d (shims for debugging)
+        message,
     )
 
     return {"status": "ok"}
