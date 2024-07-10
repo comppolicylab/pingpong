@@ -34,7 +34,6 @@
    */
   export let disabled = false;
   export let uploading = false;
-  export let isPrivateClass = false;
 
   /**
    * Function to run file upload.
@@ -353,25 +352,15 @@
       {#if availableFileNames.length === 0}
         <div class="flex flex-col justify-center h-full justify-center gap-0 flex-wrap">
           <div class="flex justify-center">
-            {#if isPrivateClass}
-              <LockSolid class="h-20 w-20 text-gray-500" strokeWidth="1.5" />
-            {:else}
-              <InboxFullOutline class="h-20 w-20 text-gray-500" strokeWidth="1.5" />
-            {/if}
+            <InboxFullOutline class="h-20 w-20 text-gray-500" strokeWidth="1.5" />
           </div>
           <div class="text-lg font-medium text-gray-500 text-center">
-            {isPrivateClass
-              ? 'No group files available'
-              : items.length > 0
-                ? 'All files selected'
-                : 'No files available'}
+            {items.length > 0 ? 'All files selected' : 'No files available'}
           </div>
           <div
             class="flex justify-center text-md text-gray-500 text-center text-wrap mx-14 flex-wrap"
           >
-            {isPrivateClass
-              ? 'Because your group is private, group file sharing is not supported. '
-              : ''}Use the Upload Files button to upload files for your assistant.
+            Use the Upload Files button to upload files for your assistant.
           </div>
         </div>
       {/if}

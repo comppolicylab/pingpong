@@ -827,6 +827,7 @@ export type CreateAssistantRequest = {
   published?: boolean;
   use_latex?: boolean;
   hide_prompt?: boolean;
+  deleted_private_files?: number[];
 };
 
 /**
@@ -843,6 +844,7 @@ export type UpdateAssistantRequest = {
   published?: boolean;
   use_latex?: boolean;
   hide_prompt?: boolean;
+  deleted_private_files?: number[];
 };
 
 /**

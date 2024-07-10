@@ -1733,6 +1733,13 @@ async def create_assistant(
         raise HTTPException(400, e.message or "OpenAI rejected this request")
 
     try:
+        for file_id in req.deleted_private_files:
+            await handle_delete_file(
+                request.state.db, request.state.authz, openai_client, int(file_id)
+            )
+
+        del req.deleted_private_files
+
         asst = await models.Assistant.create(
             request.state.db,
             req,
@@ -1874,6 +1881,12 @@ async def update_assistant(
     openai_update["instructions"] = format_instructions(
         asst.instructions, use_latex=asst.use_latex
     )
+
+    # Delete any private files that were removed
+    for file_id in req.deleted_private_files:
+        await handle_delete_file(
+            request.state.db, request.state.authz, openai_client, int(file_id)
+        )
 
     try:
         await openai_client.beta.assistants.update(

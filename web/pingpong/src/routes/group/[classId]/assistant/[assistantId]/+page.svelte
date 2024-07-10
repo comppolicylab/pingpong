@@ -38,7 +38,7 @@
 
   // The list of adhoc files being uploaded.
   let privateUploadFileInfo = writable<FileUploadInfo[]>([]);
-  const trashFiles = writable<number[]>([]);
+  const trashPrivateFiles = writable<number[]>([]);
   $: uploadingPrivate = $privateUploadFileInfo.some((f) => f.state === 'pending');
   $: privateSessionFiles = $privateUploadFileInfo
     .filter((f) => f.state === 'success')
@@ -119,7 +119,7 @@
   };
 
   // Handle file deletion.
-  const removeFile = async (evt: CustomEvent<Array<FileUploadInfo>>) => {
+  const removePrivateFile = async (evt: CustomEvent<Array<FileUploadInfo>>) => {
     const files = evt.detail;
     for (const file of files) {
       if (file.state === 'pending' || file.state === 'deleting') {
@@ -127,7 +127,7 @@
       } else if (file.state === 'error') {
         privateUploadFileInfo.update((u) => u.filter((f) => f !== file));
       } else {
-        $trashFiles = [...$trashFiles, (file.response as ServerFile).id];
+        $trashPrivateFiles = [...$trashPrivateFiles, (file.response as ServerFile).id];
       }
     }
   };
@@ -262,7 +262,8 @@
       file_search_file_ids: fileSearchToolSelect ? $selectedFileSearchFiles : [],
       published: body.published?.toString() === 'on',
       use_latex: body.use_latex?.toString() === 'on',
-      hide_prompt: body.hide_prompt?.toString() === 'on'
+      hide_prompt: body.hide_prompt?.toString() === 'on',
+      deleted_private_files: data.assistantId ? $trashPrivateFiles : []
     };
     return params;
   };
@@ -487,12 +488,11 @@
             code_interpreter: false,
             vision: false
           })}
-          isPrivateClass={data.class.private || false}
           maxCount={fileSearchMetadata.max_count}
           uploadType="File Search"
           on:error={(e) => sadToast(e.detail.message)}
           on:change={handlePrivateFilesChange}
-          on:delete={removeFile}
+          on:delete={removePrivateFile}
         />
       </div>
     {/if}
@@ -519,12 +519,11 @@
             code_interpreter: true,
             vision: false
           })}
-          isPrivateClass={data.class.private || false}
           maxCount={codeInterpreterMetadata.max_count}
           uploadType="Code Interpreter"
           on:error={(e) => sadToast(e.detail.message)}
           on:change={handlePrivateFilesChange}
-          on:delete={removeFile}
+          on:delete={removePrivateFile}
         />
       </div>
     {/if}
