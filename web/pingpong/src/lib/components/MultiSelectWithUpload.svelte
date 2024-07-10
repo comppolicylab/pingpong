@@ -298,9 +298,6 @@
   on:change={handleFileInputChange}
   use:bindToForm={{ files: files, dispatch: dispatch }}
 />
-<input type="hidden" {name} bind:value={$value} />
-<input type="hidden" name="items" value={items.map((item) => item.value)} />
-<input type="hidden" name="privateFiles" value={privateFiles.map((file) => file.file_id)} />
 <div id={name} class="flex justify-between">
   <div class="w-[45%]">
     <div class="pl-0.5 pr-1 pb-px"><Label for="available-files">Available group files</Label></div>
