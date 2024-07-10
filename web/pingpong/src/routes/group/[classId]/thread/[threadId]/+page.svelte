@@ -78,13 +78,23 @@
 
   // Get the name of the participant in the chat thread.
   const getName = (message: api.OpenAIMessage) => {
+    console.log('profiles', $participants);
     if (message.role === 'user') {
       const userId = message?.metadata?.user_id as number | undefined;
       if (!userId) {
-        return 'Unknown';
+        return 'Anonymous User';
       }
       const participant = $participants.user[userId];
-      return participant?.name || participant?.email || 'Unknown';
+      // If the thread user matches the current user, show the name.
+      if (!!$participants.user && data?.me?.user?.id && !!$participants.user[data?.me?.user?.id]) {
+        return participant?.profile.name || participant?.profile.email || 'Anonymous User';
+      }
+      // If the thread is private, show the name as 'Anonymous User'.
+      if (threadMgr?.thread?.private) {
+        return 'Anonymous User';
+      }
+      // If the thread is public, show the hashed name.
+      return participant?.hash || 'Anonymous User';
     } else {
       if ($assistantId) {
         return $participants.assistant[$assistantId] || 'PingPong Bot';
@@ -100,7 +110,7 @@
       if (!userId) {
         return '';
       }
-      return $participants.user[userId]?.image_url;
+      return $participants.user[userId]?.profile.image_url;
     }
     // TODO - custom image for the assistant
 

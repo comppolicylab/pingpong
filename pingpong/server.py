@@ -17,6 +17,7 @@ from fastapi import (
     Header,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from .animal_hash import animal_hash
 from jwt.exceptions import PyJWTError
 from openai.types.beta.assistant_create_params import ToolResources
 from openai.types.beta.threads import MessageContentPartParam
@@ -1007,7 +1008,15 @@ async def get_thread(
         "messages": list(messages.data),
         "limit": 20,
         "participants": {
-            "user": {u.id: schemas.Profile.from_user(u) for u in thread.users},
+            "user": {
+                u.id: {
+                    "hash": animal_hash(f"{thread_id}-{u.id}")
+                    if not thread.private
+                    else None,
+                    "profile": schemas.Profile.from_user(u),
+                }
+                for u in thread.users
+            },
             "assistant": {assistant.id: assistant.name},
         },
         "ci_messages": placeholder_ci_calls,

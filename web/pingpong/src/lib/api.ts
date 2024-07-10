@@ -240,6 +240,11 @@ export type Profile = {
   image_url: string;
 };
 
+export type LoadedProfile = {
+  hash?: string | null;
+  profile: Profile;
+};
+
 /**
  * User activation state.
  */
@@ -1369,7 +1374,7 @@ export type OpenAIMessage = {
  * Accounting of individuals in a thread.
  */
 export type ThreadParticipants = {
-  user: { [id: number]: Profile };
+  user: { [id: number]: LoadedProfile };
   assistant: { [id: number]: string };
 };
 

@@ -577,8 +577,13 @@ class ThreadRun(BaseModel):
         from_attributes = True
 
 
+class LoadedProfile(BaseModel):
+    hash: str | None = None
+    profile: Profile
+
+
 class ThreadParticipants(BaseModel):
-    user: dict[int, Profile]
+    user: dict[int, LoadedProfile]
     assistant: dict[int, str]
 
 
