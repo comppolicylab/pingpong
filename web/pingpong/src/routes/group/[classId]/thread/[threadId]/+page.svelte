@@ -110,7 +110,12 @@
       if (!userId) {
         return '';
       }
-      return $participants.user[userId]?.profile.image_url;
+      const participant = $participants.user[userId];
+      if (!!$participants.user && data?.me?.user?.id && !!$participants.user[data?.me?.user?.id]) {
+        return $participants.user[userId]?.profile.image_url;
+      }
+      // If the thread is private, show the name as 'Anonymous User'.
+      return '';
     }
     // TODO - custom image for the assistant
 
