@@ -12,17 +12,17 @@ def compress(bytes: List[int], target: int = 2) -> List[int]:
     """
     length = len(bytes)
     if target > length:
-        raise ValueError('Fewer input bytes than requested output')
+        raise ValueError("Fewer input bytes than requested output")
 
     # split the input list into target number of sublists
     seg_size = floor(length / target)
     segments = []
     for i in range(0, seg_size * target, seg_size):
-        segments.append(bytes[i:i+seg_size])
+        segments.append(bytes[i : i + seg_size])
 
     # ensure that any overflow goes into the last segment
     last_seg = segments[len(segments) - 1]
-    segments[len(segments) - 1] = last_seg + bytes[target * seg_size:]
+    segments[len(segments) - 1] = last_seg + bytes[target * seg_size :]
 
     # XOR filter to generate the indices
     checksums = [reduce(lambda acc, curr: acc ^ curr, s) for s in segments]

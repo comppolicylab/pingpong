@@ -15,7 +15,7 @@ def animal_hash(input: str) -> str:
     hex_digest = md5(input.encode()).hexdigest()
 
     # split the digest into byte pairs and convert to hex ints
-    p = re.compile('(..?)')
+    p = re.compile("(..?)")
     pairs = p.findall(hex_digest)
     bytes = [int(x, base=16) for x in pairs]
     compressed = compress(bytes, 2)
