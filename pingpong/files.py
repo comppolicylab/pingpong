@@ -45,7 +45,7 @@ async def handle_delete_file(
     except IntegrityError:
         raise HTTPException(
             status_code=403,
-            detail=f"File {file.name} is in use. Remove it from all assistants before deleting!",
+            detail=f"{file.name} is in use. Remove it from all assistants before deleting!",
         )
     await oai_client.files.delete(remote_file_id)
     return GenericStatus(status="ok")

@@ -159,9 +159,7 @@
       });
     dispatch(
       'delete',
-      privateFiles
-        .filter((file) => privateIdsToDelete.includes(file.file_id))
-        .map((f) => f.id)
+      privateFiles.filter((file) => privateIdsToDelete.includes(file.file_id)).map((f) => f.id)
     );
     selectedSelected = [];
     focusedListIsAvailable = true;

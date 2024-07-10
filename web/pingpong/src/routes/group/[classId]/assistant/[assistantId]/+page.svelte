@@ -45,6 +45,7 @@
     .map((f) => f.response as ServerFile);
   $: allPrivateFiles = [
     ...data.selectedFileSearchFiles.slice().filter((f) => f.private),
+    ...data.selectedCodeInterpreterFiles.slice().filter((f) => f.private),
     ...privateSessionFiles
   ];
   let loading = false;
