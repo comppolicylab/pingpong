@@ -8,6 +8,7 @@
     Input,
     Heading,
     Textarea,
+    Modal,
     type SelectOptionType
   } from 'flowbite-svelte';
   import type { Tool, ServerFile, FileUploadInfo } from '$lib/api';
@@ -16,7 +17,7 @@
   import { setsEqual } from '$lib/set';
   import { happyToast, sadToast } from '$lib/toast';
   import { normalizeNewlines } from '$lib/content.js';
-  import { ImageOutline } from 'flowbite-svelte-icons';
+  import { ImageOutline, ExclamationCircleOutline } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
   import { writable, type Writable } from 'svelte/store';
 
@@ -25,6 +26,7 @@
   // Flag indicating whether we should check for changes before navigating away.
   let checkForChanges = true;
   let assistantForm: HTMLFormElement;
+  let deleteModal = false;
 
   $: assistant = data.assistant;
   $: canPublish = data.grants.canPublishAssistants;
@@ -281,6 +283,26 @@
     return params;
   };
 
+    /**
+   * Create/save an assistant when form is submitted.
+   */
+   const processDelete = async (evt: MouseEvent) => {
+    evt.preventDefault();
+    loading = true;
+
+    if (!data.assistant) {
+      loading = false;
+      return;
+    }
+
+    if (!confirm(
+            `You are about to delete assistant \"${data.assistant.name}". Are you sure you want to continue?`
+    )) {
+      loading = false;
+      return;
+    }
+
+   };
   /**
    * Create/save an assistant when form is submitted.
    */
@@ -352,13 +374,37 @@
 </script>
 
 <div class="h-full w-full overflow-y-auto p-12">
-  <Heading tag="h2" class="text-3xl font-serif font-medium mb-6 text-blue-dark-40">
-    {#if data.isCreating}
-      New assistant
-    {:else}
-      Edit assistant
+  <div class="flex flex-row justify-between">
+    <Heading tag="h2" class="text-3xl font-serif font-medium mb-6 text-blue-dark-40">
+      {#if data.isCreating}
+        New assistant
+      {:else}
+        Edit assistant
+      {/if}
+    </Heading>
+    {#if !data.isCreating}
+    <div class="flex items-start shrink-0">
+      <Button
+        pill
+        size="sm"
+        class="bg-white border border-red-700 text-red-700 hover:text-white hover:bg-red-700"
+        type="button"
+        on:click={() => (deleteModal = true)}
+        disabled={loading || uploadingOptimistic}>Delete assistant</Button
+      >
+
+      <Modal bind:open={deleteModal} size="xs" autoclose>
+        <div class="text-center">
+          <ExclamationCircleOutline class="mx-auto mb-4 text-gray-400 w-12 h-12 dark:text-gray-200" />
+          <h3 class="mb-5 text-lg font-normal text-gray-500 dark:text-gray-400">Delete {data?.assistant?.name || 'this assistant'}?</h3>
+          <h4 class="mb-5 text-sm font-normal text-gray-500 dark:text-gray-400">All threads associated with the assistant will become read-only. This action cannot be undone.</h4>
+          <Button color="alternative">Cancel</Button>
+          <Button color="red" class="me-2">Delete</Button>
+        </div>
+      </Modal>
+    </div>
     {/if}
-  </Heading>
+  </div>
 
   <form on:submit={submitForm} bind:this={assistantForm}>
     <div class="mb-4">
