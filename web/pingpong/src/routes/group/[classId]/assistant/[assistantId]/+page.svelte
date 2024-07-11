@@ -219,11 +219,19 @@
 
     // Check selected files separately since these are handled differently in the form.
     if (
-      !setsEqual(new Set($selectedCodeInterpreterFiles), new Set(data.selectedCodeInterpreterFiles))
+      !setsEqual(
+        new Set($selectedCodeInterpreterFiles),
+        new Set(data.selectedCodeInterpreterFiles.map((f) => f.file_id))
+      )
     ) {
       modifiedFields.push('code interpreter files');
     }
-    if (!setsEqual(new Set($selectedFileSearchFiles), new Set(data.selectedFileSearchFiles))) {
+    if (
+      !setsEqual(
+        new Set($selectedFileSearchFiles),
+        new Set(data.selectedFileSearchFiles.map((f) => f.file_id))
+      )
+    ) {
       modifiedFields.push('file search files');
     }
 
