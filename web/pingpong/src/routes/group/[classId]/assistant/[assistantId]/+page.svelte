@@ -37,16 +37,24 @@
   );
 
   // The list of adhoc files being uploaded.
-  let privateUploadFileInfo = writable<FileUploadInfo[]>([]);
+  let privateUploadFSFileInfo = writable<FileUploadInfo[]>([]);
+  let privateUploadCIFileInfo = writable<FileUploadInfo[]>([]);
   const trashPrivateFileIds = writable<number[]>([]);
-  $: uploadingPrivate = $privateUploadFileInfo.some((f) => f.state === 'pending');
-  $: privateSessionFiles = $privateUploadFileInfo
+  $: uploadingFSPrivate = $privateUploadFSFileInfo.some((f) => f.state === 'pending');
+  $: uploadingCIPrivate = $privateUploadCIFileInfo.some((f) => f.state === 'pending');
+  $: privateFSSessionFiles = $privateUploadFSFileInfo
     .filter((f) => f.state === 'success')
     .map((f) => f.response as ServerFile);
-  $: allPrivateFiles = [
+  $: privateCISessionFiles = $privateUploadCIFileInfo
+    .filter((f) => f.state === 'success')
+    .map((f) => f.response as ServerFile);
+  $: allFSPrivateFiles = [
     ...data.selectedFileSearchFiles.slice().filter((f) => f.private),
+    ...privateFSSessionFiles
+  ];
+  $: allCIPrivateFiles = [
     ...data.selectedCodeInterpreterFiles.slice().filter((f) => f.private),
-    ...privateSessionFiles
+    ...privateCISessionFiles
   ];
   let loading = false;
 
@@ -90,7 +98,7 @@
   );
   $: supportsVision = supportVisionModels.includes(selectedModel);
   let allowVisionUpload = false;
-  $: asstFiles = [...data.files, ...allPrivateFiles];
+  $: asstFiles = [...data.files, ...allFSPrivateFiles, ...allCIPrivateFiles];
 
   let fileSearchOptions: SelectOptionType<string>[] = [];
   let codeInterpreterOptions: SelectOptionType<string>[] = [];
@@ -115,8 +123,11 @@
   $: codeInterpreterToolSelect = initialTools.includes('code_interpreter');
 
   // Handle updates from the file upload component.
-  const handlePrivateFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
-    privateUploadFileInfo = e.detail;
+  const handleFSPrivateFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
+    privateUploadFSFileInfo = e.detail;
+  };
+  const handleCIPrivateFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
+    privateUploadCIFileInfo = e.detail;
   };
 
   // Handle file deletion.
@@ -480,9 +491,9 @@
           name="selectedFileSearchFiles"
           items={fileSearchOptions}
           bind:value={selectedFileSearchFiles}
-          disabled={loading || !handleUpload || uploadingPrivate}
-          privateFiles={allPrivateFiles}
-          uploading={uploadingPrivate}
+          disabled={loading || !handleUpload || uploadingFSPrivate}
+          privateFiles={allFSPrivateFiles}
+          uploading={uploadingFSPrivate}
           upload={handleUpload}
           accept={data.uploadInfo.fileTypes({
             file_search: true,
@@ -492,7 +503,7 @@
           maxCount={fileSearchMetadata.max_count}
           uploadType="File Search"
           on:error={(e) => sadToast(e.detail.message)}
-          on:change={handlePrivateFilesChange}
+          on:change={handleFSPrivateFilesChange}
           on:delete={removePrivateFiles}
         />
       </div>
@@ -511,9 +522,9 @@
           name="selectedCodeInterpreterFiles"
           items={codeInterpreterOptions}
           bind:value={selectedCodeInterpreterFiles}
-          disabled={loading || !handleUpload || uploadingPrivate}
-          privateFiles={allPrivateFiles}
-          uploading={uploadingPrivate}
+          disabled={loading || !handleUpload || uploadingCIPrivate}
+          privateFiles={allCIPrivateFiles}
+          uploading={uploadingCIPrivate}
           upload={handleUpload}
           accept={data.uploadInfo.fileTypes({
             file_search: false,
@@ -523,7 +534,7 @@
           maxCount={codeInterpreterMetadata.max_count}
           uploadType="Code Interpreter"
           on:error={(e) => sadToast(e.detail.message)}
-          on:change={handlePrivateFilesChange}
+          on:change={handleCIPrivateFilesChange}
           on:delete={removePrivateFiles}
         />
       </div>
@@ -557,10 +568,10 @@
         pill
         class="bg-orange border border-orange text-white hover:bg-orange-dark"
         type="submit"
-        disabled={loading || uploadingPrivate}>Save</Button
+        disabled={loading || uploadingFSPrivate || uploadingCIPrivate}>Save</Button
       >
       <Button
-        disabled={loading || uploadingPrivate}
+        disabled={loading || uploadingFSPrivate || uploadingCIPrivate}
         href={`/group/${data.class.id}/assistant`}
         color="red"
         pill
