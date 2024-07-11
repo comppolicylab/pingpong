@@ -1734,10 +1734,14 @@ async def create_assistant(
 
     try:
         # Delete private files uploaded but not attached to the assistant
-        for file_id in req.deleted_private_files:
-            await handle_delete_file(
-                request.state.db, request.state.authz, openai_client, int(file_id)
-            )
+        await asyncio.gather(
+            *[
+                handle_delete_file(
+                    request.state.db, request.state.authz, openai_client, int(file_id)
+                )
+                for file_id in req.deleted_private_files
+            ]
+        )
 
         del req.deleted_private_files
 
@@ -1884,10 +1888,14 @@ async def update_assistant(
     )
 
     # Delete any private files that were removed
-    for file_id in req.deleted_private_files:
-        await handle_delete_file(
-            request.state.db, request.state.authz, openai_client, int(file_id)
-        )
+    await asyncio.gather(
+        *[
+            handle_delete_file(
+                request.state.db, request.state.authz, openai_client, int(file_id)
+            )
+            for file_id in req.deleted_private_files
+        ]
+    )
 
     try:
         await openai_client.beta.assistants.update(
