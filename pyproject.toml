@@ -7,7 +7,7 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-openai = "1.30.5"
+openai = "1.35.13"
 pydantic = "^2.3.0"
 pydantic-settings = "^2.0.3"
 slack-sdk = "^3.21.3"
@@ -41,7 +41,7 @@ anyio = "4.3.0"
 gunicorn = "^22.0.0"
 orjson = "^3.9.15"
 python-glowplug = "^0.3.1"
-
+mmh3 = "4.1.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.2"
