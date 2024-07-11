@@ -98,7 +98,8 @@
   );
   $: supportsVision = supportVisionModels.includes(selectedModel);
   let allowVisionUpload = false;
-  $: asstFiles = [...data.files, ...allFSPrivateFiles, ...allCIPrivateFiles];
+  $: asstFSFiles = [...data.files, ...allFSPrivateFiles];
+  $: asstCIFiles = [...data.files, ...allCIPrivateFiles];
 
   let fileSearchOptions: SelectOptionType<string>[] = [];
   let codeInterpreterOptions: SelectOptionType<string>[] = [];
@@ -112,10 +113,10 @@
     file_search: false,
     vision: false
   });
-  $: fileSearchOptions = (asstFiles || [])
+  $: fileSearchOptions = (asstFSFiles || [])
     .filter(fileSearchFilter)
     .map((file) => ({ value: file.file_id, name: file.name }));
-  $: codeInterpreterOptions = (asstFiles || [])
+  $: codeInterpreterOptions = (asstCIFiles || [])
     .filter(codeInterpreterFilter)
     .map((file) => ({ value: file.file_id, name: file.name }));
 
