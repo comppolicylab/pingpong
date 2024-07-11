@@ -20,7 +20,7 @@
   import { ImageOutline, ExclamationCircleOutline } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
   import { writable, type Writable } from 'svelte/store';
-
+  import { loading } from '$lib/stores/general';
   export let data;
 
   // Flag indicating whether we should check for changes before navigating away.
@@ -58,7 +58,6 @@
     ...data.selectedCodeInterpreterFiles.slice().filter((f) => f.private),
     ...privateCISessionFiles
   ];
-  let loading = false;
 
   const fileSearchMetadata = {
     value: 'file_search',
@@ -283,39 +282,44 @@
     return params;
   };
 
-    /**
+  /**
    * Create/save an assistant when form is submitted.
    */
-   const processDelete = async (evt: MouseEvent) => {
+  const deleteAssistant = async (evt: MouseEvent) => {
     evt.preventDefault();
-    loading = true;
+    $loading = true;
 
-    if (!data.assistant) {
-      loading = false;
+    if (!data.assistantId) {
+      sadToast(`Error: Assistant ID not found.`);
+      $loading = false;
       return;
     }
 
-    if (!confirm(
-            `You are about to delete assistant \"${data.assistant.name}". Are you sure you want to continue?`
-    )) {
-      loading = false;
-      return;
+    const result = await api.deleteAssistant(fetch, data.class.id, data.assistantId);
+    if (result.$status < 300) {
+      $loading = false;
+      checkForChanges = false;
+      happyToast('Assistant deleted');
+      await goto(`/group/${data.class.id}/assistant`, { invalidateAll: true });
+    } else {
+      $loading = false;
+      sadToast(`Error deleting assistant: ${JSON.stringify(result.detail, null, '  ')}`);
     }
+  };
 
-   };
   /**
    * Create/save an assistant when form is submitted.
    */
   const submitForm = async (evt: SubmitEvent) => {
     evt.preventDefault();
-    loading = true;
+    $loading = true;
 
     const form = evt.target as HTMLFormElement;
     const params = parseFormData(form);
 
     if (params.file_search_file_ids.length > fileSearchMetadata.max_count) {
       sadToast(`You can only select up to ${fileSearchMetadata.max_count} files for File Search.`);
-      loading = false;
+      $loading = false;
       return;
     }
 
@@ -323,7 +327,7 @@
       sadToast(
         `You can only select up to ${codeInterpreterMetadata.max_count} files for Code Interpreter.`
       );
-      loading = false;
+      $loading = false;
       return;
     }
 
@@ -334,9 +338,10 @@
 
     if (expanded.error) {
       // TODO(jnu): error message is hard to read right now, improve this.
-      loading = false;
+      $loading = false;
       sadToast(`Error: ${JSON.stringify(expanded.error, null, '  ')}`);
     } else {
+      $loading = false;
       happyToast('Assistant saved');
       checkForChanges = false;
       await goto(`/group/${data.class.id}/assistant`, { invalidateAll: true });
@@ -383,26 +388,31 @@
       {/if}
     </Heading>
     {#if !data.isCreating}
-    <div class="flex items-start shrink-0">
-      <Button
-        pill
-        size="sm"
-        class="bg-white border border-red-700 text-red-700 hover:text-white hover:bg-red-700"
-        type="button"
-        on:click={() => (deleteModal = true)}
-        disabled={loading || uploadingOptimistic}>Delete assistant</Button
-      >
+      <div class="flex items-start shrink-0">
+        <Button
+          pill
+          size="sm"
+          class="bg-white border border-red-700 text-red-700 hover:text-white hover:bg-red-700"
+          type="button"
+          on:click={() => (deleteModal = true)}
+          disabled={loading || uploadingFSPrivate || uploadingCIPrivate}>Delete assistant</Button
+        >
 
-      <Modal bind:open={deleteModal} size="xs" autoclose>
-        <div class="text-center">
-          <ExclamationCircleOutline class="mx-auto mb-4 text-gray-400 w-12 h-12 dark:text-gray-200" />
-          <h3 class="mb-5 text-lg font-normal text-gray-500 dark:text-gray-400">Delete {data?.assistant?.name || 'this assistant'}?</h3>
-          <h4 class="mb-5 text-sm font-normal text-gray-500 dark:text-gray-400">All threads associated with the assistant will become read-only. This action cannot be undone.</h4>
-          <Button color="alternative">Cancel</Button>
-          <Button color="red" class="me-2">Delete</Button>
-        </div>
-      </Modal>
-    </div>
+        <Modal bind:open={deleteModal} size="xs" autoclose>
+          <div class="text-center">
+            <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
+            <h3 class="mb-5 text-xl text-black font-bold">
+              Delete {data?.assistant?.name || 'this assistant'}?
+            </h3>
+            <h4 class="mb-5 text-sm text-black font-normal">
+              All threads associated with this assistant will become read-only. This action cannot
+              be undone.
+            </h4>
+            <Button pill color="alternative">Cancel</Button>
+            <Button pill color="red" on:click={deleteAssistant}>Delete</Button>
+          </div>
+        </Modal>
+      </div>
     {/if}
   </div>
 
@@ -538,7 +548,7 @@
           name="selectedFileSearchFiles"
           items={fileSearchOptions}
           bind:value={selectedFileSearchFiles}
-          disabled={loading || !handleUpload || uploadingFSPrivate}
+          disabled={$loading || !handleUpload || uploadingFSPrivate}
           privateFiles={allFSPrivateFiles}
           uploading={uploadingFSPrivate}
           upload={handleUpload}
@@ -569,7 +579,7 @@
           name="selectedCodeInterpreterFiles"
           items={codeInterpreterOptions}
           bind:value={selectedCodeInterpreterFiles}
-          disabled={loading || !handleUpload || uploadingCIPrivate}
+          disabled={$loading || !handleUpload || uploadingCIPrivate}
           privateFiles={allCIPrivateFiles}
           uploading={uploadingCIPrivate}
           upload={handleUpload}
@@ -615,10 +625,10 @@
         pill
         class="bg-orange border border-orange text-white hover:bg-orange-dark"
         type="submit"
-        disabled={loading || uploadingFSPrivate || uploadingCIPrivate}>Save</Button
+        disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}>Save</Button
       >
       <Button
-        disabled={loading || uploadingFSPrivate || uploadingCIPrivate}
+        disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}
         href={`/group/${data.class.id}/assistant`}
         color="red"
         pill
