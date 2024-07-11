@@ -1,10 +1,17 @@
 <script lang="ts">
-  import { Label, type SelectOptionType, Popover, Spinner } from 'flowbite-svelte';
+  import { Label, type SelectOptionType, Popover, Spinner, Tooltip } from 'flowbite-svelte';
   import { autoupload, bindToForm } from './FileUpload.svelte';
   import { writable, type Writable } from 'svelte/store';
-  import type { FileUploader, FileUploadInfo } from '$lib/api';
+  import type { FileUploader, FileUploadInfo, ServerFile } from '$lib/api';
   import { createEventDispatcher, onMount } from 'svelte';
-  import { CloudArrowUpOutline, InboxFullOutline } from 'flowbite-svelte-icons';
+  import {
+    CloudArrowUpOutline,
+    InboxFullOutline,
+    LockOutline,
+    LockSolid,
+    UsersGroupOutline,
+    UsersGroupSolid
+  } from 'flowbite-svelte-icons';
 
   /**
    * Name of field.
@@ -15,6 +22,7 @@
    * Items available to select.
    */
   export let items: SelectOptionType<string>[];
+  export let privateFiles: ServerFile[];
 
   /**
    * File ids of selected items.
@@ -86,13 +94,18 @@
     autoupload(Array.from(input.files), upload, files, maxSize, 'assistants', dispatch, value);
     $loading = false;
   };
-
-  $: availableFiles = items.filter((item) => !$value.includes(item.value));
+  $: privateFileIds = privateFiles.map((file) => file.file_id);
+  $: availableFiles = items.filter(
+    (item) => !$value.includes(item.value) && !privateFileIds.includes(item.value)
+  );
   $: availableFileNames = availableFiles.map((item) => item.name as string);
-  $: availableFileIds = availableFiles.map((item) => item.value as string);
+  $: availableFileIds = availableFiles.map((item) => item.value);
   $: selectedFiles = items.filter((item) => $value.includes(item.value));
-  $: selectedFileNames = selectedFiles.map((item) => item.name as string);
-  $: selectedFileIds = selectedFiles.map((item) => item.value as string);
+  $: selectedFileNames = selectedFiles.map((item) => [
+    item.name as string,
+    privateFileIds.includes(item.value)
+  ]);
+  $: selectedFileIds = selectedFiles.map((item) => item.value);
   let selectedAvailable: number[] = [];
   let selectedSelected: number[] = [];
 
@@ -135,11 +148,19 @@
   }
 
   function moveToAvailable() {
+    let privateIdsToDelete: string[] = [];
     selectedSelected
       .sort((a, b) => a - b)
       .forEach((index) => {
         value.update((v) => v.filter((item) => item !== selectedFileIds[index]));
+        if (privateFileIds.includes(selectedFileIds[index])) {
+          privateIdsToDelete.push(selectedFileIds[index]);
+        }
       });
+    dispatch(
+      'delete',
+      privateFiles.filter((file) => privateIdsToDelete.includes(file.file_id)).map((f) => f.id)
+    );
     selectedSelected = [];
     focusedListIsAvailable = true;
     focusedIndex = availableFileNames.length - 1;
@@ -279,7 +300,7 @@
 />
 <div id={name} class="flex justify-between">
   <div class="w-[45%]">
-    <div class="pl-0.5 pr-1 pb-px"><Label for="available-files">Available files</Label></div>
+    <div class="pl-0.5 pr-1 pb-px"><Label for="available-files">Available group files</Label></div>
     <div
       bind:this={availableListElement}
       id="available-files"
@@ -293,7 +314,7 @@
         {@const isSelected = selectedAvailable.includes(index)}
         <button
           type="button"
-          class="block text-sm w-full pt-1 pr-0 pb-1 pl-2 border-none bg-none overflow-y-auto cursor-pointer text-left {isSelected
+          class="block flex flex-row gap-1 text-sm w-full pt-1 pr-0 pb-1 pl-2 border-none bg-none overflow-y-auto cursor-pointer text-left {isSelected
             ? 'text-white bg-blue-600'
             : 'hover:bg-gray-100'}"
           role="option"
@@ -301,6 +322,19 @@
           class:focused={focusedListIsAvailable && focusedIndex === index}
           on:click={(e) => toggleSelection(true, index, e)}
         >
+          {#if isSelected}
+            <UsersGroupSolid />
+            <Tooltip
+              >This shared file is available<br />for all group members and <br />can be added to
+              any assistant</Tooltip
+            >
+          {:else}
+            <UsersGroupOutline class="text-gray-500" />
+            <Tooltip
+              >This shared file is available<br />for all group members and <br />can be added to
+              any assistant</Tooltip
+            >
+          {/if}
           {name}
         </button>
       {/each}
@@ -315,9 +349,7 @@
           <div
             class="flex justify-center text-md text-gray-500 text-center text-wrap mx-14 flex-wrap"
           >
-            <div class="shrink-0">Use the Upload Files button</div>
-            <CloudArrowUpOutline class="ml-1" />
-            <div class="shrink-0">to upload files to your assistant.</div>
+            Use the Upload Files button to upload files for your assistant.
           </div>
         </div>
       {/if}
@@ -373,7 +405,7 @@
             size="lg"
           />{/if}</button
       >
-      <div class="text-xs text-center text-gray-500">Upload<br />Files</div>
+      <div class="text-xs text-center text-gray-500">Upload<br />Private<br />Files</div>
     </div>
     {#if selectedFiles.length >= maxCount}
       <Popover
@@ -402,11 +434,11 @@
       tabindex="0"
       on:keydown={(e) => handleKeydown(e, false)}
     >
-      {#each selectedFileNames as name, index}
+      {#each selectedFileNames as [name, isPrivate], index}
         {@const isSelected = selectedSelected.includes(index)}
         <button
           type="button"
-          class="block text-sm w-full pt-1 pr-0 pb-1 pl-2 border-none bg-none overflow-y-auto cursor-pointer text-left {isSelected
+          class="block flex flex-row gap-1 text-sm w-full pt-1 pr-0 pb-1 pl-2 border-none bg-none overflow-y-auto cursor-pointer text-left {isSelected
             ? 'text-white bg-blue-600'
             : 'hover:bg-gray-100'}"
           role="option"
@@ -414,6 +446,31 @@
           class:focused={!focusedListIsAvailable && focusedIndex === index}
           on:click={(e) => toggleSelection(false, index, e)}
         >
+          {#if isPrivate}
+            {#if isSelected}
+              <LockSolid />
+              <Tooltip
+                >This private file is only available to you<br />for use with this assistant</Tooltip
+              >
+            {:else}
+              <LockOutline class="text-gray-500" />
+              <Tooltip
+                >This private file is only available to you<br />for use with this assistant</Tooltip
+              >
+            {/if}
+          {:else if isSelected}
+            <UsersGroupSolid />
+            <Tooltip
+              >This shared file is available<br />for all group members and <br />can be added to
+              any assistant</Tooltip
+            >
+          {:else}
+            <UsersGroupOutline class="text-gray-500" />
+            <Tooltip
+              >This shared file is available<br />for all group members and <br />can be added to
+              any assistant</Tooltip
+            >
+          {/if}
           {name}
         </button>
       {/each}

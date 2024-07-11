@@ -212,6 +212,7 @@ class CreateAssistant(BaseModel):
     published: bool = False
     use_latex: bool = False
     hide_prompt: bool = False
+    deleted_private_files: list[int] = []
 
 
 class UpdateAssistant(BaseModel):
@@ -225,6 +226,7 @@ class UpdateAssistant(BaseModel):
     published: bool | None = None
     use_latex: bool | None = None
     hide_prompt: bool | None = None
+    deleted_private_files: list[int] = []
 
 
 class Assistants(BaseModel):
