@@ -1182,6 +1182,11 @@ export type UserPlaceholder = {
   name: string;
 };
 
+export type HashedUser = {
+  id: number;
+  hash: string;
+};
+
 /**
  * Thread information.
  */
@@ -1211,6 +1216,7 @@ export type LoadedThread = {
   private: boolean;
   tools_available: string | null;
   users: UserPlaceholder[];
+  hashed_users?: HashedUser[];
   created: string;
   updated: string;
 };

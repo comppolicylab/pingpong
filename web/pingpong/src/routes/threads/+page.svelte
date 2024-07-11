@@ -79,6 +79,11 @@
       <h3 class="font-normal text-2xl border-b border-gray-200 pb-1">Threads</h3>
       <div class="flex flex-wrap flex-col">
         {#each threads as thread}
+          {@const allUsers = thread.hashed_users || []}
+          {@const allUsersLen = allUsers.length}
+          {@const otherUsers =
+            thread.hashed_users?.filter((user) => user.id != data.me.user?.id) || []}
+          {@const otherUsersLen = otherUsers.length}
           <a
             href={`/group/${thread.class_id}/thread/${thread.id}`}
             class="border-b border-gray-200 pb-4 pt-4 transition-all duration-300 hover:bg-gray-100 hover:pl-4"
@@ -100,7 +105,23 @@
                 {dayjs.utc(thread.updated).fromNow()}
               </div>
               <div class="text-gray-400 text-xs uppercase tracking-wide">
-                {thread.users.map((user) => user.name).join(', ')}
+                {thread.private
+                  ? allUsersLen != otherUsersLen
+                    ? `me${
+                        otherUsersLen > 0
+                          ? otherUsersLen == 1
+                            ? ' & Anonymous User'
+                            : ' & ' + otherUsersLen + ' Anonymous Users'
+                          : ''
+                      }`
+                    : 'Anonymous User'
+                  : allUsersLen != otherUsersLen
+                    ? `me${
+                        otherUsersLen > 0
+                          ? otherUsers.map((user) => user.hash || 'Anonymous User').join(', ')
+                          : ''
+                      }`
+                    : allUsers.map((user) => user.hash || 'Anonymous User').join(', ')}
               </div>
             </div>
           </a>

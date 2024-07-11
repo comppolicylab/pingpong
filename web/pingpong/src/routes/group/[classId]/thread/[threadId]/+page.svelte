@@ -78,7 +78,6 @@
 
   // Get the name of the participant in the chat thread.
   const getName = (message: api.OpenAIMessage) => {
-    console.log('profiles', $participants);
     if (message.role === 'user') {
       const userId = message?.metadata?.user_id as number | undefined;
       if (!userId) {

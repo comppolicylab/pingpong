@@ -2,6 +2,7 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional
 
+from .animal_hash import animal_hash
 from sqlalchemy import Boolean, Column, DateTime
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
@@ -989,8 +990,38 @@ class Thread(Base):
                 if not next_latest_time or new_thread.updated < next_latest_time:
                     next_latest_time = new_thread.updated
 
-                new_thread.assistant_name = new_thread.assistant.name
-                threads.append(new_thread)
+                assistant_name = new_thread.assistant.name
+                hashed_users = []
+
+                for user in new_thread.users:
+                    hashed_users.append(
+                        {
+                            "id": user.id,
+                            "hash": animal_hash(
+                                f"{new_thread.thread_id}-{user.created}"
+                            )
+                            if not new_thread.private
+                            else None,
+                        }
+                    )
+                threads.append(
+                    schemas.LoadedThread.model_validate(
+                        {
+                            "id": new_thread.id,
+                            "name": new_thread.name,
+                            "thread_id": new_thread.thread_id,
+                            "class_id": new_thread.class_id,
+                            "assistant_id": new_thread.assistant_id,
+                            "assistant_name": assistant_name,
+                            "private": new_thread.private,
+                            "tools_available": new_thread.tools_available,
+                            "users": [],
+                            "hashed_users": hashed_users,
+                            "created": new_thread.created,
+                            "updated": new_thread.updated,
+                        }
+                    )
+                )
                 added_in_page += 1
 
                 if len(threads) >= n:

@@ -1010,10 +1010,14 @@ async def get_thread(
         "participants": {
             "user": {
                 u.id: {
-                    "hash": animal_hash(f"{thread_id}-{u.id}")
+                    # Only send the hash if the thread is published
+                    "hash": animal_hash(f"{thread.thread_id}-{u.created}")
                     if not thread.private
                     else None,
-                    "profile": schemas.Profile.from_user(u),
+                    # Make sure we only send the profile of the current user
+                    "profile": schemas.Profile.from_user(u)
+                    if u.id == request.state.session.user.id
+                    else None,
                 }
                 for u in thread.users
             },

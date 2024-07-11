@@ -239,6 +239,14 @@ class UserPlaceholder(BaseModel, UserNameMixin):
     id: int
 
 
+class HashedUser(BaseModel):
+    id: int
+    hash: str | None
+
+    class Config:
+        from_attributes = True
+
+
 class Thread(BaseModel):
     id: int
     name: str
@@ -265,6 +273,7 @@ class LoadedThread(BaseModel):
     private: bool
     tools_available: str | None
     users: list["UserPlaceholder"]
+    hashed_users: list["HashedUser"] = []
     created: datetime
     updated: datetime | None
 
@@ -579,7 +588,7 @@ class ThreadRun(BaseModel):
 
 class LoadedProfile(BaseModel):
     hash: str | None = None
-    profile: Profile
+    profile: Profile | None = None
 
 
 class ThreadParticipants(BaseModel):
