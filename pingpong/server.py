@@ -25,6 +25,7 @@ from sqlalchemy.sql import func
 import pingpong.metrics as metrics
 import pingpong.models as models
 import pingpong.schemas as schemas
+from .auth import authn_method_for_email
 from .template import email_template as message_template
 from .saml import get_saml2_client, get_saml2_settings, get_saml2_attrs
 
@@ -294,7 +295,8 @@ async def login_sso(provider: str, request: Request):
 
     if sso_config.protocol == "saml":
         saml_client = await get_saml2_client(sso_config, request)
-        return RedirectResponse(saml_client.login())
+        dest = request.query_params.get("redirect", "/")
+        return RedirectResponse(saml_client.login(dest))
     else:
         raise HTTPException(
             status_code=501, detail=f"SSO protocol {sso_config.protocol} not supported"
@@ -306,7 +308,7 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
     """Provide a magic link to the auth endpoint."""
     # First figure out if this email domain is even allowed to use magic auth.
     # If not, we deny the request and point to another place they can log in.
-    login_config = config.auth.authn_method_for_domain(body.email)
+    login_config = authn_method_for_email(config.auth.authn_methods, body.email)
     if not login_config:
         raise HTTPException(
             status_code=400, detail="No login method found for email domain"
@@ -364,8 +366,22 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
 
 
 @v1.get("/auth")
-async def auth(request: Request, response: Response):
-    # Get the `token` query parameter from the request and store it in variable.
+async def auth(request: Request):
+    """Continue the auth flow based on a JWT in the query params.
+
+    If the token is valid, determine the correct authn method based on the user.
+    If the user is allowed to use magic link auth, they'll be authed automatically
+    by this endpoint. If they have to go through SSO, they'll be redirected to the
+    SSO login endpoint.
+
+    Raises:
+        HTTPException(401): If the token is invalid.
+        HTTPException(500): If there is an runtime error decoding the token.
+        HTTPException(404): If the user ID is not found.
+
+    Returns:
+        RedirectResponse: Redirect either to the SSO login endpoint or to the destination.
+    """
     dest = request.query_params.get("redirect", "/")
     stok = request.query_params.get("token")
     nowfn = get_now_fn(request)
@@ -376,7 +392,27 @@ async def auth(request: Request, response: Response):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    return redirect_with_session(dest, int(auth_token.sub), nowfn=nowfn)
+    user = await models.User.get_by_id(request.state.db, int(auth_token.sub))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Figure out the appropriate continuation based on the user's authn method.
+    # Currently we do find the authn method by checking the email domain against
+    # our config, but in the future we might need to store this explicitly by user
+    # in the database.
+    login_config = authn_method_for_email(config.auth.authn_methods, user.email)
+
+    if login_config.method == "sso":
+        return RedirectResponse(
+            f"/api/v1/login/sso?provider={login_config.provider}&redirect={dest}",
+            status_code=303,
+        )
+    elif login_config.method != "magic_link":
+        return redirect_with_session(dest, int(auth_token.sub), nowfn=nowfn)
+    else:
+        raise HTTPException(
+            status_code=501, detail=f"Login method {login_config.method} not supported"
+        )
 
 
 @v1.get(

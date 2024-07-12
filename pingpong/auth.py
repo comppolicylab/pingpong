@@ -1,11 +1,12 @@
 from datetime import timedelta
 from typing import cast
+import re
 
 from fastapi.responses import RedirectResponse
 import jwt
 from jwt.exceptions import PyJWTError
 
-from .config import config
+from .config import config, AuthnSettings
 from .now import NowFn, utcnow
 from .schemas import AuthToken, SessionToken
 
@@ -160,3 +161,46 @@ def redirect_with_session(
         max_age=expiry,
     )
     return response
+
+
+def _wildcard_match(pattern: str, value: str) -> bool:
+    """Wildcard match a pattern against a value.
+
+    Example:
+    >>> wildcard_match("*.example.com", "foo.example.com")
+    True
+    >>> wildcard_match("*.example.com", "foo.bar.example.com")
+    True
+    >>> wildcard_match("*.example.com", "example.com")
+    False
+
+    Args:
+        pattern (str): The pattern to match.
+        value (str): The value to match against.
+
+    Returns:
+        bool: True if the value matches the pattern, False otherwise.
+    """
+    pattern = "^" + re.escape(pattern).replace(r"\*", r".+") + "$"
+    return re.match(pattern, value) is not None
+
+
+def authn_method_for_email(methods: list[AuthnSettings], email: str) -> AuthnSettings:
+    """Get the authn method for the given email domain.
+
+    Args:
+        methods (list[AuthnSettings]): The list of authn methods (from the config, usually)
+        email (str): The email address.
+
+    Returns:
+        AuthnSettings: The first authn method that matches
+    """
+    domain = email.split("@")[1]
+    for method in methods:
+        # Check if the domain matches any of the domains patterns and is not
+        # excluded by any of the excluded_domains patterns
+        if any(_wildcard_match(d, domain) for d in method.domains) and not any(
+            _wildcard_match(d, domain) for d in method.excluded_domains
+        ):
+            return method
+    raise ValueError(f"No authn method found for domain {domain}")

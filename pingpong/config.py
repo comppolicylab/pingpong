@@ -2,7 +2,6 @@ import base64
 import logging
 import os
 import tomllib
-import re
 from functools import cached_property
 from pathlib import Path
 from typing import Literal, Union
@@ -125,19 +124,21 @@ class SecretKey(BaseSettings):
     algorithm: str = Field("HS256")
 
 
-class Saml2AuthnSettings(BaseSettings):
+class BaseAuthnSettings(BaseSettings):
+    name: str
+    domains: list[str] = Field(["*"])
+    excluded_domains: list[str] = Field([])
+
+
+class Saml2AuthnSettings(BaseAuthnSettings):
     method: Literal["sso"]
     protocol: Literal["saml"]
     provider: str
-    name: str
-    domains: list[str]
     base_path: str = Field("saml")
 
 
-class MagicLinkAuthnSettings(BaseSettings):
+class MagicLinkAuthnSettings(BaseAuthnSettings):
     method: Literal["magic_link"]
-    name: str
-    domains: list[str] = Field(["*"])
     expiry: int = Field(86_400)
 
 
@@ -150,17 +151,6 @@ class AuthSettings(BaseSettings):
     autopromote_on_login: bool = Field(False)
     secret_keys: list[SecretKey]
     authn_methods: list[AuthnSettings]
-
-    def authn_method_for_domain(self, email: str) -> AuthnSettings:
-        """Get the authn method for the given email domain."""
-        domain = email.split("@")[1]
-        for method in self.authn_methods:
-            # Support wildcard matching with '*'
-            for d in method.domains:
-                pattern = "^" + re.escape(d).replace(r"\*", r".+") + "$"
-                if re.match(pattern, domain):
-                    return method
-        raise ValueError(f"No authn method found for domain {domain}")
 
 
 DbSettings = Union[PostgresSettings, SqliteSettings]
