@@ -164,6 +164,7 @@ async def test_auth_with_expired_token(api, now):
     assert response.json() == {"detail": "Token expired"}
 
 
+@with_user(123, "foo@bar.com")
 async def test_auth_valid_token(api, now):
     valid_token = encode_session_token(123, nowfn=offset(now, seconds=-5))
     response = api.get(f"/api/v1/auth?token={valid_token}", allow_redirects=False)
@@ -172,7 +173,19 @@ async def test_auth_valid_token(api, now):
     assert response.headers["location"] == "http://localhost:5173/"
 
 
+@with_user(123, "foo@bar.com")
 async def test_auth_valid_token_with_redirect(api, now):
+    valid_token = encode_session_token(123, nowfn=offset(now, seconds=-5))
+    response = api.get(
+        f"/api/v1/auth?token={valid_token}&redirect=/foo/bar", allow_redirects=False
+    )
+    assert response.status_code == 303
+    # Check where redirect goes
+    assert response.headers["location"] == "http://localhost:5173/foo/bar"
+
+
+@with_user(123, "foo@hks.harvard.com")
+async def test_auth_valid_token_with_sso_redirect(api, now):
     valid_token = encode_session_token(123, nowfn=offset(now, seconds=-5))
     response = api.get(
         f"/api/v1/auth?token={valid_token}&redirect=/foo/bar", allow_redirects=False

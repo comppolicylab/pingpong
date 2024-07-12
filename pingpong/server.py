@@ -378,6 +378,7 @@ async def auth(request: Request):
         HTTPException(401): If the token is invalid.
         HTTPException(500): If there is an runtime error decoding the token.
         HTTPException(404): If the user ID is not found.
+        HTTPException(501): If we don't support the auth method for the user.
 
     Returns:
         RedirectResponse: Redirect either to the SSO login endpoint or to the destination.
@@ -407,7 +408,7 @@ async def auth(request: Request):
             f"/api/v1/login/sso?provider={login_config.provider}&redirect={dest}",
             status_code=303,
         )
-    elif login_config.method != "magic_link":
+    elif login_config.method == "magic_link":
         return redirect_with_session(dest, int(auth_token.sub), nowfn=nowfn)
     else:
         raise HTTPException(
