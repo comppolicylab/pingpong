@@ -304,24 +304,21 @@ async def login_sso(provider: str, request: Request):
 @v1.post("/login/magic", response_model=schemas.GenericStatus)
 async def login_magic(body: schemas.MagicLoginRequest, request: Request):
     """Provide a magic link to the auth endpoint."""
-    # Get the magic link config.
-    try:
-        ml_config = next(
-            method
-            for method in config.auth.authn_methods
-            if method.method == "magic_link"
-        )
-    except StopIteration:
+    # First figure out if this email domain is even allowed to use magic auth.
+    # If not, we deny the request and point to another place they can log in.
+    login_config = config.auth.authn_method_for_domain(body.email)
+    if not login_config:
         raise HTTPException(
-            status_code=400, detail="Magic links are not supported by this server"
+            status_code=400, detail="No login method found for email domain"
         )
-
-    # We can only support email magic links right now. In theory we could support
-    # SMS and others, but haven't done so yet.
-    if ml_config.transport.protocol != "email":
+    if login_config.method == "sso":
         raise HTTPException(
-            status_code=501,
-            detail="Server is trying to use an unsupported transport for magic links",
+            status_code=403,
+            detail=f"/api/v1/login/sso?provider={login_config.provider}",
+        )
+    elif login_config.method != "magic_link":
+        raise HTTPException(
+            status_code=501, detail=f"Login method {login_config.method} not supported"
         )
 
     # Get the email from the request.
@@ -341,11 +338,8 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
         else:
             raise HTTPException(status_code=401, detail="User does not exist")
 
-    email_subj = ml_config.transport.template.subject
-    expiry = ml_config.expiry
-
     nowfn = get_now_fn(request)
-    magic_link = generate_auth_link(user.id, expiry=expiry, nowfn=nowfn)
+    magic_link = generate_auth_link(user.id, expiry=login_config.expiry, nowfn=nowfn)
 
     message = message_template.substitute(
         {
@@ -362,7 +356,7 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
 
     await config.email.sender.send(
         email,
-        email_subj,
+        "Log back in to PingPong",
         message,
     )
 
