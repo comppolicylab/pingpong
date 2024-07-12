@@ -235,10 +235,6 @@ class Assistants(BaseModel):
         from_attributes = True
 
 
-class UserPlaceholder(BaseModel, UserNameMixin):
-    id: int
-
-
 class HashedUser(BaseModel):
     id: int
     hash: str | None
@@ -252,27 +248,10 @@ class Thread(BaseModel):
     name: str
     thread_id: str
     class_id: int
+    assistant_name: str | None = None
     assistant_id: int
     private: bool
     tools_available: str | None
-    users: list["UserPlaceholder"]
-    created: datetime
-    updated: datetime | None
-
-    class Config:
-        from_attributes = True
-
-
-class LoadedThread(BaseModel):
-    id: int
-    name: str
-    thread_id: str
-    class_id: int
-    assistant_name: str | None
-    assistant_id: int
-    private: bool
-    tools_available: str | None
-    users: list["UserPlaceholder"]
     hashed_users: list["HashedUser"] = []
     created: datetime
     updated: datetime | None
@@ -299,7 +278,7 @@ class NewThreadMessage(BaseModel):
 
 
 class LoadedThreads(BaseModel):
-    threads: list[LoadedThread]
+    threads: list[Thread]
 
     class Config:
         from_attributes = True

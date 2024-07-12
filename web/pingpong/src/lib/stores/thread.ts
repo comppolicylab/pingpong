@@ -69,11 +69,6 @@ export class ThreadManager {
   participants: Readable<api.ThreadParticipants>;
 
   /**
-   * The users in the thread.
-   */
-  users: Readable<api.UserPlaceholder[]>;
-
-  /**
    * Whether the thread is published.
    */
   published: Readable<boolean>;
@@ -171,8 +166,6 @@ export class ThreadManager {
       }
       return $data.data.participants;
     });
-
-    this.users = derived(this.#data, ($data) => $data?.data?.thread?.users || []);
   }
 
   async #ensureRun(threadData: BaseResponse & (ThreadWithMeta | Error)) {

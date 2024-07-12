@@ -949,6 +949,18 @@ class Thread(Base):
             await session.execute(stmt)
 
         await session.refresh(thread)
+
+        hashed_users = []
+        for user in thread.users:
+            hashed_users.append(
+                {
+                    "id": user.id,
+                    "hash": animal_hash(f"{thread.thread_id}-{user.id}-{user.created}")
+                    if not thread.private
+                    else None,
+                }
+            )
+        thread.hashed_users = hashed_users
         return thread
 
     @classmethod
@@ -969,7 +981,7 @@ class Thread(Base):
         n: int = 10,
         before: datetime | None = None,
         **kwargs,
-    ) -> List[schemas.LoadedThread]:
+    ) -> List[schemas.Thread]:
         """Similar to `get_all_by_id` but tries to guarantee `n` results.
 
         This is useful if we suspect that some of the `ids` in the input do not exist;
@@ -980,7 +992,7 @@ class Thread(Base):
         # We might need to issue multiple queries in case the information in the authz
         # server is out of date (e.g., threads have been deleted but the authz server
         # still thinks they exist).
-        threads: List[schemas.LoadedThread] = []
+        threads: List[schemas.Thread] = []
         next_latest_time: datetime | None = before
         while len(threads) < n:
             added_in_page = 0
@@ -990,7 +1002,7 @@ class Thread(Base):
                 if not next_latest_time or new_thread.updated < next_latest_time:
                     next_latest_time = new_thread.updated
 
-                assistant_name = new_thread.assistant.name
+                new_thread.assistant_name = new_thread.assistant.name
                 hashed_users = []
 
                 for user in new_thread.users:
@@ -1004,24 +1016,8 @@ class Thread(Base):
                             else None,
                         }
                     )
-                threads.append(
-                    schemas.LoadedThread.model_validate(
-                        {
-                            "id": new_thread.id,
-                            "name": new_thread.name,
-                            "thread_id": new_thread.thread_id,
-                            "class_id": new_thread.class_id,
-                            "assistant_id": new_thread.assistant_id,
-                            "assistant_name": assistant_name,
-                            "private": new_thread.private,
-                            "tools_available": new_thread.tools_available,
-                            "users": [],
-                            "hashed_users": hashed_users,
-                            "created": new_thread.created,
-                            "updated": new_thread.updated,
-                        }
-                    )
-                )
+                new_thread.hashed_users = hashed_users
+                threads.append(new_thread)
                 added_in_page += 1
 
                 if len(threads) >= n:

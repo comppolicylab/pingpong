@@ -45,7 +45,7 @@
     },
     {}
   );
-  $: threads = ($page.data.threads || []) as api.LoadedThread[];
+  $: threads = ($page.data.threads || []) as api.Thread[];
   $: currentClassId = parseInt($page.params.classId, 10);
   $: currentAssistantId = $page.data.threadData?.thread?.assistant_id;
   $: onNewChatPage = $page.url.pathname === `/group/${currentClassId}`;

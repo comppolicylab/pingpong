@@ -1158,7 +1158,7 @@ async def get_last_run(
 @v1.get(
     "/threads/recent",
     dependencies=[Depends(LoggedIn())],
-    response_model=schemas.LoadedThreads,
+    response_model=schemas.Threads,
 )
 async def list_recent_threads(
     request: Request, limit: int = 5, before: str | None = None
@@ -1189,7 +1189,7 @@ async def list_recent_threads(
 @v1.get(
     "/threads",
     dependencies=[Depends(LoggedIn())],
-    response_model=schemas.LoadedThreads,
+    response_model=schemas.Threads,
 )
 async def list_all_threads(
     request: Request,
@@ -1228,7 +1228,7 @@ async def list_all_threads(
 @v1.get(
     "/class/{class_id}/threads",
     dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
-    response_model=schemas.LoadedThreads,
+    response_model=schemas.Threads,
 )
 async def list_threads(
     class_id: str, request: Request, limit: int = 20, before: str | None = None

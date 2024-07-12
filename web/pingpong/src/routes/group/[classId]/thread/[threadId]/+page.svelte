@@ -44,18 +44,16 @@
   $: published = threadMgr.published;
   $: error = threadMgr.error;
   $: assistantId = threadMgr.assistantId;
-  $: users = threadMgr.users;
   let externalUserString: string = '';
   $: {
-    const externalUsers = $users
-      .filter((user) => user.email != data.me.profile?.email)
-      .map((user) => user.name);
-    if (externalUsers.length > 0) {
-      if (externalUsers.length === 1) {
-        externalUserString = ' and ' + externalUsers[0];
+    const filtered = Object.entries($participants.user)
+      .filter(([id, _]) => parseInt(id) != data.me?.user?.id)
+      .map(([_, v]) => v.hash || 'Anonymous User');
+    if (filtered.length > 0) {
+      if (filtered.length === 1) {
+        externalUserString = ' and ' + filtered[0];
       } else {
-        externalUserString =
-          ', ' + externalUsers.slice(0, -1).join(', ') + ' and ' + externalUsers.slice(-1);
+        externalUserString = ', ' + filtered.slice(0, -1).join(', ') + ' and ' + filtered.slice(-1);
       }
     }
   }
@@ -112,7 +110,6 @@
       if (!!$participants.user && data?.me?.user?.id && !!$participants.user[data?.me?.user?.id]) {
         return $participants.user[userId]?.profile.image_url;
       }
-      // If the thread is private, show the name as 'Anonymous User'.
       return '';
     }
     // TODO - custom image for the assistant
