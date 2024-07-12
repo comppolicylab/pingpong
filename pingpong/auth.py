@@ -1,6 +1,7 @@
 from datetime import timedelta
 from typing import cast
 
+from fastapi.responses import RedirectResponse
 import jwt
 from jwt.exceptions import PyJWTError
 
@@ -142,3 +143,20 @@ def generate_auth_link(
     """
     tok = encode_auth_token(user_id, expiry=expiry, nowfn=nowfn)
     return config.url(f"/api/v1/auth?token={tok}&redirect={redirect}")
+
+
+def redirect_with_session(
+    destination: str, user_id: int, expiry: int = 86_400 * 30, nowfn: NowFn = utcnow
+):
+    """Redirect to the destination with a session token."""
+    session_token = encode_session_token(user_id, expiry=expiry, nowfn=nowfn)
+    response = RedirectResponse(
+        config.url(destination) if destination.startswith("/") else destination,
+        status_code=303,
+    )
+    response.set_cookie(
+        key="session",
+        value=session_token,
+        max_age=expiry,
+    )
+    return response

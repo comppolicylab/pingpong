@@ -3,10 +3,19 @@ from urllib.parse import urlparse
 import json
 import os
 
+from pydantic import BaseModel
 from fastapi import Request
 from onelogin.saml2.auth import OneLogin_Saml2_Auth, OneLogin_Saml2_Settings
 
 from .config import Saml2AuthnSettings, config
+
+
+class SamlAttrs(BaseModel):
+    email: str
+    first_name: str
+    middle_name: str
+    last_name: str
+    name: str
 
 
 def get_saml2_settings(provider: str) -> Saml2AuthnSettings:
@@ -49,6 +58,28 @@ async def from_fastapi_request(request: Request) -> dict:
         "get_data": request.query_params,
         "post_data": post_data,
     }
+
+
+def get_saml2_attrs(cfg: Saml2AuthnSettings, client: OneLogin_Saml2_Auth) -> SamlAttrs:
+    """Get the SAML2 attributes for the given client and config.
+
+    Args:
+        cfg: The SAML2 authn settings.
+        client: The SAML2 auth client.
+
+    Returns:
+        The SAML2 attributes.
+    """
+    attrs = client.get_attributes()
+    fields_path = Path(cfg.base_path) / cfg.provider / "fields.json"
+    fields = json.loads(fields_path.read_text())
+    return SamlAttrs(
+        email=(attrs.get(fields["email"]) or [""])[0],
+        first_name=(attrs.get(fields["firstName"]) or [""])[0],
+        middle_name=(attrs.get(fields["middleName"]) or [""])[0],
+        last_name=(attrs.get(fields["lastName"]) or [""])[0],
+        name=(attrs.get(fields["name"]) or [""])[0],
+    )
 
 
 async def get_saml2_client(

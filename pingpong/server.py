@@ -26,7 +26,7 @@ import pingpong.metrics as metrics
 import pingpong.models as models
 import pingpong.schemas as schemas
 from .template import email_template as message_template
-from .saml import get_saml2_client, get_saml2_settings
+from .saml import get_saml2_client, get_saml2_settings, get_saml2_attrs
 
 from .ai import (
     format_instructions,
@@ -39,8 +39,8 @@ from .ai import (
 from .auth import (
     decode_auth_token,
     decode_session_token,
-    encode_session_token,
     generate_auth_link,
+    redirect_with_session,
 )
 from .authz import Relation
 from .config import config
@@ -260,13 +260,28 @@ async def login_sso_saml_acs(provider: str, request: Request):
     if not saml_client.is_authenticated():
         raise HTTPException(status_code=401, detail="SAML authentication failed")
 
-    attrs = saml_client.get_attributes()
+    attrs = get_saml2_attrs(sso_config, saml_client)
 
-    ## TODO - create/update user based on SAML attributes
-    # Blocked by HUIT updating metadata before we have access to these attrs
-    print("SAML ATTRS", attrs)
+    # Create user if missing. Update if already exists.
+    user = await models.User.get_by_email(request.state.db, attrs.email)
+    if not user:
+        user = models.User(
+            email=attrs.email,
+        )
 
-    return {"status": "ok"}
+    # Update user info
+    user.first_name = attrs.first_name
+    user.last_name = attrs.last_name
+    user.display_name = attrs.name
+    user.state = schemas.UserState.VERIFIED
+
+    # Save user to DB
+    request.state.db.add(user)
+    await request.state.db.flush()
+    await request.state.db.refresh(user)
+
+    next_url = saml_client.redirect_to("/")
+    return redirect_with_session(next_url, user.id, nowfn=get_now_fn(request))
 
 
 @v1.get("/login/sso")
@@ -367,19 +382,7 @@ async def auth(request: Request, response: Response):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Create a token for the user with more information.
-    session_dur = 86_400 * 30
-    session_token = encode_session_token(
-        int(auth_token.sub), expiry=session_dur, nowfn=nowfn
-    )
-
-    response = RedirectResponse(config.url(dest), status_code=303)
-    response.set_cookie(
-        key="session",
-        value=session_token,
-        max_age=session_dur,
-    )
-    return response
+    return redirect_with_session(dest, int(auth_token.sub), nowfn=nowfn)
 
 
 @v1.get(
