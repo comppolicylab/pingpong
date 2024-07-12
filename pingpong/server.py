@@ -1011,7 +1011,7 @@ async def get_thread(
             "user": {
                 u.id: {
                     # Only send the hash if the thread is published
-                    "hash": animal_hash(f"{thread.thread_id}-{u.created}")
+                    "hash": animal_hash(f"{thread.thread_id}-{u.id}-{u.created}")
                     if not thread.private
                     else None,
                     # Make sure we only send the profile of the current user

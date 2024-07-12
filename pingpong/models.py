@@ -998,7 +998,7 @@ class Thread(Base):
                         {
                             "id": user.id,
                             "hash": animal_hash(
-                                f"{new_thread.thread_id}-{user.created}"
+                                f"{new_thread.thread_id}-{user.id}-{user.created}"
                             )
                             if not new_thread.private
                             else None,
