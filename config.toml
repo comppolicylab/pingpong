@@ -47,13 +47,8 @@ database = "pingpong"
 # Supported authentication methods.
 # Configs for magic links and SSO go here.
 method = "magic_link"
+name = "Other"
 expiry = 86400
-
-[auth.authn_methods.transport]
-# Transport configuration for magic link authentication.
-# TODO - refactor with email changes
-protocol = "email"
-template = { subject = "Your PingPong login link!", body = "Click this link to log in to PingPong: {magic_link}" }
 
 
 [[auth.secret_keys]]

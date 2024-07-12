@@ -8,6 +8,11 @@ path = "test_db.sqlite"
 
 [auth]
 
+[[auth.authn_methods]]
+method = "magic_link"
+name = "Other"
+expiry = 86400
+
 [[auth.secret_keys]]
 key = "test env"
 
