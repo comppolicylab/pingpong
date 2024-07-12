@@ -1719,12 +1719,12 @@ export type MagicLoginRequest = {
 export const loginWithMagicLink = async (f: Fetcher, email: string) => {
   const url = `login/magic`;
   const response = await POST<MagicLoginRequest, GenericStatus>(f, url, { email });
-  if (response.$status === 403 && response.detail?.startsWith("/")) {
+  if (response.$status === 403 && response.detail?.startsWith('/')) {
     if (browser) {
       // Force the browser to request the SSO page to trigger a chain of redirects
       // for the authentication flow.
       window.location.href = response.detail;
-      return {$status: 303, detail: "Redirecting to your organization's login page ..."};
+      return { $status: 303, detail: "Redirecting to your organization's login page ..." };
     }
   }
   return response;
