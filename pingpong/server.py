@@ -404,8 +404,9 @@ async def auth(request: Request):
     login_config = authn_method_for_email(config.auth.authn_methods, user.email)
 
     if login_config.method == "sso":
+        sso_path = f"/api/v1/login/sso?provider={login_config.provider}&redirect={dest}"
         return RedirectResponse(
-            f"/api/v1/login/sso?provider={login_config.provider}&redirect={dest}",
+            config.url(sso_path),
             status_code=303,
         )
     elif login_config.method == "magic_link":
