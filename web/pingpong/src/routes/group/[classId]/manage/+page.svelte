@@ -308,7 +308,7 @@
 
         <div></div>
         <Helper
-          >Choose whether to make threads and assistants in ths group private. When checked, only
+          >Choose whether to make threads and assistants in this group private. When checked, only
           members can view unpublished threads and assistants they create.</Helper
         >
         <div>
