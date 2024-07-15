@@ -17,7 +17,7 @@ from fastapi import (
     Header,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
-from .animal_hash import pseudonym
+from .animal_hash import process_threads, pseudonym, user_names
 from jwt.exceptions import PyJWTError
 from openai.types.beta.assistant_create_params import ToolResources
 from openai.types.beta.threads import MessageContentPartParam
@@ -1117,14 +1117,7 @@ async def get_thread(
         )
 
     thread.assistant_names = {assistant.id: assistant.name}
-    thread.user_names = [
-        "Me"
-        if u.id == request.state.session.user.id
-        else pseudonym(thread, u)
-        if not thread.private
-        else "Anonymous User"
-        for u in thread.users
-    ]
+    thread.user_names = user_names(thread, request.state.session.user.id)
 
     return {
         "thread": thread,
@@ -1311,20 +1304,7 @@ async def list_recent_threads(
         before=current_latest_time,
     )
 
-    for new_thread in threads:
-        new_thread.assistant_names = {
-            new_thread.assistant_id: new_thread.assistant.name
-        }
-        new_thread.user_names = [
-            "Me"
-            if u.id == request.state.session.user.id
-            else pseudonym(new_thread, u)
-            if not new_thread.private
-            else "Anonymous User"
-            for u in new_thread.users
-        ]
-
-    return {"threads": threads}
+    return {"threads": process_threads(threads, request.state.session.user.id)}
 
 
 @v1.get(
@@ -1363,20 +1343,7 @@ async def list_all_threads(
         class_id=class_id,
     )
 
-    for new_thread in threads:
-        new_thread.assistant_names = {
-            new_thread.assistant_id: new_thread.assistant.name
-        }
-        new_thread.user_names = [
-            "Me"
-            if u.id == request.state.session.user.id
-            else pseudonym(new_thread, u)
-            if not new_thread.private
-            else "Anonymous User"
-            for u in new_thread.users
-        ]
-
-    return {"threads": threads}
+    return {"threads": process_threads(threads, request.state.session.user.id)}
 
 
 @v1.get(
@@ -1416,20 +1383,7 @@ async def list_threads(
         before=current_latest_time,
     )
 
-    for new_thread in threads:
-        new_thread.assistant_names = {
-            new_thread.assistant_id: new_thread.assistant.name
-        }
-        new_thread.user_names = [
-            "Me"
-            if u.id == request.state.session.user.id
-            else pseudonym(new_thread, u)
-            if not new_thread.private
-            else "Anonymous User"
-            for u in new_thread.users
-        ]
-
-    return {"threads": threads}
+    return {"threads": process_threads(threads, request.state.session.user.id)}
 
 
 @v1.post(
