@@ -124,9 +124,33 @@ class SecretKey(BaseSettings):
     algorithm: str = Field("HS256")
 
 
+class BaseAuthnSettings(BaseSettings):
+    name: str
+    domains: list[str] = Field(["*"])
+    excluded_domains: list[str] = Field([])
+
+
+class Saml2AuthnSettings(BaseAuthnSettings):
+    method: Literal["sso"]
+    protocol: Literal["saml"]
+    provider: str
+    base_path: str = Field("saml")
+
+
+class MagicLinkAuthnSettings(BaseAuthnSettings):
+    method: Literal["magic_link"]
+    expiry: int = Field(86_400)
+
+
+AuthnSettings = Union[Saml2AuthnSettings, MagicLinkAuthnSettings]
+
+
 class AuthSettings(BaseSettings):
+    """Authentication and related configuration."""
+
     autopromote_on_login: bool = Field(False)
     secret_keys: list[SecretKey]
+    authn_methods: list[AuthnSettings]
 
 
 DbSettings = Union[PostgresSettings, SqliteSettings]

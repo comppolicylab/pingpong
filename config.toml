@@ -43,6 +43,14 @@ database = "pingpong"
 [auth]
 # Secrets used to secure the app.
 
+[[auth.authn_methods]]
+# Supported authentication methods.
+# Configs for magic links and SSO go here.
+method = "magic_link"
+name = "Other"
+expiry = 86400
+
+
 [[auth.secret_keys]]
 # List of secret keys used to sign JWTs. The first key is used to sign new
 # tokens, and the rest are used to verify tokens that may be old. When
