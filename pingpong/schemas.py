@@ -271,13 +271,6 @@ class NewThreadMessage(BaseModel):
     vision_file_ids: list[str] = Field([], min_length=0, max_length=10)
 
 
-class LoadedThreads(BaseModel):
-    threads: list[Thread]
-
-    class Config:
-        from_attributes = True
-
-
 class Threads(BaseModel):
     threads: list[Thread]
 
