@@ -1116,12 +1116,15 @@ async def get_thread(
             messages.data[-1].created_at,
         )
 
-    thread.assistant_names = {assistant.id: assistant.name}
+    if assistant.id:
+        thread.assistant_names = {assistant.id: assistant.name}
+    else:
+        thread.assistant_names = {-1: "Deleted Assistant"}
     thread.user_names = user_names(thread, request.state.session.user.id)
 
     return {
         "thread": thread,
-        "model": assistant.model,
+        "model": assistant.model if assistant.id else "None",
         "tools_available": thread.tools_available,
         "run": last_run[0] if last_run else None,
         "messages": list(messages.data),
@@ -1296,6 +1299,7 @@ async def list_recent_threads(
         "party",
         "thread",
     )
+    print("approved threads:", thread_ids)
 
     threads = await models.Thread.get_n_by_id(
         request.state.db,

@@ -28,9 +28,12 @@ def pseudonym(thread: Thread, user: User) -> str:
 
 def process_threads(threads: list[Thread], user_id: int) -> list[ThreadSchema]:
     for new_thread in threads:
-        new_thread.assistant_names = {
-            new_thread.assistant_id: new_thread.assistant.name
-        }
+        if new_thread.assistant_id:
+            new_thread.assistant_names = {
+                new_thread.assistant_id: new_thread.assistant.name
+            }
+        else:
+            new_thread.assistant_names = {-1: "Deleted Assistant"}
         new_thread.user_names = user_names(new_thread, user_id)
     return threads
 

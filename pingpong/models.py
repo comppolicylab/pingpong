@@ -591,7 +591,9 @@ class Assistant(Base):
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     @classmethod
-    async def get_by_id(cls, session: AsyncSession, id_: int) -> "Assistant":
+    async def get_by_id(cls, session: AsyncSession, id_: int | None) -> "Assistant":
+        if not id_:
+            return Assistant()
         stmt = select(Assistant).where(Assistant.id == int(id_))
         return await session.scalar(stmt)
 

@@ -72,6 +72,7 @@
   $: supportsCodeInterpreter = data.availableTools.includes('code_interpreter') || false;
   // TODO - should figure this out by checking grants instead of participants
   $: canSubmit = !!$participants.user && $participants.user.includes('Me');
+  $: assistantDeleted = !!$assistantId && $assistantId == -1;
 
   // Get the name of the participant in the chat thread.
   const getName = (message: api.OpenAIMessage) => {
@@ -381,8 +382,9 @@
                 vision: false
               })
             : null}
-          canSubmit={canSubmit || false}
-          disabled={!canSubmit || !!$navigating}
+          {assistantDeleted}
+          canSubmit={canSubmit && !assistantDeleted}
+          disabled={!canSubmit || assistantDeleted || !!$navigating}
           loading={$submitting || $waiting}
           upload={handleUpload}
           remove={handleRemove}

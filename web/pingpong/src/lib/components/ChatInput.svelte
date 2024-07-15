@@ -36,6 +36,10 @@
    */
   export let canSubmit = false;
   /**
+   * Whether the assistant associated with this thread has been deleted.
+   */
+  export let assistantDeleted = false;
+  /**
    * Whether we're waiting for an in-flight request.
    */
   export let loading = false;
@@ -352,7 +356,11 @@
       rows="1"
       name="message"
       class="w-full !outline-none focus:ring-0 resize-none border-none bg-transparent pt-[12px] pb-[10px] pl-2 sm:pl-6 pr-2 sm:pr-8"
-      placeholder={canSubmit ? 'Ask me anything' : "You can't reply in this thread"}
+      placeholder={canSubmit
+        ? 'Ask me anything'
+        : assistantDeleted
+          ? 'Read-only thread: the assistant associated with this thread is deleted'
+          : "You can't reply in this thread"}
       class:text-gray-700={disabled}
       class:animate-pulse={loading}
       disabled={loading || disabled}

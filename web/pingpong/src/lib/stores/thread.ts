@@ -152,8 +152,13 @@ export class ThreadManager {
 
     this.submitting = derived(this.#data, ($data) => !!$data?.submitting);
 
-    this.assistantId = derived(this.#data, ($data) => $data?.data?.thread?.assistant_id || null);
+    this.assistantId = derived(this.#data, ($data) => {
+      if ($data?.data?.thread?.assistant_names && $data?.data?.thread?.assistant_names[-1]) {
+        return -1;
+      }
 
+      return $data?.data?.thread?.assistant_id || null;
+    });
     this.canFetchMore = derived(this.#data, ($data) => !!$data?.canFetchMore);
 
     this.published = derived(this.#data, ($data) => $data?.data?.thread?.private === false);
