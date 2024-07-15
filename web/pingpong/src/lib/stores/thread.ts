@@ -161,7 +161,10 @@ export class ThreadManager {
     this.error = derived(this.#data, ($data) => $data?.error || null);
 
     this.participants = derived(this.#data, ($data) => {
-      return { user: $data?.data?.thread?.user_names || [], assistant: $data?.data?.thread?.assistant_names || {} };
+      return {
+        user: $data?.data?.thread?.user_names || [],
+        assistant: $data?.data?.thread?.assistant_names || {}
+      };
     });
   }
 

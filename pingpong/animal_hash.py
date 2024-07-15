@@ -20,5 +20,6 @@ def animal_hash(input: str) -> str:
     animal = list_p(names, y / uint64_max)
     return f"{adj.capitalize()} {animal.capitalize()}"
 
+
 def pseudonym(thread: Thread, user: User) -> str:
     return animal_hash(f"{thread.id}-{user.id}-{user.created}")

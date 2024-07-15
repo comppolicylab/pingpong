@@ -909,7 +909,9 @@ class Thread(Base):
         await session.execute(stmt)
 
     @classmethod
-    async def create(cls, session: AsyncSession, user_id: int, data: dict) -> schemas.Thread:
+    async def create(
+        cls, session: AsyncSession, user_id: int, data: dict
+    ) -> schemas.Thread:
         code_interpreter_file_ids = data.pop("code_interpreter_file_ids", [])
         image_file_ids = data.pop("image_file_ids", [])
         thread = Thread(**data)
@@ -992,7 +994,9 @@ class Thread(Base):
                 if not next_latest_time or new_thread.updated < next_latest_time:
                     next_latest_time = new_thread.updated
 
-                new_thread.assistant_names = {new_thread.assistant_id: new_thread.assistant.name}
+                new_thread.assistant_names = {
+                    new_thread.assistant_id: new_thread.assistant.name
+                }
                 user_names = [
                     "Me"
                     if u.id == user_id

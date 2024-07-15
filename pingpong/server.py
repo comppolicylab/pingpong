@@ -997,8 +997,12 @@ async def get_thread(
         user_id = message.metadata.pop("user_id", None)
         if not user_id:
             continue
-        message.metadata["is_current_user"] = user_id == str(request.state.session.user.id)
-        message.metadata["name"] = "Anonymous User" if thread.private else pseudonym(thread, users[user_id])
+        message.metadata["is_current_user"] = user_id == str(
+            request.state.session.user.id
+        )
+        message.metadata["name"] = (
+            "Anonymous User" if thread.private else pseudonym(thread, users[user_id])
+        )
 
     placeholder_ci_calls = []
     if "code_interpreter" in thread.tools_available:
@@ -1012,13 +1016,13 @@ async def get_thread(
 
     thread.assistant_names = {assistant.id: assistant.name}
     thread.user_names = [
-                "Me"
-                if u.id == request.state.session.user.id
-                else pseudonym(thread, u)
-                if not thread.private
-                else "Anonymous User"
-                for u in thread.users
-            ]
+        "Me"
+        if u.id == request.state.session.user.id
+        else pseudonym(thread, u)
+        if not thread.private
+        else "Anonymous User"
+        for u in thread.users
+    ]
 
     return {
         "thread": thread,
@@ -1095,8 +1099,12 @@ async def list_thread_messages(
         user_id = message.metadata.pop("user_id", None)
         if not user_id:
             continue
-        message.metadata["is_current_user"] = user_id == str(request.state.session.user.id)
-        message.metadata["name"] = "Anonymous User" if thread.private else pseudonym(thread, users[user_id])
+        message.metadata["is_current_user"] = user_id == str(
+            request.state.session.user.id
+        )
+        message.metadata["name"] = (
+            "Anonymous User" if thread.private else pseudonym(thread, users[user_id])
+        )
 
     placeholder_ci_calls = []
     # Only run the extra steps if code_interpreter is available
