@@ -28,7 +28,6 @@
   let otherAssistants: Assistant[] = [];
   $: {
     const allAssistants = data?.assistants || [];
-    console.log('assistants', allAssistants);
     // Split all assistants into categories
     courseAssistants = allAssistants.filter((assistant) => assistant.endorsed);
     myAssistants = allAssistants.filter(
