@@ -1822,6 +1822,8 @@ async def update_assistant(
             asst.code_interpreter_files = await models.File.get_all_by_file_id(
                 request.state.db, req.code_interpreter_file_ids
             )
+        else:
+            asst.code_interpreter_files = []
 
         if req.file_search_file_ids is not None and req.file_search_file_ids != []:
             # Files will need to be stored in a vector store
