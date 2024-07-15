@@ -2124,6 +2124,7 @@ async def delete_assistant(
     assistant_id = asst.assistant_id
     await models.Assistant.delete(request.state.db, asst.id)
 
+    # Delete vector store as late as possible to avoid orphaned assistant 
     if vector_store_id:
         await delete_vector_store(request.state.db, openai_client, vector_store_id)
 
