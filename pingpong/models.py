@@ -439,8 +439,12 @@ class VectorStore(Base):
 
     @classmethod
     async def delete(cls, session: AsyncSession, id_: int) -> None:
-        stmt = delete(VectorStore).where(VectorStore.id == int(id_))
+        stmt = delete(file_vector_store_association).where(
+            file_vector_store_association.c.vector_store_id == id_
+        )
+        stmt_ = delete(VectorStore).where(VectorStore.id == int(id_))
         await session.execute(stmt)
+        await session.execute(stmt_)
 
     @classmethod
     async def get_files_by_id(cls, session: AsyncSession, id_: int) -> List["File"]:
