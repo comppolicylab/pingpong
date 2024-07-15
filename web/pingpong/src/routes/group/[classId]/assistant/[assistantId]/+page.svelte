@@ -395,7 +395,7 @@
           class="bg-white border border-red-700 text-red-700 hover:text-white hover:bg-red-700"
           type="button"
           on:click={() => (deleteModal = true)}
-          disabled={loading || uploadingFSPrivate || uploadingCIPrivate}>Delete assistant</Button
+          disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}>Delete assistant</Button
         >
 
         <Modal bind:open={deleteModal} size="xs" autoclose>

@@ -21,7 +21,7 @@ from .animal_hash import process_threads, pseudonym, user_names
 from jwt.exceptions import PyJWTError
 from openai.types.beta.assistant_create_params import ToolResources
 from openai.types.beta.threads import MessageContentPartParam
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, delete
 
 import pingpong.metrics as metrics
 import pingpong.models as models
@@ -2067,9 +2067,34 @@ async def update_assistant(
     response_model=schemas.GenericStatus,
 )
 async def delete_assistant(
-    class_id: str, assistant_id: str, request: Request, openai_client: OpenAIClient
+    class_id: str, assistant_id: str, req: schemas.DeleteAssistantRequest, request: Request, openai_client: OpenAIClient
 ):
     asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    
+    # Delete vector store if it exists
+    if asst.vector_store_id:
+        await delete_vector_store(request.state.db, openai_client, asst.vector_store_id)
+    
+    # Remove all CI files associations with the assistant
+    if req.has_code_interpreter_files:
+        stmt = delete(models.file_vector_store_association).where(
+            models.file_vector_store_association.c.assistant_id == int(asst.id)
+        )
+        await request.state.db.execute(stmt)
+    
+    try:
+        # Delete all private files associated with the assistant
+        await asyncio.gather(
+            *[
+                handle_delete_file(
+                    request.state.db, request.state.authz, openai_client, int(file_id)
+                )
+                for file_id in req.private_files
+            ]
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Error removing private files: {e}")
+    
     await asst.delete(request.state.db)
     await openai_client.beta.assistants.delete(asst.assistant_id)
     # TODO clean up grants
