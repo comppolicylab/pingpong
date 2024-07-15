@@ -1037,7 +1037,7 @@ class Thread(Base):
 
         stmt = (
             select(Thread)
-            .join(Thread.assistant)
+            .outerjoin(Thread.assistant)
             .options(contains_eager(Thread.assistant).load_only(Assistant.name))
             .order_by(Thread.updated.desc())
             .where(condition)

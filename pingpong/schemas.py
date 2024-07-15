@@ -248,7 +248,7 @@ class Thread(BaseModel):
     thread_id: str
     class_id: int
     assistant_names: dict[int, str] = {}
-    assistant_id: int
+    assistant_id: int | None = None
     private: bool
     tools_available: str | None
     user_names: list[str] = []
