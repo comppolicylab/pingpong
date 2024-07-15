@@ -94,7 +94,7 @@
                 </h4>
                 <h4 class="eyebrow eyebrow-dark shrink-0">|</h4>
                 <h4 class="eyebrow eyebrow-dark shrink truncate">
-                  {Object.values(thread.assistant_names || {1: 'Unknown Assistant'}).join(', ')}
+                  {Object.values(thread.assistant_names || { 1: 'Unknown Assistant' }).join(', ')}
                 </h4>
               </div>
               <div class="pt-2 font-light text-lg pb-2">

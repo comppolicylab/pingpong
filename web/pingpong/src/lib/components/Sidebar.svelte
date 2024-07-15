@@ -140,7 +140,7 @@
                 </h4>
                 <h4 class="shrink-0">|</h4>
                 <h4 class="shrink truncate">
-                  {Object.values(thread.assistant_names || {1: 'Unknown Assistant'}).join(', ')}
+                  {Object.values(thread.assistant_names || { 1: 'Unknown Assistant' }).join(', ')}
                 </h4>
               </div></span
             >
