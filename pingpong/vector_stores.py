@@ -126,6 +126,9 @@ async def sync_vector_store_files(
             await openai_client.beta.vector_stores.files.delete(
                 file_id, vector_store_id=vector_store_id
             )
+        # Don't raise an error if the file is already deleted
+        except openai.NotFoundError:
+            pass
         except openai.BadRequestError as e:
             raise HTTPException(400, e.message or "OpenAI rejected this request")
     return vector_store_id
@@ -151,5 +154,8 @@ async def delete_vector_store(
 
     try:
         await openai_client.beta.vector_stores.delete(vector_store_id)
+    # Don't raise an error if the vector store is already deleted
+    except openai.NotFoundError:
+        pass
     except openai.BadRequestError as e:
         raise HTTPException(400, e.message or "OpenAI rejected this request")

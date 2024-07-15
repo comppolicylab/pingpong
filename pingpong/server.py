@@ -2075,11 +2075,12 @@ async def delete_assistant(
 ):
     asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
 
-    # Delete vector store if it exists
+    # Detach the vector store from the assistant
+    vector_store_id = None
     if asst.vector_store_id:
+        # Keep the vector store ID for deletion
         vector_store_id = asst.vector_store_id
         asst.vector_store_id = None
-        await delete_vector_store(request.state.db, openai_client, vector_store_id)
 
     # Remove all CI files associations with the assistant
     if req.has_code_interpreter_files:
@@ -2122,7 +2123,12 @@ async def delete_assistant(
     # Keep the OAI assistant ID for deletion
     assistant_id = asst.assistant_id
     await models.Assistant.delete(request.state.db, asst.id)
+
+    if vector_store_id:
+        await delete_vector_store(request.state.db, openai_client, vector_store_id)
+
     await openai_client.beta.assistants.delete(assistant_id)
+
     # clean up grants
     await request.state.authz.write(revoke=revokes)
     return {"status": "ok"}
