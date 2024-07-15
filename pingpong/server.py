@@ -1204,11 +1204,23 @@ async def list_recent_threads(
 
     threads = await models.Thread.get_n_by_id(
         request.state.db,
-        request.state.session.user.id,
         thread_ids,
         limit,
         before=current_latest_time,
     )
+
+    for new_thread in threads:
+        new_thread.assistant_names = {
+            new_thread.assistant_id: new_thread.assistant.name
+        }
+        new_thread.user_names = [
+            "Me"
+            if u.id == request.state.session.user.id
+            else pseudonym(new_thread, u)
+            if not new_thread.private
+            else "Anonymous User"
+            for u in new_thread.users
+        ]
 
     return {"threads": threads}
 
@@ -1242,13 +1254,25 @@ async def list_all_threads(
     )
     threads = await models.Thread.get_n_by_id(
         request.state.db,
-        request.state.session.user.id,
         thread_ids,
         limit,
         before=current_latest_time,
         private=private,
         class_id=class_id,
     )
+
+    for new_thread in threads:
+        new_thread.assistant_names = {
+            new_thread.assistant_id: new_thread.assistant.name
+        }
+        new_thread.user_names = [
+            "Me"
+            if u.id == request.state.session.user.id
+            else pseudonym(new_thread, u)
+            if not new_thread.private
+            else "Anonymous User"
+            for u in new_thread.users
+        ]
 
     return {"threads": threads}
 
@@ -1285,11 +1309,23 @@ async def list_threads(
     thread_ids = list(set(can_view) & set(in_class))
     threads = await models.Thread.get_n_by_id(
         request.state.db,
-        request.state.session.user.id,
         thread_ids,
         limit,
         before=current_latest_time,
     )
+
+    for new_thread in threads:
+        new_thread.assistant_names = {
+            new_thread.assistant_id: new_thread.assistant.name
+        }
+        new_thread.user_names = [
+            "Me"
+            if u.id == request.state.session.user.id
+            else pseudonym(new_thread, u)
+            if not new_thread.private
+            else "Anonymous User"
+            for u in new_thread.users
+        ]
 
     return {"threads": threads}
 
@@ -1364,9 +1400,7 @@ async def create_thread(
 
     result: None | models.Thread = None
     try:
-        result = await models.Thread.create(
-            request.state.db, request.state.session.user.id, new_thread
-        )
+        result = await models.Thread.create(request.state.db, new_thread)
 
         grants = [
             (f"class:{class_id}", "parent", f"thread:{result.id}"),

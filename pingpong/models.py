@@ -2,7 +2,6 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional
 
-import pingpong.animal_hash as animal_hash
 from sqlalchemy import Boolean, Column, DateTime
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
@@ -909,9 +908,7 @@ class Thread(Base):
         await session.execute(stmt)
 
     @classmethod
-    async def create(
-        cls, session: AsyncSession, user_id: int, data: dict
-    ) -> schemas.Thread:
+    async def create(cls, session: AsyncSession, data: dict) -> "Thread":
         code_interpreter_file_ids = data.pop("code_interpreter_file_ids", [])
         image_file_ids = data.pop("image_file_ids", [])
         thread = Thread(**data)
@@ -968,12 +965,11 @@ class Thread(Base):
     async def get_n_by_id(
         cls,
         session: AsyncSession,
-        user_id: int,
         ids: list[int],
         n: int = 10,
         before: datetime | None = None,
         **kwargs,
-    ) -> List[schemas.Thread]:
+    ) -> List["Thread"]:
         """Similar to `get_all_by_id` but tries to guarantee `n` results.
 
         This is useful if we suspect that some of the `ids` in the input do not exist;
@@ -984,7 +980,7 @@ class Thread(Base):
         # We might need to issue multiple queries in case the information in the authz
         # server is out of date (e.g., threads have been deleted but the authz server
         # still thinks they exist).
-        threads: List[schemas.Thread] = []
+        threads: List["Thread"] = []
         next_latest_time: datetime | None = before
         while len(threads) < n:
             added_in_page = 0
@@ -994,18 +990,6 @@ class Thread(Base):
                 if not next_latest_time or new_thread.updated < next_latest_time:
                     next_latest_time = new_thread.updated
 
-                new_thread.assistant_names = {
-                    new_thread.assistant_id: new_thread.assistant.name
-                }
-                user_names = [
-                    "Me"
-                    if u.id == user_id
-                    else animal_hash.pseudonym(new_thread, u)
-                    if not new_thread.private
-                    else "Anonymous User"
-                    for u in new_thread.users
-                ]
-                new_thread.user_names = user_names
                 threads.append(new_thread)
                 added_in_page += 1
 
