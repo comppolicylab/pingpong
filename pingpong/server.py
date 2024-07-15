@@ -1811,41 +1811,53 @@ async def update_assistant(
     # Update the assistant
     tool_resources: ToolResources = {}
 
-    if req.code_interpreter_file_ids is not None:
-        tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
-        asst.code_interpreter_files = await models.File.get_all_by_file_id(
-            request.state.db, req.code_interpreter_file_ids
-        )
-
-    if req.file_search_file_ids is not None:
-        # Files will need to be stored in a vector store
-        if asst.vector_store_id:
-            # Vector store already exists, update
-            vectore_store_id = await sync_vector_store_files(
-                request.state.db,
-                openai_client,
-                asst.vector_store_id,
-                req.file_search_file_ids,
+    try:
+        if (
+            req.code_interpreter_file_ids is not None
+            and req.code_interpreter_file_ids != []
+        ):
+            tool_resources["code_interpreter"] = {
+                "file_ids": req.code_interpreter_file_ids
+            }
+            asst.code_interpreter_files = await models.File.get_all_by_file_id(
+                request.state.db, req.code_interpreter_file_ids
             )
-            tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
         else:
-            # Store doesn't exist, create a new one
-            vectore_store_id, vector_store_object_id = await create_vector_store(
-                request.state.db,
-                openai_client,
-                class_id,
-                req.file_search_file_ids,
-                type=schemas.VectorStoreType.THREAD,
-            )
-            asst.vector_store_id = vector_store_object_id
-            tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
-    else:
-        # No files stored in vector store, remove it
-        if asst.vector_store_id:
-            await delete_vector_store(
-                request.state.db, openai_client, asst.vector_store_id
-            )
-            tool_resources["file_search"] = {}
+            asst.code_interpreter_files = []
+
+        if req.file_search_file_ids is not None and req.file_search_file_ids != []:
+            # Files will need to be stored in a vector store
+            if asst.vector_store_id:
+                # Vector store already exists, update
+                vectore_store_id = await sync_vector_store_files(
+                    request.state.db,
+                    openai_client,
+                    asst.vector_store_id,
+                    req.file_search_file_ids,
+                )
+                tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
+            else:
+                # Store doesn't exist, create a new one
+                vectore_store_id, vector_store_object_id = await create_vector_store(
+                    request.state.db,
+                    openai_client,
+                    class_id,
+                    req.file_search_file_ids,
+                    type=schemas.VectorStoreType.THREAD,
+                )
+                asst.vector_store_id = vector_store_object_id
+                tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
+        else:
+            # No files stored in vector store, remove it
+            if asst.vector_store_id:
+                id_to_delete = asst.vector_store_id
+                asst.vector_store_id = None
+                await delete_vector_store(request.state.db, openai_client, id_to_delete)
+                tool_resources["file_search"] = {}
+    except Exception:
+        raise HTTPException(
+            500, "Error updating assistant files. Please try saving again."
+        )
 
     openai_update["tool_resources"] = tool_resources
     if req.use_latex is not None:
