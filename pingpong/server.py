@@ -989,8 +989,26 @@ async def get_thread(
         openai_client.beta.threads.runs.list(thread.thread_id, limit=1, order="desc"),
     )
     last_run = [r async for r in runs_result]
-    placeholder_ci_calls = []
 
+    if messages.data:
+        users = {str(u.id): u.created for u in thread.users}
+
+    for message in messages.data:
+        if not message.metadata.get("user_id"):
+            continue
+        if message.metadata["user_id"] == str(request.state.session.user.id):
+            message.metadata["is_current_user"] = True
+        message.metadata["hashed_name"] = "Anonymous User"
+        if thread.private:
+            del message.metadata["user_id"]
+            continue
+        if users.get(message.metadata["user_id"]):
+            message.metadata["hashed_name"] = animal_hash(
+                f"{thread.thread_id}-{message.metadata['user_id']}-{users[message.metadata['user_id']]}"
+            )
+        del message.metadata["user_id"]
+
+    placeholder_ci_calls = []
     if "code_interpreter" in thread.tools_available:
         placeholder_ci_calls = await get_placeholder_ci_calls(
             request.state.db,
@@ -1008,19 +1026,14 @@ async def get_thread(
         "messages": list(messages.data),
         "limit": 20,
         "participants": {
-            "user": {
-                u.id: {
-                    # Only send the hash if the thread is published
-                    "hash": animal_hash(f"{thread.thread_id}-{u.id}-{u.created}")
-                    if not thread.private
-                    else None,
-                    # Make sure we only send the profile of the current user
-                    "profile": schemas.Profile.from_user(u)
-                    if u.id == request.state.session.user.id
-                    else None,
-                }
+            "user": [
+                "Me"
+                if u.id == request.state.session.user.id
+                else animal_hash(f"{thread.thread_id}-{u.id}-{u.created}")
+                if not thread.private
+                else "Anonymous User"
                 for u in thread.users
-            },
+            ],
             "assistant": {assistant.id: assistant.name},
         },
         "ci_messages": placeholder_ci_calls,
@@ -1083,6 +1096,25 @@ async def list_thread_messages(
     messages = await openai_client.beta.threads.messages.list(
         thread.thread_id, limit=limit, order="asc", before=before
     )
+
+    if messages.data:
+        users = {u.id: u.created for u in thread.users}
+
+    for message in messages.data:
+        if not message.metadata.get("user_id"):
+            continue
+        if message.metadata["user_id"] == str(request.state.session.user.id):
+            message.metadata["is_current_user"] = True
+        message.metadata["hashed_name"] = "Anonymous User"
+        if thread.private:
+            del message.metadata["user_id"]
+            continue
+        if users.get(message.metadata["user_id"]):
+            message.metadata["hashed_name"] = animal_hash(
+                f"{thread.thread_id}-{message.metadata['user_id']}-{users[message.metadata['user_id']]}"
+            )
+        del message.metadata["user_id"]
+
     placeholder_ci_calls = []
     # Only run the extra steps if code_interpreter is available
     if "code_interpreter" in thread.tools_available and messages.data:

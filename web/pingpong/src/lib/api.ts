@@ -1350,7 +1350,7 @@ export type OpenAIMessage = {
  * Accounting of individuals in a thread.
  */
 export type ThreadParticipants = {
-  user: { [id: number]: LoadedProfile };
+  user: string[];
   assistant: { [id: number]: string };
 };
 

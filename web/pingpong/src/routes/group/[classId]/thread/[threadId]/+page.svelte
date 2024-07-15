@@ -46,9 +46,9 @@
   $: assistantId = threadMgr.assistantId;
   let externalUserString: string = '';
   $: {
-    const filtered = Object.entries($participants.user)
-      .filter(([id, _]) => parseInt(id) != data.me?.user?.id)
-      .map(([_, v]) => v.hash || 'Anonymous User');
+    const filtered = $participants.user
+      .filter((user_name) => user_name != 'Me')
+      .map((user_name) => user_name || 'Anonymous User');
     if (filtered.length > 0) {
       if (filtered.length === 1) {
         externalUserString = ' and ' + filtered[0];
@@ -71,27 +71,15 @@
   $: supportsFileSearch = data.availableTools.includes('file_search') || false;
   $: supportsCodeInterpreter = data.availableTools.includes('code_interpreter') || false;
   // TODO - should figure this out by checking grants instead of participants
-  $: canSubmit =
-    !!$participants.user && data?.me?.user?.id && !!$participants.user[data?.me?.user?.id];
+  $: canSubmit = !!$participants.user && $participants.user.includes('Me');
 
   // Get the name of the participant in the chat thread.
   const getName = (message: api.OpenAIMessage) => {
     if (message.role === 'user') {
-      const userId = message?.metadata?.user_id as number | undefined;
-      if (!userId) {
-        return 'Anonymous User';
+      if (message?.metadata?.is_current_user) {
+        return data?.me?.user?.name || data?.me?.user?.email || 'Anonymous User';
       }
-      const participant = $participants.user[userId];
-      // If the thread user matches the current user, show the name.
-      if (!!$participants.user && data?.me?.user?.id && !!$participants.user[data?.me?.user?.id]) {
-        return participant?.profile.name || participant?.profile.email || 'Anonymous User';
-      }
-      // If the thread is private, show the name as 'Anonymous User'.
-      if (threadMgr?.thread?.private) {
-        return 'Anonymous User';
-      }
-      // If the thread is public, show the hashed name.
-      return participant?.hash || 'Anonymous User';
+      return (message?.metadata?.hashed_name as string | undefined) || 'Anonymous User';
     } else {
       if ($assistantId) {
         return $participants.assistant[$assistantId] || 'PingPong Bot';
@@ -103,12 +91,8 @@
   // Get the avatar URL of the participant in the chat thread.
   const getImage = (message: api.OpenAIMessage) => {
     if (message.role === 'user') {
-      const userId = message?.metadata?.user_id as number | undefined;
-      if (!userId) {
-        return '';
-      }
-      if (!!$participants.user && data?.me?.user?.id && !!$participants.user[data?.me?.user?.id]) {
-        return $participants.user[userId]?.profile.image_url;
+      if (message?.metadata?.is_current_user) {
+        return data?.me?.profile?.image_url || '';
       }
       return '';
     }

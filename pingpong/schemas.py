@@ -571,7 +571,7 @@ class LoadedProfile(BaseModel):
 
 
 class ThreadParticipants(BaseModel):
-    user: dict[int, LoadedProfile]
+    user: list[str]
     assistant: dict[int, str]
 
 

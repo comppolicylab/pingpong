@@ -162,7 +162,7 @@ export class ThreadManager {
 
     this.participants = derived(this.#data, ($data) => {
       if (!$data?.data) {
-        return { user: {}, assistant: {} };
+        return { user: [], assistant: {} };
       }
       return $data.data.participants;
     });
