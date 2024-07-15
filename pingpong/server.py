@@ -26,7 +26,9 @@ from sqlalchemy.sql import func
 import pingpong.metrics as metrics
 import pingpong.models as models
 import pingpong.schemas as schemas
-from pingpong.template import email_template as message_template
+from .auth import authn_method_for_email
+from .template import email_template as message_template
+from .saml import get_saml2_client, get_saml2_settings, get_saml2_attrs
 
 from .ai import (
     format_instructions,
@@ -39,8 +41,8 @@ from .ai import (
 from .auth import (
     decode_auth_token,
     decode_session_token,
-    encode_session_token,
     generate_auth_link,
+    redirect_with_session,
 )
 from .authz import Relation
 from .config import config
@@ -243,9 +245,85 @@ async def manage_authz(data: schemas.ManageAuthzRequest, request: Request):
     return {"status": "ok"}
 
 
+@v1.post("/login/sso/saml/acs", response_model=schemas.GenericStatus)
+async def login_sso_saml_acs(provider: str, request: Request):
+    """SAML login assertion consumer service."""
+    try:
+        sso_config = get_saml2_settings(provider)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="SSO provider not found")
+    saml_client = await get_saml2_client(sso_config, request)
+    saml_client.process_response()
+
+    errors = saml_client.get_errors()
+    if errors:
+        raise HTTPException(status_code=400, detail=errors)
+
+    if not saml_client.is_authenticated():
+        raise HTTPException(status_code=401, detail="SAML authentication failed")
+
+    attrs = get_saml2_attrs(sso_config, saml_client)
+
+    # Create user if missing. Update if already exists.
+    user = await models.User.get_by_email(request.state.db, attrs.email)
+    if not user:
+        user = models.User(
+            email=attrs.email,
+        )
+
+    # Update user info
+    user.first_name = attrs.first_name
+    user.last_name = attrs.last_name
+    user.display_name = attrs.name
+    user.state = schemas.UserState.VERIFIED
+
+    # Save user to DB
+    request.state.db.add(user)
+    await request.state.db.flush()
+    await request.state.db.refresh(user)
+
+    next_url = saml_client.redirect_to("/")
+    return redirect_with_session(next_url, user.id, nowfn=get_now_fn(request))
+
+
+@v1.get("/login/sso")
+async def login_sso(provider: str, request: Request):
+    # Find the SSO method
+    try:
+        sso_config = get_saml2_settings(provider)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="SSO provider not found")
+
+    if sso_config.protocol == "saml":
+        saml_client = await get_saml2_client(sso_config, request)
+        dest = request.query_params.get("redirect", "/")
+        return RedirectResponse(saml_client.login(dest))
+    else:
+        raise HTTPException(
+            status_code=501, detail=f"SSO protocol {sso_config.protocol} not supported"
+        )
+
+
 @v1.post("/login/magic", response_model=schemas.GenericStatus)
-async def login(body: schemas.MagicLoginRequest, request: Request):
+async def login_magic(body: schemas.MagicLoginRequest, request: Request):
     """Provide a magic link to the auth endpoint."""
+    # First figure out if this email domain is even allowed to use magic auth.
+    # If not, we deny the request and point to another place they can log in.
+    login_config = authn_method_for_email(config.auth.authn_methods, body.email)
+    if not login_config:
+        raise HTTPException(
+            status_code=400, detail="No login method found for email domain"
+        )
+    if login_config.method == "sso":
+        raise HTTPException(
+            status_code=403,
+            detail=f"/api/v1/login/sso?provider={login_config.provider}",
+        )
+    elif login_config.method != "magic_link":
+        raise HTTPException(
+            status_code=501, detail=f"Login method {login_config.method} not supported"
+        )
+
     # Get the email from the request.
     email = body.email
     # Look up the user by email
@@ -264,7 +342,7 @@ async def login(body: schemas.MagicLoginRequest, request: Request):
             raise HTTPException(status_code=401, detail="User does not exist")
 
     nowfn = get_now_fn(request)
-    magic_link = generate_auth_link(user.id, expiry=86_400, nowfn=nowfn)
+    magic_link = generate_auth_link(user.id, expiry=login_config.expiry, nowfn=nowfn)
 
     message = message_template.substitute(
         {
@@ -289,8 +367,23 @@ async def login(body: schemas.MagicLoginRequest, request: Request):
 
 
 @v1.get("/auth")
-async def auth(request: Request, response: Response):
-    # Get the `token` query parameter from the request and store it in variable.
+async def auth(request: Request):
+    """Continue the auth flow based on a JWT in the query params.
+
+    If the token is valid, determine the correct authn method based on the user.
+    If the user is allowed to use magic link auth, they'll be authed automatically
+    by this endpoint. If they have to go through SSO, they'll be redirected to the
+    SSO login endpoint.
+
+    Raises:
+        HTTPException(401): If the token is invalid.
+        HTTPException(500): If there is an runtime error decoding the token.
+        HTTPException(404): If the user ID is not found.
+        HTTPException(501): If we don't support the auth method for the user.
+
+    Returns:
+        RedirectResponse: Redirect either to the SSO login endpoint or to the destination.
+    """
     dest = request.query_params.get("redirect", "/")
     stok = request.query_params.get("token")
     nowfn = get_now_fn(request)
@@ -301,19 +394,28 @@ async def auth(request: Request, response: Response):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Create a token for the user with more information.
-    session_dur = 86_400 * 30
-    session_token = encode_session_token(
-        int(auth_token.sub), expiry=session_dur, nowfn=nowfn
-    )
+    user = await models.User.get_by_id(request.state.db, int(auth_token.sub))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
 
-    response = RedirectResponse(config.url(dest), status_code=303)
-    response.set_cookie(
-        key="session",
-        value=session_token,
-        max_age=session_dur,
-    )
-    return response
+    # Figure out the appropriate continuation based on the user's authn method.
+    # Currently we do find the authn method by checking the email domain against
+    # our config, but in the future we might need to store this explicitly by user
+    # in the database.
+    login_config = authn_method_for_email(config.auth.authn_methods, user.email)
+
+    if login_config.method == "sso":
+        sso_path = f"/api/v1/login/sso?provider={login_config.provider}&redirect={dest}"
+        return RedirectResponse(
+            config.url(sso_path),
+            status_code=303,
+        )
+    elif login_config.method == "magic_link":
+        return redirect_with_session(dest, int(auth_token.sub), nowfn=nowfn)
+    else:
+        raise HTTPException(
+            status_code=501, detail=f"Login method {login_config.method} not supported"
+        )
 
 
 @v1.get(
@@ -1892,41 +1994,53 @@ async def update_assistant(
     # Update the assistant
     tool_resources: ToolResources = {}
 
-    if req.code_interpreter_file_ids is not None:
-        tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
-        asst.code_interpreter_files = await models.File.get_all_by_file_id(
-            request.state.db, req.code_interpreter_file_ids
-        )
-
-    if req.file_search_file_ids is not None:
-        # Files will need to be stored in a vector store
-        if asst.vector_store_id:
-            # Vector store already exists, update
-            vectore_store_id = await sync_vector_store_files(
-                request.state.db,
-                openai_client,
-                asst.vector_store_id,
-                req.file_search_file_ids,
+    try:
+        if (
+            req.code_interpreter_file_ids is not None
+            and req.code_interpreter_file_ids != []
+        ):
+            tool_resources["code_interpreter"] = {
+                "file_ids": req.code_interpreter_file_ids
+            }
+            asst.code_interpreter_files = await models.File.get_all_by_file_id(
+                request.state.db, req.code_interpreter_file_ids
             )
-            tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
         else:
-            # Store doesn't exist, create a new one
-            vectore_store_id, vector_store_object_id = await create_vector_store(
-                request.state.db,
-                openai_client,
-                class_id,
-                req.file_search_file_ids,
-                type=schemas.VectorStoreType.THREAD,
-            )
-            asst.vector_store_id = vector_store_object_id
-            tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
-    else:
-        # No files stored in vector store, remove it
-        if asst.vector_store_id:
-            await delete_vector_store(
-                request.state.db, openai_client, asst.vector_store_id
-            )
-            tool_resources["file_search"] = {}
+            asst.code_interpreter_files = []
+
+        if req.file_search_file_ids is not None and req.file_search_file_ids != []:
+            # Files will need to be stored in a vector store
+            if asst.vector_store_id:
+                # Vector store already exists, update
+                vectore_store_id = await sync_vector_store_files(
+                    request.state.db,
+                    openai_client,
+                    asst.vector_store_id,
+                    req.file_search_file_ids,
+                )
+                tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
+            else:
+                # Store doesn't exist, create a new one
+                vectore_store_id, vector_store_object_id = await create_vector_store(
+                    request.state.db,
+                    openai_client,
+                    class_id,
+                    req.file_search_file_ids,
+                    type=schemas.VectorStoreType.THREAD,
+                )
+                asst.vector_store_id = vector_store_object_id
+                tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
+        else:
+            # No files stored in vector store, remove it
+            if asst.vector_store_id:
+                id_to_delete = asst.vector_store_id
+                asst.vector_store_id = None
+                await delete_vector_store(request.state.db, openai_client, id_to_delete)
+                tool_resources["file_search"] = {}
+    except Exception:
+        raise HTTPException(
+            500, "Error updating assistant files. Please try saving again."
+        )
 
     openai_update["tool_resources"] = tool_resources
     if req.use_latex is not None:

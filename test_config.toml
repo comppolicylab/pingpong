@@ -8,6 +8,19 @@ path = "test_db.sqlite"
 
 [auth]
 
+[[auth.authn_methods]]
+method = "sso"
+protocol = "saml"
+provider = "harvardkey"
+name = "Harvard"
+domains = ["harvard.edu", "*.harvard.edu"]
+excluded_domains = ["alumni.harvard.edu", "post.harvard.edu"]
+
+[[auth.authn_methods]]
+method = "magic_link"
+name = "Email"
+expiry = 86400
+
 [[auth.secret_keys]]
 key = "test env"
 

@@ -29,15 +29,13 @@
   $: {
     const allAssistants = data?.assistants || [];
     // Split all assistants into categories
-    for (const assistant of allAssistants) {
-      if (assistant.endorsed) {
-        courseAssistants.push(assistant);
-      } else if (assistant.creator_id === data.me.user!.id) {
-        myAssistants.push(assistant);
-      } else {
-        otherAssistants.push(assistant);
-      }
-    }
+    courseAssistants = allAssistants.filter((assistant) => assistant.endorsed);
+    myAssistants = allAssistants.filter(
+      (assistant) => assistant.creator_id === data.me.user!.id && !assistant.endorsed
+    );
+    otherAssistants = allAssistants.filter(
+      (assistant) => assistant.creator_id !== data.me.user!.id && !assistant.endorsed
+    );
   }
 </script>
 
