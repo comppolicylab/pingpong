@@ -659,6 +659,11 @@ class Assistant(Base):
         await session.refresh(assistant)
         return assistant
 
+    @classmethod
+    async def delete(cls, session: AsyncSession, id_: int) -> None:
+        stmt = delete(Assistant).where(Assistant.id == int(id_))
+        await session.execute(stmt)
+
 
 class Class(Base):
     __tablename__ = "classes"

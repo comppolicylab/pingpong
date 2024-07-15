@@ -295,7 +295,15 @@
       return;
     }
 
-    const result = await api.deleteAssistant(fetch, data.class.id, data.assistantId);
+    let params: api.DeleteAssistant = {
+      has_code_interpreter_files: data.selectedCodeInterpreterFiles.length > 0,
+      private_files: [
+        ...data.selectedCodeInterpreterFiles.slice().filter((f) => f.private),
+        ...privateFSSessionFiles,
+        ...privateCISessionFiles
+      ].map((f) => f.id)
+    };
+    const result = await api.deleteAssistant(fetch, data.class.id, data.assistantId, params);
     if (result.$status < 300) {
       $loading = false;
       checkForChanges = false;

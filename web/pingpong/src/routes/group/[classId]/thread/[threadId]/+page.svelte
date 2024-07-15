@@ -381,7 +381,7 @@
                 vision: false
               })
             : null}
-          canSubmit = {canSubmit || false}
+          canSubmit={canSubmit || false}
           disabled={!canSubmit || !!$navigating}
           loading={$submitting || $waiting}
           upload={handleUpload}

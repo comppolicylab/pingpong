@@ -868,12 +868,22 @@ export const updateAssistant = async (
   return await PUT<UpdateAssistantRequest, Assistant>(f, url, data);
 };
 
+export type DeleteAssistant = {
+  has_code_interpreter_files: boolean;
+  private_files: number[];
+};
+
 /**
  * Delete an assistant.
  */
-export const deleteAssistant = async (f: Fetcher, classId: number, assistantId: number) => {
+export const deleteAssistant = async (
+  f: Fetcher,
+  classId: number,
+  assistantId: number,
+  data: DeleteAssistant
+) => {
   const url = `class/${classId}/assistant/${assistantId}`;
-  return await DELETE<never, GenericStatus>(f, url);
+  return await POST<DeleteAssistant, GenericStatus>(f, url, data);
 };
 
 /**
