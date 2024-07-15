@@ -81,8 +81,7 @@
         {#each threads as thread}
           {@const allUsers = thread.hashed_users || []}
           {@const allUsersLen = allUsers.length}
-          {@const otherUsers =
-            thread.hashed_users?.filter((user) => user.id != data.me.user?.id) || []}
+          {@const otherUsers = thread.hashed_users?.filter((user_name) => user_name != 'Me') || []}
           {@const otherUsersLen = otherUsers.length}
           <a
             href={`/group/${thread.class_id}/thread/${thread.id}`}
@@ -118,10 +117,10 @@
                   : allUsersLen != otherUsersLen
                     ? `me${
                         otherUsersLen > 0
-                          ? otherUsers.map((user) => user.hash || 'Anonymous User').join(', ')
+                          ? otherUsers.map((user_name) => user_name || 'Anonymous User').join(', ')
                           : ''
                       }`
-                    : allUsers.map((user) => user.hash || 'Anonymous User').join(', ')}
+                    : allUsers.map((user_name) => user_name || 'Anonymous User').join(', ')}
               </div>
             </div>
           </a>

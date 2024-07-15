@@ -1212,7 +1212,11 @@ async def list_recent_threads(
     )
 
     threads = await models.Thread.get_n_by_id(
-        request.state.db, thread_ids, limit, before=current_latest_time
+        request.state.db,
+        int(request.state.session.user.id),
+        thread_ids,
+        limit,
+        before=current_latest_time,
     )
 
     return {"threads": threads}
@@ -1247,6 +1251,7 @@ async def list_all_threads(
     )
     threads = await models.Thread.get_n_by_id(
         request.state.db,
+        int(request.state.session.user.id),
         thread_ids,
         limit,
         before=current_latest_time,
@@ -1288,7 +1293,11 @@ async def list_threads(
     can_view, in_class = await asyncio.gather(can_view_coro, in_class_coro)
     thread_ids = list(set(can_view) & set(in_class))
     threads = await models.Thread.get_n_by_id(
-        request.state.db, thread_ids, limit, before=current_latest_time
+        request.state.db,
+        int(request.state.session.user.id),
+        thread_ids,
+        limit,
+        before=current_latest_time,
     )
 
     return {"threads": threads}
@@ -1364,7 +1373,9 @@ async def create_thread(
 
     result: None | models.Thread = None
     try:
-        result = await models.Thread.create(request.state.db, new_thread)
+        result = await models.Thread.create(
+            request.state.db, int(request.state.session.user.id), new_thread
+        )
 
         grants = [
             (f"class:{class_id}", "parent", f"thread:{result.id}"),

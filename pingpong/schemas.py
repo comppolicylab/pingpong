@@ -235,14 +235,6 @@ class Assistants(BaseModel):
         from_attributes = True
 
 
-class HashedUser(BaseModel):
-    id: int
-    hash: str | None
-
-    class Config:
-        from_attributes = True
-
-
 class Thread(BaseModel):
     id: int
     name: str
@@ -252,7 +244,7 @@ class Thread(BaseModel):
     assistant_id: int
     private: bool
     tools_available: str | None
-    hashed_users: list["HashedUser"] = []
+    hashed_users: list[str] = []
     created: datetime
     updated: datetime | None
 

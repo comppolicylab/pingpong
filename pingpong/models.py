@@ -909,7 +909,7 @@ class Thread(Base):
         await session.execute(stmt)
 
     @classmethod
-    async def create(cls, session: AsyncSession, data: dict) -> "Thread":
+    async def create(cls, session: AsyncSession, user_id: int, data: dict) -> "Thread":
         code_interpreter_file_ids = data.pop("code_interpreter_file_ids", [])
         image_file_ids = data.pop("image_file_ids", [])
         thread = Thread(**data)
@@ -950,16 +950,14 @@ class Thread(Base):
 
         await session.refresh(thread)
 
-        hashed_users = []
-        for user in thread.users:
-            hashed_users.append(
-                {
-                    "id": user.id,
-                    "hash": animal_hash(f"{thread.thread_id}-{user.id}-{user.created}")
-                    if not thread.private
-                    else None,
-                }
-            )
+        hashed_users = [
+            "Me"
+            if u.id == user_id
+            else animal_hash(f"{thread.thread_id}-{u.id}-{u.created}")
+            if not thread.private
+            else "Anonymous User"
+            for u in thread.users
+        ]
         thread.hashed_users = hashed_users
         return thread
 
@@ -977,6 +975,7 @@ class Thread(Base):
     async def get_n_by_id(
         cls,
         session: AsyncSession,
+        user_id: int,
         ids: list[int],
         n: int = 10,
         before: datetime | None = None,
@@ -1003,19 +1002,14 @@ class Thread(Base):
                     next_latest_time = new_thread.updated
 
                 new_thread.assistant_name = new_thread.assistant.name
-                hashed_users = []
-
-                for user in new_thread.users:
-                    hashed_users.append(
-                        {
-                            "id": user.id,
-                            "hash": animal_hash(
-                                f"{new_thread.thread_id}-{user.id}-{user.created}"
-                            )
-                            if not new_thread.private
-                            else None,
-                        }
-                    )
+                hashed_users = [
+                    "Me"
+                    if u.id == user_id
+                    else animal_hash(f"{new_thread.thread_id}-{u.id}-{u.created}")
+                    if not new_thread.private
+                    else "Anonymous User"
+                    for u in new_thread.users
+                ]
                 new_thread.hashed_users = hashed_users
                 threads.append(new_thread)
                 added_in_page += 1

@@ -1169,11 +1169,6 @@ export type CreateThreadRequest = {
   vision_file_ids?: string[];
 };
 
-export type HashedUser = {
-  id: number;
-  hash: string;
-};
-
 /**
  * Thread information.
  */
@@ -1186,7 +1181,7 @@ export type Thread = {
   assistant_id: number;
   private: boolean;
   tools_available: string | null;
-  hashed_users?: HashedUser[];
+  hashed_users?: string[];
   created: string;
   updated: string;
 };
