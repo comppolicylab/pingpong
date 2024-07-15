@@ -240,11 +240,11 @@ class Thread(BaseModel):
     name: str
     thread_id: str
     class_id: int
-    assistant_name: str | None = None
+    assistant_names: dict[int, str] = {}
     assistant_id: int
     private: bool
     tools_available: str | None
-    hashed_users: list[str] = []
+    user_names: list[str] = []
     created: datetime
     updated: datetime | None
 
@@ -557,11 +557,6 @@ class ThreadRun(BaseModel):
         from_attributes = True
 
 
-class LoadedProfile(BaseModel):
-    hash: str | None = None
-    profile: Profile | None = None
-
-
 class ThreadParticipants(BaseModel):
     user: list[str]
     assistant: dict[int, str]
@@ -580,7 +575,6 @@ class ThreadWithMeta(BaseModel):
     run: OpenAIRun | None
     messages: list[OpenAIMessage]
     limit: int
-    participants: ThreadParticipants
     ci_messages: list[CodeInterpreterMessage] | None
 
     class Config:

@@ -79,9 +79,9 @@
       <h3 class="font-normal text-2xl border-b border-gray-200 pb-1">Threads</h3>
       <div class="flex flex-wrap flex-col">
         {#each threads as thread}
-          {@const allUsers = thread.hashed_users || []}
+          {@const allUsers = thread.user_names || []}
           {@const allUsersLen = allUsers.length}
-          {@const otherUsers = thread.hashed_users?.filter((user_name) => user_name != 'Me') || []}
+          {@const otherUsers = thread.user_names?.filter((user_name) => user_name != 'Me') || []}
           {@const otherUsersLen = otherUsers.length}
           <a
             href={`/group/${thread.class_id}/thread/${thread.id}`}
@@ -94,7 +94,7 @@
                 </h4>
                 <h4 class="eyebrow eyebrow-dark shrink-0">|</h4>
                 <h4 class="eyebrow eyebrow-dark shrink truncate">
-                  {thread.assistant_name || 'Unknown Session'}
+                  {Object.values(thread.assistant_names || {}).join(', ') || 'Unknown Assistant'}
                 </h4>
               </div>
               <div class="pt-2 font-light text-lg pb-2">

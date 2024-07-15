@@ -17,7 +17,7 @@ from fastapi import (
     Header,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
-from .animal_hash import animal_hash
+from .animal_hash import pseudonym
 from jwt.exceptions import PyJWTError
 from openai.types.beta.assistant_create_params import ToolResources
 from openai.types.beta.threads import MessageContentPartParam
@@ -991,22 +991,14 @@ async def get_thread(
     last_run = [r async for r in runs_result]
 
     if messages.data:
-        users = {str(u.id): u.created for u in thread.users}
+        users = {str(u.id): u for u in thread.users}
 
     for message in messages.data:
-        if not message.metadata.get("user_id"):
+        user_id = message.metadata.pop("user_id", None)
+        if not user_id:
             continue
-        if message.metadata["user_id"] == str(request.state.session.user.id):
-            message.metadata["is_current_user"] = True
-        message.metadata["hashed_name"] = "Anonymous User"
-        if thread.private:
-            del message.metadata["user_id"]
-            continue
-        if users.get(message.metadata["user_id"]):
-            message.metadata["hashed_name"] = animal_hash(
-                f"{thread.thread_id}-{message.metadata['user_id']}-{users[message.metadata['user_id']]}"
-            )
-        del message.metadata["user_id"]
+        message.metadata["is_current_user"] = user_id == str(request.state.session.user.id)
+        message.metadata["name"] = "Anonymous User" if thread.private else pseudonym(thread, users[user_id])
 
     placeholder_ci_calls = []
     if "code_interpreter" in thread.tools_available:
@@ -1018,6 +1010,16 @@ async def get_thread(
             messages.data[-1].created_at,
         )
 
+    thread.assistant_names = {assistant.id: assistant.name}
+    thread.user_names = [
+                "Me"
+                if u.id == request.state.session.user.id
+                else pseudonym(thread, u)
+                if not thread.private
+                else "Anonymous User"
+                for u in thread.users
+            ]
+
     return {
         "thread": thread,
         "model": assistant.model,
@@ -1025,17 +1027,6 @@ async def get_thread(
         "run": last_run[0] if last_run else None,
         "messages": list(messages.data),
         "limit": 20,
-        "participants": {
-            "user": [
-                "Me"
-                if u.id == request.state.session.user.id
-                else animal_hash(f"{thread.thread_id}-{u.id}-{u.created}")
-                if not thread.private
-                else "Anonymous User"
-                for u in thread.users
-            ],
-            "assistant": {assistant.id: assistant.name},
-        },
         "ci_messages": placeholder_ci_calls,
     }
 
@@ -1101,19 +1092,11 @@ async def list_thread_messages(
         users = {u.id: u.created for u in thread.users}
 
     for message in messages.data:
-        if not message.metadata.get("user_id"):
+        user_id = message.metadata.pop("user_id", None)
+        if not user_id:
             continue
-        if message.metadata["user_id"] == str(request.state.session.user.id):
-            message.metadata["is_current_user"] = True
-        message.metadata["hashed_name"] = "Anonymous User"
-        if thread.private:
-            del message.metadata["user_id"]
-            continue
-        if users.get(message.metadata["user_id"]):
-            message.metadata["hashed_name"] = animal_hash(
-                f"{thread.thread_id}-{message.metadata['user_id']}-{users[message.metadata['user_id']]}"
-            )
-        del message.metadata["user_id"]
+        message.metadata["is_current_user"] = user_id == str(request.state.session.user.id)
+        message.metadata["name"] = "Anonymous User" if thread.private else pseudonym(thread, users[user_id])
 
     placeholder_ci_calls = []
     # Only run the extra steps if code_interpreter is available
@@ -1213,7 +1196,7 @@ async def list_recent_threads(
 
     threads = await models.Thread.get_n_by_id(
         request.state.db,
-        int(request.state.session.user.id),
+        request.state.session.user.id,
         thread_ids,
         limit,
         before=current_latest_time,
@@ -1251,7 +1234,7 @@ async def list_all_threads(
     )
     threads = await models.Thread.get_n_by_id(
         request.state.db,
-        int(request.state.session.user.id),
+        request.state.session.user.id,
         thread_ids,
         limit,
         before=current_latest_time,
@@ -1294,7 +1277,7 @@ async def list_threads(
     thread_ids = list(set(can_view) & set(in_class))
     threads = await models.Thread.get_n_by_id(
         request.state.db,
-        int(request.state.session.user.id),
+        request.state.session.user.id,
         thread_ids,
         limit,
         before=current_latest_time,
@@ -1374,7 +1357,7 @@ async def create_thread(
     result: None | models.Thread = None
     try:
         result = await models.Thread.create(
-            request.state.db, int(request.state.session.user.id), new_thread
+            request.state.db, request.state.session.user.id, new_thread
         )
 
         grants = [

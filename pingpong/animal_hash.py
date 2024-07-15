@@ -1,4 +1,5 @@
 from .names import adjectives, names
+from .models import Thread, User
 from typing import TypeVar
 import mmh3
 
@@ -18,3 +19,6 @@ def animal_hash(input: str) -> str:
     adj = list_p(adjectives, x / uint64_max)
     animal = list_p(names, y / uint64_max)
     return f"{adj.capitalize()} {animal.capitalize()}"
+
+def pseudonym(thread: Thread, user: User) -> str:
+    return animal_hash(f"{thread.id}-{user.id}-{user.created}")

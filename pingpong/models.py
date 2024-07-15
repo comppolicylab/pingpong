@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional
 
-from .animal_hash import animal_hash
+import pingpong.animal_hash as animal_hash
 from sqlalchemy import Boolean, Column, DateTime
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
@@ -909,7 +909,7 @@ class Thread(Base):
         await session.execute(stmt)
 
     @classmethod
-    async def create(cls, session: AsyncSession, user_id: int, data: dict) -> "Thread":
+    async def create(cls, session: AsyncSession, user_id: int, data: dict) -> schemas.Thread:
         code_interpreter_file_ids = data.pop("code_interpreter_file_ids", [])
         image_file_ids = data.pop("image_file_ids", [])
         thread = Thread(**data)
@@ -950,15 +950,6 @@ class Thread(Base):
 
         await session.refresh(thread)
 
-        hashed_users = [
-            "Me"
-            if u.id == user_id
-            else animal_hash(f"{thread.thread_id}-{u.id}-{u.created}")
-            if not thread.private
-            else "Anonymous User"
-            for u in thread.users
-        ]
-        thread.hashed_users = hashed_users
         return thread
 
     @classmethod
@@ -1001,16 +992,16 @@ class Thread(Base):
                 if not next_latest_time or new_thread.updated < next_latest_time:
                     next_latest_time = new_thread.updated
 
-                new_thread.assistant_name = new_thread.assistant.name
-                hashed_users = [
+                new_thread.assistant_names = {new_thread.assistant_id: new_thread.assistant.name}
+                user_names = [
                     "Me"
                     if u.id == user_id
-                    else animal_hash(f"{new_thread.thread_id}-{u.id}-{u.created}")
+                    else animal_hash.pseudonym(new_thread, u)
                     if not new_thread.private
                     else "Anonymous User"
                     for u in new_thread.users
                 ]
-                new_thread.hashed_users = hashed_users
+                new_thread.user_names = user_names
                 threads.append(new_thread)
                 added_in_page += 1
 

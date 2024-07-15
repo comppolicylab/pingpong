@@ -79,7 +79,7 @@
       if (message?.metadata?.is_current_user) {
         return data?.me?.user?.name || data?.me?.user?.email || 'Anonymous User';
       }
-      return (message?.metadata?.hashed_name as string | undefined) || 'Anonymous User';
+      return (message?.metadata?.name as string | undefined) || 'Anonymous User';
     } else {
       if ($assistantId) {
         return $participants.assistant[$assistantId] || 'PingPong Bot';

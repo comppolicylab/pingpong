@@ -240,11 +240,6 @@ export type Profile = {
   image_url: string;
 };
 
-export type LoadedProfile = {
-  hash?: string | null;
-  profile: Profile;
-};
-
 /**
  * User activation state.
  */
@@ -1177,11 +1172,11 @@ export type Thread = {
   name: string;
   thread_id: string;
   class_id: number;
-  assistant_name?: string | null;
+  assistant_names?: Record<number, string> | null;
   assistant_id: number;
   private: boolean;
   tools_available: string | null;
-  hashed_users?: string[];
+  user_names?: string[];
   created: string;
   updated: string;
 };
@@ -1359,7 +1354,6 @@ export type ThreadWithMeta = {
   run: OpenAIRun | null;
   limit: number;
   messages: OpenAIMessage[];
-  participants: ThreadParticipants;
   ci_messages: OpenAIMessage[];
 };
 
