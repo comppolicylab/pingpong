@@ -308,7 +308,7 @@
 
         <div></div>
         <Helper
-          >Choose whether to make threads and assistants in ths group private. When checked, only
+          >Choose whether to make threads and assistants in this group private. When checked, only
           members can view unpublished threads and assistants they create.</Helper
         >
         <div>
@@ -475,10 +475,11 @@
     <div class="grid md:grid-cols-3 gap-x-6 gap-y-8 pt-6">
       <div>
         <Heading tag="h3" customSize="text-xl font-bold"
-          ><Secondary class="text-3xl text-black font-normal">Files</Secondary></Heading
+          ><Secondary class="text-3xl text-black font-normal">Shared Files</Secondary></Heading
         >
         <Info
-          >Upload files for use in assistants. Files must be under {maxUploadSize}. See the
+          >Upload files for use in assistants. Group files are available to everyone in the group
+          with permissions to create an assistant. Files must be under {maxUploadSize}. See the
           <a
             href="https://platform.openai.com/docs/api-reference/files/create"
             rel="noopener noreferrer"

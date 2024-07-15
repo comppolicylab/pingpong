@@ -286,7 +286,7 @@ email_template = Template("""
             <div class="m-gutter">
                <p>You&#8217;re receiving this email because $legal_text.
                </p>
-               <p>Pingpong is developed by the Computational Policy Lab at the Harvard Kennedy School. All content © 2024 Computational Policy Lab. All rights reserved.</p>
+               <p>Pingpong is developed by the Computational Policy Lab at the Harvard Kennedy School.</p>
             </div>
          </div>
       </div>
@@ -423,7 +423,7 @@ email_template = Template("""
                            <div class="f-legal">
                               <p>You&#8217;re receiving this email because $legal_text.
                               </p>
-                              <p>Pingpong is developed by the Computational Policy Lab at the Harvard Kennedy School.<br>All content © 2024 Computational Policy Lab. All rights reserved.</p>
+                              <p>Pingpong is developed by the Computational Policy Lab at the Harvard Kennedy School.</p>
                            </div>
                         </td>
                      </tbody>

@@ -24,6 +24,9 @@ The easiest way to run the DB and OpenFGA is through Docker.
 
 First, get access to the `config.dev.toml` file and put it in the root of your repo.
 
+> [!CAUTION]
+> **Do not** proceed with the Quick Setup before getting access to `config.dev.toml`. The Quick Setup script below will fail if you do so.
+
 Assuming you have a Docker environment available,
 the easiest way to start up development services is with the following script:
 
