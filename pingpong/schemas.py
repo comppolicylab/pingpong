@@ -237,36 +237,16 @@ class Assistants(BaseModel):
         from_attributes = True
 
 
-class UserPlaceholder(BaseModel, UserNameMixin):
-    id: int
-
-
 class Thread(BaseModel):
     id: int
     name: str
     thread_id: str
     class_id: int
+    assistant_names: dict[int, str] = {}
     assistant_id: int
     private: bool
     tools_available: str | None
-    users: list["UserPlaceholder"]
-    created: datetime
-    updated: datetime | None
-
-    class Config:
-        from_attributes = True
-
-
-class LoadedThread(BaseModel):
-    id: int
-    name: str
-    thread_id: str
-    class_id: int
-    assistant_name: str | None
-    assistant_id: int
-    private: bool
-    tools_available: str | None
-    users: list["UserPlaceholder"]
+    user_names: list[str] = []
     created: datetime
     updated: datetime | None
 
@@ -289,13 +269,6 @@ class NewThreadMessage(BaseModel):
     file_search_file_ids: list[str] = Field([], min_length=0, max_length=10)
     code_interpreter_file_ids: list[str] = Field([], min_length=0, max_length=10)
     vision_file_ids: list[str] = Field([], min_length=0, max_length=10)
-
-
-class LoadedThreads(BaseModel):
-    threads: list[LoadedThread]
-
-    class Config:
-        from_attributes = True
 
 
 class Threads(BaseModel):
@@ -580,7 +553,7 @@ class ThreadRun(BaseModel):
 
 
 class ThreadParticipants(BaseModel):
-    user: dict[int, Profile]
+    user: list[str]
     assistant: dict[int, str]
 
 
@@ -597,7 +570,6 @@ class ThreadWithMeta(BaseModel):
     run: OpenAIRun | None
     messages: list[OpenAIMessage]
     limit: int
-    participants: ThreadParticipants
     ci_messages: list[CodeInterpreterMessage] | None
 
     class Config:

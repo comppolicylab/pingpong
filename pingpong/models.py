@@ -952,6 +952,7 @@ class Thread(Base):
             await session.execute(stmt)
 
         await session.refresh(thread)
+
         return thread
 
     @classmethod
@@ -972,7 +973,7 @@ class Thread(Base):
         n: int = 10,
         before: datetime | None = None,
         **kwargs,
-    ) -> List[schemas.LoadedThread]:
+    ) -> List["Thread"]:
         """Similar to `get_all_by_id` but tries to guarantee `n` results.
 
         This is useful if we suspect that some of the `ids` in the input do not exist;
@@ -983,7 +984,7 @@ class Thread(Base):
         # We might need to issue multiple queries in case the information in the authz
         # server is out of date (e.g., threads have been deleted but the authz server
         # still thinks they exist).
-        threads: List[schemas.LoadedThread] = []
+        threads: List["Thread"] = []
         next_latest_time: datetime | None = before
         while len(threads) < n:
             added_in_page = 0
@@ -993,7 +994,6 @@ class Thread(Base):
                 if not next_latest_time or new_thread.updated < next_latest_time:
                     next_latest_time = new_thread.updated
 
-                new_thread.assistant_name = new_thread.assistant.name
                 threads.append(new_thread)
                 added_in_page += 1
 

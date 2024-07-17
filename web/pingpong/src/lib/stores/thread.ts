@@ -69,11 +69,6 @@ export class ThreadManager {
   participants: Readable<api.ThreadParticipants>;
 
   /**
-   * The users in the thread.
-   */
-  users: Readable<api.UserPlaceholder[]>;
-
-  /**
    * Whether the thread is published.
    */
   published: Readable<boolean>;
@@ -166,13 +161,11 @@ export class ThreadManager {
     this.error = derived(this.#data, ($data) => $data?.error || null);
 
     this.participants = derived(this.#data, ($data) => {
-      if (!$data?.data) {
-        return { user: {}, assistant: {} };
-      }
-      return $data.data.participants;
+      return {
+        user: $data?.data?.thread?.user_names || [],
+        assistant: $data?.data?.thread?.assistant_names || {}
+      };
     });
-
-    this.users = derived(this.#data, ($data) => $data?.data?.thread?.users || []);
   }
 
   async #ensureRun(threadData: BaseResponse & (ThreadWithMeta | Error)) {
@@ -412,7 +405,7 @@ export class ThreadManager {
         ...optimisticImageContent
       ],
       created_at: Date.now(),
-      metadata: { user_id: fromUserId },
+      metadata: { user_id: fromUserId, is_current_user: true },
       assistant_id: '',
       thread_id: '',
       file_search_file_ids: file_search_file_ids || [],

@@ -17,6 +17,7 @@ from fastapi import (
     Header,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from .animal_hash import process_threads, pseudonym, user_names
 from jwt.exceptions import PyJWTError
 from openai.types.beta.assistant_create_params import ToolResources
 from openai.types.beta.threads import MessageContentPartParam
@@ -1090,8 +1091,22 @@ async def get_thread(
         openai_client.beta.threads.runs.list(thread.thread_id, limit=1, order="desc"),
     )
     last_run = [r async for r in runs_result]
-    placeholder_ci_calls = []
 
+    if messages.data:
+        users = {str(u.id): u for u in thread.users}
+
+    for message in messages.data:
+        user_id = message.metadata.pop("user_id", None)
+        if not user_id:
+            continue
+        message.metadata["is_current_user"] = user_id == str(
+            request.state.session.user.id
+        )
+        message.metadata["name"] = (
+            "Anonymous User" if thread.private else pseudonym(thread, users[user_id])
+        )
+
+    placeholder_ci_calls = []
     if "code_interpreter" in thread.tools_available:
         placeholder_ci_calls = await get_placeholder_ci_calls(
             request.state.db,
@@ -1101,6 +1116,9 @@ async def get_thread(
             messages.data[-1].created_at,
         )
 
+    thread.assistant_names = {assistant.id: assistant.name}
+    thread.user_names = user_names(thread, request.state.session.user.id)
+
     return {
         "thread": thread,
         "model": assistant.model,
@@ -1108,10 +1126,6 @@ async def get_thread(
         "run": last_run[0] if last_run else None,
         "messages": list(messages.data),
         "limit": 20,
-        "participants": {
-            "user": {u.id: schemas.Profile.from_user(u) for u in thread.users},
-            "assistant": {assistant.id: assistant.name},
-        },
         "ci_messages": placeholder_ci_calls,
     }
 
@@ -1172,6 +1186,21 @@ async def list_thread_messages(
     messages = await openai_client.beta.threads.messages.list(
         thread.thread_id, limit=limit, order="asc", before=before
     )
+
+    if messages.data:
+        users = {u.id: u.created for u in thread.users}
+
+    for message in messages.data:
+        user_id = message.metadata.pop("user_id", None)
+        if not user_id:
+            continue
+        message.metadata["is_current_user"] = user_id == str(
+            request.state.session.user.id
+        )
+        message.metadata["name"] = (
+            "Anonymous User" if thread.private else pseudonym(thread, users[user_id])
+        )
+
     placeholder_ci_calls = []
     # Only run the extra steps if code_interpreter is available
     if "code_interpreter" in thread.tools_available and messages.data:
@@ -1247,7 +1276,7 @@ async def get_last_run(
 @v1.get(
     "/threads/recent",
     dependencies=[Depends(LoggedIn())],
-    response_model=schemas.LoadedThreads,
+    response_model=schemas.Threads,
 )
 async def list_recent_threads(
     request: Request, limit: int = 5, before: str | None = None
@@ -1269,16 +1298,19 @@ async def list_recent_threads(
     )
 
     threads = await models.Thread.get_n_by_id(
-        request.state.db, thread_ids, limit, before=current_latest_time
+        request.state.db,
+        thread_ids,
+        limit,
+        before=current_latest_time,
     )
 
-    return {"threads": threads}
+    return {"threads": process_threads(threads, request.state.session.user.id)}
 
 
 @v1.get(
     "/threads",
     dependencies=[Depends(LoggedIn())],
-    response_model=schemas.LoadedThreads,
+    response_model=schemas.Threads,
 )
 async def list_all_threads(
     request: Request,
@@ -1311,13 +1343,13 @@ async def list_all_threads(
         class_id=class_id,
     )
 
-    return {"threads": threads}
+    return {"threads": process_threads(threads, request.state.session.user.id)}
 
 
 @v1.get(
     "/class/{class_id}/threads",
     dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
-    response_model=schemas.LoadedThreads,
+    response_model=schemas.Threads,
 )
 async def list_threads(
     class_id: str, request: Request, limit: int = 20, before: str | None = None
@@ -1345,10 +1377,13 @@ async def list_threads(
     can_view, in_class = await asyncio.gather(can_view_coro, in_class_coro)
     thread_ids = list(set(can_view) & set(in_class))
     threads = await models.Thread.get_n_by_id(
-        request.state.db, thread_ids, limit, before=current_latest_time
+        request.state.db,
+        thread_ids,
+        limit,
+        before=current_latest_time,
     )
 
-    return {"threads": threads}
+    return {"threads": process_threads(threads, request.state.session.user.id)}
 
 
 @v1.post(
