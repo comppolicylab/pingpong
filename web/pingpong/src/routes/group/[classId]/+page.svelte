@@ -270,6 +270,7 @@
           mimeType={data.uploadInfo.mimeType}
           maxSize={data.uploadInfo.private_file_max_size}
           loading={$loading || !!$navigating}
+          canSubmit={true}
           visionAcceptedFiles={supportsVision
             ? data.uploadInfo.fileTypes({
                 file_search: false,
@@ -291,7 +292,6 @@
                 vision: false
               })
             : null}
-          canSubmit={true}
           upload={handleUpload}
           remove={handleRemove}
           on:submit={handleSubmit}
