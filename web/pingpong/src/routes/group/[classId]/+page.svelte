@@ -291,6 +291,7 @@
                 vision: false
               })
             : null}
+          canSubmit={true}
           upload={handleUpload}
           remove={handleRemove}
           on:submit={handleSubmit}

@@ -296,7 +296,7 @@
   };
 
   /**
-   * Create/save an assistant when form is submitted.
+   * Delete the assistant.
    */
   const deleteAssistant = async (evt: MouseEvent) => {
     evt.preventDefault();
@@ -307,7 +307,7 @@
     ].map((f) => f.id);
 
     // Show loading message if there are more than 10 files attached
-    if ($selectedFileSearchFiles.length + private_files.length > 10) {
+    if ($selectedFileSearchFiles.length + private_files.length >= 10 || private_files.length >= 5) {
       $loadingMessage = 'Deleting assistant. This may take up to a minute.';
     }
     $loading = true;
