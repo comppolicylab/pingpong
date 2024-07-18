@@ -33,7 +33,7 @@ def process_threads(threads: list[Thread], user_id: int) -> list[ThreadSchema]:
                 new_thread.assistant_id: new_thread.assistant.name
             }
         else:
-            new_thread.assistant_names = {-1: "Deleted Assistant"}
+            new_thread.assistant_names = {0: "Deleted Assistant"}
         new_thread.user_names = user_names(new_thread, user_id)
     return threads
 

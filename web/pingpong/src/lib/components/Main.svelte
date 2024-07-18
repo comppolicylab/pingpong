@@ -3,7 +3,7 @@
   import { navigating } from '$app/stores';
   import { Pulse } from 'svelte-loading-spinners';
   import { blur } from 'svelte/transition';
-  import { loading } from '$lib/stores/general';
+  import { loading, loadingMessage } from '$lib/stores/general';
 </script>
 
 <div
@@ -16,8 +16,11 @@
       <div
         class="absolute top-0 left-0 flex h-full w-full items-center bg-white bg-opacity-75 z-50"
       >
-        <div class="m-auto" transition:blur={{ amount: 10 }}>
+        <div class="m-auto flex flex-col gap-5 items-center" transition:blur={{ amount: 10 }}>
           <Pulse color="#0ea5e9" />
+          {#if $loadingMessage}
+            <p>{$loadingMessage}</p>
+          {/if}
         </div>
       </div>
     {/if}

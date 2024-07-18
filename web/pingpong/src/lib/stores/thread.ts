@@ -153,8 +153,8 @@ export class ThreadManager {
     this.submitting = derived(this.#data, ($data) => !!$data?.submitting);
 
     this.assistantId = derived(this.#data, ($data) => {
-      if ($data?.data?.thread?.assistant_names && $data?.data?.thread?.assistant_names[-1]) {
-        return -1;
+      if ($data?.data?.thread?.assistant_names && $data?.data?.thread?.assistant_names[0]) {
+        return 0;
       }
 
       return $data?.data?.thread?.assistant_id || null;

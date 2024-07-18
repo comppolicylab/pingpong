@@ -72,7 +72,7 @@
   $: supportsCodeInterpreter = data.availableTools.includes('code_interpreter') || false;
   // TODO - should figure this out by checking grants instead of participants
   $: canSubmit = !!$participants.user && $participants.user.includes('Me');
-  $: assistantDeleted = !!$assistantId && $assistantId == -1;
+  $: assistantDeleted = !!$assistantId && $assistantId == 0;
 
   // Get the name of the participant in the chat thread.
   const getName = (message: api.OpenAIMessage) => {
@@ -82,7 +82,8 @@
       }
       return (message?.metadata?.name as string | undefined) || 'Anonymous User';
     } else {
-      if ($assistantId) {
+      // Note that we need to distinguish between unknown and deleted assistants.
+      if ($assistantId !== null) {
         return $participants.assistant[$assistantId] || 'PingPong Bot';
       }
       return 'PingPong Bot';

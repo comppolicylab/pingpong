@@ -20,7 +20,7 @@
   import { ImageOutline, ExclamationCircleOutline } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
   import { writable, type Writable } from 'svelte/store';
-  import { loading } from '$lib/stores/general';
+  import { loading, loadingMessage } from '$lib/stores/general';
   export let data;
 
   // Flag indicating whether we should check for changes before navigating away.
@@ -282,37 +282,58 @@
     return params;
   };
 
+  const deletePrivateFiles = async (fileIds: number[]) => {
+    const deletePromises = fileIds.map((fileId) =>
+      api.deleteUserFile(fetch, data.class.id, data.me.user!.id, fileId)
+    );
+    const results = await Promise.all(deletePromises);
+
+    results.forEach((result) => {
+      if (result.$status > 300) {
+        sadToast(`Warning: Couldn't delete a private file: ${result.detail}`);
+      }
+    });
+  };
+
   /**
    * Create/save an assistant when form is submitted.
    */
   const deleteAssistant = async (evt: MouseEvent) => {
     evt.preventDefault();
+    const private_files = [
+      ...data.selectedCodeInterpreterFiles.filter((f) => f.private),
+      ...privateFSSessionFiles,
+      ...privateCISessionFiles
+    ].map((f) => f.id);
+
+    // Show loading message if there are more than 10 files attached
+    if ($selectedFileSearchFiles.length + private_files.length > 10) {
+      $loadingMessage = 'Deleting assistant. This may take up to a minute.';
+    }
     $loading = true;
 
     if (!data.assistantId) {
       sadToast(`Error: Assistant ID not found.`);
+      $loadingMessage = '';
       $loading = false;
       return;
     }
 
-    let params: api.DeleteAssistant = {
-      has_code_interpreter_files: data.selectedCodeInterpreterFiles.length > 0,
-      private_files: [
-        ...data.selectedCodeInterpreterFiles.slice().filter((f) => f.private),
-        ...privateFSSessionFiles,
-        ...privateCISessionFiles
-      ].map((f) => f.id)
-    };
-    const result = await api.deleteAssistant(fetch, data.class.id, data.assistantId, params);
-    if (result.$status < 300) {
-      $loading = false;
-      checkForChanges = false;
-      happyToast('Assistant deleted');
-      await goto(`/group/${data.class.id}/assistant`, { invalidateAll: true });
-    } else {
+    const result = await api.deleteAssistant(fetch, data.class.id, data.assistantId);
+    if (result.$status > 300) {
+      $loadingMessage = '';
       $loading = false;
       sadToast(`Error deleting assistant: ${JSON.stringify(result.detail, null, '  ')}`);
+      return;
     }
+
+    await deletePrivateFiles(private_files);
+    $loadingMessage = '';
+    $loading = false;
+    checkForChanges = false;
+    happyToast('Assistant deleted');
+    await goto(`/group/${data.class.id}/assistant`, { invalidateAll: true });
+    return;
   };
 
   /**
