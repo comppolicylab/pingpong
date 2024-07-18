@@ -157,7 +157,7 @@ async def delete_vector_store_db(
     vector_store_object_id: int,
 ) -> str:
     """
-    Deletes the vector store with the given vector store object id (DB PK). This is used when an assistant is deleted, and we need to delete the vector store associated with them.
+    Deletes the vector store from the DB with the given vector store object id (DB PK). This is used when an assistant is deleted, and we need to delete the vector store associated with them.
 
     Args:
         session (AsyncSession): SQLAlchemy session
@@ -181,7 +181,7 @@ async def delete_vector_store_oai(
     vector_store_id: str,
 ) -> None:
     """
-    Deletes the vector store with the given vector store id (OpenAI API vector store id). This is used when an assistant is deleted, and we need to delete the vector store associated with them.
+    Deletes the vector store from OpenAI's servers with the given vector store id (OpenAI API vector store id). This is used when an assistant is deleted, and we need to delete the vector store associated with them.
 
     Args:
         openai_client (openai.AsyncClient): OpenAI client
