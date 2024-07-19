@@ -508,13 +508,29 @@
                 }
               },
               {
-                "tupleToUserset": {
-                  "computedUserset": {
-                    "relation": "can_manage_threads"
-                  },
-                  "tupleset": {
-                    "relation": "parent"
-                  }
+                "intersection": {
+                  "child": [
+                    {
+                      "tupleToUserset": {
+                        "computedUserset": {
+                          "relation": "can_manage_threads"
+                        },
+                        "tupleset": {
+                          "relation": "parent"
+                        }
+                      }
+                    },
+                    {
+                      "tupleToUserset": {
+                        "computedUserset": {
+                          "relation": "can_publish_threads"
+                        },
+                        "tupleset": {
+                          "relation": "parent"
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             ]
