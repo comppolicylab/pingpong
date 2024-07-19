@@ -61,7 +61,7 @@
    * Files to accept for code interpreter. If null, vision capabilities are disabled.
    */
   export let visionAcceptedFiles: string | null = null;
-  let allowVisionUpload = false;
+  let allowVisionUpload = true;
   /**
    * Max upload size.
    */

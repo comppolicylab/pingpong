@@ -97,7 +97,7 @@
     (model) => model.id
   );
   $: supportsVision = supportVisionModels.includes(selectedModel);
-  let allowVisionUpload = false;
+  let allowVisionUpload = true;
   $: asstFSFiles = [...data.files, ...allFSPrivateFiles];
   $: asstCIFiles = [...data.files, ...allCIPrivateFiles];
 
