@@ -612,8 +612,11 @@ export type AssistantModel = {
   id: string;
   created: string;
   owner: string;
+  name: string;
   description: string;
   is_latest: boolean;
+  is_new: boolean;
+  highlight: boolean;
   supports_vision: boolean;
 };
 

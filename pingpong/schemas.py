@@ -442,14 +442,20 @@ class AssistantModel(BaseModel):
     id: str
     created: datetime
     owner: str
+    name: str
     description: str
     is_latest: bool
+    is_new: bool
+    highlight: bool
     supports_vision: bool
 
 
 class AssistantModelDict(TypedDict):
+    name: str
     sort_order: int
     is_latest: bool
+    is_new: bool
+    highlight: bool
     supports_vision: bool
     description: str
 
