@@ -151,6 +151,7 @@
     $trashPrivateFileIds = [...$trashPrivateFileIds, ...files];
   };
 
+  let dropdownOpen = false;
   /**
    * Check if the assistant model supports vision capabilities.
    */
@@ -162,7 +163,7 @@
   function scrollIntoView(node: HTMLElement, scroll: boolean) {
     function update(scroll: boolean) {
       if (scroll) {
-        const dropdownContainer = node.closest('.dropdown-container') as HTMLElement; // Adjust the selector as needed
+        const dropdownContainer = node.closest('.dropdown-container') as HTMLElement;
         if (dropdownContainer) {
           const nodeTop = node.offsetTop;
           dropdownContainer.scrollTop = nodeTop - dropdownContainer.offsetTop;
@@ -378,7 +379,6 @@
       }
     }
   });
-  let dropdownOpen = false;
 </script>
 
 <div class="h-full w-full overflow-y-auto p-12">
