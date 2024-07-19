@@ -662,13 +662,29 @@
                 }
               },
               {
-                "tupleToUserset": {
-                  "computedUserset": {
-                    "relation": "can_manage_assistants"
-                  },
-                  "tupleset": {
-                    "relation": "parent"
-                  }
+                "intersection": {
+                  "child": [
+                    {
+                      "tupleToUserset": {
+                        "computedUserset": {
+                          "relation": "can_manage_assistants"
+                        },
+                        "tupleset": {
+                          "relation": "parent"
+                        }
+                      }
+                    },
+                    {
+                      "tupleToUserset": {
+                        "computedUserset": {
+                          "relation": "can_publish_assistants"
+                        },
+                        "tupleset": {
+                          "relation": "parent"
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             ]

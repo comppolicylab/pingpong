@@ -57,7 +57,7 @@ type assistant
     define can_delete: owner or can_manage_assistants from parent
     define can_view: [class#member] or owner or can_manage_assistants from parent
     define can_interact_with: can_view
-    define can_publish: (owner and can_publish_assistants from parent) or can_manage_assistants from parent
+    define can_publish: (owner and can_publish_assistants from parent) or (can_manage_assistants from parent and can_publish_assistants from parent)
 
 type user_file
   relations
