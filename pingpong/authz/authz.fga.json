@@ -641,8 +641,24 @@
           "intersection": {
             "child": [
               {
-                "computedUserset": {
-                  "relation": "owner"
+                "union": {
+                  "child": [
+                    {
+                      "computedUserset": {
+                        "relation": "owner"
+                      }
+                    },
+                    {
+                      "tupleToUserset": {
+                        "computedUserset": {
+                          "relation": "supervisor"
+                        },
+                        "tupleset": {
+                          "relation": "parent"
+                        }
+                      }
+                    }
+                  ]
                 }
               },
               {
