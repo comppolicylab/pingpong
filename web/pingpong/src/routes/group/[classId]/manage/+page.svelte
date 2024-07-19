@@ -18,6 +18,7 @@
     InputAddon
   } from 'flowbite-svelte';
   import BulkAddUsers from '$lib/components/BulkAddUsers.svelte';
+  import CanvasLogo from '$lib/components/CanvasLogo.svelte';
   import ViewUsers from '$lib/components/ViewUsers.svelte';
   import FileUpload from '$lib/components/FileUpload.svelte';
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
@@ -449,6 +450,7 @@
         </div>
         <Button
           pill
+          size="md"
           class="bg-orange text-white hover:bg-orange-dark"
           on:click={() => {
             usersModalOpen = true;
@@ -456,6 +458,12 @@
           on:touchstart={() => {
             usersModalOpen = true;
           }}>Invite new users</Button
+        >
+        <Button
+          pill outline
+          size="md"
+          class="bg-white border-red-600 text-red-600 hover:bg-red-600"
+          ><div class="flex flex-row items-center gap-2"><CanvasLogo size=4/>Invite new users</div></Button
         >
         {#if usersModalOpen}
           <Modal bind:open={usersModalOpen} title="Manage users">
