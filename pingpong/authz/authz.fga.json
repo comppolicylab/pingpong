@@ -638,10 +638,10 @@
           }
         },
         "can_publish": {
-          "intersection": {
+          "union": {
             "child": [
               {
-                "union": {
+                "intersection": {
                   "child": [
                     {
                       "computedUserset": {
@@ -651,7 +651,7 @@
                     {
                       "tupleToUserset": {
                         "computedUserset": {
-                          "relation": "supervisor"
+                          "relation": "can_publish_assistants"
                         },
                         "tupleset": {
                           "relation": "parent"
@@ -664,7 +664,7 @@
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "can_publish_assistants"
+                    "relation": "can_manage_assistants"
                   },
                   "tupleset": {
                     "relation": "parent"
