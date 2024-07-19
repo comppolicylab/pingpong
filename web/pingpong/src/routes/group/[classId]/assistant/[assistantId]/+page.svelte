@@ -18,8 +18,9 @@
   import { setsEqual } from '$lib/set';
   import { happyToast, sadToast } from '$lib/toast';
   import { normalizeNewlines } from '$lib/content.js';
-  import { ChevronDownOutline, CloseOutline, ImageOutline, StarSolid } from 'flowbite-svelte-icons';
+  import { ChevronDownOutline, CloseOutline, ImageOutline } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
+  import ModelOption from '$lib/components/ModelOption.svelte';
   import { writable, type Writable } from 'svelte/store';
 
   export let data;
@@ -429,37 +430,16 @@
           >
           {#each latestModelOptions as { value, name, description, supports_vision, is_new, highlight }}
             <div use:scrollIntoView={selectedModel == value}>
-              <DropdownItem
-                on:click={() => updateSelectedModel(value)}
-                defaultClass={value == selectedModel
-                  ? 'flex flex-col gap-x-1 font-medium py-2 px-4 text-sm text-blue-900 bg-blue-light-50 hover:bg-blue-light-50 hover:text-blue-900'
-                  : 'flex flex-col gap-x-1 font-medium py-2 px-4 text-sm hover:bg-gray-100 dark:hover:bg-gray-600'}
-              >
-                <div class="flex flex-row gap-x-3 flex-wrap items-center">
-                  <span class="text-lg">{name}</span>
-                  <div class="flex flex-row gap-x-1 gap-y-0.5 flex-wrap items-center">
-                    {#if highlight}
-                      <Badge
-                        class="flex flex-row items-center gap-x-1 py-0.5 px-2 border border-amber-400 bg-amber-50 text-amber-700 text-xs normal-case"
-                        ><StarSolid size="sm" />Recommended</Badge
-                      >
-                    {/if}
-                    {#if is_new}
-                      <Badge
-                        class="flex flex-row items-center gap-x-1 py-0.5 px-2 border border-teal-400 bg-emerald-100 text-teal-900 text-xs normal-case"
-                        >New</Badge
-                      >
-                    {/if}
-                    {#if supports_vision && allowVisionUpload}
-                      <Badge
-                        class="flex flex-row items-center gap-x-1 py-0.5 px-2 border border-gray-400 bg-gray-100 text-gray-900 text-xs normal-case"
-                        ><ImageOutline size="sm" />Vision capabilities</Badge
-                      >
-                    {/if}
-                  </div>
-                </div>
-                <span class="font-normal">{description}</span>
-              </DropdownItem>
+              <ModelOption
+                {value}
+                {selectedModel}
+                {updateSelectedModel}
+                showRecommended={highlight}
+                showNew={is_new}
+                showVision={supports_vision && allowVisionUpload}
+                {name}
+                {description}
+              />
             </div>
           {/each}
           <DropdownItem
@@ -469,56 +449,29 @@
           >
           {#each versionedModelOptions as { value, name, description, supports_vision, is_new, highlight }}
             <div use:scrollIntoView={selectedModel == value}>
-              <DropdownItem
-                on:click={() => updateSelectedModel(value)}
-                defaultClass={value == selectedModel
-                  ? 'flex flex-col gap-x-1 font-medium py-2 px-4 text-sm text-blue-900 bg-blue-light-50 hover:bg-blue-light-50 hover:text-blue-900'
-                  : 'flex flex-col gap-x-1 font-medium py-2 px-4 text-sm hover:bg-gray-100 dark:hover:bg-gray-600'}
-              >
-                <div class="flex flex-row gap-x-3 gap-y-0.5 flex-wrap items-center">
-                  <span class="text-md">{name}</span>
-                  <div class="flex flex-row gap-x-1 flex-wrap items-center">
-                    {#if highlight}
-                      <Badge
-                        class="flex flex-row items-center gap-x-1 py-0.5 px-2 border border-amber-400 bg-amber-50 text-amber-700 text-xs normal-case"
-                        ><StarSolid size="sm" />Recommended</Badge
-                      >
-                    {/if}
-                    {#if is_new}
-                      <Badge
-                        class="flex flex-row items-center gap-x-1 py-0.5 px-2 border border-teal-400 bg-emerald-100 text-teal-900 text-xs normal-case"
-                        >New</Badge
-                      >
-                    {/if}
-                    {#if supports_vision && allowVisionUpload}
-                      <Badge
-                        class="flex flex-row items-center gap-x-1 py-0.5 px-2 border border-gray-400 bg-gray-100 text-gray-900 text-xs normal-case"
-                        ><ImageOutline size="sm" />Vision capabilities</Badge
-                      >
-                    {/if}
-                  </div>
-                </div>
-                <span class="font-normal">{description}</span>
-              </DropdownItem>
+              <ModelOption
+                {value}
+                {selectedModel}
+                {updateSelectedModel}
+                showRecommended={highlight}
+                showNew={is_new}
+                showVision={supports_vision && allowVisionUpload}
+                {name}
+                {description}
+                smallNameText={true}
+              />
             </div>
           {/each}
         </Dropdown>
 
-        {#if supportsVision && allowVisionUpload}
+        {#if allowVisionUpload}
           <Badge
-            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg border-teal-400 bg-emerald-100 text-teal-900 text-xs normal-case"
-            ><ImageOutline size="md" />
+            class={supportsVision
+              ? 'flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg border-teal-400 bg-emerald-100 text-teal-900 text-xs normal-case'
+              : 'flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg border-gray-100 bg-gray-50 text-gray-600 text-xs normal-case'}
+            >{#if supportsVision}<ImageOutline size="sm" />{:else}<CloseOutline size="sm" />{/if}
             <div class="flex flex-col">
-              <div>Vision</div>
-              <div>capabilities</div>
-            </div></Badge
-          >
-        {:else if allowVisionUpload}
-          <Badge
-            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg border-gray-100 bg-gray-50 text-gray-600 text-xs normal-case"
-            ><CloseOutline size="md" />
-            <div class="flex flex-col">
-              <div>No Vision</div>
+              <div>{supportsVision ? 'Vision' : 'No Vision'}</div>
               <div>capabilities</div>
             </div></Badge
           >
