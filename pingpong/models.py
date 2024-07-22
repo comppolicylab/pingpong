@@ -704,8 +704,8 @@ class Class(Base):
 
     @property
     def realtime_canvas_status(self) -> schemas.CanvasStatus:
-        if not self._canvas_status == schemas.CanvasStatus.AUTHORIZED:
-            return self._canvas_status
+        if not self.canvas_status == schemas.CanvasStatus.AUTHORIZED:
+            return self.canvas_status
         if self.canvas_expires_at and self.canvas_expires_at > datetime.now(
             pytz.timezone("UTC")
         ):

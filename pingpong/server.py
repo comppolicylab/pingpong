@@ -725,7 +725,7 @@ async def get_canvas_classes(class_id: str, request: Request):
         raise HTTPException(status_code=400, detail="No Canvas access token for class")
     tok = class_.canvas_access_token
     if class_.realtime_canvas_status == schemas.CanvasStatus.EXPIRED:
-        tok = refresh_access_token(
+        tok = await refresh_access_token(
             request.state.db, int(class_id), class_.canvas_refresh_token
         )
     courses = get_courses(tok)
