@@ -288,11 +288,15 @@
     );
     const results = await Promise.all(deletePromises);
 
+    let errorMessage = '';
     results.forEach((result) => {
-      if (result.$status > 300) {
-        sadToast(`Warning: Couldn't delete a private file: ${result.detail}`);
+      if (result.$status >= 300) {
+        errorMessage += `Warning: Couldn't delete a private file: ${result.detail}\n`;
       }
     });
+    if (errorMessage) {
+      sadToast(errorMessage);
+    }
   };
 
   /**
@@ -308,19 +312,21 @@
 
     // Show loading message if there are more than 10 files attached
     if ($selectedFileSearchFiles.length + private_files.length >= 10 || private_files.length >= 5) {
-      $loadingMessage = 'Deleting assistant. This may take up to a minute.';
+      $loadingMessage = 'Deleting assistant. This may take a while.';
     }
     $loading = true;
 
     if (!data.assistantId) {
-      sadToast(`Error: Assistant ID not found.`);
+      await deletePrivateFiles($trashPrivateFileIds);
       $loadingMessage = '';
       $loading = false;
+      sadToast(`Error: Assistant ID not found.`);
       return;
     }
 
     const result = await api.deleteAssistant(fetch, data.class.id, data.assistantId);
-    if (result.$status > 300) {
+    if (result.$status >= 300) {
+      await deletePrivateFiles($trashPrivateFileIds);
       $loadingMessage = '';
       $loading = false;
       sadToast(`Error deleting assistant: ${JSON.stringify(result.detail, null, '  ')}`);

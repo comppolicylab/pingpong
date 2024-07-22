@@ -108,7 +108,7 @@ export class ThreadManager {
       data: expanded.data || null,
       error: expanded.error || null,
       limit: expanded.data?.limit || 20,
-      canFetchMore: expanded.data ? expanded.data.messages.length == expanded.data.limit : false,
+      canFetchMore: expanded.data ? expanded.data.messages.length === expanded.data.limit : false,
       supportsFileSearch: expanded.data?.thread?.tools_available?.includes('file_search') || false,
       supportsCodeInterpreter:
         expanded.data?.thread?.tools_available?.includes('code_interpreter') || false,
@@ -351,10 +351,10 @@ export class ThreadManager {
               .sort((a, b) => a.created_at - b.created_at)
               .filter((message) => {
                 return !(
-                  message.object == 'code_interpreter_call_placeholder' &&
+                  message.object === 'code_interpreter_call_placeholder' &&
                   message.metadata &&
                   message.metadata.step_id &&
-                  message.metadata.step_id == step_id
+                  message.metadata.step_id === step_id
                 );
               })
           },
@@ -533,7 +533,7 @@ export class ThreadManager {
         return d;
       }
 
-      if (lastMessage.data.role !== 'assistant' && call.type == 'code_interpreter') {
+      if (lastMessage.data.role !== 'assistant' && call.type === 'code_interpreter') {
         d.data?.messages.push({
           role: 'assistant',
           content: [],
