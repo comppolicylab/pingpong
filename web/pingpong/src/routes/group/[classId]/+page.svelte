@@ -82,6 +82,7 @@
     );
     supportsVision = supportVisionModels.includes(assistant.model);
   }
+  $: allowVisionUpload = !!data?.isSupervisor;
 
   // Handle file upload
   const handleUpload = (
@@ -271,7 +272,7 @@
           maxSize={data.uploadInfo.private_file_max_size}
           loading={$loading || !!$navigating}
           canSubmit={true}
-          visionAcceptedFiles={supportsVision
+          visionAcceptedFiles={supportsVision && allowVisionUpload
             ? data.uploadInfo.fileTypes({
                 file_search: false,
                 code_interpreter: false,

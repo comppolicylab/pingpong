@@ -66,10 +66,9 @@
    */
   export let codeInterpreterAcceptedFiles: string | null = null;
   /**
-   * Files to accept for code interpreter. If null, vision capabilities are disabled.
+   * Files to accept for Vision. If null, vision capabilities are disabled.
    */
   export let visionAcceptedFiles: string | null = null;
-  let allowVisionUpload = false;
   /**
    * Max upload size.
    */
@@ -373,7 +372,7 @@
       style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
     />
     <div class="flex flex-row gap-1.5">
-      {#if upload && visionAcceptedFiles && allowVisionUpload}
+      {#if upload && visionAcceptedFiles}
         <FileUpload
           {maxSize}
           accept={visionAcceptedFiles || ''}

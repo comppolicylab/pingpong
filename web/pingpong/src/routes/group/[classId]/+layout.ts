@@ -21,7 +21,12 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
     api.getClassFiles(fetch, classId).then(api.expandResponse),
     api.getClassUploadInfo(fetch, classId),
     api.grants(fetch, {
-      canManage: { target_type: 'class', target_id: classId, relation: 'supervisor' }
+      canManage: { target_type: 'class', target_id: classId, relation: 'supervisor' },
+      isSupervisor: {
+        target_type: 'class',
+        target_id: classId,
+        relation: 'supervisor'
+      }
     }),
     api.getModels(fetch, classId).then(api.expandResponse)
   ]);
@@ -48,6 +53,7 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
     files: filesResponse.data?.files || [],
     uploadInfo: uploadInfoResponse,
     canManage: grants.canManage,
+    isSupervisor: grants.isSupervisor,
     models
   };
 };

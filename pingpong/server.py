@@ -142,7 +142,7 @@ async def begin_authz_session(request: Request, call_next):
 @v1.middleware("http")
 async def begin_db_session(request: Request, call_next):
     """Create a database session for the request."""
-    async with config.db.driver.async_session() as db:
+    async with config.db.driver.async_session_with_args(pool_pre_ping=True)() as db:
         request.state.db = db
         try:
             result = await call_next(request)
