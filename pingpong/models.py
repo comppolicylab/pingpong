@@ -706,11 +706,13 @@ class Class(Base):
     def realtime_canvas_status(self) -> schemas.CanvasStatus:
         if not self._canvas_status == schemas.CanvasStatus.AUTHORIZED:
             return self._canvas_status
-        if self.canvas_expires_at and self.canvas_expires_at > datetime.now(pytz.timezone('UTC')):
+        if self.canvas_expires_at and self.canvas_expires_at > datetime.now(
+            pytz.timezone("UTC")
+        ):
             return schemas.CanvasStatus.AUTHORIZED
         else:
             return schemas.CanvasStatus.EXPIRED
-    
+
     @classmethod
     async def get_members(
         cls,

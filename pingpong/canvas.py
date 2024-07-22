@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import timedelta, datetime
 from typing import cast
 import requests
 
@@ -8,8 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import config
 from .now import NowFn, utcnow
-from .schemas import CanvasToken, CanvasClasses, CanvasClass
+from .schemas import CanvasToken, CanvasClass
 from .models import Class
+
 
 def encode_canvas_token(
     user_id: int, class_id: str, expiry: int = 600, nowfn: NowFn = utcnow
@@ -137,7 +138,7 @@ def canvas_request_access_token(
     return (response["access_token"], response["refresh_token"], exp.timestamp())
 
 
-def get_courses(access_token: str) -> CanvasClasses:
+def get_courses(access_token: str) -> list[CanvasClass]:
     result = requests.get(
         config.canvas_link("/api/v1/courses"),
         headers={"Authorization": f"Bearer {access_token}"},
@@ -146,7 +147,9 @@ def get_courses(access_token: str) -> CanvasClasses:
     return [CanvasClass.model_validate(course) for course in result.json()]
 
 
-async def refresh_access_token(session: AsyncSession, class_id: int, refresh_token: str) -> tuple[str, float]:
+async def refresh_access_token(
+    session: AsyncSession, class_id: int, refresh_token: str
+) -> tuple[str, float]:
     params = {
         "client_id": config.canvas_client_id,
         "client_secret": config.canvas_client_secret,
@@ -159,5 +162,11 @@ async def refresh_access_token(session: AsyncSession, class_id: int, refresh_tok
     now = utcnow()
     exp = now + timedelta(seconds=int(response["expires_in"]) - 60)
 
-    await Class.update_canvas_token(session, class_id, response["access_token"], refresh_token, exp.timestamp())
+    await Class.update_canvas_token(
+        session,
+        class_id,
+        response["access_token"],
+        refresh_token,
+        datetime.fromtimestamp(exp.timestamp()),
+    )
     return response["access_token"]

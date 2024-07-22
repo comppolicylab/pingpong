@@ -279,7 +279,10 @@
 
   let loadingCanvasClasses = false;
   let loadedCanvasClasses = writable<CanvasClass[]>([]);
-  $: canvasClasses = loadedCanvasClasses;
+  $: canvasClasses = $loadedCanvasClasses.map((c) => ({
+    value: c.id,
+    name: c.name
+  }));
 
   const loadCanvasClasses = async () => {
     loadingCanvasClasses = true;
@@ -502,26 +505,44 @@
             <div class="flex items-center gap-3">
               <CanvasLogo size="5" />
               <span class="text-lg font-medium"
-                >Almost there: select which Canvas class to sync</span
+                >Almost there: Select which Canvas class to sync</span
               >
             </div>
             <p class="mt-2 mb-4 text-sm">
               Your Canvas account is now tied to your PingPong group. Select which class you'd like
               to link with this PingPong group.
             </p>
-            <div class="flex gap-2">
-              <Button
-                pill
-                size="xs"
-                class="bg-orange text-white hover:bg-orange-dark"
-                on:click={loadCanvasClasses}
-                on:touchstart={loadCanvasClasses}
-              >
-                {#if loadingCanvasClasses}<Spinner
-                    color="white"
-                    class="w-4 h-4 me-2"
-                  />{:else}<LinkOutline class="w-4 h-4 me-2" />{/if}Load your classes</Button
-              >
+            <div class="flex gap-2 items-center">
+              {#if canvasClasses.length > 0}
+                <Select
+                  items={canvasClasses}
+                  name="canvas_course_id"
+                  placeholder="Select a class..."
+                  on:change={submitParentForm}
+                />
+                <Button
+                  pill
+                  size="xs"
+                  class="shrink-0 max-h-fit bg-orange text-white hover:bg-orange-dark"
+                  on:click={loadCanvasClasses}
+                  on:touchstart={loadCanvasClasses}
+                >
+                  Save</Button
+                >
+              {:else}
+                <Button
+                  pill
+                  size="xs"
+                  class="bg-orange text-white hover:bg-orange-dark"
+                  on:click={loadCanvasClasses}
+                  on:touchstart={loadCanvasClasses}
+                >
+                  {#if loadingCanvasClasses}<Spinner
+                      color="white"
+                      class="w-4 h-4 me-2"
+                    />{:else}<LinkOutline class="w-4 h-4 me-2" />{/if}Load your classes</Button
+                >
+              {/if}
             </div>
           </Alert>
         {/if}

@@ -402,6 +402,7 @@ class CanvasStatus(StrEnum):
     EXPIRED = auto()
     ERROR = auto()
 
+
 class CanvasClass(BaseModel):
     id: int
     name: str
@@ -410,11 +411,13 @@ class CanvasClass(BaseModel):
     class Config:
         from_attributes = True
 
+
 class CanvasClasses(BaseModel):
     classes: list[CanvasClass]
 
     class Config:
         from_attributes = True
+
 
 class Class(BaseModel):
     id: int

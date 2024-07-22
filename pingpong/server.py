@@ -713,10 +713,11 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
 
     return cls
 
+
 @v1.get(
     "/class/{class_id}/canvas_classes",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
-    response_model=schemas.CanvasClasses,    
+    response_model=schemas.CanvasClasses,
 )
 async def get_canvas_classes(class_id: str, request: Request):
     class_ = await models.Class.get_by_id(request.state.db, int(class_id))
@@ -724,9 +725,12 @@ async def get_canvas_classes(class_id: str, request: Request):
         raise HTTPException(status_code=400, detail="No Canvas access token for class")
     tok = class_.canvas_access_token
     if class_.canvas_expires_at < utcnow():
-        tok = refresh_access_token(request.state.db, int(class_id), class_.canvas_refresh_token)
+        tok = refresh_access_token(
+            request.state.db, int(class_id), class_.canvas_refresh_token
+        )
     courses = get_courses(tok)
     return {"classes": courses}
+
 
 @v1.get(
     "/class/{class_id}/users",
