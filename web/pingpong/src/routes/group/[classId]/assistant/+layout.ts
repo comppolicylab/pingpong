@@ -27,7 +27,7 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
         target_type: 'class',
         target_id: classId,
         relation: 'supervisor'
-      },
+      }
     }),
     api.grantsList(fetch, 'can_edit', 'assistant')
   ]);
