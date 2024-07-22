@@ -149,7 +149,7 @@ def get_courses(access_token: str) -> list[CanvasClass]:
 
 async def refresh_access_token(
     session: AsyncSession, class_id: int, refresh_token: str
-) -> tuple[str, float]:
+) -> str:
     params = {
         "client_id": config.canvas_client_id,
         "client_secret": config.canvas_client_secret,
