@@ -119,10 +119,12 @@ def generate_canvas_link(
     tok = encode_canvas_token(user_id, course_id, expiry=expiry, nowfn=nowfn)
     return canvas_auth_link(tok)
 
+
 def canvas_auth_link(token: str) -> str:
     return config.canvas_link(
         f"/login/oauth2/auth?client_id={config.canvas_client_id}&response_type=code&redirect_uri={config.url('/api/v1/auth/canvas')}&state={token}"
     )
+
 
 def canvas_request_access_token(
     code: str, nowfn: NowFn = utcnow
