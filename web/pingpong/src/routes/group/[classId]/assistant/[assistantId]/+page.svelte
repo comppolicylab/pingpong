@@ -19,7 +19,12 @@
   import { setsEqual } from '$lib/set';
   import { happyToast, sadToast } from '$lib/toast';
   import { normalizeNewlines } from '$lib/content.js';
-  import { ChevronDownOutline, CloseOutline, ImageOutline, ExclamationCircleOutline } from 'flowbite-svelte-icons';
+  import {
+    ChevronDownOutline,
+    CloseOutline,
+    ImageOutline,
+    ExclamationCircleOutline
+  } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
   import ModelOption from '$lib/components/ModelOption.svelte';
   import { writable, type Writable } from 'svelte/store';
