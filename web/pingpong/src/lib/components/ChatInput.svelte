@@ -32,6 +32,14 @@
    */
   export let disabled = false;
   /**
+   * Whether the user can reply in this thread.
+   */
+  export let canSubmit = false;
+  /**
+   * Whether the assistant associated with this thread has been deleted.
+   */
+  export let assistantDeleted = false;
+  /**
    * Whether we're waiting for an in-flight request.
    */
   export let loading = false;
@@ -58,10 +66,9 @@
    */
   export let codeInterpreterAcceptedFiles: string | null = null;
   /**
-   * Files to accept for code interpreter. If null, vision capabilities are disabled.
+   * Files to accept for Vision. If null, vision capabilities are disabled.
    */
   export let visionAcceptedFiles: string | null = null;
-  let allowVisionUpload = false;
   /**
    * Max upload size.
    */
@@ -348,7 +355,11 @@
       rows="1"
       name="message"
       class="w-full !outline-none focus:ring-0 resize-none border-none bg-transparent pt-[12px] pb-[10px] pl-2 sm:pl-6 pr-2 sm:pr-8"
-      placeholder="Ask me anything"
+      placeholder={canSubmit
+        ? 'Ask me anything'
+        : assistantDeleted
+          ? 'Read-only thread: the assistant associated with this thread is deleted'
+          : "You can't reply in this thread"}
       class:text-gray-700={disabled}
       class:animate-pulse={loading}
       disabled={loading || disabled}
@@ -361,7 +372,7 @@
       style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
     />
     <div class="flex flex-row gap-1.5">
-      {#if upload && visionAcceptedFiles && allowVisionUpload}
+      {#if upload && visionAcceptedFiles}
         <FileUpload
           {maxSize}
           accept={visionAcceptedFiles || ''}

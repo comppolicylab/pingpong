@@ -108,7 +108,7 @@
                   ? allUsersLen != otherUsersLen
                     ? `me${
                         otherUsersLen > 0
-                          ? otherUsersLen == 1
+                          ? otherUsersLen === 1
                             ? ' & Anonymous User'
                             : ' & ' + otherUsersLen + ' Anonymous Users'
                           : ''

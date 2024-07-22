@@ -72,6 +72,7 @@
   $: supportsCodeInterpreter = data.availableTools.includes('code_interpreter') || false;
   // TODO - should figure this out by checking grants instead of participants
   $: canSubmit = !!$participants.user && $participants.user.includes('Me');
+  $: assistantDeleted = !$assistantId && $assistantId === 0;
 
   // Get the name of the participant in the chat thread.
   const getName = (message: api.OpenAIMessage) => {
@@ -81,7 +82,8 @@
       }
       return (message?.metadata?.name as string | undefined) || 'Anonymous User';
     } else {
-      if ($assistantId) {
+      // Note that we need to distinguish between unknown and deleted assistants.
+      if ($assistantId !== null) {
         return $participants.assistant[$assistantId] || 'PingPong Bot';
       }
       return 'PingPong Bot';
@@ -255,7 +257,7 @@
         <div class="max-w-full w-full">
           <div class="font-semibold text-blue-dark-40 mb-2 mt-1">{getName(message.data)}</div>
           {#each message.data.content as content}
-            {#if content.type == 'text'}
+            {#if content.type === 'text'}
               <div class="leading-6">
                 <Markdown
                   content={parseTextContent(
@@ -264,7 +266,7 @@
                   )}
                 />
               </div>
-            {:else if content.type == 'code'}
+            {:else if content.type === 'code'}
               <div class="leading-6 w-full">
                 <Accordion flush>
                   <AccordionItem open>
@@ -278,7 +280,7 @@
                   </AccordionItem>
                 </Accordion>
               </div>
-            {:else if content.type == 'code_interpreter_call_placeholder'}
+            {:else if content.type === 'code_interpreter_call_placeholder'}
               <Card padding="md" class="max-w-full flex-row flex items-center justify-between">
                 <div class="flex-row flex items-center space-x-2">
                   <div><CodeSolid size="lg" /></div>
@@ -299,7 +301,7 @@
                   </Button>
                 </div></Card
               >
-            {:else if content.type == 'code_output_image_file'}
+            {:else if content.type === 'code_output_image_file'}
               <Accordion flush>
                 <AccordionItem>
                   <span slot="header"
@@ -319,7 +321,7 @@
                   </div>
                 </AccordionItem>
               </Accordion>
-            {:else if content.type == 'image_file'}
+            {:else if content.type === 'image_file'}
               <div class="leading-6 w-full">
                 <img
                   class="img-attachment m-auto"
@@ -381,7 +383,9 @@
                 vision: false
               })
             : null}
-          disabled={!canSubmit || !!$navigating}
+          {assistantDeleted}
+          canSubmit={canSubmit && !assistantDeleted}
+          disabled={!canSubmit || assistantDeleted || !!$navigating}
           loading={$submitting || $waiting}
           upload={handleUpload}
           remove={handleRemove}

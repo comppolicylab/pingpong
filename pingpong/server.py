@@ -21,7 +21,7 @@ from .animal_hash import process_threads, pseudonym, user_names
 from jwt.exceptions import PyJWTError
 from openai.types.beta.assistant_create_params import ToolResources
 from openai.types.beta.threads import MessageContentPartParam
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, delete, update
 
 import pingpong.metrics as metrics
 import pingpong.models as models
@@ -56,7 +56,8 @@ from .vector_stores import (
     create_vector_store,
     append_vector_store_files,
     sync_vector_store_files,
-    delete_vector_store,
+    delete_vector_store_db,
+    delete_vector_store_oai,
 )
 
 logger = logging.getLogger(__name__)
@@ -1167,12 +1168,15 @@ async def get_thread(
             messages.data[-1].created_at,
         )
 
-    thread.assistant_names = {assistant.id: assistant.name}
+    if assistant.id:
+        thread.assistant_names = {assistant.id: assistant.name}
+    else:
+        thread.assistant_names = {0: "Deleted Assistant"}
     thread.user_names = user_names(thread, request.state.session.user.id)
 
     return {
         "thread": thread,
-        "model": assistant.model,
+        "model": assistant.model if assistant.id else "None",
         "tools_available": thread.tools_available,
         "run": last_run[0] if last_run else None,
         "messages": list(messages.data),
@@ -1998,7 +2002,7 @@ async def update_assistant(
     openai_update: dict[str, Any] = {}
     # Update the assistant
     tool_resources: ToolResources = {}
-
+    vector_store_obj_id = None
     try:
         if (
             req.code_interpreter_file_ids is not None
@@ -2040,7 +2044,9 @@ async def update_assistant(
             if asst.vector_store_id:
                 id_to_delete = asst.vector_store_id
                 asst.vector_store_id = None
-                await delete_vector_store(request.state.db, openai_client, id_to_delete)
+                vector_store_obj_id = await delete_vector_store_db(
+                    request.state.db, id_to_delete
+                )
                 tool_resources["file_search"] = {}
     except Exception:
         raise HTTPException(
@@ -2087,6 +2093,17 @@ async def update_assistant(
         asst.instructions, use_latex=asst.use_latex
     )
 
+    # Delete vector store as late as possible to avoid orphaned assistant
+    if vector_store_obj_id:
+        await delete_vector_store_oai(openai_client, vector_store_obj_id)
+
+    try:
+        await openai_client.beta.assistants.update(
+            assistant_id=asst.assistant_id, **openai_update
+        )
+    except openai.BadRequestError as e:
+        raise HTTPException(400, e.message or "OpenAI rejected this request")
+
     try:
         # Delete any private files that were removed
         await asyncio.gather(
@@ -2100,15 +2117,7 @@ async def update_assistant(
     except Exception as e:
         raise HTTPException(500, f"Error removing private files: {e}")
 
-    try:
-        await openai_client.beta.assistants.update(
-            assistant_id=asst.assistant_id, **openai_update
-        )
-    except openai.BadRequestError as e:
-        raise HTTPException(400, e.message or "OpenAI rejected this request")
-
     await request.state.authz.write_safe(grant=grants, revoke=revokes)
-
     return asst
 
 
@@ -2118,12 +2127,59 @@ async def update_assistant(
     response_model=schemas.GenericStatus,
 )
 async def delete_assistant(
-    class_id: str, assistant_id: str, request: Request, openai_client: OpenAIClient
+    class_id: str,
+    assistant_id: str,
+    request: Request,
+    openai_client: OpenAIClient,
 ):
     asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
-    await asst.delete(request.state.db)
-    await openai_client.beta.assistants.delete(asst.assistant_id)
-    # TODO clean up grants
+
+    # Detach the vector store from the assistant and delete it
+    vector_store_obj_id = None
+    if asst.vector_store_id:
+        vector_store_id = asst.vector_store_id
+        asst.vector_store_id = None
+        # Keep the OAI vector store ID for deletion
+        vector_store_obj_id = await delete_vector_store_db(
+            request.state.db, vector_store_id
+        )
+
+    # Remove any CI files associations with the assistant
+    stmt = delete(models.code_interpreter_file_assistant_association).where(
+        models.code_interpreter_file_assistant_association.c.assistant_id
+        == int(asst.id)
+    )
+    await request.state.db.execute(stmt)
+
+    revokes = [
+        (f"class:{class_id}", "parent", f"assistant:{asst.id}"),
+        (f"user:{asst.creator_id}", "owner", f"assistant:{asst.id}"),
+    ]
+
+    if asst.published:
+        revokes.append(
+            (f"class:{class_id}#member", "can_view", f"assistant:{asst.id}"),
+        )
+
+    _stmt = (
+        update(models.Thread)
+        .where(models.Thread.assistant_id == int(asst.id))
+        .values(assistant_id=None, updated=models.Thread.updated)
+    )
+    await request.state.db.execute(_stmt)
+
+    # Keep the OAI assistant ID for deletion
+    assistant_id = asst.assistant_id
+    await models.Assistant.delete(request.state.db, asst.id)
+
+    # Delete vector store as late as possible to avoid orphaned assistant
+    if vector_store_obj_id:
+        await delete_vector_store_oai(openai_client, vector_store_obj_id)
+
+    await openai_client.beta.assistants.delete(assistant_id)
+
+    # clean up grants
+    await request.state.authz.write(revoke=revokes)
     return {"status": "ok"}
 
 
