@@ -2,14 +2,16 @@
   import {
     Helper,
     Button,
-    Select,
     Checkbox,
     Label,
     Input,
     Heading,
     Textarea,
     Modal,
-    type SelectOptionType
+    type SelectOptionType,
+    Dropdown,
+    DropdownItem,
+    Badge
   } from 'flowbite-svelte';
   import type { Tool, ServerFile, FileUploadInfo } from '$lib/api';
   import { beforeNavigate, goto } from '$app/navigation';
@@ -17,8 +19,14 @@
   import { setsEqual } from '$lib/set';
   import { happyToast, sadToast } from '$lib/toast';
   import { normalizeNewlines } from '$lib/content.js';
-  import { ImageOutline, ExclamationCircleOutline } from 'flowbite-svelte-icons';
+  import {
+    ChevronDownOutline,
+    CloseOutline,
+    ImageOutline,
+    ExclamationCircleOutline
+  } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
+  import ModelOption from '$lib/components/ModelOption.svelte';
   import { writable, type Writable } from 'svelte/store';
   import { loading, loadingMessage } from '$lib/stores/general';
   export let data;
@@ -78,20 +86,31 @@
   $: initialTools = (assistant?.tools ? (JSON.parse(assistant.tools) as Tool[]) : defaultTools).map(
     (t) => t.type
   );
+  $: modelNameDict = data.models.reduce<{ [key: string]: string }>((acc, model) => {
+    acc[model.id] = model.name + (model.is_latest ? ' (Latest)' : '');
+    return acc;
+  }, {});
   $: latestModelOptions = (data.models.filter((model) => model.is_latest) || []).map((model) => ({
     value: model.id,
-    name: model.id,
-    description: model.description
+    name: model.name,
+    description: model.description,
+    supports_vision: model.supports_vision,
+    is_new: model.is_new,
+    highlight: model.highlight
   }));
   let selectedModel = '';
   $: if (latestModelOptions.length > 0 && !selectedModel) {
     selectedModel = assistant?.model || latestModelOptions[0].value;
   }
+  $: selectedModelName = modelNameDict[selectedModel];
   $: versionedModelOptions = (data.models.filter((model) => !model.is_latest) || []).map(
     (model) => ({
       value: model.id,
-      name: model.id,
-      description: model.description
+      name: model.name,
+      description: model.description,
+      supports_vision: model.supports_vision,
+      is_new: model.is_new,
+      highlight: model.highlight
     })
   );
   $: supportVisionModels = (data.models.filter((model) => model.supports_vision) || []).map(
@@ -138,14 +157,21 @@
     $trashPrivateFileIds = [...$trashPrivateFileIds, ...files];
   };
 
+  let dropdownOpen = false;
   /**
    * Check if the assistant model supports vision capabilities.
    */
-  const updateSelectedModel = (event: Event) => {
-    event.preventDefault();
-    const target = event.target as HTMLInputElement;
-    selectedModel = target.value;
+  const updateSelectedModel = (modelValue: string) => {
+    dropdownOpen = false;
+    selectedModel = modelValue;
   };
+
+  let modelNodes: { [key: string]: HTMLElement } = {};
+  $: currentNode = modelNodes[selectedModel] || null;
+  $: if (currentNode) {
+    currentNode.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+  }
+
   /**
    * Determine if a specific field has changed in the form.
    */
@@ -270,7 +296,7 @@
       name: body.name.toString(),
       description: normalizeNewlines(body.description.toString()),
       instructions: normalizeNewlines(body.instructions.toString()),
-      model: body.model.toString(),
+      model: selectedModel,
       tools,
       code_interpreter_file_ids: codeInterpreterToolSelect ? $selectedCodeInterpreterFiles : [],
       file_search_file_ids: fileSearchToolSelect ? $selectedFileSearchFiles : [],
@@ -457,17 +483,7 @@
       <Input label="name" id="name" name="name" value={assistant?.name} />
     </div>
     <div class="mb-4">
-      <div class="flex flex-row gap-10 items-center">
-        <Label for="model">Model</Label>
-        {#if supportsVision && allowVisionUpload}
-          <div class="flex flex-row items-center">
-            <ImageOutline class="inline-block w-5 h-5 mr-1 text-emerald-700" /><Label
-              class="text-emerald-700"
-              for="model">Supports Vision capabilities</Label
-            >
-          </div>
-        {/if}
-      </div>
+      <Label for="model">Model</Label>
       <Helper class="pb-1"
         >Select the model to use for this assistant. You can update your model selection at any
         time. Latest Models will always point to the latest version of the model available. Select a
@@ -479,24 +495,77 @@
           class="underline">OpenAI's Documentation</a
         > for detailed descriptions of model capabilities.</Helper
       >
-      <Select
-        label="model"
-        id="model"
-        name="model"
-        value={assistant?.model || latestModelOptions[0].value}
-        on:change={updateSelectedModel}
-      >
-        <option value="latest" disabled={true}>Latest Models</option>
-        {#each latestModelOptions as { value, name, description }}
-          <option {value}>{name}: {description}</option>
-        {/each}
-        <hr />
-        <option value="pinned" disabled={true}>Pinned Version Models</option>
-        {#each versionedModelOptions as { value, name, description }}
-          <option {value}>{name}: {description}</option>
-        {/each}
-      </Select>
+      <div class="flex flex-row gap-2">
+        <button
+          id="model"
+          name="model"
+          class="flex flex-row grow justify-between items-center text-gray-900 bg-gray-50 border border-gray-300 rounded-lg focus:ring-primary-500 focus:border-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500 text-sm p-2.5"
+          type="button"
+        >
+          {selectedModelName}
+          <ChevronDownOutline class="w-6 h-6 ms-2" />
+        </button>
+        <Dropdown
+          containerClass="dropdown-container w-1/2 divide-y z-50 max-h-80 overflow-y-auto border border-gray-300"
+          placement="bottom-start"
+          bind:open={dropdownOpen}
+        >
+          <DropdownItem
+            disabled
+            defaultClass="font-normal py-2 px-4 text-sm border-b border-gray-400"
+            >Latest Models</DropdownItem
+          >
+          {#each latestModelOptions as { value, name, description, supports_vision, is_new, highlight }}
+            <div bind:this={modelNodes[value]}>
+              <ModelOption
+                {value}
+                {selectedModel}
+                {updateSelectedModel}
+                showRecommended={highlight}
+                showNew={is_new}
+                showVision={supports_vision && allowVisionUpload}
+                {name}
+                {description}
+              />
+            </div>
+          {/each}
+          <DropdownItem
+            disabled
+            defaultClass="font-normal py-2 px-4 text-sm border-y border-gray-400"
+            >Pinned Models</DropdownItem
+          >
+          {#each versionedModelOptions as { value, name, description, supports_vision, is_new, highlight }}
+            <div bind:this={modelNodes[value]}>
+              <ModelOption
+                {value}
+                {selectedModel}
+                {updateSelectedModel}
+                showRecommended={highlight}
+                showNew={is_new}
+                showVision={supports_vision && allowVisionUpload}
+                {name}
+                {description}
+                smallNameText={true}
+              />
+            </div>
+          {/each}
+        </Dropdown>
+
+        {#if allowVisionUpload}
+          <Badge
+            class={supportsVision
+              ? 'flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg border-teal-400 bg-emerald-100 text-teal-900 text-xs normal-case'
+              : 'flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg border-gray-100 bg-gray-50 text-gray-600 text-xs normal-case'}
+            >{#if supportsVision}<ImageOutline size="sm" />{:else}<CloseOutline size="sm" />{/if}
+            <div class="flex flex-col">
+              <div>{supportsVision ? 'Vision' : 'No Vision'}</div>
+              <div>capabilities</div>
+            </div></Badge
+          >
+        {/if}
+      </div>
     </div>
+
     <div class="col-span-2 mb-4">
       <Label for="description">Description</Label>
       <Helper class="pb-1"
