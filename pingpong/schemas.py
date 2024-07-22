@@ -396,6 +396,26 @@ class Institutions(BaseModel):
         from_attributes = True
 
 
+class CanvasStatus(StrEnum):
+    AUTHORIZED = auto()
+    NONE = auto()
+    EXPIRED = auto()
+    ERROR = auto()
+
+class CanvasClass(BaseModel):
+    id: int
+    name: str
+    course_code: str
+
+    class Config:
+        from_attributes = True
+
+class CanvasClasses(BaseModel):
+    classes: list[CanvasClass]
+
+    class Config:
+        from_attributes = True
+
 class Class(BaseModel):
     id: int
     name: str
@@ -406,6 +426,8 @@ class Class(BaseModel):
     updated: datetime | None
     api_key: SecretStr | None
     private: bool | None = None
+    canvas_course_id: int | None = None
+    canvas_status: CanvasStatus | None = None
     any_can_create_assistant: bool | None = None
     any_can_publish_assistant: bool | None = None
     any_can_publish_thread: bool | None = None
@@ -593,6 +615,19 @@ class AuthToken(BaseModel):
     sub: str
     exp: int
     iat: int
+
+
+class CanvasToken(BaseModel):
+    """Canvas Token - minimal token used to sync class with Canvas course."""
+
+    class_id: str
+    user_id: str
+    exp: int
+    iat: int
+
+
+class CanvasRedirect(BaseModel):
+    url: str
 
 
 class SessionToken(BaseModel):

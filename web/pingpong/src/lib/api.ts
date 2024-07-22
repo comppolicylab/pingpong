@@ -500,6 +500,8 @@ export const getInstitution = async (f: Fetcher, id: string) => {
   return await GET<never, Institution>(f, `institution/${id}`);
 };
 
+export type CanvasStatus = 'authorized' | 'none' | 'error';
+
 /**
  * Information about an individual class.
  */
@@ -513,6 +515,8 @@ export type Class = {
   updated: string | null;
   api_key: string | null;
   private: boolean | null;
+  canvas_course_id: number | null;
+  canvas_status: CanvasStatus | null;
   any_can_create_assistant: boolean | null;
   any_can_publish_assistant: boolean | null;
   any_can_publish_thread: boolean | null;
@@ -1710,6 +1714,33 @@ export const loginWithMagicLink = async (f: Fetcher, email: string) => {
     }
   }
   return response;
+};
+
+export type CanvasRedirect = {
+  url: string;
+};
+
+/**
+ * Request for state token for Canvas sync.
+ */
+export const getCanvasLink = async (f: Fetcher, classId: number) => {
+  const url = `class/${classId}/canvas_link`;
+  return await GET<never, CanvasRedirect>(f, url);
+};
+
+export type CanvasClasses = {
+  classes: CanvasClass[];
+};
+
+export type CanvasClass = {
+  id: number;
+  name: string;
+  course_code: string;
+};
+
+export const loadCanvasClasses = async (f: Fetcher, classId: number) => {
+  const url = `class/${classId}/canvas_classes`;
+  return await GET<never, CanvasClasses>(f, url);
 };
 
 /**

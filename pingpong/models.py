@@ -2,6 +2,7 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional
 
+import pytz
 from sqlalchemy import Boolean, Column, DateTime
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
@@ -681,6 +682,13 @@ class Class(Base):
     term = Column(String)
     api_key = Column(String, nullable=True)
     private = Column(Boolean, default=False)
+    canvas_status = Column(
+        SQLEnum(schemas.CanvasStatus), default=schemas.CanvasStatus.NONE
+    )
+    canvas_course_id = Column(Integer, nullable=True)
+    canvas_access_token = Column(String, nullable=True)
+    canvas_refresh_token = Column(String, nullable=True)
+    canvas_expires_at = Column(DateTime(timezone=True), nullable=True)
     any_can_create_assistant = Column(Boolean, default=False)
     any_can_publish_assistant = Column(Boolean, default=False)
     any_can_publish_thread = Column(Boolean, default=False)
@@ -694,6 +702,15 @@ class Class(Base):
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
+    @property
+    def realtime_canvas_status(self) -> schemas.CanvasStatus:
+        if not self._canvas_status == schemas.CanvasStatus.AUTHORIZED:
+            return self._canvas_status
+        if self.canvas_expires_at and self.canvas_expires_at > datetime.now(pytz.timezone('UTC')):
+            return schemas.CanvasStatus.AUTHORIZED
+        else:
+            return schemas.CanvasStatus.EXPIRED
+    
     @classmethod
     async def get_members(
         cls,
@@ -803,6 +820,27 @@ class Class(Base):
         )
         result = await session.execute(stmt)
         return [row.Class for row in result]
+
+    @classmethod
+    async def update_canvas_token(
+        cls,
+        session: AsyncSession,
+        class_id: int,
+        access_token: str,
+        refresh_token: str,
+        expires_at: datetime,
+    ) -> None:
+        stmt = (
+            update(Class)
+            .where(Class.id == class_id)
+            .values(
+                canvas_access_token=access_token,
+                canvas_refresh_token=refresh_token,
+                canvas_expires_at=expires_at,
+                canvas_status=schemas.CanvasStatus.AUTHORIZED,
+            )
+        )
+        await session.execute(stmt)
 
 
 class CodeInterpreterCall(Base):

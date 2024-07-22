@@ -3,7 +3,7 @@
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
   import * as api from '$lib/api';
-  import type { FileUploadInfo, ServerFile, CreateClassUsersRequest } from '$lib/api';
+  import type { FileUploadInfo, ServerFile, CreateClassUsersRequest, CanvasClass } from '$lib/api';
   import {
     Button,
     ButtonGroup,
@@ -15,7 +15,9 @@
     Label,
     Input,
     Select,
-    InputAddon
+    InputAddon,
+    Alert,
+    Spinner
   } from 'flowbite-svelte';
   import BulkAddUsers from '$lib/components/BulkAddUsers.svelte';
   import CanvasLogo from '$lib/components/CanvasLogo.svelte';
@@ -27,11 +29,13 @@
     PenOutline,
     CloudArrowUpOutline,
     EyeOutline,
-    EyeSlashOutline
+    EyeSlashOutline,
+    LinkOutline
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
   import { invalidateAll, onNavigate } from '$app/navigation';
+  import { browser } from '$app/environment';
   import { submitParentForm } from '$lib/form';
 
   /**
@@ -260,6 +264,36 @@
 
   const classId = data.class.id;
 
+  const redirectToCanvas = async () => {
+    const result = await api.getCanvasLink(fetch, data.class.id);
+    const response = api.expandResponse(result);
+    if (response.error) {
+      sadToast(response.error.detail || 'An unknown error occurred');
+    } else {
+      if (browser) {
+        window.location.href = response.data.url;
+        return { $status: 303, detail: 'Redirecting you to Canvas...' };
+      }
+    }
+  };
+
+  let loadingCanvasClasses = false;
+  let loadedCanvasClasses = writable<CanvasClass[]>([]);
+  $: canvasClasses = loadedCanvasClasses;
+
+  const loadCanvasClasses = async () => {
+    loadingCanvasClasses = true;
+    const result = await api.loadCanvasClasses(fetch, data.class.id);
+    const response = api.expandResponse(result);
+    if (response.error) {
+      loadingCanvasClasses = false;
+      sadToast(response.error.detail || 'An unknown error occurred');
+    } else {
+      $loadedCanvasClasses = response.data.classes;
+      loadingCanvasClasses = false;
+    }
+  };
+
   // Clean up state on navigation. Invalidate data so that any changes
   // are reflected in the rest of the app. (If performance suffers here,
   // we can be more selective about what we invalidate.)
@@ -441,6 +475,56 @@
         <Info>Manage users who have access to this group.</Info>
       </div>
       <div class="col-span-2">
+        {#if !data.class.canvas_status || data.class.canvas_status === 'none'}
+          <Alert color="none" class="bg-blue-light-50 text-blue-900">
+            <div class="flex items-center gap-3">
+              <CanvasLogo size="5" />
+              <span class="text-lg font-medium">Sync your group with Canvas</span>
+            </div>
+            <p class="mt-2 mb-4 text-sm">
+              If you're teaching a course at Harvard, connect your PingPong group with your Canvas
+              course to automatically sync your course roster with PingPong.
+            </p>
+            <div class="flex gap-2">
+              <Button
+                pill
+                size="xs"
+                class="bg-orange text-white hover:bg-orange-dark"
+                on:click={redirectToCanvas}
+                on:touchstart={redirectToCanvas}
+              >
+                <LinkOutline class="w-4 h-4 me-2" />Sync with Canvas</Button
+              >
+            </div>
+          </Alert>
+        {:else if data.class.canvas_status === 'authorized' || !data.class.canvas_course_id}
+          <Alert color="yellow">
+            <div class="flex items-center gap-3">
+              <CanvasLogo size="5" />
+              <span class="text-lg font-medium"
+                >Almost there: select which Canvas class to sync</span
+              >
+            </div>
+            <p class="mt-2 mb-4 text-sm">
+              Your Canvas account is now tied to your PingPong group. Select which class you'd like
+              to link with this PingPong group.
+            </p>
+            <div class="flex gap-2">
+              <Button
+                pill
+                size="xs"
+                class="bg-orange text-white hover:bg-orange-dark"
+                on:click={loadCanvasClasses}
+                on:touchstart={loadCanvasClasses}
+              >
+                {#if loadingCanvasClasses}<Spinner
+                    color="white"
+                    class="w-4 h-4 me-2"
+                  />{:else}<LinkOutline class="w-4 h-4 me-2" />{/if}Load your classes</Button
+              >
+            </div>
+          </Alert>
+        {/if}
         <div class="mb-4">
           <!-- Update the user view when we finish batch adding users. -->
           <!-- Uses a variable for times users have been bulk added -->
@@ -458,12 +542,6 @@
           on:touchstart={() => {
             usersModalOpen = true;
           }}>Invite new users</Button
-        >
-        <Button
-          pill outline
-          size="md"
-          class="bg-white border-red-600 text-red-600 hover:bg-red-600"
-          ><div class="flex flex-row items-center gap-2"><CanvasLogo size=4/>Invite new users</div></Button
         >
         {#if usersModalOpen}
           <Modal bind:open={usersModalOpen} title="Manage users">

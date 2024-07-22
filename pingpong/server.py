@@ -59,6 +59,13 @@ from .vector_stores import (
     delete_vector_store_db,
     delete_vector_store_oai,
 )
+from .canvas import (
+    generate_canvas_link,
+    decode_canvas_token,
+    canvas_request_access_token,
+    get_courses,
+    refresh_access_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -367,6 +374,55 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
     return {"status": "ok"}
 
 
+@v1.get(
+    "/class/{class_id}/canvas_link",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.CanvasRedirect,
+)
+async def get_canvas_link(class_id: str, request: Request):
+    return {"url": generate_canvas_link(request.state.session.user.id, class_id)}
+
+
+@v1.get("/auth/canvas")
+async def auth_canvas(request: Request):
+    """Canvas OAuth2 callback.
+
+    This endpoint is called by Canvas after the user has authenticated.
+    We exchange the code for an access token and then redirect to the
+    destination URL with the user's session token.
+    """
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    error = request.query_params.get("error")
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Missing code or state")
+
+    canvasToken = decode_canvas_token(state, nowfn=get_now_fn(request))
+    user_id = int(canvasToken.user_id)
+    class_id = int(canvasToken.class_id)
+
+    try:
+        access_token, refresh_token, expires_in = canvas_request_access_token(code)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400, detail="Failed to get access token: " + str(e)
+        )
+
+    # Save the access token to the database
+    await models.Class.update_canvas_token(
+        request.state.db,
+        class_id,
+        access_token,
+        refresh_token,
+        datetime.fromtimestamp(expires_in),
+    )
+    return redirect_with_session(
+        f"/group/{class_id}/manage", user_id, nowfn=get_now_fn(request)
+    )
+
+
 @v1.get("/auth")
 async def auth(request: Request):
     """Continue the auth flow based on a JWT in the query params.
@@ -657,6 +713,20 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
 
     return cls
 
+@v1.get(
+    "/class/{class_id}/canvas_classes",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.CanvasClasses,    
+)
+async def get_canvas_classes(class_id: str, request: Request):
+    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    if not class_.canvas_access_token:
+        raise HTTPException(status_code=400, detail="No Canvas access token for class")
+    tok = class_.canvas_access_token
+    if class_.canvas_expires_at < utcnow():
+        tok = refresh_access_token(request.state.db, int(class_id), class_.canvas_refresh_token)
+    courses = get_courses(tok)
+    return {"classes": courses}
 
 @v1.get(
     "/class/{class_id}/users",

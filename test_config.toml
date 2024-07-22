@@ -1,5 +1,8 @@
 log_level = "DEBUG"
 public_url = "http://localhost:5173"
+canvas_url = "http://canvas.docker"
+canvas_client_id = "10000000000001"
+canvas_client_secret = "7D7UREveNZrzfNxBGRvQyf4mh4P4JVT7Mxk8U6VJeDayEY6uXc9vC3khYHCHm9cE"
 development = true
 
 [db]

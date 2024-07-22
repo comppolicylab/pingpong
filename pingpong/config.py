@@ -209,6 +209,11 @@ class Config(BaseSettings):
 
     reload: int = Field(0)
     public_url: str = Field("http://localhost:8000")
+    canvas_url: str = Field("http://canvas.docker")
+    canvas_client_id: str = Field("10000000000001")
+    canvas_client_secret: str = Field(
+        "7D7UREveNZrzfNxBGRvQyf4mh4P4JVT7Mxk8U6VJeDayEY6uXc9vC3khYHCHm9cE"
+    )
 
     development: bool = Field(False, env="DEVELOPMENT")
     db: DbSettings
@@ -226,6 +231,15 @@ class Config(BaseSettings):
         if not path:
             return self.public_url
         return f"{self.public_url.rstrip('/')}/{path.lstrip('/')}"
+
+    def canvas_link(self, path: str) -> str:
+        """Return a URL relative to the Canvas URL."""
+        return f"{self.canvas_url.rstrip('/')}/{path.lstrip('/')}"
+
+    def canvas_auth_link(self, token: str) -> str:
+        return self.canvas_link(
+            f"/login/oauth2/auth?client_id={self.canvas_client_id}&response_type=code&redirect_uri={self.url('/api/v1/auth/canvas')}&state={token}"
+        )
 
 
 def _load_config() -> Config:
