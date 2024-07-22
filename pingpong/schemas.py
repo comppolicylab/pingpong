@@ -229,6 +229,11 @@ class UpdateAssistant(BaseModel):
     deleted_private_files: list[int] = []
 
 
+class DeleteAssistant(BaseModel):
+    has_code_interpreter_files: bool = False
+    private_files: list[int] = []
+
+
 class Assistants(BaseModel):
     assistants: list[Assistant]
     creators: dict[int, User]
@@ -243,7 +248,7 @@ class Thread(BaseModel):
     thread_id: str
     class_id: int
     assistant_names: dict[int, str] = {}
-    assistant_id: int
+    assistant_id: int | None = None
     private: bool
     tools_available: str | None
     user_names: list[str] = []

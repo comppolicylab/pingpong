@@ -12,3 +12,5 @@ export const appMenuOpen = writable(false);
  * consider using a fancier counter-based system instead.
  */
 export const loading = writable(false);
+
+export const loadingMessage = writable('');

@@ -591,7 +591,9 @@ class Assistant(Base):
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     @classmethod
-    async def get_by_id(cls, session: AsyncSession, id_: int) -> "Assistant":
+    async def get_by_id(cls, session: AsyncSession, id_: int | None) -> "Assistant":
+        if not id_:
+            return Assistant()
         stmt = select(Assistant).where(Assistant.id == int(id_))
         return await session.scalar(stmt)
 
@@ -658,6 +660,11 @@ class Assistant(Base):
 
         await session.refresh(assistant)
         return assistant
+
+    @classmethod
+    async def delete(cls, session: AsyncSession, id_: int) -> None:
+        stmt = delete(Assistant).where(Assistant.id == int(id_))
+        await session.execute(stmt)
 
 
 class Class(Base):
@@ -1032,7 +1039,7 @@ class Thread(Base):
 
         stmt = (
             select(Thread)
-            .join(Thread.assistant)
+            .outerjoin(Thread.assistant)
             .options(contains_eager(Thread.assistant).load_only(Assistant.name))
             .order_by(Thread.updated.desc())
             .where(condition)

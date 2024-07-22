@@ -126,6 +126,9 @@ async def sync_vector_store_files(
             await openai_client.beta.vector_stores.files.delete(
                 file_id, vector_store_id=vector_store_id
             )
+        # Don't raise an error if the file is already deleted
+        except openai.NotFoundError:
+            pass
         except openai.BadRequestError as e:
             raise HTTPException(400, e.message or "OpenAI rejected this request")
     return vector_store_id
@@ -142,14 +145,51 @@ async def delete_vector_store(
     Args:
         session (AsyncSession): SQLAlchemy session
         openai_client (openai.AsyncClient): OpenAI client
-        vector_store_object_id (int): DB PK of the vector store (note: we only have access to the DB PK in the assistant/thread's vector store id field, not the OpenAI API vector store id, so we need to query the OpenAI API to get the vector store id)
+        vector_store_object_id (int): DB PK of the vector store
+    """
+    vector_store_id = await delete_vector_store_db(session, vector_store_object_id)
+
+    await delete_vector_store_oai(openai_client, vector_store_id)
+
+
+async def delete_vector_store_db(
+    session: AsyncSession,
+    vector_store_object_id: int,
+) -> str:
+    """
+    Deletes the vector store from the DB with the given vector store object id (DB PK). This is used when an assistant is deleted, and we need to delete the vector store associated with them.
+
+    Args:
+        session (AsyncSession): SQLAlchemy session
+        openai_client (openai.AsyncClient): OpenAI client
+        vector_store_object_id (int): DB PK of the vector store
+
+    Returns:
+        str: vector store object id
     """
     vector_store_id = await models.VectorStore.get_vector_store_id_by_id(
         session, vector_store_object_id
     )
+
     await models.VectorStore.delete(session, vector_store_object_id)
 
+    return vector_store_id
+
+
+async def delete_vector_store_oai(
+    openai_client: openai.AsyncClient,
+    vector_store_id: str,
+) -> None:
+    """
+    Deletes the vector store from OpenAI's servers with the given vector store id (OpenAI API vector store id). This is used when an assistant is deleted, and we need to delete the vector store associated with them.
+
+    Args:
+        openai_client (openai.AsyncClient): OpenAI client
+        vector_store_id (str): OpenAI API vector store id
+    """
     try:
         await openai_client.beta.vector_stores.delete(vector_store_id)
+    except openai.NotFoundError:
+        pass
     except openai.BadRequestError as e:
         raise HTTPException(400, e.message or "OpenAI rejected this request")
