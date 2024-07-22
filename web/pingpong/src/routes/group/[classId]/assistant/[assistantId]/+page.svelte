@@ -160,19 +160,10 @@
     selectedModel = modelValue;
   };
 
-  function scrollIntoView(node: HTMLElement, scroll: boolean) {
-    function update(scroll: boolean) {
-      if (scroll) {
-        const dropdownContainer = node.closest('.dropdown-container') as HTMLElement;
-        if (dropdownContainer) {
-          const nodeTop = node.offsetTop;
-          dropdownContainer.scrollTop = nodeTop - dropdownContainer.offsetTop;
-        }
-      }
-    }
-
-    update(scroll);
-    return { update };
+  let modelNodes: { [key: string]: HTMLElement } = {};
+  $: currentNode = modelNodes[selectedModel] || null;
+  $: if (currentNode) {
+    currentNode.scrollIntoView({ behavior: 'instant', block: 'nearest' });
   }
 
   /**
@@ -429,7 +420,7 @@
             >Latest Models</DropdownItem
           >
           {#each latestModelOptions as { value, name, description, supports_vision, is_new, highlight }}
-            <div use:scrollIntoView={selectedModel == value}>
+            <div bind:this={modelNodes[value]}>
               <ModelOption
                 {value}
                 {selectedModel}
@@ -448,7 +439,7 @@
             >Pinned Models</DropdownItem
           >
           {#each versionedModelOptions as { value, name, description, supports_vision, is_new, highlight }}
-            <div use:scrollIntoView={selectedModel == value}>
+            <div bind:this={modelNodes[value]}>
               <ModelOption
                 {value}
                 {selectedModel}

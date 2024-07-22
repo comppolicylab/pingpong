@@ -10,6 +10,7 @@
   export let name: string;
   export let description: string;
   export let smallNameText: boolean = false;
+  let badgeStyles = 'flex flex-row items-center gap-x-1 py-0.5 px-2 border text-xs normal-case';
 </script>
 
 <DropdownItem
@@ -28,14 +29,10 @@
         >
       {/if}
       {#if showNew}
-        <Badge
-          class="flex flex-row items-center gap-x-1 py-0.5 px-2 border border-teal-400 bg-emerald-100 text-teal-900 text-xs normal-case"
-          >New</Badge
-        >
+        <Badge class="{badgeStyles} border-teal-400 bg-emerald-100 text-teal-900">New</Badge>
       {/if}
       {#if showVision}
-        <Badge
-          class="flex flex-row items-center gap-x-1 py-0.5 px-2 border border-gray-400 bg-gray-100 text-gray-900 text-xs normal-case"
+        <Badge class="{badgeStyles} border-gray-400 bg-gray-100 text-gray-900"
           ><ImageOutline size="sm" />Vision capabilities</Badge
         >
       {/if}
