@@ -1,15 +1,13 @@
-from datetime import timedelta, datetime
+from datetime import timedelta
 from typing import cast
-import requests
+import aiohttp
 
 import jwt
 from jwt.exceptions import PyJWTError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import config
 from .now import NowFn, utcnow
 from .schemas import CanvasToken, CanvasClass
-from .models import Class
 
 
 def encode_canvas_token(
@@ -126,9 +124,26 @@ def canvas_auth_link(token: str) -> str:
     )
 
 
-def canvas_request_access_token(
-    code: str, nowfn: NowFn = utcnow
-) -> tuple[str, str, float]:
+async def canvas_token_request(params=dict[str, str]) -> tuple[str, str, int, str]:
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            config.canvas_link("/login/oauth2/token"),
+            data=params,
+            raise_for_status=True,
+        ) as resp:
+            if resp.status == 200:
+                response = await resp.json()
+                return (
+                    response["access_token"],
+                    response.get("refresh_token", ""),
+                    int(response["expires_in"]),
+                    response.get("user", {}).get("name", ""),
+                )
+            else:
+                raise ValueError("Invalid response from Canvas")
+
+
+async def get_access_token(code: str) -> tuple[str, str, int, str]:
     params = {
         "client_id": config.canvas_client_id,
         "client_secret": config.canvas_client_secret,
@@ -136,43 +151,37 @@ def canvas_request_access_token(
         "code": code,
         "redirect_uri": config.url("/api/v1/auth/canvas"),
     }
-    result = requests.post(config.canvas_link("/login/oauth2/token"), data=params)
-    result.raise_for_status()
-    response = result.json()
-    now = nowfn()
-    exp = now + timedelta(seconds=int(response["expires_in"]) - 60)
-    return (response["access_token"], response["refresh_token"], exp.timestamp())
+    return await canvas_token_request(params)
 
 
-def get_courses(access_token: str) -> list[CanvasClass]:
-    result = requests.get(
-        config.canvas_link("/api/v1/courses"),
-        headers={"Authorization": f"Bearer {access_token}"},
-    )
-    result.raise_for_status()
-    return [CanvasClass.model_validate(course) for course in result.json()]
-
-
-async def refresh_access_token(
-    session: AsyncSession, class_id: int, refresh_token: str
-) -> str:
+async def refresh_access_token(refresh_token: str) -> tuple[str, str, int, str]:
     params = {
         "client_id": config.canvas_client_id,
         "client_secret": config.canvas_client_secret,
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
     }
-    result = requests.post(config.canvas_link("/login/oauth2/token"), data=params)
-    result.raise_for_status()
-    response = result.json()
-    now = utcnow()
-    exp = now + timedelta(seconds=int(response["expires_in"]) - 60)
+    return await canvas_token_request(params)
 
-    await Class.update_canvas_token(
-        session,
-        class_id,
-        response["access_token"],
-        refresh_token,
-        datetime.fromtimestamp(exp.timestamp()),
-    )
-    return response["access_token"]
+
+async def get_courses(access_token: str) -> list[CanvasClass]:
+    headers = {"Authorization": f"Bearer {access_token}"}
+    params = {"include[]": "term"}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            config.canvas_link("/api/v1/courses"),
+            data=params,
+            headers=headers,
+            raise_for_status=True,
+        ) as resp:
+            courses = [
+                {
+                    "id": course["id"],
+                    "name": course["name"],
+                    "course_code": course["course_code"],
+                    "term": course["term"]["name"],
+                }
+                for course in await resp.json()
+            ]
+
+            return [CanvasClass.model_validate(course) for course in courses]

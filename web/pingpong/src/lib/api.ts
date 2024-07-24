@@ -517,6 +517,7 @@ export type Class = {
   private: boolean | null;
   canvas_course_id: number | null;
   canvas_status: CanvasStatus | null;
+  canvas_user_name: string | null;
   any_can_create_assistant: boolean | null;
   any_can_publish_assistant: boolean | null;
   any_can_publish_thread: boolean | null;
@@ -1734,8 +1735,9 @@ export type CanvasClasses = {
 
 export type CanvasClass = {
   id: number;
-  name: string;
-  course_code: string;
+  name: string | null;
+  course_code: string | null;
+  term: string | null;
 };
 
 export const loadCanvasClasses = async (f: Fetcher, classId: number) => {

@@ -281,7 +281,7 @@
   let loadedCanvasClasses = writable<CanvasClass[]>([]);
   $: canvasClasses = $loadedCanvasClasses.map((c) => ({
     value: c.id,
-    name: c.name
+    name: `${c.course_code ? c.course_code + ": ": ''}${c.name || 'Unnamed class'} (${c.term || 'Unknown term'})`
   }));
 
   const loadCanvasClasses = async () => {
@@ -509,7 +509,7 @@
               >
             </div>
             <p class="mt-2 mb-4 text-sm">
-              Your Canvas account is now tied to your PingPong group. Select which class you'd like
+              {data.class.canvas_user_name ? data.class.canvas_user_name + '\'s': 'A'} Canvas account is now tied to your PingPong group. Select which class you'd like
               to link with this PingPong group.
             </p>
             <div class="flex gap-2 items-center">

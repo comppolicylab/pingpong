@@ -2,7 +2,6 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional
 
-import pytz
 from sqlalchemy import Boolean, Column, DateTime
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
@@ -685,10 +684,12 @@ class Class(Base):
     canvas_status = Column(
         SQLEnum(schemas.CanvasStatus), default=schemas.CanvasStatus.NONE
     )
+    canvas_user_name = Column(String, nullable=True)
     canvas_course_id = Column(Integer, nullable=True)
     canvas_access_token = Column(String, nullable=True)
     canvas_refresh_token = Column(String, nullable=True)
-    canvas_expires_at = Column(DateTime(timezone=True), nullable=True)
+    canvas_expires_in = Column(Integer, nullable=True)
+    canvas_token_added_at = Column(DateTime(timezone=True))
     any_can_create_assistant = Column(Boolean, default=False)
     any_can_publish_assistant = Column(Boolean, default=False)
     any_can_publish_thread = Column(Boolean, default=False)
@@ -701,17 +702,6 @@ class Class(Base):
     threads = relationship("Thread", back_populates="class_")
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
-
-    @property
-    def realtime_canvas_status(self) -> schemas.CanvasStatus:
-        if not self.canvas_status == schemas.CanvasStatus.AUTHORIZED:
-            return self.canvas_status
-        if self.canvas_expires_at and self.canvas_expires_at > datetime.now(
-            pytz.timezone("UTC")
-        ):
-            return schemas.CanvasStatus.AUTHORIZED
-        else:
-            return schemas.CanvasStatus.EXPIRED
 
     @classmethod
     async def get_members(
@@ -829,20 +819,42 @@ class Class(Base):
         session: AsyncSession,
         class_id: int,
         access_token: str,
-        refresh_token: str,
-        expires_at: datetime,
+        expires_in: int,
+        refresh_token: str | None = None,
+        user_name: str | None = None,
+        refresh: bool = False,
     ) -> None:
         stmt = (
             update(Class)
             .where(Class.id == class_id)
             .values(
                 canvas_access_token=access_token,
-                canvas_refresh_token=refresh_token,
-                canvas_expires_at=expires_at,
-                canvas_status=schemas.CanvasStatus.AUTHORIZED,
+                canvas_refresh_token=refresh_token
+                if not refresh
+                else Class.canvas_refresh_token,
+                canvas_user_name=user_name if not refresh else Class.canvas_user_name,
+                canvas_expires_in=expires_in,
+                canvas_status=schemas.CanvasStatus.AUTHORIZED
+                if not refresh
+                else Class.canvas_status,
+                canvas_token_added_at=func.now(),
             )
         )
         await session.execute(stmt)
+
+    @classmethod
+    async def get_canvas_token(
+        cls, session: AsyncSession, class_id: int
+    ) -> tuple[str, str, int, datetime, datetime]:
+        stmt = select(
+            Class.canvas_access_token,
+            Class.canvas_refresh_token,
+            Class.canvas_expires_in,
+            Class.canvas_token_added_at,
+            func.now().label("now"),
+        ).where(Class.id == class_id)
+        result = await session.execute(stmt)
+        return result.first()
 
 
 class CodeInterpreterCall(Base):

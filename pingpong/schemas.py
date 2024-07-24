@@ -396,10 +396,17 @@ class Institutions(BaseModel):
         from_attributes = True
 
 
+# Status documenting the state of the Canvas sync.
+# NONE: The user has not authorized the app to sync with Canvas.
+# AUTHORIZED: The user has authorized the app to sync with Canvas.
+# LINKED: The user has linked the Canvas course to the class.
+# DISMISSED: The user has dismissed the Canvas sync dialog.
+# ERROR: There was an error during the Canvas sync. The user should try again.
 class CanvasStatus(StrEnum):
-    AUTHORIZED = auto()
     NONE = auto()
-    EXPIRED = auto()
+    AUTHORIZED = auto()
+    LINKED = auto()
+    DISMISSED = auto()
     ERROR = auto()
 
 
@@ -407,6 +414,7 @@ class CanvasClass(BaseModel):
     id: int
     name: str
     course_code: str
+    term: str
 
     class Config:
         from_attributes = True
@@ -429,7 +437,7 @@ class Class(BaseModel):
     updated: datetime | None
     api_key: SecretStr | None
     private: bool | None = None
-    canvas_course_id: int | None = None
+    canvas_user_name: str | None = None
     canvas_status: CanvasStatus | None = None
     any_can_create_assistant: bool | None = None
     any_can_publish_assistant: bool | None = None

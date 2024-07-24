@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated, Any
 import jwt
 import openai
@@ -62,7 +62,7 @@ from .vector_stores import (
 from .canvas import (
     generate_canvas_link,
     decode_canvas_token,
-    canvas_request_access_token,
+    get_access_token,
     get_courses,
     refresh_access_token,
 )
@@ -404,7 +404,9 @@ async def auth_canvas(request: Request):
     class_id = int(canvasToken.class_id)
 
     try:
-        access_token, refresh_token, expires_in = canvas_request_access_token(code)
+        access_token, refresh_token, expires_in, user_name = await get_access_token(
+            code
+        )
     except Exception as e:
         raise HTTPException(
             status_code=400, detail="Failed to get access token: " + str(e)
@@ -415,8 +417,9 @@ async def auth_canvas(request: Request):
         request.state.db,
         class_id,
         access_token,
-        refresh_token,
-        datetime.fromtimestamp(expires_in),
+        expires_in,
+        refresh_token=refresh_token,
+        user_name=user_name,
     )
     return redirect_with_session(
         f"/group/{class_id}/manage", user_id, nowfn=get_now_fn(request)
@@ -720,15 +723,24 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
     response_model=schemas.CanvasClasses,
 )
 async def get_canvas_classes(class_id: str, request: Request):
-    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
-    if not class_.canvas_access_token:
+    (
+        canvas_access_token,
+        canvas_refresh_token,
+        canvas_expires_in,
+        canvas_token_added_at,
+        now,
+    ) = await models.Class.get_canvas_token(request.state.db, int(class_id))
+    if not now:
+        raise HTTPException(status_code=400, detail="Could not locate PingPong group")
+    if not canvas_access_token:
         raise HTTPException(status_code=400, detail="No Canvas access token for class")
-    tok = class_.canvas_access_token
-    if class_.realtime_canvas_status == schemas.CanvasStatus.EXPIRED:
-        tok = await refresh_access_token(
-            request.state.db, int(class_id), class_.canvas_refresh_token
+    tok = canvas_access_token
+    if not now < canvas_token_added_at + timedelta(seconds=canvas_expires_in - 3600):
+        tok, _, expires_in, _ = await refresh_access_token(canvas_refresh_token)
+        await models.Class.update_canvas_token(
+            request.state.db, int(class_id), tok, expires_in, refresh=True
         )
-    courses = get_courses(tok)
+    courses = await get_courses(tok)
     return {"classes": courses}
 
 
