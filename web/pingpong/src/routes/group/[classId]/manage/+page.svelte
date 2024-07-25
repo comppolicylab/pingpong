@@ -18,7 +18,9 @@
     InputAddon,
     Alert,
     Spinner,
-    CloseButton
+    CloseButton,
+    Dropdown,
+    DropdownItem
   } from 'flowbite-svelte';
   import BulkAddUsers from '$lib/components/BulkAddUsers.svelte';
   import CanvasLogo from '$lib/components/CanvasLogo.svelte';
@@ -31,7 +33,8 @@
     CloudArrowUpOutline,
     EyeOutline,
     EyeSlashOutline,
-    LinkOutline
+    LinkOutline,
+    ChevronDownOutline
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
@@ -39,6 +42,7 @@
   import { browser } from '$app/environment';
   import { submitParentForm } from '$lib/form';
   import { page } from '$app/stores';
+  import CanvasClassOption from '$lib/components/CanvasClassOption.svelte';
 
   /**
    * Application data.
@@ -316,13 +320,14 @@
     }
   };
   let loadingCanvasClasses = false;
+  let classSelectDropdownOpen = false;
   let loadedCanvasClasses = writable<CanvasClass[]>([]);
   $: canvasClasses = $loadedCanvasClasses.map((c) => ({
     value: c.id,
-    name: `${c.course_code ? c.course_code + ': ' : ''}${c.name || 'Unnamed class'} (${
-      c.term || 'Unknown term'
-    })`
-  }));
+    name: c.name || 'Unnamed class',
+    course_code: c.course_code || '',
+    term: c.term,
+  })).sort((a, b) => a.course_code.localeCompare(b.course_code));
 
   const loadCanvasClasses = async () => {
     loadingCanvasClasses = true;
@@ -561,12 +566,30 @@
             </p>
             <div class="flex gap-2 items-center">
               {#if canvasClasses.length > 0}
-                <Select
-                  items={canvasClasses}
-                  name="canvas_course_id"
-                  placeholder="Select a class..."
-                  on:change={submitParentForm}
-                />
+                <button
+                  id="model"
+                  name="model"
+                  class="flex flex-row grow justify-between items-center text-gray-900 bg-gray-50 border border-gray-300 rounded-lg focus:ring-primary-500 focus:border-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500 text-sm p-2.5"
+                  type="button"
+                >
+                  <span>Select a class...</span>
+                  <ChevronDownOutline class="w-6 h-6 ms-2" />
+                </button>
+                <Dropdown
+                  containerClass="dropdown-container divide-y z-50 max-h-80 overflow-y-auto border border-gray-300 w-1/2"
+                  placement="bottom-start"
+                  bind:open={classSelectDropdownOpen}
+                >
+                  {#each canvasClasses as class_}
+                    <CanvasClassOption
+                      value='{class_.value}'
+                      selectedClass='{data.class.canvas_course_id || ""}'
+                      course_code={class_.course_code}
+                      course_name={class_.name}
+                      term={class_.term}
+                    />
+                  {/each}
+                </Dropdown>
                 <Button
                   pill
                   size="xs"
@@ -596,9 +619,17 @@
           <Alert color="green">
             <div class="flex items-center gap-3">
               <CanvasLogo size="5" />
-              <span class="text-lg font-medium">*_OTHER_PERSON_AUTHORIZED_TITLE</span>
+              <span class="text-lg font-medium">Canvas setup already in process</span>
             </div>
-            <p class="mt-2 text-sm">*_OTHER_PERSON_AUTHORIZED_DESC</p>
+            <p class="mt-2 text-sm">
+              {data.class.canvas_user?.name || 'Someone in your course'} has linked their Canvas account
+              with this group. Once they have selected a course to sync with this group, PingPong will
+              automatically sync the course's roster.
+            </p>
+            <p class="mt-2 text-sm">
+              Need to link your own account? Ask them to disconnect their Canvas account from this
+              PingPong group.
+            </p>
           </Alert>
         {:else if data.class.canvas_status === 'linked' && data.class.canvas_user?.id && data.me.user?.id === data.class.canvas_user?.id}
           <Alert color="green">

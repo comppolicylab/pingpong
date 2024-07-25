@@ -779,12 +779,13 @@ async def get_canvas_classes(class_id: str, request: Request):
     if not canvas_access_token:
         raise HTTPException(status_code=400, detail="No Canvas access token for class")
     tok = canvas_access_token
-    if not now < canvas_token_added_at + timedelta(seconds=canvas_expires_in - 3600):
+    if not now < canvas_token_added_at + timedelta(seconds=canvas_expires_in - 3600 - 60):
         tok, _, expires_in = await refresh_access_token(canvas_refresh_token)
         await models.Class.update_canvas_token(
             request.state.db, int(class_id), tok, expires_in, refresh=True
         )
     courses = await get_courses(tok)
+    print(courses)
     return {"classes": courses}
 
 

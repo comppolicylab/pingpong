@@ -153,7 +153,7 @@ class User(Base):
         "Thread", secondary=user_thread_association, back_populates="users"
     )
     canvas_syncs: Mapped[List["Class"]] = relationship(
-        "Class", back_populates="canvas_user"
+        "Class", back_populates="canvas_user", lazy="selectin"
     )
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
@@ -790,6 +790,7 @@ class Class(Base):
         stmt = (
             select(Class)
             .options(joinedload(Class.institution))
+            .options(joinedload(Class.canvas_user))
             .where(Class.institution_id == int(institution_id))
         )
         result = await session.execute(stmt)
@@ -814,6 +815,7 @@ class Class(Base):
         stmt = (
             select(Class)
             .options(joinedload(Class.institution))
+            .options(joinedload(Class.canvas_user))
             .where(Class.id.in_(ids))
         )
         result = await session.execute(stmt)
