@@ -383,6 +383,26 @@ async def get_canvas_link(class_id: str, request: Request):
     return {"url": generate_canvas_link(request.state.session.user.id, class_id)}
 
 
+@v1.post(
+    "/class/{class_id}/dismiss_canvas_sync",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def dismiss_canvas_sync(class_id: str, request: Request):
+    await models.Class.dismiss_canvas_sync(request.state.db, int(class_id))
+    return {"status": "ok"}
+
+
+@v1.post(
+    "/class/{class_id}/enable_canvas_sync",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def enable_canvas_sync(class_id: str, request: Request):
+    await models.Class.enable_canvas_sync(request.state.db, int(class_id))
+    return {"status": "ok"}
+
+
 @v1.get("/auth/canvas")
 async def auth_canvas(request: Request):
     """Canvas OAuth2 callback.
@@ -395,21 +415,44 @@ async def auth_canvas(request: Request):
     state = request.query_params.get("state")
     error = request.query_params.get("error")
     if error:
-        raise HTTPException(status_code=400, detail=error)
+        canvasToken = decode_canvas_token(state, nowfn=get_now_fn(request))
+        class_id = int(canvasToken.class_id)
+        if (
+            error == "invalid_request"
+            or error == "unauthorized_client"
+            or error == "unsupported_response_type"
+            or error == "invalid_scope"
+        ):
+            return RedirectResponse(
+                config.url(f"/group/{class_id}/manage?error_code=1"),
+                status_code=303,
+            )
+        if error == "access_denied":
+            return RedirectResponse(
+                config.url(f"/group/{class_id}/manage?error_code=2"),
+                status_code=303,
+            )
+        if error == "server_error" or error == "temporarily_unavailable":
+            return RedirectResponse(
+                config.url(f"/group/{class_id}/manage?error_code=3"),
+                status_code=303,
+            )
     if not code or not state:
-        raise HTTPException(status_code=400, detail="Missing code or state")
+        return RedirectResponse(
+            config.url(f"/group/{class_id}/manage?error_code=4"),
+            status_code=303,
+        )
 
     canvasToken = decode_canvas_token(state, nowfn=get_now_fn(request))
     user_id = int(canvasToken.user_id)
     class_id = int(canvasToken.class_id)
 
     try:
-        access_token, refresh_token, expires_in, user_name = await get_access_token(
-            code
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=400, detail="Failed to get access token: " + str(e)
+        access_token, refresh_token, expires_in = await get_access_token(code)
+    except Exception:
+        return RedirectResponse(
+            config.url(f"/group/{class_id}/manage?error_code=5"),
+            status_code=303,
         )
 
     # Save the access token to the database
@@ -419,10 +462,11 @@ async def auth_canvas(request: Request):
         access_token,
         expires_in,
         refresh_token=refresh_token,
-        user_name=user_name,
+        user_id=user_id,
     )
-    return redirect_with_session(
-        f"/group/{class_id}/manage", user_id, nowfn=get_now_fn(request)
+    return RedirectResponse(
+        config.url(f"/group/{class_id}/manage"),
+        status_code=303,
     )
 
 
@@ -736,7 +780,7 @@ async def get_canvas_classes(class_id: str, request: Request):
         raise HTTPException(status_code=400, detail="No Canvas access token for class")
     tok = canvas_access_token
     if not now < canvas_token_added_at + timedelta(seconds=canvas_expires_in - 3600):
-        tok, _, expires_in, _ = await refresh_access_token(canvas_refresh_token)
+        tok, _, expires_in = await refresh_access_token(canvas_refresh_token)
         await models.Class.update_canvas_token(
             request.state.db, int(class_id), tok, expires_in, refresh=True
         )

@@ -17,7 +17,8 @@
     Select,
     InputAddon,
     Alert,
-    Spinner
+    Spinner,
+    CloseButton
   } from 'flowbite-svelte';
   import BulkAddUsers from '$lib/components/BulkAddUsers.svelte';
   import CanvasLogo from '$lib/components/CanvasLogo.svelte';
@@ -37,6 +38,7 @@
   import { invalidateAll, onNavigate } from '$app/navigation';
   import { browser } from '$app/environment';
   import { submitParentForm } from '$lib/form';
+  import { page } from '$app/stores';
 
   /**
    * Application data.
@@ -53,7 +55,26 @@
    */
   $: maxUploadSize = humanSize(data.uploadInfo.class_file_max_size);
 
+  const errorMessages: Record<number, string> = {
+    1: 'We faced an issue when trying to sync with Canvas.',
+    2: 'You denied the request for PingPong to access your Canvas account. Please try again.',
+    3: 'Canvas is currently unable to complete the authorization request. Please try again later.',
+    4: 'We received an invalid response from Canvas. Please try again.',
+    5: 'We were unable to complete the authorization request with Canvas. Please try again.'
+  };
+
+  // Function to get error message from error code
+  function getErrorMessage(errorCode: number) {
+    return errorMessages[errorCode] || 'An unknown error occured while trying to sync with Canvas.';
+  }
+
   onMount(() => {
+    const errorCode = $page.url.searchParams.get('error_code');
+    if (errorCode) {
+      const errorMessage = getErrorMessage(parseInt(errorCode) || 0);
+      sadToast(errorMessage);
+    }
+
     // Show an error if the form failed
     // TODO -- more universal way of showing validation errors
     if (!form || !form.$status) {
@@ -276,12 +297,31 @@
       }
     }
   };
-
+  const dismissCanvasSync = async () => {
+    const result = await api.dismissCanvasSync(fetch, data.class.id);
+    const response = api.expandResponse(result);
+    if (response.error) {
+      sadToast(response.error.detail || 'An unknown error occurred');
+    } else {
+      invalidateAll();
+    }
+  };
+  const enableCanvasSync = async () => {
+    const result = await api.bringBackCanvasSync(fetch, data.class.id);
+    const response = api.expandResponse(result);
+    if (response.error) {
+      sadToast(response.error.detail || 'An unknown error occurred');
+    } else {
+      invalidateAll();
+    }
+  };
   let loadingCanvasClasses = false;
   let loadedCanvasClasses = writable<CanvasClass[]>([]);
   $: canvasClasses = $loadedCanvasClasses.map((c) => ({
     value: c.id,
-    name: `${c.course_code ? c.course_code + ": ": ''}${c.name || 'Unnamed class'} (${c.term || 'Unknown term'})`
+    name: `${c.course_code ? c.course_code + ': ' : ''}${c.name || 'Unnamed class'} (${
+      c.term || 'Unknown term'
+    })`
   }));
 
   const loadCanvasClasses = async () => {
@@ -480,27 +520,34 @@
       <div class="col-span-2">
         {#if !data.class.canvas_status || data.class.canvas_status === 'none'}
           <Alert color="none" class="bg-blue-light-50 text-blue-900">
-            <div class="flex items-center gap-3">
-              <CanvasLogo size="5" />
-              <span class="text-lg font-medium">Sync your group with Canvas</span>
-            </div>
-            <p class="mt-2 mb-4 text-sm">
-              If you're teaching a course at Harvard, connect your PingPong group with your Canvas
-              course to automatically sync your course roster with PingPong.
-            </p>
-            <div class="flex gap-2">
-              <Button
-                pill
-                size="xs"
-                class="bg-orange text-white hover:bg-orange-dark"
-                on:click={redirectToCanvas}
-                on:touchstart={redirectToCanvas}
-              >
-                <LinkOutline class="w-4 h-4 me-2" />Sync with Canvas</Button
-              >
+            <div class="pl-1.5">
+              <div class="flex flex-row justify-between items-center">
+                <div class="flex items-center gap-3">
+                  <CanvasLogo size="5" />
+                  <span class="text-lg font-medium"
+                    >Sync your PingPong group's users with Canvas</span
+                  >
+                </div>
+                <CloseButton class="hover:bg-blue-200" on:click={dismissCanvasSync} />
+              </div>
+              <p class="mt-2 mb-4 text-sm">
+                If you're teaching a course at Harvard, link your PingPong group with your Canvas
+                course to automatically sync your course roster with PingPong.
+              </p>
+              <div class="flex gap-1">
+                <Button
+                  pill
+                  size="xs"
+                  class="bg-orange text-white hover:bg-orange-dark"
+                  on:click={redirectToCanvas}
+                  on:touchstart={redirectToCanvas}
+                >
+                  <LinkOutline class="w-4 h-4 me-2" />Sync with Canvas</Button
+                >
+              </div>
             </div>
           </Alert>
-        {:else if data.class.canvas_status === 'authorized' || !data.class.canvas_course_id}
+        {:else if data.class.canvas_status === 'authorized' && !data.class.canvas_course_id && data.class.canvas_user?.id && data.me.user?.id === data.class.canvas_user?.id}
           <Alert color="yellow">
             <div class="flex items-center gap-3">
               <CanvasLogo size="5" />
@@ -509,8 +556,8 @@
               >
             </div>
             <p class="mt-2 mb-4 text-sm">
-              {data.class.canvas_user_name ? data.class.canvas_user_name + '\'s': 'A'} Canvas account is now tied to your PingPong group. Select which class you'd like
-              to link with this PingPong group.
+              Your Canvas account is now connected to this PingPong group. Select which class you'd
+              like to link with this PingPong group.
             </p>
             <div class="flex gap-2 items-center">
               {#if canvasClasses.length > 0}
@@ -545,6 +592,41 @@
               {/if}
             </div>
           </Alert>
+        {:else if data.class.canvas_status === 'authorized' && !data.class.canvas_course_id}
+          <Alert color="green">
+            <div class="flex items-center gap-3">
+              <CanvasLogo size="5" />
+              <span class="text-lg font-medium">*_OTHER_PERSON_AUTHORIZED_TITLE</span>
+            </div>
+            <p class="mt-2 text-sm">*_OTHER_PERSON_AUTHORIZED_DESC</p>
+          </Alert>
+        {:else if data.class.canvas_status === 'linked' && data.class.canvas_user?.id && data.me.user?.id === data.class.canvas_user?.id}
+          <Alert color="green">
+            <div class="flex items-center gap-3">
+              <CanvasLogo size="5" />
+              <span class="text-lg font-medium">*_COURSE_LINKED_TITLE</span>
+            </div>
+            <p class="mt-2 text-sm">*_COURSE_LINKED_TITLE</p>
+            <div class="flex gap-2">
+              <Button
+                pill
+                size="xs"
+                class="bg-orange text-white hover:bg-orange-dark"
+                on:click={redirectToCanvas}
+                on:touchstart={redirectToCanvas}
+              >
+                <LinkOutline class="w-4 h-4 me-2" />*_COURSE_LINKED_SYNC_BUTTON</Button
+              >
+            </div>
+          </Alert>
+        {:else if data.class.canvas_status === 'linked'}
+          <Alert color="green">
+            <div class="flex items-center gap-3">
+              <CanvasLogo size="5" />
+              <span class="text-lg font-medium">*_OTHER_PERSON_LINKED_TITLE</span>
+            </div>
+            <p class="mt-2 text-sm">*_OTHER_PERSON_LINKED_DESC</p>
+          </Alert>
         {/if}
         <div class="mb-4">
           <!-- Update the user view when we finish batch adding users. -->
@@ -553,17 +635,31 @@
             <ViewUsers {fetchUsers} {classId} />
           {/key}
         </div>
-        <Button
-          pill
-          size="md"
-          class="bg-orange text-white hover:bg-orange-dark"
-          on:click={() => {
-            usersModalOpen = true;
-          }}
-          on:touchstart={() => {
-            usersModalOpen = true;
-          }}>Invite new users</Button
-        >
+        <div class="flex flex-row justify-between">
+          <Button
+            pill
+            size="md"
+            class="bg-orange text-white hover:bg-orange-dark"
+            on:click={() => {
+              usersModalOpen = true;
+            }}
+            on:touchstart={() => {
+              usersModalOpen = true;
+            }}>Invite new users</Button
+          >
+          {#if data.class.canvas_status === 'dismissed'}
+            <Button
+              pill
+              size="md"
+              class="bg-white border border-blue-dark-40 text-blue-dark-40 hover:bg-blue-light-50"
+              on:click={enableCanvasSync}
+              on:touchstart={enableCanvasSync}
+              ><div class="flex flex-row gap-2">
+                <CanvasLogo size="5" />Sync with Canvas
+              </div></Button
+            >
+          {/if}
+        </div>
         {#if usersModalOpen}
           <Modal bind:open={usersModalOpen} title="Manage users">
             <BulkAddUsers

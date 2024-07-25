@@ -152,6 +152,9 @@ class User(Base):
     threads = relationship(
         "Thread", secondary=user_thread_association, back_populates="users"
     )
+    canvas_syncs: Mapped[List["Class"]] = relationship(
+        "Class", back_populates="canvas_user"
+    )
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
@@ -684,12 +687,14 @@ class Class(Base):
     canvas_status = Column(
         SQLEnum(schemas.CanvasStatus), default=schemas.CanvasStatus.NONE
     )
-    canvas_user_name = Column(String, nullable=True)
+    canvas_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    canvas_user = relationship("User", back_populates="canvas_syncs")
     canvas_course_id = Column(Integer, nullable=True)
     canvas_access_token = Column(String, nullable=True)
     canvas_refresh_token = Column(String, nullable=True)
     canvas_expires_in = Column(Integer, nullable=True)
-    canvas_token_added_at = Column(DateTime(timezone=True))
+    canvas_token_added_at = Column(DateTime(timezone=True), nullable=True)
+    canvas_last_synced = Column(DateTime(timezone=True), nullable=True)
     any_can_create_assistant = Column(Boolean, default=False)
     any_can_publish_assistant = Column(Boolean, default=False)
     any_can_publish_thread = Column(Boolean, default=False)
@@ -795,6 +800,7 @@ class Class(Base):
         stmt = (
             select(Class)
             .options(joinedload(Class.institution))
+            .options(joinedload(Class.canvas_user))
             .where(Class.id == int(id_))
         )
         return await session.scalar(stmt)
@@ -821,7 +827,7 @@ class Class(Base):
         access_token: str,
         expires_in: int,
         refresh_token: str | None = None,
-        user_name: str | None = None,
+        user_id: int | None = None,
         refresh: bool = False,
     ) -> None:
         stmt = (
@@ -832,7 +838,7 @@ class Class(Base):
                 canvas_refresh_token=refresh_token
                 if not refresh
                 else Class.canvas_refresh_token,
-                canvas_user_name=user_name if not refresh else Class.canvas_user_name,
+                canvas_user_id=user_id if not refresh else Class.canvas_user_id,
                 canvas_expires_in=expires_in,
                 canvas_status=schemas.CanvasStatus.AUTHORIZED
                 if not refresh
@@ -855,6 +861,32 @@ class Class(Base):
         ).where(Class.id == class_id)
         result = await session.execute(stmt)
         return result.first()
+
+    @classmethod
+    async def dismiss_canvas_sync(cls, session: AsyncSession, class_id: int) -> None:
+        stmt = (
+            update(Class)
+            .where(Class.id == class_id)
+            .values(
+                canvas_status=schemas.CanvasStatus.DISMISSED,
+                canvas_course_id=None,
+                canvas_access_token=None,
+                canvas_refresh_token=None,
+                canvas_expires_in=None,
+                canvas_token_added_at=None,
+                canvas_last_synced=None,
+            )
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def enable_canvas_sync(cls, session: AsyncSession, class_id: int) -> None:
+        stmt = (
+            update(Class)
+            .where(Class.id == class_id)
+            .values(canvas_status=schemas.CanvasStatus.NONE)
+        )
+        await session.execute(stmt)
 
 
 class CodeInterpreterCall(Base):

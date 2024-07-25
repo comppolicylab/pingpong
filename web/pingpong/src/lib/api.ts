@@ -500,7 +500,7 @@ export const getInstitution = async (f: Fetcher, id: string) => {
   return await GET<never, Institution>(f, `institution/${id}`);
 };
 
-export type CanvasStatus = 'authorized' | 'none' | 'error';
+export type CanvasStatus = 'authorized' | 'none' | 'error' | 'linked' | 'dismissed';
 
 /**
  * Information about an individual class.
@@ -517,7 +517,7 @@ export type Class = {
   private: boolean | null;
   canvas_course_id: number | null;
   canvas_status: CanvasStatus | null;
-  canvas_user_name: string | null;
+  canvas_user: AppUser | null;
   any_can_create_assistant: boolean | null;
   any_can_publish_assistant: boolean | null;
   any_can_publish_thread: boolean | null;
@@ -1727,6 +1727,22 @@ export type CanvasRedirect = {
 export const getCanvasLink = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/canvas_link`;
   return await GET<never, CanvasRedirect>(f, url);
+};
+
+/**
+ * Dismiss Canvas Sync box.
+ */
+export const dismissCanvasSync = async (f: Fetcher, classId: number) => {
+  const url = `class/${classId}/dismiss_canvas_sync`;
+  return await POST<never, GenericStatus>(f, url);
+};
+
+/**
+ * Bring back Canvas Sunc box.
+ */
+export const bringBackCanvasSync = async (f: Fetcher, classId: number) => {
+  const url = `class/${classId}/enable_canvas_sync`;
+  return await POST<never, GenericStatus>(f, url);
 };
 
 export type CanvasClasses = {

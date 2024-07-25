@@ -427,6 +427,13 @@ class CanvasClasses(BaseModel):
         from_attributes = True
 
 
+class CanvasUser(BaseModel, UserNameMixin):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
 class Class(BaseModel):
     id: int
     name: str
@@ -437,7 +444,7 @@ class Class(BaseModel):
     updated: datetime | None
     api_key: SecretStr | None
     private: bool | None = None
-    canvas_user_name: str | None = None
+    canvas_user: CanvasUser | None = None
     canvas_status: CanvasStatus | None = None
     any_can_create_assistant: bool | None = None
     any_can_publish_assistant: bool | None = None

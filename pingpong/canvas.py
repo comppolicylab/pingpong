@@ -124,7 +124,7 @@ def canvas_auth_link(token: str) -> str:
     )
 
 
-async def canvas_token_request(params=dict[str, str]) -> tuple[str, str, int, str]:
+async def canvas_token_request(params=dict[str, str]) -> tuple[str, str, int]:
     async with aiohttp.ClientSession() as session:
         async with session.post(
             config.canvas_link("/login/oauth2/token"),
@@ -137,13 +137,12 @@ async def canvas_token_request(params=dict[str, str]) -> tuple[str, str, int, st
                     response["access_token"],
                     response.get("refresh_token", ""),
                     int(response["expires_in"]),
-                    response.get("user", {}).get("name", ""),
                 )
             else:
                 raise ValueError("Invalid response from Canvas")
 
 
-async def get_access_token(code: str) -> tuple[str, str, int, str]:
+async def get_access_token(code: str) -> tuple[str, str, int]:
     params = {
         "client_id": config.canvas_client_id,
         "client_secret": config.canvas_client_secret,
@@ -154,7 +153,7 @@ async def get_access_token(code: str) -> tuple[str, str, int, str]:
     return await canvas_token_request(params)
 
 
-async def refresh_access_token(refresh_token: str) -> tuple[str, str, int, str]:
+async def refresh_access_token(refresh_token: str) -> tuple[str, str, int]:
     params = {
         "client_id": config.canvas_client_id,
         "client_secret": config.canvas_client_secret,
