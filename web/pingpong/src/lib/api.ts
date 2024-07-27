@@ -620,6 +620,15 @@ export type AssistantModel = {
   supports_vision: boolean;
 };
 
+export type AssistantModelOptions = {
+  value: string;
+  name: string;
+  description: string;
+  supports_vision: boolean;
+  is_new: boolean;
+  highlight: boolean;
+};
+
 /**
  * List of language models.
  */

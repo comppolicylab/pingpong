@@ -23,12 +23,14 @@
     ChevronDownOutline,
     CloseOutline,
     ImageOutline,
-    ExclamationCircleOutline
+    ExclamationCircleOutline,
+    QuestionCircleSolid,
+    ArrowUpRightFromSquareOutline,
   } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
-  import ModelOption from '$lib/components/ModelOption.svelte';
   import { writable, type Writable } from 'svelte/store';
   import { loading, loadingMessage } from '$lib/stores/general';
+  import ModelDropdownOptions from '$lib/components/ModelDropdownOptions.svelte';
   export let data;
 
   // Flag indicating whether we should check for changes before navigating away.
@@ -87,7 +89,7 @@
     (t) => t.type
   );
   $: modelNameDict = data.models.reduce<{ [key: string]: string }>((acc, model) => {
-    acc[model.id] = model.name + (model.is_latest ? ' (Latest)' : '');
+    acc[model.id] = model.name + (model.is_latest ? ' (Latest)' : ' (Pinned Version)');
     return acc;
   }, {});
   $: latestModelOptions = (data.models.filter((model) => model.is_latest) || []).map((model) => ({
@@ -506,56 +508,71 @@
           <ChevronDownOutline class="w-6 h-6 ms-2" />
         </button>
         <Dropdown
-          containerClass="dropdown-container w-1/2 divide-y z-50 max-h-80 overflow-y-auto border border-gray-300"
+          class="py-0 rounded-lg"
+          containerClass="dropdown-container w-1/2 border border-gray-300 flex flex-col"
           placement="bottom-start"
           bind:open={dropdownOpen}
         >
-          <DropdownItem
-            disabled
-            defaultClass="font-normal py-2 px-4 text-sm border-b border-gray-400"
-            >Latest Models</DropdownItem
-          >
-          {#each latestModelOptions as { value, name, description, supports_vision, is_new, highlight }}
-            <div bind:this={modelNodes[value]}>
-              <ModelOption
-                {value}
-                {selectedModel}
-                {updateSelectedModel}
-                showRecommended={highlight}
-                showNew={is_new}
-                showVision={supports_vision && allowVisionUpload}
-                {name}
-                {description}
-              />
+          <div class="relative max-h-80">
+            <div
+              class="overflow-y-auto overscroll-contain rounded-t-lg flex-grow max-h-80 relative"
+            >
+              <div
+                class="sticky top-0 z-10 bg-gradient-to-r from-orange-dark to-orange drop-shadow-md"
+              >
+                <div
+                  class="absolute inset-x-0 -top-96 h-96 bg-gradient-to-r from-orange-dark to-orange"
+                ></div>
+                <DropdownItem disabled defaultClass="font-normal py-2 px-4 text-sm text-white"
+                  >Latest Models</DropdownItem
+                >
+              </div>
+              <div class="relative z-0">
+                <ModelDropdownOptions
+                  modelOptions={latestModelOptions}
+                  selectedModel={selectedModel}
+                  updateSelectedModel={updateSelectedModel}
+                  allowVisionUpload={allowVisionUpload}
+                  bind:modelNodes={modelNodes}
+                />
+              </div>
+              <div
+                class="sticky top-0 z-10 bg-gradient-to-r from-blue-dark-40 to-blue-dark-30 drop-shadow-md"
+              >
+                <DropdownItem disabled defaultClass="font-normal py-2 px-4 text-sm text-white"
+                  >Pinned Models (advanced)</DropdownItem
+                >
+              </div>
+              <ModelDropdownOptions
+                  modelOptions={versionedModelOptions}
+                  selectedModel={selectedModel}
+                  updateSelectedModel={updateSelectedModel}
+                  allowVisionUpload={allowVisionUpload}
+                  bind:modelNodes={modelNodes}
+                  smallNameText
+                />
             </div>
-          {/each}
-          <DropdownItem
-            disabled
-            defaultClass="font-normal py-2 px-4 text-sm border-y border-gray-400"
-            >Pinned Models</DropdownItem
+          </div>
+          <a
+            href="https://platform.openai.com/docs/models/models-overview"
+            rel="noopener noreferrer"
+            target="_blank"
+            ><DropdownItem
+              class="bg-gradient-to-r from-gray-800 to-gray-600 text-white hover:from-gray-900 hover:to-gray-700 border-t rounded-b-lg"
+              ><div class="flex flex-row justify-between">
+                <div class="flex flex-row gap-2">
+                  <QuestionCircleSolid /> Unsure which model to choose? Check out OpenAI's documentation
+                </div>
+                <ArrowUpRightFromSquareOutline />
+              </div></DropdownItem
+            ></a
           >
-          {#each versionedModelOptions as { value, name, description, supports_vision, is_new, highlight }}
-            <div bind:this={modelNodes[value]}>
-              <ModelOption
-                {value}
-                {selectedModel}
-                {updateSelectedModel}
-                showRecommended={highlight}
-                showNew={is_new}
-                showVision={supports_vision && allowVisionUpload}
-                {name}
-                {description}
-                smallNameText={true}
-              />
-            </div>
-          {/each}
         </Dropdown>
-
         {#if allowVisionUpload}
           <Badge
-            class={supportsVision
-              ? 'flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg border-teal-400 bg-emerald-100 text-teal-900 text-xs normal-case'
-              : 'flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg border-gray-100 bg-gray-50 text-gray-600 text-xs normal-case'}
+            class='flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case {supportsVision
+              ? 'bg-gradient-to-b border-green-400 from-emerald-100 to-emerald-200 text-green-800'
+              : 'border-gray-100 bg-gray-50 text-gray-600'}'
             >{#if supportsVision}<ImageOutline size="sm" />{:else}<CloseOutline size="sm" />{/if}
             <div class="flex flex-col">
               <div>{supportsVision ? 'Vision' : 'No Vision'}</div>
