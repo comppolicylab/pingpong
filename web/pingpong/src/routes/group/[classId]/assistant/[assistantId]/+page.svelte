@@ -25,7 +25,7 @@
     ImageOutline,
     ExclamationCircleOutline,
     QuestionCircleSolid,
-    ArrowUpRightFromSquareOutline,
+    ArrowUpRightFromSquareOutline
   } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
   import { writable, type Writable } from 'svelte/store';
@@ -530,10 +530,10 @@
               <div class="relative z-0">
                 <ModelDropdownOptions
                   modelOptions={latestModelOptions}
-                  selectedModel={selectedModel}
-                  updateSelectedModel={updateSelectedModel}
-                  allowVisionUpload={allowVisionUpload}
-                  bind:modelNodes={modelNodes}
+                  {selectedModel}
+                  {updateSelectedModel}
+                  {allowVisionUpload}
+                  bind:modelNodes
                 />
               </div>
               <div
@@ -544,13 +544,13 @@
                 >
               </div>
               <ModelDropdownOptions
-                  modelOptions={versionedModelOptions}
-                  selectedModel={selectedModel}
-                  updateSelectedModel={updateSelectedModel}
-                  allowVisionUpload={allowVisionUpload}
-                  bind:modelNodes={modelNodes}
-                  smallNameText
-                />
+                modelOptions={versionedModelOptions}
+                {selectedModel}
+                {updateSelectedModel}
+                {allowVisionUpload}
+                bind:modelNodes
+                smallNameText
+              />
             </div>
           </div>
           <a
@@ -570,9 +570,9 @@
         </Dropdown>
         {#if allowVisionUpload}
           <Badge
-            class='flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case {supportsVision
+            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case {supportsVision
               ? 'bg-gradient-to-b border-green-400 from-emerald-100 to-emerald-200 text-green-800'
-              : 'border-gray-100 bg-gray-50 text-gray-600'}'
+              : 'border-gray-100 bg-gray-50 text-gray-600'}"
             >{#if supportsVision}<ImageOutline size="sm" />{:else}<CloseOutline size="sm" />{/if}
             <div class="flex flex-col">
               <div>{supportsVision ? 'Vision' : 'No Vision'}</div>

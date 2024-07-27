@@ -4,7 +4,7 @@
   import DropdownBadge from './DropdownBadge.svelte';
   import DropdownOption from './DropdownOption.svelte';
   export let modelOptions: AssistantModelOptions[];
-  export let modelNodes: { [key: string]: HTMLElement; };
+  export let modelNodes: { [key: string]: HTMLElement };
   export let selectedModel: string;
   export let updateSelectedModel: (model: string) => void;
   export let allowVisionUpload: boolean;
@@ -19,7 +19,7 @@
       subtitle={description}
       selectedValue={selectedModel}
       update={updateSelectedModel}
-      smallNameText={smallNameText}
+      {smallNameText}
     >
       {#if highlight}
         <DropdownBadge extraClasses="border-amber-400 from-amber-100 to-amber-50 text-amber-700"
