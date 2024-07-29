@@ -373,36 +373,6 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
 
     return {"status": "ok"}
 
-
-@v1.get(
-    "/class/{class_id}/canvas_link",
-    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
-    response_model=schemas.CanvasRedirect,
-)
-async def get_canvas_link(class_id: str, request: Request):
-    return {"url": generate_canvas_link(request.state.session.user.id, class_id)}
-
-
-@v1.post(
-    "/class/{class_id}/dismiss_canvas_sync",
-    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
-    response_model=schemas.GenericStatus,
-)
-async def dismiss_canvas_sync(class_id: str, request: Request):
-    await models.Class.dismiss_canvas_sync(request.state.db, int(class_id))
-    return {"status": "ok"}
-
-
-@v1.post(
-    "/class/{class_id}/enable_canvas_sync",
-    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
-    response_model=schemas.GenericStatus,
-)
-async def enable_canvas_sync(class_id: str, request: Request):
-    await models.Class.enable_canvas_sync(request.state.db, int(class_id))
-    return {"status": "ok"}
-
-
 @v1.get("/auth/canvas")
 async def auth_canvas(request: Request):
     """Canvas OAuth2 callback.
@@ -762,12 +732,42 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
 
 
 @v1.get(
+    "/class/{class_id}/canvas_link",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.CanvasRedirect,
+)
+async def get_canvas_link(class_id: str, request: Request):
+    return {"url": generate_canvas_link(request.state.session.user.id, class_id)}
+
+
+@v1.post(
+    "/class/{class_id}/dismiss_canvas_sync",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def dismiss_canvas_sync(class_id: str, request: Request):
+    await models.Class.dismiss_canvas_sync(request.state.db, int(class_id))
+    return {"status": "ok"}
+
+
+@v1.post(
+    "/class/{class_id}/enable_canvas_sync",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def enable_canvas_sync(class_id: str, request: Request):
+    await models.Class.enable_canvas_sync(request.state.db, int(class_id))
+    return {"status": "ok"}
+
+
+@v1.get(
     "/class/{class_id}/canvas_classes",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.CanvasClasses,
 )
 async def get_canvas_classes(class_id: str, request: Request):
     (
+        _,  # user_id
         canvas_access_token,
         canvas_refresh_token,
         canvas_expires_in,
@@ -780,7 +780,7 @@ async def get_canvas_classes(class_id: str, request: Request):
         raise HTTPException(status_code=400, detail="No Canvas access token for class")
     tok = canvas_access_token
     if not now < canvas_token_added_at + timedelta(
-        seconds=canvas_expires_in - 3600 - 60
+        seconds=canvas_expires_in + 3600 - 60
     ):
         tok, _, expires_in = await refresh_access_token(canvas_refresh_token)
         await models.Class.update_canvas_token(
@@ -789,6 +789,32 @@ async def get_canvas_classes(class_id: str, request: Request):
     courses = await get_courses(tok)
     return {"classes": courses}
 
+# @v1.post(
+#     "/class/{class_id}/canvas_class/{canvas_class_id}",
+#     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+#     response_model=schemas.GenericStatus,
+# )
+# async def set_canvas_class(
+#     class_id: str, canvas_class_id: str, request: Request
+# ):
+#     class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+#     if not class_:
+#         raise HTTPException(status_code=404, detail="Class not found")
+    
+#     if class_.canvas_user_id != request.state.session.user.id:
+#         raise HTTPException(status_code=403, detail="Not authorized to set Canvas class")
+    
+#     if not now < canvas_token_added_at + timedelta(
+#         seconds=canvas_expires_in - 3600 - 60
+#     ):
+#         tok, _, expires_in = await refresh_access_token(canvas_refresh_token)
+#         await models.Class.update_canvas_token(
+#             request.state.db, int(class_id), tok, expires_in, refresh=True
+#         )
+#     await models.Class.set_canvas_class(
+#         request.state.db, int(class_id), canvas_class_id
+#     )
+#     return {"status": "ok"}
 
 @v1.get(
     "/class/{class_id}/users",

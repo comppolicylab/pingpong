@@ -853,8 +853,9 @@ class Class(Base):
     @classmethod
     async def get_canvas_token(
         cls, session: AsyncSession, class_id: int
-    ) -> tuple[str, str, int, datetime, datetime]:
+    ) -> tuple[int, str, str, int, datetime, datetime]:
         stmt = select(
+            Class.canvas_user_id,
             Class.canvas_access_token,
             Class.canvas_refresh_token,
             Class.canvas_expires_in,

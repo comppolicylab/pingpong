@@ -166,21 +166,38 @@ async def refresh_access_token(refresh_token: str) -> tuple[str, str, int]:
 async def get_courses(access_token: str) -> list[CanvasClass]:
     headers = {"Authorization": f"Bearer {access_token}"}
     params = {"include[]": "term"}
+    courses = []
     async with aiohttp.ClientSession() as session:
-        async with session.get(
-            config.canvas_link("/api/v1/courses"),
-            data=params,
-            headers=headers,
-            raise_for_status=True,
-        ) as resp:
-            courses = [
-                {
-                    "id": course["id"],
-                    "name": course["name"],
-                    "course_code": course["course_code"],
-                    "term": course["term"]["name"],
-                }
-                for course in await resp.json()
-            ]
+        next_url = config.canvas_link("/api/v1/courses")
 
-            return [CanvasClass.model_validate(course) for course in courses]
+        while next_url:
+            async with session.get(
+                next_url,
+                params=params,
+                headers=headers,
+                raise_for_status=True,
+            ) as resp:
+                data = await resp.json()
+                courses.extend(
+                    [
+                        {
+                            "id": course["id"],
+                            "name": course["name"],
+                            "course_code": course["course_code"],
+                            "term": course["term"]["name"],
+                        }
+                        for course in data
+                    ]
+                )
+
+                # Check for the next page link
+                next_url = ""
+                link_header = resp.headers.get("Link")
+                if link_header:
+                    links = link_header.split(",")
+                    for link in links:
+                        if 'rel="next"' in link:
+                            next_url = link[link.find("<") + 1 : link.find(">")]
+                            break
+
+    return [CanvasClass.model_validate(course) for course in courses]
