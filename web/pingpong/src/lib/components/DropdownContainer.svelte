@@ -17,7 +17,7 @@
 
 <Dropdown
   class="py-0 rounded-lg"
-  containerClass="dropdown-container w-1/2 border border-gray-300 flex flex-col"
+  containerClass="dropdown-container w-1/2 border border-gray-300 flex flex-col z-10"
   placement="bottom-start"
   bind:open={dropdownOpen}
 >
