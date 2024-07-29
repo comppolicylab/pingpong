@@ -9,8 +9,6 @@
     Textarea,
     Modal,
     type SelectOptionType,
-    Dropdown,
-    DropdownItem,
     Badge
   } from 'flowbite-svelte';
   import type { Tool, ServerFile, FileUploadInfo } from '$lib/api';
@@ -20,7 +18,6 @@
   import { happyToast, sadToast } from '$lib/toast';
   import { normalizeNewlines } from '$lib/content.js';
   import {
-    ChevronDownOutline,
     CloseOutline,
     ImageOutline,
     ExclamationCircleOutline,
@@ -31,6 +28,9 @@
   import { writable, type Writable } from 'svelte/store';
   import { loading, loadingMessage } from '$lib/stores/general';
   import ModelDropdownOptions from '$lib/components/ModelDropdownOptions.svelte';
+  import DropdownContainer from '$lib/components/DropdownContainer.svelte';
+  import DropdownHeader from '$lib/components/DropdownHeader.svelte';
+  import DropdownFooter from '$lib/components/DropdownFooter.svelte';
   export let data;
 
   // Flag indicating whether we should check for changes before navigating away.
@@ -498,76 +498,43 @@
         > for detailed descriptions of model capabilities.</Helper
       >
       <div class="flex flex-row gap-2">
-        <button
-          id="model"
-          name="model"
-          class="flex flex-row grow justify-between items-center text-gray-900 bg-gray-50 border border-gray-300 rounded-lg focus:ring-primary-500 focus:border-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500 text-sm p-2.5"
-          type="button"
-        >
-          {selectedModelName}
-          <ChevronDownOutline class="w-6 h-6 ms-2" />
-        </button>
-        <Dropdown
-          class="py-0 rounded-lg"
-          containerClass="dropdown-container w-1/2 border border-gray-300 flex flex-col"
-          placement="bottom-start"
-          bind:open={dropdownOpen}
-        >
-          <div class="relative max-h-80">
-            <div
-              class="overflow-y-auto overscroll-contain rounded-t-lg flex-grow max-h-80 relative"
-            >
-              <div
-                class="sticky top-0 z-10 bg-gradient-to-r from-orange-dark to-orange drop-shadow-md"
-              >
-                <div
-                  class="absolute inset-x-0 -top-96 h-96 bg-gradient-to-r from-orange-dark to-orange"
-                ></div>
-                <DropdownItem disabled defaultClass="font-normal py-2 px-4 text-sm text-white"
-                  >Latest Models</DropdownItem
-                >
-              </div>
-              <div class="relative z-0">
-                <ModelDropdownOptions
-                  modelOptions={latestModelOptions}
-                  {selectedModel}
-                  {updateSelectedModel}
-                  {allowVisionUpload}
-                  bind:modelNodes
-                />
-              </div>
-              <div
-                class="sticky top-0 z-10 bg-gradient-to-r from-blue-dark-40 to-blue-dark-30 drop-shadow-md"
-              >
-                <DropdownItem disabled defaultClass="font-normal py-2 px-4 text-sm text-white"
-                  >Pinned Models (advanced)</DropdownItem
-                >
-              </div>
-              <ModelDropdownOptions
-                modelOptions={versionedModelOptions}
-                {selectedModel}
-                {updateSelectedModel}
-                {allowVisionUpload}
-                bind:modelNodes
-                smallNameText
-              />
-            </div>
-          </div>
-          <a
-            href="https://platform.openai.com/docs/models/models-overview"
-            rel="noopener noreferrer"
-            target="_blank"
-            ><DropdownItem
-              class="bg-gradient-to-r from-gray-800 to-gray-600 text-white hover:from-gray-900 hover:to-gray-700 border-t rounded-b-lg"
+        <DropdownContainer bind:dropdownOpen placeholder={selectedModelName}>
+          <DropdownHeader order={1} colorClasses="from-orange-dark to-orange" topHeader
+            >Latest Models</DropdownHeader
+          >
+          <ModelDropdownOptions
+            modelOptions={latestModelOptions}
+            {selectedModel}
+            {updateSelectedModel}
+            {allowVisionUpload}
+            bind:modelNodes
+          />
+          <DropdownHeader order={2} colorClasses="from-blue-dark-40 to-blue-dark-30"
+            >Pinned Models</DropdownHeader
+          >
+          <ModelDropdownOptions
+            modelOptions={versionedModelOptions}
+            {selectedModel}
+            {updateSelectedModel}
+            {allowVisionUpload}
+            bind:modelNodes
+            smallNameText
+          />
+          <div slot="footer">
+            <DropdownFooter
+              colorClasses="from-gray-800 to-gray-600"
+              hoverable
+              hoverColorClasses="hover:from-gray-900 hover:to-gray-700"
+              link="https://platform.openai.com/docs/models"
               ><div class="flex flex-row justify-between">
                 <div class="flex flex-row gap-2">
                   <QuestionCircleSolid /> Unsure which model to choose? Check out OpenAI's documentation
                 </div>
                 <ArrowUpRightFromSquareOutline />
-              </div></DropdownItem
-            ></a
-          >
-        </Dropdown>
+              </div></DropdownFooter
+            >
+          </div>
+        </DropdownContainer>
         {#if allowVisionUpload}
           <Badge
             class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case {supportsVision
