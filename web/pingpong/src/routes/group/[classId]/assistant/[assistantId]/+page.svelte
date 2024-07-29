@@ -498,7 +498,7 @@
         > for detailed descriptions of model capabilities.</Helper
       >
       <div class="flex flex-row gap-2">
-        <DropdownContainer bind:dropdownOpen placeholder={selectedModelName}>
+        <DropdownContainer bind:dropdownOpen footer placeholder={selectedModelName}>
           <DropdownHeader order={1} colorClasses="from-orange-dark to-orange" topHeader
             >Latest Models</DropdownHeader
           >

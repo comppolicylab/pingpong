@@ -1,7 +1,11 @@
 <script lang="ts">
   import { Dropdown } from 'flowbite-svelte';
   import { ChevronDownOutline } from 'flowbite-svelte-icons';
+  // Whether to show the footer.
+  export let footer = false;
+  // Whether the dropdown is open.
   export let dropdownOpen = false;
+  // The placeholder text shown in the dropdown button.
   export let placeholder = 'Select an option...';
 </script>
 
@@ -22,7 +26,11 @@
   bind:open={dropdownOpen}
 >
   <div class="relative rounded-lg">
-    <div class="overflow-y-auto overscroll-contain rounded-t-lg flex-grow max-h-80 relative">
+    <div
+      class="overflow-y-auto overscroll-contain {footer
+        ? 'rounded-t-lg'
+        : 'rounded-lg'} flex-grow max-h-80 relative"
+    >
       <slot />
     </div>
     <slot name="footer" />

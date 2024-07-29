@@ -18,9 +18,7 @@
     InputAddon,
     Alert,
     Spinner,
-    CloseButton,
-    Dropdown,
-    DropdownItem
+    CloseButton
   } from 'flowbite-svelte';
   import BulkAddUsers from '$lib/components/BulkAddUsers.svelte';
   import CanvasLogo from '$lib/components/CanvasLogo.svelte';
@@ -33,8 +31,7 @@
     CloudArrowUpOutline,
     EyeOutline,
     EyeSlashOutline,
-    LinkOutline,
-    ChevronDownOutline
+    LinkOutline
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
@@ -43,7 +40,7 @@
   import { submitParentForm } from '$lib/form';
   import { page } from '$app/stores';
   import DropdownContainer from '$lib/components/DropdownContainer.svelte';
-  import DropdownOption from '$lib/components/DropdownOption.svelte';
+  import CanvasClassDropdownOptions from '$lib/components/CanvasClassDropdownOptions.svelte';
 
   /**
    * Application data.
@@ -323,12 +320,15 @@
   let loadingCanvasClasses = false;
   let classSelectDropdownOpen = false;
   let loadedCanvasClasses = writable<CanvasClass[]>([]);
-  $: canvasClasses = $loadedCanvasClasses.map((c) => ({
-    value: c.id,
-    name: c.name || 'Unnamed class',
-    course_code: c.course_code || '',
-    term: c.term,
-  })).sort((a, b) => a.course_code.localeCompare(b.course_code));
+  let canvasClasses: CanvasClass[] = [];
+  $: canvasClasses = $loadedCanvasClasses
+    .map((c) => ({
+      id: c.id,
+      name: c.name || 'Unnamed class',
+      course_code: c.course_code || '',
+      term: c.term
+    }))
+    .sort((a, b) => a.course_code.localeCompare(b.course_code));
 
   const loadCanvasClasses = async () => {
     loadingCanvasClasses = true;
@@ -567,17 +567,16 @@
             </p>
             <div class="flex gap-2 items-center">
               {#if canvasClasses.length > 0}
-                <DropdownContainer bind:dropdownOpen={classSelectDropdownOpen} placeholder="Select a class...">
-                  {#each canvasClasses as class_}
-                    <DropdownOption
-                      value={class_.value.toString()}
-                      selectedValue={data.class.canvas_course_id?.toString() || ''}
-                      update={(value) => {
-                      }}
-                      name={class_.course_code}
-                      subtitle={class_.name}
-                    />
-                  {/each}
+                <DropdownContainer
+                  bind:dropdownOpen={classSelectDropdownOpen}
+                  placeholder="Select a class..."
+                >
+                  <CanvasClassDropdownOptions
+                    {canvasClasses}
+                    classNodes={{}}
+                    selectedClass={''}
+                    updateSelectedClass={() => {}}
+                  />
                 </DropdownContainer>
                 <Button
                   pill
