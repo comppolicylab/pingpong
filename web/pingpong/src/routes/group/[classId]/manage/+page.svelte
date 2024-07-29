@@ -42,7 +42,8 @@
   import { browser } from '$app/environment';
   import { submitParentForm } from '$lib/form';
   import { page } from '$app/stores';
-  import CanvasClassOption from '$lib/components/CanvasClassOption.svelte';
+  import DropdownContainer from '$lib/components/DropdownContainer.svelte';
+  import DropdownOption from '$lib/components/DropdownOption.svelte';
 
   /**
    * Application data.
@@ -566,30 +567,18 @@
             </p>
             <div class="flex gap-2 items-center">
               {#if canvasClasses.length > 0}
-                <button
-                  id="model"
-                  name="model"
-                  class="flex flex-row grow justify-between items-center text-gray-900 bg-gray-50 border border-gray-300 rounded-lg focus:ring-primary-500 focus:border-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500 text-sm p-2.5"
-                  type="button"
-                >
-                  <span>Select a class...</span>
-                  <ChevronDownOutline class="w-6 h-6 ms-2" />
-                </button>
-                <Dropdown
-                  containerClass="dropdown-container divide-y z-50 max-h-80 overflow-y-auto border border-gray-300 w-1/2"
-                  placement="bottom-start"
-                  bind:open={classSelectDropdownOpen}
-                >
+                <DropdownContainer bind:dropdownOpen={classSelectDropdownOpen} placeholder="Select a class...">
                   {#each canvasClasses as class_}
-                    <CanvasClassOption
-                      value='{class_.value}'
-                      selectedClass='{data.class.canvas_course_id || ""}'
-                      course_code={class_.course_code}
-                      course_name={class_.name}
-                      term={class_.term}
+                    <DropdownOption
+                      value={class_.value.toString()}
+                      selectedValue={data.class.canvas_course_id?.toString() || ''}
+                      update={(value) => {
+                      }}
+                      name={class_.course_code}
+                      subtitle={class_.name}
                     />
                   {/each}
-                </Dropdown>
+                </DropdownContainer>
                 <Button
                   pill
                   size="xs"
