@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Annotated, Any
 import jwt
 import openai
@@ -62,9 +62,11 @@ from .vector_stores import (
 from .canvas import (
     generate_canvas_link,
     decode_canvas_token,
-    get_access_token,
     get_courses,
-    refresh_access_token,
+    check_course_enrollment,
+    get_access_token,
+    get_initial_access_token,
+    set_canvas_class,
 )
 
 logger = logging.getLogger(__name__)
@@ -373,6 +375,7 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
 
     return {"status": "ok"}
 
+
 @v1.get("/auth/canvas")
 async def auth_canvas(request: Request):
     """Canvas OAuth2 callback.
@@ -418,7 +421,7 @@ async def auth_canvas(request: Request):
     class_id = int(canvasToken.class_id)
 
     try:
-        access_token, refresh_token, expires_in = await get_access_token(code)
+        access_token, refresh_token, expires_in = await get_initial_access_token(code)
     except Exception:
         return RedirectResponse(
             config.url(f"/group/{class_id}/manage?error_code=5"),
@@ -766,55 +769,27 @@ async def enable_canvas_sync(class_id: str, request: Request):
     response_model=schemas.CanvasClasses,
 )
 async def get_canvas_classes(class_id: str, request: Request):
-    (
-        _,  # user_id
-        canvas_access_token,
-        canvas_refresh_token,
-        canvas_expires_in,
-        canvas_token_added_at,
-        now,
-    ) = await models.Class.get_canvas_token(request.state.db, int(class_id))
-    if not now:
-        raise HTTPException(status_code=400, detail="Could not locate PingPong group")
-    if not canvas_access_token:
-        raise HTTPException(status_code=400, detail="No Canvas access token for class")
-    tok = canvas_access_token
-    if not now < canvas_token_added_at + timedelta(
-        seconds=canvas_expires_in + 3600 - 60
-    ):
-        tok, _, expires_in = await refresh_access_token(canvas_refresh_token)
-        await models.Class.update_canvas_token(
-            request.state.db, int(class_id), tok, expires_in, refresh=True
-        )
+    tok = await get_access_token(request.state.db, class_id)
     courses = await get_courses(tok)
     return {"classes": courses}
 
-# @v1.post(
-#     "/class/{class_id}/canvas_class/{canvas_class_id}",
-#     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
-#     response_model=schemas.GenericStatus,
-# )
-# async def set_canvas_class(
-#     class_id: str, canvas_class_id: str, request: Request
-# ):
-#     class_ = await models.Class.get_by_id(request.state.db, int(class_id))
-#     if not class_:
-#         raise HTTPException(status_code=404, detail="Class not found")
-    
-#     if class_.canvas_user_id != request.state.session.user.id:
-#         raise HTTPException(status_code=403, detail="Not authorized to set Canvas class")
-    
-#     if not now < canvas_token_added_at + timedelta(
-#         seconds=canvas_expires_in - 3600 - 60
-#     ):
-#         tok, _, expires_in = await refresh_access_token(canvas_refresh_token)
-#         await models.Class.update_canvas_token(
-#             request.state.db, int(class_id), tok, expires_in, refresh=True
-#         )
-#     await models.Class.set_canvas_class(
-#         request.state.db, int(class_id), canvas_class_id
-#     )
-#     return {"status": "ok"}
+
+@v1.post(
+    "/class/{class_id}/canvas_classes/{canvas_class_id}",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def update_canvas_class(class_id: str, canvas_class_id: str, request: Request):
+    tok = await get_access_token(
+        request.state.db,
+        class_id,
+        check_user=True,
+        user_id=request.state.session.user.id,
+    )
+    await check_course_enrollment(tok, canvas_class_id)
+    await set_canvas_class(request.state.db, tok, int(class_id), int(canvas_class_id))
+    return {"status": "ok"}
+
 
 @v1.get(
     "/class/{class_id}/users",

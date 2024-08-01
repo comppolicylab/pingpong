@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { afterUpdate, onMount } from 'svelte';
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
   import * as api from '$lib/api';
@@ -317,10 +317,10 @@
       invalidateAll();
     }
   };
-  let loadingCanvasClasses = false;
-  let classSelectDropdownOpen = false;
+
   let loadedCanvasClasses = writable<CanvasClass[]>([]);
   let canvasClasses: CanvasClass[] = [];
+  // The formatted canvas classes loaded from the API.
   $: canvasClasses = $loadedCanvasClasses
     .map((c) => ({
       id: c.id,
@@ -330,6 +330,9 @@
     }))
     .sort((a, b) => a.course_code.localeCompare(b.course_code));
 
+  // Whether we are currently loading canvas classes from the API.
+  let loadingCanvasClasses = false;
+  // Load canvas classes from the API.
   const loadCanvasClasses = async () => {
     loadingCanvasClasses = true;
     const result = await api.loadCanvasClasses(fetch, data.class.id);
@@ -342,6 +345,39 @@
       loadingCanvasClasses = false;
     }
   };
+
+  // State for the canvas class selection dropdown.
+  let classSelectDropdownOpen = false;
+  // The canvas class id
+  let selectedClass = data.class.canvas_course_id?.toString() || '';
+
+  $: classNameDict = canvasClasses.reduce<{ [key: string]: string }>((acc, class_) => {
+    acc[class_.id] = `[${class_.term}] ${class_.course_code}: ${class_.name}`;
+    return acc;
+  }, {});
+  $: selectedClassName = classNameDict[selectedClass] || 'Select a class...';
+
+  const updateSelectedClass = (classValue: string) => {
+    classSelectDropdownOpen = false;
+    selectedClass = classValue;
+  };
+
+  const saveSelectedClass = async () => {
+    if (!selectedClass) {
+      return;
+    }
+    const result = await api.saveCanvasClass(fetch, data.class.id, selectedClass);
+    const response = api.expandResponse(result);
+    if (response.error) {
+      sadToast(response.error.detail || 'An unknown error occurred');
+    } else {
+      invalidateAll();
+      happyToast('Canvas class successfully linked!');
+    }
+  };
+
+  // The HTMLElement refs of the canvas class options.
+  let classNodes: { [key: string]: HTMLElement } = {};
 
   // Clean up state on navigation. Invalidate data so that any changes
   // are reflected in the rest of the app. (If performance suffers here,
@@ -565,28 +601,49 @@
               Your Canvas account is now connected to this PingPong group. Select which class you'd
               like to link with this PingPong group.
             </p>
-            <div class="flex gap-2 items-center">
+            <div class="flex flex-row gap-2 items-stretch">
               {#if canvasClasses.length > 0}
                 <DropdownContainer
+                  optionNodes={classNodes}
                   bind:dropdownOpen={classSelectDropdownOpen}
-                  placeholder="Select a class..."
+                  bind:selectedOption={selectedClass}
+                  placeholder={selectedClassName}
+                  width="w-full"
                 >
                   <CanvasClassDropdownOptions
                     {canvasClasses}
-                    classNodes={{}}
-                    selectedClass={''}
-                    updateSelectedClass={() => {}}
+                    {selectedClass}
+                    {updateSelectedClass}
+                    bind:classNodes
                   />
                 </DropdownContainer>
-                <Button
-                  pill
-                  size="xs"
-                  class="shrink-0 max-h-fit bg-orange text-white hover:bg-orange-dark"
-                  on:click={loadCanvasClasses}
-                  on:touchstart={loadCanvasClasses}
-                >
-                  Save</Button
-                >
+                <div class="flex gap-2 items-center">
+                  <Button
+                    pill
+                    size="xs"
+                    class="shrink-0 max-h-fit bg-orange border border-orange text-white hover:bg-orange-dark hover:border-orange-dark"
+                    on:click={saveSelectedClass}
+                    on:touchstart={saveSelectedClass}
+                    disabled={loadingCanvasClasses || !selectedClass}
+                  >
+                    Save</Button
+                  >
+                  <Button
+                    pill
+                    size="xs"
+                    class="shrink-0 max-h-fit bg-blue-light-50 text-blue-dark-50 border border-blue-dark-50 hover:bg-blue-light-40"
+                    on:click={() => {
+                      canvasClasses = [];
+                      selectedClass = '';
+                    }}
+                    on:touchstart={() => {
+                      canvasClasses = [];
+                      selectedClass = '';
+                    }}
+                  >
+                    Cancel</Button
+                  >
+                </div>
               {:else}
                 <Button
                   pill
@@ -607,7 +664,7 @@
           <Alert color="green">
             <div class="flex items-center gap-3">
               <CanvasLogo size="5" />
-              <span class="text-lg font-medium">Canvas setup already in process</span>
+              <span class="text-lg font-medium">Canvas setup in process</span>
             </div>
             <p class="mt-2 text-sm">
               {data.class.canvas_user?.name || 'Someone in your course'} has linked their Canvas account
@@ -615,8 +672,8 @@
               automatically sync the course's roster.
             </p>
             <p class="mt-2 text-sm">
-              Need to link your own account? Ask them to disconnect their Canvas account from this
-              PingPong group.
+              Need to link your own account? Ask {data.class.canvas_user?.name || 'them'} to disconnect
+              their Canvas account from this PingPong group.
             </p>
           </Alert>
         {:else if data.class.canvas_status === 'linked' && data.class.canvas_user?.id && data.me.user?.id === data.class.canvas_user?.id}

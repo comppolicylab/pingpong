@@ -2,12 +2,16 @@ from datetime import timedelta
 from typing import cast
 import aiohttp
 
+from fastapi import HTTPException
 import jwt
 from jwt.exceptions import PyJWTError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import config
+from .models import Class, CanvasClass
 from .now import NowFn, utcnow
-from .schemas import CanvasToken, CanvasClass
+from .schemas import CanvasToken
+from .schemas import CanvasClass as CanvasClassSchema
 
 
 def encode_canvas_token(
@@ -142,7 +146,7 @@ async def canvas_token_request(params=dict[str, str]) -> tuple[str, str, int]:
                 raise ValueError("Invalid response from Canvas")
 
 
-async def get_access_token(code: str) -> tuple[str, str, int]:
+async def get_initial_access_token(code: str) -> tuple[str, str, int]:
     params = {
         "client_id": config.canvas_client_id,
         "client_secret": config.canvas_client_secret,
@@ -163,9 +167,9 @@ async def refresh_access_token(refresh_token: str) -> tuple[str, str, int]:
     return await canvas_token_request(params)
 
 
-async def get_courses(access_token: str) -> list[CanvasClass]:
+async def get_courses(access_token: str) -> list[CanvasClassSchema]:
     headers = {"Authorization": f"Bearer {access_token}"}
-    params = {"include[]": "term"}
+    params = {"include[]": ["term"]}
     courses = []
     async with aiohttp.ClientSession() as session:
         next_url = config.canvas_link("/api/v1/courses")
@@ -200,4 +204,122 @@ async def get_courses(access_token: str) -> list[CanvasClass]:
                             next_url = link[link.find("<") + 1 : link.find(">")]
                             break
 
-    return [CanvasClass.model_validate(course) for course in courses]
+    return [CanvasClassSchema.model_validate(course) for course in courses]
+
+
+async def get_access_token(
+    session: AsyncSession,
+    class_id: str,
+    buffer: int = 60,
+    check_user: bool = False,
+    user_id: int = 0,
+) -> str:
+    (
+        canvas_user_id,  # user_id
+        canvas_access_token,
+        canvas_refresh_token,
+        canvas_expires_in,
+        canvas_token_added_at,
+        now,
+    ) = await Class.get_canvas_token(session, int(class_id))
+    if not now:
+        raise HTTPException(status_code=400, detail="Could not locate PingPong group")
+    if not canvas_access_token:
+        raise HTTPException(status_code=400, detail="No Canvas access token for class")
+    if check_user and canvas_user_id != user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="You're not the authorized Canvas user for this class",
+        )
+
+    tok = canvas_access_token
+
+    if not now < canvas_token_added_at + timedelta(seconds=canvas_expires_in - buffer):
+        tok, _, expires_in = await refresh_access_token(canvas_refresh_token)
+        await Class.update_canvas_token(
+            session, int(class_id), tok, expires_in, refresh=True
+        )
+    return tok
+
+
+async def check_course_enrollment(access_token: str, course_id: str) -> None:
+    headers = {"Authorization": f"Bearer {access_token}"}
+    params = {
+        "type[]": [
+            "TeacherEnrollment",
+            "TaEnrollment",
+        ]
+    }
+    async with aiohttp.ClientSession() as session:
+        verified_enrollment = False
+        next_url = config.canvas_link("/api/v1/users/self/enrollments")
+        while next_url:
+            async with session.get(
+                next_url,
+                headers=headers,
+                params=params,
+                raise_for_status=True,
+            ) as resp:
+                data = await resp.json()
+                for enrollment in data:
+                    if enrollment["course_id"] == int(course_id):
+                        verified_enrollment = True
+                        break
+
+                # Check for the next page link
+                next_url = ""
+                link_header = resp.headers.get("Link")
+                if link_header:
+                    links = link_header.split(",")
+                    for link in links:
+                        if 'rel="next"' in link:
+                            next_url = link[link.find("<") + 1 : link.find(">")]
+                            break
+
+        if not verified_enrollment:
+            raise HTTPException(
+                status_code=403,
+                detail="You are not an authorized teacher in the Canvas class you are trying to access.",
+            )
+
+        if not await course_enrollment_access_check(access_token, course_id):
+            raise HTTPException(
+                status_code=403,
+                detail="You are not authorized to access the enrollment list for this Canvas class.",
+            )
+
+
+async def course_enrollment_access_check(access_token: str, course_id: str) -> bool:
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            config.canvas_link(f"/api/v1/courses/{course_id}/enrollments"),
+            headers=headers,
+            raise_for_status=True,
+        ) as resp:
+            return resp.status == 200
+
+
+async def set_canvas_class(
+    session: AsyncSession, access_token: str, db_class_id: int, canvas_course_id: int
+) -> None:
+    headers = {"Authorization": f"Bearer {access_token}"}
+    params = {"include[]": ["term"]}
+    async with aiohttp.ClientSession() as session_:
+        async with session_.get(
+            config.canvas_link(f"/api/v1/courses/{canvas_course_id}"),
+            headers=headers,
+            params=params,
+            raise_for_status=True,
+        ) as resp:
+            data = await resp.json()
+            print(data)
+            canvas_class = {
+                "canvas_id": data["id"],
+                "name": data["name"],
+                "course_code": data["course_code"],
+                "term": data["term"]["name"],
+            }
+    canvas_class = await CanvasClass.create_or_update(session, canvas_class)
+
+    await Class.update_canvas_class(session, db_class_id, canvas_class.id)

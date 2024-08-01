@@ -2,10 +2,17 @@
   import { type CanvasClass } from '$lib/api';
   import DropdownBadge from './DropdownBadge.svelte';
   import DropdownOption from './DropdownOption.svelte';
+
+  // The Canvas class options to display in the dropdown
   export let canvasClasses: CanvasClass[];
+  // The HTMLElement refs of the Canvas class options.
   export let classNodes: { [key: string]: HTMLElement };
+  // The currently selected Canvas class option.
   export let selectedClass: string;
+  // The function to update the selected Canvas class option.
   export let updateSelectedClass: (id: string) => void;
+
+  // Color palletes for the term badges
   const colorPalletes = [
     'border-pastel-green-400 from-pastel-green-50 to-pastel-green-100 text-pastel-green-800',
     'border-sunset-orange-400 from-sunset-orange-50 to-sunset-orange-100 text-sunset-orange-800',
@@ -23,7 +30,9 @@
     'border-chalet-green-400 from-chalet-green-50 to-chalet-green-100 text-chalet-green-800',
     'border-monza-red-400 from-monza-red-50 to-monza-red-100 text-monza-red-800'
   ];
+  // Extract the terms from the Canvas classes
   const termsInList = [...new Set(canvasClasses.map((c) => c.term || 'Unknown term'))];
+  // Map of terms to colors
   const termToColor = termsInList.reduce(
     (acc, term, index) => {
       const color = colorPalletes[index % colorPalletes.length];

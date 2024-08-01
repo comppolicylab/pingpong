@@ -1738,7 +1738,7 @@ export const dismissCanvasSync = async (f: Fetcher, classId: number) => {
 };
 
 /**
- * Bring back Canvas Sunc box.
+ * Bring back Canvas Sync box.
  */
 export const bringBackCanvasSync = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/enable_canvas_sync`;
@@ -1760,6 +1760,11 @@ export const loadCanvasClasses = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/canvas_classes`;
   return await GET<never, CanvasClasses>(f, url);
 };
+
+export const saveCanvasClass = async (f: Fetcher, classId: number, canvasClassId: string) => {
+  const url = `class/${classId}/canvas_classes/${canvasClassId}`;
+  return await POST<never, GenericStatus>(f, url);
+}
 
 /**
  * Roles for users in a class.

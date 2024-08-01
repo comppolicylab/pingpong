@@ -169,10 +169,7 @@
   };
 
   let modelNodes: { [key: string]: HTMLElement } = {};
-  $: currentNode = modelNodes[selectedModel] || null;
-  $: if (currentNode) {
-    currentNode.scrollIntoView({ behavior: 'instant', block: 'nearest' });
-  }
+  let modelHeaders: { [key: string]: string } = {};
 
   /**
    * Determine if a specific field has changed in the form.
@@ -498,26 +495,42 @@
         > for detailed descriptions of model capabilities.</Helper
       >
       <div class="flex flex-row gap-2">
-        <DropdownContainer bind:dropdownOpen footer placeholder={selectedModelName}>
-          <DropdownHeader order={1} colorClasses="from-orange-dark to-orange" topHeader
-            >Latest Models</DropdownHeader
+        <DropdownContainer
+          footer
+          placeholder={selectedModelName}
+          optionNodes={modelNodes}
+          optionHeaders={modelHeaders}
+          bind:selectedOption={selectedModel}
+          bind:dropdownOpen
+        >
+          <DropdownHeader
+            order={1}
+            name="latest-models"
+            colorClasses="from-orange-dark to-orange"
+            topHeader>Latest Models</DropdownHeader
           >
           <ModelDropdownOptions
             modelOptions={latestModelOptions}
             {selectedModel}
             {updateSelectedModel}
             {allowVisionUpload}
+            headerClass="latest-models"
             bind:modelNodes
+            bind:modelHeaders
           />
-          <DropdownHeader order={2} colorClasses="from-blue-dark-40 to-blue-dark-30"
-            >Pinned Models</DropdownHeader
+          <DropdownHeader
+            order={2}
+            name="versioned-models"
+            colorClasses="from-blue-dark-40 to-blue-dark-30">Pinned Models</DropdownHeader
           >
           <ModelDropdownOptions
             modelOptions={versionedModelOptions}
             {selectedModel}
             {updateSelectedModel}
             {allowVisionUpload}
+            headerClass="versioned-models"
             bind:modelNodes
+            bind:modelHeaders
             smallNameText
           />
           <div slot="footer">

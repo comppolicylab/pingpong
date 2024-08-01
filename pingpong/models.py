@@ -670,6 +670,45 @@ class Assistant(Base):
         await session.execute(stmt)
 
 
+class CanvasClass(Base):
+    __tablename__ = "canvas_classes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    canvas_id = Column(Integer, nullable=False, unique=True)
+    name = Column(String)
+    course_code = Column(String)
+    term = Column(String)
+    classes = relationship("Class", back_populates="canvas_class")
+
+    @classmethod
+    async def create_or_update(cls, session: AsyncSession, data: dict) -> "CanvasClass":
+        stmt = select(CanvasClass).where(CanvasClass.canvas_id == data["canvas_id"])
+        existing_class = await session.scalar(stmt)
+        if existing_class:
+            existing_class.name = data["name"]
+            existing_class.term = data["term"]
+            existing_class.canvas_id = data["canvas_id"]
+            existing_class.course_code = data["course_code"]
+            session.add(existing_class)
+            await session.flush()
+            await session.refresh(existing_class)
+            return existing_class
+
+        canvas_class = CanvasClass(**data)
+        session.add(canvas_class)
+        await session.flush()
+        await session.refresh(canvas_class)
+        return canvas_class
+
+    @classmethod
+    async def delete_if_unused(cls, session: AsyncSession, id_: int) -> None:
+        stmt = select(Class).where(Class.canvas_class_id == id_)
+        canvas_class = await session.scalar(stmt)
+        
+        if not canvas_class:
+            stmt_ = delete(CanvasClass).where(CanvasClass.id == id_)
+            await session.execute(stmt_)
+
 class Class(Base):
     __tablename__ = "classes"
 
@@ -687,8 +726,12 @@ class Class(Base):
     canvas_status = Column(
         SQLEnum(schemas.CanvasStatus), default=schemas.CanvasStatus.NONE
     )
+    canvas_class_id = Column(Integer, ForeignKey("canvas_classes.id"), nullable=True)
+    canvas_class = relationship(
+        "CanvasClass", back_populates="classes", lazy="selectin"
+    )
     canvas_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    canvas_user = relationship("User", back_populates="canvas_syncs")
+    canvas_user = relationship("User", back_populates="canvas_syncs", lazy="selectin")
     canvas_course_id = Column(Integer, nullable=True)
     canvas_access_token = Column(String, nullable=True)
     canvas_refresh_token = Column(String, nullable=True)
@@ -802,6 +845,7 @@ class Class(Base):
             select(Class)
             .options(joinedload(Class.institution))
             .options(joinedload(Class.canvas_user))
+            .options(joinedload(Class.canvas_class))
             .where(Class.id == int(id_))
         )
         return await session.scalar(stmt)
@@ -816,6 +860,7 @@ class Class(Base):
             select(Class)
             .options(joinedload(Class.institution))
             .options(joinedload(Class.canvas_user))
+            .options(joinedload(Class.canvas_class))
             .where(Class.id.in_(ids))
         )
         result = await session.execute(stmt)
@@ -890,6 +935,23 @@ class Class(Base):
             .values(canvas_status=schemas.CanvasStatus.NONE)
         )
         await session.execute(stmt)
+
+    @classmethod
+    async def update_canvas_class(
+        cls, session: AsyncSession, class_id: int, canvas_id: int
+    ) -> None:
+        stmt = select(Class).where(Class.id == class_id)
+        class_instance = await session.scalar(stmt)
+
+        if class_instance.canvas_class_id:
+            old_canvas_id = class_instance.canvas_class_id
+            class_instance.canvas_class_id = canvas_id
+            await CanvasClass.delete_if_unused(session, old_canvas_id)
+        else:
+            class_instance.canvas_class_id = canvas_id
+
+        class_instance.canvas_status = schemas.CanvasStatus.LINKED
+        await session.flush()
 
 
 class CodeInterpreterCall(Base):

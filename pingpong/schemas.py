@@ -446,6 +446,8 @@ class Class(BaseModel):
     private: bool | None = None
     canvas_user: CanvasUser | None = None
     canvas_status: CanvasStatus | None = None
+    canvas_class: CanvasClass | None = None
+    canvas_last_synced: datetime | None = None
     any_can_create_assistant: bool | None = None
     any_can_publish_assistant: bool | None = None
     any_can_publish_thread: bool | None = None
