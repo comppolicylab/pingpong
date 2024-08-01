@@ -1,8 +1,8 @@
 from datetime import timedelta
-from typing import cast
+from typing import Callable, List, cast
 import aiohttp
 
-from fastapi import HTTPException
+from fastapi import HTTPException, BackgroundTasks, Request
 import jwt
 from jwt.exceptions import PyJWTError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,9 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import config
 from .models import Class, CanvasClass
 from .now import NowFn, utcnow
-from .schemas import CanvasToken
-from .schemas import CanvasClass as CanvasClassSchema
-
+from .schemas import CanvasToken, CanvasClass as CanvasClassSchema, ClassUserRoles, CreateUserClassRole, CreateUserClassRoles
+from .users import add_new_users
 
 def encode_canvas_token(
     user_id: int, class_id: str, expiry: int = 600, nowfn: NowFn = utcnow
@@ -313,7 +312,6 @@ async def set_canvas_class(
             raise_for_status=True,
         ) as resp:
             data = await resp.json()
-            print(data)
             canvas_class = {
                 "canvas_id": data["id"],
                 "name": data["name"],
@@ -323,3 +321,56 @@ async def set_canvas_class(
     canvas_class = await CanvasClass.create_or_update(session, canvas_class)
 
     await Class.update_canvas_class(session, db_class_id, canvas_class.id)
+
+
+async def sync_roster(
+    session: AsyncSession, access_token: str, class_id: int, request: Request, tasks: BackgroundTasks, get_now_fn: Callable[[Request], NowFn]
+) -> None:
+    class_ = await Class.get_canvas_course_id(session, class_id)
+
+    if not class_:
+        raise HTTPException(status_code=400, detail="No linked Canvas course found")
+
+    user_roles: List[CreateUserClassRole] = []
+    headers = {"Authorization": f"Bearer {access_token}"}
+    params = {"include[]": ["enrollments"]}
+    async with aiohttp.ClientSession() as session_:
+        next_url = config.canvas_link(f"/api/v1/courses/{class_.canvas_class.canvas_id}/users")
+        while next_url:
+            async with session_.get(
+                next_url,
+                headers=headers,
+                params=params,
+                raise_for_status=True,
+            ) as resp:
+                data = await resp.json()
+                for user in data:
+                    is_teacher = False
+                    for enrollment in user["enrollments"]:
+                        if enrollment["type"] in ["TeacherEnrollment", "TaEnrollment"]:
+                            is_teacher = True
+                        break
+                    user_roles.append(
+                        CreateUserClassRole(
+                            email=user["email"],
+                            roles=ClassUserRoles(
+                                admin=False,
+                                teacher=is_teacher,
+                                student=not is_teacher,
+                            ),
+                        )
+                    )
+                
+                # Check for the next page link
+                next_url = ""
+                link_header = resp.headers.get("Link")
+                if link_header:
+                    links = link_header.split(",")
+                    for link in links:
+                        if 'rel="next"' in link:
+                            next_url = link[link.find("<") + 1 : link.find(">")]
+                            break
+        
+    new_ucr = CreateUserClassRoles(roles=user_roles, silent=False, from_canvas=True)
+
+    await add_new_users(class_id=str(class_id), new_ucr=new_ucr, request=request, tasks=tasks, get_now_fn=get_now_fn)

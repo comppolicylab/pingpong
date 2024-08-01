@@ -57,6 +57,7 @@ class UserClassRole(Base):
     )
     role = Column(SQLEnum(schemas.Role), nullable=True)
     title: Mapped[Optional[str]]
+    from_canvas = Column(Boolean, default=False)
     user = relationship("User", back_populates="classes")
     class_ = relationship("Class", back_populates="users")
 
@@ -704,10 +705,11 @@ class CanvasClass(Base):
     async def delete_if_unused(cls, session: AsyncSession, id_: int) -> None:
         stmt = select(Class).where(Class.canvas_class_id == id_)
         canvas_class = await session.scalar(stmt)
-        
+
         if not canvas_class:
             stmt_ = delete(CanvasClass).where(CanvasClass.id == id_)
             await session.execute(stmt_)
+
 
 class Class(Base):
     __tablename__ = "classes"
@@ -909,6 +911,20 @@ class Class(Base):
         ).where(Class.id == class_id)
         result = await session.execute(stmt)
         return result.first()
+
+    @classmethod
+    async def get_canvas_course_id(
+        cls, session: AsyncSession, class_id: int
+    ) -> "Class":
+        stmt = (
+            select(Class)
+            .outerjoin(Class.canvas_class)
+            .options(
+                contains_eager(Class.canvas_class).load_only(CanvasClass.canvas_id)
+            )
+            .where(Class.id == class_id)
+        )
+        return await session.scalar(stmt)
 
     @classmethod
     async def dismiss_canvas_sync(cls, session: AsyncSession, class_id: int) -> None:

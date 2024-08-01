@@ -2,6 +2,7 @@
   import { afterUpdate, onMount } from 'svelte';
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
+  import dayjs from '$lib/time';
   import * as api from '$lib/api';
   import type { FileUploadInfo, ServerFile, CreateClassUsersRequest, CanvasClass } from '$lib/api';
   import {
@@ -286,6 +287,7 @@
   };
 
   const classId = data.class.id;
+  const canvasLinkedClass = data.class.canvas_class;
 
   const redirectToCanvas = async () => {
     const result = await api.getCanvasLink(fetch, data.class.id);
@@ -323,7 +325,7 @@
   // The formatted canvas classes loaded from the API.
   $: canvasClasses = $loadedCanvasClasses
     .map((c) => ({
-      id: c.id,
+      canvas_id: c.canvas_id,
       name: c.name || 'Unnamed class',
       course_code: c.course_code || '',
       term: c.term
@@ -349,10 +351,10 @@
   // State for the canvas class selection dropdown.
   let classSelectDropdownOpen = false;
   // The canvas class id
-  let selectedClass = data.class.canvas_course_id?.toString() || '';
+  let selectedClass = data.class.canvas_class?.canvas_id.toString() || '';
 
   $: classNameDict = canvasClasses.reduce<{ [key: string]: string }>((acc, class_) => {
-    acc[class_.id] = `[${class_.term}] ${class_.course_code}: ${class_.name}`;
+    acc[class_.canvas_id] = `[${class_.term}] ${class_.course_code}: ${class_.name}`;
     return acc;
   }, {});
   $: selectedClassName = classNameDict[selectedClass] || 'Select a class...';
@@ -373,6 +375,17 @@
     } else {
       invalidateAll();
       happyToast('Canvas class successfully linked!');
+    }
+  };
+
+  const syncClass = async () => {
+    const result = await api.syncCanvasClass(fetch, data.class.id);
+    const response = api.expandResponse(result);
+    if (response.error) {
+      sadToast(response.error.detail || 'An unknown error occurred');
+    } else {
+      invalidateAll();
+      happyToast('Synced PingPong user list with Canvas roster!');
     }
   };
 
@@ -589,7 +602,7 @@
               </div>
             </div>
           </Alert>
-        {:else if data.class.canvas_status === 'authorized' && !data.class.canvas_course_id && data.class.canvas_user?.id && data.me.user?.id === data.class.canvas_user?.id}
+        {:else if data.class.canvas_status === 'authorized' && !data.class.canvas_class && data.class.canvas_user?.id && data.me.user?.id === data.class.canvas_user?.id}
           <Alert color="yellow">
             <div class="flex items-center gap-3">
               <CanvasLogo size="5" />
@@ -660,7 +673,7 @@
               {/if}
             </div>
           </Alert>
-        {:else if data.class.canvas_status === 'authorized' && !data.class.canvas_course_id}
+        {:else if data.class.canvas_status === 'authorized' && !data.class.canvas_class}
           <Alert color="green">
             <div class="flex items-center gap-3">
               <CanvasLogo size="5" />
@@ -680,18 +693,27 @@
           <Alert color="green">
             <div class="flex items-center gap-3">
               <CanvasLogo size="5" />
-              <span class="text-lg font-medium">*_COURSE_LINKED_TITLE</span>
+              <span class="text-lg font-medium">Canvas Sync is active</span>
             </div>
-            <p class="mt-2 text-sm">*_COURSE_LINKED_TITLE</p>
+            <p class="mt-2 text-sm">
+              This PingPong group is linked to {canvasLinkedClass?.course_code}: {canvasLinkedClass?.name}
+              on Canvas. The class roster is automatically synced with this group's user list about once
+              every hour. Use the Sync button below to request an immediate sync.
+            </p>
+            <p class="mt-2 mb-4 text-sm">
+              Last sync: {data.class.canvas_last_synced
+                ? dayjs.utc(data.class.canvas_last_synced).fromNow()
+                : 'never'}
+            </p>
             <div class="flex gap-2">
               <Button
                 pill
                 size="xs"
                 class="bg-orange text-white hover:bg-orange-dark"
-                on:click={redirectToCanvas}
-                on:touchstart={redirectToCanvas}
+                on:click={syncClass}
+                on:touchstart={syncClass}
               >
-                <LinkOutline class="w-4 h-4 me-2" />*_COURSE_LINKED_SYNC_BUTTON</Button
+                <LinkOutline class="w-4 h-4 me-2" />Sync roster</Button
               >
             </div>
           </Alert>

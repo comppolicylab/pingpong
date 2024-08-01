@@ -515,9 +515,10 @@ export type Class = {
   updated: string | null;
   api_key: string | null;
   private: boolean | null;
-  canvas_course_id: number | null;
-  canvas_status: CanvasStatus | null;
   canvas_user: AppUser | null;
+  canvas_status: CanvasStatus | null;
+  canvas_class: CanvasClass | null;
+  canvas_last_synced: string | null;
   any_can_create_assistant: boolean | null;
   any_can_publish_assistant: boolean | null;
   any_can_publish_thread: boolean | null;
@@ -1750,7 +1751,7 @@ export type CanvasClasses = {
 };
 
 export type CanvasClass = {
-  id: number;
+  canvas_id: number;
   name: string | null;
   course_code: string | null;
   term: string | null;
@@ -1763,6 +1764,11 @@ export const loadCanvasClasses = async (f: Fetcher, classId: number) => {
 
 export const saveCanvasClass = async (f: Fetcher, classId: number, canvasClassId: string) => {
   const url = `class/${classId}/canvas_classes/${canvasClassId}`;
+  return await POST<never, GenericStatus>(f, url);
+};
+
+export const syncCanvasClass = async (f: Fetcher, classId: number) => {
+  const url = `class/${classId}/sync_canvas_class`;
   return await POST<never, GenericStatus>(f, url);
 }
 

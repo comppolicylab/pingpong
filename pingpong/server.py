@@ -48,7 +48,6 @@ from .authz import Relation
 from .config import config
 from .errors import sentry
 from .files import FILE_TYPES, handle_create_file, handle_delete_file
-from .invite import send_invite
 from .now import NowFn, utcnow
 from .permission import Authz, LoggedIn
 from .runs import get_placeholder_ci_calls
@@ -67,7 +66,9 @@ from .canvas import (
     get_access_token,
     get_initial_access_token,
     set_canvas_class,
+    sync_roster,
 )
+from .users import add_new_users
 
 logger = logging.getLogger(__name__)
 
@@ -791,6 +792,22 @@ async def update_canvas_class(class_id: str, canvas_class_id: str, request: Requ
     return {"status": "ok"}
 
 
+@v1.post(
+    "/class/{class_id}/sync_canvas_class",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def sync_canvas_class(class_id: str, request: Request, tasks: BackgroundTasks):
+    tok = await get_access_token(
+        request.state.db,
+        class_id,
+        check_user=True,
+        user_id=request.state.session.user.id,
+    )
+    await sync_roster(session=request.state.db, access_token=tok, class_id=int(class_id), request=request, tasks=tasks, get_now_fn=get_now_fn)
+    return {"status": "ok"}
+
+
 @v1.get(
     "/class/{class_id}/users",
     dependencies=[Depends(Authz("can_view_users", "class:{class_id}"))],
@@ -855,103 +872,7 @@ async def add_users_to_class(
     request: Request,
     tasks: BackgroundTasks,
 ):
-    cid = int(class_id)
-    class_ = await models.Class.get_by_id(request.state.db, cid)
-    result: list[schemas.UserClassRole] = []
-    new_: list[schemas.CreateInvite] = []
-
-    grants = list[Relation]()
-    revokes = list[Relation]()
-
-    is_admin = await request.state.authz.test(
-        f"user:{request.state.session.user.id}", "admin", f"class:{class_id}"
-    )
-
-    formatted_roles = {
-        "admin": "an Administrator",
-        "teacher": "a Moderator",
-        "student": "a Member",
-    }
-
-    user_display_name = await models.User.get_display_name(
-        request.state.db, request.state.session.user.id
-    )
-
-    for ucr in new_ucr.roles:
-        if not is_admin and ucr.roles.admin:
-            raise HTTPException(
-                status_code=403, detail="Lacking permission to add admins"
-            )
-
-        if not is_admin and ucr.roles.teacher:
-            raise HTTPException(
-                status_code=403, detail="Lacking permission to add teachers"
-            )
-
-        user = await models.User.get_or_create_by_email(request.state.db, ucr.email)
-        if is_admin and user.id == request.state.session.user.id:
-            if not ucr.roles.admin:
-                raise HTTPException(
-                    status_code=403, detail="Cannot demote yourself from admin"
-                )
-
-        existing = await models.UserClassRole.get(request.state.db, user.id, cid)
-        new_roles = []
-        for role in ["admin", "teacher", "student"]:
-            if getattr(ucr.roles, role):
-                grants.append((f"user:{user.id}", role, f"class:{cid}"))
-                new_roles.append(formatted_roles[role])
-            else:
-                revokes.append((f"user:{user.id}", role, f"class:{cid}"))
-
-        if existing:
-            result.append(
-                schemas.UserClassRole(
-                    user_id=existing.user_id,
-                    class_id=existing.class_id,
-                    roles=ucr.roles,
-                )
-            )
-            request.state.db.add(existing)
-        else:
-            # Make sure the user exists...
-            added = await models.UserClassRole.create(
-                request.state.db,
-                user.id,
-                cid,
-            )
-            new_.append(
-                schemas.CreateInvite(
-                    user_id=user.id,
-                    email=user.email,
-                    class_name=class_.name,
-                    inviter_name=user_display_name,
-                    formatted_role=", ".join(new_roles) if new_roles else None,
-                )
-            )
-            result.append(
-                schemas.UserClassRole(
-                    user_id=added.user_id,
-                    class_id=added.class_id,
-                    roles=ucr.roles,
-                )
-            )
-
-    # Send emails to new users in the background
-    nowfn = get_now_fn(request)
-    for invite in new_:
-        magic_link = generate_auth_link(invite.user_id, expiry=86_400 * 7, nowfn=nowfn)
-        tasks.add_task(
-            send_invite,
-            config.email.sender,
-            invite,
-            magic_link,
-            new_ucr.silent,
-        )
-
-    await request.state.authz.write_safe(grant=grants, revoke=revokes)
-
-    return {"roles": result}
+    return await add_new_users(class_id, new_ucr, request, tasks, get_now_fn)
 
 
 @v1.put(

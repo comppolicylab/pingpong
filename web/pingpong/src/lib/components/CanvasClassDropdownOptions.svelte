@@ -44,12 +44,12 @@
 </script>
 
 <div class="relative z-0">
-  {#each canvasClasses as { id, name, course_code, term }}
-    <div bind:this={classNodes[id.toString()]}>
+  {#each canvasClasses as { canvas_id, name, course_code, term }}
+    <div bind:this={classNodes[canvas_id.toString()]}>
       <DropdownOption
-        value={id.toString()}
+        value={canvas_id.toString()}
         name={course_code || 'Unknown course'}
-        subtitle={(name || 'Unknown course') + ' (' + id.toString() + ')'}
+        subtitle={(name || 'Unknown course') + ' (' + canvas_id.toString() + ')'}
         selectedValue={selectedClass}
         update={updateSelectedClass}
       >

@@ -312,6 +312,7 @@ class CreateUserClassRole(BaseModel):
 class CreateUserClassRoles(BaseModel):
     roles: list[CreateUserClassRole]
     silent: bool = False
+    from_canvas: bool = False
 
 
 class UserClassRole(BaseModel):
@@ -411,7 +412,7 @@ class CanvasStatus(StrEnum):
 
 
 class CanvasClass(BaseModel):
-    id: int
+    canvas_id: int
     name: str
     course_code: str
     term: str
