@@ -770,8 +770,14 @@ async def enable_canvas_sync(class_id: str, request: Request):
     response_model=schemas.CanvasClasses,
 )
 async def get_canvas_classes(class_id: str, request: Request):
-    tok = await get_access_token(request.state.db, class_id)
-    courses = await get_courses(tok)
+    try:
+        courses = await get_courses(request.state.db, class_id)
+    except HTTPException as e:
+        # If we get a 4xx error, mark the class as having a sync error.
+        # Otherwise, just display an error message (assuming this would be a 5xx error).
+        if e.status_code >= 400 and e.status_code < 500:
+            await models.Class.mark_canvas_sync_error(request.state.db, int(class_id))
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
     return {"classes": courses}
 
 
@@ -798,20 +804,21 @@ async def update_canvas_class(class_id: str, canvas_class_id: str, request: Requ
     response_model=schemas.GenericStatus,
 )
 async def sync_canvas_class(class_id: str, request: Request, tasks: BackgroundTasks):
-    tok = await get_access_token(
-        request.state.db,
-        class_id,
-        check_user=True,
-        user_id=request.state.session.user.id,
-    )
-    await sync_roster(
-        session=request.state.db,
-        access_token=tok,
-        class_id=int(class_id),
-        request=request,
-        tasks=tasks,
-        get_now_fn=get_now_fn,
-    )
+    try:
+        await sync_roster(
+            session=request.state.db,
+            user_id=request.state.session.user.id,
+            class_id=int(class_id),
+            request=request,
+            tasks=tasks,
+            get_now_fn=get_now_fn,
+        )
+    except HTTPException as e:
+        # If we get a 401 error, mark the class as having a sync error.
+        # Otherwise, just display an error message.
+        if e.status_code == 401:
+            await models.Class.mark_canvas_sync_error(request.state.db, int(class_id))
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
     return {"status": "ok"}
 
 

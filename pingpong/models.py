@@ -898,6 +898,19 @@ class Class(Base):
         await session.execute(stmt)
 
     @classmethod
+    async def mark_canvas_sync_error(
+        cls,
+        session: AsyncSession,
+        class_id: int,
+    ) -> None:
+        stmt = (
+            update(Class)
+            .where(Class.id == class_id)
+            .values(canvas_status=schemas.CanvasStatus.ERROR)
+        )
+        await session.execute(stmt)
+
+    @classmethod
     async def get_canvas_token(
         cls, session: AsyncSession, class_id: int
     ) -> tuple[int, str, str, int, datetime, datetime]:
@@ -960,9 +973,10 @@ class Class(Base):
         stmt = select(Class).where(Class.id == class_id)
         class_instance = await session.scalar(stmt)
 
-        if class_instance.canvas_class_id:
+        if class_instance.canvas_class_id and class_instance.canvas_class_id != canvas_id:
             old_canvas_id = class_instance.canvas_class_id
             class_instance.canvas_class_id = canvas_id
+            class_instance.canvas_last_synced = None
             await CanvasClass.delete_if_unused(session, old_canvas_id)
         else:
             class_instance.canvas_class_id = canvas_id

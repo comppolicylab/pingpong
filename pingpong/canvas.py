@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import config
 from .models import Class, CanvasClass
 from .now import NowFn, utcnow
+from .retry import with_retry
 from .schemas import (
     CanvasToken,
     CanvasClass as CanvasClassSchema,
@@ -173,15 +174,23 @@ async def refresh_access_token(refresh_token: str) -> tuple[str, str, int]:
     return await canvas_token_request(params)
 
 
-async def get_courses(access_token: str) -> list[CanvasClassSchema]:
+@with_retry(max_retries=3)
+async def get_courses(
+    session: AsyncSession, class_id: int, retry_attempt: int = 0
+) -> list[CanvasClassSchema]:
+    # Get the access token and force refresh if this is a retry attempt
+    access_token = await get_access_token(
+        session, str(class_id), force_refresh=retry_attempt > 0
+    )
     headers = {"Authorization": f"Bearer {access_token}"}
     params = {"include[]": ["term"]}
     courses = []
-    async with aiohttp.ClientSession() as session:
+
+    async with aiohttp.ClientSession() as session_:
         next_url = config.canvas_link("/api/v1/courses")
 
         while next_url:
-            async with session.get(
+            async with session_.get(
                 next_url,
                 params=params,
                 headers=headers,
@@ -191,7 +200,7 @@ async def get_courses(access_token: str) -> list[CanvasClassSchema]:
                 courses.extend(
                     [
                         {
-                            "id": course["id"],
+                            "canvas_id": course["id"],
                             "name": course["name"],
                             "course_code": course["course_code"],
                             "term": course["term"]["name"],
@@ -219,6 +228,7 @@ async def get_access_token(
     buffer: int = 60,
     check_user: bool = False,
     user_id: int = 0,
+    force_refresh: bool = False,
 ) -> str:
     (
         canvas_user_id,  # user_id
@@ -240,7 +250,10 @@ async def get_access_token(
 
     tok = canvas_access_token
 
-    if not now < canvas_token_added_at + timedelta(seconds=canvas_expires_in - buffer):
+    if (
+        not now < canvas_token_added_at + timedelta(seconds=canvas_expires_in - buffer)
+        or force_refresh
+    ):
         tok, _, expires_in = await refresh_access_token(canvas_refresh_token)
         await Class.update_canvas_token(
             session, int(class_id), tok, expires_in, refresh=True
@@ -329,17 +342,21 @@ async def set_canvas_class(
 
     await Class.update_canvas_class(session, db_class_id, canvas_class.id)
 
-
+@with_retry(max_retries=3)
 async def sync_roster(
     session: AsyncSession,
-    access_token: str,
+    user_id: int,
     class_id: int,
     request: Request,
     tasks: BackgroundTasks,
     get_now_fn: Callable[[Request], NowFn],
+    retry_attempt: int = 0,
 ) -> None:
+    access_token = await get_access_token(
+        session, str(class_id), check_user=True, user_id=user_id, force_refresh=retry_attempt > 0
+    )
     class_, now = await Class.get_canvas_course_id(session, class_id)
-
+    # raise HTTPException(status_code=400, detail="No linked Canvas course found")
     if not class_:
         raise HTTPException(status_code=400, detail="No linked Canvas course found")
 
@@ -349,10 +366,13 @@ async def sync_roster(
         # Calculate the remaining time until the next allowed sync
         time_remaining = (
             class_.canvas_last_synced + timedelta(minutes=10) - now
-        ).total_seconds() // 60
+        ).total_seconds() + 1
+        time_remaining_string = (
+            f"{int(time_remaining // 60)} minute{'s'[:(int(time_remaining)// 60)^1]}" if int(time_remaining // 60) > 0 else f"{int(time_remaining)} second{'s'[:(int(time_remaining)^1)]}"
+        )
         raise HTTPException(
             status_code=429,
-            detail=f"A Canvas sync was recently completed, please wait before trying again. You can request a manual sync after {int(time_remaining)} minutes.",
+            detail=f"A Canvas sync was recently completed. Please wait before trying again. You can request a manual sync in {time_remaining_string}.",
         )
 
     user_roles: List[CreateUserClassRole] = []

@@ -19,7 +19,13 @@
     InputAddon,
     Alert,
     Spinner,
-    CloseButton
+    CloseButton,
+
+    Dropdown,
+
+    DropdownItem
+
+
   } from 'flowbite-svelte';
   import BulkAddUsers from '$lib/components/BulkAddUsers.svelte';
   import CanvasLogo from '$lib/components/CanvasLogo.svelte';
@@ -33,7 +39,22 @@
     EyeOutline,
     EyeSlashOutline,
     LinkOutline,
-    RefreshOutline
+    RefreshOutline,
+
+    TrashBinOutline,
+
+    ChevronDownOutline,
+
+    BarsOutline,
+
+    SortHorizontalOutline,
+
+    AdjustmentsHorizontalOutline
+
+
+
+
+
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
@@ -43,6 +64,7 @@
   import { page } from '$app/stores';
   import DropdownContainer from '$lib/components/DropdownContainer.svelte';
   import CanvasClassDropdownOptions from '$lib/components/CanvasClassDropdownOptions.svelte';
+  import ChatInput from '$lib/components/ChatInput.svelte';
 
   /**
    * Application data.
@@ -287,8 +309,8 @@
     return api.getClassUsers(fetch, data.class.id, { limit, offset, search });
   };
 
-  const classId = data.class.id;
-  const canvasLinkedClass = data.class.canvas_class;
+  $: classId = data.class.id;
+  $: canvasLinkedClass = data.class.canvas_class;
 
   const redirectToCanvas = async () => {
     const result = await api.getCanvasLink(fetch, data.class.id);
@@ -342,6 +364,7 @@
     const response = api.expandResponse(result);
     if (response.error) {
       loadingCanvasClasses = false;
+      invalidateAll();
       sadToast(response.error.detail || 'An unknown error occurred');
     } else {
       $loadedCanvasClasses = response.data.classes;
@@ -379,14 +402,18 @@
     }
   };
 
+  let syncingCanvasClass = false;
   const syncClass = async () => {
+    syncingCanvasClass = true;
     const result = await api.syncCanvasClass(fetch, data.class.id);
     const response = api.expandResponse(result);
     if (response.error) {
       // Needed here to update the timer (Last sync: ...)
+      syncingCanvasClass = false;
       invalidateAll();
       sadToast(response.error.detail || 'An unknown error occurred');
     } else {
+      syncingCanvasClass = false;
       invalidateAll();
       timesAdded++;
       happyToast('Synced PingPong user list with Canvas roster!');
@@ -395,7 +422,7 @@
 
   // The HTMLElement refs of the canvas class options.
   let classNodes: { [key: string]: HTMLElement } = {};
-
+  let open = false;
   // Clean up state on navigation. Invalidate data so that any changes
   // are reflected in the rest of the app. (If performance suffers here,
   // we can be more selective about what we invalidate.)
@@ -578,7 +605,7 @@
       </div>
       <div class="col-span-2">
         {#if !data.class.canvas_status || data.class.canvas_status === 'none'}
-          <Alert color="none" class="bg-blue-light-50 text-blue-900">
+          <Alert color="none" class="bg-blue-50 text-blue-900" defaultClass='p-4 gap-3 text-sm border-2 border-blue-200'>
             <div class="pl-1.5">
               <div class="flex flex-row justify-between items-center">
                 <div class="flex items-center gap-3">
@@ -597,7 +624,7 @@
                 <Button
                   pill
                   size="xs"
-                  class="bg-orange text-white hover:bg-orange-dark"
+                  class="bg-gradient-to-t from-blue-900 to-blue-800 text-white hover:from-blue-800 hover:to-blue-700"
                   on:click={redirectToCanvas}
                   on:touchstart={redirectToCanvas}
                 >
@@ -606,8 +633,8 @@
               </div>
             </div>
           </Alert>
-        {:else if data.class.canvas_status === 'authorized' && !data.class.canvas_class && data.class.canvas_user?.id && data.me.user?.id === data.class.canvas_user?.id}
-          <Alert color="yellow">
+        {:else if data.class.canvas_status === 'authorized' && data.class.canvas_user?.id && data.me.user?.id === data.class.canvas_user?.id}
+          <Alert color="yellow" defaultClass='p-4 gap-3 text-sm border-2'>
             <div class="flex items-center gap-3">
               <CanvasLogo size="5" />
               <span class="text-lg font-medium"
@@ -638,7 +665,7 @@
                   <Button
                     pill
                     size="xs"
-                    class="shrink-0 max-h-fit bg-orange border border-orange text-white hover:bg-orange-dark hover:border-orange-dark"
+                    class="shrink-0 max-h-fit border border-amber-900 bg-gradient-to-t from-amber-900 to-amber-800 text-white hover:from-amber-800 hover:to-amber-700"
                     on:click={saveSelectedClass}
                     on:touchstart={saveSelectedClass}
                     disabled={loadingCanvasClasses || !selectedClass}
@@ -648,7 +675,7 @@
                   <Button
                     pill
                     size="xs"
-                    class="shrink-0 max-h-fit bg-blue-light-50 text-blue-dark-50 border border-blue-dark-50 hover:bg-blue-light-40"
+                    class="shrink-0 max-h-fit border border-gray-400 bg-gradient-to-t from-gray-100 to-gray-100 text-gray-800 hover:from-gray-200 hover:to-gray-100"
                     on:click={() => {
                       canvasClasses = [];
                       selectedClass = '';
@@ -665,7 +692,7 @@
                 <Button
                   pill
                   size="xs"
-                  class="bg-orange text-white hover:bg-orange-dark"
+                  class="bg-gradient-to-t from-amber-900 to-amber-800 text-white hover:from-amber-800 hover:to-amber-700"
                   on:click={loadCanvasClasses}
                   on:touchstart={loadCanvasClasses}
                 >
@@ -677,8 +704,8 @@
               {/if}
             </div>
           </Alert>
-        {:else if data.class.canvas_status === 'authorized' && !data.class.canvas_class}
-          <Alert color="green">
+        {:else if data.class.canvas_status === 'authorized'}
+          <Alert color="green" defaultClass='p-4 gap-3 text-sm border-2'>
             <div class="flex items-center gap-3">
               <CanvasLogo size="5" />
               <span class="text-lg font-medium">Canvas setup in process</span>
@@ -694,15 +721,67 @@
             </p>
           </Alert>
         {:else if data.class.canvas_status === 'linked' && data.class.canvas_user?.id && data.me.user?.id === data.class.canvas_user?.id}
-          <Alert color="green">
+          <Alert color="green" defaultClass='p-4 gap-3 text-sm border-2'>
             <div class="flex items-center gap-3">
               <CanvasLogo size="5" />
               <span class="text-lg font-medium">Canvas Sync is active</span>
             </div>
             <p class="mt-2 text-sm">
-              This PingPong group is linked to {canvasLinkedClass?.course_code}: {canvasLinkedClass?.name}
+              This PingPong group is linked to <span class="font-semibold">{canvasLinkedClass?.course_code}: {canvasLinkedClass?.name}</span>
               on Canvas. The class roster is automatically synced with this group's user list about once
               every hour. Use the Sync button below to request an immediate sync.
+            </p>
+            <p class="mt-2 mb-4 text-sm">
+              Last sync: {data.class.canvas_last_synced
+                ? dayjs.utc(data.class.canvas_last_synced).fromNow()
+                : 'never'}
+            </p>
+            <div class="flex justify-between">
+              <Button
+                pill
+                size="xs"
+                class="bg-gradient-to-t from-green-800 to-green-700 text-white hover:from-green-700 hover:to-green-600"
+                on:click={syncClass}
+                on:touchstart={syncClass}
+                disabled={syncingCanvasClass || $updatingApiKey}
+              >
+              {#if syncingCanvasClass}<Spinner
+              color="white"
+              class="w-4 h-4 me-2"
+            />Syncing roster...{:else}<RefreshOutline class="w-4 h-4 me-2" />Sync roster{/if}</Button
+              >
+              <Button
+                pill
+                size="xs"
+                class="border border-green-900 hover:bg-green-900 text-green-900 hover:bg-gradient-to-t hover:from-green-800 hover:to-green-700 hover:text-white"
+                on:click={() => { open = !open; }}
+                on:touchstart={() => { open = !open; }}
+                disabled={syncingCanvasClass || $updatingApiKey}
+              >
+              <AdjustmentsHorizontalOutline class="w-4 h-4 me-2" />Edit Canvas Sync</Button
+              >
+              <Dropdown {open}>
+                <DropdownItem><div class="flex flex-row gap-3"><SortHorizontalOutline class="w-4 h-4 me-2" />Sync another class</div></DropdownItem>
+                <DropdownItem><div class="flex flex-row gap-3"><ChevronDownOutline class="w-4 h-4 me-2" />Disconnect Canvas account</div></DropdownItem>
+              </Dropdown>
+            </div>
+          </Alert>
+        {:else if data.class.canvas_status === 'linked'}
+          <Alert color="green">
+            <div class="flex items-center gap-3">
+              <CanvasLogo size="5" />
+              <span class="text-lg font-medium">*_OTHER_PERSON_LINKED_TITLE</span>
+            </div>
+            <p class="mt-2 text-sm">*_OTHER_PERSON_LINKED_DESC</p>
+          </Alert>
+          {:else if data.class.canvas_status === 'error' && data.class.canvas_user?.id && data.me.user?.id === data.class.canvas_user?.id}
+          <Alert color="red">
+            <div class="flex items-center gap-3">
+              <CanvasLogo size="5" />
+              <span class="text-lg font-medium">Important: Reconnect your Canvas account</span>
+            </div>
+            <p class="mt-2 text-sm">
+              We faced an issue when trying to connect to your Canvas account. Use the reconnection button below to reauthorize Pingpong to access your Canvas account and ensure uninterrupted syncing of your class roster.
             </p>
             <p class="mt-2 mb-4 text-sm">
               Last sync: {data.class.canvas_last_synced
@@ -714,22 +793,22 @@
                 pill
                 size="xs"
                 class="bg-orange text-white hover:bg-orange-dark"
-                on:click={syncClass}
-                on:touchstart={syncClass}
+                on:click={redirectToCanvas}
+                on:touchstart={redirectToCanvas}
               >
-                <RefreshOutline class="w-4 h-4 me-2" />Sync roster</Button
+                <RefreshOutline class="w-4 h-4 me-2" />Reconnect Canvas account</Button
               >
             </div>
           </Alert>
-        {:else if data.class.canvas_status === 'linked'}
-          <Alert color="green">
+        {:else if data.class.canvas_status === 'error'}
+          <Alert color="red">
             <div class="flex items-center gap-3">
               <CanvasLogo size="5" />
-              <span class="text-lg font-medium">*_OTHER_PERSON_LINKED_TITLE</span>
+              <span class="text-lg font-medium">*_OTHER_PERSON_ERROR_TITLE</span>
             </div>
             <p class="mt-2 text-sm">*_OTHER_PERSON_LINKED_DESC</p>
           </Alert>
-        {/if}
+          {/if}
         <div class="mb-4">
           <!-- Update the user view when we finish batch adding users. -->
           <!-- Uses a variable for times users have been bulk added -->
