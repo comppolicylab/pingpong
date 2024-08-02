@@ -531,13 +531,9 @@
             headerClass="versioned-models"
             bind:modelNodes
             bind:modelHeaders
-            smallNameText
           />
           <div slot="footer">
             <DropdownFooter
-              colorClasses="from-gray-800 to-gray-600"
-              hoverable
-              hoverColorClasses="hover:from-gray-900 hover:to-gray-700"
               link="https://platform.openai.com/docs/models"
               ><div class="flex flex-row justify-between">
                 <div class="flex flex-row gap-2">
