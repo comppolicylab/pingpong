@@ -1016,6 +1016,39 @@ class Class(Base):
         for row in result:
             yield row.Class
 
+    @classmethod
+    async def remove_canvas_sync(
+        cls, session: AsyncSession, id_: int, kill_connection: bool = False
+    ) -> list[int]:
+        stmt = select(Class).where(Class.id == id_)
+        class_instance = await session.scalar(stmt)
+
+        if class_instance.canvas_class_id:
+            await CanvasClass.delete_if_unused(session, class_instance.canvas_class_id)
+            class_instance.canvas_class_id = None
+            class_instance.canvas_status = schemas.CanvasStatus.AUTHORIZED
+            class_instance.canvas_last_synced = None
+
+        if kill_connection:
+            class_instance.canvas_access_token = None
+            class_instance.canvas_refresh_token = None
+            class_instance.canvas_expires_in = None
+            class_instance.canvas_token_added_at = None
+            class_instance.canvas_status = schemas.CanvasStatus.NONE
+
+        stmt_ = select(UserClassRole).where(
+            and_(UserClassRole.class_id == id_, UserClassRole.from_canvas)
+        )
+        result = await session.execute(stmt_)
+        users = [row.UserClassRole for row in result]
+        user_ids = [user.user_id for user in users]
+
+        for user in users:
+            await session.delete(user)
+        await session.flush()
+
+        return user_ids
+
 
 class CodeInterpreterCall(Base):
     __tablename__ = "code_interpreter_calls"

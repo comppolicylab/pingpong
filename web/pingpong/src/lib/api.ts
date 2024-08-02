@@ -1774,6 +1774,16 @@ export const syncCanvasClass = async (f: Fetcher, classId: number) => {
   return await POST<never, GenericStatus>(f, url);
 };
 
+export const deleteCanvasClassSync = async (f: Fetcher, classId: number) => {
+  const url = `class/${classId}/class_sync`;
+  return await DELETE<never, GenericStatus>(f, url);
+};
+
+export const removeCanvasConnection = async (f: Fetcher, classId: number) => {
+  const url = `class/${classId}/canvas_account`;
+  return await DELETE<never, GenericStatus>(f, url);
+};
+
 /**
  * Roles for users in a class.
  */

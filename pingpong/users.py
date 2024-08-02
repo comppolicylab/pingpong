@@ -180,3 +180,15 @@ async def remove_user(
         revokes.append((f"user:{user_id}", role, f"class:{class_id}"))
 
     await client_.write_safe(revoke=revokes)
+
+
+async def delete_canvas_permissions(
+    client: OpenFgaAuthzClient, user_ids: list[int], class_id: str
+) -> None:
+    revokes = list[Relation]()
+    revokes = [
+        (f"user:{user_id}", role, f"class:{class_id}")
+        for user_id in user_ids
+        for role in ["admin", "teacher", "student"]
+    ]
+    await client.write_safe(revoke=revokes)

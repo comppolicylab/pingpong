@@ -403,9 +403,41 @@
     }
   };
 
+  let editDropdownOpen = false;
+  const deleteClassSync = async () => {
+    const result = await api.deleteCanvasClassSync(fetch, data.class.id);
+    const response = api.expandResponse(result);
+    if (response.error) {
+      editDropdownOpen = false;
+      invalidateAll();
+      sadToast(response.error.detail || 'An unknown error occurred');
+    } else {
+      editDropdownOpen = false;
+      $loadedCanvasClasses = [];
+      selectedClass = '';
+      invalidateAll();
+      timesAdded++;
+      happyToast('Canvas class removed successfully!');
+    }
+  };
+
+  const removeCanvasConnection = async () => {
+    const result = await api.removeCanvasConnection(fetch, data.class.id);
+    const response = api.expandResponse(result);
+    if (response.error) {
+      editDropdownOpen = false;
+      invalidateAll();
+      sadToast(response.error.detail || 'An unknown error occurred');
+    } else {
+      editDropdownOpen = false;
+      invalidateAll();
+      timesAdded++;
+      happyToast('Canvas account connection removed successfully!');
+    }
+  };
+
   // The HTMLElement refs of the canvas class options.
   let classNodes: { [key: string]: HTMLElement } = {};
-  let open = false;
   // Clean up state on navigation. Invalidate data so that any changes
   // are reflected in the rest of the app. (If performance suffers here,
   // we can be more selective about what we invalidate.)
@@ -664,11 +696,11 @@
                     size="xs"
                     class="shrink-0 max-h-fit border border-gray-400 bg-gradient-to-t from-gray-100 to-gray-100 text-gray-800 hover:from-gray-200 hover:to-gray-100"
                     on:click={() => {
-                      canvasClasses = [];
+                      $loadedCanvasClasses = [];
                       selectedClass = '';
                     }}
                     on:touchstart={() => {
-                      canvasClasses = [];
+                      $loadedCanvasClasses = [];
                       selectedClass = '';
                     }}
                   >
@@ -710,7 +742,7 @@
         {:else if data.class.canvas_status === 'linked' && data.class.canvas_user?.id && data.me.user?.id === data.class.canvas_user?.id}
           <Alert color="green" defaultClass="p-4 gap-3 text-sm border-2">
             <div class="flex items-center gap-3">
-              <CanvasLogo size="5" />
+              <div class="animate-pulse"><CanvasLogo size="5" /></div>
               <span class="text-lg font-medium">Canvas Sync is active</span>
             </div>
             <p class="mt-2 text-sm">
@@ -725,7 +757,7 @@
                 ? dayjs.utc(data.class.canvas_last_synced).fromNow()
                 : 'never'}
             </p>
-            <div class="flex justify-between">
+            <div class="flex flex-row justify-between items-center">
               <Button
                 pill
                 size="xs"
@@ -741,25 +773,25 @@
                 pill
                 size="xs"
                 class="border border-green-900 hover:bg-green-900 text-green-900 hover:bg-gradient-to-t hover:from-green-800 hover:to-green-700 hover:text-white"
-                on:click={() => {
-                  open = !open;
-                }}
-                on:touchstart={() => {
-                  open = !open;
-                }}
                 disabled={syncingCanvasClass || $updatingApiKey}
               >
                 <AdjustmentsHorizontalOutline class="w-4 h-4 me-2" />Edit Canvas Sync</Button
               >
-              <Dropdown {open}>
-                <DropdownItem
-                  ><div class="flex flex-row gap-3">
-                    <SortHorizontalOutline class="w-4 h-4 me-2" />Sync another class
+              <Dropdown bind:open={editDropdownOpen}>
+                <DropdownItem on:click={deleteClassSync}
+                  ><div class="flex flex-row gap-2 items-center">
+                    <div class="border bg-green-800 border-green-800 text-white rounded-full">
+                      <SortHorizontalOutline class="w-4 h-4 m-2" />
+                    </div>
+                    Sync another class
                   </div></DropdownItem
                 >
-                <DropdownItem
-                  ><div class="flex flex-row gap-3">
-                    <UserRemoveSolid class="w-4 h-4 me-2" />Disconnect Canvas account
+                <DropdownItem on:click={removeCanvasConnection}
+                  ><div class="flex flex-row gap-3 items-center">
+                    <div class="border bg-green-800 border-green-800 text-white rounded-full">
+                      <UserRemoveSolid class="w-4 h-4 m-2" />
+                    </div>
+                    Disconnect Canvas account
                   </div></DropdownItem
                 >
               </Dropdown>
@@ -768,10 +800,20 @@
         {:else if data.class.canvas_status === 'linked'}
           <Alert color="green">
             <div class="flex items-center gap-3">
-              <CanvasLogo size="5" />
-              <span class="text-lg font-medium">*_OTHER_PERSON_LINKED_TITLE</span>
+              <div class="animate-pulse"><CanvasLogo size="5" /></div>
+              <span class="text-lg font-medium">Canvas Sync is active</span>
             </div>
-            <p class="mt-2 text-sm">*_OTHER_PERSON_LINKED_DESC</p>
+            <p class="mt-2 text-sm">
+              This PingPong group is linked to <span class="font-semibold"
+                >{canvasLinkedClass?.course_code}: {canvasLinkedClass?.name}</span
+              > on Canvas. The class roster is automatically synced with this group's user list about
+              once every hour.
+            </p>
+            <p class="mt-2 text-sm">
+              {data.class.canvas_user?.name || 'Someone in your course'} has linked their Canvas account
+              with this group. Need to link your own account? Ask {data.class.canvas_user?.name ||
+                'them'} to disconnect their Canvas account from this PingPong group.
+            </p>
           </Alert>
         {:else if data.class.canvas_status === 'error' && data.class.canvas_user?.id && data.me.user?.id === data.class.canvas_user?.id}
           <Alert color="red">

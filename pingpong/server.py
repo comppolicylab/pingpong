@@ -68,7 +68,7 @@ from .canvas import (
     set_canvas_class,
     sync_roster,
 )
-from .users import add_new_users, remove_user
+from .users import add_new_users, delete_canvas_permissions, remove_user
 
 logger = logging.getLogger(__name__)
 
@@ -818,6 +818,30 @@ async def sync_canvas_class(class_id: str, request: Request, tasks: BackgroundTa
         if e.status_code == 401:
             await models.Class.mark_canvas_sync_error(request.state.db, int(class_id))
         raise HTTPException(status_code=e.status_code, detail=e.detail)
+    return {"status": "ok"}
+
+
+@v1.delete(
+    "/class/{class_id}/class_sync",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def unlink_canvas_class(class_id: str, request: Request):
+    userIds = await models.Class.remove_canvas_sync(request.state.db, int(class_id))
+    await delete_canvas_permissions(request.state.authz, userIds, class_id)
+    return {"status": "ok"}
+
+
+@v1.delete(
+    "/class/{class_id}/canvas_account",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def remove_canvas_connection(class_id: str, request: Request):
+    userIds = await models.Class.remove_canvas_sync(
+        request.state.db, int(class_id), kill_connection=True
+    )
+    await delete_canvas_permissions(request.state.authz, userIds, class_id)
     return {"status": "ok"}
 
 
