@@ -531,9 +531,14 @@
             headerClass="versioned-models"
             bind:modelNodes
             bind:modelHeaders
+            smallNameText
           />
           <div slot="footer">
-            <DropdownFooter link="https://platform.openai.com/docs/models"
+            <DropdownFooter
+              colorClasses="from-gray-800 to-gray-600"
+              hoverable
+              hoverColorClasses="hover:from-gray-900 hover:to-gray-700"
+              link="https://platform.openai.com/docs/models"
               ><div class="flex flex-row justify-between">
                 <div class="flex flex-row gap-2">
                   <QuestionCircleSolid /> Unsure which model to choose? Check out OpenAI's documentation
