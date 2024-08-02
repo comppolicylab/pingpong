@@ -973,7 +973,10 @@ class Class(Base):
         stmt = select(Class).where(Class.id == class_id)
         class_instance = await session.scalar(stmt)
 
-        if class_instance.canvas_class_id and class_instance.canvas_class_id != canvas_id:
+        if (
+            class_instance.canvas_class_id
+            and class_instance.canvas_class_id != canvas_id
+        ):
             old_canvas_id = class_instance.canvas_class_id
             class_instance.canvas_class_id = canvas_id
             class_instance.canvas_last_synced = None

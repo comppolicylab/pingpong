@@ -1,10 +1,15 @@
 import asyncio
 import random
-from typing import Any, Mapping, Callable, Optional
+from typing import Any, Mapping, Callable
 
 from fastapi import HTTPException
 
-def with_retry(max_retries: int = 5, max_delay: int = 60, backoff: int = 2,) -> Callable:
+
+def with_retry(
+    max_retries: int = 5,
+    max_delay: int = 60,
+    backoff: int = 2,
+) -> Callable:
     def decorator(f: Callable) -> Callable:
         async def wrapper(*args: Any, **kwargs: Mapping[str, Any]) -> Any:
             attempt = 0
@@ -17,10 +22,12 @@ def with_retry(max_retries: int = 5, max_delay: int = 60, backoff: int = 2,) -> 
                         raise e
                     last_error = e
                     attempt += 1
-                    t = min(max_delay, backoff ** attempt)
+                    t = min(max_delay, backoff**attempt)
                     jittered = random.random() * t
                     await asyncio.sleep(jittered)
             if last_error:
                 raise last_error
+
         return wrapper
+
     return decorator

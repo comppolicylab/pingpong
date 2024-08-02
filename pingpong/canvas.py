@@ -342,6 +342,7 @@ async def set_canvas_class(
 
     await Class.update_canvas_class(session, db_class_id, canvas_class.id)
 
+
 @with_retry(max_retries=3)
 async def sync_roster(
     session: AsyncSession,
@@ -353,7 +354,11 @@ async def sync_roster(
     retry_attempt: int = 0,
 ) -> None:
     access_token = await get_access_token(
-        session, str(class_id), check_user=True, user_id=user_id, force_refresh=retry_attempt > 0
+        session,
+        str(class_id),
+        check_user=True,
+        user_id=user_id,
+        force_refresh=retry_attempt > 0,
     )
     class_, now = await Class.get_canvas_course_id(session, class_id)
     # raise HTTPException(status_code=400, detail="No linked Canvas course found")
@@ -368,7 +373,9 @@ async def sync_roster(
             class_.canvas_last_synced + timedelta(minutes=10) - now
         ).total_seconds() + 1
         time_remaining_string = (
-            f"{int(time_remaining // 60)} minute{'s'[:(int(time_remaining)// 60)^1]}" if int(time_remaining // 60) > 0 else f"{int(time_remaining)} second{'s'[:(int(time_remaining)^1)]}"
+            f"{int(time_remaining // 60)} minute{'s'[:(int(time_remaining)// 60)^1]}"
+            if int(time_remaining // 60) > 0
+            else f"{int(time_remaining)} second{'s'[:(int(time_remaining)^1)]}"
         )
         raise HTTPException(
             status_code=429,
