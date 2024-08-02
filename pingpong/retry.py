@@ -18,8 +18,9 @@ def with_retry(
                 try:
                     return await f(*args, retry_attempt=attempt, **kwargs)
                 except Exception as e:
-                    # If we specifically block the request due to rate limiting, don't retry
-                    if isinstance(e, HTTPException) and e.status_code == 429:
+                    # Our server returned an error, so we should stop retrying
+                    # We use aiohttp raise_for_status, which returns a ClientResponseError
+                    if isinstance(e, HTTPException):
                         raise e
                     last_error = e
                     attempt += 1
