@@ -349,12 +349,8 @@ class UpdateUserInfo(BaseModel):
     display_name: str | None = Field(None, min_length=1, max_length=100)
 
 
-class ClassUser(BaseModel):
+class ClassUser(BaseModel, UserNameMixin):
     id: int
-    first_name: str | None
-    last_name: str | None
-    display_name: str | None
-    email: str
     state: UserState
     roles: ClassUserRoles
     explanation: list[list[str]] | None

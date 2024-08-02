@@ -68,7 +68,7 @@ from .canvas import (
     set_canvas_class,
     sync_roster,
 )
-from .users import add_new_users
+from .users import add_new_users, remove_user
 
 logger = logging.getLogger(__name__)
 
@@ -987,26 +987,7 @@ async def update_user_class_role(
     response_model=schemas.GenericStatus,
 )
 async def remove_user_from_class(class_id: str, user_id: str, request: Request):
-    cid = int(class_id)
-    uid = int(user_id)
-
-    if uid == request.state.session.user.id:
-        raise HTTPException(
-            status_code=403, detail="Cannot remove yourself from a class"
-        )
-
-    existing = await models.UserClassRole.get(request.state.db, uid, cid)
-    if not existing:
-        raise HTTPException(status_code=404, detail="User not found in class")
-
-    await models.UserClassRole.delete(request.state.db, uid, cid)
-
-    revokes = list[Relation]()
-    for role in ["admin", "teacher", "student"]:
-        revokes.append((f"user:{uid}", role, f"class:{cid}"))
-
-    await request.state.authz.write_safe(revoke=revokes)
-
+    await remove_user(int(class_id), int(user_id), request)
     return {"status": "ok"}
 
 

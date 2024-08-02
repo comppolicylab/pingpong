@@ -19,7 +19,8 @@ def with_retry(
                     return await f(*args, retry_attempt=attempt, **kwargs)
                 except Exception as e:
                     # Our server returned an error, so we should stop retrying
-                    # We use aiohttp raise_for_status, which returns a ClientResponseError
+                    # Our network requests use aiohttp raise_for_status,
+                    # which returns a ClientResponseError
                     if isinstance(e, HTTPException):
                         raise e
                     last_error = e
