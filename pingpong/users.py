@@ -12,10 +12,8 @@ from .invite import send_invite
 from .now import NowFn, utcnow
 
 
-def get_now_fn(req: Request | None) -> NowFn:
+def get_now_fn(req: Request) -> NowFn:
     """Get the current time function for the request."""
-    if req is None:
-        return utcnow
     return getattr(req.app.state, "now", utcnow)
 
 
