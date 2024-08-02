@@ -325,24 +325,24 @@ async def sync_roster(
     if not class_:
         raise HTTPException(status_code=400, detail="No linked Canvas course found")
 
-    # if (
-    #     class_.canvas_last_synced
-    #     and class_.canvas_last_synced > now - timedelta(minutes=10)
-    #     and not cron
-    # ):
-    #     # Calculate the remaining time until the next allowed sync
-    #     time_remaining = (
-    #         class_.canvas_last_synced + timedelta(minutes=10) - now
-    #     ).total_seconds() + 1
-    #     time_remaining_string = (
-    #         f"{int(time_remaining // 60)} minute{'s'[:(int(time_remaining)// 60)^1]}"
-    #         if int(time_remaining // 60) > 0
-    #         else f"{int(time_remaining)} second{'s'[:(int(time_remaining)^1)]}"
-    #     )
-    #     raise HTTPException(
-    #         status_code=429,
-    #         detail=f"A Canvas sync was recently completed. Please wait before trying again. You can request a manual sync in {time_remaining_string}.",
-    #     )
+    if (
+        class_.canvas_last_synced
+        and class_.canvas_last_synced > now - timedelta(minutes=10)
+        and not cron
+    ):
+        # Calculate the remaining time until the next allowed sync
+        time_remaining = (
+            class_.canvas_last_synced + timedelta(minutes=10) - now
+        ).total_seconds() + 1
+        time_remaining_string = (
+            f"{int(time_remaining // 60)} minute{'s'[:(int(time_remaining)// 60)^1]}"
+            if int(time_remaining // 60) > 0
+            else f"{int(time_remaining)} second{'s'[:(int(time_remaining)^1)]}"
+        )
+        raise HTTPException(
+            status_code=429,
+            detail=f"A Canvas sync was recently completed. Please wait before trying again. You can request a manual sync in {time_remaining_string}.",
+        )
     user_roles: List[CreateUserClassRole] = []
     headers = {"Authorization": f"Bearer {access_token}"}
     params = {"include[]": ["enrollments"]}
