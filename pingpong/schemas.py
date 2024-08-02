@@ -318,6 +318,7 @@ class CreateUserClassRoles(BaseModel):
 class UserClassRole(BaseModel):
     user_id: int
     class_id: int
+    from_canvas: bool = False
     roles: ClassUserRoles
 
     class Config:
@@ -357,6 +358,7 @@ class ClassUser(BaseModel):
     state: UserState
     roles: ClassUserRoles
     explanation: list[list[str]] | None
+    from_canvas: bool = False
 
 
 class UserGroup(BaseModel):

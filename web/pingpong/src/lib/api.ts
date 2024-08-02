@@ -252,6 +252,7 @@ export type UserClassRole = {
   user_id: number;
   class_id: number;
   role: string;
+  from_canvas: boolean;
 };
 
 /**
@@ -1066,6 +1067,7 @@ export type ClassUser = {
   email: string;
   roles: ClassUserRoles;
   state: UserState;
+  from_canvas: boolean;
 };
 
 /**

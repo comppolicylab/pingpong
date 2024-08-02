@@ -25,6 +25,7 @@
   import { sadToast, happyToast } from '$lib/toast';
   import * as api from '$lib/api';
   import { submitParentForm } from '$lib/form';
+  import CanvasLogo from './CanvasLogo.svelte';
 
   /**
    * Number of users to view on each page.
@@ -299,7 +300,7 @@
       <TableHead>
         <TableHeadCell padding={thPad}>User</TableHeadCell>
         <TableHeadCell padding={thPad}>Role</TableHeadCell>
-        <TableHeadCell padding={thPad}>Verified</TableHeadCell>
+        <TableHeadCell padding={thPad}>Status</TableHeadCell>
         <TableHeadCell padding={thPad}></TableHeadCell>
       </TableHead>
       <TableBody>
@@ -330,19 +331,26 @@
               {/if}
             </TableBodyCell>
             <TableBodyCell {tdClass}>
-              {#if user.state === 'verified'}
-                <div title="This user is verified."><CheckCircleOutline color="green" /></div>
-              {:else if user.state === 'unverified'}
-                <div title="This user has not responded to the invitation.">
-                  <EnvelopeOutline color="orange" />
-                </div>
-              {:else if user.state === 'banned'}
-                <div title="This user has been banned from PingPong.">
-                  <CloseOutline color="red" />
-                </div>
-              {:else}
-                {user.state}
-              {/if}
+              <div class="flex flex-row items-center gap-2">
+                {#if user.state === 'verified'}
+                  <div title="This user is verified."><CheckCircleOutline color="green" /></div>
+                {:else if user.state === 'unverified'}
+                  <div title="This user has not responded to the invitation.">
+                    <EnvelopeOutline color="orange" />
+                  </div>
+                {:else if user.state === 'banned'}
+                  <div title="This user has been banned from PingPong.">
+                    <CloseOutline color="red" />
+                  </div>
+                {:else}
+                  {user.state}
+                {/if}
+                {#if user.from_canvas}
+                  <div title="This user was imported from Canvas.">
+                    <span class="text-red-600"><CanvasLogo size="5" /></span>
+                  </div>
+                {/if}
+              </div>
             </TableBodyCell>
             <TableBodyCell {tdClass}>
               <form on:submit={submitRemoveUser}>

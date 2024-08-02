@@ -79,12 +79,14 @@ class UserClassRole(Base):
         session: AsyncSession,
         user_id: int,
         class_id: int,
+        from_canvas: bool = False,
     ) -> "UserClassRole":
         stmt = (
             _get_upsert_stmt(session)(UserClassRole)
             .values(
                 user_id=int(user_id),
                 class_id=int(class_id),
+                from_canvas=from_canvas,
             )
             .on_conflict_do_nothing(
                 index_elements=[UserClassRole.user_id, UserClassRole.class_id],

@@ -25,6 +25,7 @@ async def add_new_users(
     request: Request,
     tasks: BackgroundTasks,
     ignore_self: bool = False,
+    from_canvas: bool = False,
 ):
     cid = int(class_id)
     class_ = await models.Class.get_by_id(request.state.db, cid)
@@ -83,8 +84,10 @@ async def add_new_users(
                     user_id=existing.user_id,
                     class_id=existing.class_id,
                     roles=ucr.roles,
+                    from_canvas=from_canvas,
                 )
             )
+            existing.from_canvas = from_canvas
             request.state.db.add(existing)
         else:
             # Make sure the user exists...
@@ -92,6 +95,7 @@ async def add_new_users(
                 request.state.db,
                 user.id,
                 cid,
+                from_canvas,
             )
             new_.append(
                 schemas.CreateInvite(
@@ -107,6 +111,7 @@ async def add_new_users(
                     user_id=added.user_id,
                     class_id=added.class_id,
                     roles=ucr.roles,
+                    from_canvas=from_canvas,
                 )
             )
 
@@ -134,6 +139,7 @@ async def add_new_users_cron(
     client: OpenFgaAuthzClient | None,
     new_ucr: schemas.CreateUserClassRoles,
     ignore_self: bool = True,
+    from_canvas: bool = True,
 ):
     if not client:
         raise HTTPException(status_code=500, detail="Authz client not available")
@@ -191,8 +197,10 @@ async def add_new_users_cron(
                     user_id=existing.user_id,
                     class_id=existing.class_id,
                     roles=ucr.roles,
+                    from_canvas=from_canvas,
                 )
             )
+            existing.from_canvas = from_canvas
             session.add(existing)
         else:
             # Make sure the user exists...
@@ -200,6 +208,7 @@ async def add_new_users_cron(
                 session,
                 user.id,
                 cid,
+                from_canvas,
             )
             new_.append(
                 schemas.CreateInvite(
@@ -215,6 +224,7 @@ async def add_new_users_cron(
                     user_id=added.user_id,
                     class_id=added.class_id,
                     roles=ucr.roles,
+                    from_canvas=from_canvas,
                 )
             )
 

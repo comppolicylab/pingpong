@@ -868,6 +868,7 @@ async def list_class_users(
                     student=results[i * 3 + 2],
                 ),
                 explanation=[[]],
+                from_canvas=u.from_canvas or False,
             )
         )
 
