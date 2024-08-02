@@ -307,7 +307,12 @@
         {#each users as user (user.id)}
           {@const roleInfo = getRoleInfoForUser(user)}
           <TableBodyRow>
-            <TableBodyCell {tdClass}><div class="flex flex-col"><div>{user.name}</div><div class="font-normal">{user.email}</div></div></TableBodyCell>
+            <TableBodyCell {tdClass}
+              ><div class="flex flex-col">
+                <div>{user.name}</div>
+                <div class="font-normal">{user.email}</div>
+              </div></TableBodyCell
+            >
             <TableBodyCell {tdClass}>
               <form on:submit={submitUpdateUser}>
                 <input type="hidden" name="user_id" value={user.id} />
