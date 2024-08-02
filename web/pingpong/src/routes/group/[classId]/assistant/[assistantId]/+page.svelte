@@ -533,8 +533,7 @@
             bind:modelHeaders
           />
           <div slot="footer">
-            <DropdownFooter
-              link="https://platform.openai.com/docs/models"
+            <DropdownFooter link="https://platform.openai.com/docs/models"
               ><div class="flex flex-row justify-between">
                 <div class="flex flex-row gap-2">
                   <QuestionCircleSolid /> Unsure which model to choose? Check out OpenAI's documentation
