@@ -38,7 +38,10 @@
     RefreshOutline,
     ChevronDownOutline,
     SortHorizontalOutline,
-    AdjustmentsHorizontalOutline
+    AdjustmentsHorizontalOutline,
+
+    UserRemoveSolid
+
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
@@ -729,7 +732,7 @@
               <Button
                 pill
                 size="xs"
-                class="bg-gradient-to-t from-green-800 to-green-700 text-white hover:from-green-700 hover:to-green-600"
+                class="bg-gradient-to-t from-green-800 to-green-700 text-white hover:from-green-700 hover:to-green-600 drop-shadow-md"
                 on:click={syncClass}
                 on:touchstart={syncClass}
                 disabled={syncingCanvasClass || $updatingApiKey}
@@ -759,7 +762,7 @@
                 >
                 <DropdownItem
                   ><div class="flex flex-row gap-3">
-                    <ChevronDownOutline class="w-4 h-4 me-2" />Disconnect Canvas account
+                    <UserRemoveSolid class="w-4 h-4 me-2" />Disconnect Canvas account
                   </div></DropdownItem
                 >
               </Dropdown>

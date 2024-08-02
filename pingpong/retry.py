@@ -17,8 +17,9 @@ def with_retry(
             while attempt < max_retries:
                 try:
                     return await f(*args, retry_attempt=attempt, **kwargs)
-                except HTTPException as e:
-                    if e.status_code == 429:
+                except Exception as e:
+                    # If we specifically block the request due to rate limiting, don't retry
+                    if isinstance(e, HTTPException) and e.status_code == 429:
                         raise e
                     last_error = e
                     attempt += 1
