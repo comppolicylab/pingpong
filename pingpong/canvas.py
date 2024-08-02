@@ -1,13 +1,14 @@
 from datetime import timedelta
+import json
 from logging import Logger
-from typing import List, cast
+from typing import List
 import aiohttp
 
 from fastapi import HTTPException, BackgroundTasks, Request
-import jwt
 from jwt.exceptions import PyJWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pingpong.auth import decode_auth_token, encode_auth_token
 from pingpong.authz.openfga import OpenFgaAuthzClient
 
 from .config import config
@@ -37,30 +38,11 @@ def encode_canvas_token(
     Returns:
         str: Canvas State Token
     """
-    if expiry < 1:
-        raise ValueError("expiry must be greater than 1 second")
-
-    now = nowfn()
-    exp = now + timedelta(seconds=expiry)
-    tok = CanvasToken(
-        iat=int(now.timestamp()),
-        exp=int(exp.timestamp()),
-        user_id=str(user_id),
-        class_id=class_id,
-    )
-
-    secret = config.auth.secret_keys[0]
-
-    # For some reason mypy is wrong and thinks this is a bytes object. It is
-    # actually a str in PyJWT:
-    # https://github.com/jpadilla/pyjwt/blob/2.8.0/jwt/api_jwt.py#L52
-    return cast(
-        str,
-        jwt.encode(
-            tok.model_dump(),
-            secret.key,
-            algorithm=secret.algorithm,
-        ),
+    return encode_auth_token(
+        user_id,
+        expiry,
+        nowfn=nowfn,
+        sub=json.dumps({"class_id": class_id, "user_id": user_id}),
     )
 
 
@@ -77,43 +59,17 @@ def decode_canvas_token(token: str, nowfn: NowFn = utcnow) -> CanvasToken:
     Raises:
         jwt.exceptions.PyJWTError when token is not valid
     """
-    exc: PyJWTError | None = None
-
-    for secret in config.auth.secret_keys:
-        try:
-            tok = CanvasToken(
-                **jwt.decode(
-                    token,
-                    secret.key,
-                    algorithms=[secret.algorithm],
-                    options={
-                        "verify_exp": False,
-                        "verify_nbf": False,
-                    },
-                )
-            )
-
-            # Custom timestamp verification according to the nowfn
-            now = nowfn().timestamp()
-            nbf = getattr(tok, "nbf", None)
-            if nbf is not None and now < nbf:
-                raise PyJWTError("Token not valid yet")
-
-            exp = getattr(tok, "exp", None)
-            if exp is not None and now > exp:
-                raise PyJWTError("Token expired")
-
-            return tok
-
-        except PyJWTError as e:
-            exc = e
-            continue
-
-    if exc is not None:
-        raise exc
-
-    # Unclear why we would get here
-    raise ValueError("invalid token")
+    try:
+        auth_token = decode_auth_token(token, nowfn=nowfn)
+        sub_data = json.loads(auth_token.sub)
+        return CanvasToken(
+            user_id=str(sub_data["user_id"]),
+            class_id=str(sub_data["class_id"]),
+            iat=auth_token.iat,
+            exp=auth_token.exp,
+        )
+    except PyJWTError as e:
+        raise HTTPException(status_code=400, detail="Invalid Canvas token") from e
 
 
 def generate_canvas_link(

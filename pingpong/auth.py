@@ -41,7 +41,9 @@ def decode_session_token(token: str, nowfn: NowFn = utcnow) -> SessionToken:
     return SessionToken(**auth_token.model_dump())
 
 
-def encode_auth_token(user_id: int, expiry: int = 600, nowfn: NowFn = utcnow) -> str:
+def encode_auth_token(
+    user_id: int, expiry: int = 600, nowfn: NowFn = utcnow, sub: str | None = None
+) -> str:
     """Generates the Auth Token.
 
     Args:
@@ -60,7 +62,7 @@ def encode_auth_token(user_id: int, expiry: int = 600, nowfn: NowFn = utcnow) ->
     tok = AuthToken(
         iat=int(now.timestamp()),
         exp=int(exp.timestamp()),
-        sub=str(user_id),
+        sub=str(user_id) if not sub else sub,
     )
 
     secret = config.auth.secret_keys[0]
