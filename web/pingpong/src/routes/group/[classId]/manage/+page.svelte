@@ -36,12 +36,9 @@
     EyeSlashOutline,
     LinkOutline,
     RefreshOutline,
-    ChevronDownOutline,
     SortHorizontalOutline,
     AdjustmentsHorizontalOutline,
-
     UserRemoveSolid
-
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
