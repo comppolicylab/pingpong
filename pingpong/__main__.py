@@ -9,6 +9,7 @@ import alembic.command
 import alembic.config
 
 from .auth import encode_auth_token
+from .canvas import sync_all
 from .config import config
 from .models import Base, User
 
@@ -24,6 +25,11 @@ def cli() -> None:
 
 @cli.group("auth")
 def auth() -> None:
+    pass
+
+
+@cli.group("canvas")
+def canvas() -> None:
     pass
 
 
@@ -175,6 +181,17 @@ def db_set_version(version: str, alembic_config: str) -> None:
     al_cfg = _load_alembic(alembic_config)
     # Run the Alembic upgrade command
     alembic.command.stamp(al_cfg, version)
+
+
+@canvas.command("sync-all")
+def canvas_sync_all() -> None:
+    async def _sync_all() -> None:
+        await config.authz.driver.init()
+        async with config.db.driver.async_session() as session:
+            async with config.authz.driver.get_client() as c:
+                await sync_all(session, c, logger)
+
+    asyncio.run(_sync_all())
 
 
 if __name__ == "__main__":

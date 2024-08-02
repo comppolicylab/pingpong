@@ -811,7 +811,6 @@ async def sync_canvas_class(class_id: str, request: Request, tasks: BackgroundTa
             class_id=int(class_id),
             request=request,
             tasks=tasks,
-            get_now_fn=get_now_fn,
         )
     except HTTPException as e:
         # If we get a 401 error, mark the class as having a sync error.
@@ -886,7 +885,7 @@ async def add_users_to_class(
     request: Request,
     tasks: BackgroundTasks,
 ):
-    return await add_new_users(class_id, new_ucr, request, tasks, get_now_fn)
+    return await add_new_users(class_id, new_ucr, request, tasks)
 
 
 @v1.put(

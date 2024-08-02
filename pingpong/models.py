@@ -1000,6 +1000,20 @@ class Class(Base):
         )
         await session.execute(stmt)
 
+    @classmethod
+    async def get_all_to_sync(
+        cls, session: AsyncSession
+    ) -> AsyncGenerator["Class", None]:
+        stmt = select(Class).where(
+            and_(
+                Class.canvas_class_id is not None,
+                Class.canvas_status == schemas.CanvasStatus.LINKED,
+            )
+        )
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.Class
+
 
 class CodeInterpreterCall(Base):
     __tablename__ = "code_interpreter_calls"

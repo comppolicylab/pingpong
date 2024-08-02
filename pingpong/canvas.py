@@ -1,11 +1,14 @@
 from datetime import timedelta
-from typing import Callable, List, cast
+from logging import Logger
+from typing import List, cast
 import aiohttp
 
 from fastapi import HTTPException, BackgroundTasks, Request
 import jwt
 from jwt.exceptions import PyJWTError
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from pingpong.authz.openfga import OpenFgaAuthzClient
 
 from .config import config
 from .models import Class, CanvasClass
@@ -18,7 +21,7 @@ from .schemas import (
     CreateUserClassRole,
     CreateUserClassRoles,
 )
-from .users import add_new_users
+from .users import add_new_users, add_new_users_cron
 
 
 def encode_canvas_token(
@@ -350,8 +353,9 @@ async def sync_roster(
     class_id: int,
     request: Request,
     tasks: BackgroundTasks,
-    get_now_fn: Callable[[Request], NowFn],
     retry_attempt: int = 0,
+    cron: bool = False,
+    client: OpenFgaAuthzClient | None = None,
 ) -> None:
     access_token = await get_access_token(
         session,
@@ -361,26 +365,26 @@ async def sync_roster(
         force_refresh=retry_attempt > 0,
     )
     class_, now = await Class.get_canvas_course_id(session, class_id)
-    # raise HTTPException(status_code=400, detail="No linked Canvas course found")
+
     if not class_:
         raise HTTPException(status_code=400, detail="No linked Canvas course found")
 
-    if class_.canvas_last_synced and class_.canvas_last_synced > now - timedelta(
-        minutes=10
-    ):
-        # Calculate the remaining time until the next allowed sync
-        time_remaining = (
-            class_.canvas_last_synced + timedelta(minutes=10) - now
-        ).total_seconds() + 1
-        time_remaining_string = (
-            f"{int(time_remaining // 60)} minute{'s'[:(int(time_remaining)// 60)^1]}"
-            if int(time_remaining // 60) > 0
-            else f"{int(time_remaining)} second{'s'[:(int(time_remaining)^1)]}"
-        )
-        raise HTTPException(
-            status_code=429,
-            detail=f"A Canvas sync was recently completed. Please wait before trying again. You can request a manual sync in {time_remaining_string}.",
-        )
+    # if class_.canvas_last_synced and class_.canvas_last_synced > now - timedelta(
+    #     minutes=10
+    # ) and not cron:
+    #     # Calculate the remaining time until the next allowed sync
+    #     time_remaining = (
+    #         class_.canvas_last_synced + timedelta(minutes=10) - now
+    #     ).total_seconds() + 1
+    #     time_remaining_string = (
+    #         f"{int(time_remaining // 60)} minute{'s'[:(int(time_remaining)// 60)^1]}"
+    #         if int(time_remaining // 60) > 0
+    #         else f"{int(time_remaining)} second{'s'[:(int(time_remaining)^1)]}"
+    #     )
+    #     raise HTTPException(
+    #         status_code=429,
+    #         detail=f"A Canvas sync was recently completed. Please wait before trying again. You can request a manual sync in {time_remaining_string}.",
+    #     )
 
     user_roles: List[CreateUserClassRole] = []
     headers = {"Authorization": f"Bearer {access_token}"}
@@ -426,13 +430,42 @@ async def sync_roster(
 
     new_ucr = CreateUserClassRoles(roles=user_roles, silent=False, from_canvas=True)
 
-    await add_new_users(
-        class_id=str(class_id),
-        new_ucr=new_ucr,
-        request=request,
-        tasks=tasks,
-        get_now_fn=get_now_fn,
-        ignore_self=True,
-    )
+    if not cron:
+        await add_new_users(
+            class_id=str(class_id),
+            new_ucr=new_ucr,
+            request=request,
+            tasks=tasks,
+            ignore_self=True,
+        )
+    else:
+        await add_new_users_cron(
+            class_id=str(class_id),
+            user_id=user_id,
+            session=session,
+            client=client,
+            new_ucr=new_ucr,
+            ignore_self=True,
+        )
 
     await Class.update_last_synced(session, class_id)
+
+
+async def sync_all(
+    session: AsyncSession, client: OpenFgaAuthzClient, logger: Logger
+) -> None:
+    async for class_ in Class.get_all_to_sync(session):
+        try:
+            logger.info(f"Syncing class {class_.id}")
+            await sync_roster(
+                session,
+                class_.canvas_user_id,
+                class_.id,
+                None,
+                None,
+                cron=True,
+                client=client,
+            )
+            await session.commit()
+        except Exception as e:
+            logger.error(f"Failed to sync class {class_.id}: {e}")
