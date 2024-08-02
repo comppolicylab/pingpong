@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { afterUpdate, onMount } from 'svelte';
+  import { onMount } from 'svelte';
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
   import dayjs from '$lib/time';
@@ -32,7 +32,8 @@
     CloudArrowUpOutline,
     EyeOutline,
     EyeSlashOutline,
-    LinkOutline
+    LinkOutline,
+    RefreshOutline
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
@@ -382,9 +383,12 @@
     const result = await api.syncCanvasClass(fetch, data.class.id);
     const response = api.expandResponse(result);
     if (response.error) {
+      // Needed here to update the timer (Last sync: ...)
+      invalidateAll();
       sadToast(response.error.detail || 'An unknown error occurred');
     } else {
       invalidateAll();
+      timesAdded++;
       happyToast('Synced PingPong user list with Canvas roster!');
     }
   };
@@ -713,7 +717,7 @@
                 on:click={syncClass}
                 on:touchstart={syncClass}
               >
-                <LinkOutline class="w-4 h-4 me-2" />Sync roster</Button
+                <RefreshOutline class="w-4 h-4 me-2" />Sync roster</Button
               >
             </div>
           </Alert>

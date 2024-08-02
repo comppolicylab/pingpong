@@ -9,11 +9,14 @@ from .config import config
 from .invite import send_invite
 from .now import NowFn
 
-async def add_new_users(class_id: str,
+
+async def add_new_users(
+    class_id: str,
     new_ucr: schemas.CreateUserClassRoles,
     request: Request,
     tasks: BackgroundTasks,
-    get_now_fn: Callable[[Request], NowFn]
+    get_now_fn: Callable[[Request], NowFn],
+    ignore_self: bool = False,
 ):
     cid = int(class_id)
     class_ = await models.Class.get_by_id(request.state.db, cid)
@@ -45,11 +48,13 @@ async def add_new_users(class_id: str,
 
         if not is_admin and ucr.roles.teacher:
             raise HTTPException(
-                status_code=403, detail="Lacking permission to add teachers"
+                status_code=403, detail="Lacking permission to add moderators"
             )
 
         user = await models.User.get_or_create_by_email(request.state.db, ucr.email)
         if is_admin and user.id == request.state.session.user.id:
+            if ignore_self:
+                continue
             if not ucr.roles.admin:
                 raise HTTPException(
                     status_code=403, detail="Cannot demote yourself from admin"

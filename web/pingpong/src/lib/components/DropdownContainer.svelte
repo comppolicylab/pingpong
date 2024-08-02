@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Dropdown } from 'flowbite-svelte';
   import { ChevronDownOutline } from 'flowbite-svelte-icons';
-  import { afterUpdate, onMount, tick } from 'svelte';
+  import { afterUpdate } from 'svelte';
 
   // Whether to show the footer.
   export let footer = false;

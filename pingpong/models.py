@@ -907,7 +907,7 @@ class Class(Base):
             Class.canvas_refresh_token,
             Class.canvas_expires_in,
             Class.canvas_token_added_at,
-            func.now().label("now"),
+            func.now(),
         ).where(Class.id == class_id)
         result = await session.execute(stmt)
         return result.first()
@@ -915,16 +915,17 @@ class Class(Base):
     @classmethod
     async def get_canvas_course_id(
         cls, session: AsyncSession, class_id: int
-    ) -> "Class":
+    ) -> tuple["Class", datetime]:
         stmt = (
-            select(Class)
+            select(Class, func.now())
             .outerjoin(Class.canvas_class)
             .options(
                 contains_eager(Class.canvas_class).load_only(CanvasClass.canvas_id)
             )
             .where(Class.id == class_id)
         )
-        return await session.scalar(stmt)
+        result = await session.execute(stmt)
+        return result.first()
 
     @classmethod
     async def dismiss_canvas_sync(cls, session: AsyncSession, class_id: int) -> None:
@@ -968,6 +969,19 @@ class Class(Base):
 
         class_instance.canvas_status = schemas.CanvasStatus.LINKED
         await session.flush()
+
+    @classmethod
+    async def update_last_synced(
+        cls,
+        session: AsyncSession,
+        class_id: int,
+    ) -> None:
+        stmt = (
+            update(Class)
+            .where(Class.id == class_id)
+            .values(canvas_last_synced=func.now(), updated=Class.updated)
+        )
+        await session.execute(stmt)
 
 
 class CodeInterpreterCall(Base):

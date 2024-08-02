@@ -804,7 +804,14 @@ async def sync_canvas_class(class_id: str, request: Request, tasks: BackgroundTa
         check_user=True,
         user_id=request.state.session.user.id,
     )
-    await sync_roster(session=request.state.db, access_token=tok, class_id=int(class_id), request=request, tasks=tasks, get_now_fn=get_now_fn)
+    await sync_roster(
+        session=request.state.db,
+        access_token=tok,
+        class_id=int(class_id),
+        request=request,
+        tasks=tasks,
+        get_now_fn=get_now_fn,
+    )
     return {"status": "ok"}
 
 

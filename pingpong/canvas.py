@@ -10,8 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import config
 from .models import Class, CanvasClass
 from .now import NowFn, utcnow
-from .schemas import CanvasToken, CanvasClass as CanvasClassSchema, ClassUserRoles, CreateUserClassRole, CreateUserClassRoles
+from .schemas import (
+    CanvasToken,
+    CanvasClass as CanvasClassSchema,
+    ClassUserRoles,
+    CreateUserClassRole,
+    CreateUserClassRoles,
+)
 from .users import add_new_users
+
 
 def encode_canvas_token(
     user_id: int, class_id: str, expiry: int = 600, nowfn: NowFn = utcnow
@@ -324,18 +331,37 @@ async def set_canvas_class(
 
 
 async def sync_roster(
-    session: AsyncSession, access_token: str, class_id: int, request: Request, tasks: BackgroundTasks, get_now_fn: Callable[[Request], NowFn]
+    session: AsyncSession,
+    access_token: str,
+    class_id: int,
+    request: Request,
+    tasks: BackgroundTasks,
+    get_now_fn: Callable[[Request], NowFn],
 ) -> None:
-    class_ = await Class.get_canvas_course_id(session, class_id)
+    class_, now = await Class.get_canvas_course_id(session, class_id)
 
     if not class_:
         raise HTTPException(status_code=400, detail="No linked Canvas course found")
+
+    if class_.canvas_last_synced and class_.canvas_last_synced > now - timedelta(
+        minutes=10
+    ):
+        # Calculate the remaining time until the next allowed sync
+        time_remaining = (
+            class_.canvas_last_synced + timedelta(minutes=10) - now
+        ).total_seconds() // 60
+        raise HTTPException(
+            status_code=429,
+            detail=f"A Canvas sync was recently completed, please wait before trying again. You can request a manual sync after {int(time_remaining)} minutes.",
+        )
 
     user_roles: List[CreateUserClassRole] = []
     headers = {"Authorization": f"Bearer {access_token}"}
     params = {"include[]": ["enrollments"]}
     async with aiohttp.ClientSession() as session_:
-        next_url = config.canvas_link(f"/api/v1/courses/{class_.canvas_class.canvas_id}/users")
+        next_url = config.canvas_link(
+            f"/api/v1/courses/{class_.canvas_class.canvas_id}/users"
+        )
         while next_url:
             async with session_.get(
                 next_url,
@@ -360,7 +386,7 @@ async def sync_roster(
                             ),
                         )
                     )
-                
+
                 # Check for the next page link
                 next_url = ""
                 link_header = resp.headers.get("Link")
@@ -370,7 +396,16 @@ async def sync_roster(
                         if 'rel="next"' in link:
                             next_url = link[link.find("<") + 1 : link.find(">")]
                             break
-        
+
     new_ucr = CreateUserClassRoles(roles=user_roles, silent=False, from_canvas=True)
 
-    await add_new_users(class_id=str(class_id), new_ucr=new_ucr, request=request, tasks=tasks, get_now_fn=get_now_fn)
+    await add_new_users(
+        class_id=str(class_id),
+        new_ucr=new_ucr,
+        request=request,
+        tasks=tasks,
+        get_now_fn=get_now_fn,
+        ignore_self=True,
+    )
+
+    await Class.update_last_synced(session, class_id)

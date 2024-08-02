@@ -1770,7 +1770,7 @@ export const saveCanvasClass = async (f: Fetcher, classId: number, canvasClassId
 export const syncCanvasClass = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/sync_canvas_class`;
   return await POST<never, GenericStatus>(f, url);
-}
+};
 
 /**
  * Roles for users in a class.
