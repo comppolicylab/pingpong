@@ -128,6 +128,20 @@ poetry run python -m pingpong db migrate
 
 The OpenFGA authorization server has a [playground](http://localhost:3000/playground) that may be useful.
 
+## Canvas Authentication
+
+Pingpong supports syncing of group user rosters through Canvas. To set up the integration, set up the following in `config.toml` (or the respective local config file):
+- The URL where the application should send Canvas API requests to.
+  <br>`canvas_url = "http://canvas.docker"`
+- The Canvas Client ID to use for authentication requests.
+  <br>`canvas_client_id = "00000000"`
+- The Canvas Client Secret to use when requesting authentication tokens.
+ <br>` canvas_client_secret = "XXXXXXXXXX"`
+
+Finally, make sure that the callback URL for Pingpong once the request is authenticated is set up as `[Pingpong Base Url]/api/v1/auth/canvas/` on the [Canvas Admin panel](https://community.canvaslms.com/t5/Admin-Guide/How-do-I-manage-developer-keys-for-an-account/ta-p/249).
+
+### Canvas local deployment:
+You can follow the instructions to install a local instance of [canvas-lms](https://github.com/instructure/canvas-lms/wiki/Quick-Start) for testing.
 
 ## Backend / API
 
