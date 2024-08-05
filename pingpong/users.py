@@ -62,6 +62,8 @@ async def add_new_users(
 
     from_canvas = new_ucr.from_canvas or False
 
+    if from_canvas:
+        newly_synced: list = []
     for ucr in new_ucr.roles:
         if not is_admin and ucr.roles.admin:
             raise HTTPException(
@@ -74,6 +76,8 @@ async def add_new_users(
             )
 
         user = await models.User.get_or_create_by_email(session_, ucr.email)
+        if from_canvas:
+            newly_synced.append(user.id)
         if is_admin and user.id == user_id_:
             if ignore_self:
                 continue
@@ -141,6 +145,11 @@ async def add_new_users(
             new_ucr.silent,
         )
 
+    if from_canvas:
+        users_to_delete = await models.UserClassRole.delete_from_sync_list(
+            session_, int(class_id), newly_synced
+        )
+        await delete_canvas_permissions(client_, users_to_delete, class_id)
     await client_.write_safe(grant=grants, revoke=revokes)
 
     return {"roles": result}

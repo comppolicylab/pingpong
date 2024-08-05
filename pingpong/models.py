@@ -106,6 +106,25 @@ class UserClassRole(Base):
         await session.execute(stmt)
         return None
 
+    @classmethod
+    async def delete_from_sync_list(
+        cls, session: AsyncSession, class_id: int, newly_synced: list[int]
+    ) -> list[int]:
+        stmt = select(UserClassRole).where(
+            and_(UserClassRole.class_id == int(class_id), UserClassRole.from_canvas)
+        )
+        result = await session.execute(stmt)
+        users = [row.UserClassRole.user_id for row in result]
+        users_to_delete = list(set(users) - set(newly_synced))
+        stmt_ = delete(UserClassRole).where(
+            and_(
+                UserClassRole.class_id == int(class_id),
+                UserClassRole.user_id.in_(users_to_delete),
+            )
+        )
+        session.execute(stmt_)
+        return users_to_delete
+
 
 class UserInstitutionRole(Base):
     __tablename__ = "users_institutions"
