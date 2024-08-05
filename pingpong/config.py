@@ -238,10 +238,10 @@ class Config(BaseSettings):
 
     def canvas_auth_link(self, token: str) -> str:
         """Return the Redirect URL for Canvas authentication.
-        
+
         Args:
             token (str): The generated `AuthToken` identifying the authentication request. This will be returned by Canvas.
-        
+
         Returns:
             str: Redirect URL.
         """
