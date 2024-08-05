@@ -110,6 +110,17 @@ class UserClassRole(Base):
     async def delete_from_sync_list(
         cls, session: AsyncSession, class_id: int, newly_synced: list[int]
     ) -> list[int]:
+        """
+        Removes `UserClassRole`s from Canvas course members who were previously synced with Canvas but were not returned in the current sync.
+
+        Args:
+            session (AsyncSession): The DB Session to use for executing DB statements.
+            class_id (int): The ID of the class being synced.
+            newly_synced (list[int]): The list of all user ids returned by the current sync.
+
+        Returns:
+            list[int]: List of user ids that were removed as they were not included in the current Canvas sync. Can be used to remove the relevant permissions for users.
+        """
         stmt = select(UserClassRole).where(
             and_(UserClassRole.class_id == int(class_id), UserClassRole.from_canvas)
         )
@@ -122,7 +133,7 @@ class UserClassRole(Base):
                 UserClassRole.user_id.in_(users_to_delete),
             )
         )
-        session.execute(stmt_)
+        await session.execute(stmt_)
         return users_to_delete
 
 
@@ -174,6 +185,7 @@ class User(Base):
     threads = relationship(
         "Thread", secondary=user_thread_association, back_populates="users"
     )
+    # Maps to classes in which the user has connected their Canvas account
     canvas_syncs: Mapped[List["Class"]] = relationship(
         "Class", back_populates="canvas_user", lazy="selectin"
     )
@@ -724,6 +736,7 @@ class CanvasClass(Base):
 
     @classmethod
     async def delete_if_unused(cls, session: AsyncSession, id_: int) -> None:
+        """Check if a Pingpong class is connected to this Canvas class, delete otherwise."""
         stmt = select(Class).where(Class.canvas_class_id == id_)
         canvas_class = await session.scalar(stmt)
 
@@ -900,6 +913,7 @@ class Class(Base):
         user_id: int | None = None,
         refresh: bool = False,
     ) -> None:
+        """Update Canvas authentication token. When refreshed, there's no need to provide a new refresh token; the same one can be reused."""
         stmt = (
             update(Class)
             .where(Class.id == class_id)
@@ -924,6 +938,7 @@ class Class(Base):
         session: AsyncSession,
         class_id: int,
     ) -> None:
+        """Mark Canvas class connection as errored out so user can be prompted to reauthenticate."""
         stmt = (
             update(Class)
             .where(Class.id == class_id)
@@ -935,6 +950,7 @@ class Class(Base):
     async def get_canvas_token(
         cls, session: AsyncSession, class_id: int
     ) -> tuple[int, str, str, int, datetime, datetime]:
+        """Return Canvas token with DB time."""
         stmt = select(
             Class.canvas_user_id,
             Class.canvas_access_token,
@@ -950,6 +966,7 @@ class Class(Base):
     async def get_canvas_course_id(
         cls, session: AsyncSession, class_id: int
     ) -> tuple["Class", datetime]:
+        """Return Canvas course ID with DB time."""
         stmt = (
             select(Class, func.now())
             .outerjoin(Class.canvas_class)
@@ -963,6 +980,7 @@ class Class(Base):
 
     @classmethod
     async def dismiss_canvas_sync(cls, session: AsyncSession, class_id: int) -> None:
+        """Mark that a user has dismissed the Canvas sync alert. Do not display moving forward."""
         stmt = (
             update(Class)
             .where(Class.id == class_id)
@@ -980,6 +998,7 @@ class Class(Base):
 
     @classmethod
     async def enable_canvas_sync(cls, session: AsyncSession, class_id: int) -> None:
+        """Mark that a user has re-enabled Canvas Sync."""
         stmt = (
             update(Class)
             .where(Class.id == class_id)
@@ -991,6 +1010,7 @@ class Class(Base):
     async def update_canvas_class(
         cls, session: AsyncSession, class_id: int, canvas_id: int
     ) -> None:
+        """Update the Canvas linked Class ID."""
         stmt = select(Class).where(Class.id == class_id)
         class_instance = await session.scalar(stmt)
 
@@ -1014,6 +1034,7 @@ class Class(Base):
         session: AsyncSession,
         class_id: int,
     ) -> None:
+        """Update the timestamp of when the class' roster was synced with Canvas."""
         stmt = (
             update(Class)
             .where(Class.id == class_id)
@@ -1025,6 +1046,7 @@ class Class(Base):
     async def get_all_to_sync(
         cls, session: AsyncSession
     ) -> AsyncGenerator["Class", None]:
+        """For syncing CRON job: Get all classes with an active Canvas-linked class."""
         stmt = select(Class).where(
             and_(
                 Class.canvas_class_id is not None,
@@ -1039,6 +1061,7 @@ class Class(Base):
     async def remove_canvas_sync(
         cls, session: AsyncSession, id_: int, kill_connection: bool = False
     ) -> list[int]:
+        """Remove linked Canvas class connection."""
         stmt = select(Class).where(Class.id == id_)
         class_instance = await session.scalar(stmt)
 
@@ -1048,6 +1071,7 @@ class Class(Base):
             class_instance.canvas_status = schemas.CanvasStatus.AUTHORIZED
             class_instance.canvas_last_synced = None
 
+        # Remove class AND Canvas account connection
         if kill_connection:
             class_instance.canvas_access_token = None
             class_instance.canvas_refresh_token = None

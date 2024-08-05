@@ -237,6 +237,14 @@ class Config(BaseSettings):
         return f"{self.canvas_url.rstrip('/')}/{path.lstrip('/')}"
 
     def canvas_auth_link(self, token: str) -> str:
+        """Return the Redirect URL for Canvas authentication.
+        
+        Args:
+            token (str): The generated `AuthToken` identifying the authentication request. This will be returned by Canvas.
+        
+        Returns:
+            str: Redirect URL.
+        """
         return self.canvas_link(
             f"/login/oauth2/auth?client_id={self.canvas_client_id}&response_type=code&redirect_uri={self.url('/api/v1/auth/canvas')}&state={token}"
         )

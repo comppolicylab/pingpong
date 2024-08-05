@@ -68,7 +68,7 @@ from .canvas import (
     set_canvas_class,
     sync_roster,
 )
-from .users import add_new_users, delete_canvas_permissions, remove_user
+from .users import add_new_users, delete_canvas_permissions
 
 logger = logging.getLogger(__name__)
 
@@ -910,7 +910,7 @@ async def add_users_to_class(
     request: Request,
     tasks: BackgroundTasks,
 ):
-    return await add_new_users(class_id, new_ucr, request, tasks)
+    return await add_new_users(class_id, new_ucr, request=request, tasks=tasks)
 
 
 @v1.put(
@@ -1011,7 +1011,25 @@ async def update_user_class_role(
     response_model=schemas.GenericStatus,
 )
 async def remove_user_from_class(class_id: str, user_id: str, request: Request):
-    await remove_user(int(class_id), int(user_id), request)
+    cid = int(class_id)
+    uid = int(user_id)
+
+    if uid == request.state.session.user.id:
+        raise HTTPException(
+            status_code=403, detail="Cannot remove yourself from a class"
+        )
+
+    existing = await models.UserClassRole.get(request.state.db, uid, cid)
+    if not existing:
+        raise HTTPException(status_code=404, detail="User not found in class")
+
+    await models.UserClassRole.delete(request.state.db, uid, cid)
+
+    revokes = list[Relation]()
+    for role in ["admin", "teacher", "student"]:
+        revokes.append((f"user:{uid}", role, f"class:{cid}"))
+
+    await request.state.authz.write_safe(revoke=revokes)
     return {"status": "ok"}
 
 
@@ -1396,7 +1414,7 @@ async def get_last_run(
             )
         except openai.APIConnectionError as e:
             logger.error("Error connecting to OpenAI: %s", e)
-            # Contine polling
+            # Continue polling
 
     return {"thread": thread, "run": last_run}
 
@@ -1651,13 +1669,13 @@ async def send_message(
     if data.file_search_file_ids:
         if thread.vector_store_id:
             # Vector store already exists, update
-            vectore_store_id = await append_vector_store_files(
+            vector_store_id = await append_vector_store_files(
                 request.state.db,
                 openai_client,
                 thread.vector_store_id,
                 data.file_search_file_ids,
             )
-            tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
+            tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
         else:
             # Store doesn't exist, create a new one
             vector_store_id, vector_store_object_id = await create_vector_store(
@@ -2094,16 +2112,16 @@ async def update_assistant(
             # Files will need to be stored in a vector store
             if asst.vector_store_id:
                 # Vector store already exists, update
-                vectore_store_id = await sync_vector_store_files(
+                vector_store_id = await sync_vector_store_files(
                     request.state.db,
                     openai_client,
                     asst.vector_store_id,
                     req.file_search_file_ids,
                 )
-                tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
+                tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
             else:
                 # Store doesn't exist, create a new one
-                vectore_store_id, vector_store_object_id = await create_vector_store(
+                vector_store_id, vector_store_object_id = await create_vector_store(
                     request.state.db,
                     openai_client,
                     class_id,
@@ -2111,7 +2129,7 @@ async def update_assistant(
                     type=schemas.VectorStoreType.THREAD,
                 )
                 asst.vector_store_id = vector_store_object_id
-                tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
+                tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
         else:
             # No files stored in vector store, remove it
             if asst.vector_store_id:

@@ -185,6 +185,9 @@ def db_set_version(version: str, alembic_config: str) -> None:
 
 @canvas.command("sync-all")
 def canvas_sync_all() -> None:
+    """
+    Sync all classes with an linked Canvas class.
+    """
     async def _sync_all() -> None:
         await config.authz.driver.init()
         async with config.db.driver.async_session() as session:

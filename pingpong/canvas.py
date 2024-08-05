@@ -312,6 +312,7 @@ async def sync_roster(
     retry_attempt: int = 0,
     cron: bool = False,
     client: OpenFgaAuthzClient | None = None,
+    time_between_syncs: int = 10,
 ) -> None:
     access_token = await get_access_token(
         session,
@@ -332,7 +333,7 @@ async def sync_roster(
     ):
         # Calculate the remaining time until the next allowed sync
         time_remaining = (
-            class_.canvas_last_synced + timedelta(minutes=10) - now
+            class_.canvas_last_synced + timedelta(minutes=time_between_syncs) - now
         ).total_seconds() + 1
         time_remaining_string = (
             f"{int(time_remaining // 60)} minute{'s'[:(int(time_remaining)// 60)^1]}"

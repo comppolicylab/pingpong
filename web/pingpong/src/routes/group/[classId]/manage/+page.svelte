@@ -74,7 +74,7 @@
 
   // Function to get error message from error code
   function getErrorMessage(errorCode: number) {
-    return errorMessages[errorCode] || 'An unknown error occured while trying to sync with Canvas.';
+    return errorMessages[errorCode] || 'An unknown error occurred while trying to sync with Canvas.';
   }
 
   onMount(() => {

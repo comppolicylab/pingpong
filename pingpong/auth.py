@@ -50,6 +50,7 @@ def encode_auth_token(
         user_id (int): User ID
         expiry (int, optional): Expiry in seconds. Defaults to 600.
         nowfn (NowFn, optional): Function to get the current time. Defaults to utcnow.
+        sub (str, optional): A user-provided string to provide as the `sub` parameter for `AuthToken` generation. Otherwise, `sub` defaults to `user_id`
 
     Returns:
         str: Auth Token

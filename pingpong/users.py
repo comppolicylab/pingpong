@@ -155,42 +155,6 @@ async def add_new_users(
     return {"roles": result}
 
 
-async def remove_user(
-    class_id: int,
-    user_id: int,
-    request: Request | None = None,
-    request_user_id: int | None = None,
-    session: AsyncSession | None = None,
-    client: OpenFgaAuthzClient | None = None,
-):
-    request_user_id = (
-        request_user_id
-        if request_user_id
-        else request.state.session.user.id
-        if request
-        else None
-    )
-    session_ = session if session else request.state.db if request else None
-    client_ = client if client else request.state.authz if request else None
-
-    if user_id == request_user_id:
-        raise HTTPException(
-            status_code=403, detail="Cannot remove yourself from a class"
-        )
-
-    existing = await models.UserClassRole.get(session_, user_id, class_id)
-    if not existing:
-        raise HTTPException(status_code=404, detail="User not found in class")
-
-    await models.UserClassRole.delete(session_, user_id, class_id)
-
-    revokes = list[Relation]()
-    for role in ["admin", "teacher", "student"]:
-        revokes.append((f"user:{user_id}", role, f"class:{class_id}"))
-
-    await client_.write_safe(revoke=revokes)
-
-
 async def delete_canvas_permissions(
     client: OpenFgaAuthzClient, user_ids: list[int], class_id: str
 ) -> None:
