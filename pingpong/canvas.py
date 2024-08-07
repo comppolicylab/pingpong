@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pingpong.auth import decode_auth_token, encode_auth_token
 from pingpong.authz.openfga import OpenFgaAuthzClient
 
-from .config import config
+from .config import config, LTISettings
 from .models import Class, CanvasClass
 from .now import NowFn, utcnow
 from .retry import with_retry
@@ -25,73 +25,118 @@ from .schemas import (
 from .users import add_new_users
 
 
-def encode_canvas_token(
-    user_id: int, class_id: str, expiry: int = 600, nowfn: NowFn = utcnow
-) -> str:
-    """Generates the Canvas State Token.
+class CanvasCourseClient:
+    def __init__(
+        self,
+        canvas_backend_config: LTISettings,
+        db: AsyncSession,
+        class_id: int,
+        user_id: int,
+        expiry: int = 600,
+        nowfn: NowFn = utcnow,
+    ):
+        self.config = canvas_backend_config
+        self.db = db
+        self.class_id = class_id
+        self.user_id = user_id
+        self.expiry = expiry
+        self.nowfn = nowfn
 
-    Args:
-        user_id (int): User ID
-        expiry (int, optional): Expiry in seconds. Defaults to 600.
-        nowfn (NowFn, optional): Function to get the current time. Defaults to utcnow.
+    def _encode_canvas_token(self) -> str:
+        """Generates the Canvas State Token.
 
-    Returns:
-        str: Canvas State Token
-    """
-    return encode_auth_token(
-        user_id,
-        expiry,
-        nowfn=nowfn,
-        sub=json.dumps({"class_id": class_id, "user_id": user_id}),
-    )
+        Returns:
+            str: Canvas State Token
+        """
+        if not self.user_id:
+            raise HTTPException(status_code=400, detail="No user ID provided")
 
+        if not self.class_id:
+            raise HTTPException(status_code=400, detail="No class ID provided")
 
-def decode_canvas_token(token: str, nowfn: NowFn = utcnow) -> CanvasToken:
-    """Decodes the Canvas State Token.
-
-    Args:
-        token (str): Canvas State Token
-        nowfn (NowFn, optional): Function to get the current time. Defaults to utcnow.
-
-    Returns:
-        CanvasToken: Canvas State Token
-
-    Raises:
-        jwt.exceptions.PyJWTError when token is not valid
-    """
-    try:
-        auth_token = decode_auth_token(token, nowfn=nowfn)
-        sub_data = json.loads(auth_token.sub)
-        return CanvasToken(
-            user_id=str(sub_data["user_id"]),
-            class_id=str(sub_data["class_id"]),
-            iat=auth_token.iat,
-            exp=auth_token.exp,
+        return encode_auth_token(
+            str(self.user_id),
+            self.expiry,
+            nowfn=self.nowfn,
+            sub=json.dumps({"class_id": self.class_id, "user_id": self.user_id}),
         )
-    except PyJWTError as e:
-        raise HTTPException(status_code=400, detail="Invalid Canvas token") from e
 
+    def _decode_canvas_token(self, token: str) -> CanvasToken:
+        """Decodes the Canvas State Token.
 
-def generate_canvas_link(
-    user_id: int, course_id: str, expiry: int = 600, nowfn: NowFn = utcnow
-) -> str:
-    """Generates the redirect link to authenticate with Canvas.
+        Args:
+            token (str): Canvas State Token
 
-    Args:
-        user_id (int): User ID
-        redirect (str, optional): Redirect URL. Defaults to "/".
+        Returns:
+            CanvasToken: Canvas State Token
 
-    Returns:
-        str: Auth Link
-    """
-    tok = encode_canvas_token(user_id, course_id, expiry=expiry, nowfn=nowfn)
-    return canvas_auth_link(tok)
+        Raises:
+            `jwt.exceptions.PyJWTError` when token is not valid
+        """
+        try:
+            auth_token = decode_auth_token(token, nowfn=self.nowfn)
+            sub_data = json.loads(auth_token.sub)
+            return CanvasToken(
+                user_id=str(sub_data["user_id"]),
+                class_id=str(sub_data["class_id"]),
+                iat=auth_token.iat,
+                exp=auth_token.exp,
+            )
+        except PyJWTError as e:
+            raise HTTPException(status_code=400, detail="Invalid Canvas token") from e
 
+    def generate_canvas_link(self) -> str:
+        """Generates the redirect link to authenticate with Canvas.
 
-def canvas_auth_link(token: str) -> str:
-    return config.canvas_link(
-        f"/login/oauth2/auth?client_id={config.canvas_client_id}&response_type=code&redirect_uri={config.url('/api/v1/auth/canvas')}&state={token}"
-    )
+        Returns:
+            str: Auth Link
+        """
+        tok = self._encode_canvas_token()
+        return self._canvas_auth_link(tok)
+
+    def _canvas_auth_link(self, token: str) -> str:
+        """Return the Redirect URL for Canvas authentication.
+        
+        Args:
+            token (str): The generated `AuthToken` identifying the authentication request. This will be returned by Canvas.
+            
+        Returns:
+            str: Redirect URL.
+        """
+        return self.config.url(
+            f"/login/oauth2/auth?client_id={self.config.client_id}&response_type=code&redirect_uri={config.url('/api/v1/auth/canvas')}&state={token}"
+        )
+
+    async def canvas_token_request(params=dict[str, str]) -> tuple[str, str, int]:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                config.canvas_link("/login/oauth2/token"),
+                data=params,
+                raise_for_status=True,
+            ) as resp:
+                if resp.status == 200:
+                    response = await resp.json()
+                    return (
+                        response["access_token"],
+                        response.get("refresh_token", ""),
+                        int(response["expires_in"]),
+                    )
+                else:
+                    raise ValueError("Invalid response from Canvas")
+
+    async def _make_authed_request(self, path: str, body: dict | None):
+        access_token = await get_access_token(
+            self.db, str(self.class_id), force_refresh=False
+        )
+        headers = {"Authorization": f"Bearer {access_token}"}
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                config.canvas_link(path),
+                headers=headers,
+                json=body,
+                raise_for_status=True,
+            ) as resp:
+                return await resp.json()
 
 
 async def canvas_token_request(params=dict[str, str]) -> tuple[str, str, int]:
@@ -271,7 +316,7 @@ async def course_enrollment_access_check(access_token: str, course_id: str) -> b
     headers = {"Authorization": f"Bearer {access_token}"}
     async with aiohttp.ClientSession() as session:
         async with session.get(
-            config.canvas_link(f"/api/v1/courses/{course_id}/enrollments"),
+            config.canvas_link(f"/api/v1/courses/{course_id}/users"),
             headers=headers,
             raise_for_status=True,
         ) as resp:

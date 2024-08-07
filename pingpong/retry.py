@@ -17,12 +17,12 @@ def with_retry(
             while attempt < max_retries:
                 try:
                     return await f(*args, retry_attempt=attempt, **kwargs)
+                # Our server returned an error, so we should stop retrying
+                # Our network requests use aiohttp raise_for_status,
+                # which returns a ClientResponseError
+                except HTTPException as e:
+                    raise e
                 except Exception as e:
-                    # Our server returned an error, so we should stop retrying
-                    # Our network requests use aiohttp raise_for_status,
-                    # which returns a ClientResponseError
-                    if isinstance(e, HTTPException):
-                        raise e
                     last_error = e
                     attempt += 1
                     t = min(max_delay, backoff**attempt)

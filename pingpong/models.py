@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional
 
-from sqlalchemy import Boolean, Column, DateTime
+from sqlalchemy import Boolean, Column, DateTime, UniqueConstraint
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
     ForeignKey,
@@ -706,9 +706,13 @@ class Assistant(Base):
 
 class CanvasClass(Base):
     __tablename__ = "canvas_classes"
+    __table_args__ = (
+        UniqueConstraint("canvas_id", "canvas_tenant_id", name="_id_tenant_id_uc"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    canvas_id = Column(Integer, nullable=False, unique=True)
+    canvas_id = Column(Integer, nullable=False)
+    canvas_tenant_id = Column(Integer, nullable=False)
     name = Column(String)
     course_code = Column(String)
     term = Column(String)

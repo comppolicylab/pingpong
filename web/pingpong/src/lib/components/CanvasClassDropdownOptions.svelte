@@ -12,8 +12,8 @@
   // The function to update the selected Canvas class option.
   export let updateSelectedClass: (id: string) => void;
 
-  // Color palletes for the term badges
-  const colorPalletes = [
+  // Color palettes for the term badges
+  const colorPalettes = [
     'border-pastel-green-400 from-pastel-green-50 to-pastel-green-100 text-pastel-green-800',
     'border-sunset-orange-400 from-sunset-orange-50 to-sunset-orange-100 text-sunset-orange-800',
     'border-red-pink-400 from-red-pink-50 to-red-pink-100 text-red-pink-800',
@@ -35,7 +35,7 @@
   // Map of terms to colors
   const termToColor = termsInList.reduce(
     (acc, term, index) => {
-      const color = colorPalletes[index % colorPalletes.length];
+      const color = colorPalettes[index % colorPalettes.length];
       acc[term] = color;
       return acc;
     },

@@ -15,7 +15,7 @@ from .config import Saml2AuthnSettings, MagicLinkAuthnSettings
 def test_auth_token():
     now = utcnow()
     now_ts = int(now.timestamp())
-    tok = encode_auth_token(1, nowfn=lambda: now)
+    tok = encode_auth_token("1", nowfn=lambda: now)
     payload = decode_auth_token(tok)
     assert payload == AuthToken(sub="1", exp=now_ts + 600, iat=now_ts)
 

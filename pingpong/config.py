@@ -156,6 +156,37 @@ class AuthSettings(BaseSettings):
 DbSettings = Union[PostgresSettings, SqliteSettings]
 
 
+class HarvardInstanceSettings(BaseSettings):
+    """Harvard Canvas instance settings."""
+
+    type: Literal["harvard"]
+    client_id: str
+    client_secret: str
+    base_url: str = Field("https://canvas.harvard.edu")
+    sync_interval: int = Field(60 * 60)  # 1 hour
+    sync_offset: int = Field(60 * 10)  # 10 mins
+
+    def url(self, path: str) -> str:
+        """Return a URL relative to the Canvas Base URL."""
+        return f"{self.base_url.rstrip('/')}/{path.lstrip('/')}"
+
+    def auth_link(self, token: str) -> str:
+        """Return the Redirect URL for Canvas authentication.
+
+        Args:
+            token (str): The generated `AuthToken` identifying the authentication request. This will be returned by Canvas.
+
+        Returns:
+            str: Redirect URL.
+        """
+        return self.url(
+            f"/login/oauth2/auth?client_id={self.client_id}&response_type=code&redirect_uri={config.url('/api/v1/auth/canvas')}&state={token}"
+        )
+
+
+LTISettings = Union[HarvardInstanceSettings]
+
+
 class InitSettings(BaseSettings):
     """Settings for first-time app init."""
 
@@ -209,12 +240,6 @@ class Config(BaseSettings):
 
     reload: int = Field(0)
     public_url: str = Field("http://localhost:8000")
-    canvas_url: str = Field("http://canvas.docker")
-    canvas_client_id: str = Field("10000000000001")
-    canvas_client_secret: str = Field(
-        "7D7UREveNZrzfNxBGRvQyf4mh4P4JVT7Mxk8U6VJeDayEY6uXc9vC3khYHCHm9cE"
-    )
-
     development: bool = Field(False, env="DEVELOPMENT")
     db: DbSettings
     auth: AuthSettings

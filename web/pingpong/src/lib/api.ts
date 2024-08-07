@@ -1728,7 +1728,7 @@ export type CanvasRedirect = {
  * Request for state token for Canvas sync.
  */
 export const getCanvasLink = async (f: Fetcher, classId: number) => {
-  const url = `class/${classId}/canvas_link`;
+  const url = `class/${classId}/canvas/link`;
   return await GET<never, CanvasRedirect>(f, url);
 };
 
@@ -1736,7 +1736,7 @@ export const getCanvasLink = async (f: Fetcher, classId: number) => {
  * Dismiss Canvas Sync box.
  */
 export const dismissCanvasSync = async (f: Fetcher, classId: number) => {
-  const url = `class/${classId}/dismiss_canvas_sync`;
+  const url = `class/${classId}/canvas/sync/dismiss`;
   return await POST<never, GenericStatus>(f, url);
 };
 
@@ -1744,7 +1744,7 @@ export const dismissCanvasSync = async (f: Fetcher, classId: number) => {
  * Bring back Canvas Sync box.
  */
 export const bringBackCanvasSync = async (f: Fetcher, classId: number) => {
-  const url = `class/${classId}/enable_canvas_sync`;
+  const url = `class/${classId}/canvas/sync/enable`;
   return await POST<never, GenericStatus>(f, url);
 };
 
@@ -1760,27 +1760,27 @@ export type CanvasClass = {
 };
 
 export const loadCanvasClasses = async (f: Fetcher, classId: number) => {
-  const url = `class/${classId}/canvas_classes`;
+  const url = `class/${classId}/canvas/classes`;
   return await GET<never, CanvasClasses>(f, url);
 };
 
 export const saveCanvasClass = async (f: Fetcher, classId: number, canvasClassId: string) => {
-  const url = `class/${classId}/canvas_classes/${canvasClassId}`;
+  const url = `class/${classId}/canvas/classes/${canvasClassId}`;
   return await POST<never, GenericStatus>(f, url);
 };
 
 export const syncCanvasClass = async (f: Fetcher, classId: number) => {
-  const url = `class/${classId}/sync_canvas_class`;
+  const url = `class/${classId}/canvas/classes/sync`;
   return await POST<never, GenericStatus>(f, url);
 };
 
 export const deleteCanvasClassSync = async (f: Fetcher, classId: number) => {
-  const url = `class/${classId}/class_sync`;
+  const url = `class/${classId}/canvas/sync`;
   return await DELETE<never, GenericStatus>(f, url);
 };
 
 export const removeCanvasConnection = async (f: Fetcher, classId: number) => {
-  const url = `class/${classId}/canvas_account`;
+  const url = `class/${classId}/canvas/account`;
   return await DELETE<never, GenericStatus>(f, url);
 };
 

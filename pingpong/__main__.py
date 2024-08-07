@@ -78,7 +78,7 @@ def login(email: str, redirect: str, super_user: bool) -> None:
             return user.id
 
     user_id = asyncio.run(_get_or_create(email))
-    tok = encode_auth_token(user_id)
+    tok = encode_auth_token(str(user_id))
     url = config.url(f"/api/v1/auth?token={tok}&redirect={redirect}")
     print(f"Magic auth link: {url}")
 
@@ -193,7 +193,7 @@ def canvas_sync_all() -> None:
         await config.authz.driver.init()
         async with config.db.driver.async_session() as session:
             async with config.authz.driver.get_client() as c:
-                await sync_all(session, c, logger)
+                await sync_all(session, c)
 
     asyncio.run(_sync_all())
 

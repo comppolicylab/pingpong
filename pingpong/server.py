@@ -736,7 +736,7 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
 
 
 @v1.get(
-    "/class/{class_id}/canvas_link",
+    "/class/{class_id}/canvas/link",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.CanvasRedirect,
 )
@@ -745,7 +745,7 @@ async def get_canvas_link(class_id: str, request: Request):
 
 
 @v1.post(
-    "/class/{class_id}/dismiss_canvas_sync",
+    "/class/{class_id}/canvas/sync/dismiss",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
@@ -755,7 +755,7 @@ async def dismiss_canvas_sync(class_id: str, request: Request):
 
 
 @v1.post(
-    "/class/{class_id}/enable_canvas_sync",
+    "/class/{class_id}/canvas/sync/enable",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
@@ -765,7 +765,7 @@ async def enable_canvas_sync(class_id: str, request: Request):
 
 
 @v1.get(
-    "/class/{class_id}/canvas_classes",
+    "/class/{class_id}/canvas/classes",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.CanvasClasses,
 )
@@ -777,12 +777,12 @@ async def get_canvas_classes(class_id: str, request: Request):
         # Otherwise, just display an error message (assuming this would be a 5xx error).
         if e.status_code >= 400 and e.status_code < 500:
             await models.Class.mark_canvas_sync_error(request.state.db, int(class_id))
-        raise HTTPException(status_code=e.status_code, detail=e.detail)
+        raise e
     return {"classes": courses}
 
 
 @v1.post(
-    "/class/{class_id}/canvas_classes/{canvas_class_id}",
+    "/class/{class_id}/canvas/classes/{canvas_class_id}",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
@@ -799,7 +799,7 @@ async def update_canvas_class(class_id: str, canvas_class_id: str, request: Requ
 
 
 @v1.post(
-    "/class/{class_id}/sync_canvas_class",
+    "/class/{class_id}/canvas/classes/sync",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
@@ -817,12 +817,12 @@ async def sync_canvas_class(class_id: str, request: Request, tasks: BackgroundTa
         # Otherwise, just display an error message.
         if e.status_code == 401:
             await models.Class.mark_canvas_sync_error(request.state.db, int(class_id))
-        raise HTTPException(status_code=e.status_code, detail=e.detail)
+        raise e
     return {"status": "ok"}
 
 
 @v1.delete(
-    "/class/{class_id}/class_sync",
+    "/class/{class_id}/canvas/sync",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
@@ -833,7 +833,7 @@ async def unlink_canvas_class(class_id: str, request: Request):
 
 
 @v1.delete(
-    "/class/{class_id}/canvas_account",
+    "/class/{class_id}/canvas/account",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )

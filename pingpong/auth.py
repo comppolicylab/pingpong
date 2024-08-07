@@ -24,7 +24,7 @@ def encode_session_token(
     Returns:
         str: Encoded session token JWT
     """
-    return encode_auth_token(user_id, expiry, nowfn=nowfn)
+    return encode_auth_token(str(user_id), expiry, nowfn=nowfn)
 
 
 def decode_session_token(token: str, nowfn: NowFn = utcnow) -> SessionToken:
@@ -42,7 +42,9 @@ def decode_session_token(token: str, nowfn: NowFn = utcnow) -> SessionToken:
 
 
 def encode_auth_token(
-    user_id: int, expiry: int = 600, nowfn: NowFn = utcnow, sub: str | None = None
+    sub: str,
+    expiry: int = 600,
+    nowfn: NowFn = utcnow,
 ) -> str:
     """Generates the Auth Token.
 
@@ -63,7 +65,7 @@ def encode_auth_token(
     tok = AuthToken(
         iat=int(now.timestamp()),
         exp=int(exp.timestamp()),
-        sub=str(user_id) if not sub else sub,
+        sub=sub,
     )
 
     secret = config.auth.secret_keys[0]
@@ -145,7 +147,7 @@ def generate_auth_link(
     Returns:
         str: Auth Link
     """
-    tok = encode_auth_token(user_id, expiry=expiry, nowfn=nowfn)
+    tok = encode_auth_token(str(user_id), expiry=expiry, nowfn=nowfn)
     return config.url(f"/api/v1/auth?token={tok}&redirect={redirect}")
 
 

@@ -740,11 +740,11 @@
             </div>
           </Alert>
         {:else if data.class.canvas_status === 'authorized'}
-          <Alert color="green" defaultClass="p-4 gap-3 text-sm border-2">
+          <Alert color="yellow" defaultClass="p-4 gap-3 text-sm border-2">
             <div class="p-1.5">
               <div class="flex items-center gap-3">
                 <CanvasLogo size="5" />
-                <span class="text-lg font-medium">Canvas setup in process</span>
+                <span class="text-lg font-medium">Canvas Sync setup in process</span>
               </div>
               <p class="mt-2 text-sm">
                 {data.class.canvas_user?.name || 'Someone in your course'} has linked their Canvas account
@@ -830,6 +830,11 @@
                 > on Canvas. The class roster is automatically synced with this group's user list about
                 once every hour.
               </p>
+              <p class="mt-2 mb-2 text-sm">
+                Last sync: {data.class.canvas_last_synced
+                  ? dayjs.utc(data.class.canvas_last_synced).fromNow()
+                  : 'never'}
+              </p>
               <p class="mt-2 text-sm">
                 {data.class.canvas_user?.name || 'Someone in your course'} has linked their Canvas account
                 with this group. Need to link your own account? Ask {data.class.canvas_user?.name ||
@@ -881,6 +886,11 @@
                 with this group. However, we faced an issue when trying to connect to their Canvas account.
                 Ask {data.class.canvas_user?.name || 'them'} to reauthorize Pingpong to access your Canvas
                 account through this page and ensure uninterrupted syncing of your class roster.
+              </p>
+              <p class="mt-2 mb-4 text-sm">
+                Last sync: {data.class.canvas_last_synced
+                  ? dayjs.utc(data.class.canvas_last_synced).fromNow()
+                  : 'never'}
               </p>
               <p class="mt-2 text-sm">
                 Need to link your own account? Ask {data.class.canvas_user?.name || 'them'} to disconnect
