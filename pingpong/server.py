@@ -1323,7 +1323,7 @@ async def get_last_run(
             )
         except openai.APIConnectionError as e:
             logger.error("Error connecting to OpenAI: %s", e)
-            # Contine polling
+            # Continue polling
 
     return {"thread": thread, "run": last_run}
 
@@ -1578,13 +1578,13 @@ async def send_message(
     if data.file_search_file_ids:
         if thread.vector_store_id:
             # Vector store already exists, update
-            vectore_store_id = await append_vector_store_files(
+            vector_store_id = await append_vector_store_files(
                 request.state.db,
                 openai_client,
                 thread.vector_store_id,
                 data.file_search_file_ids,
             )
-            tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
+            tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
         else:
             # Store doesn't exist, create a new one
             vector_store_id, vector_store_object_id = await create_vector_store(
@@ -2021,16 +2021,16 @@ async def update_assistant(
             # Files will need to be stored in a vector store
             if asst.vector_store_id:
                 # Vector store already exists, update
-                vectore_store_id = await sync_vector_store_files(
+                vector_store_id = await sync_vector_store_files(
                     request.state.db,
                     openai_client,
                     asst.vector_store_id,
                     req.file_search_file_ids,
                 )
-                tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
+                tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
             else:
                 # Store doesn't exist, create a new one
-                vectore_store_id, vector_store_object_id = await create_vector_store(
+                vector_store_id, vector_store_object_id = await create_vector_store(
                     request.state.db,
                     openai_client,
                     class_id,
@@ -2038,7 +2038,7 @@ async def update_assistant(
                     type=schemas.VectorStoreType.THREAD,
                 )
                 asst.vector_store_id = vector_store_object_id
-                tool_resources["file_search"] = {"vector_store_ids": [vectore_store_id]}
+                tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
         else:
             # No files stored in vector store, remove it
             if asst.vector_store_id:
