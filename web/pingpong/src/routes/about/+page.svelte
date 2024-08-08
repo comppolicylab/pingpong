@@ -86,7 +86,7 @@
     >
   </div>
   {#if nonAuthed}
-    <PingPongDemoCarousel />
+    <div class="px-14"><PingPongDemoCarousel /></div>
   {/if}
   <div class="px-12">
     <Heading tag="h3" class="my-4">What kinds of data do you collect?</Heading>
@@ -141,7 +141,7 @@
   </div>
 
   {#if !nonAuthed}
-    <div class="px-12 py-8 bg-white">
+    <div class="px-12 pb-8 bg-white">
       <Heading tag="h3" class="my-4">How can I get help?</Heading>
       <P class="ml-0.5 mt-4">
         <Sanitize html={data.supportInfo.blurb} />
