@@ -12,19 +12,20 @@
         >Educational Access</span
       >
     </Heading>
-    <P class="text-xl text-gray-700 text-center lg:text-2xl sm:px-16 md:px-25 md:px-35 xl:px-48"
+    <P
+      class="mt-4 text-xl text-gray-700 text-center lg:text-2xl sm:px-16 md:px-25 md:px-35 xl:px-48"
       >Give your students free access to a custom version of ChatGPT designed to improve teaching
       and learning.
     </P>
   </div>
   <div class="mx-7 mb-2">
-    <P class="leading-6"
+    <P class="leading-6 mt-4"
       >We are seeking instructors at two- and four-year colleges, especially those teaching math,
       economics, statistics and or computer science to participate in a large-scale study to assess
       the benefits of generative AI on student learning. An honorarium will be provided to
       participating instructors.</P
     >
-    <P>To participate, complete a short (6-question) survey:</P>
+    <P class="mt-4">To participate, complete a short (6-question) survey:</P>
   </div>
   <div
     class="justify-center items-center space-y-4 sm:flex sm:space-y-0 sm:space-x-4 rtl:space-x-reverse"
@@ -160,9 +161,3 @@
     </div>
   </Card>
 </div>
-
-<style lang="css">
-  :global(.about p) {
-    margin-top: 1rem;
-  }
-</style>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Select, Label, Input, GradientButton, Textarea, Heading, P } from 'flowbite-svelte';
+  import { Select, Label, Input, Textarea, Heading, P, Button } from 'flowbite-svelte';
   import Sanitize from '$lib/components/Sanitize.svelte';
   import { writable } from 'svelte/store';
   import { happyToast, sadToast } from '$lib/toast.js';
@@ -53,8 +53,8 @@
   };
 </script>
 
-<div class="px-12 py-12 flex flex-col gap-8 about h-full overflow-y-auto">
-  <div class="text-center">
+<div class="flex flex-col gap-8 about h-full overflow-y-auto">
+  <div class="text-center px-12 pt-12">
     <Heading tag="h2" class="mt-4 mb-6" customSize="text-4xl font-extrabold md:text-5xl lg:text-6xl"
       >{#if nonAuthed}Welcome to{:else}About{/if}
       <span class="bg-gradient-to-t from-orange-dark to-orange text-transparent bg-clip-text"
@@ -62,23 +62,24 @@
       ></Heading
     >
   </div>
-  <div>
+  <div class="px-12">
     <Heading tag="h3" class="my-4">What is it?</Heading>
-    <P class="ml-0.5"
+    <P class="ml-0.5 mt-4"
       >PingPong is a tool for using large language models (LLMs) for teaching and learning. You can
       use it to create and share custom bots for specific tasks, like serving as a virtual teaching
       assistant with access to course documents.</P
     >
-    <P class="ml-0.5"
+    <P class="ml-0.5 mt-4"
       >PingPong is built on top of <a
         href="https://openai.com/index/hello-gpt-4o/"
         rel="noopener noreferrer"
         target="_blank">GPT-4o</a
       >, a large language model developed by
-      <a href="https://openai.com" rel="noopener noreffer" target="_blank">OpenAI</a>. But there are
-      several advantages of using PingPong over ChatGPT. First, moderators can view de-identified
-      chats, which helps instructors understand how their students are using the tool and
-      potentially tailor class content accordingly. Second, none of the information entered on
+      <a class="underline" href="https://openai.com" rel="noopener noreffer" target="_blank"
+        >OpenAI</a
+      >. But there are several advantages of using PingPong over ChatGPT. First, moderators can view
+      de-identified chats, which helps instructors understand how their students are using the tool
+      and potentially tailor class content accordingly. Second, none of the information entered on
       PingPong will be used by OpenAI to train their models, ensuring user data is kept private.
       Finally, PingPong is integrated into Canvas, making it easy for faculty and students to get up
       and running quickly.</P
@@ -87,32 +88,34 @@
   {#if nonAuthed}
     <PingPongDemoCarousel />
   {/if}
-  <div>
+  <div class="px-12">
     <Heading tag="h3" class="my-4">What kinds of data do you collect?</Heading>
-    <P class="ml-0.5">
-      Please read our <a href="/privacy-policy" rel="noopener noreferrer">privacy policy</a> to learn
-      about what information we collect and how we keep it safe.
+    <P class="ml-0.5 mt-4">
+      Please read our <a href="/privacy-policy" class="underline" rel="noopener noreferrer"
+        >privacy policy</a
+      > to learn about what information we collect and how we keep it safe.
     </P>
   </div>
 
-  <div>
+  <div class="px-12">
     <Heading tag="h3" class="my-4">Who built it?</Heading>
-    <P class="ml-0.5">
+    <P class="ml-0.5 mt-4">
       This app was developed by the <a
         href="https://policylab.hks.harvard.edu"
+        class="underline"
         rel="noopener noreferrer"
         target="_blank">Computational Policy Lab</a
       >
       at the
-      <a href="https://hks.harvard.edu" rel="noopener noreferrer" target="_blank"
+      <a href="https://hks.harvard.edu" class="underline" rel="noopener noreferrer" target="_blank"
         >Harvard Kennedy School</a
       >.
     </P>
   </div>
 
-  <div>
+  <div class="px-12">
     <Heading tag="h3" class="my-4">What else should I know?</Heading>
-    <P class="ml-0.5">Here are a few disclosures, rules, and disclaimers about this app:</P>
+    <P class="ml-0.5 mt-4">Here are a few disclosures, rules, and disclaimers about this app:</P>
     <ol class="list-decimal ml-7">
       <li class="my-2">
         We are monitoring the app for signs of abuse and will take action if we see it.
@@ -125,6 +128,7 @@
         You must adhere to <a
           href="https://policy.security.harvard.edu/policies"
           rel="noopener noreferrer"
+          class="underline"
           target="_blank">Harvard's Information Security Policy</a
         > while using this app.
       </li>
@@ -137,14 +141,14 @@
   </div>
 
   {#if !nonAuthed}
-    <div>
+    <div class="px-12 py-8 bg-white">
       <Heading tag="h3" class="my-4">How can I get help?</Heading>
-      <P class="ml-0.5">
+      <P class="ml-0.5 mt-4">
         <Sanitize html={data.supportInfo.blurb} />
       </P>
       {#if data.supportInfo.can_post}
         <div>
-          <P class="ml-0.5">
+          <P class="ml-0.5 mt-4">
             You can send us a message with the following form and we will try to get back to you
             soon!
           </P>
@@ -179,8 +183,11 @@
                   />
                 </div>
                 <div class="flex flex-col gap-2 mx-auto">
-                  <GradientButton class="w-20" type="submit" disabled={$loading} color="cyanToBlue"
-                    >Send</GradientButton
+                  <Button
+                    pill
+                    class="w-20 text-white inline-flex justify-center items-center px-5 bg-blue-dark-40 hover:bg-blue-dark-50 shadow-md"
+                    type="submit"
+                    disabled={$loading}>Send</Button
                   >
                 </div>
               </div>
@@ -190,41 +197,34 @@
       {/if}
     </div>
   {/if}
-</div>
-
-<div class="flex flex-col gap-8 bg-slate-500 p-8">
-  <div class="flex flex-row gap-2 justify-evenly px-12 items-center">
-    <div class="w-48">
-      <a href="https://shorensteincenter.org/" rel="noopener noreferrer" target="_blank">
-        <img
-          src="/HKSlogo_shorenstein_transparent-1.png"
-          alt="Harvard Kennedy School - Shorenstein Center logo"
-        />
-      </a>
+  <div class="flex flex-col gap-8 bg-blue-dark-40 p-8 w-full">
+    <div class="flex flex-row gap-2 justify-evenly px-12 items-center">
+      <div class="w-48">
+        <a href="https://shorensteincenter.org/" rel="noopener noreferrer" target="_blank">
+          <img
+            src="/HKSlogo_shorenstein_transparent-1.png"
+            alt="Harvard Kennedy School - Shorenstein Center logo"
+          />
+        </a>
+      </div>
+      <div>
+        <a
+          href="https://policylab.hks.harvard.edu"
+          class="flex flex-row gap-2 items-center"
+          rel="noopener noreferrer"
+          target="_blank"
+        >
+          <img
+            src="/cpl_logo_white.svg"
+            style="height: 1.2rem"
+            alt="Computational Policy Lab logo"
+          />
+          <span class="font-mono text-gray-100 text-sm">COMPUTATIONAL POLICY LAB</span>
+        </a>
+      </div>
     </div>
-    <div>
-      <a
-        href="https://policylab.hks.harvard.edu"
-        class="flex flex-row gap-2 items-center"
-        rel="noopener noreferrer"
-        target="_blank"
-      >
-        <img src="/cpl_logo_white.svg" style="height: 1.2rem" alt="Computational Policy Lab logo" />
-        <span class="font-mono text-gray-100 text-sm">COMPUTATIONAL POLICY LAB</span>
-      </a>
-    </div>
+    <P class="text-xs w-full text-center text-gray-100 mt-4"
+      >All content &copy; {year} Computational Policy Lab. All rights reserved.</P
+    >
   </div>
-  <P class="text-xs w-full text-center text-gray-100"
-    >All content &copy; {year} Computational Policy Lab. All rights reserved.</P
-  >
 </div>
-
-<style lang="css">
-  :global(.about a) {
-    color: #1a202c;
-    text-decoration: underline;
-  }
-  :global(.about p) {
-    margin-top: 1rem;
-  }
-</style>

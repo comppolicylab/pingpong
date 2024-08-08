@@ -9,7 +9,7 @@
     </Heading>
   </div>
   <div>
-    <P
+    <P class="mt-4"
       >This Privacy Statement discloses the privacy practices related to the HKS developed tool,
       PingPong, in its use by Harvard affiliates at Harvard University in Cambridge, MA. By using
       PingPong, you are consenting to our collection and use of information in accordance with this
@@ -42,7 +42,7 @@
     <Heading tag="h3" class="mt-4 mb-3" customSize="text-2xl font-extrabold"
       >What information do we gather about you and who has access?
     </Heading>
-    <P
+    <P class="mt-4"
       >Moderators for the group in which you are using PingPong do not have access to your
       identifiable information. The Harvard technical team developing and managing PingPong does
       have access to identifiable information for purposes of system administration, including
@@ -52,6 +52,7 @@
       team automatically logs errors in the app to <a
         href="https://sentry.io"
         rel="noopener noreferrer"
+        class="underline"
         target="_blank">Sentry</a
       >. These logs do not contain any identifiable information about any user who might have
       triggered the error. Identifiable information, per policy, cannot be requested and will not be
@@ -59,10 +60,11 @@
       <a
         href="https://hwpi.harvard.edu/files/provost/files/policy_on_access_to_electronic_information.pdf"
         rel="noopener noreferrer"
+        class="underline"
         target="_blank">Harvard Policy on Access to Electronic Information</a
       > in the management of PingPong and access to the user data stored to support the service.</P
     >
-    <P
+    <P class="mt-4"
       >Harvard researchers may request deidentified transcripts or other user data related to the
       use of PingPong for the purposes of learning about the use of PingPong and improving the
       learning experience. User information may be shared with third-party vendors to the extent
@@ -72,10 +74,11 @@
       more information about Harvard's license with OpenAI, please contact <a
         href="mailto:sgoshev@hks.harvard.edu"
         rel="noopener noreferrer"
+        class="underline"
         target="_blank">Simo Goshev</a
       >.</P
     >
-    <P
+    <P class="mt-4"
       >We may also provide your information to third parties in circumstances where we believe that
       doing so is necessary or appropriate to satisfy any applicable law, regulation, legal process
       or governmental request; detect, prevent or otherwise address fraud, security, or technical
@@ -87,7 +90,7 @@
     <Heading tag="h3" class="mt-4 mb-3" customSize="text-2xl font-extrabold"
       >Information protection
     </Heading>
-    <P
+    <P class="mt-4"
       >This site has reasonable security measures in place to help protect against the loss, misuse,
       and alteration of the information under our control. However, no method of transmission over
       the Internet or method of electronic storage is 100% secure.
@@ -98,7 +101,7 @@
     <Heading tag="h3" class="mt-4 mb-3" customSize="text-2xl font-extrabold"
       >Changes to this policy
     </Heading>
-    <P
+    <P class="mt-4"
       >This Privacy Statement may be amended from time to time. Any such changes will be posted on
       this page.
     </P>
@@ -108,16 +111,6 @@
     <Heading tag="h3" class="mt-4 mb-3" customSize="text-2xl font-extrabold"
       >Effective date
     </Heading>
-    <P>The effective date of this policy is August 5, 2024.</P>
+    <P class="mt-4">The effective date of this policy is August 5, 2024.</P>
   </div>
 </div>
-
-<style lang="css">
-  :global(.about a) {
-    color: #1a202c;
-    text-decoration: underline;
-  }
-  :global(.about p) {
-    margin-top: 1rem;
-  }
-</style>

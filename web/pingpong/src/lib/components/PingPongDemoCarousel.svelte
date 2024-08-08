@@ -50,7 +50,6 @@
       const aspectRatio = img.height / img.width;
       carouselHeight = `${carouselWidth * aspectRatio}px`;
     };
-    console.log(carouselHeight);
     img.src = images[index].src;
   }
 
