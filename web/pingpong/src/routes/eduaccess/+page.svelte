@@ -12,40 +12,33 @@
         >Educational Access</span
       >
     </Heading>
-    <P
-      class="mb-7 text-xl text-gray-700 text-center lg:text-2xl sm:px-16 md:px-25 md:px-35 xl:px-48"
+    <P class="text-xl text-gray-700 text-center lg:text-2xl sm:px-16 md:px-25 md:px-35 xl:px-48"
       >Give your students free access to a custom version of ChatGPT designed to improve teaching
       and learning.
     </P>
-    <div
-      class="justify-center items-center space-y-4 sm:flex sm:space-y-0 sm:space-x-4 rtl:space-x-reverse"
-    >
-      <Button
-        href="https://harvard.az1.qualtrics.com/jfe/form/SV_3xRMxp1g44nnjka"
-        rel="noopener noreferrer"
-        target="_blank"
-        class="text-orange-dark border underline border-orange-dark hover:border-gray-900 inline-flex justify-center text-lg items-center p-5 font-medium bg-gray-50 rounded-lg hover:text-gray-900 hover:bg-gray-100 hover:no-underline"
-      >
-        <span class="w-full ms-3">Express your interest for PingPong Edu Access</span>
-        <ArrowRightOutline class="w-6 h-6 ms-2" />
-      </Button>
-    </div>
   </div>
-  <div>
-    <P
+  <div class="mx-7 mb-2">
+    <P class="leading-6"
       >We are seeking instructors at two- and four-year colleges, especially those teaching math,
       economics, statistics and or computer science to participate in a large-scale study to assess
       the benefits of generative AI on student learning. An honorarium will be provided to
       participating instructors.</P
     >
-    <P
-      >To participate, complete <a
-        href="https://harvard.az1.qualtrics.com/jfe/form/SV_3xRMxp1g44nnjka"
-        rel="noopener noreferrer"
-        class="underline"
-        target="_blank">this short (6-question) survey</a
-      >.</P
+    <P>To participate, complete a short (6-question) survey:</P>
+  </div>
+  <div
+    class="justify-center items-center space-y-4 sm:flex sm:space-y-0 sm:space-x-4 rtl:space-x-reverse"
+  >
+    <Button
+      pill
+      href="https://harvard.az1.qualtrics.com/jfe/form/SV_3xRMxp1g44nnjka"
+      rel="noopener noreferrer"
+      target="_blank"
+      class="text-white inline-flex justify-center text-lg items-center px-5 font-medium text-lg bg-blue-dark-40 hover:bg-blue-dark-50 shadow-md"
     >
+      <span class="w-full ms-3">Express your interest for PingPong Edu Access</span>
+      <ArrowRightOutline class="w-6 h-6 ms-2" />
+    </Button>
   </div>
 
   <PingPongDemoCarousel />
