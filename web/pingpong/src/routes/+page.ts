@@ -19,6 +19,8 @@ export const load: PageLoad = async ({ parent }) => {
     // Since the user is an admin, we can redirect them to a page where they can
     // set up their first class.
     return redirect(302, '/admin');
+  } else {
+    return redirect(302, '/about');
   }
 
   // If we get here it means the user has no visible items and is

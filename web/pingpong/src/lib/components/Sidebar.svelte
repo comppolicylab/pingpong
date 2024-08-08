@@ -11,7 +11,9 @@
     DotsVerticalOutline,
     ArrowRightOutline,
     CogOutline,
-    EyeOutline
+    EyeOutline,
+    UserCircleSolid,
+    FileLinesOutline
   } from 'flowbite-svelte-icons';
 
   import {
@@ -35,6 +37,7 @@
 
   export let data: LayoutData;
 
+  $: nonAuthed = data.isPublicPage && !data?.me?.user;
   $: avatar = data?.me?.profile?.image_url;
   $: name = data?.me?.user?.name || data?.me?.user?.email;
   // Index classes by ID so we can look them up easier.
@@ -89,16 +92,19 @@
     </SidebarGroup>
 
     <SidebarGroup class="mt-6 mb-10">
+      <!-- svelte-ignore missing-declaration -->
       <SidebarItem
-        href={onNewChatPage
-          ? undefined
-          : currentClassId
-            ? `/group/${currentClassId}${
-                currentAssistantId ? `?assistant=${currentAssistantId}` : ''
-              }`
-            : '/'}
+        href={nonAuthed
+          ? '/login'
+          : onNewChatPage
+            ? undefined
+            : currentClassId
+              ? `/group/${currentClassId}${
+                  currentAssistantId ? `?assistant=${currentAssistantId}` : ''
+                }`
+              : '/'}
         disabled={onNewChatPage}
-        label="Start a new chat"
+        label={nonAuthed ? 'Login' : 'Start a new chat'}
         class={`flex flex-row-reverse justify-between pr-4 text-white rounded-full ${
           onNewChatPage
             ? 'bg-blue-dark-40 hover:bg-blue-dark-40 cursor-default text-blue-dark-30 select-none'
@@ -106,74 +112,102 @@
         }`}
       >
         <svelte:fragment slot="icon">
-          <CirclePlusSolid size="sm" />
+          {#if nonAuthed}
+            <UserCircleSolid size="sm" />
+          {:else}
+            <CirclePlusSolid size="sm" />
+          {/if}
         </svelte:fragment>
       </SidebarItem>
     </SidebarGroup>
 
-    <SidebarGroup ulClass="flex flex-wrap justify-between gap-2 items-center">
-      <span class="flex-1 truncate text-white">Recent Threads</span>
-      <a
-        href={`/threads`}
-        class="text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap justify-between gap-2 items-center"
-      >
-        <span class="text-xs">View All</span><ArrowRightOutline
-          size="md"
-          class="text-white inline-block p-0.5 ml-1 rounded-full bg-blue-dark-30"
-        />
-      </a>
-    </SidebarGroup>
-    <SidebarGroup border class="overflow-y-auto border-blue-dark-40 border-t-3 pt-1">
-      {#each threads as thread}
+    {#if nonAuthed}
+      <SidebarGroup border class="overflow-y-auto border-blue-dark-40 border-t-3 pt-1">
         <SidebarItem
+          href="/about"
+          label="Home"
           class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2"
-          spanClass="flex-1 truncate"
-          href={`/group/${thread.class_id}/thread/${thread.id}`}
-          label={thread.name || 'Undefined'}
           activeClass="bg-blue-dark-40"
+        />
+        <SidebarItem
+          href="/eduaccess"
+          label="Educational Access"
+          class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2"
+          activeClass="bg-blue-dark-40"
+        />
+        <SidebarItem
+          href="/privacy-policy"
+          label="Privacy Policy"
+          class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2"
+          activeClass="bg-blue-dark-40"
+        />
+      </SidebarGroup>
+    {:else}
+      <SidebarGroup ulClass="flex flex-wrap justify-between gap-2 items-center">
+        <span class="flex-1 truncate text-white">Recent Threads</span>
+        <a
+          href={`/threads`}
+          class="text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap justify-between gap-2 items-center"
         >
-          <svelte:fragment slot="icon">
-            <span class="eyebrow w-full"
-              ><div class="flex flex-row gap-1">
-                <h4 class="shrink-0">
-                  {classesById[thread.class_id].name}
-                </h4>
-                <h4 class="shrink-0">|</h4>
-                <h4 class="shrink truncate">
-                  {Object.values(thread.assistant_names || { 1: 'Unknown Assistant' }).join(', ')}
-                </h4>
-              </div></span
-            >
-            {#if thread.private}
-              <EyeSlashOutline size="sm" class="text-white" />
-            {:else}
-              <EyeOutline size="sm" class="text-white" />
-            {/if}
-          </svelte:fragment>
+          <span class="text-xs">View All</span><ArrowRightOutline
+            size="md"
+            class="text-white inline-block p-0.5 ml-1 rounded-full bg-blue-dark-30"
+          />
+        </a>
+      </SidebarGroup>
+      <SidebarGroup border class="overflow-y-auto border-blue-dark-40 border-t-3 pt-1">
+        {#each threads as thread}
+          <SidebarItem
+            class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2"
+            spanClass="flex-1 truncate"
+            href={`/group/${thread.class_id}/thread/${thread.id}`}
+            label={thread.name || 'Undefined'}
+            activeClass="bg-blue-dark-40"
+          >
+            <svelte:fragment slot="icon">
+              <span class="eyebrow w-full"
+                ><div class="flex flex-row gap-1">
+                  <h4 class="shrink-0">
+                    {classesById[thread.class_id].name}
+                  </h4>
+                  <h4 class="shrink-0">|</h4>
+                  <h4 class="shrink truncate">
+                    {Object.values(thread.assistant_names || { 1: 'Unknown Assistant' }).join(', ')}
+                  </h4>
+                </div></span
+              >
+              {#if thread.private}
+                <EyeSlashOutline size="sm" class="text-white" />
+              {:else}
+                <EyeOutline size="sm" class="text-white" />
+              {/if}
+            </svelte:fragment>
 
-          <svelte:fragment slot="subtext">
-            <span class="text-xs text-gray-400 w-full">{dayjs.utc(thread.updated).fromNow()}</span>
-          </svelte:fragment>
-        </SidebarItem>
-      {/each}
-      {#if !threads.length}
-        <div class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2">
-          No conversations yet!
-        </div>
-      {/if}
-    </SidebarGroup>
+            <svelte:fragment slot="subtext">
+              <span class="text-xs text-gray-400 w-full">{dayjs.utc(thread.updated).fromNow()}</span
+              >
+            </svelte:fragment>
+          </SidebarItem>
+        {/each}
+        {#if !threads.length}
+          <div class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2">
+            No conversations yet!
+          </div>
+        {/if}
+      </SidebarGroup>
 
-    <SidebarGroup class="mt-auto border-blue-dark-40 border-t-3" border>
-      <Li>
-        <div
-          class="user cursor-pointer flex items-center p-2 text-base font-normal text-white rounded-lg dark:text-white hover:bg-blue-dark-40 dark:hover:bg-gray-700"
-        >
-          <Avatar src={avatar} alt={name} />
-          <span class="ml-3 text-sm truncate" title={name}>{name}</span>
-          <DotsVerticalOutline size="lg" class="ml-auto" />
-        </div>
-      </Li>
-    </SidebarGroup>
+      <SidebarGroup class="mt-auto border-blue-dark-40 border-t-3" border>
+        <Li>
+          <div
+            class="user cursor-pointer flex items-center p-2 text-base font-normal text-white rounded-lg dark:text-white hover:bg-blue-dark-40 dark:hover:bg-gray-700"
+          >
+            <Avatar src={avatar} alt={name} />
+            <span class="ml-3 text-sm truncate" title={name}>{name}</span>
+            <DotsVerticalOutline size="lg" class="ml-auto" />
+          </div>
+        </Li>
+      </SidebarGroup>
+    {/if}
   </SidebarWrapper>
 </Sidebar>
 
@@ -192,6 +226,10 @@
   <DropdownItem href="/about" class="flex space-x-4 items-center">
     <QuestionCircleOutline size="sm" />
     <span>About</span>
+  </DropdownItem>
+  <DropdownItem href="/privacy-policy" class="flex space-x-4 items-center">
+    <FileLinesOutline size="sm" />
+    <span>Privacy Policy</span>
   </DropdownItem>
   <DropdownDivider />
   <DropdownItem href="/logout" class="flex space-x-4 items-center">

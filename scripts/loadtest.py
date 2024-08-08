@@ -172,7 +172,7 @@ class TestInstance:
                 "instructions": "You are a friendly AI for testing purposes",
                 "description": "Auto generated for a load test",
                 "model": "gpt-4-1106-preview",
-                "tools": [],  # TODO retrieval, code interpretter
+                "tools": [],  # TODO retrieval, code interpreter
                 "published": True,
                 "use_latex": True,
             },
