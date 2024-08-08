@@ -5,6 +5,9 @@ import type { LayoutLoad } from './$types';
 const LOGIN = '/login';
 const HOME = '/';
 const ONBOARDING = '/onboarding';
+const ABOUT = '/about';
+const PRIVACY_POLICY = '/privacy-policy';
+const EDU = '/eduaccess';
 
 /**
  * Load the current user and redirect if they are not logged in.
@@ -19,15 +22,20 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   const authed = me.data.status === 'valid';
   const needsOnboarding = !!me.data?.user && (!me.data.user.first_name || !me.data.user.last_name);
 
+  // If the page is public, don't redirect to the login page.
+  let isPublicPage = false;
+
   if (url.pathname === LOGIN) {
     // If the user is logged in, go to the home page.
     if (authed) {
       redirect(302, HOME);
     }
   } else {
-    // If the user is not logged in, go to the login page.
-    if (!authed) {
-      redirect(302, LOGIN);
+    if (url.pathname === ABOUT || url.pathname === PRIVACY_POLICY || url.pathname === EDU) {
+      isPublicPage = true;
+    } else if (!authed) {
+      // If the user is not logged in, go to the About page.
+      redirect(302, ABOUT);
     } else {
       if (needsOnboarding && url.pathname !== ONBOARDING) {
         const destination = encodeURIComponent(`${url.pathname}${url.search}`);
@@ -74,6 +82,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   };
 
   return {
+    isPublicPage,
     needsOnboarding,
     me: me.data,
     authed,
