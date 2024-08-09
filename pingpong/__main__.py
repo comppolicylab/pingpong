@@ -51,6 +51,15 @@ def make_root(email: str) -> None:
         await config.authz.driver.init()
         async with config.db.driver.async_session() as session:
             user = await User.get_by_email(session, email)
+            if not user:
+                user = User(email=email)
+                user.super_admin = True
+            else:
+                user.super_admin = True
+            session.add(user)
+            await session.commit()
+            await session.refresh(user)
+
             async with config.authz.driver.get_client() as c:
                 await c.create_root_user(user.id)
 
