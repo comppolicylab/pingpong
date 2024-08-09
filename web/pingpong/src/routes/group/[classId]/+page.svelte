@@ -300,20 +300,24 @@
         {#if isPrivate}
           <div class="flex gap-2 px-4 py-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
             <LockSolid size="sm" class="text-orange pt-0" />
-            <Span class="text-gray-400 text-xs font-normal">Moderators <span class="font-semibold">cannot</span> see this thread or your name. For more information, please review <a
-              href="/privacy-policy"
-              rel="noopener noreferrer"
-              class="underline">PingPong's privacy statement</a
-            >. Assistants can make mistakes. Check important info.</Span>
+            <Span class="text-gray-400 text-xs font-normal"
+              >Moderators <span class="font-semibold">cannot</span> see this thread or your name.
+              For more information, please review
+              <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
+                >PingPong's privacy statement</a
+              >. Assistants can make mistakes. Check important info.</Span
+            >
           </div>
         {:else}
           <div class="flex gap-2 px-4 py-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
             <EyeSlashOutline size="sm" class="text-orange pt-0" />
-            <Span class="text-gray-400 text-xs font-normal">Moderators can see this thread but not your name. For more information, please review <a
-              href="/privacy-policy"
-              rel="noopener noreferrer"
-              class="underline">PingPong's privacy statement</a
-            >. Assistants can make mistakes. Check important info.</Span>
+            <Span class="text-gray-400 text-xs font-normal"
+              >Moderators can see this thread but not your name. For more information, please review <a
+                href="/privacy-policy"
+                rel="noopener noreferrer"
+                class="underline">PingPong's privacy statement</a
+              >. Assistants can make mistakes. Check important info.</Span
+            >
           </div>
         {/if}
         <input type="hidden" name="assistant_id" bind:value={assistant.id} />

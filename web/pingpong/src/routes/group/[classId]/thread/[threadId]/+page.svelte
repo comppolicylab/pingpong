@@ -23,13 +23,10 @@
     EyeSlashOutline,
     EyeOutline,
     RefreshOutline,
-    DotsHorizontalOutline,
     CodeSolid,
     ImageSolid,
     LockSolid,
-
     CogOutline
-
   } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
@@ -382,27 +379,37 @@
           remove={handleRemove}
           on:submit={handleSubmit}
         />
-        <div
-          class="flex gap-2 px-4 py-2 items-center w-full text-sm justify-between grow"
-        >
+        <div class="flex gap-2 px-4 py-2 items-center w-full text-sm justify-between grow">
           <div class="flex gap-2 grow shrink min-w-0">
             {#if !$published && isPrivate}
-                <LockSolid size="sm" class="text-orange" />
-                <Span class="text-gray-400 text-xs font-normal">Moderators <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For more information, please review <a
-                  href="/privacy-policy"
-                  rel="noopener noreferrer"
-                  class="underline">PingPong's privacy statement</a
-                >. {/if}Assistants can make mistakes. Check important info.</Span>
+              <LockSolid size="sm" class="text-orange" />
+              <Span class="text-gray-400 text-xs font-normal"
+                >Moderators <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
+                  more information, please review <a
+                    href="/privacy-policy"
+                    rel="noopener noreferrer"
+                    class="underline">PingPong's privacy statement</a
+                  >.
+                {/if}Assistants can make mistakes. Check important info.</Span
+              >
             {:else if !$published}
               <EyeSlashOutline size="sm" class="text-orange" />
-              <Span class="text-gray-400 text-xs font-normal">Moderators can see this thread but not {isCurrentUser ? 'your' : 'the user\'s'} name. {#if isCurrentUser}For more information, please review <a
-                href="/privacy-policy"
-                rel="noopener noreferrer"
-                class="underline">PingPong's privacy statement</a
-              >. {/if}Assistants can make mistakes. Check important info.</Span>
+              <Span class="text-gray-400 text-xs font-normal"
+                >Moderators can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
+                {#if isCurrentUser}For more information, please review <a
+                    href="/privacy-policy"
+                    rel="noopener noreferrer"
+                    class="underline">PingPong's privacy statement</a
+                  >.
+                {/if}Assistants can make mistakes. Check important info.</Span
+              >
             {:else}
               <EyeOutline size="sm" class="text-orange" />
-              <Span class="text-gray-400 text-xs font-normal">Everyone in this group can see this thread but not {isCurrentUser ? 'your' : 'the user\'s'} name. Assistants can make mistakes. Check important info.</Span>
+              <Span class="text-gray-400 text-xs font-normal"
+                >Everyone in this group can see this thread but not {isCurrentUser
+                  ? 'your'
+                  : "the user's"} name. Assistants can make mistakes. Check important info.</Span
+              >
             {/if}
           </div>
 
