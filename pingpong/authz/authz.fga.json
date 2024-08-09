@@ -474,13 +474,24 @@
           }
         },
         "can_delete": {
-          "tupleToUserset": {
-            "computedUserset": {
-              "relation": "can_manage_threads"
-            },
-            "tupleset": {
-              "relation": "parent"
-            }
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "party"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "can_manage_threads"
+                  },
+                  "tupleset": {
+                    "relation": "parent"
+                  }
+                }
+              }
+            ]
           }
         },
         "can_publish": {
@@ -495,13 +506,29 @@
                       }
                     },
                     {
-                      "tupleToUserset": {
-                        "computedUserset": {
-                          "relation": "can_publish_threads"
-                        },
-                        "tupleset": {
-                          "relation": "parent"
-                        }
+                      "union": {
+                        "child": [
+                          {
+                            "tupleToUserset": {
+                              "computedUserset": {
+                                "relation": "can_publish_threads"
+                              },
+                              "tupleset": {
+                                "relation": "parent"
+                              }
+                            }
+                          },
+                          {
+                            "tupleToUserset": {
+                              "computedUserset": {
+                                "relation": "supervisor"
+                              },
+                              "tupleset": {
+                                "relation": "parent"
+                              }
+                            }
+                          }
+                        ]
                       }
                     }
                   ]

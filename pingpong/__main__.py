@@ -53,9 +53,7 @@ def make_root(email: str) -> None:
             user = await User.get_by_email(session, email)
             if not user:
                 user = User(email=email)
-                user.super_admin = True
-            else:
-                user.super_admin = True
+            user.super_admin = True
             session.add(user)
             await session.commit()
             await session.refresh(user)
