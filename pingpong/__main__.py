@@ -84,7 +84,9 @@ def _load_alembic(alembic_config="alembic.ini") -> alembic.config.Config:
     """Load the Alembic config."""
     al_cfg = alembic.config.Config(alembic_config)
     # Use the Alembic config from `alembic.ini` but override the URL for the db
-    al_cfg.set_main_option("sqlalchemy.url", config.db.driver.sync_uri)
+    # If pw uses a % there will be an error thrown in the logs, so "escape" it.
+    clean_uri = config.db.driver.sync_uri.replace("%", "%%")
+    al_cfg.set_main_option("sqlalchemy.url", clean_uri)
     return al_cfg
 
 
