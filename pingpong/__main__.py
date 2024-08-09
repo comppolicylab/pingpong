@@ -7,6 +7,8 @@ import click
 import alembic
 import alembic.command
 import alembic.config
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from .auth import encode_auth_token
 from .config import config
@@ -25,6 +27,21 @@ def cli() -> None:
 @cli.group("auth")
 def auth() -> None:
     pass
+
+
+@auth.command("create_db_schema")
+def create_db_schema() -> None:
+    async def _make_db_schema() -> None:
+        engine = create_async_engine(
+            config.db.driver.async_uri,
+            echo=config.debug,
+            isolation_level="AUTOCOMMIT",
+        )
+        async with engine.connect() as conn:
+            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS authz"))
+        await engine.dispose()
+
+    asyncio.run(_make_db_schema())
 
 
 @auth.command("make_root")
