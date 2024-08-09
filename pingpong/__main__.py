@@ -34,7 +34,7 @@ def create_db_schema() -> None:
     async def _make_db_schema() -> None:
         engine = create_async_engine(
             config.db.driver.async_uri,
-            echo=config.debug,
+            echo=True,
             isolation_level="AUTOCOMMIT",
         )
         async with engine.connect() as conn:
