@@ -1,9 +1,9 @@
-name: "Production: Docker - Building PingPong Web Image"
+name: "Staging: Docker - Building PingPong Web Image"
 
 on:
   push:
     tags:
-      - "prod-web-*"
+      - "stage-web-*"
 
 jobs:
   build:
@@ -32,7 +32,7 @@ jobs:
       - name: Push docker image to repo
         run: |
           aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 654654251079.dkr.ecr.us-east-1.amazonaws.com
-          docker tag ${{ vars.PINGPONG_WEB_REGISTRY }}:${GITHUB_REF##*-} ${{ vars.PINGPONG_WEB_REGISTRY }}:prod-latest
+          docker tag ${{ vars.PINGPONG_WEB_REGISTRY }}:${GITHUB_REF##*-} ${{ vars.PINGPONG_WEB_REGISTRY }}:stage-latest
           docker push ${{ vars.PINGPONG_WEB_REGISTRY }}:${GITHUB_REF##*-}
           docker push ${{ vars.PINGPONG_WEB_REGISTRY }}:latest
 
