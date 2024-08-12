@@ -32,9 +32,9 @@ jobs:
       - name: Push docker image to repo
         run: |
           aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 654654251079.dkr.ecr.us-east-1.amazonaws.com
-          docker tag ${{ vars.PINGPONG_WEB_REGISTRY }}:${GITHUB_REF##*-} ${{ vars.PINGPONG_WEB_REGISTRY }}:stage-latest
-          docker push ${{ vars.PINGPONG_WEB_REGISTRY }}:${GITHUB_REF##*-}
-          docker push ${{ vars.PINGPONG_WEB_REGISTRY }}:latest
+          docker tag ${{ vars.PINGPONG_WEB_REGISTRY }}:stage-${GITHUB_REF##*-} ${{ vars.PINGPONG_WEB_REGISTRY }}:stage-latest
+          docker push ${{ vars.PINGPONG_WEB_REGISTRY }}:stage-${GITHUB_REF##*-}
+          docker push ${{ vars.PINGPONG_WEB_REGISTRY }}:stage-latest
 
       - name: Send notification
         env:
@@ -42,7 +42,7 @@ jobs:
           GIPHY_API_KEY: ${{ secrets.GIPHY_API_KEY }}
         run: |
           GIF=$(curl "https://api.giphy.com/v1/gifs/random?api_key=$GIPHY_API_KEY&tag=dog&rating=g" | python -c "import sys,json; print (json.load(sys.stdin)['data']['images']['downsized']['url'])")
-          MSG=":pingpong: Built PingPong Web Docker image ${GITHUB_REF##*-} :tada:"
+          MSG=":pingpong: PingPong Web Docker image stage-web-${GITHUB_REF##*-} Ready! :tada:"
 
           curl -X POST -H 'Content-Type: application/json' \
             --data "{\"text\": \"$MSG\", \"blocks\": [{\"type\":\"section\", \"text\": {\"type\": \"plain_text\", \"text\": \"$MSG\", \"emoji\": true}}, {\"type\":\"image\",\"image_url\":\"$GIF\", \"alt_text\":\"dog\", \"title\": {\"type\":\"plain_text\", \"text\": \"success dog\"}}]}" \
