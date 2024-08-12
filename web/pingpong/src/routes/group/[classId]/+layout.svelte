@@ -10,7 +10,7 @@
   $: isOnClassPage = $page.url.pathname === `/group/${data.class?.id}/assistant`;
 </script>
 
-<div class="relative pb-8 h-full w-full flex flex-col">
+<div class="relative pb-2 h-full w-full flex flex-col">
   <ThreadHeader
     current={data.class}
     classes={data.classes}

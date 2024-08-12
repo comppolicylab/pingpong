@@ -46,8 +46,8 @@ type thread
     define party: [user]
     define can_view: [class#member] or party or can_manage_threads from parent
     define can_participate: party
-    define can_delete: can_manage_threads from parent
-    define can_publish: (party and can_publish_threads from parent) or (can_manage_threads from parent and can_publish_threads from parent)
+    define can_delete: party or can_manage_threads from parent
+    define can_publish: (party and (can_publish_threads from parent or supervisor from parent)) or (can_manage_threads from parent and can_publish_threads from parent)
 
 type assistant
   relations
