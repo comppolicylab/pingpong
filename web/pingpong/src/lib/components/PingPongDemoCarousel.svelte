@@ -2,7 +2,7 @@
   import chat_screen from '$lib/assets/screens/chat_v2.webp';
   import edit_assistant_screen from '$lib/assets/screens/edit_assistant_v2.webp';
   import group_home from '$lib/assets/screens/group_home_v2.webp';
-  import home_screen from '$lib/assets/screens/home_v2.webp';
+  import home_screen from '$lib/assets/screens/home_v3.webp';
   import { onMount } from 'svelte';
   import { AngleLeftOutline, AngleRightOutline } from 'flowbite-svelte-icons';
   import { Button, Carousel, Thumbnails, Tooltip } from 'flowbite-svelte';

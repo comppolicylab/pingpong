@@ -21,11 +21,12 @@
   <div class="mx-7 mb-2">
     <P class="leading-6 mt-4"
       >We are seeking instructors at two- and four-year colleges, especially those teaching math,
-      economics, statistics and or computer science to participate in a large-scale study to assess
-      the benefits of generative AI on student learning. An honorarium will be provided to
-      participating instructors.</P
+      economics, statistics and or computer science to participate in a randomized large-scale study
+      to assess the benefits of generative AI on student learning. Initial access will be provided
+      to half of the participating instructors with access provided to all instructors in the
+      following semester. An honorarium will be provided to all participating instructors.</P
     >
-    <P class="mt-4">To participate, complete a short (6-question) survey:</P>
+    <P class="mt-4">To participate, complete a short (5-question) survey:</P>
   </div>
   <div
     class="justify-center items-center space-y-4 sm:flex sm:space-y-0 sm:space-x-4 rtl:space-x-reverse"
@@ -56,8 +57,8 @@
         <ol class="list-disc ml-7 font-light">
           <li class="my-2">Additional support in answering student questions.</li>
           <li class="my-2">
-            Access to a highly customizable, multilingual tool which provides analytics on students'
-            use.
+            Access to a highly customizable, multilingual tool that instructors can easily tailor to
+            their syllabus and assignments.
           </li>
           <li class="my-2">Financial honorarium for engagement.</li>
           <li class="my-2">The possibility of improved student learning outcomes.</li>
@@ -104,8 +105,8 @@
             Short & anonymous (15-minute) pre-study assessment exam for students.
           </li>
           <li class="my-2">
-            One semester access to an AI chatbot that is customized to serve as a tutor for students
-            completing a given course.
+            Full access to de-identified student interactions with the tool, including analytics on
+            student use.
           </li>
           <li class="my-2">
             Short & anonymous (15-minute) post-study assessment exam for students.
@@ -148,7 +149,7 @@
             href="https://harvard.az1.qualtrics.com/jfe/form/SV_3xRMxp1g44nnjka"
             rel="noopener noreferrer"
             class="underline"
-            target="_blank">this short (6-question) survey</a
+            target="_blank">this short (5-question) survey</a
           >.<br /><br />For further information, please contact
           <a
             href="mailto:pingpongedu@hks.harvard.edu"
