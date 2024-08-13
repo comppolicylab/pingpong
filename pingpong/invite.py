@@ -26,6 +26,7 @@ async def send_invite(
             "type": "invitation",
             "cta": f"Join {invite.class_name} on PingPong",
             "underline": "PingPong is a tool for using large language models in a group setting. It&#8217;s built on top of GPT-4, a large language model developed by OpenAI.",
+            "expires": "7 days",
             "link": link,
             "email": invite.email,
             "legal_text": "because a PingPong user invited you to join their Group",

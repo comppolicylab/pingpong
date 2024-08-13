@@ -352,6 +352,7 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
             "type": "login link",
             "cta": "Login to PingPong",
             "underline": "",
+            "expires": "24 hours",
             "link": magic_link,
             "email": email,
             "legal_text": "because you requested a login link from PingPong",
