@@ -5,7 +5,11 @@ from .time import convert_seconds
 
 
 async def send_invite(
-    sender: EmailSender, invite: CreateInvite, link: str, expires: int = 86400, silent: bool = False
+    sender: EmailSender,
+    invite: CreateInvite,
+    link: str,
+    expires: int = 86400,
+    silent: bool = False,
 ):
     """Send an email invitation for a user to join a class."""
     subject = f"You're invited to join {invite.class_name}!"
