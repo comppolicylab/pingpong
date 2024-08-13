@@ -1,9 +1,10 @@
-name: "Production: Docker - Building PingPong Server Image"
+name: "Docker - Building PingPong Server Image"
+run-name: Build Docker Server Image (${{ github.ref_name }})
 
 on:
   push:
     tags:
-      - "prod-srv-*"
+      - "srv-*"
 
 jobs:
   build:
@@ -32,18 +33,5 @@ jobs:
       - name: Push docker image to repo
         run: |
           aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 654654251079.dkr.ecr.us-east-1.amazonaws.com
-          docker tag ${{ vars.PINGPONG_SRV_REGISTRY }}:prod-${GITHUB_REF##*-} ${{ vars.PINGPONG_SRV_REGISTRY }}:prod-latest
+          docker tag ${{ vars.PINGPONG_SRV_REGISTRY }}:prod-${GITHUB_REF##*-}
           docker push ${{ vars.PINGPONG_SRV_REGISTRY }}:prod-${GITHUB_REF##*-}
-          docker push ${{ vars.PINGPONG_SRV_REGISTRY }}:prod-latest
-
-      - name: Send notification
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-          GIPHY_API_KEY: ${{ secrets.GIPHY_API_KEY }}
-        run: |
-          GIF=$(curl "https://api.giphy.com/v1/gifs/random?api_key=$GIPHY_API_KEY&tag=dog&rating=g" | python -c "import sys,json; print (json.load(sys.stdin)['data']['images']['downsized']['url'])")
-          MSG=":pingpong: PingPong Server Docker image prod-srv-${GITHUB_REF##*-} Ready :tada:"
-
-          curl -X POST -H 'Content-Type: application/json' \
-            --data "{\"text\": \"$MSG\", \"blocks\": [{\"type\":\"section\", \"text\": {\"type\": \"plain_text\", \"text\": \"$MSG\", \"emoji\": true}}, {\"type\":\"image\",\"image_url\":\"$GIF\", \"alt_text\":\"dog\", \"title\": {\"type\":\"plain_text\", \"text\": \"success dog\"}}]}" \
-            $SLACK_WEBHOOK
