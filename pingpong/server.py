@@ -1044,7 +1044,7 @@ async def list_class_models(
             "is_new": True,
             "highlight": False,
             "supports_vision": True,
-            "description": "Latest GPT-4o model snapshot. GPT-4o (Latest) does not point to this snapshot yet.",
+            "description": "Latest GPT-4o model snapshot. GPT-4o (Latest) points to gpt-4o-2024-05-13 and not this snapshot yet.",
         },
         "gpt-4o-2024-05-13": {
             "name": "gpt-4o-2024-05-13",
