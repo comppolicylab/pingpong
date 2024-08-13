@@ -82,7 +82,7 @@
     );
     supportsVision = supportVisionModels.includes(assistant.model);
   }
-  $: allowVisionUpload = !!data?.isSupervisor;
+  $: allowVisionUpload = true;
 
   // Handle file upload
   const handleUpload = (
