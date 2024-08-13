@@ -78,10 +78,10 @@ jobs:
               print(f'Created new tag: {prefix}-v{new_version}')
 
           changed_files = '${{ steps.changed-files.outputs.all_changed_files }}'
-          
+
           if ${{ steps.web-update.outputs.update }}:
               update_version('web')
-          
+
           if ${{ steps.server-update.outputs.update }}:
               update_version('srv')
           "
