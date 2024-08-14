@@ -98,13 +98,14 @@
   $: availableFiles = items.filter(
     (item) => !$value.includes(item.value) && !privateFileIds.includes(item.value)
   );
-  $: availableFileNames = availableFiles.map((item) => item.name as string);
+  $: availableFileNames = availableFiles
+    .sort((a, b) => (a.name as string).localeCompare(b.name as string))
+    .map((item) => item.name as string);
   $: availableFileIds = availableFiles.map((item) => item.value);
   $: selectedFiles = items.filter((item) => $value.includes(item.value));
-  $: selectedFileNames = selectedFiles.map((item) => [
-    item.name as string,
-    privateFileIds.includes(item.value)
-  ]);
+  $: selectedFileNames = selectedFiles
+    .sort((a, b) => (a.name as string).localeCompare(b.name as string))
+    .map((item) => [item.name as string, privateFileIds.includes(item.value)]);
   $: selectedFileIds = selectedFiles.map((item) => item.value);
   let selectedAvailable: number[] = [];
   let selectedSelected: number[] = [];
