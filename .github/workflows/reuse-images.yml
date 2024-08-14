@@ -1,0 +1,104 @@
+name: Docker - Building PingPong Image
+run-name: Build Docker Image (${{ github.ref_name }})
+
+on:
+  push:
+    tags:
+      - "app-*"
+
+jobs:
+  build-image:
+    name: Build Docker Image
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check if we built both srv and web images in the current commit
+        run: |
+          git fetch --tags
+          TAGS=$(git tag --contains ${{ github.sha }})
+          
+          # Initialize flags for srv and web tags
+          HAS_SRV=false
+          HAS_WEB=false
+
+          # Check if the tags contain both srv and web
+          if echo "$TAGS" | grep -qE 'srv-v[0-9]+'; then
+            HAS_SRV=true
+          fi
+          if echo "$TAGS" | grep -qE 'web-v[0-9]+'; then
+            HAS_WEB=true
+          fi
+          
+          if [ "$HAS_SRV" = false ] && [ "$HAS_WEB" = false ]; then
+            echo "Error: Neither srv nor web tags were found for the current commit." >&2
+            exit 1
+          fi
+          
+          # Determine if both tags are present
+          if [ "$HAS_SRV" = true ] && [ "$HAS_WEB" = true ]; then
+            HAS_BOTH=true
+          else
+            HAS_BOTH=false
+          fi
+
+          # Output the result to the environment
+          echo "HAS_SRV=$HAS_SRV" >> $GITHUB_ENV
+          echo "HAS_WEB=$HAS_WEB" >> $GITHUB_ENV
+          echo "HAS_BOTH=$HAS_BOTH" >> $GITHUB_ENV
+            
+      - name: Configure AWS credentials
+        if: ${{ !env.HAS_BOTH }}
+        uses: aws-actions/configure-aws-credentials@0e613a0980cbf65ed5b322eb7a1e075d28913a83
+        with:
+          aws-access-key-id: ${{ secrets.PINGPONG_AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.PINGPONG_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        if: ${{ !env.HAS_BOTH }}
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@cef2380b0d4c6813048ef6e1f7fd9ec1639bd3b5
+      
+      - name: Tag old image with new app tag
+        run: |
+          # Set the correct registry based on the service type
+          if [ "$HAS_WEB" == true ]; then
+            REGISTRY=${{ vars.PINGPONG_WEB_REGISTRY }}
+            REPOSITORY=$(echo ${{ vars.PINGPONG_WEB_REGISTRY }} | awk -F'/' '{print $2}')
+            SERVICE_TYPE=web
+          elif [ "$HAS_SRV" == true ]; then
+            REGISTRY=${{ vars.PINGPONG_SRV_REGISTRY }}
+            REPOSITORY=$(echo ${{ vars.PINGPONG_SRV_REGISTRY }} | awk -F'/' '{print $2}')
+            SERVICE_TYPE=srv
+          else
+            echo "Invalid service type"
+            exit 1
+          fi
+          
+          # Get the old image tag version
+          find_latest_tag() {
+            if [ -z "$1" ]; then
+                echo "Error: No service type provided."
+                return 1
+            fi
+
+            SERVICE_TYPE=$1  
+            PREV_TAG=$(git tag --sort=-v:refname -l "${SERVICE_TYPE}-v*" | head -n 1)
+  
+            if [ -z "$PREV_TAG" ]; then
+                echo "Error: No tags found for service type $SERVICE_TYPE."
+                return 1
+            fi
+
+            echo $PREV_TAG
+          }
+          
+          LATEST_TAG=$(find_latest_tag $SERVICE_TYPE)
+          LATEST_VERSION=${LATEST_TAG##*-}
+          
+          aws ecr get-login-password --region ${{ vars.AWS_REGION }} | docker login --username AWS --password-stdin $REGISTRY
+          aws ecr batch-get-image --repository-name $REPOSITORY --image-ids imageTag=$LATEST_VERSION --query 'images[].imageManifest' --output text > imageManifest.json
+          aws ecr put-image --repository-name $REPOSITORY --image-tag $GITHUB_REF --image-manifest file://imageManifest.json

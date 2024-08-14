@@ -74,7 +74,10 @@ jobs:
               if server_update:
                   new_srv_version = increment_version('srv')
                   tags.append(f'srv-v{new_srv_version}')
-
+              
+              new_app_version = increment_version('app')
+              tags.append(f'app-v{new_app_version}')
+              
               for tag in tags:
                   subprocess.run(['git', 'tag', tag], check=True)
 

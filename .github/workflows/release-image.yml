@@ -1,0 +1,80 @@
+name: Tag Image on AWS
+run-name: "${{ github.event.release.prerelease && 'Staging' || 'Production' }}: Tag ${{ github.event.release.tag_name }} Image on AWS"
+on:
+  release:
+    types: [published, released]
+jobs:
+  tag-image:
+    name: Tag Image on AWS
+    if: 
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if we built both srv and web images in the current commit
+        run: |
+          git fetch --tags
+          TAGS=$(git tag --contains ${{ github.sha }})
+          
+          # Initialize flags for srv and web tags
+          HAS_SRV=false
+          HAS_WEB=false
+
+          # Check if the tags contain both srv and web
+          if echo "$TAGS" | grep -qE 'srv-v[0-9]+'; then
+            HAS_SRV=true
+          fi
+          if echo "$TAGS" | grep -qE 'web-v[0-9]+'; then
+            HAS_WEB=true
+          fi
+          
+          if [ "$HAS_SRV" = false ] && [ "$HAS_WEB" = false ]; then
+            echo "Error: Neither srv nor web tags were found for the current commit." >&2
+            exit 1
+          fi
+          
+          # Determine if both tags are present
+          if [ "$HAS_SRV" = true ] && [ "$HAS_WEB" = true ]; then
+            HAS_BOTH=true
+          else
+            HAS_BOTH=false
+          fi
+
+          # Output the result to the environment
+          echo "HAS_SRV=$HAS_SRV" >> $GITHUB_ENV
+          echo "HAS_WEB=$HAS_WEB" >> $GITHUB_ENV
+          echo "HAS_BOTH=$HAS_BOTH" >> $GITHUB_ENV
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@0e613a0980cbf65ed5b322eb7a1e075d28913a83
+        with:
+          aws-access-key-id: ${{ secrets.PINGPONG_AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.PINGPONG_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@cef2380b0d4c6813048ef6e1f7fd9ec1639bd3b5
+      
+      - name: Tag Server Image
+        env:
+          ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
+        if: ${{ env.HAS_SRV }}
+        run: |          
+          # Get the version number from the release tag
+          VERSION=${GITHUB_REF##*-}
+          
+          aws ecr get-login-password --region ${{ vars.AWS_REGION }} | docker login --username AWS --password-stdin ${{ vars.PINGPONG_SRV_REGISTRY }}
+          aws ecr batch-get-image --repository-name ${{ vars.PINGPONG_SRV_REGISTRY }} --image-ids imageTag=$GITHUB_REF --query 'images[].imageManifest' --output text > imageManifest.json
+          aws ecr put-image --repository-name ${{ vars.PINGPONG_SRV_REGISTRY }} --image-tag ${{env.ENVIRONMENT}} --image-manifest file://imageManifest.json
+      
+      - name: Tag Web Image
+        env:
+          ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
+        if: ${{ env.HAS_WEB }}
+        run: |          
+          # Get the version number from the release tag
+          VERSION=${GITHUB_REF##*-}
+          
+          aws ecr get-login-password --region ${{ vars.AWS_REGION }} | docker login --username AWS --password-stdin ${{ vars.PINGPONG_WEB_REGISTRY }}
+          aws ecr batch-get-image --repository-name ${{ vars.PINGPONG_WEB_REGISTRY }} --image-ids imageTag=$GITHUB_REF --query 'images[].imageManifest' --output text > imageManifest.json
+          aws ecr put-image --repository-name ${{ vars.PINGPONG_WEB_REGISTRY }} --image-tag ${{env.ENVIRONMENT}} --image-manifest file://imageManifest.json
