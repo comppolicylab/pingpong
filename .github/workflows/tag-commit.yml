@@ -1,6 +1,5 @@
-name: Tag Commit
-
-concurrency: production
+name: Adding Tags to Commit
+concurrency: commit
 
 on:
   push:
@@ -34,6 +33,7 @@ jobs:
       - name: Tag commit with new versions
         env:
           CHANGED_FILES_STRING: ${{ steps.changed-files.outputs.all_changed_files }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -e
           python << EOF
@@ -68,22 +68,36 @@ jobs:
               server_update = any('pingpong/' in file or file in ['conftest.py', 'poetry.lock', 'pyproject.toml'] for file in changed_files)
 
               tags = []
+              service_tags = []
               if web_update:
                   new_web_version = increment_version('web')
                   tags.append(f'web-v{new_web_version}')
+                  service_tags.append(f'web-v{new_web_version}')
               if server_update:
                   new_srv_version = increment_version('srv')
                   tags.append(f'srv-v{new_srv_version}')
-              
+                  service_tags.append(f'srv-v{new_srv_version}')
+
               new_app_version = increment_version('app')
               tags.append(f'app-v{new_app_version}')
-              
+
               for tag in tags:
-                  subprocess.run(['git', 'tag', tag], check=True)
+                subprocess.run(['git', 'tag', tag], check=True)
 
               if tags:
-                  subprocess.run(['git', 'push', 'origin', '--tags'], check=True)
-                  print(f"Successfully pushed new tags: {', '.join(tags)}")
+                subprocess.run(['git', 'push', 'origin', '--tags'], check=True)
+                for tag in service_tags:
+                  # see https://github.com/orgs/community/discussions/27028
+                  # and https://github.blog/changelog/2022-09-08-github-actions-use-github_token-with-workflow_dispatch-and-repository_dispatch/
+                  subprocess.run([
+                    'gh', 'api', 'repos/{owner}/{repo}/actions/workflows/docker-build.yml/dispatches',
+                    '-f', f'ref={tag}',
+                  ], check=True)
+                subprocess.run([
+                  'gh', 'api', 'repos/{owner}/{repo}/actions/workflows/reuse-images.yml/dispatches',
+                  '-f', f'ref=app-v{new_app_version}',
+                ], check=True)
+                print(f"Successfully pushed new tags: {', '.join(tags)}")
               else:
                   print("No new tags to push.")
 

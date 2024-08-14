@@ -1,11 +1,6 @@
 name: Docker - Building PingPong Image
-run-name: Build Docker Image (${{ github.ref_name }})
-
-on:
-  push:
-    tags:
-      - "web-*"
-      - "srv-*"
+run-name: Build Docker Image for ${{ github.ref_name }}
+on: workflow_dispatch
 
 jobs:
   build-image:
@@ -16,7 +11,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract app tag from commit tags
+      - name: Extract app version tag from commit
         run: |
           git fetch --tags
           TAGS=$(git tag --contains ${{ github.sha }})
@@ -26,7 +21,7 @@ jobs:
             exit 1
           fi
           echo "APP_TAG=$APP_TAG" >> $GITHUB_ENV
-      
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@0e613a0980cbf65ed5b322eb7a1e075d28913a83
         with:
@@ -37,12 +32,12 @@ jobs:
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@cef2380b0d4c6813048ef6e1f7fd9ec1639bd3b5
-      
+
       - name: Extract service type
         run: |
           # Extract the service type (web or srv) from the release tag
           SERVICE_TYPE=$(echo ${{ github.ref_name }} | cut -d'-' -f1)
-            
+
           # Set the correct registry based on the service type
           if [ "$SERVICE_TYPE" == "web" ]; then
             echo "REGISTRY=${{ vars.PINGPONG_WEB_REGISTRY }}" >> $GITHUB_ENV
@@ -54,11 +49,11 @@ jobs:
           fi
           echo "SERVICE_TYPE=$SERVICE_TYPE" >> $GITHUB_ENV
 
-      - name: Build web docker image
+      - name: Build service docker image
         run: |
           docker compose -f docker-compose.yml -f docker-compose.prod.yml build $SERVICE_TYPE
 
-      - name: Push web docker image to repo
+      - name: Push service docker image to repo
         run: |
           aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 654654251079.dkr.ecr.us-east-1.amazonaws.com
           docker tag $REGISTRY:${GITHUB_REF##*-} $REGISTRY:$APP_TAG
