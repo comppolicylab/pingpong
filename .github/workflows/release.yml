@@ -106,7 +106,7 @@ jobs:
           GIF=$(curl "https://api.giphy.com/v1/gifs/random?api_key=$GIPHY_API_KEY&tag=dog&rating=g" | python -c "import sys,json; print (json.load(sys.stdin)['data']['images']['downsized']['url'])")
           TAGGED_MSG=":pingpong: *Retagged* existing *Server Image (${{ env.SRV_VERSION }})* with *${{ env.ENVIRONMENT }}* tag :tada:"
           BUILT_MSG=":pingpong: *Built* and pushed *Server Image (${{ env.SRV_VERSION }})* with *${{ env.ENVIRONMENT }}* tag :tada:"
-          if [[ ${{ env.SRV_IMAGE_EXISTS }} == 'false' ]]; then
+          if [[ ${{ env.SRV_IMAGE_STATUS }} == 'DOES_NOT_EXIST' ]]; then
             MSG=$BUILT_MSG
           else
             MSG=$TAGGED_MSG
