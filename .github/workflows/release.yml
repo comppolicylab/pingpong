@@ -65,7 +65,7 @@ jobs:
           ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
         if: ${{ env.SRV_IMAGE_EXISTS == 'true' }}
         run: |
-          MANIFEST=$(aws ecr batch-get-image --repository-name ${{ vars.PINGPONG_SRV_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-ids imageTag=${{ env.SRV_VERSION }}  --query 'images[].imageManifest')
+          MANIFEST=$(aws ecr batch-get-image --repository-name ${{ vars.PINGPONG_SRV_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-ids imageTag=${{ env.SRV_VERSION }} --output text --query 'images[].imageManifest')
           aws ecr put-image --repository-name ${{ vars.PINGPONG_SRV_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-tag ${{env.ENVIRONMENT}} --image-manifest "$MANIFEST"
           echo "Tagged existing Server Image (${{ env.SRV_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
 
@@ -125,8 +125,8 @@ jobs:
           ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
         if: ${{ env.WEB_IMAGE_EXISTS  == 'true' }}
         run: |
-          MANIFEST=$(aws ecr batch-get-image --repository-name ${{ vars.PINGPONG_WEB_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-ids imageTag=${{ env.WEB_VERSION }}  --query 'images[].imageManifest')
-          aws ecr put-image --repository-name ${{ vars.PINGPONG_WEB_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-tag ${{env.ENVIRONMENT}} --image-manifest $MANIFEST
+          MANIFEST=$(aws ecr batch-get-image --repository-name ${{ vars.PINGPONG_WEB_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-ids imageTag=${{ env.WEB_VERSION }} --output text --query 'images[].imageManifest')
+          aws ecr put-image --repository-name ${{ vars.PINGPONG_WEB_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-tag ${{env.ENVIRONMENT}} --image-manifest "$MANIFEST"
           echo "Tagged existing Web Image (${{ env.WEB_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
 
       - name: Build web image for release
