@@ -54,7 +54,7 @@ jobs:
 
           # Check if the image with SRV_VERSION tag exists
           if aws ecr describe-images --repository-name ${{ vars.PINGPONG_SRV_REPO }} --registry-id $REGISTRY_ID --image-ids imageTag=${{ env.SRV_VERSION }} >/dev/null 2>&1; then
-            if aws ecr describe-images --repository-name ${{ vars.PINGPONG_SRV_REPO }} --registry-id $REGISTRY_ID --image-ids imageTag=${{ env.ENVIRONMENT }} >/dev/null 2>&1; then
+            if grep -q ${{ env.ENVIRONMENT }} <<< $(aws ecr describe-images --repository-name ${{ vars.PINGPONG_SRV_REPO }} --registry-id $REGISTRY_ID --image-ids imageTag=${{ env.ENVIRONMENT }} >/dev/null 2>&1); then
               echo "SRV_IMAGE_STATUS=EXISTS_WITH_ENV_TAG" >> $GITHUB_ENV
               echo "Server Image with tag ${{ env.SRV_VERSION }} exists and has the ${{ env.ENVIRONMENT }} tag in the ECR repository."
             else
@@ -122,16 +122,16 @@ jobs:
         run: |
           # Check if the image with WEB_VERSION tag exists
           if aws ecr describe-images --repository-name ${{ vars.PINGPONG_WEB_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-ids imageTag=${{ env.WEB_VERSION }} >/dev/null 2>&1; then
-            if aws ecr describe-images --repository-name ${{ vars.PINGPONG_WEB_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-ids imageTag=${{ env.ENVIRONMENT }} >/dev/null 2>&1; then
+            if grep -q ${{ env.ENVIRONMENT }} <<< $(aws ecr describe-images --repository-name ${{ vars.PINGPONG_WEB_REPO }} --registry-id $REGISTRY_ID --image-ids imageTag=${{ env.ENVIRONMENT }} >/dev/null 2>&1); then
               echo "WEB_IMAGE_STATUS=EXISTS_WITH_ENV_TAG" >> $GITHUB_ENV
-              echo "Web Image with tag ${{ env.SRV_VERSION }} exists and has the ${{ env.ENVIRONMENT }} tag in the ECR repository."
+              echo "Web Image with tag ${{ env.WEB_VERSION }} exists and has the ${{ env.ENVIRONMENT }} tag in the ECR repository."
             else
               echo "WEB_IMAGE_STATUS=EXISTS_WITHOUT_ENV_TAG" >> $GITHUB_ENV
-              echo "Web Image with tag ${{ env.SRV_VERSION }} exists but does not have the ${{ env.ENVIRONMENT }} tag in the ECR repository."
+              echo "Web Image with tag ${{ env.WEB_VERSION }} exists but does not have the ${{ env.ENVIRONMENT }} tag in the ECR repository."
             fi
           else
             echo "WEB_IMAGE_STATUS=DOES_NOT_EXIST" >> $GITHUB_ENV
-            echo "Web Image with tag ${{ env.SRV_VERSION }} does not exist in the ECR repository."
+            echo "Web Image with tag ${{ env.WEB_VERSION }} does not exist in the ECR repository."
           fi
 
         shell: bash
