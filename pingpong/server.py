@@ -28,6 +28,7 @@ import pingpong.models as models
 import pingpong.schemas as schemas
 from .auth import authn_method_for_email
 from .template import email_template as message_template
+from .time import convert_seconds
 from .saml import get_saml2_client, get_saml2_settings, get_saml2_attrs
 
 from .ai import (
@@ -352,6 +353,7 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
             "type": "login link",
             "cta": "Login to PingPong",
             "underline": "",
+            "expires": convert_seconds(login_config.expiry),
             "link": magic_link,
             "email": email,
             "legal_text": "because you requested a login link from PingPong",

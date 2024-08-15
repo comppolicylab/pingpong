@@ -1,10 +1,15 @@
 from .email import EmailSender
 from .schemas import CreateInvite
 from .template import email_template as message_template
+from .time import convert_seconds
 
 
 async def send_invite(
-    sender: EmailSender, invite: CreateInvite, link: str, silent: bool = False
+    sender: EmailSender,
+    invite: CreateInvite,
+    link: str,
+    expires: int = 86400,
+    silent: bool = False,
 ):
     """Send an email invitation for a user to join a class."""
     subject = f"You're invited to join {invite.class_name}!"
@@ -26,6 +31,7 @@ async def send_invite(
             "type": "invitation",
             "cta": f"Join {invite.class_name} on PingPong",
             "underline": "PingPong is a tool for using large language models in a group setting. It&#8217;s built on top of GPT-4, a large language model developed by OpenAI.",
+            "expires": convert_seconds(expires),
             "link": link,
             "email": invite.email,
             "legal_text": "because a PingPong user invited you to join their Group",
