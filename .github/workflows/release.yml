@@ -49,7 +49,7 @@ jobs:
           aws ecr get-login-password --region ${{ vars.AWS_REGION }} | docker login --username AWS --password-stdin ${{ vars.PINGPONG_REGISTRY_ENDPOINT }}
 
           # Check if the image with SRV_VERSION tag exists
-          if aws ecr describe-images --repository-name ${{ vars.PINGPONG_SRV_REPO }} --image-ids imageTag=${{ env.SRV_VERSION }} >/dev/null 2>&1; then
+          if aws ecr describe-images --repository-name ${{ vars.PINGPONG_SRV_REPO }} --image-ids imageTag=${{ env.SRV_VERSION }}; then
             echo "SRV_IMAGE_EXISTS=true" >> $GITHUB_ENV
             echo "Server Image with tag ${{ env.SRV_VERSION }} exists in the ECR repository."
           else
@@ -95,8 +95,8 @@ jobs:
           ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
         run: |
           GIF=$(curl "https://api.giphy.com/v1/gifs/random?api_key=$GIPHY_API_KEY&tag=dog&rating=g" | python -c "import sys,json; print (json.load(sys.stdin)['data']['images']['downsized']['url'])")
-          TAGGED_MSG="Tagged existing Server Image (${{ env.SRV_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
-          BUILT_MSG="Built and pushed Server Image (${{ env.SRV_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
+          TAGGED_MSG=":pingpong: **Retagged** existing **Web Image (${{ env.WEB_VERSION }})** with **${{ env.ENVIRONMENT }}** tag :tada:"
+          BUILT_MSG=":pingpong: **Built** and pushed **Web Image (${{ env.WEB_VERSION }})** with **${{ env.ENVIRONMENT }}** tag :tada:"
           if [[ ${{ env.SRV_IMAGE_EXISTS }} == 'false' ]]; then
             MSG=$BUILT_MSG
           else
@@ -112,7 +112,7 @@ jobs:
           aws ecr get-login-password --region ${{ vars.AWS_REGION }} | docker login --username AWS --password-stdin ${{ vars.PINGPONG_REGISTRY_ENDPOINT }}
 
           # Check if the image with WEB_VERSION tag exists
-          if aws ecr describe-images --repository-name ${{ vars.PINGPONG_WEB_REPO }} --image-ids imageTag=${{ env.WEB_VERSION }} >/dev/null 2>&1; then
+          if aws ecr describe-images --repository-name ${{ vars.PINGPONG_WEB_REPO }} --image-ids imageTag=${{ env.WEB_VERSION }}; then
             echo "WEB_IMAGE_EXISTS=true" >> $GITHUB_ENV
             echo "Web Image with tag ${{ env.WEB_VERSION }} exists in the ECR repository."
           else
@@ -158,8 +158,8 @@ jobs:
           ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
         run: |
           GIF=$(curl "https://api.giphy.com/v1/gifs/random?api_key=$GIPHY_API_KEY&tag=cat&rating=g" | python -c "import sys,json; print (json.load(sys.stdin)['data']['images']['downsized']['url'])")
-          TAGGED_MSG="Tagged existing Web Image (${{ env.WEB_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
-          BUILT_MSG="Built and pushed Web Image (${{ env.WEB_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
+          TAGGED_MSG=":pingpong: **Retagged** existing **Web Image (${{ env.WEB_VERSION }})** with **${{ env.ENVIRONMENT }}** tag :tada:"
+          BUILT_MSG=":pingpong: **Built** and pushed **Web Image (${{ env.WEB_VERSION }})** with **${{ env.ENVIRONMENT }}** tag :tada:"
           if [[ ${{ env.WEB_IMAGE_EXISTS }} == 'false' ]]; then
             MSG=$BUILT_MSG
           else
@@ -167,5 +167,5 @@ jobs:
           fi
 
           curl -X POST -H 'Content-Type: application/json' \
-            --data "{\"text\": \"$MSG\", \"blocks\": [{\"type\":\"section\", \"text\": {\"type\": \"plain_text\", \"text\": \"$MSG\", \"emoji\": true}}, {\"type\":\"image\",\"image_url\":\"$GIF\", \"alt_text\":\"dog\", \"title\": {\"type\":\"plain_text\", \"text\": \"success dog\"}}]}" \
+            --data "{\"text\": \"$MSG\", \"blocks\": [{\"type\":\"section\", \"text\": {\"type\": \"plain_text\", \"text\": \"$MSG\", \"emoji\": true}}, {\"type\":\"image\",\"image_url\":\"$GIF\", \"alt_text\":\"dog\", \"title\": {\"type\":\"plain_text\", \"text\": \"success cat\"}}]}" \
             $SLACK_WEBHOOK
