@@ -61,7 +61,7 @@ jobs:
       - name: Tag server image for release
         env:
           ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
-        if: ${{ env.SRV_IMAGE_EXISTS }}
+        if: ${{ env.SRV_IMAGE_EXISTS == 'true' }}
         run: |
           aws ecr get-login-password --region ${{ vars.AWS_REGION }} | docker login --username AWS --password-stdin ${{ vars.PINGPONG_REGISTRY_ENDPOINT }}
           aws ecr batch-get-image --repository-name ${{ vars.PINGPONG_SRV_REPO }} --image-ids imageTag=${{ env.SRV_VERSION }}  --query 'images[].imageManifest' --output text > imageManifest.json
@@ -123,7 +123,7 @@ jobs:
       - name: Tag web image for release
         env:
           ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
-        if: ${{ env.WEB_IMAGE_EXISTS }}
+        if: ${{ env.WEB_IMAGE_EXISTS  == 'true' }}
         run: |
           aws ecr get-login-password --region ${{ vars.AWS_REGION }} | docker login --username AWS --password-stdin ${{ vars.PINGPONG_REGISTRY_ENDPOINT }}
           aws ecr batch-get-image --repository-name ${{ vars.PINGPONG_WEB_REPO }} --image-ids imageTag=${{ env.WEB_VERSION }}  --query 'images[].imageManifest' --output text > imageManifest.json
