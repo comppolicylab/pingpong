@@ -11,12 +11,8 @@ jobs:
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout release code at tag commit
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.release.target_commitish }}
-          token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Parse version tag
         run: |

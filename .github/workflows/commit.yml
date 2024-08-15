@@ -31,7 +31,7 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Tag commit with new versions
+      - name: Add versioning tag to commit
         env:
           CHANGED_FILES_STRING: ${{ steps.changed-files.outputs.all_changed_files }}
           GH_TOKEN: ${{ github.token }}
