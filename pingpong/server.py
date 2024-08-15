@@ -1037,6 +1037,15 @@ async def list_class_models(
             "supports_vision": False,
             "description": "The latest GPT-3.5 Turbo model. Choose the more capable GPT-4o Mini model instead.",
         },
+        "chatgpt-4o-latest": {
+            "name": "chatgpt-4o-latest",
+            "sort_order": 8,
+            "is_latest": False,
+            "is_new": True,
+            "highlight": False,
+            "supports_vision": True,
+            "description": "Dynamic model continuously updated to the current version of GPT-4o in ChatGPT. Intended for research and evaluation. Not recommended for critical projects or experiences, as it's not optimized for API usage (eg. function calling, instruction following).",
+        },
         "gpt-4o-2024-08-06": {
             "name": "gpt-4o-2024-08-06",
             "sort_order": 6,
@@ -1066,7 +1075,7 @@ async def list_class_models(
         },
         "gpt-4-turbo-2024-04-09": {
             "name": "gpt-4-turbo-2024-04-09",
-            "sort_order": 8,
+            "sort_order": 9,
             "is_latest": False,
             "is_new": False,
             "highlight": False,
@@ -1075,7 +1084,7 @@ async def list_class_models(
         },
         "gpt-4-0125-preview": {
             "name": "gpt-4-0125-preview",
-            "sort_order": 9,
+            "sort_order": 10,
             "is_latest": False,
             "is_new": False,
             "highlight": False,
@@ -1084,7 +1093,7 @@ async def list_class_models(
         },
         "gpt-4-1106-preview": {
             "name": "gpt-4-1106-preview",
-            "sort_order": 10,
+            "sort_order": 11,
             "is_latest": False,
             "is_new": False,
             "highlight": False,
@@ -1093,7 +1102,7 @@ async def list_class_models(
         },
         "gpt-3.5-turbo-0125": {
             "name": "gpt-3.5-turbo-0125",
-            "sort_order": 11,
+            "sort_order": 12,
             "is_latest": False,
             "is_new": False,
             "highlight": False,
@@ -1102,7 +1111,7 @@ async def list_class_models(
         },
         "gpt-3.5-turbo-1106": {
             "name": "gpt-3.5-turbo-1106",
-            "sort_order": 12,
+            "sort_order": 13,
             "is_latest": False,
             "is_new": False,
             "highlight": False,
