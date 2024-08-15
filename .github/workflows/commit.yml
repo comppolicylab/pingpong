@@ -1,0 +1,125 @@
+name: Add versioning tag to commit
+concurrency: commit
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - web/**
+      - pingpong/**
+      - conftest.py
+      - poetry.lock
+      - pyproject.toml
+
+jobs:
+  tag-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 11 # Fetch the last 10 commits and the current one
+          fetch-tags: true
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v44
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Tag commit with new versions
+        env:
+          CHANGED_FILES_STRING: ${{ steps.changed-files.outputs.all_changed_files }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          python << EOF
+          set -e
+          python << EOF
+          import os
+          import re
+          import subprocess
+          import sys
+          from datetime import datetime
+
+          def get_last_tag(n=1):
+              if n > 10:
+                  raise ValueError('No versioning tags found on the last 10 commits')
+              try:
+                  # Get all tags pointing to the HEAD~n commit
+                  tags = subprocess.check_output(['git', 'tag', '--points-at', f'HEAD~{n}'], stderr=subprocess.DEVNULL).decode().strip().split('\n')
+                  
+                  # Filter tags that match our versioning format
+                  pattern = r'\d{4}\.\d{2}\.\d{2}\.\d+_srv-\d+\((?:b|r)\)_web-\d+\((?:b|r)\)'
+                  matching_tags = [tag for tag in tags if re.match(pattern, tag)]
+                  if not matching_tags:
+                      print(f'No versioning tags found on commit HEAD~{n}')
+                      return get_last_tag(n + 1)
+                  
+                  print(f'Found versioning tags on commit HEAD~{n}: {matching_tags}')
+                  # If multiple matching tags, return the one with the highest build number
+                  return max(matching_tags, key=lambda t: int(t.split('.')[3].split('_')[0]))
+              except subprocess.CalledProcessError as e:
+                  raise ValueError("Failed to retrieve versioning tags from the previous commits", e)
+
+          def parse_tag(tag):
+              print(f'Parsing tag: {tag}')
+              pattern = r'(\d{4}\.\d{2}\.\d{2})\.(\d+)_srv-(\d+)\((\w+)\)_web-(\d+)\((\w+)\)'
+              match = re.match(pattern, tag)
+              if not match:
+                  raise ValueError(f"Invalid versioning tag format: {tag}")
+              try:
+                  return {
+                    'date': match.group(1),
+                    'build': int(match.group(2)),
+                    'srv': int(match.group(3)),
+                    'srv_status': match.group(4),
+                    'web': int(match.group(5)),
+                    'web_status': match.group(6)
+                }
+              except Exception as e:
+                  raise ValueError(f"Failed to parse versioning tag: {tag}", e)
+
+          def create_new_tag(last_tag, web_update, server_update):
+              today = datetime.now().strftime('%Y.%m.%d')
+              if last_tag:
+                  last_tag_info = parse_tag(last_tag)
+                  new_build = last_tag_info['build'] + 1
+                  new_srv = last_tag_info['srv'] + (1 if server_update else 0)
+                  new_web = last_tag_info['web'] + (1 if web_update else 0)
+              else:
+                  new_build = 1
+                  new_srv = 1
+                  new_web = 1
+
+              srv_status = 'b' if server_update else 'r'
+              web_status = 'b' if web_update else 'r'
+
+              return f"{today}.{new_build:04d}_srv-{new_srv}({srv_status})_web-{new_web}({web_status})"
+
+          try:
+              changed_files = os.environ['CHANGED_FILES_STRING'].split(" ")
+              web_update = any('web/' in file for file in changed_files)
+              server_update = any('pingpong/' in file or file in ['conftest.py', 'poetry.lock', 'pyproject.toml'] for file in changed_files)
+
+              last_tag = get_last_tag()
+              new_tag = create_new_tag(last_tag, web_update, server_update)
+
+              subprocess.run(['git', 'tag', new_tag], check=True)
+              subprocess.run(['git', 'push', 'origin', new_tag], check=True)
+
+              print(f"Successfully pushed new versioning tag: {new_tag}")
+
+              subprocess.run([
+                'gh', 'api', 'repos/{owner}/{repo}/actions/workflows/docker-build.yml/dispatches',
+                '-f', f'ref={new_tag}',
+              ], check=True)
+          except Exception as e:
+              print(f"Error: {str(e)}", file=sys.stderr)
+              sys.exit(1)
+          EOF
+        shell: bash
