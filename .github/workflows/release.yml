@@ -54,8 +54,12 @@ jobs:
 
           IMAGE_INFO=$(aws ecr describe-images --repository-name ${{ vars.PINGPONG_SRV_REPO }} --registry-id $REGISTRY_ID --image-ids imageTag=${{ env.SRV_VERSION }} 2>/dev/null)
           if [ $? -ne 0 ]; then
+            # There was an error checking the image
+            echo "Error checking the Web Image with tag ${{ env.SRV_VERSION }} in the ECR repository."
+            exit 1
+          elif [ -z "$IMAGE_INFO" ]; then
             # The image doesn't exist
-            echo "SRV_IMAGE_STATUS=DOES_NOT_EXIST"
+            echo "WEB_IMAGE_STATUS=DOES_NOT_EXIST" >> $GITHUB_ENV
             echo "Server Image with tag ${{ env.SRV_VERSION }} does not exist in the ECR repository."
           else
             # Image exists, now check if it has the ENVIRONMENT tag
@@ -124,8 +128,12 @@ jobs:
         run: |
           IMAGE_INFO=$(aws ecr describe-images --repository-name ${{ vars.PINGPONG_WEB_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-ids imageTag=${{ env.WEB_VERSION }} 2>/dev/null)
           if [ $? -ne 0 ]; then
+            # There was an error checking the image
+            echo "Error checking the Web Image with tag ${{ env.WEB_VERSION }} in the ECR repository."
+            exit 1
+          elif [ -z "$IMAGE_INFO" ]; then
             # The image doesn't exist
-            echo "WEB_IMAGE_STATUS=DOES_NOT_EXIST"
+            echo "WEB_IMAGE_STATUS=DOES_NOT_EXIST" >> $GITHUB_ENV
             echo "Server Image with tag ${{ env.WEB_VERSION }} does not exist in the ECR repository."
           else
             # Image exists, now check if it has the ENVIRONMENT tag
