@@ -98,7 +98,7 @@ jobs:
           try:
               changed_files = os.environ['CHANGED_FILES_STRING'].split(" ")
               web_update = any('web/' in file for file in changed_files)
-              server_update = any('pingpong/' in file or 'saml/' in file or 'alembic/' in file or file in ['poetry.lock', 'pyproject.toml'] for file in changed_files)
+              server_update = any(file.startswith(('pingpong/', 'saml/', 'alembic/')) or file in ['poetry.lock', 'pyproject.toml'] for file in changed_files)
 
               last_tag = get_last_tag()
               new_tag, new_srv, new_web = create_new_tag(last_tag, web_update, server_update)
@@ -108,10 +108,6 @@ jobs:
 
               print(f"Successfully pushed new versioning tag: {new_tag}")
 
-              subprocess.run([
-                'gh', 'api', 'repos/{owner}/{repo}/actions/workflows/docker-build.yml/dispatches',
-                '-f', f'ref={new_tag}',
-              ], check=True)
           except Exception as e:
               print(f"Error: {str(e)}", file=sys.stderr)
               sys.exit(1)
