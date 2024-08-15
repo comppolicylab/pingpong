@@ -1,7 +1,7 @@
 services:
 
   web:
-    image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-web:v0.7.1
+    image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-web:${WEB_VERSION}
     build:
       args:
         sentry_dsn: https://54d1c8a998bf4cb271881a47e10f8070@o702726.ingest.sentry.io/4506613819506688
@@ -9,7 +9,7 @@ services:
         origin: https://pingpong.hks.harvard.edu
 
   srv:
-    image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-srv:v0.4.9
+    image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-srv:${SRV_VERSION}
 
 
 secrets:

@@ -71,6 +71,7 @@ jobs:
       - name: Build server image for release
         env:
           ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
+          SRV_VERSION: ${{ env.SRV_VERSION }}
         if: ${{ env.SRV_IMAGE_EXISTS == 'false' }}
         run: |
           echo "Building Server Image with tag ${{ env.SRV_VERSION }}"
@@ -133,6 +134,7 @@ jobs:
       - name: Build web image for release
         env:
           ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
+          WEB_VERSION: ${{ env.WEB_VERSION }}
         if: ${{ env.WEB_IMAGE_EXISTS == 'false' }}
         run: |
           echo "Building Web Image with tag ${{ env.WEB_VERSION }}"
