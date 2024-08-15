@@ -43,7 +43,6 @@ jobs:
           import re
           import subprocess
           import sys
-          from datetime import datetime
 
           def get_last_tag(n=1):
               if n > 10:
