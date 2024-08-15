@@ -47,7 +47,8 @@ jobs:
       - name: Check if Server image exists
         run: |
           REGISTRY_ID="${{ vars.PINGPONG_REGISTRY_ENDPOINT }}"
-          echo "REGISTRY_ID=${REGISTRY_ID%%.*}" >> $GITHUB_ENV
+          REGISTRY_ID=${REGISTRY_ID%%.*}
+          echo "REGISTRY_ID=$REGISTRY_ID" >> $GITHUB_ENV
 
           # Check if the image with SRV_VERSION tag exists
           if aws ecr describe-images --repository-name ${{ vars.PINGPONG_SRV_REPO }} --registry-id $REGISTRY_ID --image-ids imageTag=${{ env.SRV_VERSION }}; then
