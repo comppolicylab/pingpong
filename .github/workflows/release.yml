@@ -43,6 +43,8 @@ jobs:
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@cef2380b0d4c6813048ef6e1f7fd9ec1639bd3b5
+        with:
+          mask-password: 'false'
 
       - name: Check if Server image exists
         run: |
