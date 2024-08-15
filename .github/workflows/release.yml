@@ -46,8 +46,11 @@ jobs:
 
       - name: Check if Server image exists
         run: |
+          REGISTRY_ID="${{ vars.PINGPONG_REGISTRY_ENDPOINT }}"
+          echo "REGISTRY_ID=${REGISTRY_ID%%.*}" >> $GITHUB_ENV
+
           # Check if the image with SRV_VERSION tag exists
-          if aws ecr describe-images --repository-name ${{ vars.PINGPONG_SRV_REPO }} --registry-id 654654251079 --image-ids imageTag=${{ env.SRV_VERSION }}; then
+          if aws ecr describe-images --repository-name ${{ vars.PINGPONG_SRV_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-ids imageTag=${{ env.SRV_VERSION }}; then
             echo "SRV_IMAGE_EXISTS=true" >> $GITHUB_ENV
             echo "Server Image with tag ${{ env.SRV_VERSION }} exists in the ECR repository."
           else
@@ -61,8 +64,8 @@ jobs:
           ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
         if: ${{ env.SRV_IMAGE_EXISTS == 'true' }}
         run: |
-          aws ecr batch-get-image --repository-name ${{ vars.PINGPONG_SRV_REPO }} --image-ids imageTag=${{ env.SRV_VERSION }}  --query 'images[].imageManifest' --output text > imageManifest.json
-          aws ecr put-image --repository-name ${{ vars.PINGPONG_SRV_REPO }} --image-tag ${{env.ENVIRONMENT}} --image-manifest file://imageManifest.json
+          aws ecr batch-get-image --repository-name ${{ vars.PINGPONG_SRV_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-ids imageTag=${{ env.SRV_VERSION }}  --query 'images[].imageManifest' --output text > imageManifest.json
+          aws ecr put-image --repository-name ${{ vars.PINGPONG_SRV_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-tag ${{env.ENVIRONMENT}} --image-manifest file://imageManifest.json
           echo "Tagged existing Server Image (${{ env.SRV_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
 
       - name: Build server image for release
@@ -106,10 +109,8 @@ jobs:
 
       - name: Check if Web image exists
         run: |
-          aws ecr get-login-password --region ${{ vars.AWS_REGION }} | docker login --username AWS --password-stdin ${{ vars.PINGPONG_REGISTRY_ENDPOINT }}
-
           # Check if the image with WEB_VERSION tag exists
-          if aws ecr describe-images --repository-name ${{ vars.PINGPONG_WEB_REPO }} --image-ids imageTag=${{ env.WEB_VERSION }}; then
+          if aws ecr describe-images --repository-name ${{ vars.PINGPONG_WEB_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-ids imageTag=${{ env.WEB_VERSION }}; then
             echo "WEB_IMAGE_EXISTS=true" >> $GITHUB_ENV
             echo "Web Image with tag ${{ env.WEB_VERSION }} exists in the ECR repository."
           else
@@ -123,9 +124,8 @@ jobs:
           ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
         if: ${{ env.WEB_IMAGE_EXISTS  == 'true' }}
         run: |
-          aws ecr get-login-password --region ${{ vars.AWS_REGION }} | docker login --username AWS --password-stdin ${{ vars.PINGPONG_REGISTRY_ENDPOINT }}
-          aws ecr batch-get-image --repository-name ${{ vars.PINGPONG_WEB_REPO }} --image-ids imageTag=${{ env.WEB_VERSION }}  --query 'images[].imageManifest' --output text > imageManifest.json
-          aws ecr put-image --repository-name ${{ vars.PINGPONG_WEB_REPO }} --image-tag ${{env.ENVIRONMENT}} --image-manifest file://imageManifest.json
+          aws ecr batch-get-image --repository-name ${{ vars.PINGPONG_WEB_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-ids imageTag=${{ env.WEB_VERSION }}  --query 'images[].imageManifest' --output text > imageManifest.json
+          aws ecr put-image --repository-name ${{ vars.PINGPONG_WEB_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-tag ${{env.ENVIRONMENT}} --image-manifest file://imageManifest.json
           echo "Tagged existing Web Image (${{ env.WEB_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
 
       - name: Build web image for release
