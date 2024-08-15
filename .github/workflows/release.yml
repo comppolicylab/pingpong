@@ -45,6 +45,8 @@ jobs:
         uses: aws-actions/amazon-ecr-login@cef2380b0d4c6813048ef6e1f7fd9ec1639bd3b5
 
       - name: Check if Server image exists
+        env:
+          ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
         run: |
           REGISTRY_ID="${{ vars.PINGPONG_REGISTRY_ENDPOINT }}"
           REGISTRY_ID=${REGISTRY_ID%%.*}
@@ -117,6 +119,8 @@ jobs:
             $SLACK_WEBHOOK
 
       - name: Check if Web image exists
+        env:
+          ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
         run: |
           IMAGE_INFO=$(aws ecr describe-images --repository-name ${{ vars.PINGPONG_WEB_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-ids imageTag=${{ env.WEB_VERSION }} 2>/dev/null)
           if [ $? -ne 0 ]; then
