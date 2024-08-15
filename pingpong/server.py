@@ -816,6 +816,7 @@ async def add_users_to_class(
             config.email.sender,
             invite,
             magic_link,
+            86_400 * 7,
             new_ucr.silent,
         )
 
