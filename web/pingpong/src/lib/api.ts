@@ -923,7 +923,9 @@ export const uploadUserFile = (
  * File upload error.
  */
 export interface FileUploadFailure {
-  error: string;
+  error: {
+    detail: string;
+  };
 }
 
 /**
@@ -1008,7 +1010,9 @@ const _doUpload = (
           resolve(info.response);
         } else {
           info.state = 'error';
-          info.response = { error: xhr.responseText };
+          info.response = {
+            error: xhr.responseText ? JSON.parse(xhr.responseText) : { detail: '' }
+          };
           reject(info.response);
         }
       }

@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Annotated, Any
 import jwt
 import openai
+import humanize
 from fastapi import (
     BackgroundTasks,
     Depends,
@@ -1736,7 +1737,7 @@ async def create_file(
     if upload.size > config.upload.class_file_max_size:
         raise HTTPException(
             status_code=413,
-            detail=f"File too large. Max size is {config.upload.class_file_max_size} bytes.",
+            detail=f"File too large. Max size is {humanize.naturalsize(config.upload.private_file_max_size)}.",
         )
 
     return await handle_create_file(
@@ -1766,7 +1767,7 @@ async def create_user_file(
     if upload.size > config.upload.private_file_max_size:
         raise HTTPException(
             status_code=413,
-            detail=f"File too large. Max size is {config.upload.private_file_max_size} bytes.",
+            detail=f"File too large. Max size is {humanize.naturalsize(config.upload.private_file_max_size)}.",
         )
 
     return await handle_create_file(
