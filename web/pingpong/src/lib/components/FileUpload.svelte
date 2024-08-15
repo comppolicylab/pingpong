@@ -20,9 +20,10 @@
     const newFiles: FileUploadInfo[] = [];
     toUpload.forEach((f) => {
       if (maxSize && f.size > maxSize) {
+        const maxUploadSize = humanSize(maxSize);
         dispatch('error', {
           file: f,
-          message: `<strong>Upload unsuccessful: File is too large</strong><br>Max size is ${maxSize} bytes.`
+          message: `<strong>Upload unsuccessful: File is too large</strong><br>Max size is ${maxUploadSize}.`
         });
         return;
       }
@@ -65,7 +66,10 @@
             }
             return existingFiles;
           });
-          dispatch('error', { file: f, message: `Could not upload file ${f.name}: ${error}.` });
+          dispatch('error', {
+            file: f,
+            message: `Could not upload file ${f.name}: ${error.error.detail || 'unknown error'}`
+          });
         });
 
       newFiles.push(fp);
@@ -119,7 +123,7 @@
   import { writable, type Writable } from 'svelte/store';
   import { Button } from 'flowbite-svelte';
   import type { FileUploader, FileUploadInfo, FileUploadPurpose } from '$lib/api';
-
+  import { humanSize } from '$lib/size';
   /**
    * Whether to allow uploading.
    */
