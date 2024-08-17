@@ -28,7 +28,7 @@ type class
     define can_view: member
     define can_view_users: supervisor
     define can_view_api_key: admin from parent
-    define can_delete: supervisor
+    define can_delete: admin from parent
     define can_edit_info: supervisor
     define can_manage_users: supervisor
     define can_create_thread: member
