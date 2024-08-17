@@ -118,7 +118,7 @@
 
 <script lang="ts">
   // Could also consider using CodeOutline, SearchOutline
-  import { FileCodeOutline, FileSearchOutline, ImageOutline } from 'flowbite-svelte-icons';
+  import { FileCodeOutline, FileSearchOutline, ImageOutline, PaperClipOutline } from 'flowbite-svelte-icons';
   import { createEventDispatcher } from 'svelte';
   import { writable, type Writable } from 'svelte/store';
   import { Button } from 'flowbite-svelte';
@@ -149,7 +149,7 @@
   /**
    * Type of icon to display.
    */
-  export let type: 'file_search' | 'code_interpreter' | 'image' = 'file_search';
+  export let type: 'file_search' | 'code_interpreter' | 'image' | 'multimodal' = 'multimodal';
 
   /**
    * Max upload size in bytes.
@@ -273,8 +273,10 @@
           <FileSearchOutline size="md" />
         {:else if type === 'image'}
           <ImageOutline size="md" />
-        {:else}
+        {:else if type === 'code_interpreter'}
           <FileCodeOutline size="md" />
+        {:else}
+          <PaperClipOutline size="md" />
         {/if}
       </slot>
     </Button>

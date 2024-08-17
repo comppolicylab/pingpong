@@ -159,7 +159,7 @@ class AssistantFilesResponse(BaseModel):
         from_attributes = True
 
 
-FileUploadPurpose = Union[Literal["assistants"], Literal["vision"]]
+FileUploadPurpose = Union[Literal["assistants"], Literal["vision"], Literal["multimodal"]]
 
 
 class VectorStore(BaseModel):

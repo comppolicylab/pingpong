@@ -421,6 +421,22 @@
           <Popover arrow={false}>Code Interpreter is disabled</Popover>
         {/if}
       {/if}
+      {#if upload}
+        <FileUpload
+          {maxSize}
+          accept={codeInterpreterAcceptedFiles || ''}
+          disabled={loading || disabled || !upload}
+          type="multimodal"
+          {upload}
+          on:error={(e) => sadToast(e.detail.message)}
+          on:change={handleCodeInterpreterFilesChange}
+        />
+        {#if upload}
+          <Popover arrow={false}>Upload files to thread</Popover>
+        {:else}
+          <Popover arrow={false}>File upload is disabled</Popover>
+        {/if}
+      {/if}
     </div>
     <Button
       pill
