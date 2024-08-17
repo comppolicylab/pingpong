@@ -4,6 +4,7 @@
     CheckCircleOutline,
     CloseOutline,
     EnvelopeOutline,
+    QuestionCircleOutline,
     TrashBinOutline
   } from 'flowbite-svelte-icons';
   import {
@@ -17,7 +18,8 @@
     Button,
     Pagination,
     Select,
-    type LinkType
+    type LinkType,
+    Tooltip
   } from 'flowbite-svelte';
   import { SearchOutline } from 'flowbite-svelte-icons';
   import { ROLES, ROLE_LABELS } from '$lib/api';
@@ -51,10 +53,38 @@
    */
   export let thPad = 'px-3 py-2';
 
+  const rolePermissions: Record<string, number> = {
+    admin: 3,
+    teacher: 2,
+    student: 1,
+    'no-access': 0
+  };
+
+  export let currentUserRole: Role | 'no-access' = 'no-access';
+  export let currentUserId: number | null = null;
+
+  /**
+   * Check if the current user has permission to edit the role of a user.
+   *
+   * @param role The role of the user to check.
+   * @returns True if the current user can edit the role, false otherwise.
+   */
+  const checkUserEditPermissions = (role: string) => {
+    return rolePermissions[role] <= rolePermissions[currentUserRole];
+  };
+
+  const isCurrentUser = (user: ClassUser) => {
+    return user.id === currentUserId;
+  };
+
   // The list of role options for the dropdown selector
   const roleOptions = [
-    ...ROLES.map((role) => ({ value: role, name: ROLE_LABELS[role] })),
-    { value: '', name: '<Unassigned>' }
+    ...ROLES.filter((role) => checkUserEditPermissions(role)).map((role) => ({
+      value: role,
+      name: ROLE_LABELS[role]
+    })),
+    // Need a value for "no access" role, dropdown defaults to Select a Role otherwise
+    { value: 'no-access', name: 'No Access' }
   ];
 
   // Whether a request is in flight.
@@ -147,7 +177,8 @@
     const primary = priorityRoles.find((role) => user.roles[role]);
     const other = priorityRoles.filter((role) => user.roles[role] && role !== primary);
     return {
-      primary: primary || '',
+      primary: primary || 'no-access',
+      label: primary ? ROLE_LABELS[primary] : 'No Access',
       other,
       otherLabels: other.map((role) => ROLE_LABELS[role])
     };
@@ -206,7 +237,10 @@
     const form = evt.target as HTMLFormElement;
     const formData = new FormData(form);
     const d = Object.fromEntries(formData.entries());
-    const role = d.role.toString() as Role;
+    let role: Role | null = null;
+    if (d.role.toString() !== 'no-access') {
+      role = d.role.toString() as Role;
+    }
     const userId = parseInt(d.user_id.toString(), 10);
 
     if (!d.user_id) {
@@ -219,7 +253,7 @@
       return;
     }
 
-    const roleLabel = ROLE_LABELS[role as Role] || role || 'unassigned';
+    const roleLabel = ROLE_LABELS[role as Role] || role || 'No Access';
     const user = users.find((u) => u.id === +userId);
     const userName = user?.name || user?.email || `User ${userId}`;
     const action = `Set ${userName} role to "${roleLabel}"`;
@@ -295,7 +329,7 @@
   {#if users.length === 0}
     <div class="text-center text-gray-500 dark:text-gray-400">No users found</div>
   {:else}
-    <Table>
+    <Table divClass="relative overflow-x-auto overflow-y-show">
       <TableHead>
         <TableHeadCell padding={thPad}>User</TableHeadCell>
         <TableHeadCell padding={thPad}>Role</TableHeadCell>
@@ -305,28 +339,49 @@
       <TableBody>
         {#each users as user (user.id)}
           {@const roleInfo = getRoleInfoForUser(user)}
+          {@const noPermissions = !checkUserEditPermissions(roleInfo.primary)}
+          {@const currentUser = isCurrentUser(user)}
           <TableBodyRow>
             <TableBodyCell {tdClass}>{user.email}</TableBodyCell>
             <TableBodyCell {tdClass}>
-              <form on:submit={submitUpdateUser}>
-                <input type="hidden" name="user_id" value={user.id} />
-                <Select
-                  name="role"
-                  items={roleOptions}
-                  value={roleInfo.primary}
-                  on:change={submitParentForm}
-                />
-              </form>
-              {#if !roleInfo.primary}
-                <div class="text-xs whitespace-normal text-pretty text-gray-500 mt-2">
-                  * This user is not assigned to any role currently.
+              {#if noPermissions || currentUser}
+                <div class="flex felx-row justify-between">
+                  <div>{roleInfo.label}</div>
+                  <div>
+                    <QuestionCircleOutline color="gray" />
+                    <Tooltip
+                      type="custom"
+                      arrow={false}
+                      class="flex overflow-y-auto bg-gray-900 z-10 max-w-72 y-2 px-3 text-sm text-wrap font-light text-white"
+                    >
+                      {noPermissions
+                        ? `You do not have enough permissions to change ${roleInfo.label} user roles`
+                        : 'You cannot change your own user role'}
+                    </Tooltip>
+                  </div>
                 </div>
-              {:else if roleInfo.other.length > 0}
-                <div class="text-xs whitespace-normal text-pretty text-gray-500 mt-2">
-                  * This user is also assigned to the following roles: <span class="font-bold"
-                    >{roleInfo.otherLabels.join(', ')}</span
-                  >
-                </div>
+              {:else}
+                <form on:submit={submitUpdateUser}>
+                  <input type="hidden" name="user_id" value={user.id} />
+                  <Select
+                    name="role"
+                    items={roleOptions}
+                    value={roleInfo.primary}
+                    placeholder="Select a user role..."
+                    on:change={submitParentForm}
+                  />
+                </form>
+                {#if roleInfo.primary === 'no-access'}
+                  <div class="text-xs whitespace-normal font-light text-pretty text-gray-500 mt-2">
+                    * This user is not assigned to any role currently.
+                  </div>
+                {:else if roleInfo.other.length > 0}
+                  <div class="text-xs whitespace-normal font-light text-pretty text-gray-500 mt-2">
+                    * This user is also assigned to the following roles: <span class="font-bold"
+                      >{roleInfo.otherLabels.join(', ')}</span
+                    >
+                  </div>
+                {/if}
               {/if}
             </TableBodyCell>
             <TableBodyCell {tdClass}>

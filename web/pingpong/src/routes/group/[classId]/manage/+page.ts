@@ -24,6 +24,16 @@ export const load: PageLoad = async ({ fetch, params }) => {
         target_id: classId,
         relation: 'admin'
       },
+      isTeacher: {
+        target_type: 'class',
+        target_id: classId,
+        relation: 'teacher'
+      },
+      isStudent: {
+        target_type: 'class',
+        target_id: classId,
+        relation: 'student'
+      },
       canViewApiKey: { target_type: 'class', target_id: classId, relation: 'can_view_api_key' },
       canViewUsers: { target_type: 'class', target_id: classId, relation: 'can_view_users' },
       canDelete: { target_type: 'class', target_id: classId, relation: 'can_delete' },
