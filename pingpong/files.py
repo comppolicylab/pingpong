@@ -79,6 +79,7 @@ async def handle_create_file(
         )
 
     if purpose == "multimodal":
+        new_v_file, new_f_file = None, None
         if _is_vision_supported(upload.content_type.lower()):
             new_v_file = await handle_create_file(
                 session,
