@@ -118,7 +118,12 @@
 
 <script lang="ts">
   // Could also consider using CodeOutline, SearchOutline
-  import { FileCodeOutline, FileSearchOutline, ImageOutline, PaperClipOutline } from 'flowbite-svelte-icons';
+  import {
+    FileCodeOutline,
+    FileSearchOutline,
+    ImageOutline,
+    PaperClipOutline
+  } from 'flowbite-svelte-icons';
   import { createEventDispatcher } from 'svelte';
   import { writable, type Writable } from 'svelte/store';
   import { Button } from 'flowbite-svelte';

@@ -12,7 +12,7 @@
   import { createEventDispatcher } from 'svelte';
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
-  import { Button, P, Popover } from 'flowbite-svelte';
+  import { Button, Popover } from 'flowbite-svelte';
   import { page } from '$app/stores';
   import type {
     MimeTypeLookupFn,
@@ -222,7 +222,7 @@
         if (!isNaN(visionFileId)) {
           removePromises.push(remove(visionFileId));
         }
-      }      
+      }
       Promise.all(removePromises)
         .then(() => {
           allFiles.update((f) => f.filter((x) => x !== file));
@@ -244,14 +244,13 @@
   <input type="hidden" name="file_search_file_ids" bind:value={fileSearchFileIds} />
   <input type="hidden" name="code_interpreter_file_ids" bind:value={codeInterpreterFileIds} />
   {#if $allFiles.length > 0}
-    <div class="z-20 p-0 pl-2 text-sm font-medium text-gray-900 dark:text-gray-300">Images</div>
     <div
       class="z-10 top-0 p-2 flex gap-2 flex-wrap"
       use:fixFileListHeight={$allFiles}
       bind:this={allFileListRef}
     >
       {#each $allFiles as file}
-        <FilePlaceholder {mimeType} info={file} purpose="vision" on:delete={removeFile} />
+        <FilePlaceholder {mimeType} info={file} purpose="multimodal" on:delete={removeFile} />
       {/each}
     </div>
   {/if}
@@ -285,7 +284,9 @@
       {#if upload && (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || visionAcceptedFiles)}
         <FileUpload
           {maxSize}
-          accept={(codeInterpreterAcceptedFiles ?? '') + (fileSearchAcceptedFiles ?? '') + (visionAcceptedFiles ?? '')}
+          accept={(codeInterpreterAcceptedFiles ?? '') +
+            (fileSearchAcceptedFiles ?? '') +
+            (visionAcceptedFiles ?? '')}
           disabled={loading || disabled || !upload}
           type="multimodal"
           purpose="multimodal"
@@ -293,7 +294,7 @@
           on:error={(e) => sadToast(e.detail.message)}
           on:change={handleFilesChange}
         />
-        {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || visionAcceptedFiles)}
+        {#if codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || visionAcceptedFiles}
           <Popover arrow={false}>Upload files to thread</Popover>
         {:else}
           <Popover arrow={false}>File upload is disabled</Popover>
@@ -308,9 +309,7 @@
       class={`${
         loading ? 'animate-pulse cursor-progress' : ''
       } p-3 px-4 mr-2 bg-orange hover:bg-orange-dark`}
-      disabled={uploading ||
-        loading ||
-        disabled}
+      disabled={uploading || loading || disabled}
     >
       Submit
     </Button>

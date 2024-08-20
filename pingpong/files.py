@@ -78,27 +78,31 @@ async def handle_create_file(
             status_code=403, detail="File type not supported for File Search by OpenAI!"
         )
 
-    if purpose == 'multimodal':
+    if purpose == "multimodal":
         if _is_vision_supported(upload.content_type.lower()):
             new_v_file = await handle_create_file(
-                session, authz, oai_client,
+                session,
+                authz,
+                oai_client,
                 upload=upload,
                 class_id=class_id,
                 uploader_id=uploader_id,
                 private=private,
-                purpose='vision',
+                purpose="vision",
             )
-        
+
         # There is a case where the file is vision supported but not file search or code interpreter supported
         # image/webp is an example of this case
         if _is_fs_ci_supported(upload.content_type.lower()):
             new_f_file = await handle_create_file(
-                session, authz, oai_client,
+                session,
+                authz,
+                oai_client,
                 upload=upload,
                 class_id=class_id,
                 uploader_id=uploader_id,
                 private=private,
-                purpose='assistants',
+                purpose="assistants",
             )
 
         if new_f_file:
@@ -129,7 +133,7 @@ async def handle_create_file(
                 created=new_v_file.created,
                 updated=new_v_file.updated,
             )
-        
+
     new_f = await oai_client.files.create(
         # NOTE(jnu): the client tries to infer the filename, which doesn't
         # work on this file that exists as bytes in memory. There's an
@@ -402,15 +406,20 @@ _SUPPORTED_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES}
 
 _IMG_SUPPORTED_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES if ft.vision}
 
-_FS_CI_SUPPORTED_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES if ft.code_interpreter or ft.file_search}
+_FS_CI_SUPPORTED_TYPE = {
+    ft.mime_type.lower() for ft in FILE_TYPES if ft.code_interpreter or ft.file_search
+}
+
 
 def _is_supported(content_type: str) -> bool:
     """Check if the content type is supported."""
     return content_type in _SUPPORTED_TYPE
 
+
 def _is_vision_supported(content_type: str) -> bool:
     """Check if the content type is supported for vision."""
     return content_type in _IMG_SUPPORTED_TYPE
+
 
 def _is_fs_ci_supported(content_type: str) -> bool:
     """Check if the content type is supported for file search and code interpreter."""
