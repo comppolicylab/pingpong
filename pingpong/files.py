@@ -94,7 +94,9 @@ async def handle_create_file(
 
         # There is a case where the file is vision supported but not file search or code interpreter supported
         # image/webp is an example of this case
-        if _is_fs_ci_supported(upload.content_type.lower()):
+        if _is_fs_supported(upload.content_type.lower()) or _is_ci_supported(
+            upload.content_type.lower()
+        ):
             new_f_file = await handle_create_file(
                 session,
                 authz,
@@ -106,34 +108,34 @@ async def handle_create_file(
                 purpose="assistants",
             )
 
-        if new_f_file:
-            return FileSchema(
-                id=new_f_file.id,
-                name=new_f_file.name,
-                content_type=new_f_file.content_type,
-                file_id=new_f_file.file_id,
-                vision_obj_id=new_v_file.id if new_v_file else None,
-                vision_file_id=new_v_file.file_id if new_v_file else None,
-                class_id=new_f_file.class_id,
-                private=new_f_file.private,
-                uploader_id=new_f_file.uploader_id,
-                created=new_f_file.created,
-                updated=new_f_file.updated,
+        primary_file = new_f_file if new_f_file else new_v_file
+
+        # Always true, as we have checked _is_supported
+        if not primary_file:
+            raise HTTPException(
+                status_code=500,
+                detail="File not uploaded, something went wrong!",
             )
-        elif new_v_file:
-            return FileSchema(
-                id=new_v_file.id,
-                name=new_v_file.name,
-                content_type=new_v_file.content_type,
-                file_id=new_v_file.file_id,
-                vision_obj_id=None,
-                vision_file_id=new_v_file.file_id,
-                class_id=new_v_file.class_id,
-                private=new_v_file.private,
-                uploader_id=new_v_file.uploader_id,
-                created=new_v_file.created,
-                updated=new_v_file.updated,
-            )
+
+        return FileSchema(
+            id=primary_file.id,
+            name=primary_file.name,
+            content_type=primary_file.content_type,
+            file_id=primary_file.file_id,
+            vision_obj_id=new_v_file.id if new_v_file and new_f_file else None,
+            file_search_file_id=primary_file.file_id
+            if _is_fs_supported(upload.content_type.lower())
+            else None,
+            code_interpreter_file_id=primary_file.file_id
+            if _is_ci_supported(upload.content_type.lower())
+            else None,
+            vision_file_id=new_v_file.file_id if new_v_file else None,
+            class_id=primary_file.class_id,
+            private=primary_file.private,
+            uploader_id=primary_file.uploader_id,
+            created=primary_file.created,
+            updated=primary_file.updated,
+        )
 
     new_f = await oai_client.files.create(
         # NOTE(jnu): the client tries to infer the filename, which doesn't
@@ -407,9 +409,9 @@ _SUPPORTED_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES}
 
 _IMG_SUPPORTED_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES if ft.vision}
 
-_FS_CI_SUPPORTED_TYPE = {
-    ft.mime_type.lower() for ft in FILE_TYPES if ft.code_interpreter or ft.file_search
-}
+_FS_SUPPORTED_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES if ft.file_search}
+
+_CI_SUPPORTED_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES if ft.code_interpreter}
 
 
 def _is_supported(content_type: str) -> bool:
@@ -422,6 +424,11 @@ def _is_vision_supported(content_type: str) -> bool:
     return content_type in _IMG_SUPPORTED_TYPE
 
 
-def _is_fs_ci_supported(content_type: str) -> bool:
-    """Check if the content type is supported for file search and code interpreter."""
-    return content_type in _FS_CI_SUPPORTED_TYPE
+def _is_fs_supported(content_type: str) -> bool:
+    """Check if the content type is supported for file search."""
+    return content_type in _FS_SUPPORTED_TYPE
+
+
+def _is_ci_supported(content_type: str) -> bool:
+    """Check if the content type is supported for code interpreter."""
+    return content_type in _CI_SUPPORTED_TYPE

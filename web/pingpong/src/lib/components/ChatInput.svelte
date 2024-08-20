@@ -93,12 +93,12 @@
   $: uploading = $allFiles.some((f) => f.state === 'pending');
 
   $: codeInterpreterFileIds = $allFiles
-    .filter((f) => f.state === 'success' && (f.response as ServerFile).file_id)
+    .filter((f) => f.state === 'success' && (f.response as ServerFile).code_interpreter_file_id)
     .map((f) => (f.response as ServerFile).file_id)
     .join(',');
 
   $: fileSearchFileIds = $allFiles
-    .filter((f) => f.state === 'success' && (f.response as ServerFile).file_id)
+    .filter((f) => f.state === 'success' && (f.response as ServerFile).file_search_file_id)
     .map((f) => (f.response as ServerFile).file_id)
     .join(',');
 

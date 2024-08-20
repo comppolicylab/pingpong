@@ -128,6 +128,8 @@ class File(BaseModel):
     content_type: str
     file_id: str
     vision_obj_id: int | None = None
+    file_search_file_id: str | None = None
+    code_interpreter_file_id: str | None = None
     vision_file_id: str | None = None
     class_id: int
     private: bool | None
