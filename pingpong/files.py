@@ -120,7 +120,7 @@ async def handle_create_file(
                 created=new_f_file.created,
                 updated=new_f_file.updated,
             )
-        else:
+        elif new_v_file:
             return FileSchema(
                 id=new_v_file.id,
                 name=new_v_file.name,
