@@ -2,13 +2,12 @@ import { Marked, type MarkedExtension } from 'marked';
 import { markedHighlight } from 'marked-highlight';
 import { markedKatex } from './marked-katex';
 import hljs from 'highlight.js';
-import {memoize} from './memoize';
-
+import { memoize } from './memoize';
 
 /**
  * List of available markdown extensions.
  */
-const EXTENSIONS: {[key: string]: MarkedExtension} = {
+const EXTENSIONS: { [key: string]: MarkedExtension } = {
   syntax: markedHighlight({
     langPrefix: 'hljs language-',
     highlight: (code, lang) => {
@@ -16,22 +15,22 @@ const EXTENSIONS: {[key: string]: MarkedExtension} = {
       return hljs.highlight(code, { language }).value;
     }
   }),
-  latex: markedKatex({ throwOnError: false }),
-}
+  latex: markedKatex({ throwOnError: false })
+};
 
 /**
  * Options to enable or disable markdown extensions.
  *
  * See `EXTENSIONS` for a list of available extensions.
  */
-export type MarkdownRendererOptions = Partial<{[k in keyof typeof EXTENSIONS]: boolean}>;
+export type MarkdownRendererOptions = Partial<{ [k in keyof typeof EXTENSIONS]: boolean }>;
 
 /**
  * Default renderer options.
  */
 const DEFAULT_OPTIONS: MarkdownRendererOptions = {
   latex: false,
-  syntax: true,
+  syntax: true
 };
 
 /**
@@ -50,7 +49,7 @@ const getMarkdownRenderer = (options: MarkdownRendererOptions) => {
     }
   }
   return new Marked(...extensions);
-}
+};
 
 /**
  * Generate a key from the enabled extensions.
@@ -60,8 +59,12 @@ const getMarkdownRenderer = (options: MarkdownRendererOptions) => {
  *   { latex: true, syntax: true } => 'latex,syntax'
  */
 const keyFromOpts = (opts: MarkdownRendererOptions) => {
-  return Object.entries(opts).filter(([_, v]) => v).map(([k]) => k).sort().join(',');
-}
+  return Object.entries(opts)
+    .filter(([_, v]) => v)
+    .map(([k]) => k)
+    .sort()
+    .join(',');
+};
 
 /**
  * Memoized version of `getMarkdownRenderer`.

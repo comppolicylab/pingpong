@@ -9,5 +9,5 @@
 </script>
 
 <div class="markdown max-w-full">
-  <Sanitize html={markdown(content, {syntax, latex})} />
+  <Sanitize html={markdown(content, { syntax, latex })} />
 </div>
