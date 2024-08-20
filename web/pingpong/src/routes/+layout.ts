@@ -16,6 +16,10 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   // Fetch the current user
   const me = api.expandResponse(await api.me(fetch));
   if (me.error) {
+    // Errors are unusual here, but redirect to login just in case.
+    if (url.pathname === LOGIN) {
+      return;
+    }
     redirect(302, LOGIN);
   }
 
