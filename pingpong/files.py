@@ -78,6 +78,58 @@ async def handle_create_file(
             status_code=403, detail="File type not supported for File Search by OpenAI!"
         )
 
+    if purpose == 'multimodal':
+        if _is_vision_supported(upload.content_type.lower()):
+            new_v_file = await handle_create_file(
+                session, authz, oai_client,
+                upload=upload,
+                class_id=class_id,
+                uploader_id=uploader_id,
+                private=private,
+                purpose='vision',
+            )
+        
+        # There is a case where the file is vision supported but not file search or code interpreter supported
+        # image/webp is an example of this case
+        if _is_fs_ci_supported(upload.content_type.lower()):
+            new_f_file = await handle_create_file(
+                session, authz, oai_client,
+                upload=upload,
+                class_id=class_id,
+                uploader_id=uploader_id,
+                private=private,
+                purpose='assistants',
+            )
+
+        if new_f_file:
+            return FileSchema(
+                id=new_f_file.id,
+                name=new_f_file.name,
+                content_type=new_f_file.content_type,
+                file_id=new_f_file.file_id,
+                vision_obj_id=new_v_file.id if new_v_file else None,
+                vision_file_id=new_v_file.file_id if new_v_file else None,
+                class_id=new_f_file.class_id,
+                private=new_f_file.private,
+                uploader_id=new_f_file.uploader_id,
+                created=new_f_file.created,
+                updated=new_f_file.updated,
+            )
+        else:
+            return FileSchema(
+                id=new_v_file.id,
+                name=new_v_file.name,
+                content_type=new_v_file.content_type,
+                file_id=new_v_file.file_id,
+                vision_obj_id=None,
+                vision_file_id=new_v_file.file_id,
+                class_id=new_v_file.class_id,
+                private=new_v_file.private,
+                uploader_id=new_v_file.uploader_id,
+                created=new_v_file.created,
+                updated=new_v_file.updated,
+            )
+        
     new_f = await oai_client.files.create(
         # NOTE(jnu): the client tries to infer the filename, which doesn't
         # work on this file that exists as bytes in memory. There's an
@@ -348,7 +400,18 @@ FILE_TYPES = [
 
 _SUPPORTED_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES}
 
+_IMG_SUPPORTED_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES if ft.vision}
+
+_FS_CI_SUPPORTED_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES if ft.code_interpreter or ft.file_search}
 
 def _is_supported(content_type: str) -> bool:
     """Check if the content type is supported."""
     return content_type in _SUPPORTED_TYPE
+
+def _is_vision_supported(content_type: str) -> bool:
+    """Check if the content type is supported for vision."""
+    return content_type in _IMG_SUPPORTED_TYPE
+
+def _is_fs_ci_supported(content_type: str) -> bool:
+    """Check if the content type is supported for file search and code interpreter."""
+    return content_type in _FS_CI_SUPPORTED_TYPE

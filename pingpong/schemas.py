@@ -127,6 +127,8 @@ class File(BaseModel):
     name: str
     content_type: str
     file_id: str
+    vision_obj_id: int | None = None
+    vision_file_id: str | None = None
     class_id: int
     private: bool | None
     uploader_id: int | None

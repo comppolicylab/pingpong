@@ -330,6 +330,8 @@ export type ServerFile = {
   id: number;
   name: string;
   file_id: string;
+  vision_obj_id: number | null;
+  vision_file_id: string | null;
   content_type: string;
   class_id: number;
   private: boolean | null;
