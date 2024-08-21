@@ -138,7 +138,7 @@
   $: canManageClassUsers = !!data?.grants?.canManageUsers;
   $: canUploadClassFiles = !!data?.grants?.canUploadClassFiles;
   $: canViewApiKey = !!data?.grants?.canViewApiKey;
-  let currentUserRole: api.Role | null = null;
+  let currentUserRole: api.Role | null;
   $: currentUserRole = data.grants?.isAdmin
     ? 'admin'
     : data.grants?.isTeacher
