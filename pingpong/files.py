@@ -1,3 +1,4 @@
+import asyncio
 import openai
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.exc import IntegrityError
@@ -79,17 +80,22 @@ async def handle_create_file(
         )
 
     if purpose == "multimodal":
-        new_v_file, new_f_file = None, None
+        tasks: list[asyncio.Task[FileSchema]] = []
         if _is_vision_supported(upload.content_type.lower()):
-            new_v_file = await handle_create_file(
-                session,
-                authz,
-                oai_client,
-                upload=upload,
-                class_id=class_id,
-                uploader_id=uploader_id,
-                private=private,
-                purpose="vision",
+            tasks.append(
+                asyncio.create_task(
+                    handle_create_file(
+                        session,
+                        authz,
+                        oai_client,
+                        upload=upload,
+                        class_id=class_id,
+                        uploader_id=uploader_id,
+                        private=private,
+                        purpose="vision",
+                    ),
+                    name="vision_upload",
+                )
             )
 
         # There is a case where the file is vision supported but not file search or code interpreter supported
@@ -97,16 +103,37 @@ async def handle_create_file(
         if _is_fs_supported(upload.content_type.lower()) or _is_ci_supported(
             upload.content_type.lower()
         ):
-            new_f_file = await handle_create_file(
-                session,
-                authz,
-                oai_client,
-                upload=upload,
-                class_id=class_id,
-                uploader_id=uploader_id,
-                private=private,
-                purpose="assistants",
+            tasks.append(
+                asyncio.create_task(
+                    handle_create_file(
+                        session,
+                        authz,
+                        oai_client,
+                        upload=upload,
+                        class_id=class_id,
+                        uploader_id=uploader_id,
+                        private=private,
+                        purpose="assistants",
+                    ),
+                    name="assistants_upload",
+                )
             )
+
+        await asyncio.gather(*tasks)
+        new_v_file, new_f_file = (
+            next(
+                (task.result() for task in tasks if task.get_name() == "vision_upload"),
+                None,
+            ),
+            next(
+                (
+                    task.result()
+                    for task in tasks
+                    if task.get_name() == "assistants_upload"
+                ),
+                None,
+            ),
+        )
 
         primary_file = new_f_file if new_f_file else new_v_file
 
@@ -173,6 +200,15 @@ async def handle_create_file(
             name=f.name,
             content_type=f.content_type,
             file_id=f.file_id,
+            file_search_file_id=f.file_id
+            if _is_fs_supported(upload.content_type.lower())
+            else None,
+            code_interpreter_file_id=f.file_id
+            if _is_ci_supported(upload.content_type.lower())
+            else None,
+            vision_file_id=f.file_id
+            if _is_vision_supported(upload.content_type.lower())
+            else None,
             class_id=f.class_id,
             private=f.private,
             uploader_id=f.uploader_id,

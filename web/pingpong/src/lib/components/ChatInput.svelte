@@ -24,6 +24,7 @@
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import FileUpload from '$lib/components/FileUpload.svelte';
   import { sadToast } from '$lib/toast';
+  import type { FileUploadPurpose } from '$lib/api';
 
   const dispatcher = createEventDispatcher();
 
@@ -91,7 +92,15 @@
   // The list of files being uploaded.
   let allFiles = writable<FileUploadInfo[]>([]);
   $: uploading = $allFiles.some((f) => f.state === 'pending');
-
+  let purpose: FileUploadPurpose | null = null;
+  $: purpose =
+    (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles) && visionAcceptedFiles
+      ? 'multimodal'
+      : codeInterpreterAcceptedFiles || fileSearchAcceptedFiles
+        ? 'assistants'
+        : visionAcceptedFiles
+          ? 'vision'
+          : null;
   $: codeInterpreterFileIds = $allFiles
     .filter((f) => f.state === 'success' && (f.response as ServerFile).code_interpreter_file_id)
     .map((f) => (f.response as ServerFile).file_id)
@@ -281,7 +290,7 @@
       style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
     />
     <div class="flex flex-row gap-1.5">
-      {#if upload && (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || visionAcceptedFiles)}
+      {#if upload && purpose}
         <FileUpload
           {maxSize}
           accept={(codeInterpreterAcceptedFiles ?? '') +
@@ -289,7 +298,7 @@
             (visionAcceptedFiles ?? '')}
           disabled={loading || disabled || !upload}
           type="multimodal"
-          purpose="multimodal"
+          {purpose}
           {upload}
           on:error={(e) => sadToast(e.detail.message)}
           on:change={handleFilesChange}
