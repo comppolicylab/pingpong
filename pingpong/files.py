@@ -201,13 +201,13 @@ async def handle_create_file(
             content_type=f.content_type,
             file_id=f.file_id,
             file_search_file_id=f.file_id
-            if _is_fs_supported(upload.content_type.lower())
+            if _is_fs_supported(upload.content_type.lower()) and purpose == "assistants"
             else None,
             code_interpreter_file_id=f.file_id
-            if _is_ci_supported(upload.content_type.lower())
+            if _is_ci_supported(upload.content_type.lower()) and purpose == "assistants"
             else None,
             vision_file_id=f.file_id
-            if _is_vision_supported(upload.content_type.lower())
+            if _is_vision_supported(upload.content_type.lower()) and purpose == "vision"
             else None,
             class_id=f.class_id,
             private=f.private,
