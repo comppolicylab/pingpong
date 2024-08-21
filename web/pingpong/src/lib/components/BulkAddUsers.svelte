@@ -1,24 +1,17 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import * as api from '$lib/api';
-  import {
-    Select,
-    Helper,
-    Button,
-    Label,
-    Textarea,
-    Hr,
-    Accordion,
-    AccordionItem
-  } from 'flowbite-svelte';
+  import { Select, Helper, Button, Label, Textarea, Hr, Modal } from 'flowbite-svelte';
   import { writable } from 'svelte/store';
   import { sadToast } from '$lib/toast';
-  import { LockSolid } from 'flowbite-svelte-icons';
+  import { LockSolid, QuestionCircleOutline } from 'flowbite-svelte-icons';
   import PermissionsTable from './PermissionsTable.svelte';
 
   export let role: api.Role;
   export let isPrivate: boolean = false;
   export let permissions: { name: string; member: boolean; moderator: boolean }[] = [];
+
+  let permissionsModalOpen = false;
 
   const dispatch = createEventDispatcher();
 
@@ -79,37 +72,48 @@
   >
   <Textarea class="mt-2 mb-4" id="emails" name="emails" rows="4" />
 
-  <Label defaultClass="text-md font-normal rtl:text-right font-medium block" for="role">Role</Label>
+  <div class="flex items-center justify-between">
+    <Label defaultClass="text-md font-normal rtl:text-right font-medium block" for="role"
+      >Role</Label
+    >
+    <Button
+      class="flex flex-row items-center gap-1 text-sm font-normal text-gray-500 hover:underline p-0"
+      on:click={() => (permissionsModalOpen = true)}
+      on:touchstart={() => (permissionsModalOpen = true)}
+    >
+      <div>View permissions</div>
+      <QuestionCircleOutline class="w-4 h-4 text-gray-500" />
+    </Button>
+  </div>
+  {#if permissionsModalOpen}
+    <Modal bind:open={permissionsModalOpen} title="Your group's user role permissions">
+      <div class="my-2">
+        {#if isPrivate}
+          <div
+            class="flex flex-row items-center text-sm text-white bg-gradient-to-r from-gray-800 to-gray-600 p-4 rounded-t-lg"
+          >
+            <LockSolid class="w-8 h-8 mr-3" />
+            <span
+              >Threads and assistants are private in your group, so Moderators have limited
+              permissions compared to a non-private group.</span
+            >
+          </div>
+        {/if}
+        <PermissionsTable {permissions} />
+      </div>
+    </Modal>
+  {/if}
   <Helper helperClass="text-sm font-normal text-gray-500 dark:text-gray-300">
     <div>Choose a user role to grant permissions to these users to view the group.</div>
   </Helper>
-  <div class="my-2">
-    {#if isPrivate}
-      <div
-        class="flex flex-row items-center text-sm text-white bg-gradient-to-r from-gray-800 to-gray-600 p-4 rounded-t-lg"
-      >
-        <LockSolid class="w-8 h-8 mr-3" />
-        <span
-          >Threads and assistants are private in your group, so Moderators have limited permissions
-          compared to a non-private group.</span
-        >
-      </div>
-    {/if}
-    <Accordion
-      activeClass="bg-gray-200 text-gray-900 focus:ring-4 focus:ring-gray-200"
-      inactiveClass="text-gray-700 hover:bg-gray-100 rounded-b-lg"
-    >
-      <AccordionItem
-        paddingDefault="px-4 py-2"
-        defaultClass="flex items-center justify-between w-full font-medium text-left rounded-b-lg border-gray-200 dark:border-gray-700"
-      >
-        <span slot="header" class="text-sm">View your group's user role permissions</span>
-        <PermissionsTable {permissions} />
-      </AccordionItem>
-    </Accordion>
-  </div>
-  <Select id="role" name="role" placeholder="Select a user role..." value={role} items={roles} />
-
+  <Select
+    id="role"
+    name="role"
+    class="py-1.5 mt-2 mb-4"
+    placeholder="Select a user role..."
+    value={role}
+    items={roles}
+  />
   <Hr />
   <div>
     <Button
