@@ -150,7 +150,9 @@ async def handle_create_file(
     except openai.BadRequestError as e:
         raise HTTPException(
             status_code=400,
-            detail=e.response.json().get("error", {}).get("message", "OpenAI rejected this request"),
+            detail=e.response.json()
+            .get("error", {})
+            .get("message", "OpenAI rejected this request"),
         )
 
     data = {
