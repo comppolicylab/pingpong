@@ -142,6 +142,7 @@ async def add_new_users(
             config.email.sender,
             invite,
             magic_link,
+            86_400 * 7,
             new_ucr.silent,
         )
 
