@@ -94,7 +94,7 @@
     <Helper helperClass="text-md font-normal rtl:text-right font-medium block">
       Notify people
     </Helper>
-    <Checkbox id="notify" name="notify" class="mt-1 text-sm font-normal"
+    <Checkbox checked id="notify" name="notify" class="mt-1 text-sm font-normal"
       >Let users know they have access to {className} on PingPong</Checkbox
     >
   </div>
