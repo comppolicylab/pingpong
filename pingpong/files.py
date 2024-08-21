@@ -137,15 +137,21 @@ async def handle_create_file(
             updated=primary_file.updated,
         )
 
-    new_f = await oai_client.files.create(
-        # NOTE(jnu): the client tries to infer the filename, which doesn't
-        # work on this file that exists as bytes in memory. There's an
-        # undocumented way to specify name, content, and content_type which
-        # we use here to force correctness.
-        # https://github.com/stanford-policylab/pingpong/issues/147
-        file=(upload.filename, upload.file, upload.content_type),
-        purpose=purpose,
-    )
+    try:
+        new_f = await oai_client.files.create(
+            # NOTE(jnu): the client tries to infer the filename, which doesn't
+            # work on this file that exists as bytes in memory. There's an
+            # undocumented way to specify name, content, and content_type which
+            # we use here to force correctness.
+            # https://github.com/stanford-policylab/pingpong/issues/147
+            file=(upload.filename.lower(), upload.file, upload.content_type),
+            purpose=purpose,
+        )
+    except openai.BadRequestError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=e.response.json().get("error", {}).get("message", "OpenAI rejected this request"),
+        )
 
     data = {
         "file_id": new_f.id,
