@@ -61,6 +61,15 @@
   // TODO - should figure this out by checking grants instead of participants
   $: canSubmit = !!$participants.user && $participants.user.includes('Me');
   $: assistantDeleted = !$assistantId && $assistantId === 0;
+  let useLatex = false;
+  $: {
+    const assistant = data.assistants.find((assistant) => assistant.id === $assistantId);
+    if (assistant) {
+      useLatex = assistant.use_latex || false;
+    } else {
+      console.warn(`Definition for assistant ${$assistantId} not found.`);
+    }
+  }
 
   // Get the name of the participant in the chat thread.
   const getName = (message: api.OpenAIMessage) => {
@@ -252,6 +261,8 @@
                     content.text,
                     api.fullPath(`/class/${classId}/thread/${threadId}`)
                   )}
+                  syntax={true}
+                  latex={useLatex}
                 />
               </div>
             {:else if content.type === 'code'}
