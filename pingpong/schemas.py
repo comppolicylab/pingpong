@@ -312,7 +312,6 @@ class CreateUserClassRole(BaseModel):
 class CreateUserClassRoles(BaseModel):
     roles: list[CreateUserClassRole]
     notify: bool = True
-    silent: bool = False
 
 
 class UserClassRole(BaseModel):

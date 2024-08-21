@@ -820,7 +820,6 @@ async def add_users_to_class(
                 invite,
                 magic_link,
                 86_400 * 7,
-                new_ucr.silent,
             )
 
     await request.state.authz.write_safe(grant=grants, revoke=revokes)

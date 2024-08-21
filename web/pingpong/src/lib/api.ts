@@ -259,7 +259,6 @@ export type UserClassRole = {
  */
 export type UserClassRoles = {
   roles: UserClassRole[];
-  silent: boolean;
 };
 
 /**
