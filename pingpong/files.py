@@ -74,14 +74,16 @@ async def handle_create_file(
         uploader_id (int): Uploader ID
         private (bool): File privacy
     """
-    if not _is_supported(upload.content_type.lower()):
+    content_type = upload.content_type.lower()
+
+    if not _is_supported(content_type):
         raise HTTPException(
             status_code=403, detail="File type not supported for File Search by OpenAI!"
         )
 
     if purpose == "multimodal":
         tasks: list[asyncio.Task[FileSchema]] = []
-        if _is_vision_supported(upload.content_type.lower()):
+        if _is_vision_supported(content_type):
             tasks.append(
                 asyncio.create_task(
                     handle_create_file(
@@ -100,9 +102,7 @@ async def handle_create_file(
 
         # There is a case where the file is vision supported but not file search or code interpreter supported
         # image/webp is an example of this case
-        if _is_fs_supported(upload.content_type.lower()) or _is_ci_supported(
-            upload.content_type.lower()
-        ):
+        if _is_fs_supported(content_type) or _is_ci_supported(content_type):
             tasks.append(
                 asyncio.create_task(
                     handle_create_file(
@@ -151,10 +151,10 @@ async def handle_create_file(
             file_id=primary_file.file_id,
             vision_obj_id=new_v_file.id if new_v_file and new_f_file else None,
             file_search_file_id=primary_file.file_id
-            if _is_fs_supported(upload.content_type.lower())
+            if _is_fs_supported(content_type)
             else None,
             code_interpreter_file_id=primary_file.file_id
-            if _is_ci_supported(upload.content_type.lower())
+            if _is_ci_supported(content_type)
             else None,
             vision_file_id=new_v_file.file_id if new_v_file else None,
             class_id=primary_file.class_id,
@@ -201,13 +201,13 @@ async def handle_create_file(
             content_type=f.content_type,
             file_id=f.file_id,
             file_search_file_id=f.file_id
-            if _is_fs_supported(upload.content_type.lower()) and purpose == "assistants"
+            if _is_fs_supported(content_type) and purpose == "assistants"
             else None,
             code_interpreter_file_id=f.file_id
-            if _is_ci_supported(upload.content_type.lower()) and purpose == "assistants"
+            if _is_ci_supported(content_type) and purpose == "assistants"
             else None,
             vision_file_id=f.file_id
-            if _is_vision_supported(upload.content_type.lower()) and purpose == "vision"
+            if _is_vision_supported(content_type) and purpose == "vision"
             else None,
             class_id=f.class_id,
             private=f.private,
