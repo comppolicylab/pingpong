@@ -822,8 +822,6 @@ async def add_users_to_class(
                 86_400 * 7,
                 new_ucr.silent,
             )
-    else:
-        print("Not sending emails")
 
     await request.state.authz.write_safe(grant=grants, revoke=revokes)
 
