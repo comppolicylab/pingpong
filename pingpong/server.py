@@ -807,18 +807,23 @@ async def add_users_to_class(
                 )
             )
 
-    # Send emails to new users in the background
-    nowfn = get_now_fn(request)
-    for invite in new_:
-        magic_link = generate_auth_link(invite.user_id, expiry=86_400 * 7, nowfn=nowfn)
-        tasks.add_task(
-            send_invite,
-            config.email.sender,
-            invite,
-            magic_link,
-            86_400 * 7,
-            new_ucr.silent,
-        )
+    if new_ucr.notify:
+        # Send emails to new users in the background
+        nowfn = get_now_fn(request)
+        for invite in new_:
+            magic_link = generate_auth_link(
+                invite.user_id, expiry=86_400 * 7, nowfn=nowfn
+            )
+            tasks.add_task(
+                send_invite,
+                config.email.sender,
+                invite,
+                magic_link,
+                86_400 * 7,
+                new_ucr.silent,
+            )
+    else:
+        print("Not sending emails")
 
     await request.state.authz.write_safe(grant=grants, revoke=revokes)
 

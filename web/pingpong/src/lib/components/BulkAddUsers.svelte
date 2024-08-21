@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import * as api from '$lib/api';
-  import { Select, Helper, Button, Label, Textarea, Hr } from 'flowbite-svelte';
+  import { Select, Helper, Button, Label, Textarea, Hr, Checkbox } from 'flowbite-svelte';
   import { writable } from 'svelte/store';
   import { sadToast } from '$lib/toast';
 
@@ -39,6 +39,8 @@
       sadToast('Role is required');
     }
 
+    const notify = d.notify === 'on';
+
     const request: api.CreateClassUsersRequest = {
       roles: emailList.map((e) => ({
         email: e,
@@ -47,7 +49,8 @@
           teacher: role === 'teacher',
           student: role === 'student'
         }
-      }))
+      })),
+      notify: notify
     };
 
     dispatch('submit', request);
@@ -88,6 +91,12 @@
       </ul>
     </Helper>
     <Select id="role" name="role" value={role} items={roles} />
+    <Helper helperClass="text-md font-normal rtl:text-right font-medium block">
+      Notify people
+    </Helper>
+    <Checkbox id="notify" name="notify" class="mt-1 text-sm font-normal"
+      >Send email invite to new users</Checkbox
+    >
   </div>
   <Hr />
   <div>
