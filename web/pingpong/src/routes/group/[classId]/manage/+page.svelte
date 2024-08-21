@@ -460,6 +460,7 @@
         {#if usersModalOpen}
           <Modal bind:open={usersModalOpen} title="Manage users">
             <BulkAddUsers
+              className={data.class.name}
               isPrivate={makePrivate}
               on:submit={submitCreateUsers}
               on:cancel={() => (usersModalOpen = false)}

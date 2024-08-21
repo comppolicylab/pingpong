@@ -6,7 +6,7 @@
   import { sadToast } from '$lib/toast';
 
   export let role: api.Role;
-
+  export let className: string = 'your group';
   export let isPrivate: boolean = false;
 
   const dispatch = createEventDispatcher();
@@ -95,7 +95,7 @@
       Notify people
     </Helper>
     <Checkbox id="notify" name="notify" class="mt-1 text-sm font-normal"
-      >Send email invite to new users</Checkbox
+      >Let users know they have access to {className} on PingPong</Checkbox
     >
   </div>
   <Hr />
