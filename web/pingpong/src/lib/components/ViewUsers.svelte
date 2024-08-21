@@ -53,14 +53,13 @@
    */
   export let thPad = 'px-3 py-2';
 
-  const rolePermissions: Record<string, number> = {
+  const rolePermissions: Record<Role, number> = {
     admin: 3,
     teacher: 2,
-    student: 1,
-    'no-access': 0
+    student: 1
   };
 
-  export let currentUserRole: Role | 'no-access' = 'no-access';
+  export let currentUserRole: Role | null = null;
   export let currentUserId: number | null = null;
 
   /**
@@ -69,8 +68,10 @@
    * @param role The role of the user to check.
    * @returns True if the current user can edit the role, false otherwise.
    */
-  const checkUserEditPermissions = (role: string) => {
-    return rolePermissions[role] <= rolePermissions[currentUserRole];
+  const checkUserEditPermissions = (role: Role | null) => {
+    let currentPermissionLevel = currentUserRole ? rolePermissions[currentUserRole] : 0;
+    let editPermissionLevel = role ? rolePermissions[role] : 0;
+    return editPermissionLevel <= currentPermissionLevel;
   };
 
   const isCurrentUser = (user: ClassUser) => {
@@ -84,7 +85,7 @@
       name: ROLE_LABELS[role]
     })),
     // Need a value for "no access" role, dropdown defaults to Select a Role otherwise
-    { value: 'no-access', name: 'No Access' }
+    { value: null, name: 'No Access' }
   ];
 
   // Whether a request is in flight.
@@ -177,7 +178,7 @@
     const primary = priorityRoles.find((role) => user.roles[role]);
     const other = priorityRoles.filter((role) => user.roles[role] && role !== primary);
     return {
-      primary: primary || 'no-access',
+      primary: primary || null,
       label: primary ? ROLE_LABELS[primary] : 'No Access',
       other,
       otherLabels: other.map((role) => ROLE_LABELS[role])
@@ -238,9 +239,7 @@
     const formData = new FormData(form);
     const d = Object.fromEntries(formData.entries());
     let role: Role | null = null;
-    if (d.role.toString() !== 'no-access') {
-      role = d.role.toString() as Role;
-    }
+    role = (d.role.toString() as Role) || null;
     const userId = parseInt(d.user_id.toString(), 10);
 
     if (!d.user_id) {
@@ -371,7 +370,7 @@
                     on:change={submitParentForm}
                   />
                 </form>
-                {#if roleInfo.primary === 'no-access'}
+                {#if !roleInfo.primary}
                   <div class="text-xs whitespace-normal font-light text-pretty text-gray-500 mt-2">
                     * This user is not assigned to any role currently.
                   </div>

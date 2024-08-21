@@ -57,7 +57,7 @@
     dispatch('submit', request);
   };
 
-  const roles = api.ROLES.filter((role) => role != 'admin').map((role) => ({
+  const roles = api.ROLES.filter((role) => role !== 'admin').map((role) => ({
     value: role,
     name: api.ROLE_LABELS[role]
   }));

@@ -138,13 +138,14 @@
   $: canManageClassUsers = !!data?.grants?.canManageUsers;
   $: canUploadClassFiles = !!data?.grants?.canUploadClassFiles;
   $: canViewApiKey = !!data?.grants?.canViewApiKey;
+  let currentUserRole: api.Role | null = null;
   $: currentUserRole = data.grants?.isAdmin
     ? 'admin'
     : data.grants?.isTeacher
       ? 'teacher'
       : data.grants?.isStudent
         ? 'student'
-        : ('no-access' as api.Role) || 'no-access';
+        : null;
 
   // Handle file deletion.
   const removeFile = async (evt: CustomEvent<FileUploadInfo>) => {
