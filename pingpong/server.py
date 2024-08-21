@@ -1770,7 +1770,6 @@ async def create_user_file(
             status_code=413,
             detail=f"File too large. Max size is {humanize.naturalsize(config.upload.private_file_max_size)}.",
         )
-
     return await handle_create_file(
         request.state.db,
         request.state.authz,

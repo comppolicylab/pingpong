@@ -1,3 +1,4 @@
+import asyncio
 import openai
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.exc import IntegrityError
@@ -73,20 +74,113 @@ async def handle_create_file(
         uploader_id (int): Uploader ID
         private (bool): File privacy
     """
-    if not _is_supported(upload.content_type.lower()):
+    content_type = upload.content_type.lower()
+
+    if not _is_supported(content_type):
         raise HTTPException(
             status_code=403, detail="File type not supported for File Search by OpenAI!"
         )
 
-    new_f = await oai_client.files.create(
-        # NOTE(jnu): the client tries to infer the filename, which doesn't
-        # work on this file that exists as bytes in memory. There's an
-        # undocumented way to specify name, content, and content_type which
-        # we use here to force correctness.
-        # https://github.com/stanford-policylab/pingpong/issues/147
-        file=(upload.filename, upload.file, upload.content_type),
-        purpose=purpose,
-    )
+    if purpose == "multimodal":
+        tasks: list[asyncio.Task[FileSchema]] = []
+        if _is_vision_supported(content_type):
+            tasks.append(
+                asyncio.create_task(
+                    handle_create_file(
+                        session,
+                        authz,
+                        oai_client,
+                        upload=upload,
+                        class_id=class_id,
+                        uploader_id=uploader_id,
+                        private=private,
+                        purpose="vision",
+                    ),
+                    name="vision_upload",
+                )
+            )
+
+        # There is a case where the file is vision supported but not file search or code interpreter supported
+        # image/webp is an example of this case
+        if _is_fs_supported(content_type) or _is_ci_supported(content_type):
+            tasks.append(
+                asyncio.create_task(
+                    handle_create_file(
+                        session,
+                        authz,
+                        oai_client,
+                        upload=upload,
+                        class_id=class_id,
+                        uploader_id=uploader_id,
+                        private=private,
+                        purpose="assistants",
+                    ),
+                    name="assistants_upload",
+                )
+            )
+
+        await asyncio.gather(*tasks)
+        new_v_file, new_f_file = (
+            next(
+                (task.result() for task in tasks if task.get_name() == "vision_upload"),
+                None,
+            ),
+            next(
+                (
+                    task.result()
+                    for task in tasks
+                    if task.get_name() == "assistants_upload"
+                ),
+                None,
+            ),
+        )
+
+        primary_file = new_f_file if new_f_file else new_v_file
+
+        # Always true, as we have checked _is_supported
+        if not primary_file:
+            raise HTTPException(
+                status_code=500,
+                detail="File not uploaded, something went wrong!",
+            )
+
+        return FileSchema(
+            id=primary_file.id,
+            name=primary_file.name,
+            content_type=primary_file.content_type,
+            file_id=primary_file.file_id,
+            vision_obj_id=new_v_file.id if new_v_file and new_f_file else None,
+            file_search_file_id=primary_file.file_id
+            if _is_fs_supported(content_type)
+            else None,
+            code_interpreter_file_id=primary_file.file_id
+            if _is_ci_supported(content_type)
+            else None,
+            vision_file_id=new_v_file.file_id if new_v_file else None,
+            class_id=primary_file.class_id,
+            private=primary_file.private,
+            uploader_id=primary_file.uploader_id,
+            created=primary_file.created,
+            updated=primary_file.updated,
+        )
+
+    try:
+        new_f = await oai_client.files.create(
+            # NOTE(jnu): the client tries to infer the filename, which doesn't
+            # work on this file that exists as bytes in memory. There's an
+            # undocumented way to specify name, content, and content_type which
+            # we use here to force correctness.
+            # https://github.com/stanford-policylab/pingpong/issues/147
+            file=(upload.filename.lower(), upload.file, upload.content_type),
+            purpose=purpose,
+        )
+    except openai.BadRequestError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=e.response.json()
+            .get("error", {})
+            .get("message", "OpenAI rejected this request"),
+        )
 
     data = {
         "file_id": new_f.id,
@@ -106,6 +200,15 @@ async def handle_create_file(
             name=f.name,
             content_type=f.content_type,
             file_id=f.file_id,
+            file_search_file_id=f.file_id
+            if _is_fs_supported(content_type) and purpose == "assistants"
+            else None,
+            code_interpreter_file_id=f.file_id
+            if _is_ci_supported(content_type) and purpose == "assistants"
+            else None,
+            vision_file_id=f.file_id
+            if _is_vision_supported(content_type) and purpose == "vision"
+            else None,
             class_id=f.class_id,
             private=f.private,
             uploader_id=f.uploader_id,
@@ -348,7 +451,28 @@ FILE_TYPES = [
 
 _SUPPORTED_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES}
 
+_IMG_SUPPORTED_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES if ft.vision}
+
+_FS_SUPPORTED_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES if ft.file_search}
+
+_CI_SUPPORTED_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES if ft.code_interpreter}
+
 
 def _is_supported(content_type: str) -> bool:
     """Check if the content type is supported."""
     return content_type in _SUPPORTED_TYPE
+
+
+def _is_vision_supported(content_type: str) -> bool:
+    """Check if the content type is supported for vision."""
+    return content_type in _IMG_SUPPORTED_TYPE
+
+
+def _is_fs_supported(content_type: str) -> bool:
+    """Check if the content type is supported for file search."""
+    return content_type in _FS_SUPPORTED_TYPE
+
+
+def _is_ci_supported(content_type: str) -> bool:
+    """Check if the content type is supported for code interpreter."""
+    return content_type in _CI_SUPPORTED_TYPE
