@@ -119,7 +119,7 @@
     (model) => model.id
   );
   $: supportsVision = supportVisionModels.includes(selectedModel);
-  $: allowVisionUpload = !!data?.grants?.isSupervisor;
+  $: allowVisionUpload = true;
   $: asstFSFiles = [...data.files, ...allFSPrivateFiles];
   $: asstCIFiles = [...data.files, ...allCIPrivateFiles];
 
@@ -658,6 +658,7 @@
             code_interpreter: false,
             vision: false
           })}
+          maxSize={data.uploadInfo.class_file_max_size}
           maxCount={fileSearchMetadata.max_count}
           uploadType="File Search"
           on:error={(e) => sadToast(e.detail.message)}
@@ -689,6 +690,7 @@
             code_interpreter: true,
             vision: false
           })}
+          maxSize={data.uploadInfo.class_file_max_size}
           maxCount={codeInterpreterMetadata.max_count}
           uploadType="Code Interpreter"
           on:error={(e) => sadToast(e.detail.message)}

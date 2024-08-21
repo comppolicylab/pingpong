@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Annotated, Any
 import jwt
 import openai
+import humanize
 from fastapi import (
     BackgroundTasks,
     Depends,
@@ -28,6 +29,7 @@ import pingpong.models as models
 import pingpong.schemas as schemas
 from .auth import authn_method_for_email
 from .template import email_template as message_template
+from .time import convert_seconds
 from .saml import get_saml2_client, get_saml2_settings, get_saml2_attrs
 
 from .ai import (
@@ -362,6 +364,7 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
             "type": "login link",
             "cta": "Login to PingPong",
             "underline": "",
+            "expires": convert_seconds(login_config.expiry),
             "link": magic_link,
             "email": email,
             "legal_text": "because you requested a login link from PingPong",
@@ -910,7 +913,104 @@ async def add_users_to_class(
     request: Request,
     tasks: BackgroundTasks,
 ):
-    return await add_new_users(class_id, new_ucr, request=request, tasks=tasks)
+    cid = int(class_id)
+    class_ = await models.Class.get_by_id(request.state.db, cid)
+    result: list[schemas.UserClassRole] = []
+    new_: list[schemas.CreateInvite] = []
+
+    grants = list[Relation]()
+    revokes = list[Relation]()
+
+    is_admin = await request.state.authz.test(
+        f"user:{request.state.session.user.id}", "admin", f"class:{class_id}"
+    )
+
+    formatted_roles = {
+        "admin": "an Administrator",
+        "teacher": "a Moderator",
+        "student": "a Member",
+    }
+
+    user_display_name = await models.User.get_display_name(
+        request.state.db, request.state.session.user.id
+    )
+
+    for ucr in new_ucr.roles:
+        if not is_admin and ucr.roles.admin:
+            raise HTTPException(
+                status_code=403, detail="Lacking permission to add admins"
+            )
+
+        if not is_admin and ucr.roles.teacher:
+            raise HTTPException(
+                status_code=403, detail="Lacking permission to add teachers"
+            )
+
+        user = await models.User.get_or_create_by_email(request.state.db, ucr.email)
+        if is_admin and user.id == request.state.session.user.id:
+            if not ucr.roles.admin:
+                raise HTTPException(
+                    status_code=403, detail="Cannot demote yourself from admin"
+                )
+
+        existing = await models.UserClassRole.get(request.state.db, user.id, cid)
+        new_roles = []
+        for role in ["admin", "teacher", "student"]:
+            if getattr(ucr.roles, role):
+                grants.append((f"user:{user.id}", role, f"class:{cid}"))
+                new_roles.append(formatted_roles[role])
+            else:
+                revokes.append((f"user:{user.id}", role, f"class:{cid}"))
+
+        if existing:
+            result.append(
+                schemas.UserClassRole(
+                    user_id=existing.user_id,
+                    class_id=existing.class_id,
+                    roles=ucr.roles,
+                )
+            )
+            request.state.db.add(existing)
+        else:
+            # Make sure the user exists...
+            added = await models.UserClassRole.create(
+                request.state.db,
+                user.id,
+                cid,
+            )
+            new_.append(
+                schemas.CreateInvite(
+                    user_id=user.id,
+                    email=user.email,
+                    class_name=class_.name,
+                    inviter_name=user_display_name,
+                    formatted_role=", ".join(new_roles) if new_roles else None,
+                )
+            )
+            result.append(
+                schemas.UserClassRole(
+                    user_id=added.user_id,
+                    class_id=added.class_id,
+                    roles=ucr.roles,
+                )
+            )
+
+    # Send emails to new users in the background
+    nowfn = get_now_fn(request)
+    for invite in new_:
+        magic_link = generate_auth_link(invite.user_id, expiry=86_400 * 7, nowfn=nowfn)
+        tasks.add_task(
+            send_invite,
+            config.email.sender,
+            invite,
+            magic_link,
+            86_400 * 7,
+            new_ucr.silent,
+        )
+
+    await request.state.authz.write_safe(grant=grants, revoke=revokes)
+
+    return {"roles": result}
 
 
 @v1.put(
@@ -1128,9 +1228,27 @@ async def list_class_models(
             "supports_vision": False,
             "description": "The latest GPT-3.5 Turbo model. Choose the more capable GPT-4o Mini model instead.",
         },
+        "chatgpt-4o-latest": {
+            "name": "chatgpt-4o-latest",
+            "sort_order": 8,
+            "is_latest": False,
+            "is_new": True,
+            "highlight": False,
+            "supports_vision": True,
+            "description": "Dynamic model continuously updated to the current version of GPT-4o in ChatGPT. Intended for research and evaluation. Not recommended for critical projects or experiences, as it's not optimized for API usage (eg. function calling, instruction following).",
+        },
+        "gpt-4o-2024-08-06": {
+            "name": "gpt-4o-2024-08-06",
+            "sort_order": 6,
+            "is_latest": False,
+            "is_new": True,
+            "highlight": False,
+            "supports_vision": True,
+            "description": "Latest GPT-4o model snapshot. GPT-4o (Latest) points to gpt-4o-2024-05-13 and not this snapshot yet.",
+        },
         "gpt-4o-2024-05-13": {
             "name": "gpt-4o-2024-05-13",
-            "sort_order": 5,
+            "sort_order": 7,
             "is_latest": False,
             "is_new": False,
             "highlight": False,
@@ -1139,16 +1257,16 @@ async def list_class_models(
         },
         "gpt-4o-mini-2024-07-18": {
             "name": "gpt-4o-mini-2024-07-18",
-            "sort_order": 6,
+            "sort_order": 5,
             "is_latest": False,
-            "is_new": False,
+            "is_new": True,
             "highlight": False,
             "supports_vision": True,
             "description": "GPT-4o Mini initial release version.",
         },
         "gpt-4-turbo-2024-04-09": {
             "name": "gpt-4-turbo-2024-04-09",
-            "sort_order": 7,
+            "sort_order": 9,
             "is_latest": False,
             "is_new": False,
             "highlight": False,
@@ -1157,7 +1275,7 @@ async def list_class_models(
         },
         "gpt-4-0125-preview": {
             "name": "gpt-4-0125-preview",
-            "sort_order": 8,
+            "sort_order": 10,
             "is_latest": False,
             "is_new": False,
             "highlight": False,
@@ -1166,7 +1284,7 @@ async def list_class_models(
         },
         "gpt-4-1106-preview": {
             "name": "gpt-4-1106-preview",
-            "sort_order": 9,
+            "sort_order": 11,
             "is_latest": False,
             "is_new": False,
             "highlight": False,
@@ -1175,7 +1293,7 @@ async def list_class_models(
         },
         "gpt-3.5-turbo-0125": {
             "name": "gpt-3.5-turbo-0125",
-            "sort_order": 10,
+            "sort_order": 12,
             "is_latest": False,
             "is_new": False,
             "highlight": False,
@@ -1184,7 +1302,7 @@ async def list_class_models(
         },
         "gpt-3.5-turbo-1106": {
             "name": "gpt-3.5-turbo-1106",
-            "sort_order": 11,
+            "sort_order": 13,
             "is_latest": False,
             "is_new": False,
             "highlight": False,
@@ -1807,7 +1925,7 @@ async def create_file(
     if upload.size > config.upload.class_file_max_size:
         raise HTTPException(
             status_code=413,
-            detail=f"File too large. Max size is {config.upload.class_file_max_size} bytes.",
+            detail=f"File too large. Max size is {humanize.naturalsize(config.upload.private_file_max_size)}.",
         )
 
     return await handle_create_file(
@@ -1837,9 +1955,8 @@ async def create_user_file(
     if upload.size > config.upload.private_file_max_size:
         raise HTTPException(
             status_code=413,
-            detail=f"File too large. Max size is {config.upload.private_file_max_size} bytes.",
+            detail=f"File too large. Max size is {humanize.naturalsize(config.upload.private_file_max_size)}.",
         )
-
     return await handle_create_file(
         request.state.db,
         request.state.authz,

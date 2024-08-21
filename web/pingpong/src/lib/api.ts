@@ -331,6 +331,10 @@ export type ServerFile = {
   id: number;
   name: string;
   file_id: string;
+  vision_obj_id: number | null;
+  file_search_file_id: string | null;
+  code_interpreter_file_id: string | null;
+  vision_file_id: string | null;
   content_type: string;
   class_id: number;
   private: boolean | null;
@@ -902,7 +906,7 @@ export interface UploadOptions {
   onProgress?: (percent: number) => void;
 }
 
-export type FileUploadPurpose = 'assistants' | 'vision';
+export type FileUploadPurpose = 'assistants' | 'vision' | 'multimodal';
 
 /**
  * Upload a file to a class.
@@ -930,7 +934,9 @@ export const uploadUserFile = (
  * File upload error.
  */
 export interface FileUploadFailure {
-  error: string;
+  error: {
+    detail: string;
+  };
 }
 
 /**
@@ -1015,7 +1021,9 @@ const _doUpload = (
           resolve(info.response);
         } else {
           info.state = 'error';
-          info.response = { error: xhr.responseText };
+          info.response = {
+            error: xhr.responseText ? JSON.parse(xhr.responseText) : { detail: '' }
+          };
           reject(info.response);
         }
       }

@@ -1,0 +1,186 @@
+name: Push New Release to AWS
+run-name: "${{ github.event.release.prerelease && 'Staging' || 'Production' }}: Release ${{ github.event.release.tag_name }} on AWS"
+concurrency: release
+
+on:
+  release:
+    types: [published, released]
+jobs:
+  release:
+    name: Build and Push/Tag Docker Images for Release
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release code at tag commit
+        uses: actions/checkout@v4
+
+      - name: Parse version tag
+        run: |
+          # Get the release tag
+          RELEASE_TAG=${{ github.event.release.tag_name }}
+
+          # Parse the tag
+          if [[ $RELEASE_TAG =~ ^([0-9]+)-srv([0-9]+)-web([0-9]+)$ ]]; then
+            SRV_VERSION="${BASH_REMATCH[2]}"
+            WEB_VERSION="${BASH_REMATCH[3]}"
+
+            # Set GitHub environment variables
+            echo "SRV_VERSION=v${SRV_VERSION}" >> $GITHUB_ENV
+            echo "WEB_VERSION=v${WEB_VERSION}" >> $GITHUB_ENV
+          else
+            echo "Error: Invalid tag format"
+            exit 1
+          fi
+        shell: bash
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@0e613a0980cbf65ed5b322eb7a1e075d28913a83
+        with:
+          aws-access-key-id: ${{ secrets.PINGPONG_AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.PINGPONG_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@cef2380b0d4c6813048ef6e1f7fd9ec1639bd3b5
+
+      - name: Check if Server image exists
+        env:
+          ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
+        run: |
+          REGISTRY_ID="${{ vars.PINGPONG_REGISTRY_ENDPOINT }}"
+          REGISTRY_ID=${REGISTRY_ID%%.*}
+          echo "REGISTRY_ID=$REGISTRY_ID" >> $GITHUB_ENV
+
+          # Check if the image with SRV_VERSION tag exists
+          if aws ecr describe-images --repository-name ${{ vars.PINGPONG_SRV_REPO }} --registry-id $REGISTRY_ID --image-ids imageTag=${{ env.SRV_VERSION }} >/dev/null 2>&1; then
+            if grep -q ${{ env.ENVIRONMENT }} <<< $(aws ecr describe-images --repository-name ${{ vars.PINGPONG_SRV_REPO }} --registry-id $REGISTRY_ID --image-ids imageTag=${{ env.SRV_VERSION }}); then
+              echo "SRV_IMAGE_STATUS=EXISTS_WITH_ENV_TAG" >> $GITHUB_ENV
+              echo "Server Image with tag ${{ env.SRV_VERSION }} exists and has the ${{ env.ENVIRONMENT }} tag in the ECR repository."
+            else
+              echo "SRV_IMAGE_STATUS=EXISTS_WITHOUT_ENV_TAG" >> $GITHUB_ENV
+              echo "Server Image with tag ${{ env.SRV_VERSION }} exists but does not have the ${{ env.ENVIRONMENT }} tag in the ECR repository."
+            fi
+          else
+            echo "SRV_IMAGE_STATUS=DOES_NOT_EXIST" >> $GITHUB_ENV
+            echo "Server Image with tag ${{ env.SRV_VERSION }} does not exist in the ECR repository."
+          fi
+        shell: bash
+
+      - name: Tag server image for release
+        env:
+          ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
+        if: ${{ env.SRV_IMAGE_STATUS == 'EXISTS_WITHOUT_ENV_TAG' }}
+        run: |
+          MANIFEST=$(aws ecr batch-get-image --repository-name ${{ vars.PINGPONG_SRV_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-ids imageTag=${{ env.SRV_VERSION }} --output text --query 'images[].imageManifest')
+          aws ecr put-image --repository-name ${{ vars.PINGPONG_SRV_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-tag ${{env.ENVIRONMENT}} --image-manifest "$MANIFEST"
+          echo "Tagged existing Server Image (${{ env.SRV_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
+
+      - name: Build server image for release
+        env:
+          ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
+          SRV_VERSION: ${{ env.SRV_VERSION }}
+        if: ${{ env.SRV_IMAGE_STATUS == 'DOES_NOT_EXIST' }}
+        run: |
+          echo "Building Server Image with tag ${{ env.SRV_VERSION }}"
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml build srv
+
+      - name: Push server image for release
+        env:
+          ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
+        if: ${{ env.SRV_IMAGE_STATUS == 'DOES_NOT_EXIST' }}
+        run: |
+          aws ecr get-login-password --region ${{ vars.AWS_REGION }} | docker login --username AWS --password-stdin ${{ vars.PINGPONG_REGISTRY_ENDPOINT }}
+          docker tag ${{ vars.PINGPONG_SRV_REGISTRY }}:${{ env.SRV_VERSION }} ${{ vars.PINGPONG_SRV_REGISTRY }}:${{ env.ENVIRONMENT }}
+          docker push ${{ vars.PINGPONG_SRV_REGISTRY }}:${{ env.SRV_VERSION }}
+          docker push ${{ vars.PINGPONG_SRV_REGISTRY }}:${{ env.ENVIRONMENT }}
+          echo "Built and pushed Server Image (${{ env.SRV_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
+
+      - name: Send Server Image tagged notification
+        if: ${{ env.SRV_IMAGE_STATUS != 'EXISTS_WITH_ENV_TAG' }}
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          GIPHY_API_KEY: ${{ secrets.GIPHY_API_KEY }}
+          ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
+        run: |
+          GIF=$(curl "https://api.giphy.com/v1/gifs/random?api_key=$GIPHY_API_KEY&tag=dog&rating=g" | python -c "import sys,json; print (json.load(sys.stdin)['data']['images']['downsized']['url'])")
+          TAGGED_MSG=":pingpong: *Retagged* existing *Server Image (${{ env.SRV_VERSION }})* with *${{ env.ENVIRONMENT }}* tag :tada:"
+          BUILT_MSG=":pingpong: *Built* and pushed *Server Image (${{ env.SRV_VERSION }})* with *${{ env.ENVIRONMENT }}* tag :tada:"
+          if [[ ${{ env.SRV_IMAGE_STATUS }} == 'DOES_NOT_EXIST' ]]; then
+            MSG=$BUILT_MSG
+          else
+            MSG=$TAGGED_MSG
+          fi
+
+          curl -X POST -H 'Content-Type: application/json' \
+            --data "{\"text\": \"$MSG\", \"blocks\": [{\"type\":\"section\", \"text\": {\"type\": \"mrkdwn\", \"text\": \"$MSG\"}}, {\"type\":\"image\",\"image_url\":\"$GIF\", \"alt_text\":\"dog\", \"title\": {\"type\":\"plain_text\", \"text\": \"success dog\"}}]}" \
+            $SLACK_WEBHOOK
+
+      - name: Check if Web image exists
+        env:
+          ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
+        run: |
+          # Check if the image with WEB_VERSION tag exists
+          if aws ecr describe-images --repository-name ${{ vars.PINGPONG_WEB_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-ids imageTag=${{ env.WEB_VERSION }} >/dev/null 2>&1; then
+            if grep -q ${{ env.ENVIRONMENT }} <<< $(aws ecr describe-images --repository-name ${{ vars.PINGPONG_WEB_REPO }} --registry-id $REGISTRY_ID --image-ids imageTag=${{ env.WEB_VERSION }}); then
+              echo "WEB_IMAGE_STATUS=EXISTS_WITH_ENV_TAG" >> $GITHUB_ENV
+              echo "Web Image with tag ${{ env.WEB_VERSION }} exists and has the ${{ env.ENVIRONMENT }} tag in the ECR repository."
+            else
+              echo "WEB_IMAGE_STATUS=EXISTS_WITHOUT_ENV_TAG" >> $GITHUB_ENV
+              echo "Web Image with tag ${{ env.WEB_VERSION }} exists but does not have the ${{ env.ENVIRONMENT }} tag in the ECR repository."
+            fi
+          else
+            echo "WEB_IMAGE_STATUS=DOES_NOT_EXIST" >> $GITHUB_ENV
+            echo "Web Image with tag ${{ env.WEB_VERSION }} does not exist in the ECR repository."
+          fi
+
+        shell: bash
+
+      - name: Tag web image for release
+        env:
+          ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
+        if: ${{ env.WEB_IMAGE_STATUS  == 'EXISTS_WITHOUT_ENV_TAG' }}
+        run: |
+          MANIFEST=$(aws ecr batch-get-image --repository-name ${{ vars.PINGPONG_WEB_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-ids imageTag=${{ env.WEB_VERSION }} --output text --query 'images[].imageManifest')
+          aws ecr put-image --repository-name ${{ vars.PINGPONG_WEB_REPO }} --registry-id ${{ env.REGISTRY_ID }} --image-tag ${{env.ENVIRONMENT}} --image-manifest "$MANIFEST"
+          echo "Tagged existing Web Image (${{ env.WEB_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
+
+      - name: Build web image for release
+        env:
+          ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
+          WEB_VERSION: ${{ env.WEB_VERSION }}
+        if: ${{ env.WEB_IMAGE_STATUS == 'DOES_NOT_EXIST' }}
+        run: |
+          echo "Building Web Image with tag ${{ env.WEB_VERSION }}"
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml build web
+
+      - name: Push web image for release
+        env:
+          ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
+        if: ${{ env.WEB_IMAGE_STATUS == 'DOES_NOT_EXIST' }}
+        run: |
+          aws ecr get-login-password --region ${{ vars.AWS_REGION }} | docker login --username AWS --password-stdin ${{ vars.PINGPONG_REGISTRY_ENDPOINT }}
+          docker tag ${{ vars.PINGPONG_WEB_REGISTRY }}:${{ env.WEB_VERSION }} ${{ vars.PINGPONG_WEB_REGISTRY }}:${{ env.ENVIRONMENT }}
+          docker push ${{ vars.PINGPONG_WEB_REGISTRY }}:${{ env.WEB_VERSION }}
+          docker push ${{ vars.PINGPONG_WEB_REGISTRY }}:${{ env.ENVIRONMENT }}
+          echo "Built and pushed Web Image (${{ env.WEB_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
+
+      - name: Send Web Image tagged notification
+        if: ${{ env.WEB_IMAGE_STATUS != 'EXISTS_WITH_ENV_TAG' }}
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          GIPHY_API_KEY: ${{ secrets.GIPHY_API_KEY }}
+          ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
+        run: |
+          GIF=$(curl "https://api.giphy.com/v1/gifs/random?api_key=$GIPHY_API_KEY&tag=cat&rating=g" | python -c "import sys,json; print (json.load(sys.stdin)['data']['images']['downsized']['url'])")
+          TAGGED_MSG=":pingpong: *Retagged* existing *Web Image (${{ env.WEB_VERSION }})* with *${{ env.ENVIRONMENT }}* tag :tada:"
+          BUILT_MSG=":pingpong: *Built* and pushed *Web Image (${{ env.WEB_VERSION }})* with *${{ env.ENVIRONMENT }}* tag :tada:"
+          if [[ ${{ env.WEB_IMAGE_STATUS }} == 'DOES_NOT_EXIST' ]]; then
+            MSG=$BUILT_MSG
+          else
+            MSG=$TAGGED_MSG
+          fi
+
+          curl -X POST -H 'Content-Type: application/json' \
+            --data "{\"text\": \"$MSG\", \"blocks\": [{\"type\":\"section\", \"text\": {\"type\": \"mrkdwn\", \"text\": \"$MSG\"}}, {\"type\":\"image\",\"image_url\":\"$GIF\", \"alt_text\":\"dog\", \"title\": {\"type\":\"plain_text\", \"text\": \"success cat\"}}]}" \
+            $SLACK_WEBHOOK

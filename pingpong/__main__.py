@@ -7,6 +7,8 @@ import click
 import alembic
 import alembic.command
 import alembic.config
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from .auth import encode_auth_token
 from .canvas import sync_all
@@ -33,6 +35,21 @@ def canvas() -> None:
     pass
 
 
+@auth.command("create_db_schema")
+def create_db_schema() -> None:
+    async def _make_db_schema() -> None:
+        engine = create_async_engine(
+            config.db.driver.async_uri,
+            echo=True,
+            isolation_level="AUTOCOMMIT",
+        )
+        async with engine.connect() as conn:
+            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS authz"))
+        await engine.dispose()
+
+    asyncio.run(_make_db_schema())
+
+
 @auth.command("make_root")
 @click.argument("email")
 def make_root(email: str) -> None:
@@ -40,6 +57,13 @@ def make_root(email: str) -> None:
         await config.authz.driver.init()
         async with config.db.driver.async_session() as session:
             user = await User.get_by_email(session, email)
+            if not user:
+                user = User(email=email)
+            user.super_admin = True
+            session.add(user)
+            await session.commit()
+            await session.refresh(user)
+
             async with config.authz.driver.get_client() as c:
                 await c.create_root_user(user.id)
 
@@ -90,7 +114,9 @@ def _load_alembic(alembic_config="alembic.ini") -> alembic.config.Config:
     """Load the Alembic config."""
     al_cfg = alembic.config.Config(alembic_config)
     # Use the Alembic config from `alembic.ini` but override the URL for the db
-    al_cfg.set_main_option("sqlalchemy.url", config.db.driver.sync_uri)
+    # If pw uses a % there will be an error thrown in the logs, so "escape" it.
+    clean_uri = config.db.driver.sync_uri.replace("%", "%%")
+    al_cfg.set_main_option("sqlalchemy.url", clean_uri)
     return al_cfg
 
 

@@ -256,7 +256,7 @@ email_template = Template("""
       <div class="mobile mobile-bg" style="width: 0; max-height: 0; overflow: hidden; display: none;">
          <div class="m-gutter">
             <p>$subtitle</p>
-            <p>This $type will expire in 7 days.</p>
+            <p>This $type will expire in $expires.</p>
             <p>
                <span style="white-space: nowrap;">
             <div><a href="$link" class="mobile-button-bg" style="display: flex; align-items: center; width: fit-content; row-gap: 8px; column-gap: 8px; font-size: 17px; line-height: 20px;font-weight: 500; border-radius: 9999px; padding: 8px 16px; color: white !important; flex-shrink: 0;">$cta<source srcset="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png"><img src="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png" width="17" height="17" class="hero-image" style="display: block;" border="0" alt="right pointing arrow"></a></div></span></p>
@@ -341,7 +341,7 @@ email_template = Template("""
                         <tr>
                            <td class="d1" align="left" valign="top" style="padding: 0;">
                               <p>$subtitle</p>
-                              <p>This $type will expire in 7 days.</p>
+                              <p>This $type will expire in $expires.</p>
                               <p>
                                  <span style="white-space: nowrap;">
                               <div><a href="$link" class="desktop-button-bg" style="display: flex; align-items: center; width: fit-content; row-gap: 8px; column-gap: 8px; font-size: 17px; line-height: 20px;font-weight: 500; border-radius: 9999px; padding: 8px 16px; color: white !important; background-color: rgb(252, 98, 77); flex-shrink: 0;">

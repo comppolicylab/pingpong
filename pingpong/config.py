@@ -229,7 +229,7 @@ SupportSettings = Union[DiscordSettings, NoSupportSettings]
 class UploadSettings(BaseSettings):
     """Settings for file uploads."""
 
-    private_file_max_size: int = Field(10 * 1024 * 1024)  # 10 MB
+    private_file_max_size: int = Field(512 * 1024 * 1024)  # 512 MB
     class_file_max_size: int = Field(512 * 1024 * 1024)  # 512 MB
 
 

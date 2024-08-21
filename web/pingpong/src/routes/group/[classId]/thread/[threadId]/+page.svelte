@@ -23,10 +23,10 @@
     EyeSlashOutline,
     EyeOutline,
     RefreshOutline,
-    DotsHorizontalOutline,
     CodeSolid,
     ImageSolid,
-    LockSolid
+    LockSolid,
+    CogOutline
   } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
@@ -44,19 +44,7 @@
   $: published = threadMgr.published;
   $: error = threadMgr.error;
   $: assistantId = threadMgr.assistantId;
-  let externalUserString: string = '';
-  $: {
-    const filtered = $participants.user
-      .filter((user_name) => user_name != 'Me')
-      .map((user_name) => user_name || 'Anonymous User');
-    if (filtered.length > 0) {
-      if (filtered.length === 1) {
-        externalUserString = ' and ' + filtered[0];
-      } else {
-        externalUserString = ', ' + filtered.slice(0, -1).join(', ') + ' and ' + filtered.slice(-1);
-      }
-    }
-  }
+  $: isCurrentUser = $participants.user.includes('Me');
   let supportsVision = false;
   $: {
     const supportVisionModels = (data.models.filter((model) => model.supports_vision) || []).map(
@@ -73,6 +61,15 @@
   // TODO - should figure this out by checking grants instead of participants
   $: canSubmit = !!$participants.user && $participants.user.includes('Me');
   $: assistantDeleted = !$assistantId && $assistantId === 0;
+  let useLatex = false;
+  $: {
+    const assistant = data.assistants.find((assistant) => assistant.id === $assistantId);
+    if (assistant) {
+      useLatex = assistant.use_latex || false;
+    } else {
+      console.warn(`Definition for assistant ${$assistantId} not found.`);
+    }
+  }
 
   // Get the name of the participant in the chat thread.
   const getName = (message: api.OpenAIMessage) => {
@@ -264,6 +261,8 @@
                     content.text,
                     api.fullPath(`/class/${classId}/thread/${threadId}`)
                   )}
+                  syntax={true}
+                  latex={useLatex}
                 />
               </div>
             {:else if content.type === 'code'}
@@ -391,35 +390,43 @@
           remove={handleRemove}
           on:submit={handleSubmit}
         />
-        <div
-          class="flex gap-2 px-4 py-2 items-center w-full text-sm flex-nowrap justify-between grow"
-        >
-          <div class="flex gap-1 grow shrink min-w-0 flex-wrap">
+        <div class="flex gap-2 px-4 py-2 items-center w-full text-sm justify-between grow">
+          <div class="flex gap-2 grow shrink min-w-0">
             {#if !$published && isPrivate}
-              <div
-                class="flex gap-2 px-4 py-2 items-center w-full text-sm flex-wrap lg:flex-nowrap"
+              <LockSolid size="sm" class="text-orange" />
+              <Span class="text-gray-400 text-xs font-normal"
+                >Moderators <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
+                  more information, please review <a
+                    href="/privacy-policy"
+                    rel="noopener noreferrer"
+                    class="underline">PingPong's privacy statement</a
+                  >.
+                {/if}Assistants can make mistakes. Check important info.</Span
               >
-                <LockSolid size="sm" class="text-orange" />
-                <Span class="text-gray-400 text-xs">This thread is only visible to you.</Span>
-              </div>
             {:else if !$published}
               <EyeSlashOutline size="sm" class="text-orange" />
-              <Span class="text-gray-400 text-xs whitespace-nowrap"
-                >This thread is visible to the moderation team{externalUserString
-                  ? `, yourself${externalUserString}`
-                  : ' and yourself'}.</Span
+              <Span class="text-gray-400 text-xs font-normal"
+                >Moderators can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
+                {#if isCurrentUser}For more information, please review <a
+                    href="/privacy-policy"
+                    rel="noopener noreferrer"
+                    class="underline">PingPong's privacy statement</a
+                  >.
+                {/if}Assistants can make mistakes. Check important info.</Span
               >
             {:else}
               <EyeOutline size="sm" class="text-orange" />
-              <Span class="text-gray-400 text-xs"
-                >This thread is visible to everyone in this group.</Span
+              <Span class="text-gray-400 text-xs font-normal"
+                >Everyone in this group can see this thread but not {isCurrentUser
+                  ? 'your'
+                  : "the user's"} name. Assistants can make mistakes. Check important info.</Span
               >
             {/if}
           </div>
 
           <div class="shrink-0 grow-0 h-auto">
-            <DotsHorizontalOutline
-              class="dots-menu dark:text-white cursor-pointer bg-white dark:bg-slate-700"
+            <CogOutline
+              class="dark:text-white cursor-pointer w-6 h-4 bg-white dark:bg-slate-700 font-light"
               size="lg"
             />
             <Dropdown>

@@ -1,10 +1,13 @@
-import { redirect } from '@sveltejs/kit';
+import { redirect, error } from '@sveltejs/kit';
 import * as api from '$lib/api';
 import type { LayoutLoad } from './$types';
 
 const LOGIN = '/login';
 const HOME = '/';
 const ONBOARDING = '/onboarding';
+const ABOUT = '/about';
+const PRIVACY_POLICY = '/privacy-policy';
+const EDU = '/eduaccess';
 
 /**
  * Load the current user and redirect if they are not logged in.
@@ -12,12 +15,26 @@ const ONBOARDING = '/onboarding';
 export const load: LayoutLoad = async ({ fetch, url }) => {
   // Fetch the current user
   const me = api.expandResponse(await api.me(fetch));
+
+  // If we can't even load `me` then the server is probably down.
+  // Redirect to the login page if we're not already there, just
+  // in case that will work. Otherwise, just show the error.
   if (me.error) {
-    redirect(302, LOGIN);
+    if (url.pathname !== LOGIN) {
+      redirect(302, LOGIN);
+    } else {
+      const errorObject = (me.error || {}) as { $status: number; detail: string };
+      const code = errorObject.$status || 500;
+      const message = errorObject.detail || 'An unknown error occurred.';
+      error(code, { message: `Error reaching the server: ${message}` });
+    }
   }
 
   const authed = me.data.status === 'valid';
   const needsOnboarding = !!me.data?.user && (!me.data.user.first_name || !me.data.user.last_name);
+
+  // If the page is public, don't redirect to the login page.
+  let isPublicPage = false;
 
   if (url.pathname === LOGIN) {
     // If the user is logged in, go to the home page.
@@ -25,9 +42,11 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
       redirect(302, HOME);
     }
   } else {
-    // If the user is not logged in, go to the login page.
-    if (!authed) {
-      redirect(302, LOGIN);
+    if (url.pathname === ABOUT || url.pathname === PRIVACY_POLICY || url.pathname === EDU) {
+      isPublicPage = true;
+    } else if (!authed) {
+      // If the user is not logged in, go to the About page.
+      redirect(302, ABOUT);
     } else {
       if (needsOnboarding && url.pathname !== ONBOARDING) {
         const destination = encodeURIComponent(`${url.pathname}${url.search}`);
@@ -74,6 +93,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   };
 
   return {
+    isPublicPage,
     needsOnboarding,
     me: me.data,
     authed,

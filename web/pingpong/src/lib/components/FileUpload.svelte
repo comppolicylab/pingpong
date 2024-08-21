@@ -20,9 +20,10 @@
     const newFiles: FileUploadInfo[] = [];
     toUpload.forEach((f) => {
       if (maxSize && f.size > maxSize) {
+        const maxUploadSize = humanSize(maxSize);
         dispatch('error', {
           file: f,
-          message: `<strong>Upload unsuccessful: File is too large</strong><br>Max size is ${maxSize} bytes.`
+          message: `<strong>Upload unsuccessful: File is too large</strong><br>Max size is ${maxUploadSize}.`
         });
         return;
       }
@@ -65,7 +66,10 @@
             }
             return existingFiles;
           });
-          dispatch('error', { file: f, message: `Could not upload file ${f.name}: ${error}.` });
+          dispatch('error', {
+            file: f,
+            message: `Could not upload file ${f.name}: ${error.error.detail || 'unknown error'}`
+          });
         });
 
       newFiles.push(fp);
@@ -114,12 +118,17 @@
 
 <script lang="ts">
   // Could also consider using CodeOutline, SearchOutline
-  import { FileCodeOutline, FileSearchOutline, ImageOutline } from 'flowbite-svelte-icons';
+  import {
+    FileCodeOutline,
+    FileSearchOutline,
+    ImageOutline,
+    PaperClipOutline
+  } from 'flowbite-svelte-icons';
   import { createEventDispatcher } from 'svelte';
   import { writable, type Writable } from 'svelte/store';
   import { Button } from 'flowbite-svelte';
   import type { FileUploader, FileUploadInfo, FileUploadPurpose } from '$lib/api';
-
+  import { humanSize } from '$lib/size';
   /**
    * Whether to allow uploading.
    */
@@ -145,7 +154,7 @@
   /**
    * Type of icon to display.
    */
-  export let type: 'file_search' | 'code_interpreter' | 'image' = 'file_search';
+  export let type: 'file_search' | 'code_interpreter' | 'image' | 'multimodal' = 'multimodal';
 
   /**
    * Max upload size in bytes.
@@ -269,8 +278,10 @@
           <FileSearchOutline size="md" />
         {:else if type === 'image'}
           <ImageOutline size="md" />
-        {:else}
+        {:else if type === 'code_interpreter'}
           <FileCodeOutline size="md" />
+        {:else}
+          <PaperClipOutline size="md" />
         {/if}
       </slot>
     </Button>
