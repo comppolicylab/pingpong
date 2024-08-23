@@ -499,7 +499,7 @@
       >
       <div class="flex flex-row gap-2">
         <DropdownContainer bind:dropdownOpen placeholder={selectedModelName}>
-          <DropdownHeader order={2} colorClasses="from-orange-dark to-orange" topHeader
+          <DropdownHeader order={1} colorClasses="from-orange-dark to-orange" topHeader
             >Latest Models</DropdownHeader
           >
           <ModelDropdownOptions
@@ -509,7 +509,7 @@
             {allowVisionUpload}
             bind:modelNodes
           />
-          <DropdownHeader order={3} colorClasses="from-blue-dark-40 to-blue-dark-30"
+          <DropdownHeader order={2} colorClasses="from-blue-dark-40 to-blue-dark-30"
             >Pinned Models</DropdownHeader
           >
           <ModelDropdownOptions
