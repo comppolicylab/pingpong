@@ -73,12 +73,12 @@ class AddNewUsers(ABC):
     async def _check_permissions(self, ucr: schemas.UserClassRole):
         if not self.is_admin and ucr.roles.admin:
             raise HTTPException(
-                status_code=403, detail="Lacking permission to add admins"
+                status_code=403, detail="Lacking permission to add Administrators."
             )
 
-        if not self.is_admin and ucr.roles.teacher:
+        if not self.is_supervisor and ucr.roles.teacher:
             raise HTTPException(
-                status_code=403, detail="Lacking permission to add moderators"
+                status_code=403, detail="Lacking permission to add Moderators."
             )
 
     async def _update_user_enrollment(
@@ -168,6 +168,10 @@ class AddNewUsers(ABC):
             f"user:{self.user_id}", "admin", f"class:{self.class_id}"
         )
 
+        self.is_supervisor = await self.client.test(
+            f"user:{self.user_id}", "supervisor", f"class:{self.class_id}"
+        )
+
         if not self.new_ucr.silent:
             self.invite_config = await self._init_invites()
 
@@ -182,14 +186,14 @@ class AddNewUsers(ABC):
 
             if self.new_ucr.lms_tenant:
                 self.newly_synced.append(user.id)
-            if self.is_admin and user.id == self.user_id:
+            if user.id == self.user_id:
                 # We don't want an LMS sync to change the roles of the user who initiated it
                 if self.new_ucr.lms_tenant:
                     continue
                 # If the user is an admin, they can't demote themselves
-                elif not ucr.roles.admin:
+                else:
                     raise HTTPException(
-                        status_code=403, detail="Cannot demote yourself from admin"
+                        status_code=403, detail="You cannot change your own role."
                     )
 
             # Check if the user is already enrolled in the class

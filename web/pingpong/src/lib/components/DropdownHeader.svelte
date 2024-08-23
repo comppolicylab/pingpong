@@ -11,7 +11,7 @@
 </script>
 
 <div
-  class="sticky {name} top-0 z-{(order + 1) * 10} bg-gradient-to-r {colorClasses} drop-shadow-md"
+  class="sticky {name} top-0 z-{(order + 2) * 10} bg-gradient-to-r {colorClasses} drop-shadow-md"
 >
   {#if topHeader}
     <div class="absolute inset-x-0 -top-96 h-96 bg-gradient-to-r {colorClasses}"></div>

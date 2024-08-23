@@ -260,7 +260,6 @@ export type UserClassRole = {
  */
 export type UserClassRoles = {
   roles: UserClassRole[];
-  silent: boolean;
 };
 
 /**
@@ -1142,6 +1141,7 @@ export type CreateClassUserRequest = {
  */
 export type CreateClassUsersRequest = {
   roles: CreateClassUserRequest[];
+  silent: boolean;
 };
 
 /**

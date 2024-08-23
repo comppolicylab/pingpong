@@ -53,6 +53,7 @@
   import { page } from '$app/stores';
   import DropdownContainer from '$lib/components/DropdownContainer.svelte';
   import CanvasClassDropdownOptions from '$lib/components/CanvasClassDropdownOptions.svelte';
+  import PermissionsTable from '$lib/components/PermissionsTable.svelte';
 
   /**
    * Application data.
@@ -179,6 +180,14 @@
   $: canManageClassUsers = !!data?.grants?.canManageUsers;
   $: canUploadClassFiles = !!data?.grants?.canUploadClassFiles;
   $: canViewApiKey = !!data?.grants?.canViewApiKey;
+  let currentUserRole: api.Role | null;
+  $: currentUserRole = data.grants?.isAdmin
+    ? 'admin'
+    : data.grants?.isTeacher
+      ? 'teacher'
+      : data.grants?.isStudent
+        ? 'student'
+        : null;
 
   // Handle file deletion.
   const removeFile = async (evt: CustomEvent<FileUploadInfo>) => {
@@ -453,6 +462,37 @@
     trashFiles.set([]);
     invalidateAll();
   });
+
+  $: permissions = [
+    { name: 'View personal or published assistants', member: true, moderator: true },
+    {
+      name: 'Create a thread and view personal or published threads',
+      member: true,
+      moderator: true
+    },
+    {
+      name: 'Create an assistant',
+      member: !!data?.class.any_can_create_assistant || false,
+      moderator: true
+    },
+    {
+      name: 'Publish an assistant for others to chat with',
+      member: !!data?.class.any_can_publish_assistant || false,
+      moderator: true
+    },
+    { name: 'Publish a thread for others to view', member: anyCanPublishThread, moderator: true },
+    {
+      name: 'View unpublished assistants created by others',
+      member: false,
+      moderator: !makePrivate
+    },
+    {
+      name: 'View unpublished threads created by others (anonymized)',
+      member: false,
+      moderator: !makePrivate
+    },
+    { name: 'Manage group information and user list', member: false, moderator: true }
+  ];
 </script>
 
 <div
@@ -518,7 +558,7 @@
             name="any_can_publish_thread"
             disabled={$updatingClass}
             on:change={submitParentForm}
-            checked={anyCanPublishThread}>Allow members to publish threads</Checkbox
+            bind:checked={anyCanPublishThread}>Allow members to publish threads</Checkbox
           >
         </div>
 
@@ -535,6 +575,12 @@
           on:change={submitParentForm}
           disabled={$updatingClass}
         />
+
+        <div></div>
+
+        <div class="col-span-2">
+          <PermissionsTable {permissions} />
+        </div>
       </div>
     </form>
   {/if}
@@ -908,7 +954,7 @@
           <!-- Update the user view when we finish batch adding users. -->
           <!-- Uses a variable for times users have been bulk added -->
           {#key timesAdded}
-            <ViewUsers {fetchUsers} {classId} />
+            <ViewUsers {fetchUsers} {classId} currentUserId={data.me.user?.id} {currentUserRole} />
           {/key}
         </div>
         <div class="flex flex-row justify-between">
@@ -937,8 +983,10 @@
           {/if}
         </div>
         {#if usersModalOpen}
-          <Modal bind:open={usersModalOpen} title="Manage users">
+          <Modal bind:open={usersModalOpen} title="Invite new users">
             <BulkAddUsers
+              {permissions}
+              className={data.class.name}
               isPrivate={makePrivate}
               on:submit={submitCreateUsers}
               on:cancel={() => (usersModalOpen = false)}
