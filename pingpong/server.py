@@ -785,7 +785,7 @@ async def get_canvas_classes(class_id: str, tenant: str, request: Request):
 
 
 @v1.post(
-    "/class/{class_id}/canvas/{tenant}/classes/{canvas_class_id}/link",
+    "/class/{class_id}/canvas/{tenant}/classes/{canvas_class_id}",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
@@ -803,7 +803,7 @@ async def update_canvas_class(
 
 
 @v1.post(
-    "/class/{class_id}/canvas/{tenant}/classes/sync",
+    "/class/{class_id}/canvas/{tenant}/sync",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )

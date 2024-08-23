@@ -1781,12 +1781,12 @@ export const saveCanvasClass = async (
   tenant: string,
   canvasClassId: string
 ) => {
-  const url = `class/${classId}/canvas/${tenant}/classes/${canvasClassId}/link`;
+  const url = `class/${classId}/canvas/${tenant}/classes/${canvasClassId}`;
   return await POST<never, GenericStatus>(f, url);
 };
 
 export const syncCanvasClass = async (f: Fetcher, classId: number, tenant: string) => {
-  const url = `class/${classId}/canvas/${tenant}/classes/sync`;
+  const url = `class/${classId}/canvas/${tenant}/sync`;
   return await POST<never, GenericStatus>(f, url);
 };
 
