@@ -736,6 +736,9 @@ async def add_users_to_class(
     is_admin = await request.state.authz.test(
         f"user:{request.state.session.user.id}", "admin", f"class:{class_id}"
     )
+    is_supervisor = await request.state.authz.test(
+        f"user:{request.state.session.user.id}", "supervisor", f"class:{class_id}"
+    )
 
     formatted_roles = {
         "admin": "an Administrator",
@@ -750,20 +753,20 @@ async def add_users_to_class(
     for ucr in new_ucr.roles:
         if not is_admin and ucr.roles.admin:
             raise HTTPException(
-                status_code=403, detail="Lacking permission to add admins"
+                status_code=403, detail="Lacking permission to add Administrators."
             )
 
-        if not is_admin and ucr.roles.teacher:
+        # This should never happen, but just in case...
+        if not is_supervisor and ucr.roles.teacher:
             raise HTTPException(
-                status_code=403, detail="Lacking permission to add teachers"
+                status_code=403, detail="Lacking permission to add Moderators."
             )
 
         user = await models.User.get_or_create_by_email(request.state.db, ucr.email)
-        if is_admin and user.id == request.state.session.user.id:
-            if not ucr.roles.admin:
-                raise HTTPException(
-                    status_code=403, detail="Cannot demote yourself from admin"
-                )
+        if user.id == request.state.session.user.id:
+            raise HTTPException(
+                status_code=403, detail="You cannot change your own role."
+            )
 
         existing = await models.UserClassRole.get(request.state.db, user.id, cid)
         new_roles = []
