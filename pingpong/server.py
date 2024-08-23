@@ -807,7 +807,7 @@ async def add_users_to_class(
                 )
             )
 
-    if new_ucr.notify:
+    if not new_ucr.silent:
         # Send emails to new users in the background
         nowfn = get_now_fn(request)
         for invite in new_:

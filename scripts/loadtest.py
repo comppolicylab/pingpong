@@ -209,7 +209,7 @@ class TestInstance:
                     }
                     for i in range(num_users)
                 ],
-                "notify": False,
+                "silent": True,
             },
         )
         self._ctr += num_users

@@ -1126,7 +1126,7 @@ export type CreateClassUserRequest = {
  */
 export type CreateClassUsersRequest = {
   roles: CreateClassUserRequest[];
-  notify: boolean;
+  silent: boolean;
 };
 
 /**

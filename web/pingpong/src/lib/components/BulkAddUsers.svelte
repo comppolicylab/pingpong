@@ -39,7 +39,7 @@
       sadToast('Role is required');
     }
 
-    const notify = d.notify === 'on';
+    const silent = d.notify !== 'on';
 
     const request: api.CreateClassUsersRequest = {
       roles: emailList.map((e) => ({
@@ -50,7 +50,7 @@
           student: role === 'student'
         }
       })),
-      notify: notify
+      silent: silent
     };
 
     dispatch('submit', request);
