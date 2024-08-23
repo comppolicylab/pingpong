@@ -1,4 +1,4 @@
-import { redirect } from '@sveltejs/kit';
+import { redirect, error } from '@sveltejs/kit';
 import * as api from '$lib/api';
 import type { LayoutLoad } from './$types';
 
@@ -15,8 +15,19 @@ const EDU = '/eduaccess';
 export const load: LayoutLoad = async ({ fetch, url }) => {
   // Fetch the current user
   const me = api.expandResponse(await api.me(fetch));
+
+  // If we can't even load `me` then the server is probably down.
+  // Redirect to the login page if we're not already there, just
+  // in case that will work. Otherwise, just show the error.
   if (me.error) {
-    redirect(302, LOGIN);
+    if (url.pathname !== LOGIN) {
+      redirect(302, LOGIN);
+    } else {
+      const errorObject = (me.error || {}) as { $status: number; detail: string };
+      const code = errorObject.$status || 500;
+      const message = errorObject.detail || 'An unknown error occurred.';
+      error(code, { message: `Error reaching the server: ${message}` });
+    }
   }
 
   const authed = me.data.status === 'valid';
