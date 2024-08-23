@@ -39,9 +39,10 @@ key = "devkey"
 [[lms.lms_instances]]
 type = "canvas"
 tenant = "demo"
+sso = "demo"
+sso_target: "key"
 base_url = "http://canvas.docker"
 client_id = "your client id here"
 client_secret = "your client secret here"
-sync_interval = 3600
 sync_wait = 600
 auth_token_expiry = 3600
