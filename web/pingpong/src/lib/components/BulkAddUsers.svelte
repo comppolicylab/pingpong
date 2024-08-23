@@ -1,12 +1,12 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import * as api from '$lib/api';
-  import { Select, Helper, Button, Label, Textarea, Hr } from 'flowbite-svelte';
+  import { Select, Helper, Button, Label, Textarea, Hr, Checkbox } from 'flowbite-svelte';
   import { writable } from 'svelte/store';
   import { sadToast } from '$lib/toast';
 
   export let role: api.Role;
-
+  export let className: string = 'your group';
   export let isPrivate: boolean = false;
 
   const dispatch = createEventDispatcher();
@@ -39,6 +39,8 @@
       sadToast('Role is required');
     }
 
+    const silent = d.notify !== 'on';
+
     const request: api.CreateClassUsersRequest = {
       roles: emailList.map((e) => ({
         email: e,
@@ -47,7 +49,8 @@
           teacher: role === 'teacher',
           student: role === 'student'
         }
-      }))
+      })),
+      silent: silent
     };
 
     dispatch('submit', request);
@@ -88,6 +91,12 @@
       </ul>
     </Helper>
     <Select id="role" name="role" value={role} items={roles} />
+    <Helper helperClass="text-md font-normal rtl:text-right font-medium block">
+      Notify people
+    </Helper>
+    <Checkbox checked id="notify" name="notify" class="mt-1 text-sm font-normal"
+      >Let users know they have access to {className} on PingPong</Checkbox
+    >
   </div>
   <Hr />
   <div>
