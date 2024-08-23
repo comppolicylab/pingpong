@@ -736,8 +736,8 @@ async def add_users_to_class(
     is_admin = await request.state.authz.test(
         f"user:{request.state.session.user.id}", "admin", f"class:{class_id}"
     )
-    is_teacher = await request.state.authz.test(
-        f"user:{request.state.session.user.id}", "teacher", f"class:{class_id}"
+    is_supervisor = await request.state.authz.test(
+        f"user:{request.state.session.user.id}", "supervisor", f"class:{class_id}"
     )
 
     formatted_roles = {
@@ -757,7 +757,7 @@ async def add_users_to_class(
             )
 
         # This should never happen, but just in case...
-        if not is_teacher and ucr.roles.teacher:
+        if not is_supervisor and ucr.roles.teacher:
             raise HTTPException(
                 status_code=403, detail="Lacking permission to add Moderators."
             )
