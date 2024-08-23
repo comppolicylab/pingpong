@@ -8,7 +8,7 @@
   export let topHeader = false;
 </script>
 
-<div class="sticky top-0 z-{(order + 1) * 10} bg-gradient-to-r {colorClasses} drop-shadow-md">
+<div class="sticky top-0 z-{(order + 2) * 10} bg-gradient-to-r {colorClasses} drop-shadow-md">
   {#if topHeader}
     <div class="absolute inset-x-0 -top-96 h-96 bg-gradient-to-r {colorClasses}"></div>
   {/if}

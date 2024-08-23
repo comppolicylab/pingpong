@@ -4,10 +4,15 @@
   import { Select, Helper, Button, Label, Textarea, Hr, Checkbox } from 'flowbite-svelte';
   import { writable } from 'svelte/store';
   import { sadToast } from '$lib/toast';
+  import { AngleDownOutline, LockSolid, QuestionCircleOutline } from 'flowbite-svelte-icons';
+  import PermissionsTable from './PermissionsTable.svelte';
 
   export let role: api.Role;
   export let className: string = 'your group';
   export let isPrivate: boolean = false;
+  export let permissions: { name: string; member: boolean; moderator: boolean }[] = [];
+
+  let permissionsModalOpen = false;
 
   const dispatch = createEventDispatcher();
 
@@ -56,48 +61,81 @@
     dispatch('submit', request);
   };
 
-  const roles = api.ROLES.map((role) => ({ value: role, name: api.ROLE_LABELS[role] }));
+  const roles = api.ROLES.filter((role) => role !== 'admin').map((role) => ({
+    value: role,
+    name: api.ROLE_LABELS[role]
+  }));
 </script>
 
 <form on:submit={submitForm}>
-  <div class="space-y-2">
-    <Label for="emails">Emails</Label>
-    <Helper>Enter email addresses separated by commas or newlines.</Helper>
-    <Textarea id="emails" name="emails" rows="3" />
+  <Label defaultClass="text-md font-normal rtl:text-right font-medium block" for="emails"
+    >Emails</Label
+  >
+  <Helper helperClass="text-sm font-normal text-gray-500 dark:text-gray-300"
+    >Enter email addresses separated by commas or newlines.</Helper
+  >
+  <Textarea class="mt-2 mb-4" id="emails" name="emails" rows="4" />
 
-    <Label for="role">Role</Label>
-    <Helper>
-      <div>
-        Choose a role to grant permissions to these users to view the group.{isPrivate
-          ? ' As a private group, permissions are more restrictive compared to a non-private group.'
-          : ''}
-      </div>
-      <ul class="list-disc pl-8 my-2">
-        <li>
-          <strong>Members</strong> can create chats and view their own personal chat history.
-        </li>
-        <li>
-          <strong>Moderators</strong>
-          {isPrivate
-            ? 'can manage members, but cannot view unpublished chat histories or assistants.'
-            : "can view everyone's chat history and manage members."}
-        </li>
-        <li>
-          <strong>Administrators</strong>
-          {isPrivate
-            ? 'can manage the group, but cannot view unpublished chat histories or assistants.'
-            : "can view everyone's chat history and assistants, and manage the group."}
-        </li>
-      </ul>
-    </Helper>
-    <Select id="role" name="role" value={role} items={roles} />
-    <Helper helperClass="text-md font-normal rtl:text-right font-medium block">
-      Notify people
-    </Helper>
-    <Checkbox checked id="notify" name="notify" class="mt-1 text-sm font-normal"
-      >Let users know they have access to {className} on PingPong</Checkbox
+  <div class="flex items-center justify-between">
+    <Label defaultClass="text-md font-normal rtl:text-right font-medium block" for="role"
+      >Role</Label
     >
+    <Button
+      class="flex flex-row items-center gap-1 text-sm font-normal text-gray-500 hover:underline p-0"
+      on:click={() => (permissionsModalOpen = !permissionsModalOpen)}
+      on:touchstart={() => (permissionsModalOpen = !permissionsModalOpen)}
+    >
+      {permissionsModalOpen ? 'Hide' : 'Show'} permissions
+      {#if permissionsModalOpen}
+        <AngleDownOutline class="w-4 h-4" />
+      {:else}
+        <QuestionCircleOutline class="w-4 h-4" />
+      {/if}
+    </Button>
   </div>
+  <div
+    class="overflow-hidden transition-all duration-300 ease-in-out"
+    class:max-h-0={!permissionsModalOpen}
+    class:max-h-[500px]={permissionsModalOpen}
+    class:opacity-0={!permissionsModalOpen}
+    class:opacity-100={permissionsModalOpen}
+  >
+    <div class="rounded-lg overflow-hidden shadow-md my-4 relative">
+      {#if isPrivate}
+        <div
+          class="flex items-center text-sm text-white bg-gradient-to-r from-gray-800 to-gray-600 border-gradient-to-r from-gray-800 to-gray-600 p-4"
+        >
+          <LockSolid class="w-8 h-8 mr-3" />
+          <span>
+            Threads and assistants are private in your group, so Moderators have limited permissions
+            compared to a non-private group.
+          </span>
+        </div>
+      {/if}
+      <div
+        class="bg-white border rounded-lg border-gray-300 overflow-hidden"
+        class:rounded-lg={!isPrivate}
+        class:rounded-b-lg={isPrivate}
+      >
+        <PermissionsTable {permissions} />
+      </div>
+    </div>
+  </div>
+  <Helper helperClass="text-sm font-normal text-gray-500 dark:text-gray-300">
+    <div>Choose a user role to grant permissions to these users to view the group.</div>
+  </Helper>
+  <Select
+    id="role"
+    name="role"
+    class="py-1.5 mt-2 mb-4"
+    placeholder="Select a user role..."
+    value={role}
+    items={roles}
+  />
+  <Helper helperClass="text-md font-normal rtl:text-right font-medium block">Notify people</Helper>
+  <Checkbox checked id="notify" name="notify" class="mt-1 text-sm font-normal"
+    >Let users know they have access to {className} on PingPong</Checkbox
+  >
   <Hr />
   <div>
     <Button
