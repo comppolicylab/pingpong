@@ -91,14 +91,12 @@ class CanvasCourseClient(ABC):
         db: AsyncSession,
         class_id: int,
         user_id: int,
-        min_between_syncs: int = 10,
         nowfn: NowFn = utcnow,
     ):
         self.config = canvas_backend_config
         self.db = db
         self.class_id = class_id
         self.user_id = user_id
-        self.min_between_syncs = min_between_syncs
         self.nowfn = nowfn
 
     async def __aenter__(self):
@@ -719,17 +717,18 @@ class ManualCanvasClient(CanvasCourseClient):
 
     def _sync_allowed(self, last_synced: datetime | None, now: datetime):
         """Check if a sync is allowed based on the last sync time and the time between syncs."""
-        if last_synced and last_synced > now - timedelta(
-            minutes=self.min_between_syncs
-        ):
+        if last_synced and last_synced + timedelta(seconds=self.config.sync_wait) > now:
             # Calculate the remaining time until the next allowed sync. Add one second so we never return 0.
             time_remaining = (
-                last_synced + timedelta(minutes=self.min_between_syncs) - now
+                last_synced + timedelta(seconds=self.config.sync_wait) - now
             ).total_seconds() + 1
 
             raise HTTPException(
                 status_code=429,
-                detail=f"A Canvas sync was recently completed. Please wait before trying again. You can request a manual sync in {convert_seconds(int(time_remaining))}.",
+                # convert_seconds uses arrow to format the time remaining in a human-readable format,
+                # but it might display "instantly" if the time remaining is less than a minute, which is not intuitive.
+                detail=f"A Canvas sync was recently completed. Please wait before trying again.\
+                You can request a manual sync in {convert_seconds(int(time_remaining)) if int(time_remaining) > 60 else 'a minute'}.",
             )
 
     async def _update_user_roles(self):
