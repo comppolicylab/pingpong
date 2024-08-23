@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { type CanvasClass } from '$lib/api';
+  import { type LMSClass as CanvasClass } from '$lib/api';
   import DropdownBadge from './DropdownBadge.svelte';
   import DropdownOption from './DropdownOption.svelte';
 
@@ -44,12 +44,12 @@
 </script>
 
 <div class="relative z-0">
-  {#each canvasClasses as { canvas_id, name, course_code, term }}
-    <div bind:this={classNodes[canvas_id.toString()]}>
+  {#each canvasClasses as { lms_id, name, course_code, term }}
+    <div bind:this={classNodes[lms_id.toString()]}>
       <DropdownOption
-        value={canvas_id.toString()}
+        value={lms_id.toString()}
         name={course_code || 'Unknown course'}
-        subtitle={(name || 'Unknown course') + ' (' + canvas_id.toString() + ')'}
+        subtitle={(name || 'Unknown course') + ' (' + lms_id.toString() + ')'}
         selectedValue={selectedClass}
         update={updateSelectedClass}
       >

@@ -350,7 +350,7 @@
                 {:else}
                   {user.state}
                 {/if}
-                {#if user.from_canvas}
+                {#if user.lms_type === 'canvas'}
                   <div title="This user was imported from Canvas.">
                     <span class="text-red-600"><CanvasLogo size="5" /></span>
                   </div>

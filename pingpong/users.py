@@ -1,159 +1,15 @@
+from abc import ABC, abstractmethod
 from pingpong.authz.openfga import OpenFgaAuthzClient
 import pingpong.models as models
 import pingpong.schemas as schemas
 
 from fastapi import BackgroundTasks, HTTPException, Request
-from starlette.background import BackgroundTasks as BackgroundTasksCron
 from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import generate_auth_link
 from .authz import Relation
 from .config import config
 from .invite import send_invite
 from .now import NowFn, utcnow
-
-
-def get_now_fn(req: Request) -> NowFn:
-    """Get the current time function for the request."""
-    return getattr(req.app.state, "now", utcnow)
-
-
-async def add_new_users(
-    class_id: str,
-    new_ucr: schemas.CreateUserClassRoles,
-    ignore_self: bool = False,
-    request: Request | None = None,
-    tasks: BackgroundTasks | None = None,
-    user_id: int | None = None,
-    session: AsyncSession | None = None,
-    client: OpenFgaAuthzClient | None = None,
-    cron: bool = False,
-):
-    if cron and (not user_id or not session or not client):
-        raise HTTPException(status_code=400, detail="Missing cron arguments")
-    elif not cron and (not request or not tasks):
-        raise HTTPException(status_code=400, detail="Missing request arguments")
-
-    cid = int(class_id)
-
-    session_ = session if session else request.state.db if request else None
-    user_id_ = (
-        user_id if user_id else request.state.session.user.id if request else None
-    )
-    client_ = client if client else request.state.authz if request else None
-    class_ = await models.Class.get_by_id(session_, cid)
-    result: list[schemas.UserClassRole] = []
-    new_: list[schemas.CreateInvite] = []
-
-    grants = list[Relation]()
-    revokes = list[Relation]()
-
-    is_admin = await client_.test(f"user:{user_id_}", "admin", f"class:{class_id}")
-
-    formatted_roles = {
-        "admin": "an Administrator",
-        "teacher": "a Moderator",
-        "student": "a Member",
-    }
-
-    user_display_name = await models.User.get_display_name(
-        session_,
-        user_id_,
-    )
-
-    from_canvas = new_ucr.from_canvas or False
-
-    if from_canvas:
-        newly_synced: list = []
-    for ucr in new_ucr.roles:
-        if not is_admin and ucr.roles.admin:
-            raise HTTPException(
-                status_code=403, detail="Lacking permission to add admins"
-            )
-
-        if not is_admin and ucr.roles.teacher:
-            raise HTTPException(
-                status_code=403, detail="Lacking permission to add moderators"
-            )
-
-        user = await models.User.get_or_create_by_email(session_, ucr.email)
-        if from_canvas:
-            newly_synced.append(user.id)
-        if is_admin and user.id == user_id_:
-            if ignore_self:
-                continue
-            if not ucr.roles.admin:
-                raise HTTPException(
-                    status_code=403, detail="Cannot demote yourself from admin"
-                )
-
-        existing = await models.UserClassRole.get(session_, user.id, cid)
-        new_roles = []
-        for role in ["admin", "teacher", "student"]:
-            if getattr(ucr.roles, role):
-                grants.append((f"user:{user.id}", role, f"class:{cid}"))
-                new_roles.append(formatted_roles[role])
-            else:
-                revokes.append((f"user:{user.id}", role, f"class:{cid}"))
-
-        if existing:
-            result.append(
-                schemas.UserClassRole(
-                    user_id=existing.user_id,
-                    class_id=existing.class_id,
-                    roles=ucr.roles,
-                    from_canvas=from_canvas,
-                )
-            )
-            existing.from_canvas = from_canvas
-            session_.add(existing)
-        else:
-            # Make sure the user exists...
-            added = await models.UserClassRole.create(
-                session_,
-                user.id,
-                cid,
-                from_canvas,
-            )
-            new_.append(
-                schemas.CreateInvite(
-                    user_id=user.id,
-                    email=user.email,
-                    class_name=class_.name,
-                    inviter_name=user_display_name,
-                    formatted_role=", ".join(new_roles) if new_roles else None,
-                )
-            )
-            result.append(
-                schemas.UserClassRole(
-                    user_id=added.user_id,
-                    class_id=added.class_id,
-                    roles=ucr.roles,
-                    from_canvas=from_canvas,
-                )
-            )
-
-    # Send emails to new users in the background
-    nowfn = get_now_fn(request) if not cron else utcnow
-    tasks_ = tasks if not cron else BackgroundTasksCron()
-    for invite in new_:
-        magic_link = generate_auth_link(invite.user_id, expiry=86_400 * 7, nowfn=nowfn)
-        tasks_.add_task(
-            send_invite,
-            config.email.sender,
-            invite,
-            magic_link,
-            86_400 * 7,
-            new_ucr.silent,
-        )
-
-    if from_canvas:
-        users_to_delete = await models.UserClassRole.delete_from_sync_list(
-            session_, int(class_id), newly_synced
-        )
-        await delete_canvas_permissions(client_, users_to_delete, class_id)
-    await client_.write_safe(grant=grants, revoke=revokes)
-
-    return {"roles": result}
 
 
 async def delete_canvas_permissions(
@@ -166,3 +22,272 @@ async def delete_canvas_permissions(
         for role in ["admin", "teacher", "student"]
     ]
     await client.write_safe(revoke=revokes)
+
+
+class AddNewUsers(ABC):
+    def __init__(
+        self,
+        class_id: str,
+        new_ucr: schemas.CreateUserClassRoles,
+        user_id: int,
+        session: AsyncSession,
+        client: OpenFgaAuthzClient,
+    ):
+        self.class_id = int(class_id)
+        self.new_ucr = new_ucr
+        self.user_id = user_id
+        self.session = session
+        self.client = client
+
+    @abstractmethod
+    def send_invites(self):
+        pass
+
+    def _permissions_to_revoke(self, user_ids: list[int]) -> list[Relation]:
+        """Generate permissions to revoke after deleting enrollment for a list of users."""
+
+        return [
+            (f"user:{user_id}", role, f"class:{str(self.class_id)}")
+            for user_id in user_ids
+            for role in ["admin", "teacher", "student"]
+        ]
+
+    async def _init_invites(self) -> schemas.CreateUserInviteConfig:
+        invite_config = schemas.CreateUserInviteConfig()
+
+        # Roles to display in the email invite
+        invite_config.formatted_roles = {
+            "admin": "an Administrator",
+            "teacher": "a Moderator",
+            "student": "a Member",
+        }
+
+        # Get the display name of the user who initiated the request to display in the email invite
+        invite_config.inviter_display_name = await models.User.get_display_name(
+            self.session,
+            self.user_id,
+        )
+
+        return invite_config
+
+    async def _check_permissions(self, ucr: schemas.UserClassRole):
+        if not self.is_admin and ucr.roles.admin:
+            raise HTTPException(
+                status_code=403, detail="Lacking permission to add admins"
+            )
+
+        if not self.is_admin and ucr.roles.teacher:
+            raise HTTPException(
+                status_code=403, detail="Lacking permission to add moderators"
+            )
+
+    async def _update_user_enrollment(
+        self, enrollment: schemas.UserClassRole, roles: schemas.ClassUserRoles
+    ):
+        self.new_roles.append(
+            schemas.UserClassRole(
+                user_id=enrollment.user_id,
+                class_id=enrollment.class_id,
+                roles=roles,
+            )
+        )
+
+        # Update the LMS tenant if it's provided
+        # There might be cases where the user is already enrolled in the class
+        # through a manual invite, and we want to make sure the LMS tenant is updated.
+        #
+        # DESIGN DECISION: LMS sync always takes precedence over manual invites.
+        # For example, a user that was manually invited but then synced through LMS
+        # will be deleted if they are no longer on the LMS roster.
+        # TODO: This might not be the desired behavior in all cases. Add a UI option to
+        # control this behavior.
+        if self.new_ucr.lms_tenant:
+            enrollment.lms_tenant = self.new_ucr.lms_tenant
+            enrollment.lms_type = self.new_ucr.lms_type
+            self.session.add(enrollment)
+
+    async def _create_user_enrollment(
+        self,
+        user: models.User,
+        ucr: schemas.UserClassRole,
+        invite_roles: list[str] = [],
+    ):
+        # Create the user enrollment
+        enrollment = await models.UserClassRole.create(
+            self.session,
+            user.id,
+            self.class_id,
+            self.new_ucr.lms_tenant,
+            self.new_ucr.lms_type,
+        )
+
+        self.new_roles.append(
+            schemas.UserClassRole(
+                user_id=enrollment.user_id,
+                class_id=enrollment.class_id,
+                roles=ucr.roles,
+            )
+        )
+
+        if not self.new_ucr.silent:
+            self.invite_config.invites.append(
+                schemas.CreateInvite(
+                    user_id=user.id,
+                    email=user.email,
+                    class_name=self.class_.name,
+                    inviter_name=self.invite_config.inviter_display_name,
+                    formatted_role=", ".join(invite_roles) if invite_roles else None,
+                )
+            )
+
+    async def _remove_deleted_users(self):
+        # Find users that were previously synced but are no longer on the roster
+        # and delete their class enrollments
+        users_to_delete = await models.UserClassRole.delete_from_sync_list(
+            self.session,
+            self.class_id,
+            self.newly_synced,
+            self.new_ucr.lms_tenant,
+            self.new_ucr.lms_type,
+        )
+        # Finally, add permission revokes for the users that were deleted
+        self.revokes.extend(self._permissions_to_revoke(users_to_delete))
+
+    async def add_new_users(self) -> schemas.UserClassRoles:
+        """
+        Add new users to a class.
+        """
+
+        self.class_ = await models.Class.get_by_id(self.session, self.class_id)
+        self.new_roles: list[schemas.UserClassRole] = []
+
+        grants = list[Relation]()
+        self.revokes = list[Relation]()
+
+        self.is_admin = await self.client.test(
+            f"user:{self.user_id}", "admin", f"class:{self.class_id}"
+        )
+
+        if not self.new_ucr.silent:
+            self.invite_config = await self._init_invites()
+
+        # If the request is from LMS, we need to store the newly synced users
+        # so we can delete previously synced users that are no longer on the roster
+        if self.new_ucr.lms_tenant:
+            self.newly_synced: list[int] = []
+
+        for ucr in self.new_ucr.roles:
+            await self._check_permissions(ucr)
+            user = await models.User.get_or_create_by_email(self.session, ucr.email)
+
+            if self.new_ucr.lms_tenant:
+                self.newly_synced.append(user.id)
+            if self.is_admin and user.id == self.user_id:
+                # We don't want an LMS sync to change the roles of the user who initiated it
+                if self.new_ucr.lms_tenant:
+                    continue
+                # If the user is an admin, they can't demote themselves
+                elif not ucr.roles.admin:
+                    raise HTTPException(
+                        status_code=403, detail="Cannot demote yourself from admin"
+                    )
+
+            # Check if the user is already enrolled in the class
+            enrollment = await models.UserClassRole.get(
+                self.session, user.id, self.class_id
+            )
+
+            if not self.new_ucr.silent:
+                invite_roles = []
+            for role in ["admin", "teacher", "student"]:
+                if getattr(ucr.roles, role):
+                    grants.append((f"user:{user.id}", role, f"class:{self.class_id}"))
+                    if not self.new_ucr.silent:
+                        invite_roles.append(self.invite_config.formatted_roles[role])
+                else:
+                    self.revokes.append(
+                        (f"user:{user.id}", role, f"class:{self.class_id}")
+                    )
+
+            if enrollment:
+                await self._update_user_enrollment(enrollment, ucr.roles)
+            else:
+                await self._create_user_enrollment(user, ucr, invite_roles)
+
+        # Send emails to new users in the background
+        if not self.new_ucr.silent:
+            self.send_invites()
+
+        if self.new_ucr.lms_tenant:
+            await self._remove_deleted_users()
+
+        await self.client.write_safe(grant=grants, revoke=self.revokes)
+        return schemas.UserClassRoles(roles=self.new_roles)
+
+
+class AddNewUsersManual(AddNewUsers):
+    def __init__(
+        self,
+        class_id: str,
+        new_ucr: schemas.CreateUserClassRoles,
+        request: Request,
+        tasks: BackgroundTasks,
+    ):
+        super().__init__(
+            class_id,
+            new_ucr,
+            request.state.session.user.id,
+            request.state.db,
+            request.state.authz,
+        )
+        self.request = request
+        self.tasks = tasks
+
+    def get_now_fn(self) -> NowFn:
+        """Get the current time function for the request."""
+        return getattr(self.request.app.state, "now", utcnow)
+
+    def send_invites(self):
+        nowfn = self.get_now_fn()
+        for invite in self.invite_config.invites:
+            magic_link = generate_auth_link(
+                invite.user_id, expiry=86_400 * 7, nowfn=nowfn
+            )
+            self.tasks.add_task(
+                send_invite,
+                config.email.sender,
+                invite,
+                magic_link,
+                86_400 * 7,
+                self.new_ucr.silent,
+            )
+
+
+class AddNewUsersScript(AddNewUsers):
+    def __init__(
+        self,
+        class_id: str,
+        user_id: int,
+        session: AsyncSession,
+        client: OpenFgaAuthzClient,
+        new_ucr: schemas.CreateUserClassRoles,
+    ):
+        super().__init__(class_id, new_ucr, user_id, session, client)
+
+    def get_now_fn(self) -> NowFn:
+        """Get the current time function for the request."""
+        return utcnow
+
+    def send_invites(self):
+        nowfn = self.get_now_fn()
+        for invite in self.invite_config.invites:
+            magic_link = generate_auth_link(
+                invite.user_id, expiry=86_400 * 7, nowfn=nowfn
+            )
+            send_invite(
+                config.email.sender,
+                invite,
+                magic_link,
+                86_400 * 7,
+                self.new_ucr.silent,
+            )

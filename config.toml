@@ -16,13 +16,6 @@ log_level = "DEBUG"
 # should be the public URL of the server, like `https://pingpong.app/`.
 public_url = "http://localhost:5173"
 
-# The URL where the application should send Canvas API requests to.
-canvas_url = "http://canvas.docker"
-# The Canvas Client ID to use for authentication requests.
-canvas_client_id = "10000000000001"
-# The Canvas Client Secret to use when requesting authentication tokens.
-canvas_client_secret = "7D7UREveNZrzfNxBGRvQyf4mh4P4JVT7Mxk8U6VJeDayEY6uXc9vC3khYHCHm9cE"
-
 # Whether the server is running in development mode. Should be `false` in prod.
 development = true
 
@@ -86,3 +79,30 @@ key = "devkey"
 # In production we generally will use `smtp`. See the `pingpong/config.py`
 # file for more details about backends.
 type = "mock"
+
+[[lms.lms_instances]]
+# Supported LMS Instances
+# Configs for Canvas, and future LMSs go here
+# Every institution should have a different config
+#
+# Type of LMS. We currently only support Canvas.
+type = "canvas"
+# Institution associated with LMS instance
+tenant = "demo-institution"
+# The URL where the application should send Canvas API requests to.
+# For local development, this should be the default localhost Canvas URL
+# if you follow their Quick Start guide.
+base_url = "http://canvas.docker"
+# The Canvas Client ID to use for authentication requests.
+client_id = "your client id here"
+# The Canvas Client Secret to use when requesting authentication tokens.
+client_secret = "your client secret here"
+# How often to sync course rosters. Defaults to 1 hour.
+sync_interval = 3600
+# How often to allow users to request manual roster syncs.
+# Defaults to 10 minutes.
+sync_wait = 600
+# How long the auth token returned as state parameter should be valid for.
+# Defaults to 1 hour.
+# See: https://canvas.instructure.com/doc/api/file.oauth.html#oauth2-flow-2
+auth_token_expiry = 3600

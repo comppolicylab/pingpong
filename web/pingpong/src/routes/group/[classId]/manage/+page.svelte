@@ -4,7 +4,12 @@
   import type { Writable } from 'svelte/store';
   import dayjs from '$lib/time';
   import * as api from '$lib/api';
-  import type { FileUploadInfo, ServerFile, CreateClassUsersRequest, CanvasClass } from '$lib/api';
+  import type {
+    FileUploadInfo,
+    ServerFile,
+    CreateClassUsersRequest,
+    LMSClass as CanvasClass
+  } from '$lib/api';
   import {
     Button,
     ButtonGroup,
@@ -295,10 +300,10 @@
   };
 
   $: classId = data.class.id;
-  $: canvasLinkedClass = data.class.canvas_class;
+  $: canvasLinkedClass = data.class.lms_class;
 
   const redirectToCanvas = async () => {
-    const result = await api.getCanvasLink(fetch, data.class.id);
+    const result = await api.getCanvasLink(fetch, data.class.id, 'harvard');
     const response = api.expandResponse(result);
     if (response.error) {
       sadToast(response.error.detail || 'An unknown error occurred');
@@ -310,7 +315,7 @@
     }
   };
   const dismissCanvasSync = async () => {
-    const result = await api.dismissCanvasSync(fetch, data.class.id);
+    const result = await api.dismissCanvasSync(fetch, data.class.id, 'harvard');
     const response = api.expandResponse(result);
     if (response.error) {
       sadToast(response.error.detail || 'An unknown error occurred');
@@ -319,7 +324,7 @@
     }
   };
   const enableCanvasSync = async () => {
-    const result = await api.bringBackCanvasSync(fetch, data.class.id);
+    const result = await api.bringBackCanvasSync(fetch, data.class.id, 'harvard');
     const response = api.expandResponse(result);
     if (response.error) {
       sadToast(response.error.detail || 'An unknown error occurred');
@@ -333,7 +338,7 @@
   // The formatted canvas classes loaded from the API.
   $: canvasClasses = $loadedCanvasClasses
     .map((c) => ({
-      canvas_id: c.canvas_id,
+      lms_id: c.lms_id,
       name: c.name || 'Unnamed class',
       course_code: c.course_code || '',
       term: c.term
@@ -345,7 +350,7 @@
   // Load canvas classes from the API.
   const loadCanvasClasses = async () => {
     loadingCanvasClasses = true;
-    const result = await api.loadCanvasClasses(fetch, data.class.id);
+    const result = await api.loadCanvasClasses(fetch, data.class.id, 'harvard');
     const response = api.expandResponse(result);
     if (response.error) {
       loadingCanvasClasses = false;
@@ -360,10 +365,10 @@
   // State for the canvas class selection dropdown.
   let classSelectDropdownOpen = false;
   // The canvas class id
-  let selectedClass = data.class.canvas_class?.canvas_id.toString() || '';
+  let selectedClass = data.class.lms_class?.toString() || '';
 
   $: classNameDict = canvasClasses.reduce<{ [key: string]: string }>((acc, class_) => {
-    acc[class_.canvas_id] = `[${class_.term}] ${class_.course_code}: ${class_.name}`;
+    acc[class_.lms_id] = `[${class_.term}] ${class_.course_code}: ${class_.name}`;
     return acc;
   }, {});
   $: selectedClassName = classNameDict[selectedClass] || 'Select a class...';
@@ -377,7 +382,7 @@
     if (!selectedClass) {
       return;
     }
-    const result = await api.saveCanvasClass(fetch, data.class.id, selectedClass);
+    const result = await api.saveCanvasClass(fetch, data.class.id, 'harvard', selectedClass);
     const response = api.expandResponse(result);
     if (response.error) {
       sadToast(response.error.detail || 'An unknown error occurred');
@@ -390,7 +395,7 @@
   let syncingCanvasClass = false;
   const syncClass = async () => {
     syncingCanvasClass = true;
-    const result = await api.syncCanvasClass(fetch, data.class.id);
+    const result = await api.syncCanvasClass(fetch, data.class.id, 'harvard');
     const response = api.expandResponse(result);
     if (response.error) {
       // Needed here to update the timer (Last sync: ...)
@@ -407,7 +412,7 @@
 
   let editDropdownOpen = false;
   const deleteClassSync = async () => {
-    const result = await api.deleteCanvasClassSync(fetch, data.class.id);
+    const result = await api.deleteCanvasClassSync(fetch, data.class.id, 'harvard');
     const response = api.expandResponse(result);
     if (response.error) {
       editDropdownOpen = false;
@@ -424,7 +429,7 @@
   };
 
   const removeCanvasConnection = async () => {
-    const result = await api.removeCanvasConnection(fetch, data.class.id);
+    const result = await api.removeCanvasConnection(fetch, data.class.id, 'harvard');
     const response = api.expandResponse(result);
     if (response.error) {
       editDropdownOpen = false;
@@ -621,7 +626,7 @@
         <Info>Manage users who have access to this group.</Info>
       </div>
       <div class="col-span-2">
-        {#if !data.class.canvas_status || data.class.canvas_status === 'none'}
+        {#if !data.class.lms_status || data.class.lms_status === 'none'}
           <Alert
             color="none"
             class="bg-blue-50 text-blue-900"
@@ -654,7 +659,7 @@
               </div>
             </div>
           </Alert>
-        {:else if data.class.canvas_status === 'authorized' && data.class.canvas_user?.id && data.me.user?.id === data.class.canvas_user?.id}
+        {:else if data.class.lms_status === 'authorized' && data.class.lms_user?.id && data.me.user?.id === data.class.lms_user?.id}
           <Alert color="yellow" defaultClass="p-4 gap-3 text-sm border-2">
             <div class="p-1.5">
               <div class="flex items-center gap-3">
@@ -739,7 +744,7 @@
               </div>
             </div>
           </Alert>
-        {:else if data.class.canvas_status === 'authorized'}
+        {:else if data.class.lms_status === 'authorized'}
           <Alert color="yellow" defaultClass="p-4 gap-3 text-sm border-2">
             <div class="p-1.5">
               <div class="flex items-center gap-3">
@@ -747,17 +752,17 @@
                 <span class="text-lg font-medium">Canvas Sync setup in process</span>
               </div>
               <p class="mt-2 text-sm">
-                {data.class.canvas_user?.name || 'Someone in your course'} has linked their Canvas account
+                {data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
                 with this group. Once they have selected a course to sync with this group, PingPong will
                 automatically sync the course's roster.
               </p>
               <p class="mt-2 text-sm">
-                Need to link your own account? Ask {data.class.canvas_user?.name || 'them'} to disconnect
+                Need to link your own account? Ask {data.class.lms_user?.name || 'them'} to disconnect
                 their Canvas account from this PingPong group.
               </p>
             </div>
           </Alert>
-        {:else if data.class.canvas_status === 'linked' && data.class.canvas_user?.id && data.me.user?.id === data.class.canvas_user?.id}
+        {:else if data.class.lms_status === 'linked' && data.class.lms_user?.id && data.me.user?.id === data.class.lms_user?.id}
           <Alert color="green" defaultClass="p-4 gap-3 text-sm border-2">
             <div class="p-1.5">
               <div class="flex items-center gap-3">
@@ -772,8 +777,8 @@
                 once every hour. Use the Sync button below to request an immediate sync.
               </p>
               <p class="mt-2 mb-4 text-sm">
-                Last sync: {data.class.canvas_last_synced
-                  ? dayjs.utc(data.class.canvas_last_synced).fromNow()
+                Last sync: {data.class.lms_last_synced
+                  ? dayjs.utc(data.class.lms_last_synced).fromNow()
                   : 'never'}
               </p>
               <div class="flex flex-row justify-between items-center">
@@ -817,7 +822,7 @@
               </div>
             </div>
           </Alert>
-        {:else if data.class.canvas_status === 'linked'}
+        {:else if data.class.lms_status === 'linked'}
           <Alert color="green" defaultClass="p-4 gap-3 text-sm border-2">
             <div class="p-1.5">
               <div class="flex items-center gap-3">
@@ -831,18 +836,18 @@
                 once every hour.
               </p>
               <p class="mt-2 mb-2 text-sm">
-                Last sync: {data.class.canvas_last_synced
-                  ? dayjs.utc(data.class.canvas_last_synced).fromNow()
+                Last sync: {data.class.lms_last_synced
+                  ? dayjs.utc(data.class.lms_last_synced).fromNow()
                   : 'never'}
               </p>
               <p class="mt-2 text-sm">
-                {data.class.canvas_user?.name || 'Someone in your course'} has linked their Canvas account
-                with this group. Need to link your own account? Ask {data.class.canvas_user?.name ||
+                {data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
+                with this group. Need to link your own account? Ask {data.class.lms_user?.name ||
                   'them'} to disconnect their Canvas account from this PingPong group.
               </p>
             </div>
           </Alert>
-        {:else if data.class.canvas_status === 'error' && data.class.canvas_user?.id && data.me.user?.id === data.class.canvas_user?.id}
+        {:else if data.class.lms_status === 'error' && data.class.lms_user?.id && data.me.user?.id === data.class.lms_user?.id}
           <Alert color="red" defaultClass="p-4 gap-3 text-sm border-2">
             <div class="p-1.5">
               <div class="flex items-center gap-3">
@@ -855,8 +860,8 @@
                 ensure uninterrupted syncing of your class roster.
               </p>
               <p class="mt-2 mb-4 text-sm">
-                Last sync: {data.class.canvas_last_synced
-                  ? dayjs.utc(data.class.canvas_last_synced).fromNow()
+                Last sync: {data.class.lms_last_synced
+                  ? dayjs.utc(data.class.lms_last_synced).fromNow()
                   : 'never'}
               </p>
               <div class="flex gap-2">
@@ -872,7 +877,7 @@
               </div>
             </div>
           </Alert>
-        {:else if data.class.canvas_status === 'error'}
+        {:else if data.class.lms_status === 'error'}
           <Alert color="red" defaultClass="p-4 gap-3 text-sm border-2">
             <div class="p-1.5">
               <div class="flex items-center gap-3">
@@ -882,18 +887,18 @@
                 >
               </div>
               <p class="mt-2 text-sm">
-                {data.class.canvas_user?.name || 'Someone in your course'} has linked their Canvas account
+                {data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
                 with this group. However, we faced an issue when trying to connect to their Canvas account.
-                Ask {data.class.canvas_user?.name || 'them'} to reauthorize Pingpong to access your Canvas
+                Ask {data.class.lms_user?.name || 'them'} to reauthorize Pingpong to access your Canvas
                 account through this page and ensure uninterrupted syncing of your class roster.
               </p>
               <p class="mt-2 mb-4 text-sm">
-                Last sync: {data.class.canvas_last_synced
-                  ? dayjs.utc(data.class.canvas_last_synced).fromNow()
+                Last sync: {data.class.lms_last_synced
+                  ? dayjs.utc(data.class.lms_last_synced).fromNow()
                   : 'never'}
               </p>
               <p class="mt-2 text-sm">
-                Need to link your own account? Ask {data.class.canvas_user?.name || 'them'} to disconnect
+                Need to link your own account? Ask {data.class.lms_user?.name || 'them'} to disconnect
                 their Canvas account from this PingPong group.
               </p>
             </div>
@@ -918,7 +923,7 @@
               usersModalOpen = true;
             }}>Invite new users</Button
           >
-          {#if data.class.canvas_status === 'dismissed'}
+          {#if data.class.lms_status === 'dismissed'}
             <Button
               pill
               size="md"

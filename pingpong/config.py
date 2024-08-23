@@ -156,15 +156,17 @@ class AuthSettings(BaseSettings):
 DbSettings = Union[PostgresSettings, SqliteSettings]
 
 
-class HarvardInstanceSettings(BaseSettings):
-    """Harvard Canvas instance settings."""
+class CanvasSettings(BaseSettings):
+    """Connection settings to a Canvas instance."""
 
-    type: Literal["harvard"]
+    type: Literal["canvas"]
+    tenant: str
     client_id: str
     client_secret: str
-    base_url: str = Field("https://canvas.harvard.edu")
+    base_url: str
     sync_interval: int = Field(60 * 60)  # 1 hour
-    sync_offset: int = Field(60 * 10)  # 10 mins
+    sync_wait: int = Field(60 * 10)  # 10 mins
+    auth_token_expiry: int = Field(60 * 60)  # 1 hour
 
     def url(self, path: str) -> str:
         """Return a URL relative to the Canvas Base URL."""
@@ -184,7 +186,13 @@ class HarvardInstanceSettings(BaseSettings):
         )
 
 
-LTISettings = Union[HarvardInstanceSettings]
+LMSInstance = Union[CanvasSettings]
+
+
+class LMSSettings(BaseSettings):
+    """LMS connection settings."""
+
+    lms_instances: list[LMSInstance]
 
 
 class InitSettings(BaseSettings):
@@ -245,6 +253,7 @@ class Config(BaseSettings):
     auth: AuthSettings
     authz: AuthzSettings
     email: EmailSettings
+    lms: LMSSettings
     sentry: SentrySettings = Field(SentrySettings())
     metrics: MetricsSettings = Field(MetricsSettings())
     init: InitSettings = Field(InitSettings())
@@ -256,23 +265,6 @@ class Config(BaseSettings):
         if not path:
             return self.public_url
         return f"{self.public_url.rstrip('/')}/{path.lstrip('/')}"
-
-    def canvas_link(self, path: str) -> str:
-        """Return a URL relative to the Canvas URL."""
-        return f"{self.canvas_url.rstrip('/')}/{path.lstrip('/')}"
-
-    def canvas_auth_link(self, token: str) -> str:
-        """Return the Redirect URL for Canvas authentication.
-
-        Args:
-            token (str): The generated `AuthToken` identifying the authentication request. This will be returned by Canvas.
-
-        Returns:
-            str: Redirect URL.
-        """
-        return self.canvas_link(
-            f"/login/oauth2/auth?client_id={self.canvas_client_id}&response_type=code&redirect_uri={self.url('/api/v1/auth/canvas')}&state={token}"
-        )
 
 
 def _load_config() -> Config:

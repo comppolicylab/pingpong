@@ -11,7 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from .auth import encode_auth_token
-from .canvas import sync_all
+from .canvas import canvas_sync_all
 from .config import config
 from .models import Base, User
 
@@ -30,8 +30,8 @@ def auth() -> None:
     pass
 
 
-@cli.group("canvas")
-def canvas() -> None:
+@cli.group("lms")
+def lms() -> None:
     pass
 
 
@@ -209,17 +209,22 @@ def db_set_version(version: str, alembic_config: str) -> None:
     alembic.command.stamp(al_cfg, version)
 
 
-@canvas.command("sync-all")
-def canvas_sync_all() -> None:
+@lms.command("sync-all")
+def sync_all() -> None:
     """
-    Sync all classes with an linked Canvas class.
+    Sync all classes with an linked LMS class.
     """
 
     async def _sync_all() -> None:
         await config.authz.driver.init()
         async with config.db.driver.async_session() as session:
             async with config.authz.driver.get_client() as c:
-                await sync_all(session, c)
+                for lms in config.lms.lms_instances:
+                    if lms.type == "canvas":
+                        logger.info(
+                            f"Syncing all classes in {lms.tenant}'s {lms.type} instance..."
+                        )
+                        await canvas_sync_all(session, c, lms)
 
     asyncio.run(_sync_all())
 
