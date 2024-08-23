@@ -504,7 +504,7 @@
           }}>Invite new users</Button
         >
         {#if usersModalOpen}
-          <Modal bind:open={usersModalOpen} title="Manage users">
+          <Modal bind:open={usersModalOpen} title="Invite new users">
             <BulkAddUsers
               {permissions}
               className={data.class.name}

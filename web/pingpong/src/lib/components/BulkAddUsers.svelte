@@ -1,10 +1,10 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import * as api from '$lib/api';
-  import { Select, Helper, Button, Label, Textarea, Hr, Checkbox, Modal } from 'flowbite-svelte';
+  import { Select, Helper, Button, Label, Textarea, Hr, Checkbox } from 'flowbite-svelte';
   import { writable } from 'svelte/store';
   import { sadToast } from '$lib/toast';
-  import { LockSolid, QuestionCircleOutline } from 'flowbite-svelte-icons';
+  import { AngleDownOutline, LockSolid, QuestionCircleOutline } from 'flowbite-svelte-icons';
   import PermissionsTable from './PermissionsTable.svelte';
 
   export let role: api.Role;
@@ -82,31 +82,45 @@
     >
     <Button
       class="flex flex-row items-center gap-1 text-sm font-normal text-gray-500 hover:underline p-0"
-      on:click={() => (permissionsModalOpen = true)}
-      on:touchstart={() => (permissionsModalOpen = true)}
+      on:click={() => (permissionsModalOpen = !permissionsModalOpen)}
+      on:touchstart={() => (permissionsModalOpen = !permissionsModalOpen)}
     >
-      <div>View permissions</div>
-      <QuestionCircleOutline class="w-4 h-4 text-gray-500" />
+      {permissionsModalOpen ? 'Hide' : 'Show'} permissions
+      {#if permissionsModalOpen}
+        <AngleDownOutline class="w-4 h-4" />
+      {:else}
+        <QuestionCircleOutline class="w-4 h-4" />
+      {/if}
     </Button>
   </div>
-  {#if permissionsModalOpen}
-    <Modal bind:open={permissionsModalOpen} title="Your group's user role permissions">
-      <div class="my-2">
-        {#if isPrivate}
-          <div
-            class="flex flex-row items-center text-sm text-white bg-gradient-to-r from-gray-800 to-gray-600 p-4 rounded-t-lg"
-          >
-            <LockSolid class="w-8 h-8 mr-3" />
-            <span
-              >Threads and assistants are private in your group, so Moderators have limited
-              permissions compared to a non-private group.</span
-            >
-          </div>
-        {/if}
+  <div
+    class="overflow-hidden transition-all duration-300 ease-in-out"
+    class:max-h-0={!permissionsModalOpen}
+    class:max-h-[500px]={permissionsModalOpen}
+    class:opacity-0={!permissionsModalOpen}
+    class:opacity-100={permissionsModalOpen}
+  >
+    <div class="rounded-lg overflow-hidden shadow-md my-4 relative">
+      {#if isPrivate}
+        <div
+          class="flex items-center text-sm text-white bg-gradient-to-r from-gray-800 to-gray-600 border-gradient-to-r from-gray-800 to-gray-600 p-4"
+        >
+          <LockSolid class="w-8 h-8 mr-3" />
+          <span>
+            Threads and assistants are private in your group, so Moderators have limited permissions
+            compared to a non-private group.
+          </span>
+        </div>
+      {/if}
+      <div
+        class="bg-white border rounded-lg border-gray-300 overflow-hidden"
+        class:rounded-lg={!isPrivate}
+        class:rounded-b-lg={isPrivate}
+      >
         <PermissionsTable {permissions} />
       </div>
-    </Modal>
-  {/if}
+    </div>
+  </div>
   <Helper helperClass="text-sm font-normal text-gray-500 dark:text-gray-300">
     <div>Choose a user role to grant permissions to these users to view the group.</div>
   </Helper>
@@ -117,13 +131,11 @@
     placeholder="Select a user role..."
     value={role}
     items={roles}
-    <Helper helperClass="text-md font-normal rtl:text-right font-medium block">
-      Notify people
-    </Helper>
-    <Checkbox checked id="notify" name="notify" class="mt-1 text-sm font-normal"
-      >Let users know they have access to {className} on PingPong</Checkbox
-    >
   />
+  <Helper helperClass="text-md font-normal rtl:text-right font-medium block">Notify people</Helper>
+  <Checkbox checked id="notify" name="notify" class="mt-1 text-sm font-normal"
+    >Let users know they have access to {className} on PingPong</Checkbox
+  >
   <Hr />
   <div>
     <Button
