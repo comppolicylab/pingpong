@@ -766,7 +766,7 @@
           <Alert color="green" defaultClass="p-4 gap-3 text-sm border-2">
             <div class="p-1.5">
               <div class="flex items-center gap-3">
-                <div class="animate-pulsexw"><CanvasLogo size="5" /></div>
+                <div class="animate-pulse"><CanvasLogo size="5" /></div>
                 <span class="text-lg font-medium">Canvas Sync is active</span>
               </div>
               <p class="mt-2 text-sm">

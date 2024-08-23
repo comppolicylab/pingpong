@@ -2,10 +2,10 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 import json
 import logging
-from typing import Callable, Literal, TypeVar, Union
+from typing import Callable, Generator, Literal, TypeVar, Union
 import aiohttp
 
-from fastapi import HTTPException, BackgroundTasks, Request
+from fastapi import BackgroundTasks, Request
 from fastapi.responses import RedirectResponse
 from jwt.exceptions import PyJWTError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,7 +57,7 @@ def decode_canvas_token(token: str, nowfn: NowFn) -> CanvasToken:
             exp=auth_token.exp,
         )
     except PyJWTError as e:
-        raise HTTPException(status_code=400, detail="Invalid Canvas token") from e
+        raise ValueError("Invalid Canvas token") from e
 
 
 def get_canvas_config(tenant: str) -> CanvasSettings:
@@ -72,7 +72,7 @@ def get_canvas_config(tenant: str) -> CanvasSettings:
     for lms in config.lms.lms_instances:
         if lms.type == "canvas" and lms.tenant == tenant:
             return lms
-    raise HTTPException(status_code=400, detail="No Canvas configuration found")
+    raise ValueError("No Canvas configuration found")
 
 
 T = TypeVar("T")
@@ -113,10 +113,10 @@ class CanvasCourseClient(ABC):
             str: Canvas State Token
         """
         if not self.user_id:
-            raise HTTPException(status_code=400, detail="No user ID provided")
+            raise ValueError("No user ID provided")
 
         if not self.class_id:
-            raise HTTPException(status_code=400, detail="No class ID provided")
+            raise ValueError("No class ID provided")
 
         return encode_auth_token(
             sub=json.dumps(
@@ -156,21 +156,16 @@ class CanvasCourseClient(ABC):
 
         # If no Canvas class is found, the tuple will be None, so we can detect that here
         if not response.now:
-            raise HTTPException(
-                status_code=400, detail="Could not locate PingPong group"
-            )
+            raise ValueError("Could not locate PingPong group")
 
         # No Canvas access token is found for this class
         if not response.access_token:
-            raise HTTPException(
-                status_code=400, detail="No Canvas access token for class"
-            )
+            raise ValueError("No Canvas access token for class")
 
         # Check if the user making the request is the user whose Canvas account is connected for the class
         if response.user_id != self.user_id:
-            raise HTTPException(
-                status_code=403,
-                detail="You're not the authorized Canvas user for this class",
+            raise ValueError(
+                "You're not the authorized Canvas user for this class",
             )
 
         # Set the access token to use for the request as the current access token
@@ -251,7 +246,6 @@ class CanvasCourseClient(ABC):
     async def _make_authed_request_get(
         self,
         path: str,
-        body: dict | None = None,
         params: dict | None = None,
         retry_attempt: int = 0,
     ) -> CanvasRequestResponse:
@@ -263,135 +257,39 @@ class CanvasCourseClient(ABC):
             path,
             params=params,
             headers=headers,
-            json=body,
             raise_for_status=True,
         ) as resp:
             return await self.create_response(resp)
 
-    async def _paginated_request(
+    async def _request_all_pages(
         self,
         path: str,
-        f: Callable[[list[dict]], list[T]],
         body: dict | None = None,
         params: dict | None = None,
         method: Union[Literal["GET"], Literal["POST"]] = "GET",
-    ) -> list[T]:
+    ):
         """Paginate through a request response. Returns the parsed response of all pages.
 
         Args:
             path (str): The path to the API endpoint.
-            f (Callable[[list[dict]], list[any]]): The function to parse the JSON response.
             body (dict, optional): The body of the request. Defaults to None.
             params (dict, optional): The parameters of the request. Defaults to None.
+            method (Union[Literal["GET"], Literal["POST"]], optional): The HTTP method to use. Defaults to "GET".
 
         Returns:
             list[any]: The parsed response of all pages.
         """
-        results = []
 
         next_page = self.config.url(path)
-
         while next_page:
             if method == "GET":
-                response = await self._make_authed_request_get(next_page, body, params)
+                response = await self._make_authed_request_get(next_page, params)
             else:
                 response = await self._make_authed_request_post(next_page, body, params)
-            result = f(response.response)
-            results.extend(result)
+
+            yield response.response
+
             next_page = response.next_page
-
-        return results
-
-    async def _paginated_request_single(
-        self,
-        path: str,
-        f: Callable[[list[dict], Union[T, None]], Union[T, None]],
-        body: dict | None = None,
-        params: dict | None = None,
-        method: Union[Literal["GET"], Literal["POST"]] = "GET",
-    ) -> Union[T, None]:
-        """Paginate through a request response. Returns a single object or None.
-        For example, can be used for returning a boolean value.
-
-        Args:
-            path (str): The path to the API endpoint.
-            f (Callable[[list[dict], Union[T, None]], T]): The function to parse the JSON response.
-            body (dict, optional): The body of the request. Defaults to None.
-            params (dict, optional): The parameters of the request. Defaults to None.
-
-        Returns:
-            Union[T, None]: Result.
-        """
-        next_page = self.config.url(path)
-
-        result = None
-
-        while next_page:
-            try:
-                if method == "GET":
-                    response = await self._make_authed_request_get(
-                        next_page, body, params
-                    )
-                else:
-                    response = await self._make_authed_request_post(
-                        next_page, body, params
-                    )
-                result = f(response.response, result)
-                next_page = response.next_page
-            except BreakLoopException as e:
-                return e.value
-
-        return result
-
-    async def _non_paginated_request(
-        self,
-        path: str,
-        f: Callable[[dict], T],
-        body: dict | None = None,
-        params: dict | None = None,
-        method: Union[Literal["GET"], Literal["POST"]] = "GET",
-    ) -> T:
-        """Make a request to an API endpoint that does not require pagination.
-
-        Args:
-            path (str): The path to the API endpoint.
-            f (Callable[[dict], T]): The function to parse the JSON response.
-            body (dict, optional): The body of the request. Defaults to None.
-            params (dict, optional): The parameters of the request. Defaults to None.
-
-        Returns:
-            T: Result.
-        """
-        if method == "GET":
-            response = await self._make_authed_request_get(
-                self.config.url(path), body, params
-            )
-        else:
-            response = await self._make_authed_request_post(
-                self.config.url(path), body, params
-            )
-        return f(response.response)
-
-    async def _request_returns_data(
-        self,
-        path: str,
-        body: dict | None = None,
-        params: dict | None = None,
-    ) -> bool:
-        """Check if a request to an API endpoint returns data.
-
-        Args:
-            path (str): The path to the API endpoint.
-            body (dict, optional): The body of the request. Defaults to None.
-            params (dict, optional): The parameters of the request. Defaults to None.
-
-        Returns:
-            bool: True if data is returned, False otherwise.
-        """
-        response = await self._make_authed_request_get(
-            self.config.url(path), body, params
-        )
-        return bool(response.response)
 
     async def _get_initial_access_token(self, code: str) -> CanvasAccessToken:
         params = {
@@ -439,10 +337,12 @@ class CanvasCourseClient(ABC):
             CanvasRefreshAccessTokenRequest(**params)
         )
 
-    def _process_courses(self, data: list[dict]) -> list[CanvasClassSchema]:
+    def _process_courses(
+        self, data: list[dict]
+    ) -> Generator[CanvasClassSchema, None, None]:
         """Process the JSON response of the Canvas courses API."""
-
-        return [self._process_course(course) for course in data]
+        for course in data:
+            yield self._process_course(course)
 
     def _process_course(self, data: dict) -> CanvasClassSchema:
         """Process the JSON response of the Canvas course API.
@@ -483,23 +383,19 @@ class CanvasCourseClient(ABC):
         #           term for each course is returned.
         params = {"include[]": ["term"]}
 
-        return await self._paginated_request(
-            request_url, self._process_courses, params=params
-        )
+        return [
+            course
+            async for result in self._request_all_pages(request_url, params=params)
+            for course in self._process_courses(result)
+        ]
 
-    def _enrollment_check(
-        self,
-        course_id: str,
-    ) -> Callable[[list[dict], bool | None], bool | None]:
-        """Generate a function to check if the user has a teacher or TA enrollment in the course."""
+    def _enrollment_check(self, course_id: str, data: list[dict]) -> bool:
+        """Check if the user has a teacher or TA enrollment in the course."""
 
-        def f(data: list[dict], result: bool | None) -> bool | None:
-            for enrollment in data:
-                if enrollment["course_id"] == int(course_id):
-                    raise BreakLoopException(True)
-            return result
-
-        return f
+        for enrollment in data:
+            if enrollment["course_id"] == int(course_id):
+                return True
+        return False
 
     async def _in_teaching_staff(self, course_id: str) -> bool:
         """Confirm that the current user has a Teacher or TA role in the current class."""
@@ -527,12 +423,10 @@ class CanvasCourseClient(ABC):
             ]
         }
 
-        return (
-            await self._paginated_request_single(
-                request_url, self._enrollment_check(course_id), params=params
-            )
-            or False
-        )
+        async for result in self._request_all_pages(request_url, params=params):
+            if self._enrollment_check(course_id, result):
+                return True
+        return False
 
     async def _roster_access_check(self, course_id: str) -> bool:
         """Check if the user has access to the course roster."""
@@ -545,20 +439,21 @@ class CanvasCourseClient(ABC):
         # https://canvas.instructure.com/doc/api/users.html#User
         request_url = f"/api/v1/courses/{course_id}/users"
 
-        return await self._request_returns_data(request_url)
+        async for result in self._request_all_pages(request_url):
+            return bool(result)
+
+        return False
 
     async def verify_access(self, course_id: str) -> None:
         """Verify that the user has access to the course and the roster."""
         if not await self._in_teaching_staff(course_id):
-            raise HTTPException(
-                status_code=403,
-                detail="You are not an authorized teacher or TA in the Canvas class you are trying to access.",
+            raise ValueError(
+                "You are not an authorized teacher or TA in the Canvas class you are trying to access.",
             )
 
         if not await self._roster_access_check(course_id):
-            raise HTTPException(
-                status_code=403,
-                detail="You are not authorized to access the enrollment list for this Canvas class.",
+            raise ValueError(
+                "You are not authorized to access the enrollment list for this Canvas class.",
             )
 
     async def _get_course_details(self, course_id: str) -> CanvasClassSchema:
@@ -579,9 +474,10 @@ class CanvasCourseClient(ABC):
         #           term for each course is returned.
         params = {"include[]": ["term"]}
 
-        return await self._non_paginated_request(
-            request_url, self._process_course, params=params
-        )
+        async for result in self._request_all_pages(request_url, params=params):
+            return self._process_course(result)
+
+        raise ValueError("Course not found")
 
     async def set_canvas_class(self, course_id: str) -> None:
         """Set the Canvas class for the PingPong class."""
@@ -605,7 +501,9 @@ class CanvasCourseClient(ABC):
         """Check if a sync is allowed based on the last sync time and the time between syncs."""
         pass
 
-    def _process_users(self, data: list[dict]) -> list[CreateUserClassRole]:
+    def _process_users(
+        self, data: list[dict]
+    ) -> Generator[CreateUserClassRole, None, None]:
         """Generate a CreateUserClassRole object from the JSON response of a user.
 
         We extract the user's email address and determine if they are a teacher or student.
@@ -627,25 +525,20 @@ class CanvasCourseClient(ABC):
         https://canvas.instructure.com/doc/api/enrollments.html#Enrollment
         """
 
-        user_roles: list[CreateUserClassRole] = []
         for user in data:
             is_teacher = False
             for enrollment in user["enrollments"]:
                 if enrollment["type"] in ["TeacherEnrollment", "TaEnrollment"]:
                     is_teacher = True
                     break
-            user_roles.append(
-                CreateUserClassRole(
-                    email=user["email"],
-                    roles=ClassUserRoles(
-                        admin=False,
-                        teacher=is_teacher,
-                        student=not is_teacher,
-                    ),
-                )
+            yield CreateUserClassRole(
+                email=user["email"],
+                roles=ClassUserRoles(
+                    admin=False,
+                    teacher=is_teacher,
+                    student=not is_teacher,
+                ),
             )
-
-        return user_roles
 
     async def _get_course_users(self, course_id: str) -> list[CreateUserClassRole]:
         """Get the users in a course."""
@@ -669,9 +562,11 @@ class CanvasCourseClient(ABC):
         #                  ‘final_score’, ‘current_grade’ and ‘final_grade’ values.
         params = {"include[]": ["enrollments"]}
 
-        return await self._paginated_request(
-            request_url, self._process_users, params=params
-        )
+        return [
+            user_role
+            async for result in self._request_all_pages(request_url, params=params)
+            for user_role in self._process_users(result)
+        ]
 
     @abstractmethod
     async def _update_user_roles(self) -> None:
@@ -683,7 +578,7 @@ class CanvasCourseClient(ABC):
 
         class_, now = await Class.get_lms_course_id(self.db, self.class_id)
         if not class_:
-            raise HTTPException(status_code=400, detail="No linked Canvas course found")
+            raise ValueError("No linked Canvas course found")
 
         self._sync_allowed(class_.lms_last_synced, now)
         self.new_ucr = CreateUserClassRoles(
@@ -723,11 +618,8 @@ class ManualCanvasClient(CanvasCourseClient):
                 last_synced + timedelta(seconds=self.config.sync_wait) - now
             ).total_seconds() + 1
 
-            raise HTTPException(
-                status_code=429,
-                # convert_seconds uses arrow to format the time remaining in a human-readable format,
-                # but it might display "instantly" if the time remaining is less than a minute, which is not intuitive.
-                detail=f"A Canvas sync was recently completed. Please wait before trying again.\
+            raise ValueError(
+                f"A Canvas sync was recently completed. Please wait before trying again.\
                 You can request a manual sync in {convert_seconds(int(time_remaining)) if int(time_remaining) > 60 else 'a minute'}.",
             )
 
