@@ -388,37 +388,42 @@ async def auth_canvas(request: Request):
     state = request.query_params.get("state")
     error = request.query_params.get("error")
 
-    canvasToken = decode_canvas_token(state, nowfn=get_now_fn(request))
-    user_id = int(canvasToken.user_id)
-    class_id = int(canvasToken.class_id)
-    lms_tenant = canvasToken.lms_tenant
+    canvas_token = decode_canvas_token(state, nowfn=get_now_fn(request))
+    user_id = int(canvas_token.user_id)
+    class_id = int(canvas_token.class_id)
+    lms_tenant = canvas_token.lms_tenant
 
     if error:
-        class_id = int(canvasToken.class_id)
-        if (
-            error == "invalid_request"
-            or error == "unauthorized_client"
-            or error == "unsupported_response_type"
-            or error == "invalid_scope"
-        ):
-            return RedirectResponse(
-                config.url(f"/group/{class_id}/manage?error_code=1"),
-                status_code=303,
-            )
-        if error == "access_denied":
-            return RedirectResponse(
-                config.url(f"/group/{class_id}/manage?error_code=2"),
-                status_code=303,
-            )
-        if error == "server_error" or error == "temporarily_unavailable":
-            return RedirectResponse(
-                config.url(f"/group/{class_id}/manage?error_code=3"),
-                status_code=303,
-            )
-
+        class_id = int(canvas_token.class_id)
+        match error:
+            case (
+                "invalid_request"
+                | "unauthorized_client"
+                | "unsupported_response_type"
+                | "invalid_scope"
+            ):
+                return RedirectResponse(
+                    config.url(f"/group/{class_id}/manage?error_code=1"),
+                    status_code=303,
+                )
+            case "access_denied":
+                return RedirectResponse(
+                    config.url(f"/group/{class_id}/manage?error_code=2"),
+                    status_code=303,
+                )
+            case "server_error" | "temporarily_unavailable":
+                return RedirectResponse(
+                    config.url(f"/group/{class_id}/manage?error_code=3"),
+                    status_code=303,
+                )
+            case _:
+                return RedirectResponse(
+                    config.url(f"/group/{class_id}/manage?error_code=4"),
+                    status_code=303,
+                )
     try:
         canvas_settings = get_canvas_config(lms_tenant)
-    except HTTPException:
+    except ValueError:
         canvas_settings = None
 
     if not code or not canvas_settings or user_id != request.state.session.user.id:
@@ -776,7 +781,8 @@ async def get_canvas_classes(class_id: str, tenant: str, request: Request):
         try:
             courses = await client.get_courses()
         except HTTPException as e:
-            # If we get a 4xx error, mark the class as having a sync error.
+            # If we get a 4xx error, mark the class as having a sync error before raising the error.
+            # This will prompt the user to re-connect to Canvas before we sync again.
             # Otherwise, just display an error message (assuming this would be a 5xx error).
             if e.status_code >= 400 and e.status_code < 500:
                 await models.Class.mark_lms_sync_error(request.state.db, int(class_id))

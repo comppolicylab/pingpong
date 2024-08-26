@@ -212,7 +212,7 @@ def db_set_version(version: str, alembic_config: str) -> None:
 @lms.command("sync-all")
 def sync_all() -> None:
     """
-    Sync all classes with an linked LMS class.
+    Sync all classes with a linked LMS class.
     """
 
     async def _sync_all() -> None:
@@ -220,11 +220,16 @@ def sync_all() -> None:
         async with config.db.driver.async_session() as session:
             async with config.authz.driver.get_client() as c:
                 for lms in config.lms.lms_instances:
-                    if lms.type == "canvas":
-                        logger.info(
-                            f"Syncing all classes in {lms.tenant}'s {lms.type} instance..."
-                        )
-                        await canvas_sync_all(session, c, lms)
+                    match lms.type:
+                        case "canvas":
+                            logger.info(
+                                f"Syncing all classes in {lms.tenant}'s {lms.type} instance..."
+                            )
+                            await canvas_sync_all(session, c, lms)
+                        case _:
+                            raise NotImplementedError(
+                                f"Unsupported LMS type: {lms.type}"
+                            )
 
     asyncio.run(_sync_all())
 

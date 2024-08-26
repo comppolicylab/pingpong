@@ -2,7 +2,7 @@ import asyncio
 import random
 from typing import Any, Mapping, Callable
 
-from fastapi import HTTPException
+from aiohttp import ClientResponseError
 
 
 def with_retry(
@@ -20,14 +20,14 @@ def with_retry(
                 # Our server returned an error, so we should stop retrying
                 # Our network requests use aiohttp raise_for_status,
                 # which returns a ClientResponseError
-                except HTTPException as e:
-                    raise e
-                except Exception as e:
+                except ClientResponseError as e:
                     last_error = e
                     attempt += 1
                     t = min(max_delay, backoff**attempt)
                     jittered = random.random() * t
                     await asyncio.sleep(jittered)
+                except Exception as e:
+                    raise e
             if last_error:
                 raise last_error
 

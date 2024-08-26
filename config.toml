@@ -94,7 +94,7 @@ tenant = "demo-institution"
 sso = "demo-sso"
 # The attribute to get from Canvas for identifying duplicate accounts and
 # merging them when logging in through SSO. Optional.
-sso_target: "key"
+sso_target = "key"
 # The URL where the application should send Canvas API requests to.
 # For local development, this should be the default localhost Canvas URL
 # if you follow their Quick Start guide.
