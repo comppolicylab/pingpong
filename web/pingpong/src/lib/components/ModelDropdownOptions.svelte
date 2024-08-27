@@ -5,10 +5,16 @@
   import DropdownOption from './DropdownOption.svelte';
   export let modelOptions: AssistantModelOptions[];
   export let modelNodes: { [key: string]: HTMLElement };
+  export let modelHeaders: { [key: string]: string };
+  export let headerClass: string;
   export let selectedModel: string;
   export let updateSelectedModel: (model: string) => void;
   export let allowVisionUpload: boolean;
   export let smallNameText: boolean = false;
+
+  for (const model of modelOptions) {
+    modelHeaders[model.value] = headerClass;
+  }
 </script>
 
 <div class="relative z-0">

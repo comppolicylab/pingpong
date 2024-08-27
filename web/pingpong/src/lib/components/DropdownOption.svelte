@@ -10,7 +10,8 @@
 
 <DropdownItem
   on:click={() => update(value)}
-  defaultClass="flex flex-col gap-x-1 gap-y-1 font-medium py-2 px-4 text-sm {value == selectedValue
+  defaultClass="flex flex-col gap-x-1 gap-y-1 font-medium py-2 px-4 text-sm scroll-mt-9 {value ==
+  selectedValue
     ? 'text-blue-900 bg-blue-light-40 hover:bg-blue-light-40 hover:text-blue-900'
     : 'hover:bg-gray-100 dark:hover:bg-gray-600'}"
 >

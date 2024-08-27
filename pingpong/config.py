@@ -156,6 +156,46 @@ class AuthSettings(BaseSettings):
 DbSettings = Union[PostgresSettings, SqliteSettings]
 
 
+class CanvasSettings(BaseSettings):
+    """Connection settings to a Canvas instance."""
+
+    type: Literal["canvas"]
+    tenant: str
+    client_id: str
+    client_secret: str
+    base_url: str
+    sso_target: str | None = Field(None)
+    sso_tenant: str | None = Field(None)
+    sync_wait: int = Field(60 * 10)  # 10 mins
+    auth_token_expiry: int = Field(60 * 60)  # 1 hour
+
+    def url(self, path: str) -> str:
+        """Return a URL relative to the Canvas Base URL."""
+        return f"{self.base_url.rstrip('/')}/{path.lstrip('/')}"
+
+    def auth_link(self, token: str) -> str:
+        """Return the Redirect URL for Canvas authentication.
+
+        Args:
+            token (str): The generated `AuthToken` identifying the authentication request. This will be returned by Canvas.
+
+        Returns:
+            str: Redirect URL.
+        """
+        return self.url(
+            f"/login/oauth2/auth?client_id={self.client_id}&response_type=code&redirect_uri={config.url('/api/v1/auth/canvas')}&state={token}"
+        )
+
+
+LMSInstance = Union[CanvasSettings]
+
+
+class LMSSettings(BaseSettings):
+    """LMS connection settings."""
+
+    lms_instances: list[LMSInstance]
+
+
 class InitSettings(BaseSettings):
     """Settings for first-time app init."""
 
@@ -209,12 +249,12 @@ class Config(BaseSettings):
 
     reload: int = Field(0)
     public_url: str = Field("http://localhost:8000")
-
     development: bool = Field(False, env="DEVELOPMENT")
     db: DbSettings
     auth: AuthSettings
     authz: AuthzSettings
     email: EmailSettings
+    lms: LMSSettings
     sentry: SentrySettings = Field(SentrySettings())
     metrics: MetricsSettings = Field(MetricsSettings())
     init: InitSettings = Field(InitSettings())

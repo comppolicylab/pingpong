@@ -35,3 +35,14 @@ port = "11800"
 store = "pingpong"
 cfg = "./pingpong/authz/authz.fga.json"
 key = "devkey"
+
+[[lms.lms_instances]]
+type = "canvas"
+tenant = "demo"
+sso_tenant = "demo"
+sso_target = "key"
+base_url = "http://canvas.docker"
+client_id = "your client id here"
+client_secret = "your client secret here"
+sync_wait = 600
+auth_token_expiry = 3600

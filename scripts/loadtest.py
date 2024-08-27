@@ -218,7 +218,7 @@ class TestInstance:
             {
                 "email": emails[i],
                 "id": x["user_id"],
-                "token": encode_auth_token(x["user_id"]),
+                "token": encode_auth_token(str(x["user_id"])),
             }
             for i, x in enumerate(resp.json()["roles"])
         ]
@@ -228,7 +228,7 @@ class TestInstance:
 def on_test_start(**kwargs):
     print("Starting test", kwargs)
     global TEST_INST
-    TEST_INST = TestInstance(config.public_url, encode_auth_token(1))
+    TEST_INST = TestInstance(config.public_url, encode_auth_token("1"))
 
 
 @events.test_stop.add_listener

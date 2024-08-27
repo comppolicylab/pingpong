@@ -4,6 +4,7 @@ import logging
 import time
 from datetime import datetime
 from typing import Annotated, Any
+from aiohttp import ClientResponseError
 import jwt
 import openai
 import humanize
@@ -48,9 +49,15 @@ from .auth import (
 )
 from .authz import Relation
 from .config import config
+from .canvas import (
+    CanvasException,
+    LightweightCanvasClient,
+    ManualCanvasClient,
+    decode_canvas_token,
+    get_canvas_config,
+)
 from .errors import sentry
 from .files import FILE_TYPES, handle_create_file, handle_delete_file
-from .invite import send_invite
 from .now import NowFn, utcnow
 from .permission import Authz, LoggedIn
 from .runs import get_placeholder_ci_calls
@@ -61,6 +68,7 @@ from .vector_stores import (
     delete_vector_store_db,
     delete_vector_store_oai,
 )
+from .users import AddNewUsersManual, AddUserException, delete_canvas_permissions
 
 logger = logging.getLogger(__name__)
 
@@ -370,6 +378,76 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
     return {"status": "ok"}
 
 
+@v1.get("/auth/canvas")
+async def auth_canvas(request: Request):
+    """Canvas OAuth2 callback. For now, this defaults to using the Harvard instance.
+
+    This endpoint is called by Canvas after the user has authenticated.
+    We exchange the code for an access token and then redirect to the
+    destination URL with the user's session token.
+    """
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    error = request.query_params.get("error")
+
+    try:
+        canvas_token = decode_canvas_token(state, nowfn=get_now_fn(request))
+        user_id = int(canvas_token.user_id)
+        class_id = int(canvas_token.class_id)
+        lms_tenant = canvas_token.lms_tenant
+    except Exception:
+        return RedirectResponse(
+            config.url("/?error_code=1"),
+            status_code=303,
+        )
+
+    if error:
+        class_id = int(canvas_token.class_id)
+        match error:
+            case (
+                "invalid_request"
+                | "unauthorized_client"
+                | "unsupported_response_type"
+                | "invalid_scope"
+            ):
+                return RedirectResponse(
+                    config.url(f"/group/{class_id}/manage?error_code=1"),
+                    status_code=303,
+                )
+            case "access_denied":
+                return RedirectResponse(
+                    config.url(f"/group/{class_id}/manage?error_code=2"),
+                    status_code=303,
+                )
+            case "server_error" | "temporarily_unavailable":
+                return RedirectResponse(
+                    config.url(f"/group/{class_id}/manage?error_code=3"),
+                    status_code=303,
+                )
+            case _:
+                return RedirectResponse(
+                    config.url(f"/group/{class_id}/manage?error_code=4"),
+                    status_code=303,
+                )
+    try:
+        canvas_settings = get_canvas_config(lms_tenant)
+    except ValueError:
+        canvas_settings = None
+
+    if not code or not canvas_settings or user_id != request.state.session.user.id:
+        return RedirectResponse(
+            config.url(f"/group/{class_id}/manage?error_code=4"),
+            status_code=303,
+        )
+
+    async with LightweightCanvasClient(
+        canvas_settings,
+        class_id,
+        request,
+    ) as client:
+        return await client.complete_initial_auth(code)
+
+
 @v1.get("/auth")
 async def auth(request: Request):
     """Continue the auth flow based on a JWT in the query params.
@@ -662,6 +740,188 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
 
 
 @v1.get(
+    "/class/{class_id}/canvas/{tenant}/link",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.CanvasRedirect,
+)
+async def get_canvas_link(class_id: str, tenant: str, request: Request):
+    canvas_settings = get_canvas_config(tenant)
+    async with LightweightCanvasClient(
+        canvas_settings,
+        int(class_id),
+        request,
+    ) as client:
+        return {"url": client.get_oauth_link()}
+
+
+@v1.post(
+    "/class/{class_id}/canvas/{tenant}/sync/dismiss",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def dismiss_canvas_sync(class_id: str, request: Request):
+    await models.Class.dismiss_lms_sync(request.state.db, int(class_id))
+    return {"status": "ok"}
+
+
+@v1.post(
+    "/class/{class_id}/canvas/{tenant}/sync/enable",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def enable_canvas_sync(class_id: str, request: Request):
+    await models.Class.enable_lms_sync(request.state.db, int(class_id))
+    return {"status": "ok"}
+
+
+@v1.get(
+    "/class/{class_id}/canvas/{tenant}/classes",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.LMSClasses,
+)
+async def get_canvas_classes(class_id: str, tenant: str, request: Request):
+    canvas_settings = get_canvas_config(tenant)
+    async with LightweightCanvasClient(
+        canvas_settings,
+        int(class_id),
+        request,
+    ) as client:
+        try:
+            courses = await client.get_courses()
+            return {"classes": courses}
+        except ClientResponseError as e:
+            # If we get a 4xx error, mark the class as having a sync error before raising the error.
+            # This will prompt the user to re-connect to Canvas before we sync again.
+            # Otherwise, just display an error message.
+            if e.code == 401:
+                await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
+            raise HTTPException(
+                status_code=e.code, detail="Canvas returned an error: " + e.message
+            )
+        except CanvasException as e:
+            raise HTTPException(
+                status_code=e.code or 500,
+                detail=e.detail
+                or "We faced an error while getting your Canvas classes.",
+            )
+        except Exception:
+            raise HTTPException(
+                status_code=500,
+                detail="We faced an internal error while getting your Canvas classes.",
+            )
+
+
+@v1.post(
+    "/class/{class_id}/canvas/{tenant}/classes/{canvas_class_id}",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def update_canvas_class(
+    class_id: str, tenant: str, canvas_class_id: str, request: Request
+):
+    canvas_settings = get_canvas_config(tenant)
+    async with LightweightCanvasClient(
+        canvas_settings,
+        int(class_id),
+        request,
+    ) as client:
+        try:
+            await client.set_canvas_class(canvas_class_id)
+            return {"status": "ok"}
+        except CanvasException as e:
+            raise HTTPException(
+                status_code=e.code or 500,
+                detail=e.detail or "We faced an error while setting your Canvas class.",
+            )
+        except ClientResponseError as e:
+            # If we get a 401 error, mark the class as having a sync error.
+            # Otherwise, just display an error message.
+            if e.code == 401:
+                await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
+            raise HTTPException(
+                status_code=e.code, detail="Canvas returned an error: " + e.message
+            )
+        except Exception:
+            raise HTTPException(
+                status_code=500,
+                detail="We faced an internal error while setting your Canvas class.",
+            )
+
+
+@v1.post(
+    "/class/{class_id}/canvas/{tenant}/sync",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def sync_canvas_class(
+    class_id: str, tenant: str, request: Request, tasks: BackgroundTasks
+):
+    canvas_settings = get_canvas_config(tenant)
+    async with ManualCanvasClient(
+        canvas_settings,
+        int(class_id),
+        request,
+        tasks,
+    ) as client:
+        try:
+            await client.sync_roster()
+            return {"status": "ok"}
+        except ClientResponseError as e:
+            # If we get a 401 error, mark the class as having a sync error.
+            # Otherwise, just display an error message.
+            if e.code == 401:
+                await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
+            raise HTTPException(
+                status_code=e.code, detail="Canvas returned an error: " + e.message
+            )
+        except (CanvasException, AddUserException) as e:
+            raise HTTPException(
+                status_code=e.code or 500,
+                detail=e.detail or "We faced an error while syncing with Canvas.",
+            )
+        except Exception:
+            raise HTTPException(
+                status_code=500,
+                detail="We faced an internal error while syncing with Canvas.",
+            )
+
+
+@v1.delete(
+    "/class/{class_id}/canvas/{tenant}/sync",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def unlink_canvas_class(class_id: str, tenant: str, request: Request):
+    canvas_settings = get_canvas_config(tenant)
+    userIds = await models.Class.remove_lms_sync(
+        request.state.db,
+        int(class_id),
+        canvas_settings.tenant,
+        schemas.LMSType(canvas_settings.type),
+    )
+    await delete_canvas_permissions(request.state.authz, userIds, class_id)
+    return {"status": "ok"}
+
+
+@v1.delete(
+    "/class/{class_id}/canvas/{tenant}/account",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def remove_canvas_connection(class_id: str, tenant: str, request: Request):
+    canvas_settings = get_canvas_config(tenant)
+    userIds = await models.Class.remove_lms_sync(
+        request.state.db,
+        int(class_id),
+        canvas_settings.tenant,
+        schemas.LMSType(canvas_settings.type),
+        kill_connection=True,
+    )
+    await delete_canvas_permissions(request.state.authz, userIds, class_id)
+    return {"status": "ok"}
+
+
+@v1.get(
     "/class/{class_id}/users",
     dependencies=[Depends(Authz("can_view_users", "class:{class_id}"))],
     response_model=schemas.ClassUsers,
@@ -708,6 +968,8 @@ async def list_class_users(
                     student=results[i * 3 + 2],
                 ),
                 explanation=[[]],
+                lms_tenant=u.lms_tenant or None,
+                lms_type=u.lms_type or None,
             )
         )
 
@@ -725,109 +987,15 @@ async def add_users_to_class(
     request: Request,
     tasks: BackgroundTasks,
 ):
-    cid = int(class_id)
-    class_ = await models.Class.get_by_id(request.state.db, cid)
-    result: list[schemas.UserClassRole] = []
-    new_: list[schemas.CreateInvite] = []
-
-    grants = list[Relation]()
-    revokes = list[Relation]()
-
-    is_admin = await request.state.authz.test(
-        f"user:{request.state.session.user.id}", "admin", f"class:{class_id}"
-    )
-    is_supervisor = await request.state.authz.test(
-        f"user:{request.state.session.user.id}", "supervisor", f"class:{class_id}"
-    )
-
-    formatted_roles = {
-        "admin": "an Administrator",
-        "teacher": "a Moderator",
-        "student": "a Member",
-    }
-
-    user_display_name = await models.User.get_display_name(
-        request.state.db, request.state.session.user.id
-    )
-
-    for ucr in new_ucr.roles:
-        if not is_admin and ucr.roles.admin:
-            raise HTTPException(
-                status_code=403, detail="Lacking permission to add Administrators."
-            )
-
-        # This should never happen, but just in case...
-        if not is_supervisor and ucr.roles.teacher:
-            raise HTTPException(
-                status_code=403, detail="Lacking permission to add Moderators."
-            )
-
-        user = await models.User.get_or_create_by_email(request.state.db, ucr.email)
-        if user.id == request.state.session.user.id:
-            raise HTTPException(
-                status_code=403, detail="You cannot change your own role."
-            )
-
-        existing = await models.UserClassRole.get(request.state.db, user.id, cid)
-        new_roles = []
-        for role in ["admin", "teacher", "student"]:
-            if getattr(ucr.roles, role):
-                grants.append((f"user:{user.id}", role, f"class:{cid}"))
-                new_roles.append(formatted_roles[role])
-            else:
-                revokes.append((f"user:{user.id}", role, f"class:{cid}"))
-
-        if existing:
-            result.append(
-                schemas.UserClassRole(
-                    user_id=existing.user_id,
-                    class_id=existing.class_id,
-                    roles=ucr.roles,
-                )
-            )
-            request.state.db.add(existing)
-        else:
-            # Make sure the user exists...
-            added = await models.UserClassRole.create(
-                request.state.db,
-                user.id,
-                cid,
-            )
-            new_.append(
-                schemas.CreateInvite(
-                    user_id=user.id,
-                    email=user.email,
-                    class_name=class_.name,
-                    inviter_name=user_display_name,
-                    formatted_role=", ".join(new_roles) if new_roles else None,
-                )
-            )
-            result.append(
-                schemas.UserClassRole(
-                    user_id=added.user_id,
-                    class_id=added.class_id,
-                    roles=ucr.roles,
-                )
-            )
-
-    if not new_ucr.silent:
-        # Send emails to new users in the background
-        nowfn = get_now_fn(request)
-        for invite in new_:
-            magic_link = generate_auth_link(
-                invite.user_id, expiry=86_400 * 7, nowfn=nowfn
-            )
-            tasks.add_task(
-                send_invite,
-                config.email.sender,
-                invite,
-                magic_link,
-                86_400 * 7,
-            )
-
-    await request.state.authz.write_safe(grant=grants, revoke=revokes)
-
-    return {"roles": result}
+    try:
+        return await AddNewUsersManual(
+            class_id, new_ucr, request, tasks
+        ).add_new_users()
+    except AddUserException as e:
+        raise HTTPException(
+            status_code=e.code or 500,
+            detail=e.detail or "We faced an error while adding users.",
+        )
 
 
 @v1.put(
@@ -947,7 +1115,6 @@ async def remove_user_from_class(class_id: str, user_id: str, request: Request):
         revokes.append((f"user:{uid}", role, f"class:{cid}"))
 
     await request.state.authz.write_safe(revoke=revokes)
-
     return {"status": "ok"}
 
 

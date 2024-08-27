@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from .auth import encode_auth_token
+from .canvas import canvas_sync_all
 from .config import config
 from .models import Base, User
 
@@ -26,6 +27,11 @@ def cli() -> None:
 
 @cli.group("auth")
 def auth() -> None:
+    pass
+
+
+@cli.group("lms")
+def lms() -> None:
     pass
 
 
@@ -96,7 +102,7 @@ def login(email: str, redirect: str, super_user: bool) -> None:
             return user.id
 
     user_id = asyncio.run(_get_or_create(email))
-    tok = encode_auth_token(user_id)
+    tok = encode_auth_token(str(user_id))
     url = config.url(f"/api/v1/auth?token={tok}&redirect={redirect}")
     print(f"Magic auth link: {url}")
 
@@ -201,6 +207,31 @@ def db_set_version(version: str, alembic_config: str) -> None:
     al_cfg = _load_alembic(alembic_config)
     # Run the Alembic upgrade command
     alembic.command.stamp(al_cfg, version)
+
+
+@lms.command("sync-all")
+def sync_all() -> None:
+    """
+    Sync all classes with a linked LMS class.
+    """
+
+    async def _sync_all() -> None:
+        await config.authz.driver.init()
+        async with config.db.driver.async_session() as session:
+            async with config.authz.driver.get_client() as c:
+                for lms in config.lms.lms_instances:
+                    match lms.type:
+                        case "canvas":
+                            logger.info(
+                                f"Syncing all classes in {lms.tenant}'s {lms.type} instance..."
+                            )
+                            await canvas_sync_all(session, c, lms)
+                        case _:
+                            raise NotImplementedError(
+                                f"Unsupported LMS type: {lms.type}"
+                            )
+
+    asyncio.run(_sync_all())
 
 
 if __name__ == "__main__":

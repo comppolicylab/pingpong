@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum, StrEnum, auto
-from typing import Literal, Union, TypedDict
+from typing import Generic, Literal, TypeVar, Union, TypedDict
 
 from openai.types.beta.assistant_tool import AssistantTool as Tool
 from openai.types.beta.threads import Message as OpenAIMessage
@@ -312,17 +312,21 @@ class ClassUserRoles(BaseModel):
 
 class CreateUserClassRole(BaseModel):
     email: str = Field(..., min_length=3, max_length=100)
+    sso_id: str | None = None
     roles: ClassUserRoles
 
 
-class CreateUserClassRoles(BaseModel):
-    roles: list[CreateUserClassRole]
-    silent: bool = False
+class LMSType(Enum):
+    CANVAS = "canvas"
 
 
 class UserClassRole(BaseModel):
     user_id: int
     class_id: int
+    lms_tenant: str | None = None
+    lms_type: LMSType | None = None
+    sso_id: str | None = None
+    sso_tenant: str | None = None
     roles: ClassUserRoles
 
     class Config:
@@ -345,6 +349,12 @@ class CreateInvite(BaseModel):
     formatted_role: str | None = None
 
 
+class CreateUserInviteConfig(BaseModel):
+    invites: list[CreateInvite] = []
+    formatted_roles: dict[str, str] = {}
+    inviter_display_name: str | None = None
+
+
 class UpdateUserInfo(BaseModel):
     """Fields that the user can edit about themselves."""
 
@@ -353,15 +363,13 @@ class UpdateUserInfo(BaseModel):
     display_name: str | None = Field(None, min_length=1, max_length=100)
 
 
-class ClassUser(BaseModel):
+class ClassUser(BaseModel, UserNameMixin):
     id: int
-    first_name: str | None
-    last_name: str | None
-    display_name: str | None
-    email: str
     state: UserState
     roles: ClassUserRoles
     explanation: list[list[str]] | None
+    lms_tenant: str | None = None
+    lms_type: LMSType | None = None
 
 
 class UserGroup(BaseModel):
@@ -402,6 +410,125 @@ class Institutions(BaseModel):
         from_attributes = True
 
 
+# Status documenting the state of the LMS sync.
+# NONE: The user has not authorized the app to sync with LMS.
+# AUTHORIZED: The user has authorized the app to sync with LMS.
+# LINKED: The user has linked the LMS course to the class.
+# DISMISSED: The user has dismissed the LMS sync dialog.
+# ERROR: There was an error during the LMS sync. The user should try again.
+class LMSStatus(StrEnum):
+    NONE = auto()
+    AUTHORIZED = auto()
+    LINKED = auto()
+    DISMISSED = auto()
+    ERROR = auto()
+
+
+class CreateUserClassRoles(BaseModel):
+    roles: list[CreateUserClassRole]
+    silent: bool = False
+    lms_tenant: str | None = None
+    lms_type: LMSType | None = None
+    sso_tenant: str | None = None
+
+
+class LMSClass(BaseModel):
+    lms_id: int
+    lms_type: LMSType
+    lms_tenant: str
+    name: str
+    course_code: str
+    term: str
+
+    class Config:
+        from_attributes = True
+
+
+class LMSClasses(BaseModel):
+    classes: list[LMSClass]
+
+    class Config:
+        from_attributes = True
+
+
+class LMSClassRequest(BaseModel):
+    name: str
+    course_code: str
+    term: str
+    lms_id: int
+    lms_type: LMSType
+    lms_tenant: str
+
+    class Config:
+        from_attributes = True
+
+
+class LMSUser(BaseModel, UserNameMixin):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+class CanvasAccessToken(BaseModel):
+    access_token: str
+    expires_in: int
+    refresh_token: str
+
+    class Config:
+        from_attributes = True
+
+
+class CanvasStoredAccessToken(BaseModel):
+    user_id: int
+    access_token: str
+    refresh_token: str
+    expires_in: int
+    token_added_at: datetime
+    now: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CanvasInitialAccessTokenRequest(BaseModel):
+    client_id: str
+    client_secret: str
+    response_type: str
+    code: str
+    redirect_uri: str
+
+    class Config:
+        from_attributes = True
+
+
+class CanvasRefreshAccessTokenRequest(BaseModel):
+    client_id: str
+    client_secret: str
+    grant_type: str
+    refresh_token: str
+
+    class Config:
+        from_attributes = True
+
+
+T = TypeVar("T")
+
+
+class CanvasRequestResponse(BaseModel, Generic[T]):
+    response: list[dict[str, T]] | dict[str, T]
+    next_page: str | None
+
+
+class CreateUpdateCanvasClass(BaseModel):
+    class_id: int
+    user_id: int
+    canvas_course: LMSClass
+
+    class Config:
+        from_attributes = True
+
+
 class Class(BaseModel):
     id: int
     name: str
@@ -412,6 +539,10 @@ class Class(BaseModel):
     updated: datetime | None
     api_key: SecretStr | None
     private: bool | None = None
+    lms_user: LMSUser | None = None
+    lms_status: LMSStatus | None = None
+    lms_class: LMSClass | None = None
+    lms_last_synced: datetime | None = None
     any_can_create_assistant: bool | None = None
     any_can_publish_assistant: bool | None = None
     any_can_publish_thread: bool | None = None
@@ -599,6 +730,20 @@ class AuthToken(BaseModel):
     sub: str
     exp: int
     iat: int
+
+
+class CanvasToken(BaseModel):
+    """Canvas Token - minimal token used to sync class with Canvas course."""
+
+    class_id: str
+    user_id: str
+    lms_tenant: str
+    exp: int
+    iat: int
+
+
+class CanvasRedirect(BaseModel):
+    url: str
 
 
 class SessionToken(BaseModel):

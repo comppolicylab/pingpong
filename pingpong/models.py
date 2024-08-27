@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional
 
-from sqlalchemy import Boolean, Column, DateTime
+from sqlalchemy import Boolean, Column, DateTime, UniqueConstraint
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
     ForeignKey,
@@ -57,6 +57,10 @@ class UserClassRole(Base):
     )
     role = Column(SQLEnum(schemas.Role), nullable=True)
     title: Mapped[Optional[str]]
+    lms_tenant: Mapped[Optional[str]]
+    lms_type = Column(SQLEnum(schemas.LMSType), nullable=True)
+    sso_id: Mapped[Optional[str]]
+    sso_tenant: Mapped[Optional[str]]
     user = relationship("User", back_populates="classes")
     class_ = relationship("Class", back_populates="users")
 
@@ -78,15 +82,29 @@ class UserClassRole(Base):
         session: AsyncSession,
         user_id: int,
         class_id: int,
+        lms_tenant: str | None = None,
+        lms_type: schemas.LMSType | None = None,
+        sso_tenant: str | None = None,
+        sso_id: str | None = None,
     ) -> "UserClassRole":
         stmt = (
             _get_upsert_stmt(session)(UserClassRole)
             .values(
                 user_id=int(user_id),
                 class_id=int(class_id),
+                lms_tenant=lms_tenant,
+                lms_type=lms_type,
+                sso_id=sso_id,
+                sso_tenant=sso_tenant,
             )
-            .on_conflict_do_nothing(
+            .on_conflict_do_update(
                 index_elements=[UserClassRole.user_id, UserClassRole.class_id],
+                set_=dict(
+                    lms_tenant=lms_tenant,
+                    lms_type=lms_type,
+                    sso_id=sso_id,
+                    sso_tenant=sso_tenant,
+                ),
             )
             .returning(UserClassRole)
         )
@@ -102,6 +120,46 @@ class UserClassRole(Base):
         )
         await session.execute(stmt)
         return None
+
+    @classmethod
+    async def delete_from_sync_list(
+        cls,
+        session: AsyncSession,
+        class_id: int,
+        newly_synced: list[int],
+        lms_tenant: str,
+        lms_type: schemas.LMSType,
+    ) -> list[int]:
+        """
+        Removes `UserClassRole`s from LMS course members who were previously synced with a specific LMS tenant but were not returned in the current sync.
+
+        Args:
+            session (AsyncSession): The DB Session to use for executing DB statements.
+            class_id (int): The ID of the class being synced.
+            newly_synced (list[int]): The list of all user ids returned by the current sync.
+            lms (str): The LMS tenant the sync was performed on.
+
+        Returns:
+            list[int]: List of user ids that were removed as they were not included in the current LMS tenant sync. Can be used to remove the relevant permissions for users.
+        """
+        stmt = select(UserClassRole).where(
+            and_(
+                UserClassRole.class_id == int(class_id),
+                UserClassRole.lms_tenant == lms_tenant,
+                UserClassRole.lms_type == lms_type,
+            )
+        )
+        result = await session.execute(stmt)
+        users = [row.UserClassRole.user_id for row in result]
+        users_to_delete = list(set(users) - set(newly_synced))
+        stmt_ = delete(UserClassRole).where(
+            and_(
+                UserClassRole.class_id == int(class_id),
+                UserClassRole.user_id.in_(users_to_delete),
+            )
+        )
+        await session.execute(stmt_)
+        return users_to_delete
 
 
 class UserInstitutionRole(Base):
@@ -151,6 +209,10 @@ class User(Base):
     super_admin = Column(Boolean, default=False)
     threads = relationship(
         "Thread", secondary=user_thread_association, back_populates="users"
+    )
+    # Maps to classes in which the user has connected their LMS account
+    lms_syncs: Mapped[List["Class"]] = relationship(
+        "Class", back_populates="lms_user", lazy="selectin"
     )
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
@@ -667,6 +729,62 @@ class Assistant(Base):
         await session.execute(stmt)
 
 
+class LMSClass(Base):
+    __tablename__ = "lms_classes"
+    __table_args__ = (
+        UniqueConstraint("lms_id", "lms_tenant", "lms_type", name="_id_lms_uc"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lms_id = Column(Integer, nullable=False)
+    lms_tenant = Column(String, nullable=False)
+    lms_type = Column(SQLEnum(schemas.LMSType), nullable=False)
+    name = Column(String)
+    course_code = Column(String)
+    term = Column(String)
+    classes = relationship("Class", back_populates="lms_class")
+
+    @classmethod
+    async def create_or_update(
+        cls, session: AsyncSession, request: schemas.LMSClassRequest
+    ) -> "LMSClass":
+        stmt = (
+            _get_upsert_stmt(session)(LMSClass)
+            .values(
+                name=request.name,
+                term=request.term,
+                course_code=request.course_code,
+                lms_id=request.lms_id,
+                lms_tenant=request.lms_tenant,
+                lms_type=request.lms_type,
+            )
+            .on_conflict_do_update(
+                index_elements=[
+                    LMSClass.lms_id,
+                    LMSClass.lms_tenant,
+                    LMSClass.lms_type,
+                ],
+                set_=dict(
+                    name=request.name,
+                    term=request.term,
+                    course_code=request.course_code,
+                ),
+            )
+            .returning(LMSClass)
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def delete_if_unused(cls, session: AsyncSession, id_: int) -> None:
+        """Check if a Pingpong class is connected to this LMS class, delete otherwise."""
+        stmt = select(Class).where(Class.lms_class_id == id_)
+        lms_class = await session.scalar(stmt)
+
+        if not lms_class:
+            stmt_ = delete(LMSClass).where(LMSClass.id == id_)
+            await session.execute(stmt_)
+
+
 class Class(Base):
     __tablename__ = "classes"
 
@@ -681,6 +799,17 @@ class Class(Base):
     term = Column(String)
     api_key = Column(String, nullable=True)
     private = Column(Boolean, default=False)
+    lms_status = Column(SQLEnum(schemas.LMSStatus), default=schemas.LMSStatus.NONE)
+    lms_class_id = Column(Integer, ForeignKey("lms_classes.id"), nullable=True)
+    lms_class = relationship("LMSClass", back_populates="classes", lazy="selectin")
+    lms_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    lms_user = relationship("User", back_populates="lms_syncs", lazy="selectin")
+    lms_course_id = Column(Integer, nullable=True)
+    lms_access_token = Column(String, nullable=True)
+    lms_refresh_token = Column(String, nullable=True)
+    lms_expires_in = Column(Integer, nullable=True)
+    lms_token_added_at = Column(DateTime(timezone=True), nullable=True)
+    lms_last_synced = Column(DateTime(timezone=True), nullable=True)
     any_can_create_assistant = Column(Boolean, default=False)
     any_can_publish_assistant = Column(Boolean, default=False)
     any_can_publish_thread = Column(Boolean, default=False)
@@ -776,6 +905,7 @@ class Class(Base):
         stmt = (
             select(Class)
             .options(joinedload(Class.institution))
+            .options(joinedload(Class.lms_user))
             .where(Class.institution_id == int(institution_id))
         )
         result = await session.execute(stmt)
@@ -786,6 +916,8 @@ class Class(Base):
         stmt = (
             select(Class)
             .options(joinedload(Class.institution))
+            .options(joinedload(Class.lms_user))
+            .options(joinedload(Class.lms_class))
             .where(Class.id == int(id_))
         )
         return await session.scalar(stmt)
@@ -799,10 +931,228 @@ class Class(Base):
         stmt = (
             select(Class)
             .options(joinedload(Class.institution))
+            .options(joinedload(Class.lms_user))
+            .options(joinedload(Class.lms_class))
             .where(Class.id.in_(ids))
         )
         result = await session.execute(stmt)
         return [row.Class for row in result]
+
+    @classmethod
+    async def update_lms_token(
+        cls,
+        session: AsyncSession,
+        class_id: int,
+        access_token: str,
+        expires_in: int,
+        refresh_token: str | None = None,
+        user_id: int | None = None,
+        refresh: bool = False,
+    ) -> None:
+        """Update LMS authentication token. When refreshed, there's no need to provide a new refresh token; the same one can be reused."""
+        stmt = (
+            update(Class)
+            .where(Class.id == class_id)
+            .values(
+                lms_access_token=access_token,
+                lms_refresh_token=refresh_token
+                if not refresh
+                else Class.lms_refresh_token,
+                lms_user_id=user_id if not refresh else Class.lms_user_id,
+                lms_expires_in=expires_in,
+                lms_status=schemas.LMSStatus.AUTHORIZED
+                if not refresh
+                else Class.lms_status,
+                lms_token_added_at=func.now(),
+            )
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def mark_lms_sync_error(
+        cls,
+        session: AsyncSession,
+        class_id: int,
+    ) -> None:
+        """Mark LMS class connection as errored out so user can be prompted to reauthenticate."""
+        stmt = (
+            update(Class)
+            .where(Class.id == class_id)
+            .values(lms_status=schemas.LMSStatus.ERROR)
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def get_lms_token(
+        cls, session: AsyncSession, class_id: int
+    ) -> schemas.CanvasStoredAccessToken:
+        """Return LMS token with DB time."""
+        stmt = select(
+            Class.lms_user_id,
+            Class.lms_access_token,
+            Class.lms_refresh_token,
+            Class.lms_expires_in,
+            Class.lms_token_added_at,
+            func.now(),
+        ).where(Class.id == class_id)
+        response = await session.execute(stmt)
+        result = response.first()
+        return schemas.CanvasStoredAccessToken(
+            user_id=result[0],
+            access_token=result[1],
+            refresh_token=result[2],
+            expires_in=result[3],
+            token_added_at=result[4],
+            now=result[5],
+        )
+
+    @classmethod
+    async def get_lms_course_id(
+        cls, session: AsyncSession, class_id: int
+    ) -> tuple["Class", datetime]:
+        """Return LMS course ID with DB time."""
+        stmt = (
+            select(Class, func.now())
+            .outerjoin(Class.lms_class)
+            .options(contains_eager(Class.lms_class).load_only(LMSClass.lms_id))
+            .where(Class.id == class_id)
+        )
+        result = await session.execute(stmt)
+        return result.first()
+
+    @classmethod
+    async def dismiss_lms_sync(cls, session: AsyncSession, class_id: int) -> None:
+        """Mark that a user has dismissed the LMS sync alert. Do not display moving forward."""
+        stmt = (
+            update(Class)
+            .where(Class.id == class_id)
+            .values(
+                lms_status=schemas.LMSStatus.DISMISSED,
+                lms_course_id=None,
+                lms_access_token=None,
+                lms_refresh_token=None,
+                lms_expires_in=None,
+                lms_token_added_at=None,
+                lms_last_synced=None,
+            )
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def enable_lms_sync(cls, session: AsyncSession, class_id: int) -> None:
+        """Mark that a user has re-enabled LMS Sync."""
+        stmt = (
+            update(Class)
+            .where(Class.id == class_id)
+            .values(lms_status=schemas.LMSStatus.NONE)
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def update_lms_class(
+        cls, session: AsyncSession, class_id: int, lms_id: int
+    ) -> None:
+        """Update the LMS linked Class ID."""
+        stmt = select(Class).where(Class.id == class_id)
+        class_instance = await session.scalar(stmt)
+
+        if class_instance.lms_class_id and class_instance.lms_class_id != lms_id:
+            old_lms_id = class_instance.lms_class_id
+            class_instance.lms_class_id = lms_id
+            class_instance.lms_last_synced = None
+            await LMSClass.delete_if_unused(session, old_lms_id)
+        else:
+            class_instance.lms_class_id = lms_id
+
+        class_instance.lms_status = schemas.LMSStatus.LINKED
+        await session.flush()
+
+    @classmethod
+    async def update_last_synced(
+        cls,
+        session: AsyncSession,
+        class_id: int,
+    ) -> None:
+        """Update the timestamp of when the class' roster was synced with LMS."""
+        stmt = (
+            update(Class)
+            .where(Class.id == class_id)
+            .values(lms_last_synced=func.now(), updated=Class.updated)
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def get_all_to_sync(
+        cls, session: AsyncSession, lms_tenant: str, lms_type: schemas.LMSType
+    ) -> AsyncGenerator["Class", None]:
+        """
+        For syncing CRON job: Get all classes with an active
+        LMS-linked class under a specific tenant.
+        """
+        stmt = (
+            select(Class)
+            .outerjoin(Class.lms_class)
+            .options(
+                contains_eager(Class.lms_class).load_only(
+                    LMSClass.lms_tenant, LMSClass.lms_type
+                )
+            )
+            .where(
+                and_(
+                    Class.lms_class_id is not None,
+                    Class.lms_status == schemas.LMSStatus.LINKED,
+                    LMSClass.lms_tenant == lms_tenant,
+                    LMSClass.lms_type == lms_type,
+                )
+            )
+        )
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.Class
+
+    @classmethod
+    async def remove_lms_sync(
+        cls,
+        session: AsyncSession,
+        id_: int,
+        lms_tenant: str,
+        lms_type: schemas.LMSType,
+        kill_connection: bool = False,
+    ) -> list[int]:
+        """Remove linked LMS class connection."""
+        stmt = select(Class).where(Class.id == id_)
+        class_instance = await session.scalar(stmt)
+
+        if class_instance.lms_class_id:
+            await LMSClass.delete_if_unused(session, class_instance.lms_class_id)
+            class_instance.lms_class_id = None
+            class_instance.lms_status = schemas.LMSStatus.AUTHORIZED
+            class_instance.lms_last_synced = None
+
+        # Remove class AND LMS account connection
+        if kill_connection:
+            class_instance.lms_access_token = None
+            class_instance.lms_refresh_token = None
+            class_instance.lms_expires_in = None
+            class_instance.lms_token_added_at = None
+            class_instance.lms_status = schemas.LMSStatus.NONE
+
+        stmt_ = select(UserClassRole).where(
+            and_(
+                UserClassRole.class_id == id_,
+                UserClassRole.lms_tenant == lms_tenant,
+                UserClassRole.lms_type == lms_type,
+            )
+        )
+        result = await session.execute(stmt_)
+        users = [row.UserClassRole for row in result]
+        user_ids = [user.user_id for user in users]
+
+        for user in users:
+            await session.delete(user)
+        await session.flush()
+
+        return user_ids
 
 
 class CodeInterpreterCall(Base):

@@ -24,7 +24,7 @@ def encode_session_token(
     Returns:
         str: Encoded session token JWT
     """
-    return encode_auth_token(user_id, expiry, nowfn=nowfn)
+    return encode_auth_token(str(user_id), expiry, nowfn=nowfn)
 
 
 def decode_session_token(token: str, nowfn: NowFn = utcnow) -> SessionToken:
@@ -41,11 +41,15 @@ def decode_session_token(token: str, nowfn: NowFn = utcnow) -> SessionToken:
     return SessionToken(**auth_token.model_dump())
 
 
-def encode_auth_token(user_id: int, expiry: int = 600, nowfn: NowFn = utcnow) -> str:
+def encode_auth_token(
+    sub: str,
+    expiry: int = 600,
+    nowfn: NowFn = utcnow,
+) -> str:
     """Generates the Auth Token.
 
     Args:
-        user_id (int): User ID
+        sub (str): A user-provided string to provide as the `sub` parameter for `AuthToken` generation.
         expiry (int, optional): Expiry in seconds. Defaults to 600.
         nowfn (NowFn, optional): Function to get the current time. Defaults to utcnow.
 
@@ -60,7 +64,7 @@ def encode_auth_token(user_id: int, expiry: int = 600, nowfn: NowFn = utcnow) ->
     tok = AuthToken(
         iat=int(now.timestamp()),
         exp=int(exp.timestamp()),
-        sub=str(user_id),
+        sub=sub,
     )
 
     secret = config.auth.secret_keys[0]
@@ -142,7 +146,7 @@ def generate_auth_link(
     Returns:
         str: Auth Link
     """
-    tok = encode_auth_token(user_id, expiry=expiry, nowfn=nowfn)
+    tok = encode_auth_token(str(user_id), expiry=expiry, nowfn=nowfn)
     return config.url(f"/api/v1/auth?token={tok}&redirect={redirect}")
 
 

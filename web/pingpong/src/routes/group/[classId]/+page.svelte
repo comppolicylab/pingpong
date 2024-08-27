@@ -29,7 +29,23 @@
    */
   export let data;
 
+  const errorMessages: Record<number, string> = {
+    1: 'We faced an issue when trying to sync with Canvas.'
+  };
+
+  // Function to get error message from error code
+  function getErrorMessage(errorCode: number) {
+    return (
+      errorMessages[errorCode] || 'An unknown error occurred while trying to sync with Canvas.'
+    );
+  }
+
   onMount(async () => {
+    const errorCode = $page.url.searchParams.get('error_code');
+    if (errorCode) {
+      const errorMessage = getErrorMessage(parseInt(errorCode) || 0);
+      sadToast(errorMessage);
+    }
     // Make sure that an assistant is linked in the URL
     if (!$page.url.searchParams.has('assistant')) {
       if (data.assistants.length > 0) {
