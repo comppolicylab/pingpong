@@ -312,6 +312,7 @@ class ClassUserRoles(BaseModel):
 
 class CreateUserClassRole(BaseModel):
     email: str = Field(..., min_length=3, max_length=100)
+    sso_id: str | None = None
     roles: ClassUserRoles
 
 
@@ -324,6 +325,8 @@ class UserClassRole(BaseModel):
     class_id: int
     lms_tenant: str | None = None
     lms_type: LMSType | None = None
+    sso_id: str | None = None
+    sso_tenant: str | None = None
     roles: ClassUserRoles
 
     class Config:
@@ -426,6 +429,7 @@ class CreateUserClassRoles(BaseModel):
     silent: bool = False
     lms_tenant: str | None = None
     lms_type: LMSType | None = None
+    sso_tenant: str | None = None
 
 
 class LMSClass(BaseModel):

@@ -3,13 +3,19 @@ from pingpong.authz.openfga import OpenFgaAuthzClient
 import pingpong.models as models
 import pingpong.schemas as schemas
 
-from fastapi import BackgroundTasks, HTTPException, Request
+from fastapi import BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import generate_auth_link
 from .authz import Relation
 from .config import config
 from .invite import send_invite
 from .now import NowFn, utcnow
+
+
+class AddUserException(Exception):
+    def __init__(self, detail: str = "", code: int | None = None):
+        self.code = code
+        self.detail = detail
 
 
 async def delete_canvas_permissions(
@@ -72,17 +78,20 @@ class AddNewUsers(ABC):
 
     async def _check_permissions(self, ucr: schemas.UserClassRole):
         if not self.is_admin and ucr.roles.admin:
-            raise HTTPException(
-                status_code=403, detail="Lacking permission to add Administrators."
+            raise AddUserException(
+                code=403, detail="Lacking permission to add Administrators."
             )
 
         if not self.is_supervisor and ucr.roles.teacher:
-            raise HTTPException(
-                status_code=403, detail="Lacking permission to add Moderators."
+            raise AddUserException(
+                code=403, detail="Lacking permission to add Moderators."
             )
 
     async def _update_user_enrollment(
-        self, enrollment: schemas.UserClassRole, roles: schemas.ClassUserRoles
+        self,
+        enrollment: schemas.UserClassRole,
+        roles: schemas.ClassUserRoles,
+        sso_id: str | None = None,
     ):
         self.new_roles.append(
             schemas.UserClassRole(
@@ -104,6 +113,8 @@ class AddNewUsers(ABC):
         if self.new_ucr.lms_tenant:
             enrollment.lms_tenant = self.new_ucr.lms_tenant
             enrollment.lms_type = self.new_ucr.lms_type
+            enrollment.sso_id = sso_id
+            enrollment.sso_tenant = self.new_ucr.sso_tenant
             self.session.add(enrollment)
 
     async def _create_user_enrollment(
@@ -111,6 +122,7 @@ class AddNewUsers(ABC):
         user: models.User,
         ucr: schemas.UserClassRole,
         invite_roles: list[str] = [],
+        sso_id: str | None = None,
     ):
         # Create the user enrollment
         enrollment = await models.UserClassRole.create(
@@ -119,6 +131,8 @@ class AddNewUsers(ABC):
             self.class_id,
             self.new_ucr.lms_tenant,
             self.new_ucr.lms_type,
+            self.new_ucr.sso_tenant,
+            sso_id,
         )
 
         self.new_roles.append(
@@ -192,8 +206,8 @@ class AddNewUsers(ABC):
                     continue
                 # If the user is an admin, they can't demote themselves
                 else:
-                    raise HTTPException(
-                        status_code=403, detail="You cannot change your own role."
+                    raise AddUserException(
+                        code=403, detail="You cannot change your own role."
                     )
 
             # Check if the user is already enrolled in the class
@@ -214,9 +228,9 @@ class AddNewUsers(ABC):
                     )
 
             if enrollment:
-                await self._update_user_enrollment(enrollment, ucr.roles)
+                await self._update_user_enrollment(enrollment, ucr.roles, ucr.sso_id)
             else:
-                await self._create_user_enrollment(user, ucr, invite_roles)
+                await self._create_user_enrollment(user, ucr, invite_roles, ucr.sso_id)
 
         # Send emails to new users in the background
         if not self.new_ucr.silent:

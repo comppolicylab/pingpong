@@ -39,7 +39,7 @@ key = "devkey"
 [[lms.lms_instances]]
 type = "canvas"
 tenant = "demo"
-sso = "demo"
+sso_tenant = "demo"
 sso_target = "key"
 base_url = "http://canvas.docker"
 client_id = "your client id here"

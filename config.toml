@@ -91,7 +91,7 @@ type = "canvas"
 tenant = "demo-institution"
 # The associated SSO to compare against for identifying existing accounts
 # Optional.
-sso = "demo-sso"
+sso_tenant = "demo-sso"
 # The attribute to get from Canvas for identifying duplicate accounts and
 # merging them when logging in through SSO. Optional.
 sso_target = "key"

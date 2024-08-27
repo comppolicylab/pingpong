@@ -164,8 +164,8 @@ class CanvasSettings(BaseSettings):
     client_id: str
     client_secret: str
     base_url: str
-    sso: str | None = Field(None)
     sso_target: str | None = Field(None)
+    sso_tenant: str | None = Field(None)
     sync_wait: int = Field(60 * 10)  # 10 mins
     auth_token_expiry: int = Field(60 * 60)  # 1 hour
 

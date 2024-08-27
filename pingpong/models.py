@@ -59,6 +59,8 @@ class UserClassRole(Base):
     title: Mapped[Optional[str]]
     lms_tenant: Mapped[Optional[str]]
     lms_type = Column(SQLEnum(schemas.LMSType), nullable=True)
+    sso_id: Mapped[Optional[str]]
+    sso_tenant: Mapped[Optional[str]]
     user = relationship("User", back_populates="classes")
     class_ = relationship("Class", back_populates="users")
 
@@ -82,6 +84,8 @@ class UserClassRole(Base):
         class_id: int,
         lms_tenant: str | None = None,
         lms_type: schemas.LMSType | None = None,
+        sso_tenant: str | None = None,
+        sso_id: str | None = None,
     ) -> "UserClassRole":
         stmt = (
             _get_upsert_stmt(session)(UserClassRole)
@@ -90,10 +94,17 @@ class UserClassRole(Base):
                 class_id=int(class_id),
                 lms_tenant=lms_tenant,
                 lms_type=lms_type,
+                sso_id=sso_id,
+                sso_tenant=sso_tenant,
             )
             .on_conflict_do_update(
                 index_elements=[UserClassRole.user_id, UserClassRole.class_id],
-                set_=dict(lms_tenant=lms_tenant, lms_type=lms_type),
+                set_=dict(
+                    lms_tenant=lms_tenant,
+                    lms_type=lms_type,
+                    sso_id=sso_id,
+                    sso_tenant=sso_tenant,
+                ),
             )
             .returning(UserClassRole)
         )

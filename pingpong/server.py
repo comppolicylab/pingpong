@@ -4,6 +4,7 @@ import logging
 import time
 from datetime import datetime
 from typing import Annotated, Any
+from aiohttp import ClientResponseError
 import jwt
 import openai
 import humanize
@@ -49,6 +50,7 @@ from .auth import (
 from .authz import Relation
 from .config import config
 from .canvas import (
+    CanvasException,
     LightweightCanvasClient,
     ManualCanvasClient,
     decode_canvas_token,
@@ -66,7 +68,7 @@ from .vector_stores import (
     delete_vector_store_db,
     delete_vector_store_oai,
 )
-from .users import AddNewUsersManual, delete_canvas_permissions
+from .users import AddNewUsersManual, AddUserException, delete_canvas_permissions
 
 logger = logging.getLogger(__name__)
 
@@ -388,10 +390,16 @@ async def auth_canvas(request: Request):
     state = request.query_params.get("state")
     error = request.query_params.get("error")
 
-    canvas_token = decode_canvas_token(state, nowfn=get_now_fn(request))
-    user_id = int(canvas_token.user_id)
-    class_id = int(canvas_token.class_id)
-    lms_tenant = canvas_token.lms_tenant
+    try:
+        canvas_token = decode_canvas_token(state, nowfn=get_now_fn(request))
+        user_id = int(canvas_token.user_id)
+        class_id = int(canvas_token.class_id)
+        lms_tenant = canvas_token.lms_tenant
+    except Exception:
+        return RedirectResponse(
+            config.url("/?error_code=1"),
+            status_code=303,
+        )
 
     if error:
         class_id = int(canvas_token.class_id)
@@ -780,14 +788,27 @@ async def get_canvas_classes(class_id: str, tenant: str, request: Request):
     ) as client:
         try:
             courses = await client.get_courses()
-        except HTTPException as e:
+            return {"classes": courses}
+        except ClientResponseError as e:
             # If we get a 4xx error, mark the class as having a sync error before raising the error.
             # This will prompt the user to re-connect to Canvas before we sync again.
-            # Otherwise, just display an error message (assuming this would be a 5xx error).
-            if e.status_code >= 400 and e.status_code < 500:
+            # Otherwise, just display an error message.
+            if e.code == 401:
                 await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
-            raise e
-    return {"classes": courses}
+            raise HTTPException(
+                status_code=e.code, detail="Canvas returned an error: " + e.message
+            )
+        except CanvasException as e:
+            raise HTTPException(
+                status_code=e.code or 500,
+                detail=e.detail
+                or "We faced an error while getting your Canvas classes.",
+            )
+        except Exception:
+            raise HTTPException(
+                status_code=500,
+                detail="We faced an internal error while getting your Canvas classes.",
+            )
 
 
 @v1.post(
@@ -804,8 +825,27 @@ async def update_canvas_class(
         int(class_id),
         request,
     ) as client:
-        await client.set_canvas_class(canvas_class_id)
-    return {"status": "ok"}
+        try:
+            await client.set_canvas_class(canvas_class_id)
+            return {"status": "ok"}
+        except CanvasException as e:
+            raise HTTPException(
+                status_code=e.code or 500,
+                detail=e.detail or "We faced an error while setting your Canvas class.",
+            )
+        except ClientResponseError as e:
+            # If we get a 401 error, mark the class as having a sync error.
+            # Otherwise, just display an error message.
+            if e.code == 401:
+                await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
+            raise HTTPException(
+                status_code=e.code, detail="Canvas returned an error: " + e.message
+            )
+        except Exception:
+            raise HTTPException(
+                status_code=500,
+                detail="We faced an internal error while setting your Canvas class.",
+            )
 
 
 @v1.post(
@@ -825,13 +865,25 @@ async def sync_canvas_class(
     ) as client:
         try:
             await client.sync_roster()
-        except HTTPException as e:
+            return {"status": "ok"}
+        except ClientResponseError as e:
             # If we get a 401 error, mark the class as having a sync error.
             # Otherwise, just display an error message.
-            if e.status_code == 401:
+            if e.code == 401:
                 await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
-            raise e
-    return {"status": "ok"}
+            raise HTTPException(
+                status_code=e.code, detail="Canvas returned an error: " + e.message
+            )
+        except (CanvasException, AddUserException) as e:
+            raise HTTPException(
+                status_code=e.code or 500,
+                detail=e.detail or "We faced an error while syncing with Canvas.",
+            )
+        except Exception:
+            raise HTTPException(
+                status_code=500,
+                detail="We faced an internal error while syncing with Canvas.",
+            )
 
 
 @v1.delete(
@@ -935,7 +987,15 @@ async def add_users_to_class(
     request: Request,
     tasks: BackgroundTasks,
 ):
-    return await AddNewUsersManual(class_id, new_ucr, request, tasks).add_new_users()
+    try:
+        return await AddNewUsersManual(
+            class_id, new_ucr, request, tasks
+        ).add_new_users()
+    except AddUserException as e:
+        raise HTTPException(
+            status_code=e.code or 500,
+            detail=e.detail or "We faced an error while adding users.",
+        )
 
 
 @v1.put(
@@ -2511,6 +2571,11 @@ async def handle_exception(request: Request, exc: Exception):
         return JSONResponse(
             status_code=exc.status_code,
             content={"detail": exc.detail},
+        )
+    elif isinstance(exc, ClientResponseError):
+        return JSONResponse(
+            status_code=exc.status,
+            content={"detail": exc.message},
         )
     else:
         return JSONResponse(

@@ -7,7 +7,6 @@ import aiohttp
 
 from fastapi import BackgroundTasks, Request
 from fastapi.responses import RedirectResponse
-from jwt.exceptions import PyJWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pingpong.auth import decode_auth_token, encode_auth_token
@@ -34,6 +33,12 @@ from .schemas import (
 from .users import AddNewUsersScript, AddNewUsersManual
 
 
+class CanvasException(Exception):
+    def __init__(self, detail: str = "", code: int | None = None):
+        self.code = code
+        self.detail = detail
+
+
 def decode_canvas_token(token: str, nowfn: NowFn) -> CanvasToken:
     """Decodes the Canvas State Token.
 
@@ -56,8 +61,8 @@ def decode_canvas_token(token: str, nowfn: NowFn) -> CanvasToken:
             iat=auth_token.iat,
             exp=auth_token.exp,
         )
-    except PyJWTError as e:
-        raise ValueError("Invalid Canvas token") from e
+    except Exception as e:
+        raise CanvasException("Invalid Canvas token") from e
 
 
 def get_canvas_config(tenant: str) -> CanvasSettings:
@@ -72,16 +77,11 @@ def get_canvas_config(tenant: str) -> CanvasSettings:
     for lms in config.lms.lms_instances:
         if lms.type == "canvas" and lms.tenant == tenant:
             return lms
-    raise ValueError("No Canvas configuration found")
+    raise CanvasException("No Canvas configuration found")
 
 
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
-
-
-class BreakLoopException(Exception):
-    def __init__(self, value):
-        self.value = value
 
 
 class CanvasCourseClient(ABC):
@@ -113,10 +113,10 @@ class CanvasCourseClient(ABC):
             str: Canvas State Token
         """
         if not self.user_id:
-            raise ValueError("No user ID provided")
+            raise CanvasException("No user ID provided")
 
         if not self.class_id:
-            raise ValueError("No class ID provided")
+            raise CanvasException("No class ID provided")
 
         return encode_auth_token(
             sub=json.dumps(
@@ -156,15 +156,15 @@ class CanvasCourseClient(ABC):
 
         # If no Canvas class is found, the tuple will be None, so we can detect that here
         if not response.now:
-            raise ValueError("Could not locate PingPong group")
+            raise CanvasException("Could not locate PingPong group")
 
         # No Canvas access token is found for this class
         if not response.access_token:
-            raise ValueError("No Canvas access token for class")
+            raise CanvasException("No Canvas access token for class")
 
         # Check if the user making the request is the user whose Canvas account is connected for the class
         if response.user_id != self.user_id:
-            raise ValueError(
+            raise CanvasException(
                 "You're not the authorized Canvas user for this class",
             )
 
@@ -447,13 +447,15 @@ class CanvasCourseClient(ABC):
     async def verify_access(self, course_id: str) -> None:
         """Verify that the user has access to the course and the roster."""
         if not await self._in_teaching_staff(course_id):
-            raise ValueError(
-                "You are not an authorized teacher or TA in the Canvas class you are trying to access.",
+            raise CanvasException(
+                code=403,
+                detail="You are not an authorized teacher or TA in the Canvas class you are trying to access.",
             )
 
         if not await self._roster_access_check(course_id):
-            raise ValueError(
-                "You are not authorized to access the enrollment list for this Canvas class.",
+            raise CanvasException(
+                code=403,
+                detail="You are not authorized to access the enrollment list for this Canvas class.",
             )
 
     async def _get_course_details(self, course_id: str) -> CanvasClassSchema:
@@ -477,7 +479,7 @@ class CanvasCourseClient(ABC):
         async for result in self._request_all_pages(request_url, params=params):
             return self._process_course(result)
 
-        raise ValueError("Course not found")
+        raise CanvasException("Course not found")
 
     async def set_canvas_class(self, course_id: str) -> None:
         """Set the Canvas class for the PingPong class."""
@@ -533,6 +535,7 @@ class CanvasCourseClient(ABC):
                     break
             yield CreateUserClassRole(
                 email=user["email"],
+                sso_id=user.get(self.config.sso_target),
                 roles=ClassUserRoles(
                     admin=False,
                     teacher=is_teacher,
@@ -578,7 +581,7 @@ class CanvasCourseClient(ABC):
 
         class_, now = await Class.get_lms_course_id(self.db, self.class_id)
         if not class_:
-            raise ValueError("No linked Canvas course found")
+            raise CanvasException("No linked Canvas course found")
 
         self._sync_allowed(class_.lms_last_synced, now)
         self.new_ucr = CreateUserClassRoles(
@@ -586,6 +589,7 @@ class CanvasCourseClient(ABC):
             silent=False,
             lms_tenant=self.config.tenant,
             lms_type=self.config.type,
+            sso_tenant=self.config.sso_tenant,
         )
         await self._update_user_roles()
         await Class.update_last_synced(self.db, self.class_id)
@@ -618,8 +622,9 @@ class ManualCanvasClient(CanvasCourseClient):
                 last_synced + timedelta(seconds=self.config.sync_wait) - now
             ).total_seconds() + 1
 
-            raise ValueError(
-                f"A Canvas sync was recently completed. Please wait before trying again.\
+            raise CanvasException(
+                code=429,
+                detail=f"A Canvas sync was recently completed. Please wait before trying again.\
                 You can request a manual sync in {convert_seconds(int(time_remaining)) if int(time_remaining) > 60 else 'a minute'}.",
             )
 
