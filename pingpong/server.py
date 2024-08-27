@@ -2572,11 +2572,6 @@ async def handle_exception(request: Request, exc: Exception):
             status_code=exc.status_code,
             content={"detail": exc.detail},
         )
-    elif isinstance(exc, ClientResponseError):
-        return JSONResponse(
-            status_code=exc.status,
-            content={"detail": exc.message},
-        )
     else:
         return JSONResponse(
             status_code=500,
