@@ -277,7 +277,6 @@ class AddNewUsersManual(AddNewUsers):
                 invite,
                 magic_link,
                 86_400 * 7,
-                self.new_ucr.silent,
             )
 
 
@@ -307,5 +306,4 @@ class AddNewUsersScript(AddNewUsers):
                 invite,
                 magic_link,
                 86_400 * 7,
-                self.new_ucr.silent,
             )
