@@ -804,11 +804,11 @@ async def get_canvas_classes(class_id: str, tenant: str, request: Request):
                 detail=e.detail
                 or "We faced an error while getting your Canvas classes.",
             ) from e
-        except Exception:
+        except Exception as e:
             raise HTTPException(
                 status_code=500,
                 detail="We faced an internal error while getting your Canvas classes.",
-            )
+            ) from e
 
 
 @v1.post(
@@ -841,11 +841,11 @@ async def update_canvas_class(
             raise HTTPException(
                 status_code=e.code, detail="Canvas returned an error: " + e.message
             ) from e
-        except Exception:
+        except Exception as e:
             raise HTTPException(
                 status_code=500,
                 detail="We faced an internal error while setting your Canvas class.",
-            )
+            ) from e
 
 
 @v1.post(
@@ -879,11 +879,11 @@ async def sync_canvas_class(
                 status_code=e.code or 500,
                 detail=e.detail or "We faced an error while syncing with Canvas.",
             ) from e
-        except Exception:
+        except Exception as e:
             raise HTTPException(
                 status_code=500,
                 detail="We faced an internal error while syncing with Canvas.",
-            )
+            ) from e
 
 
 @v1.delete(
