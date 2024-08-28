@@ -138,7 +138,7 @@ class CanvasCourseClient(ABC):
         """
         token = self._encode_token()
         return self.config.url(
-            f"/login/oauth2/auth?client_id={self.config.client_id}&scopes=&response_type=code&redirect_uri={config.url('/api/v1/auth/canvas')}&state={token}"
+            f"/login/oauth2/auth?client_id={self.config.client_id}&scope=url:GET|/api/v1/courses%20url:GET|/api/v1/courses/:id%20url:GET|/api/v1/courses/:course_id/enrollments%20url:GET|/api/v1/courses/:course_id/users%20url:GET|/api/v1/users/:user_id/enrollments&response_type=code&redirect_uri={config.url('/api/v1/auth/canvas')}&state={token}"
         )
 
     async def _get_access_token(
