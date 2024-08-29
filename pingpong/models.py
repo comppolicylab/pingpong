@@ -1368,6 +1368,7 @@ class Thread(Base):
         limit: int = 10,
         before: datetime | None = None,
         class_id: int | None = None,
+        class_ids: list[int] | None = None,
         private: bool | None = None,
     ) -> AsyncGenerator["Thread", None]:
         """Get a number of threads by their IDs.
@@ -1384,6 +1385,8 @@ class Thread(Base):
             condition = and_(condition, Thread.updated < before)
         if class_id:
             condition = and_(condition, Thread.class_id == int(class_id))
+        if class_ids:
+            condition = and_(condition, Thread.class_id.in_(class_ids))
         if private is not None:
             condition = and_(condition, Thread.private == private)
 

@@ -1545,12 +1545,19 @@ async def list_recent_threads(
         "party",
         "thread",
     )
+    # Make sure we only get threads that are in classes the user is a member of
+    class_ids = await request.state.authz.list(
+        f"user:{request.state.session.user.id}",
+        "member",
+        "class",
+    )
 
     threads = await models.Thread.get_n_by_id(
         request.state.db,
         thread_ids,
         limit,
         before=current_latest_time,
+        class_ids=class_ids,
     )
 
     return {"threads": process_threads(threads, request.state.session.user.id)}
@@ -1583,6 +1590,12 @@ async def list_all_threads(
         "can_view",
         "thread",
     )
+    # Make sure we only get threads that are in classes the user is a member of
+    class_ids = await request.state.authz.list(
+        f"user:{request.state.session.user.id}",
+        "member",
+        "class",
+    )
     threads = await models.Thread.get_n_by_id(
         request.state.db,
         thread_ids,
@@ -1590,6 +1603,7 @@ async def list_all_threads(
         before=current_latest_time,
         private=private,
         class_id=class_id,
+        class_ids=class_ids,
     )
 
     return {"threads": process_threads(threads, request.state.session.user.id)}
