@@ -15,9 +15,10 @@ type KatexToken = {
  * Description of a KaTeX delimeter.
  */
 export type KatexDelimeter = {
-  left: string;
-  right: string;
+  left: string | RegExp;
+  right: string | RegExp;
   display: boolean;
+  preserve?: boolean;
 };
 
 /**
@@ -35,7 +36,8 @@ const DEFAULT_OPTIONS: MarkedKatexOptions = {
     { left: '$$', right: '$$', display: true },
     { left: '$', right: '$', display: false },
     { left: '\\(', right: '\\)', display: false },
-    { left: '\\[', right: '\\]', display: true }
+    { left: '\\[', right: '\\]', display: true },
+    { left: /\\begin\{(.*?)\}/, right: /\\end\{\1\}/, display: true, preserve: true }
   ]
 };
 
@@ -50,9 +52,9 @@ const escapeRegExp = (str: string) => {
  * Create a KaTeX extension for Marked that renders with the given delimeters.
  */
 const markedKatexExtension = (delimeter: KatexDelimeter, options: KatexOptions) => {
-  const { left, right, display } = delimeter;
-  const startDelim = escapeRegExp(left);
-  const endDelim = escapeRegExp(right);
+  const { left, right, display, preserve } = delimeter;
+  const startDelim = left instanceof RegExp ? left : new RegExp(escapeRegExp(left));
+  const endDelim = right instanceof RegExp ? right : new RegExp(escapeRegExp(right));
   return {
     name: 'katex',
     // HACK(jnu): the level is *always* `inline` even when we're going to render in block
@@ -61,17 +63,20 @@ const markedKatexExtension = (delimeter: KatexDelimeter, options: KatexOptions) 
     // the KaTeX at all in these cases.
     level: 'inline' as const,
     start(src: string) {
-      return src.match(new RegExp(`${startDelim}`))?.index;
+      const x = src.match(startDelim)?.index;
+      return x;
     },
     tokenizer(src: string): KatexToken | undefined {
       // Escape the delimeters and create a regular expression.
-      const match = src.match(new RegExp(`^${startDelim}([^${endDelim}]+)${endDelim}`));
+      const pattern = `^${startDelim.source}([^(?:${endDelim.source})]+)${endDelim.source}`;
+      const match = src.match(new RegExp(pattern, 'm'));
       if (match) {
         const [full, content] = match;
         return {
           type: 'katex',
           raw: full,
-          content,
+          // If `preserve` is specified, keep start and end delimiters.
+          content: preserve ? full : content,
           display
         };
       }
