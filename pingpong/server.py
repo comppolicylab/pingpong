@@ -797,18 +797,18 @@ async def get_canvas_classes(class_id: str, tenant: str, request: Request):
                 await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
             raise HTTPException(
                 status_code=e.code, detail="Canvas returned an error: " + e.message
-            )
+            ) from e
         except CanvasException as e:
             raise HTTPException(
                 status_code=e.code or 500,
                 detail=e.detail
                 or "We faced an error while getting your Canvas classes.",
-            )
-        except Exception:
+            ) from e
+        except Exception as e:
             raise HTTPException(
                 status_code=500,
                 detail="We faced an internal error while getting your Canvas classes.",
-            )
+            ) from e
 
 
 @v1.post(
@@ -832,7 +832,7 @@ async def update_canvas_class(
             raise HTTPException(
                 status_code=e.code or 500,
                 detail=e.detail or "We faced an error while setting your Canvas class.",
-            )
+            ) from e
         except ClientResponseError as e:
             # If we get a 401 error, mark the class as having a sync error.
             # Otherwise, just display an error message.
@@ -840,12 +840,12 @@ async def update_canvas_class(
                 await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
             raise HTTPException(
                 status_code=e.code, detail="Canvas returned an error: " + e.message
-            )
-        except Exception:
+            ) from e
+        except Exception as e:
             raise HTTPException(
                 status_code=500,
                 detail="We faced an internal error while setting your Canvas class.",
-            )
+            ) from e
 
 
 @v1.post(
@@ -873,17 +873,17 @@ async def sync_canvas_class(
                 await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
             raise HTTPException(
                 status_code=e.code, detail="Canvas returned an error: " + e.message
-            )
+            ) from e
         except (CanvasException, AddUserException) as e:
             raise HTTPException(
                 status_code=e.code or 500,
                 detail=e.detail or "We faced an error while syncing with Canvas.",
-            )
-        except Exception:
+            ) from e
+        except Exception as e:
             raise HTTPException(
                 status_code=500,
                 detail="We faced an internal error while syncing with Canvas.",
-            )
+            ) from e
 
 
 @v1.delete(
@@ -995,7 +995,7 @@ async def add_users_to_class(
         raise HTTPException(
             status_code=e.code or 500,
             detail=e.detail or "We faced an error while adding users.",
-        )
+        ) from e
 
 
 @v1.put(
