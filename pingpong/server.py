@@ -1165,7 +1165,10 @@ async def remove_user_from_class(class_id: str, user_id: str, request: Request):
 
     # CHECK 4: Is the user imported from an LMS?
     if existing.lms_tenant:
-        raise HTTPException(status_code=403, detail="You cannot manually remove an imported user. Please remove the user from your Canvas roster.")
+        raise HTTPException(
+            status_code=403,
+            detail="You cannot manually remove an imported user. Please remove the user from your Canvas roster.",
+        )
     await models.UserClassRole.delete(request.state.db, uid, cid)
 
     revokes = list[Relation]()

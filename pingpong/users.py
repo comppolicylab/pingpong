@@ -215,12 +215,12 @@ class AddNewUsers(ABC):
                 self.session, user.id, self.class_id
             )
 
-            if enrollment.lms_tenant and not self.new_ucr.lms_tenant:
+            if enrollment and enrollment.lms_tenant and not self.new_ucr.lms_tenant:
                 raise AddUserException(
                     code=403,
                     detail="You cannot manually change the role of an imported user. Please update the user's role in Canvas.",
                 )
-            
+
             invite_roles = []
             for role in ["admin", "teacher", "student"]:
                 if getattr(ucr.roles, role):
