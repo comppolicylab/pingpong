@@ -1104,7 +1104,7 @@ async def update_user_class_role(
 
 @v1.delete(
     "/class/{class_id}/user/{user_id}",
-    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    dependencies=[Depends(Authz("supervisor", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
 async def remove_user_from_class(class_id: str, user_id: str, request: Request):
@@ -1120,6 +1120,8 @@ async def remove_user_from_class(class_id: str, user_id: str, request: Request):
     if not existing:
         raise HTTPException(status_code=404, detail="User not found in class")
 
+    if existing.lms_tenant:
+        raise HTTPException(status_code=403, detail="You cannot manually remove an imported user. Please remove the user from your Canvas roster.")
     await models.UserClassRole.delete(request.state.db, uid, cid)
 
     revokes = list[Relation]()

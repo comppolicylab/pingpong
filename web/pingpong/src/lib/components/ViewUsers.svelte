@@ -349,7 +349,7 @@
               </div></TableBodyCell
             >
             <TableBodyCell {tdClass}>
-              {#if noPermissions || currentUser}
+              {#if noPermissions || currentUser || user.lms_type}
                 <div class="flex felx-row justify-between">
                   <div>{roleInfo.label}</div>
                   <div>
@@ -357,11 +357,16 @@
                     <Tooltip
                       type="custom"
                       arrow={false}
-                      class="flex overflow-y-auto bg-gray-900 z-10 max-w-72 y-2 px-3 text-sm text-wrap font-light text-white"
+                      class="flex flex-row overflow-y-auto bg-gray-900 z-10 max-w-xs py-2 px-3 text-sm text-wrap font-light text-white"
                     >
-                      {noPermissions
-                        ? `You do not have enough permissions to change ${roleInfo.label} user roles`
-                        : 'You cannot change your own user role'}
+                      <div class="whitespace-normal">
+                        <span class="font-medium">Role Change Not Allowed:</span>{' '}
+                        {noPermissions
+                          ? `You do not have enough permissions to change ${roleInfo.label} user roles.`
+                          : currentUser
+                            ? 'You cannot change your own user role.'
+                            : 'You cannot edit roles for imported users. Please make changes in Canvas.'}
+                      </div>
                     </Tooltip>
                   </div>
                 </div>
@@ -412,10 +417,12 @@
               </div>
             </TableBodyCell>
             <TableBodyCell {tdClass}>
-              <form on:submit={submitRemoveUser}>
-                <input type="hidden" name="user_id" value={user.id} />
-                <Button on:click={deleteUser}><TrashBinOutline color="red" /></Button>
-              </form>
+              {#if (currentUser || user.lms_type || noPermissions)}
+                <form on:submit={submitRemoveUser}>
+                  <input type="hidden" name="user_id" value={user.id} />
+                  <Button on:click={deleteUser}><TrashBinOutline color="red" /></Button>
+                </form>
+              {/if}
             </TableBodyCell>
           </TableBodyRow>
         {/each}
