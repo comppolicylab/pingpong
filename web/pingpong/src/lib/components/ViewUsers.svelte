@@ -417,7 +417,7 @@
               </div>
             </TableBodyCell>
             <TableBodyCell {tdClass}>
-              {#if (currentUser || user.lms_type || noPermissions)}
+              {#if !(currentUser || user.lms_type || noPermissions)}
                 <form on:submit={submitRemoveUser}>
                   <input type="hidden" name="user_id" value={user.id} />
                   <Button on:click={deleteUser}><TrashBinOutline color="red" /></Button>
