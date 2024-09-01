@@ -933,7 +933,6 @@ async def remove_canvas_connection(class_id: str, tenant: str, request: Request)
                 canvas_settings.tenant,
                 schemas.LMSType(canvas_settings.type),
                 kill_connection=True,
-                keep_option=keep_option,
             )
             await delete_canvas_permissions(request.state.authz, userIds, class_id)
 
