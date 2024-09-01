@@ -43,7 +43,8 @@
     RefreshOutline,
     SortHorizontalOutline,
     AdjustmentsHorizontalOutline,
-    UserRemoveSolid
+    UserRemoveSolid,
+    ExclamationCircleOutline
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
@@ -342,6 +343,8 @@
     }
   };
 
+  let disconnectCanvas = false;
+  let disconnectClass = false;
   let loadedCanvasClasses = writable<CanvasClass[]>([]);
   let canvasClasses: CanvasClass[] = [];
   // The formatted canvas classes loaded from the API.
@@ -420,8 +423,8 @@
   };
 
   let editDropdownOpen = false;
-  const deleteClassSync = async () => {
-    const result = await api.deleteCanvasClassSync(fetch, data.class.id, 'harvard');
+  const deleteClassSync = async (keep: boolean) => {
+    const result = await api.deleteCanvasClassSync(fetch, data.class.id, 'harvard', keep);
     const response = api.expandResponse(result);
     if (response.error) {
       editDropdownOpen = false;
@@ -437,8 +440,8 @@
     }
   };
 
-  const removeCanvasConnection = async () => {
-    const result = await api.removeCanvasConnection(fetch, data.class.id, 'harvard');
+  const removeCanvasConnection = async (keep: boolean) => {
+    const result = await api.removeCanvasConnection(fetch, data.class.id, 'harvard', keep);
     const response = api.expandResponse(result);
     if (response.error) {
       editDropdownOpen = false;
@@ -448,7 +451,7 @@
       editDropdownOpen = false;
       invalidateAll();
       timesAdded++;
-      happyToast('Canvas account connection removed successfully!');
+      happyToast('Canvas class connection removed successfully!');
     }
   };
 
@@ -780,8 +783,8 @@
                       size="xs"
                       class="border border-amber-900 hover:bg-amber-900 text-amber-900 hover:bg-gradient-to-t hover:from-amber-800 hover:to-amber-700 hover:text-white"
                       disabled={syncingCanvasClass || $updatingApiKey}
-                      on:click={removeCanvasConnection}
-                      on:touchstart={removeCanvasConnection}
+                      on:click={() => removeCanvasConnection(false)}
+                      on:touchstart={() => removeCanvasConnection(false)}
                     >
                       <UserRemoveSolid class="w-4 h-4 me-2" />Disconnect Canvas account</Button
                     >
@@ -848,7 +851,7 @@
                   <AdjustmentsHorizontalOutline class="w-4 h-4 me-2" />Edit Canvas Sync</Button
                 >
                 <Dropdown bind:open={editDropdownOpen}>
-                  <DropdownItem on:click={deleteClassSync}
+                  <DropdownItem on:click={() => (disconnectClass = true)}
                     ><div class="flex flex-row gap-2 items-center">
                       <div class="border bg-green-800 border-green-800 text-white rounded-full">
                         <SortHorizontalOutline class="w-4 h-4 m-2" />
@@ -856,7 +859,7 @@
                       Sync another class
                     </div></DropdownItem
                   >
-                  <DropdownItem on:click={removeCanvasConnection}
+                  <DropdownItem on:click={() => (disconnectCanvas = true)}
                     ><div class="flex flex-row gap-3 items-center">
                       <div class="border bg-green-800 border-green-800 text-white rounded-full">
                         <UserRemoveSolid class="w-4 h-4 m-2" />
@@ -864,6 +867,50 @@
                       Disconnect Canvas account
                     </div></DropdownItem
                   >
+                  <Modal bind:open={disconnectCanvas} size="sm" autoclose>
+                    <div class="text-center">
+                      <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
+                      <h3 class="mb-5 text-xl text-black font-bold">
+                        Remove imported users from {data.class.lms_class?.course_code}?
+                      </h3>
+                      <h4 class="mb-5 text-sm text-black font-normal">
+                        While Canvas Sync was active, PingPong imported all users in your Canvas
+                        roster. If you keep imported users, you can edit their roles or remove their
+                        access to this group at any time.
+                      </h4>
+                      <div class="flex flex-row gap-2 justify-center">
+                        <Button
+                          pill
+                          color="alternative"
+                          on:click={() => removeCanvasConnection(true)}>Keep imported users</Button
+                        >
+                        <Button pill color="red" on:click={() => removeCanvasConnection(false)}
+                          >Remove imported users</Button
+                        >
+                      </div>
+                    </div>
+                  </Modal>
+                  <Modal bind:open={disconnectClass} size="sm" autoclose>
+                    <div class="text-center">
+                      <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
+                      <h3 class="mb-5 text-xl text-black font-bold">
+                        Remove imported users from {data.class.lms_class?.course_code}?
+                      </h3>
+                      <h4 class="mb-5 text-sm text-black font-normal">
+                        While Canvas Sync was active, PingPong imported all users in your Canvas
+                        roster. If you keep imported users, you can edit their roles or remove their
+                        access to this group at any time.
+                      </h4>
+                      <div class="flex flex-row gap-2 justify-center">
+                        <Button pill color="alternative" on:click={() => deleteClassSync(true)}
+                          >Keep imported users</Button
+                        >
+                        <Button pill color="red" on:click={() => deleteClassSync(false)}
+                          >Remove imported users</Button
+                        >
+                      </div>
+                    </div>
+                  </Modal>
                 </Dropdown>
               </div>
             </div>

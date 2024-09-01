@@ -1790,13 +1790,23 @@ export const syncCanvasClass = async (f: Fetcher, classId: number, tenant: strin
   return await POST<never, GenericStatus>(f, url);
 };
 
-export const deleteCanvasClassSync = async (f: Fetcher, classId: number, tenant: string) => {
-  const url = `class/${classId}/canvas/${tenant}/sync`;
+export const deleteCanvasClassSync = async (
+  f: Fetcher,
+  classId: number,
+  tenant: string,
+  keep: boolean
+) => {
+  const url = `class/${classId}/canvas/${tenant}/sync/${keep ? 'keep_users' : 'delete_users'}`;
   return await DELETE<never, GenericStatus>(f, url);
 };
 
-export const removeCanvasConnection = async (f: Fetcher, classId: number, tenant: string) => {
-  const url = `class/${classId}/canvas/${tenant}/account`;
+export const removeCanvasConnection = async (
+  f: Fetcher,
+  classId: number,
+  tenant: string,
+  keep: boolean
+) => {
+  const url = `class/${classId}/canvas/${tenant}/account/${keep ? 'keep_users' : 'delete_users'}`;
   return await DELETE<never, GenericStatus>(f, url);
 };
 
