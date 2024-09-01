@@ -921,14 +921,36 @@ async def unlink_canvas_class(class_id: str, tenant: str, request: Request):
 )
 async def remove_canvas_connection(class_id: str, tenant: str, request: Request):
     canvas_settings = get_canvas_config(tenant)
-    userIds = await models.Class.remove_lms_sync(
-        request.state.db,
-        int(class_id),
-        canvas_settings.tenant,
-        schemas.LMSType(canvas_settings.type),
-        kill_connection=True,
-    )
-    await delete_canvas_permissions(request.state.authz, userIds, class_id)
+
+    async with LightweightCanvasClient(
+        canvas_settings, int(class_id), request
+    ) as client:
+        try:
+            await client.log_out()
+            userIds = await models.Class.remove_lms_sync(
+                request.state.db,
+                int(class_id),
+                canvas_settings.tenant,
+                schemas.LMSType(canvas_settings.type),
+                kill_connection=True,
+                keep_option=keep_option,
+            )
+            await delete_canvas_permissions(request.state.authz, userIds, class_id)
+
+        except ClientResponseError as e:
+            logger.exception("delete_canvas_permissions: ClientResponseError occurred")
+            raise HTTPException(
+                status_code=e.code,
+                detail="Canvas returned an error when removing your account: "
+                + e.message,
+            )
+        except Exception:
+            logger.exception("delete_canvas_permissions: Exception occurred")
+            raise HTTPException(
+                status_code=500,
+                detail="We faced an internal error while removing your account.",
+            )
+
     return {"status": "ok"}
 
 
