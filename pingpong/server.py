@@ -3,7 +3,7 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 from aiohttp import ClientResponseError
 import jwt
 import openai
@@ -905,13 +905,14 @@ async def sync_canvas_class(
 async def unlink_canvas_class(
     class_id: str,
     tenant: str,
-    keep_option: Literal["keep_users", "delete_users"],
+    keep_option: str,
     request: Request,
 ):
     if keep_option not in {"keep_users", "delete_users"}:
         raise HTTPException(
             status_code=400, detail="Choice of whether to keep imported users missing."
         )
+    keep_option = cast(Literal["keep_users", "delete_users"], keep_option)
     canvas_settings = get_canvas_config(tenant)
     userIds = await models.Class.remove_lms_sync(
         request.state.db,
@@ -932,13 +933,14 @@ async def unlink_canvas_class(
 async def remove_canvas_connection(
     class_id: str,
     tenant: str,
-    keep_option: Literal["keep_users", "delete_users"],
+    keep_option: str,
     request: Request,
 ):
     if keep_option not in {"keep_users", "delete_users"}:
         raise HTTPException(
             status_code=400, detail="Choice of whether to keep imported users missing."
         )
+    keep_option = cast(Literal["keep_users", "delete_users"], keep_option)
     canvas_settings = get_canvas_config(tenant)
     userIds = await models.Class.remove_lms_sync(
         request.state.db,
