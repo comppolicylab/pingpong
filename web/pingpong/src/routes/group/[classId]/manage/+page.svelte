@@ -871,7 +871,7 @@
                     <div class="text-center">
                       <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
                       <h3 class="mb-5 text-xl text-black font-bold">
-                        Remove imported users from {data.class.lms_class?.course_code}?
+                        Remove imported users from {data.class.lms_class?.course_code || 'Canvas'}?
                       </h3>
                       <h4 class="mb-5 text-sm text-black font-normal">
                         While Canvas Sync was active, PingPong imported all users in your Canvas
@@ -894,7 +894,7 @@
                     <div class="text-center">
                       <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
                       <h3 class="mb-5 text-xl text-black font-bold">
-                        Remove imported users from {data.class.lms_class?.course_code}?
+                        Remove imported users from {data.class.lms_class?.course_code || 'Canvas'}?
                       </h3>
                       <h4 class="mb-5 text-sm text-black font-normal">
                         While Canvas Sync was active, PingPong imported all users in your Canvas
