@@ -451,48 +451,42 @@
                 "this": {}
               },
               {
-                "intersection": {
-                  "child": [
-                    {
-                      "union": {
-                        "child": [
-                          {
-                            "computedUserset": {
-                              "relation": "party"
-                            }
-                          },
-                          {
-                            "tupleToUserset": {
-                              "computedUserset": {
-                                "relation": "can_manage_threads"
-                              },
-                              "tupleset": {
-                                "relation": "parent"
-                              }
-                            }
-                          }
-                        ]
-                      }
-                    },
-                    {
-                      "tupleToUserset": {
-                        "computedUserset": {
-                          "relation": "member"
-                        },
-                        "tupleset": {
-                          "relation": "parent"
-                        }
-                      }
-                    }
-                  ]
+                "computedUserset": {
+                  "relation": "party"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "can_manage_threads"
+                  },
+                  "tupleset": {
+                    "relation": "parent"
+                  }
                 }
               }
             ]
           }
         },
         "can_participate": {
-          "computedUserset": {
-            "relation": "party"
+          "intersection": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "party"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "member"
+                  },
+                  "tupleset": {
+                    "relation": "parent"
+                  }
+                }
+              }
+            ]
           }
         },
         "can_delete": {
