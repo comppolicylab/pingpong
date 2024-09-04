@@ -3,7 +3,7 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any
 from aiohttp import ClientResponseError
 import jwt
 import openai
@@ -905,42 +905,29 @@ async def sync_canvas_class(
 async def unlink_canvas_class(
     class_id: str,
     tenant: str,
-    keep_option: str,
     request: Request,
+    keep_users: bool = True,
 ):
-    if keep_option not in {"keep_users", "delete_users"}:
-        raise HTTPException(
-            status_code=400, detail="Choice of whether to keep imported users missing."
-        )
-    keep_option = cast(Literal["keep_users", "delete_users"], keep_option)
     canvas_settings = get_canvas_config(tenant)
     userIds = await models.Class.remove_lms_sync(
         request.state.db,
         int(class_id),
         canvas_settings.tenant,
         schemas.LMSType(canvas_settings.type),
-        keep_option=keep_option,
+        keep_users=keep_users,
     )
     await delete_canvas_permissions(request.state.authz, userIds, class_id)
     return {"status": "ok"}
 
 
 @v1.delete(
-    "/class/{class_id}/canvas/{tenant}/account/{keep_option}",
+    "/class/{class_id}/canvas/{tenant}/account",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
 async def remove_canvas_connection(
-    class_id: str,
-    tenant: str,
-    keep_option: str,
-    request: Request,
+    class_id: str, tenant: str, request: Request, keep_users: bool = True
 ):
-    if keep_option not in {"keep_users", "delete_users"}:
-        raise HTTPException(
-            status_code=400, detail="Choice of whether to keep imported users missing."
-        )
-    keep_option = cast(Literal["keep_users", "delete_users"], keep_option)
     canvas_settings = get_canvas_config(tenant)
     userIds = await models.Class.remove_lms_sync(
         request.state.db,
@@ -948,7 +935,7 @@ async def remove_canvas_connection(
         canvas_settings.tenant,
         schemas.LMSType(canvas_settings.type),
         kill_connection=True,
-        keep_option=keep_option,
+        keep_users=keep_users,
     )
     await delete_canvas_permissions(request.state.authz, userIds, class_id)
     return {"status": "ok"}

@@ -1,6 +1,6 @@
 import json
 from datetime import datetime
-from typing import AsyncGenerator, List, Literal, Optional
+from typing import AsyncGenerator, List, Optional
 
 from sqlalchemy import Boolean, Column, DateTime, UniqueConstraint
 from sqlalchemy import Enum as SQLEnum
@@ -1117,7 +1117,7 @@ class Class(Base):
         id_: int,
         lms_tenant: str,
         lms_type: schemas.LMSType,
-        keep_option: Literal["keep_users", "delete_users"] = "keep_users",
+        keep_users: bool = False,
         kill_connection: bool = False,
     ) -> list[int]:
         """Remove linked LMS class connection."""
@@ -1139,7 +1139,7 @@ class Class(Base):
             class_instance.lms_status = schemas.LMSStatus.NONE
 
         user_ids = []
-        if keep_option == "delete_users":
+        if keep_users:
             stmt_ = select(UserClassRole).where(
                 and_(
                     UserClassRole.class_id == id_,

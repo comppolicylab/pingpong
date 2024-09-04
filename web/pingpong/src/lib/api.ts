@@ -1796,8 +1796,8 @@ export const deleteCanvasClassSync = async (
   tenant: string,
   keep: boolean
 ) => {
-  const url = `class/${classId}/canvas/${tenant}/sync/${keep ? 'keep_users' : 'delete_users'}`;
-  return await DELETE<never, GenericStatus>(f, url);
+  const url = `class/${classId}/canvas/${tenant}/sync`;
+  return await DELETE<{ keep_users: boolean }, GenericStatus>(f, url, { keep_users: keep });
 };
 
 export const removeCanvasConnection = async (
@@ -1806,8 +1806,8 @@ export const removeCanvasConnection = async (
   tenant: string,
   keep: boolean
 ) => {
-  const url = `class/${classId}/canvas/${tenant}/account/${keep ? 'keep_users' : 'delete_users'}`;
-  return await DELETE<never, GenericStatus>(f, url);
+  const url = `class/${classId}/canvas/${tenant}/account`;
+  return await DELETE<{ keep_users: boolean }, GenericStatus>(f, url, { keep_users: keep });
 };
 
 /**
