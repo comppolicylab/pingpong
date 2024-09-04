@@ -991,9 +991,20 @@
                   : 'never'}
               </p>
               <p class="mt-2 text-sm">
-                Need to link your own account? Ask {data.class.lms_user?.name || 'them'} to disconnect
-                their Canvas account from this PingPong group.
+                Need to link your own account? You can disconnect
+                their Canvas account from this PingPong group. <span class="font-medium">This action is irreversible and will delete all imported users from Canvas.</span>
               </p>
+              <div class="flex gap-2">
+                <Button
+                  pill
+                  size="xs"
+                  class="border border-red-900 bg-gradient-to-t from-red-800 to-red-700 text-white hover:from-red-700 hover:to-red-600"
+                  on:click={redirectToCanvas}
+                  on:touchstart={redirectToCanvas}
+                >
+                  <RefreshOutline class="w-4 h-4 me-2" />Remove Canvas account</Button
+                >
+              </div>
             </div>
           </Alert>
         {/if}
