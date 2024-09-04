@@ -10,6 +10,9 @@ from .authz import Relation
 from .config import config
 from .invite import send_invite
 from .now import NowFn, utcnow
+from sqlalchemy import select, delete, insert
+from sqlalchemy.orm import aliased
+from .models import UserClassRole
 
 
 class AddUserException(Exception):
@@ -95,6 +98,50 @@ async def check_permissions(request: Request, uid: int, cid: int):
             code=403,
             detail="You cannot manually edit an imported user. Please update or remove the user through your Canvas roster.",
         )
+
+
+class MergeUsers:
+    def __init__(self, session: AsyncSession, client: OpenFgaAuthzClient, new_user_id: int, old_user_id: int) -> None:
+        self.session = session
+        self.client = client
+        self.nid = new_user_id
+        self.oid = old_user_id
+
+    async def merge_classes(self) -> None:
+        # Find classes the old user is enrolled in and the new user is not
+        old_user_classes = aliased(UserClassRole)
+        new_user_classes = aliased(UserClassRole)
+
+        # Step 2: Subquery to find classes where oid is enrolled but nid is not
+        subquery = (
+            select(
+                old_user_classes.class_id,
+                old_user_classes.role,
+                old_user_classes.title,
+                old_user_classes.lms_tenant,
+                old_user_classes.lms_type,
+                old_user_classes.sso_id,
+                old_user_classes.sso_tenant,
+                self.nid  # Include nid directly as the new user_id
+            )
+            .outerjoin(
+                new_user_classes,
+                (new_user_classes.class_id == old_user_classes.class_id) & 
+                (new_user_classes.user_id == self.nid)
+            )
+            .where(
+                old_user_classes.user_id == self.oid,
+                new_user_classes.user_id.is_(None)
+            )
+        )
+
+        # Step 3: Use _get_upsert_stmt to upsert records
+        upsert_stmt = models._get_upsert_stmt(UserClassRole, subquery).on_conflict_do_nothing()
+
+        self.session.execute(upsert_stmt)
+
+        # Remove the old user from all classes
+        delete_stmt = delete(UserClassRole).where(UserClassRole.user_id == self.oid)
 
 
 class AddNewUsers(ABC):

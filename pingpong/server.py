@@ -299,6 +299,15 @@ async def login_sso_saml_acs(provider: str, request: Request):
     await request.state.db.flush()
     await request.state.db.refresh(user)
 
+    # Add external login and get accounts to merge
+    user_ids = await models.ExternalLogin.accounts_to_merge(
+        request.state.db, user.id, provider=provider, identifier=attrs.identifier
+    )
+    
+    # Merge accounts
+    for uid in user_ids:
+        await models.User.merge(request.state.db, user.id, uid)
+    
     next_url = saml_client.redirect_to("/")
     return redirect_with_session(next_url, user.id, nowfn=get_now_fn(request))
 

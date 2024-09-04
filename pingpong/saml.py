@@ -16,6 +16,7 @@ class SamlAttrs(BaseModel):
     middle_name: str
     last_name: str
     name: str
+    identifier: str
 
 
 def get_saml2_settings(provider: str) -> Saml2AuthnSettings:
@@ -79,6 +80,7 @@ def get_saml2_attrs(cfg: Saml2AuthnSettings, client: OneLogin_Saml2_Auth) -> Sam
         middle_name=(attrs.get(fields["middleName"]) or [""])[0],
         last_name=(attrs.get(fields["lastName"]) or [""])[0],
         name=(attrs.get(fields["name"]) or [""])[0],
+        identifier=(attrs.get(fields["identifier"]) or [""])[0],
     )
 
 
