@@ -1575,10 +1575,9 @@ async def list_recent_threads(
     )
     thread_ids = await request.state.authz.list(
         f"user:{request.state.session.user.id}",
-        "party",
+        "can_participate",
         "thread",
     )
-
     threads = await models.Thread.get_n_by_id(
         request.state.db,
         thread_ids,
