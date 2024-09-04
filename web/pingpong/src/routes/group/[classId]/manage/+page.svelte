@@ -43,8 +43,7 @@
     RefreshOutline,
     SortHorizontalOutline,
     AdjustmentsHorizontalOutline,
-    UserRemoveSolid,
-    ExclamationCircleOutline
+    UserRemoveSolid
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
@@ -55,6 +54,7 @@
   import DropdownContainer from '$lib/components/DropdownContainer.svelte';
   import CanvasClassDropdownOptions from '$lib/components/CanvasClassDropdownOptions.svelte';
   import PermissionsTable from '$lib/components/PermissionsTable.svelte';
+  import CanvasDisconnectModal from '$lib/components/CanvasDisconnectModal.svelte';
 
   /**
    * Application data.
@@ -455,6 +455,17 @@
     }
   };
 
+  const reconnectCanvasAccount = async () => {
+    const result = await api.removeCanvasConnection(fetch, data.class.id, 'harvard', true);
+    const response = api.expandResponse(result);
+    if (response.error) {
+      invalidateAll();
+      sadToast(response.error.detail || 'An unknown error occurred');
+    } else {
+      await redirectToCanvas();
+    }
+  };
+
   // The HTMLElement refs of the canvas class options.
   let classNodes: { [key: string]: HTMLElement } = {};
   // Clean up state on navigation. Invalidate data so that any changes
@@ -805,10 +816,21 @@
                 with this group. Once they have selected a course to sync with this group, PingPong will
                 automatically sync the course's roster.
               </p>
-              <p class="mt-2 text-sm">
-                Need to link your own account? Ask {data.class.lms_user?.name || 'them'} to disconnect
-                their Canvas account from this PingPong group.
+              <p class="mt-2 mb-4 text-sm">
+                Need to link your own account? You can disconnect their Canvas account from this
+                PingPong group.
               </p>
+              <div class="flex gap-2">
+                <Button
+                  pill
+                  size="xs"
+                  class="border border-amber-900 hover:bg-amber-900 text-amber-900 hover:bg-gradient-to-t hover:from-amber-800 hover:to-amber-700 hover:text-white"
+                  on:click={() => removeCanvasConnection(false)}
+                  on:touchstart={() => removeCanvasConnection(false)}
+                >
+                  <UserRemoveSolid class="w-4 h-4 me-2" />Disconnect Canvas account</Button
+                >
+              </div>
             </div>
           </Alert>
         {:else if data.class.lms_status === 'linked' && data.class.lms_user?.id && data.me.user?.id === data.class.lms_user?.id}
@@ -868,48 +890,18 @@
                     </div></DropdownItem
                   >
                   <Modal bind:open={disconnectCanvas} size="sm" autoclose>
-                    <div class="text-center">
-                      <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
-                      <h3 class="mb-5 text-xl text-black font-bold">
-                        Remove imported users from {data.class.lms_class?.course_code || 'Canvas'}?
-                      </h3>
-                      <h4 class="mb-5 text-sm text-black font-normal">
-                        While Canvas Sync was active, PingPong imported all users in your Canvas
-                        roster. If you keep imported users, you can edit their roles or remove their
-                        access to this group at any time.
-                      </h4>
-                      <div class="flex flex-row gap-2 justify-center">
-                        <Button
-                          pill
-                          color="alternative"
-                          on:click={() => removeCanvasConnection(true)}>Keep imported users</Button
-                        >
-                        <Button pill color="red" on:click={() => removeCanvasConnection(false)}
-                          >Remove imported users</Button
-                        >
-                      </div>
-                    </div>
+                    <CanvasDisconnectModal
+                      canvasCourseCode={data.class.lms_class?.course_code || ''}
+                      on:keep={() => removeCanvasConnection(true)}
+                      on:remove={() => removeCanvasConnection(false)}
+                    />
                   </Modal>
                   <Modal bind:open={disconnectClass} size="sm" autoclose>
-                    <div class="text-center">
-                      <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
-                      <h3 class="mb-5 text-xl text-black font-bold">
-                        Remove imported users from {data.class.lms_class?.course_code || 'Canvas'}?
-                      </h3>
-                      <h4 class="mb-5 text-sm text-black font-normal">
-                        While Canvas Sync was active, PingPong imported all users in your Canvas
-                        roster. If you keep imported users, you can edit their roles or remove their
-                        access to this group at any time.
-                      </h4>
-                      <div class="flex flex-row gap-2 justify-center">
-                        <Button pill color="alternative" on:click={() => deleteClassSync(true)}
-                          >Keep imported users</Button
-                        >
-                        <Button pill color="red" on:click={() => deleteClassSync(false)}
-                          >Remove imported users</Button
-                        >
-                      </div>
-                    </div>
+                    <CanvasDisconnectModal
+                      canvasCourseCode={data.class.lms_class?.course_code || ''}
+                      on:keep={() => deleteClassSync(true)}
+                      on:remove={() => deleteClassSync(false)}
+                    />
                   </Modal>
                 </Dropdown>
               </div>
@@ -933,11 +925,32 @@
                   ? dayjs.utc(data.class.lms_last_synced).fromNow()
                   : 'never'}
               </p>
-              <p class="mt-2 text-sm">
+              <p class="mt-2 mb-4 text-sm">
                 {data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
-                with this group. Need to link your own account? Ask {data.class.lms_user?.name ||
-                  'them'} to disconnect their Canvas account from this PingPong group.
+                with this group. Need to link your own account? You can disconnect their Canvas account
+                from this PingPong group.
+                <span class="font-bold"
+                  >This action is irreversible and will delete all imported users from Canvas.</span
+                >
               </p>
+              <div class="flex gap-2">
+                <Button
+                  pill
+                  size="xs"
+                  class="border border-green-900 hover:bg-green-900 text-green-900 hover:bg-gradient-to-t hover:from-green-800 hover:to-green-700 hover:text-white"
+                  on:click={() => (disconnectCanvas = true)}
+                  on:touchstart={() => (disconnectCanvas = true)}
+                >
+                  <UserRemoveSolid class="w-4 h-4 me-2" />Disconnect Canvas account</Button
+                >
+              </div>
+              <Modal bind:open={disconnectCanvas} size="sm" autoclose>
+                <CanvasDisconnectModal
+                  canvasCourseCode={data.class.lms_class?.course_code || ''}
+                  on:keep={() => removeCanvasConnection(true)}
+                  on:remove={() => removeCanvasConnection(false)}
+                />
+              </Modal>
             </div>
           </Alert>
         {:else if data.class.lms_status === 'error' && data.class.lms_user?.id && data.me.user?.id === data.class.lms_user?.id}
@@ -962,8 +975,8 @@
                   pill
                   size="xs"
                   class="border border-red-900 bg-gradient-to-t from-red-800 to-red-700 text-white hover:from-red-700 hover:to-red-600"
-                  on:click={redirectToCanvas}
-                  on:touchstart={redirectToCanvas}
+                  on:click={reconnectCanvasAccount}
+                  on:touchstart={reconnectCanvasAccount}
                 >
                   <RefreshOutline class="w-4 h-4 me-2" />Reconnect Canvas account</Button
                 >
@@ -991,8 +1004,10 @@
                   : 'never'}
               </p>
               <p class="mt-2 mb-4 text-sm">
-                Need to link your own account? You can disconnect their Canvas account from this
-                PingPong group. <span class="font-bold"
+                {data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
+                with this group. Need to link your own account? You can disconnect their Canvas account
+                from this PingPong group.
+                <span class="font-bold"
                   >This action is irreversible and will delete all imported users from Canvas.</span
                 >
               </p>
@@ -1000,37 +1015,19 @@
                 <Button
                   pill
                   size="xs"
-                  class="border border-red-900 bg-gradient-to-t from-red-800 to-red-700 text-white hover:from-red-700 hover:to-red-600"
-                  on:click={() => disconnectCanvas = true}
-                  on:touchstart={() => disconnectCanvas = true}
+                  class="border border-green-900 hover:bg-green-900 text-green-900 hover:bg-gradient-to-t hover:from-green-800 hover:to-green-700 hover:text-white"
+                  on:click={() => (disconnectCanvas = true)}
+                  on:touchstart={() => (disconnectCanvas = true)}
                 >
                   <UserRemoveSolid class="w-4 h-4 me-2" />Disconnect Canvas account</Button
                 >
               </div>
               <Modal bind:open={disconnectCanvas} size="sm" autoclose>
-                <div class="text-center">
-                  <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
-                  <h3 class="mb-5 text-xl text-black font-bold">
-                    Are you sure you want to disconnect {data.class.lms_user?.name
-                      ? data.class.lms_user?.name + "'s"
-                      : 'their'} Canvas account?
-                  </h3>
-                  <h4 class="mb-5 text-sm text-black font-normal">
-                    While Canvas Sync was active, PingPong imported all users in your Canvas roster.
-                    If you disconnect their Canvas account, all imported users from Canvas will be
-                    removed from your group user list. <span class="font-bold"
-                      >This action is irreversible.</span
-                    >
-                  </h4>
-                  <div class="flex flex-row gap-2 justify-center">
-                    <Button pill color="alternative" on:click={() => disconnectCanvas = false}
-                      >Cancel</Button
-                    >
-                    <Button pill color="red" on:click={() => removeCanvasConnection(false)}
-                      >Disconnect and remove users</Button
-                    >
-                  </div>
-                </div>
+                <CanvasDisconnectModal
+                  canvasCourseCode={data.class.lms_class?.course_code || ''}
+                  on:keep={() => removeCanvasConnection(true)}
+                  on:remove={() => removeCanvasConnection(false)}
+                />
               </Modal>
             </div>
           </Alert>
