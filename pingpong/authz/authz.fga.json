@@ -445,20 +445,36 @@
           "this": {}
         },
         "can_view": {
-          "union": {
+          "intersection": {
             "child": [
               {
-                "this": {}
-              },
-              {
-                "computedUserset": {
-                  "relation": "party"
+                "union": {
+                  "child": [
+                    {
+                      "this": {}
+                    },
+                    {
+                      "computedUserset": {
+                        "relation": "party"
+                      }
+                    },
+                    {
+                      "tupleToUserset": {
+                        "computedUserset": {
+                          "relation": "can_manage_threads"
+                        },
+                        "tupleset": {
+                          "relation": "parent"
+                        }
+                      }
+                    }
+                  ]
                 }
               },
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "can_manage_threads"
+                    "relation": "member"
                   },
                   "tupleset": {
                     "relation": "parent"
