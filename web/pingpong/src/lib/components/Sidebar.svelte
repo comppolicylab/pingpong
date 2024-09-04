@@ -92,6 +92,7 @@
     </SidebarGroup>
 
     <SidebarGroup class="mt-6 mb-10">
+      <!-- svelte-ignore missing-declaration -->
       <SidebarItem
         href={nonAuthed
           ? '/login'
