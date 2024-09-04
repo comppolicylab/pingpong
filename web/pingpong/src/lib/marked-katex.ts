@@ -37,7 +37,7 @@ const DEFAULT_OPTIONS: MarkedKatexOptions = {
     { left: '$', right: '$', display: false },
     { left: '\\(', right: '\\)', display: false },
     { left: '\\[', right: '\\]', display: true },
-    { left: /\\begin\{(.*?)\}/, right: /\\end\{\1\}/, display: true, preserve: true }
+    { left: /\\begin\{(.*?)\}/, right: /\\end\{\\1\}/, display: true, preserve: true }
   ]
 };
 
