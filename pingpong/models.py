@@ -1117,7 +1117,7 @@ class Class(Base):
         id_: int,
         lms_tenant: str,
         lms_type: schemas.LMSType,
-        keep_users: bool = False,
+        keep_users: bool = True,
         kill_connection: bool = False,
     ) -> list[int]:
         """Remove linked LMS class connection."""
