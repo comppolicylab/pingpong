@@ -4,9 +4,9 @@
     CloseOutline,
     UserSettingsOutline,
     QuestionCircleOutline,
-    ArrowRightToBracketSolid,
+    ArrowRightToBracketOutline,
     EyeSlashOutline,
-    BarsSolid,
+    BarsOutline,
     CirclePlusSolid,
     DotsVerticalOutline,
     ArrowRightOutline,
@@ -82,7 +82,7 @@
           {#if $appMenuOpen}
             <CloseOutline size="xl" class="text-white menu-close" />
           {:else}
-            <BarsSolid size="xl" class="text-white menu-open" />
+            <BarsOutline size="xl" class="text-white menu-open" />
           {/if}
         </button>
         <NavBrand href="/" class="">
@@ -233,7 +233,7 @@
   </DropdownItem>
   <DropdownDivider />
   <DropdownItem href="/logout" class="flex space-x-4 items-center">
-    <ArrowRightToBracketSolid size="sm" />
+    <ArrowRightToBracketOutline size="sm" />
     <span>Logout</span>
   </DropdownItem>
 </Dropdown>
