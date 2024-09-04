@@ -215,8 +215,7 @@ class AddNewUsers(ABC):
                 self.session, user.id, self.class_id
             )
 
-            if not self.new_ucr.silent:
-                invite_roles = []
+            invite_roles = []
             for role in ["admin", "teacher", "student"]:
                 if getattr(ucr.roles, role):
                     grants.append((f"user:{user.id}", role, f"class:{self.class_id}"))
