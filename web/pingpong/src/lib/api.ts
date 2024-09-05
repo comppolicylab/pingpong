@@ -134,7 +134,7 @@ const _fetchJSON = async <R extends BaseData>(
 
   try {
     data = await res.json();
-  } catch (e) {
+  } catch {
     // Do nothing
   }
 
