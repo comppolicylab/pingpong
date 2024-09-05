@@ -37,6 +37,7 @@ const DEFAULT_OPTIONS: MarkedKatexOptions = {
     { left: '$', right: '$', display: false },
     { left: '\\(', right: '\\)', display: false },
     { left: '\\[', right: '\\]', display: true },
+    // @ts-expect-error: The capturing group is valid since the `left` and `right` patterns are combined.
     { left: /\\begin\{(.*?)\}/, right: /\\end\{\1\}/, display: true, preserve: true }
   ]
 };

@@ -7,7 +7,7 @@
     FileUploadPurpose
   } from '$lib/api';
   import {
-    CloseSolid,
+    CloseOutline,
     FileSolid,
     ExclamationCircleOutline,
     ImageSolid
@@ -76,7 +76,7 @@
   {#if state !== 'pending' && state !== 'deleting'}
     <div class="absolute top-[-6px] right-[-6px] -delete-button">
       <Button pill color="dark" class="p-0">
-        <CloseSolid class="w-4 h-4" on:click={deleteFile} />
+        <CloseOutline class="w-4 h-4" on:click={deleteFile} />
       </Button>
     </div>
   {/if}
