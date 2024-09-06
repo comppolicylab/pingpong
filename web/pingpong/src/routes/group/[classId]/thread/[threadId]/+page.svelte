@@ -23,7 +23,7 @@
     EyeSlashOutline,
     EyeOutline,
     RefreshOutline,
-    CodeSolid,
+    CodeOutline,
     ImageSolid,
     LockSolid,
     CogOutline
@@ -271,7 +271,7 @@
                   <AccordionItem open>
                     <span slot="header"
                       ><div class="flex-row flex items-center space-x-2">
-                        <div><CodeSolid size="lg" /></div>
+                        <div><CodeOutline size="lg" /></div>
                         <div>Code Interpreter</div>
                       </div></span
                     >
@@ -282,7 +282,7 @@
             {:else if content.type === 'code_interpreter_call_placeholder'}
               <Card padding="md" class="max-w-full flex-row flex items-center justify-between">
                 <div class="flex-row flex items-center space-x-2">
-                  <div><CodeSolid size="lg" /></div>
+                  <div><CodeOutline size="lg" /></div>
                   <div>Code Interpreter</div>
                 </div>
 
