@@ -283,13 +283,16 @@ async def login_sso_saml_acs(provider: str, request: Request):
     attrs = get_saml2_attrs(sso_config, saml_client)
 
     # Create user if missing. Update if already exists.
-    user = await models.User.get_by_email(request.state.db, attrs.email)
+    user = await models.User.get_by_email_sso(
+        request.state.db, attrs.email, provider, attrs.identifier
+    )
     if not user:
         user = models.User(
             email=attrs.email,
         )
 
     # Update user info
+    user.email = attrs.email
     user.first_name = attrs.first_name
     user.last_name = attrs.last_name
     user.display_name = attrs.name

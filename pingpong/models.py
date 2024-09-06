@@ -50,6 +50,7 @@ class Base(AsyncAttrs, DeclarativeBase):
 
 class UserClassRole(Base):
     __tablename__ = "users_classes"
+    __table_args__ = (UniqueConstraint("user_id", "class_id", name="_user_class_uc"),)
 
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id"), nullable=False, primary_key=True
@@ -108,7 +109,7 @@ class UserClassRole(Base):
         stmt_ = (
             _get_upsert_stmt(session)(ExternalLogin)
             .values(user_id=user_id, provider=sso_tenant, identifier=sso_id)
-            .on_conflict_do_nothing(
+            .on_conflict_do_update(
                 index_elements=["user_id", "provider"],
                 set_=dict(
                     provider=sso_tenant,
@@ -226,6 +227,9 @@ class UserClassRole(Base):
 
 class UserInstitutionRole(Base):
     __tablename__ = "users_institutions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "institution_id", name="_user_inst_uc"),
+    )
 
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id"), nullable=False, primary_key=True
@@ -250,6 +254,9 @@ user_thread_association = Table(
 
 class ExternalLogin(Base):
     __tablename__ = "external_logins"
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", name="_user_provider_uc"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"))
@@ -264,8 +271,9 @@ class ExternalLogin(Base):
         stmt = (
             _get_upsert_stmt(session)(ExternalLogin)
             .values(user_id=user_id, provider=provider, identifier=identifier)
-            .on_conflict_do_nothing(
-                index_elements=["user_id", "provider", "identifier"],
+            .on_conflict_do_update(
+                index_elements=["user_id", "provider"],
+                set_=dict(identifier=identifier),
             )
         )
         await session.execute(stmt)
@@ -331,6 +339,31 @@ class User(Base):
     async def get_by_email(cls, session: AsyncSession, email: str) -> "User":
         stmt = select(User).where(func.lower(User.email) == func.lower(email))
         return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_email_sso(
+        cls, session: AsyncSession, email: str, provider: str, identifier: str
+    ) -> "User":
+        # First attempt: query by email
+        stmt_by_email = select(User).where(func.lower(User.email) == func.lower(email))
+        user = await session.scalar(stmt_by_email)
+
+        if user:
+            return user
+
+        # If user is not found by email, attempt to query by external login
+        stmt_by_sso = (
+            select(User)
+            .join(ExternalLogin)
+            .where(
+                and_(
+                    ExternalLogin.provider == provider,
+                    ExternalLogin.identifier == identifier,
+                )
+            )
+        )
+
+        return await session.scalar(stmt_by_sso)
 
     @classmethod
     async def get_or_create_by_email(
