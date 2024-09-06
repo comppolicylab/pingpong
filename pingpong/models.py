@@ -347,20 +347,30 @@ class User(Base):
         existing = await cls.get_by_email_sso(
             session, email, provider=provider, identifier=identifier
         )
+        # User already exists
         if existing:
             if provider and identifier:
+                # We might not have the external login information stored
                 await ExternalLogin.create_or_update(
                     session, existing.id, provider=provider, identifier=identifier
                 )
+            # Now that we updated the external login, we can return the user
             return existing
-        user = User(email=email, state=initial_state)
+
+        # User does not exist, create a new user
+        if provider and identifier:
+            user = User(
+                email=email,
+                state=initial_state,
+                external_logins=[
+                    ExternalLogin(provider=provider, identifier=identifier)
+                ],
+            )
+        else:
+            user = User(email=email, state=initial_state)
         session.add(user)
         await session.flush()
         await session.refresh(user)
-        if provider and identifier:
-            await ExternalLogin.create_or_update(
-                session, user.id, provider=provider, identifier=identifier
-            )
         return user
 
     @classmethod
