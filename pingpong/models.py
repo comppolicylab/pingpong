@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional
 
-from sqlalchemy import Boolean, Column, DateTime, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, UniqueConstraint, case
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
     ForeignKey,
@@ -890,12 +890,32 @@ class Class(Base):
     async def update(
         cls, session: AsyncSession, id_: int, data: schemas.UpdateClass
     ) -> "Class":
+        update_data = data.dict(exclude_none=True)
+
         stmt = (
             update(Class)
             .where(Class.id == int(id_))
-            .values(**data.dict(exclude_none=True))
+            .values(**update_data)
+            .where(
+                and_(
+                    Class.id == int(id_),
+                    case(
+                        (
+                            Class.private.is_(True),
+                            Class.private == update_data.get("private", True),
+                        ),
+                        else_=True,
+                    ),
+                )
+            )
         )
-        await session.execute(stmt)
+        result = await session.execute(stmt)
+
+        if result.rowcount == 0:
+            raise ValueError(
+                "Update failed: The class is private and the setting cannot be reverted."
+            )
+
         return await cls.get_by_id(session, int(id_))
 
     @classmethod

@@ -678,7 +678,10 @@ async def get_class_upload_info(class_id: str, request: Request):
     response_model=schemas.Class,
 )
 async def update_class(class_id: str, update: schemas.UpdateClass, request: Request):
-    cls = await models.Class.update(request.state.db, int(class_id), update)
+    try:
+        cls = await models.Class.update(request.state.db, int(class_id), update)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     grants = []
     revokes = []

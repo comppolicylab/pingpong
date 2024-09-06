@@ -26,7 +26,8 @@
     Spinner,
     CloseButton,
     Dropdown,
-    DropdownItem
+    DropdownItem,
+    Tooltip
   } from 'flowbite-svelte';
   import BulkAddUsers from '$lib/components/BulkAddUsers.svelte';
   import CanvasLogo from '$lib/components/CanvasLogo.svelte';
@@ -254,7 +255,7 @@
       name: d.name.toString(),
       term: d.term.toString(),
       any_can_publish_thread: d.any_can_publish_thread?.toString() === 'on',
-      private: d.make_private?.toString() === 'on',
+      private: makePrivate,
       ...parseAssistantPermissions(d.asst_perm.toString())
     };
 
@@ -496,6 +497,43 @@
     },
     { name: 'Manage group information and user list', member: false, moderator: true }
   ];
+
+  let aboutToSetPrivate: boolean = false;
+  let confirmText: string = '';
+  let originalEvent: Event;
+
+  function handleClick(event: MouseEvent): void {
+    event.preventDefault();
+    originalEvent = event;
+    aboutToSetPrivate = true;
+  }
+
+  function handleConfirmTextChange(event: Event): void {
+    const target = event.target as HTMLInputElement;
+    confirmText = target.value;
+  }
+
+  function handleMakePrivate(): void {
+    if (
+      !confirm(
+        `You are about to make threads and assistants private in this group. This action CANNOT be undone and you'll have to create a new group to see threads and assistants of other members as a Moderator.\n\nAre you sure you want to continue?`
+      )
+    ) {
+      handleCancel();
+      return;
+    }
+    makePrivate = true;
+    if (originalEvent) {
+      submitParentForm(originalEvent);
+    }
+    aboutToSetPrivate = false;
+    confirmText = '';
+  }
+
+  function handleCancel(): void {
+    aboutToSetPrivate = false;
+    confirmText = '';
+  }
 </script>
 
 <div
@@ -544,12 +582,63 @@
           <Checkbox
             id="make_private"
             name="make_private"
-            disabled={$updatingClass}
-            on:change={submitParentForm}
-            bind:checked={makePrivate}>Make threads and assistants private</Checkbox
+            disabled={$updatingClass || makePrivate}
+            on:click={handleClick}
+            bind:checked={makePrivate}
           >
-        </div>
+            {#if makePrivate}
+              <span class="text-slate-800">Threads and assistants are private</span>
+            {:else}
+              Make threads and assistants private
+            {/if}
+          </Checkbox>
+          {#if makePrivate}
+            <Tooltip
+              type="custom"
+              arrow={false}
+              class="flex flex-row overflow-y-auto bg-gray-900 z-10 max-w-xs py-2 px-3 text-sm text-wrap font-medium text-white"
+              placement="top-start"
+            >
+              This setting cannot be changed. Unpublished threads and assistants are private in this
+              group.
+            </Tooltip>
+          {/if}
 
+          <Modal bind:open={aboutToSetPrivate} size="sm" autoclose>
+            <div class="text-center px-2">
+              <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
+              <h3 class="mb-5 text-xl text-gray-900 dark:text-white font-bold">
+                Are you sure you want to make threads and assistants private?
+              </h3>
+              <p class="mb-5 text-sm text-gray-700 dark:text-gray-300">
+                If you turn this setting on, only members can view unpublished threads and
+                assistants they create.
+                <span class="font-bold">This action cannot be undone.</span>
+              </p>
+              <div class="mb-4 px-4">
+                <input
+                  type="text"
+                  class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full py-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
+                  placeholder="Type 'confirm' to proceed"
+                  bind:value={confirmText}
+                  on:input={handleConfirmTextChange}
+                />
+              </div>
+              <div class="flex justify-center gap-4">
+                <Button pill color="alternative" on:click={handleCancel}>Cancel</Button>
+                <Button
+                  pill
+                  outline
+                  color="red"
+                  disabled={confirmText.toLowerCase() !== 'confirm'}
+                  on:click={handleMakePrivate}
+                >
+                  Make private
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        </div>
         <div></div>
         <Helper
           >Choose whether to allow members to share their threads with the rest of the group.
