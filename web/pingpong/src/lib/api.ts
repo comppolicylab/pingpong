@@ -134,7 +134,7 @@ const _fetchJSON = async <R extends BaseData>(
 
   try {
     data = await res.json();
-  } catch (e) {
+  } catch {
     // Do nothing
   }
 
@@ -1790,14 +1790,24 @@ export const syncCanvasClass = async (f: Fetcher, classId: number, tenant: strin
   return await POST<never, GenericStatus>(f, url);
 };
 
-export const deleteCanvasClassSync = async (f: Fetcher, classId: number, tenant: string) => {
+export const deleteCanvasClassSync = async (
+  f: Fetcher,
+  classId: number,
+  tenant: string,
+  keep: boolean
+) => {
   const url = `class/${classId}/canvas/${tenant}/sync`;
-  return await DELETE<never, GenericStatus>(f, url);
+  return await DELETE<{ keep_users: boolean }, GenericStatus>(f, url, { keep_users: keep });
 };
 
-export const removeCanvasConnection = async (f: Fetcher, classId: number, tenant: string) => {
+export const removeCanvasConnection = async (
+  f: Fetcher,
+  classId: number,
+  tenant: string,
+  keep: boolean
+) => {
   const url = `class/${classId}/canvas/${tenant}/account`;
-  return await DELETE<never, GenericStatus>(f, url);
+  return await DELETE<{ keep_users: boolean }, GenericStatus>(f, url, { keep_users: keep });
 };
 
 /**
