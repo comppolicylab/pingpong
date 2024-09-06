@@ -194,9 +194,16 @@ class AddNewUsers(ABC):
         if self.new_ucr.lms_tenant:
             enrollment.lms_tenant = self.new_ucr.lms_tenant
             enrollment.lms_type = self.new_ucr.lms_type
-            enrollment.sso_id = sso_id
-            enrollment.sso_tenant = self.new_ucr.sso_tenant
             self.session.add(enrollment)
+
+        # Update the external login identifier if it's provided
+        if sso_id and self.new_ucr.sso_tenant:
+            await models.ExternalLogin.create_or_update(
+                self.session,
+                enrollment.user_id,
+                self.new_ucr.sso_tenant,
+                sso_id,
+            )
 
     async def _create_user_enrollment(
         self,

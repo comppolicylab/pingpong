@@ -1,6 +1,6 @@
 import asyncio
 import json
-from sqlalchemy import delete, update
+from sqlalchemy import delete, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pingpong.config import config
@@ -40,13 +40,13 @@ async def merge(
 async def merge_classes(
     session: AsyncSession, new_user_id: int, old_user_id: int
 ) -> None:
-    upsert_stmt = """
+    upsert_stmt = text("""
     INSERT INTO users_classes (user_id, class_id, role, title, lms_tenant, lms_type)
     SELECT :new_user_id, class_id, role, title, lms_tenant, lms_type
     FROM users_classes
     WHERE user_id = :old_user_id
     ON CONFLICT (user_id, class_id) DO NOTHING
-    """
+    """)
 
     await session.execute(
         upsert_stmt, {"new_user_id": new_user_id, "old_user_id": old_user_id}
@@ -61,13 +61,13 @@ async def merge_classes(
 async def merge_institutions(
     session: AsyncSession, new_user_id: int, old_user_id: int
 ) -> None:
-    upsert_stmt = """
+    upsert_stmt = text("""
     INSERT INTO users_institutions (user_id, institution_id, role, title)
     SELECT :new_user_id, institution_id, role, title
     FROM users_institutions
     WHERE user_id = :old_user_id
     ON CONFLICT (user_id, institution_id) DO NOTHING
-    """
+    """)
 
     await session.execute(
         upsert_stmt, {"new_user_id": new_user_id, "old_user_id": old_user_id}
@@ -116,13 +116,13 @@ async def merge_lms_users(
 async def merge_external_logins(
     session: AsyncSession, new_user_id: int, old_user_id: int
 ) -> None:
-    upsert_stmt = """
+    upsert_stmt = text("""
     INSERT INTO external_logins (user_id, provider, identifier)
     SELECT :new_user_id, provider, identifier
     FROM external_logins
     WHERE user_id = :old_user_id
     ON CONFLICT (user_id, provider) DO NOTHING
-    """
+    """)
 
     await session.execute(
         upsert_stmt, {"new_user_id": new_user_id, "old_user_id": old_user_id}
@@ -168,8 +168,9 @@ async def list_all_permissions(
         ]
     )
     all_relations = [
-        (tuple_set.user, tuple_set.relation, tuple_set.object)
+        (client_tuple.user, client_tuple.relation, client_tuple.object)
         for tuple_set in all_tuple_sets
+        for client_tuple in tuple_set
     ]
 
     return all_relations

@@ -14,6 +14,7 @@ from openfga_sdk.client.models import (
 from openfga_sdk.credentials import CredentialConfiguration, Credentials
 from openfga_sdk.models import CreateStoreRequest
 from openfga_sdk.models.read_request_tuple_key import ReadRequestTupleKey
+from openfga_sdk.models.read_response import ReadResponse
 
 from .base import AuthzClient, AuthzDriver, RelatedObject, Relation
 
@@ -61,8 +62,19 @@ class OpenFgaAuthzClient(AuthzClient):
         n = len(type_) + 1
         return [int(slug[n:]) for slug in response.objects]
 
-    async def read(self, key: ReadRequestTupleKey) -> ClientTuple:
-        return await self._cli.read(key)
+    async def read(self, key: ReadRequestTupleKey) -> List[ClientTuple]:
+        response: ReadResponse = await self._cli.read(key)
+
+        client_tuples = [
+            ClientTuple(
+                user=tuple.key.user,
+                relation=tuple.key.relation,
+                object=tuple.key.object,
+            )
+            for tuple in response.tuples
+        ]
+
+        return client_tuples
 
     async def expand(
         self, entity: str, relation: str, max_depth: int = 1
