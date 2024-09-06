@@ -72,6 +72,7 @@ from .users import (
     AddNewUsersManual,
     AddUserException,
     CheckUserPermissionException,
+    MergeUsers,
     check_permissions,
     delete_canvas_permissions,
 )
@@ -303,11 +304,11 @@ async def login_sso_saml_acs(provider: str, request: Request):
     user_ids = await models.ExternalLogin.accounts_to_merge(
         request.state.db, user.id, provider=provider, identifier=attrs.identifier
     )
-    
+
     # Merge accounts
     for uid in user_ids:
-        await models.User.merge(request.state.db, user.id, uid)
-    
+        await MergeUsers(request.state.db, request.state.authz, user.id, uid).merge()
+
     next_url = saml_client.redirect_to("/")
     return redirect_with_session(next_url, user.id, nowfn=get_now_fn(request))
 

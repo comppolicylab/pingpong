@@ -63,8 +63,6 @@ class UserClassRole(Base):
     lms_type = Column(SQLEnum(schemas.LMSType), nullable=True)
     user = relationship("User", back_populates="classes")
     class_ = relationship("Class", back_populates="users")
-    external_logins: Mapped[List["ExternalLogin"]] = relationship(
-        "ExternalLogin", back_populates="ucr", lazy="selectin")
 
     @classmethod
     async def get(
@@ -109,9 +107,9 @@ class UserClassRole(Base):
         result = await session.scalar(stmt)
         stmt_ = (
             _get_upsert_stmt(session)(ExternalLogin)
-            .values(user_id=user_id, provider=sso_tenant, identifier=sso_id, ucr_id=result.id)
+            .values(user_id=user_id, provider=sso_tenant, identifier=sso_id)
             .on_conflict_do_nothing(
-                index_elements=["user_id", "ucr_id"],
+                index_elements=["user_id", "provider"],
                 set_=dict(
                     provider=sso_tenant,
                     identifier=sso_id,
@@ -173,7 +171,9 @@ class UserClassRole(Base):
         return users_to_delete
 
     @classmethod
-    async def transfer_class_enrollments(cls, session: AsyncSession, nuid: int, ouid: int):
+    async def transfer_class_enrollments(
+        cls, session: AsyncSession, nuid: int, ouid: int
+    ):
         # Query to find classes that old user is enrolled in but new is not
         old_user_classes = aliased(UserClassRole)
         new_user_classes = aliased(UserClassRole)
@@ -182,8 +182,8 @@ class UserClassRole(Base):
             .join(Class, UserClassRole.class_id == Class.id)
             .outerjoin(
                 new_user_classes,
-                (old_user_classes.class_id == new_user_classes.class_id) &
-                (new_user_classes.user_id == nuid)
+                (old_user_classes.class_id == new_user_classes.class_id)
+                & (new_user_classes.user_id == nuid),
             )
             .where(old_user_classes.user_id == ouid)
             .where(new_user_classes.user_id.is_(None))
@@ -208,17 +208,18 @@ class UserClassRole(Base):
 
         # Perform the UPSERT operation to add new enrollments
         if new_enrollments:
-            upsert_stmt = _get_upsert_stmt(session)(
-                UserClassRole
-            ).values(new_enrollments).on_conflict_do_nothing(
-                index_elements=[UserClassRole.user_id, UserClassRole.class_id]
+            upsert_stmt = (
+                _get_upsert_stmt(session)(UserClassRole)
+                .values(new_enrollments)
+                .on_conflict_do_nothing(
+                    index_elements=[UserClassRole.user_id, UserClassRole.class_id]
+                )
             )
             await session.execute(upsert_stmt)
 
         # Remove all records of the old user from the `users_classes` table
-        stmt_delete_old_user = (
-            delete(UserClassRole)
-            .where(UserClassRole.user_id == ouid)
+        stmt_delete_old_user = delete(UserClassRole).where(
+            UserClassRole.user_id == ouid
         )
         await session.execute(stmt_delete_old_user)
 
@@ -246,6 +247,7 @@ user_thread_association = Table(
     Index("user_thread_idx", "user_id", "thread_id", unique=True),
 )
 
+
 class ExternalLogin(Base):
     __tablename__ = "external_logins"
 
@@ -254,8 +256,6 @@ class ExternalLogin(Base):
     user = relationship("User", back_populates="external_logins")
     provider = Column(String, nullable=True)
     identifier = Column(String, nullable=True)
-    ucr_id = Mapped[Optional[int]]
-    ucr = relationship("UserClassRole", back_populates="external_logins")
 
     @classmethod
     async def accounts_to_merge(
@@ -277,7 +277,8 @@ class ExternalLogin(Base):
             )
         )
         result = await session.execute(stmt_)
-        return [row[0] for row in result]
+        return list(set(row[0] for row in result))
+
 
 class User(Base):
     __tablename__ = "users"
