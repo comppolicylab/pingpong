@@ -13,7 +13,7 @@
   } from 'flowbite-svelte';
   import {
     EyeSlashOutline,
-    ChevronDownSolid,
+    ChevronDownOutline,
     ArrowRightOutline,
     LockSolid
   } from 'flowbite-svelte-icons';
@@ -177,7 +177,7 @@
           <Button
             pill
             class="bg-blue-light-50 text-xs uppercase tracking-wide font-medium text-black border-solid border border-blue-dark-40"
-            >{assistant.name} <ChevronDownSolid class="w-3 h-3 ms-2" /></Button
+            >{assistant.name} <ChevronDownOutline class="w-3 h-3 ms-2" /></Button
           >
 
           <Dropdown class="max-h-60 overflow-y-auto w-60">

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Button, Dropdown, DropdownItem } from 'flowbite-svelte';
-  import { ChevronDownSolid, ArrowRightOutline, CogSolid } from 'flowbite-svelte-icons';
+  import { ChevronDownOutline, ArrowRightOutline, CogSolid } from 'flowbite-svelte-icons';
   import * as api from '$lib/api';
   import PageHeader, { mainTextClass } from './PageHeader.svelte';
 
@@ -17,7 +17,7 @@
     <div class="eyebrow eyebrow-dark ml-4">Select group</div>
     <Button class={mainTextClass}
       >{current?.name || 'no class'}
-      <ChevronDownSolid
+      <ChevronDownOutline
         size="sm"
         class="bg-white rounded-full ml-4 h-8 w-8 inline-block text-orange"
       /></Button
