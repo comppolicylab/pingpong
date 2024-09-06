@@ -30,6 +30,73 @@ async def delete_canvas_permissions(
     await client.write_safe(revoke=revokes)
 
 
+class CheckUserPermissionException(Exception):
+    def __init__(self, detail: str = "", code: int | None = None):
+        self.code = code
+        self.detail = detail
+
+
+async def check_permissions(request: Request, uid: int, cid: int):
+    # CHECK 1: Is the requesting user trying to edit themselves?
+    if uid == request.state.session.user.id:
+        raise CheckUserPermissionException(
+            code=403, detail="You cannot manage your own user role."
+        )
+
+    # CHECK 2: Does requesting user have enough permissions to edit this type of user?
+    # Query to find the current permissions for the requester and the user being modified.
+    me_ent = f"user:{request.state.session.user.id}"
+    them_ent = f"user:{uid}"
+    class_obj = f"class:{cid}"
+    perms = await request.state.authz.check(
+        [
+            (me_ent, "admin", class_obj),
+            (me_ent, "teacher", class_obj),
+            (me_ent, "student", class_obj),
+            (them_ent, "admin", class_obj),
+            (them_ent, "teacher", class_obj),
+            (them_ent, "student", class_obj),
+        ]
+    )
+    ordered_roles = ["admin", "teacher", "student", None]
+    my_perms = [r for r, p in zip(ordered_roles[:3], perms[:3]) if p]
+    their_perms = [r for r, p in zip(ordered_roles[:3], perms[3:]) if p]
+
+    # Figure out the role with maximal permissions for each user.
+    # (This is necessary because users might have multiple roles. This
+    # is especially true with inherited `admin` permissions.)
+    my_primary_role = next(
+        (r for r in ordered_roles if r in my_perms),
+        None,
+    )
+    their_primary_role = next(
+        (r for r in ordered_roles if r in their_perms),
+        None,
+    )
+
+    my_primary_idx = ordered_roles.index(my_primary_role)
+    their_primary_idx = ordered_roles.index(their_primary_role)
+
+    # If they already have more permissions than we do, we can't remove them them
+    if their_primary_idx < my_primary_idx:
+        raise CheckUserPermissionException(
+            code=403, detail="Lacking permission to manage this user."
+        )
+
+    existing = await models.UserClassRole.get(request.state.db, uid, cid)
+
+    # CHECK 3: Is the user being edited a member of this group?
+    if not existing:
+        raise CheckUserPermissionException(code=404, detail="User not found in group.")
+
+    # CHECK 4: Is the user imported from an LMS?
+    if existing.lms_tenant:
+        raise CheckUserPermissionException(
+            code=403,
+            detail="You cannot manually edit an imported user. Please update or remove the user through your Canvas roster.",
+        )
+
+
 class AddNewUsers(ABC):
     def __init__(
         self,
@@ -215,8 +282,13 @@ class AddNewUsers(ABC):
                 self.session, user.id, self.class_id
             )
 
-            if not self.new_ucr.silent:
-                invite_roles = []
+            if enrollment and enrollment.lms_tenant and not self.new_ucr.lms_tenant:
+                raise AddUserException(
+                    code=403,
+                    detail="You cannot manually change the role of an imported user. Please update the user's role in Canvas.",
+                )
+
+            invite_roles = []
             for role in ["admin", "teacher", "student"]:
                 if getattr(ucr.roles, role):
                     grants.append((f"user:{user.id}", role, f"class:{self.class_id}"))

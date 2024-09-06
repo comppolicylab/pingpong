@@ -1117,7 +1117,7 @@ class Class(Base):
         id_: int,
         lms_tenant: str,
         lms_type: schemas.LMSType,
-        keep_users: bool = False,
+        keep_users: bool = True,
         kill_connection: bool = False,
     ) -> list[int]:
         """Remove linked LMS class connection."""
@@ -1125,10 +1125,11 @@ class Class(Base):
         class_instance = await session.scalar(stmt)
 
         if class_instance.lms_class_id:
-            await LMSClass.delete_if_unused(session, class_instance.lms_class_id)
+            old_lms_class_id = class_instance.lms_class_id
             class_instance.lms_class_id = None
             class_instance.lms_status = schemas.LMSStatus.AUTHORIZED
             class_instance.lms_last_synced = None
+            await LMSClass.delete_if_unused(session, old_lms_class_id)
 
         # Remove class AND LMS account connection
         if kill_connection:

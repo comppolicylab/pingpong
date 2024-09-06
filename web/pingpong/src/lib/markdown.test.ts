@@ -98,4 +98,21 @@ Test Math
       )
     ).toMatchSnapshot();
   });
+
+  it('should be able to render `\\begin{align*}` blocks as latex', () => {
+    expect(
+      markdown(
+        `
+**Solution**:
+\\begin{align*}
+(1 + 2i)(2 - 3i) &= 1 \\cdot 2 + 1 \\cdot (-3i) + 2i \\cdot 2 + 2i \\cdot (-3i) \\\\
+&= 2 - 3i + 4i - 6i^2.
+\\end{align*}
+Since $i^2 = -1$, we get:
+$$ 2 - 3i + 4i + 6 = 8 + i.$$
+`,
+        { latex: true }
+      )
+    ).toMatchSnapshot();
+  });
 });

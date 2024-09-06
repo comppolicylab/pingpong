@@ -43,7 +43,8 @@
     RefreshOutline,
     SortHorizontalOutline,
     AdjustmentsHorizontalOutline,
-    UserRemoveSolid
+    UserRemoveSolid,
+    ExclamationCircleOutline
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
