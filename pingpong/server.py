@@ -304,6 +304,9 @@ async def login_sso_saml_acs(provider: str, request: Request):
     await request.state.db.refresh(user)
 
     # Add external login and get accounts to merge
+    await models.ExternalLogin.create_or_update(
+        request.state.db, user.id, provider=provider, identifier=attrs.identifier
+    )
     user_ids = await models.ExternalLogin.accounts_to_merge(
         request.state.db, user.id, provider=provider, identifier=attrs.identifier
     )

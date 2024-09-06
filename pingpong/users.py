@@ -640,7 +640,9 @@ class AddNewUsers(ABC):
 
         for ucr in self.new_ucr.roles:
             await self._check_permissions(ucr)
-            user = await models.User.get_or_create_by_email(self.session, ucr.email)
+            user = await models.User.get_or_create_by_email_sso(
+                self.session, ucr.email, self.new_ucr.sso_tenant, ucr.sso_id
+            )
 
             if self.new_ucr.lms_tenant:
                 self.newly_synced.append(user.id)

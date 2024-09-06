@@ -265,9 +265,9 @@ class ExternalLogin(Base):
     identifier = Column(String, nullable=True)
 
     @classmethod
-    async def accounts_to_merge(
+    async def create_or_update(
         cls, session: AsyncSession, user_id: int, provider: str, identifier: str
-    ) -> list[int]:
+    ) -> None:
         stmt = (
             _get_upsert_stmt(session)(ExternalLogin)
             .values(user_id=user_id, provider=provider, identifier=identifier)
@@ -277,6 +277,11 @@ class ExternalLogin(Base):
             )
         )
         await session.execute(stmt)
+
+    @classmethod
+    async def accounts_to_merge(
+        cls, session: AsyncSession, user_id: int, provider: str, identifier: str
+    ) -> list[int]:
         stmt_ = select(ExternalLogin.user_id).where(
             and_(
                 ExternalLogin.provider == provider,
@@ -342,13 +347,17 @@ class User(Base):
 
     @classmethod
     async def get_by_email_sso(
-        cls, session: AsyncSession, email: str, provider: str, identifier: str
+        cls,
+        session: AsyncSession,
+        email: str,
+        provider: str | None,
+        identifier: str | None,
     ) -> "User":
         # First attempt: query by email
         stmt_by_email = select(User).where(func.lower(User.email) == func.lower(email))
         user = await session.scalar(stmt_by_email)
 
-        if user:
+        if user or not provider or not identifier:
             return user
 
         # If user is not found by email, attempt to query by external login
@@ -379,6 +388,34 @@ class User(Base):
         session.add(user)
         await session.flush()
         await session.refresh(user)
+        return user
+
+    @classmethod
+    async def get_or_create_by_email_sso(
+        cls,
+        session: AsyncSession,
+        email: str,
+        provider: str | None,
+        identifier: str | None,
+        initial_state: schemas.UserState = schemas.UserState.UNVERIFIED,
+    ) -> "User":
+        existing = await cls.get_by_email_sso(
+            session, email, provider=provider, identifier=identifier
+        )
+        if existing:
+            if provider and identifier:
+                await ExternalLogin.create_or_update(
+                    session, existing.id, provider=provider, identifier=identifier
+                )
+            return existing
+        user = User(email=email, state=initial_state)
+        session.add(user)
+        await session.flush()
+        await session.refresh(user)
+        if provider and identifier:
+            await ExternalLogin.create_or_update(
+                session, user.id, provider=provider, identifier=identifier
+            )
         return user
 
     @classmethod
