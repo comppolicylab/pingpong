@@ -13,6 +13,7 @@ from openfga_sdk.client.models import (
 )
 from openfga_sdk.credentials import CredentialConfiguration, Credentials
 from openfga_sdk.models import CreateStoreRequest
+from openfga_sdk.models.read_request_tuple_key import ReadRequestTupleKey
 
 from .base import AuthzClient, AuthzDriver, RelatedObject, Relation
 
@@ -59,6 +60,9 @@ class OpenFgaAuthzClient(AuthzClient):
         response = await self._cli.list_objects(query)
         n = len(type_) + 1
         return [int(slug[n:]) for slug in response.objects]
+
+    async def read(self, key: ReadRequestTupleKey) -> ClientTuple:
+        return await self._cli.read(key)
 
     async def expand(
         self, entity: str, relation: str, max_depth: int = 1
@@ -298,3 +302,9 @@ class OpenFgaAuthzDriver(AuthzDriver):
                 )
 
             await c.close()
+
+    def get_types(self) -> list[str]:
+        """Get a list of object types used in the authz model."""
+        with open(self.model_config) as f:
+            model = json.load(f)
+        return [t["type"] for t in model["type_definitions"]]

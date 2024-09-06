@@ -72,10 +72,10 @@ from .users import (
     AddNewUsersManual,
     AddUserException,
     CheckUserPermissionException,
-    MergeUsers,
     check_permissions,
     delete_canvas_permissions,
 )
+from .merge import merge
 
 logger = logging.getLogger(__name__)
 
@@ -313,7 +313,7 @@ async def login_sso_saml_acs(provider: str, request: Request):
 
     # Merge accounts
     for uid in user_ids:
-        await MergeUsers(request.state.db, request.state.authz, user.id, uid).merge()
+        await merge(request.state.db, request.state.authz, user.id, uid)
 
     next_url = saml_client.redirect_to("/")
     return redirect_with_session(next_url, user.id, nowfn=get_now_fn(request))

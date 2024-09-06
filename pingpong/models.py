@@ -21,12 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
-    aliased,
     joinedload,
     contains_eager,
     mapped_column,
     relationship,
-    selectinload,
 )
 from sqlalchemy.sql import func
 import pingpong.schemas as schemas
@@ -171,59 +169,6 @@ class UserClassRole(Base):
         await session.execute(stmt_)
         return users_to_delete
 
-    @classmethod
-    async def transfer_class_enrollments(
-        cls, session: AsyncSession, nuid: int, ouid: int
-    ):
-        # Query to find classes that old user is enrolled in but new is not
-        old_user_classes = aliased(UserClassRole)
-        new_user_classes = aliased(UserClassRole)
-        stmt_find_classes = (
-            select(UserClassRole)
-            .join(Class, UserClassRole.class_id == Class.id)
-            .outerjoin(
-                new_user_classes,
-                (old_user_classes.class_id == new_user_classes.class_id)
-                & (new_user_classes.user_id == nuid),
-            )
-            .where(old_user_classes.user_id == ouid)
-            .where(new_user_classes.user_id.is_(None))
-            .options(selectinload(UserClassRole.class_))
-        )
-
-        # Fetch the classes
-        ouid_classes = (await session.execute(stmt_find_classes)).scalars().all()
-
-        # Create a list of new enrollments for the new user (NUID)
-        new_enrollments = [
-            {
-                "user_id": nuid,
-                "class_id": user_class.class_id,
-                "role": user_class.role,
-                "title": user_class.title,
-                "lms_tenant": user_class.lms_tenant,
-                "lms_type": user_class.lms_type,
-            }
-            for user_class in ouid_classes
-        ]
-
-        # Perform the UPSERT operation to add new enrollments
-        if new_enrollments:
-            upsert_stmt = (
-                _get_upsert_stmt(session)(UserClassRole)
-                .values(new_enrollments)
-                .on_conflict_do_nothing(
-                    index_elements=[UserClassRole.user_id, UserClassRole.class_id]
-                )
-            )
-            await session.execute(upsert_stmt)
-
-        # Remove all records of the old user from the `users_classes` table
-        stmt_delete_old_user = delete(UserClassRole).where(
-            UserClassRole.user_id == ouid
-        )
-        await session.execute(stmt_delete_old_user)
-
 
 class UserInstitutionRole(Base):
     __tablename__ = "users_institutions"
@@ -261,8 +206,8 @@ class ExternalLogin(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     user = relationship("User", back_populates="external_logins")
-    provider = Column(String, nullable=True)
-    identifier = Column(String, nullable=True)
+    provider = Column(String, nullable=False)
+    identifier = Column(String, nullable=False)
 
     @classmethod
     async def create_or_update(
