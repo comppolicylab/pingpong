@@ -898,17 +898,23 @@ async def sync_canvas_class(
 
 
 @v1.delete(
-    "/class/{class_id}/canvas/{tenant}/sync",
+    "/class/{class_id}/canvas/{tenant}/sync/{keep_option}",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
-async def unlink_canvas_class(class_id: str, tenant: str, request: Request):
+async def unlink_canvas_class(
+    class_id: str,
+    tenant: str,
+    request: Request,
+    keep_users: bool = True,
+):
     canvas_settings = get_canvas_config(tenant)
     userIds = await models.Class.remove_lms_sync(
         request.state.db,
         int(class_id),
         canvas_settings.tenant,
         schemas.LMSType(canvas_settings.type),
+        keep_users=keep_users,
     )
     await delete_canvas_permissions(request.state.authz, userIds, class_id)
     return {"status": "ok"}
@@ -919,7 +925,9 @@ async def unlink_canvas_class(class_id: str, tenant: str, request: Request):
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
-async def remove_canvas_connection(class_id: str, tenant: str, request: Request):
+async def remove_canvas_connection(
+    class_id: str, tenant: str, request: Request, keep_users: bool = True
+):
     canvas_settings = get_canvas_config(tenant)
 
     async with LightweightCanvasClient(
@@ -933,6 +941,7 @@ async def remove_canvas_connection(class_id: str, tenant: str, request: Request)
                 canvas_settings.tenant,
                 schemas.LMSType(canvas_settings.type),
                 kill_connection=True,
+                keep_users=keep_users,
             )
             await delete_canvas_permissions(request.state.authz, userIds, class_id)
 

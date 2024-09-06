@@ -1117,6 +1117,7 @@ class Class(Base):
         id_: int,
         lms_tenant: str,
         lms_type: schemas.LMSType,
+        keep_users: bool = True,
         kill_connection: bool = False,
     ) -> list[int]:
         """Remove linked LMS class connection."""
@@ -1138,20 +1139,35 @@ class Class(Base):
             class_instance.lms_token_added_at = None
             class_instance.lms_status = schemas.LMSStatus.NONE
 
-        stmt_ = select(UserClassRole).where(
-            and_(
-                UserClassRole.class_id == id_,
-                UserClassRole.lms_tenant == lms_tenant,
-                UserClassRole.lms_type == lms_type,
+        user_ids = []
+        if keep_users:
+            stmt_ = select(UserClassRole).where(
+                and_(
+                    UserClassRole.class_id == id_,
+                    UserClassRole.lms_tenant == lms_tenant,
+                    UserClassRole.lms_type == lms_type,
+                )
             )
-        )
-        result = await session.execute(stmt_)
-        users = [row.UserClassRole for row in result]
-        user_ids = [user.user_id for user in users]
+            result = await session.execute(stmt_)
+            users = result.scalars().all()
+            user_ids = [user.user_id for user in users]
 
-        for user in users:
-            await session.delete(user)
-        await session.flush()
+            for user in users:
+                await session.delete(user)
+            await session.flush()
+        else:
+            stmt = (
+                update(UserClassRole)
+                .where(
+                    and_(
+                        UserClassRole.class_id == id_,
+                        UserClassRole.lms_tenant == lms_tenant,
+                        UserClassRole.lms_type == lms_type,
+                    )
+                )
+                .values(lms_type=None, lms_tenant=None)
+            )
+            await session.execute(stmt)
 
         return user_ids
 
