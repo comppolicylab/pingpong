@@ -1298,7 +1298,7 @@ class Class(Base):
             class_instance.lms_status = schemas.LMSStatus.NONE
 
         user_ids = []
-        if keep_users:
+        if not keep_users:
             stmt_ = select(UserClassRole).where(
                 and_(
                     UserClassRole.class_id == id_,

@@ -923,7 +923,7 @@ async def sync_canvas_class(
 
 
 @v1.delete(
-    "/class/{class_id}/canvas/{tenant}/sync/{keep_option}",
+    "/class/{class_id}/canvas/{tenant}/sync",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
