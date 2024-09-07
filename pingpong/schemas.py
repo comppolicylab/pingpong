@@ -325,8 +325,6 @@ class UserClassRole(BaseModel):
     class_id: int
     lms_tenant: str | None = None
     lms_type: LMSType | None = None
-    sso_id: str | None = None
-    sso_tenant: str | None = None
     roles: ClassUserRoles
 
     class Config:

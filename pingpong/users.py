@@ -10,6 +10,7 @@ from .authz import Relation
 from .config import config
 from .invite import send_invite
 from .now import NowFn, utcnow
+from .merge import merge
 
 
 class AddUserException(Exception):
@@ -116,6 +117,23 @@ class AddNewUsers(ABC):
     def send_invites(self):
         pass
 
+    async def _merge_accounts(self):
+        if not self.new_ucr.sso_tenant:
+            return
+        for user_id, sso_id in self.newly_synced_identifiers.items():
+            if not sso_id:
+                continue
+            user_ids = await models.ExternalLogin.accounts_to_merge(
+                self.session,
+                user_id,
+                provider=self.new_ucr.sso_tenant,
+                identifier=sso_id,
+            )
+
+            # Merge accounts
+            for uid in user_ids:
+                await merge(self.session, self.client, user_id, uid)
+
     def _permissions_to_revoke(self, user_ids: list[int]) -> list[Relation]:
         """Generate permissions to revoke after deleting enrollment for a list of users."""
 
@@ -180,9 +198,16 @@ class AddNewUsers(ABC):
         if self.new_ucr.lms_tenant:
             enrollment.lms_tenant = self.new_ucr.lms_tenant
             enrollment.lms_type = self.new_ucr.lms_type
-            enrollment.sso_id = sso_id
-            enrollment.sso_tenant = self.new_ucr.sso_tenant
             self.session.add(enrollment)
+
+        # Update the external login identifier if it's provided
+        if sso_id and self.new_ucr.sso_tenant:
+            await models.ExternalLogin.create_or_update(
+                self.session,
+                enrollment.user_id,
+                self.new_ucr.sso_tenant,
+                sso_id,
+            )
 
     async def _create_user_enrollment(
         self,
@@ -260,13 +285,17 @@ class AddNewUsers(ABC):
         # so we can delete previously synced users that are no longer on the roster
         if self.new_ucr.lms_tenant:
             self.newly_synced: list[int] = []
+            self.newly_synced_identifiers: dict[int, str | None] = {}
 
         for ucr in self.new_ucr.roles:
             await self._check_permissions(ucr)
-            user = await models.User.get_or_create_by_email(self.session, ucr.email)
+            user = await models.User.get_or_create_by_email_sso(
+                self.session, ucr.email, self.new_ucr.sso_tenant, ucr.sso_id
+            )
 
             if self.new_ucr.lms_tenant:
                 self.newly_synced.append(user.id)
+                self.newly_synced_identifiers[user.id] = ucr.sso_id
             if user.id == self.user_id:
                 # We don't want an LMS sync to change the roles of the user who initiated it
                 if self.new_ucr.lms_tenant:
@@ -310,6 +339,7 @@ class AddNewUsers(ABC):
 
         if self.new_ucr.lms_tenant:
             await self._remove_deleted_users()
+            await self._merge_accounts()
 
         await self.client.write_safe(grant=grants, revoke=self.revokes)
         return schemas.UserClassRoles(roles=self.new_roles)
