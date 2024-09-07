@@ -26,8 +26,7 @@
     Spinner,
     CloseButton,
     Dropdown,
-    DropdownItem,
-    Tooltip
+    DropdownItem
   } from 'flowbite-svelte';
   import BulkAddUsers from '$lib/components/BulkAddUsers.svelte';
   import CanvasLogo from '$lib/components/CanvasLogo.svelte';
