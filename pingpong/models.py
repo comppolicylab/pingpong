@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional
 
-from sqlalchemy import Boolean, Column, DateTime, UniqueConstraint, case
+from sqlalchemy import Boolean, Column, DateTime, UniqueConstraint
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
     ForeignKey,
@@ -1036,31 +1036,25 @@ class Class(Base):
     ) -> "Class":
         update_data = data.dict(exclude_none=True)
 
-        stmt = (
-            update(Class)
-            .where(Class.id == int(id_))
-            .values(**update_data)
-            .where(
-                and_(
-                    Class.id == int(id_),
-                    case(
-                        (
-                            Class.private.is_(True),
-                            Class.private == update_data.get("private", True),
-                        ),
-                        else_=True,
-                    ),
-                )
-            )
-        )
-        result = await session.execute(stmt)
+        # Fetch the current state of the record
+        existing_class = await cls.get_by_id(session, id_)
 
-        if result.rowcount == 0:
-            raise ValueError(
-                "Update failed: The class is private and the setting cannot be reverted."
-            )
+        if not existing_class:
+            raise ValueError("Update failed: Group not found.")
 
-        return await cls.get_by_id(session, int(id_))
+        # If `private` is being updated to False, ensure it is currently public
+        if (
+            "private" in update_data
+            and update_data["private"] is False
+            and existing_class.private is True
+        ):
+            raise ValueError("Update failed: Cannot change a private group to public.")
+
+        # Proceed with the update
+        stmt = update(Class).where(Class.id == int(id_)).values(**update_data)
+        await session.execute(stmt)
+
+        return await cls.get_by_id(session, id_)
 
     @classmethod
     async def get_by_institution(

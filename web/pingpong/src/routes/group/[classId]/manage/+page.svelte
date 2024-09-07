@@ -45,7 +45,9 @@
     SortHorizontalOutline,
     AdjustmentsHorizontalOutline,
     UserRemoveSolid,
-    FileLinesOutline
+    FileLinesOutline,
+    ExclamationCircleOutline,
+    LockSolid
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
@@ -604,72 +606,59 @@
           />
         </div>
 
-        <div></div>
-        <Helper
-          >Choose whether to make threads and assistants in this group private. When checked, only
-          members can view unpublished threads and assistants they create.</Helper
-        >
-        <div>
-          <Checkbox
-            id="make_private"
-            name="make_private"
-            disabled={$updatingClass || makePrivate}
-            on:click={handleClick}
-            bind:checked={makePrivate}
+        {#if !makePrivate}
+          <div></div>
+          <Helper
+            >Choose whether to make threads and assistants in this group private. When checked,
+            unpublished threads and assistants can only be viewed by those who created them.</Helper
           >
-            {#if makePrivate}
-              <span class="text-slate-800">Threads and assistants are private</span>
-            {:else}
-              Make threads and assistants private
-            {/if}
-          </Checkbox>
-          {#if makePrivate}
-            <Tooltip
-              type="custom"
-              arrow={false}
-              class="flex flex-row overflow-y-auto bg-gray-900 z-10 max-w-xs py-2 px-3 text-sm text-wrap font-medium text-white"
-              placement="top-start"
+          <div>
+            <Checkbox
+              id="make_private"
+              name="make_private"
+              disabled={$updatingClass || makePrivate}
+              on:click={handleClick}
+              bind:checked={makePrivate}
             >
-              This setting cannot be changed. Unpublished threads and assistants are private in this
-              group.
-            </Tooltip>
-          {/if}
+              Make threads and assistants private
+            </Checkbox>
+            <Modal bind:open={aboutToSetPrivate} size="sm" autoclose>
+              <div class="text-center px-2">
+                <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
+                <h3 class="mb-5 text-xl text-gray-900 dark:text-white font-bold">
+                  Are you sure you want to make threads and assistants private?
+                </h3>
+                <p class="mb-5 text-sm text-gray-700 dark:text-gray-300">
+                  If you turn this setting on, only members can view unpublished threads and
+                  assistants they create.
+                  <span class="font-bold">This action cannot be undone.</span>
+                </p>
+                <div class="mb-4 px-4">
+                  <input
+                    type="text"
+                    class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full py-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
+                    placeholder="Type 'confirm' to proceed"
+                    bind:value={confirmText}
+                    on:input={handleConfirmTextChange}
+                  />
+                </div>
+                <div class="flex justify-center gap-4">
+                  <Button pill color="alternative" on:click={handleCancel}>Cancel</Button>
+                  <Button
+                    pill
+                    outline
+                    color="red"
+                    disabled={confirmText.toLowerCase() !== 'confirm'}
+                    on:click={handleMakePrivate}
+                  >
+                    Make private
+                  </Button>
+                </div>
+              </div>
+            </Modal>
+          </div>
+        {/if}
 
-          <Modal bind:open={aboutToSetPrivate} size="sm" autoclose>
-            <div class="text-center px-2">
-              <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
-              <h3 class="mb-5 text-xl text-gray-900 dark:text-white font-bold">
-                Are you sure you want to make threads and assistants private?
-              </h3>
-              <p class="mb-5 text-sm text-gray-700 dark:text-gray-300">
-                If you turn this setting on, only members can view unpublished threads and
-                assistants they create.
-                <span class="font-bold">This action cannot be undone.</span>
-              </p>
-              <div class="mb-4 px-4">
-                <input
-                  type="text"
-                  class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full py-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
-                  placeholder="Type 'confirm' to proceed"
-                  bind:value={confirmText}
-                  on:input={handleConfirmTextChange}
-                />
-              </div>
-              <div class="flex justify-center gap-4">
-                <Button pill color="alternative" on:click={handleCancel}>Cancel</Button>
-                <Button
-                  pill
-                  outline
-                  color="red"
-                  disabled={confirmText.toLowerCase() !== 'confirm'}
-                  on:click={handleMakePrivate}
-                >
-                  Make private
-                </Button>
-              </div>
-            </div>
-          </Modal>
-        </div>
         <div></div>
         <Helper
           >Choose whether to allow members to share their threads with the rest of the group.
@@ -699,6 +688,19 @@
           disabled={$updatingClass}
         />
 
+        {#if makePrivate}
+          <div></div>
+          <div
+            class="flex col-span-2 items-center rounded-lg text-sm text-white bg-gradient-to-r from-gray-800 to-gray-600 border-gradient-to-r from-gray-800 to-gray-600 p-4"
+          >
+            <LockSolid class="w-8 h-8 mr-3" />
+            <span>
+              Unpublished threads and assistants are private in your group. <span
+                class="font-semibold">This setting cannot be changed.</span
+              >
+            </span>
+          </div>
+        {/if}
         <div></div>
 
         <div class="col-span-2">
