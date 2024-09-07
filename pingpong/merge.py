@@ -182,7 +182,6 @@ async def merge_permissions(
 ) -> None:
     old_permissions = await list_all_permissions(client, old_user_id)
     new_permissions = [(f"user:{new_user_id}", r, o) for _, r, o in old_permissions]
-
     await client.write_safe(grant=new_permissions, revoke=old_permissions)
 
 

@@ -104,18 +104,19 @@ class UserClassRole(Base):
             .returning(UserClassRole)
         )
         result = await session.scalar(stmt)
-        stmt_ = (
-            _get_upsert_stmt(session)(ExternalLogin)
-            .values(user_id=user_id, provider=sso_tenant, identifier=sso_id)
-            .on_conflict_do_update(
-                index_elements=["user_id", "provider"],
-                set_=dict(
-                    provider=sso_tenant,
-                    identifier=sso_id,
-                ),
+        if sso_tenant and sso_id:
+            stmt_ = (
+                _get_upsert_stmt(session)(ExternalLogin)
+                .values(user_id=user_id, provider=sso_tenant, identifier=sso_id)
+                .on_conflict_do_update(
+                    index_elements=["user_id", "provider"],
+                    set_=dict(
+                        provider=sso_tenant,
+                        identifier=sso_id,
+                    ),
+                )
             )
-        )
-        await session.execute(stmt_)
+            await session.execute(stmt_)
         return result
 
     @classmethod
