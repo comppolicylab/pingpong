@@ -46,7 +46,6 @@ def upgrade() -> None:
         ["user_id", "merged_user_id"],
         unique=True,
     )
-    op.drop_column("users", "previous_ids")
     op.create_unique_constraint(
         "_user_class_uc", "users_classes", ["user_id", "class_id"]
     )
@@ -70,15 +69,6 @@ def downgrade() -> None:
         sa.Column("sso_tenant", sa.VARCHAR(), autoincrement=False, nullable=True),
     )
     op.drop_constraint("_user_class_uc", "users_classes", type_="unique")
-    op.add_column(
-        "users",
-        sa.Column(
-            "previous_ids",
-            postgresql.ARRAY(sa.INTEGER()),
-            autoincrement=False,
-            nullable=True,
-        ),
-    )
     op.drop_index("user_user_id_idx", table_name="users_merged_users")
     op.drop_table("users_merged_users")
     op.drop_table("external_logins")
