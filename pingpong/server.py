@@ -75,6 +75,7 @@ from .users import (
     check_permissions,
     delete_canvas_permissions,
 )
+from .merge import merge
 
 logger = logging.getLogger(__name__)
 
@@ -282,13 +283,16 @@ async def login_sso_saml_acs(provider: str, request: Request):
     attrs = get_saml2_attrs(sso_config, saml_client)
 
     # Create user if missing. Update if already exists.
-    user = await models.User.get_by_email(request.state.db, attrs.email)
+    user = await models.User.get_by_email_sso(
+        request.state.db, attrs.email, provider, attrs.identifier
+    )
     if not user:
         user = models.User(
             email=attrs.email,
         )
 
     # Update user info
+    user.email = attrs.email
     user.first_name = attrs.first_name
     user.last_name = attrs.last_name
     user.display_name = attrs.name
@@ -298,6 +302,18 @@ async def login_sso_saml_acs(provider: str, request: Request):
     request.state.db.add(user)
     await request.state.db.flush()
     await request.state.db.refresh(user)
+
+    # Add external login and get accounts to merge
+    await models.ExternalLogin.create_or_update(
+        request.state.db, user.id, provider=provider, identifier=attrs.identifier
+    )
+    user_ids = await models.ExternalLogin.accounts_to_merge(
+        request.state.db, user.id, provider=provider, identifier=attrs.identifier
+    )
+
+    # Merge accounts
+    for uid in user_ids:
+        await merge(request.state.db, request.state.authz, user.id, uid)
 
     next_url = saml_client.redirect_to("/")
     return redirect_with_session(next_url, user.id, nowfn=get_now_fn(request))
@@ -912,10 +928,7 @@ async def sync_canvas_class(
     response_model=schemas.GenericStatus,
 )
 async def unlink_canvas_class(
-    class_id: str,
-    tenant: str,
-    request: Request,
-    keep_users: bool = True,
+    class_id: str, tenant: str, request: Request, keep_users: bool = True
 ):
     canvas_settings = get_canvas_config(tenant)
     userIds = await models.Class.remove_lms_sync(
@@ -935,7 +948,10 @@ async def unlink_canvas_class(
     response_model=schemas.GenericStatus,
 )
 async def remove_canvas_connection(
-    class_id: str, tenant: str, request: Request, keep_users: bool = True
+    class_id: str,
+    tenant: str,
+    request: Request,
+    keep_users: bool = True,
 ):
     canvas_settings = get_canvas_config(tenant)
 
@@ -1366,7 +1382,11 @@ async def get_thread(
         openai_client.beta.threads.runs.list(thread.thread_id, limit=1, order="desc"),
     )
     last_run = [r async for r in runs_result]
-
+    current_user_ids = [
+        request.state.session.user.id
+    ] + await models.User.get_previous_ids_by_id(
+        request.state.db, request.state.session.user.id
+    )
     if messages.data:
         users = {str(u.id): u for u in thread.users}
 
@@ -1374,9 +1394,7 @@ async def get_thread(
         user_id = message.metadata.pop("user_id", None)
         if not user_id:
             continue
-        message.metadata["is_current_user"] = user_id == str(
-            request.state.session.user.id
-        )
+        message.metadata["is_current_user"] = int(user_id) in current_user_ids
         message.metadata["name"] = (
             "Anonymous User" if thread.private else pseudonym(thread, users[user_id])
         )

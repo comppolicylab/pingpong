@@ -48,6 +48,7 @@ class Base(AsyncAttrs, DeclarativeBase):
 
 class UserClassRole(Base):
     __tablename__ = "users_classes"
+    __table_args__ = (UniqueConstraint("user_id", "class_id", name="_user_class_uc"),)
 
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id"), nullable=False, primary_key=True
@@ -59,8 +60,6 @@ class UserClassRole(Base):
     title: Mapped[Optional[str]]
     lms_tenant: Mapped[Optional[str]]
     lms_type = Column(SQLEnum(schemas.LMSType), nullable=True)
-    sso_id: Mapped[Optional[str]]
-    sso_tenant: Mapped[Optional[str]]
     user = relationship("User", back_populates="classes")
     class_ = relationship("Class", back_populates="users")
 
@@ -94,21 +93,31 @@ class UserClassRole(Base):
                 class_id=int(class_id),
                 lms_tenant=lms_tenant,
                 lms_type=lms_type,
-                sso_id=sso_id,
-                sso_tenant=sso_tenant,
             )
             .on_conflict_do_update(
                 index_elements=[UserClassRole.user_id, UserClassRole.class_id],
                 set_=dict(
                     lms_tenant=lms_tenant,
                     lms_type=lms_type,
-                    sso_id=sso_id,
-                    sso_tenant=sso_tenant,
                 ),
             )
             .returning(UserClassRole)
         )
-        return await session.scalar(stmt)
+        result = await session.scalar(stmt)
+        if sso_tenant and sso_id:
+            stmt_ = (
+                _get_upsert_stmt(session)(ExternalLogin)
+                .values(user_id=user_id, provider=sso_tenant, identifier=sso_id)
+                .on_conflict_do_update(
+                    index_elements=["user_id", "provider"],
+                    set_=dict(
+                        provider=sso_tenant,
+                        identifier=sso_id,
+                    ),
+                )
+            )
+            await session.execute(stmt_)
+        return result
 
     @classmethod
     async def delete(cls, session: AsyncSession, user_id: int, class_id: int) -> None:
@@ -164,6 +173,9 @@ class UserClassRole(Base):
 
 class UserInstitutionRole(Base):
     __tablename__ = "users_institutions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "institution_id", name="_user_inst_uc"),
+    )
 
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id"), nullable=False, primary_key=True
@@ -183,6 +195,58 @@ user_thread_association = Table(
     Column("user_id", Integer, ForeignKey("users.id")),
     Column("thread_id", Integer, ForeignKey("threads.id")),
     Index("user_thread_idx", "user_id", "thread_id", unique=True),
+)
+
+
+class ExternalLogin(Base):
+    __tablename__ = "external_logins"
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", name="_user_provider_uc"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user = relationship("User", back_populates="external_logins")
+    provider = Column(String, nullable=False)
+    identifier = Column(String, nullable=False)
+
+    @classmethod
+    async def create_or_update(
+        cls, session: AsyncSession, user_id: int, provider: str, identifier: str
+    ) -> None:
+        stmt = (
+            _get_upsert_stmt(session)(ExternalLogin)
+            .values(user_id=user_id, provider=provider, identifier=identifier)
+            .on_conflict_do_update(
+                index_elements=["user_id", "provider"],
+                set_=dict(identifier=identifier),
+            )
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def accounts_to_merge(
+        cls, session: AsyncSession, user_id: int, provider: str, identifier: str
+    ) -> list[int]:
+        stmt_ = select(ExternalLogin.user_id).where(
+            and_(
+                ExternalLogin.provider == provider,
+                ExternalLogin.identifier == identifier,
+                ExternalLogin.user_id != user_id,
+            )
+        )
+        result = await session.execute(stmt_)
+        return list(set(row[0] for row in result))
+
+
+user_merge_association = Table(
+    "users_merged_users",
+    Base.metadata,
+    Column(
+        "user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    ),
+    Column("merged_user_id", Integer, nullable=False),
+    Index("user_user_id_idx", "user_id", "merged_user_id", unique=True),
 )
 
 
@@ -210,6 +274,9 @@ class User(Base):
     threads = relationship(
         "Thread", secondary=user_thread_association, back_populates="users"
     )
+    external_logins: Mapped[List["ExternalLogin"]] = relationship(
+        "ExternalLogin", back_populates="user", lazy="selectin"
+    )
     # Maps to classes in which the user has connected their LMS account
     lms_syncs: Mapped[List["Class"]] = relationship(
         "Class", back_populates="lms_user", lazy="selectin"
@@ -236,6 +303,35 @@ class User(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_by_email_sso(
+        cls,
+        session: AsyncSession,
+        email: str,
+        provider: str | None,
+        identifier: str | None,
+    ) -> "User":
+        # First attempt: query by email
+        stmt_by_email = select(User).where(func.lower(User.email) == func.lower(email))
+        user = await session.scalar(stmt_by_email)
+
+        if user or not provider or not identifier:
+            return user
+
+        # If user is not found by email, attempt to query by external login
+        stmt_by_sso = (
+            select(User)
+            .join(ExternalLogin)
+            .where(
+                and_(
+                    ExternalLogin.provider == provider,
+                    ExternalLogin.identifier == identifier,
+                )
+            )
+        )
+
+        return await session.scalar(stmt_by_sso)
+
+    @classmethod
     async def get_or_create_by_email(
         cls,
         session: AsyncSession,
@@ -252,9 +348,57 @@ class User(Base):
         return user
 
     @classmethod
+    async def get_or_create_by_email_sso(
+        cls,
+        session: AsyncSession,
+        email: str,
+        provider: str | None,
+        identifier: str | None,
+        initial_state: schemas.UserState = schemas.UserState.UNVERIFIED,
+    ) -> "User":
+        existing = await cls.get_by_email_sso(
+            session, email, provider=provider, identifier=identifier
+        )
+        # User already exists
+        if existing:
+            if provider and identifier:
+                # We might not have the external login information stored
+                await ExternalLogin.create_or_update(
+                    session, existing.id, provider=provider, identifier=identifier
+                )
+            # Now that we updated the external login, we can return the user
+            return existing
+
+        # User does not exist, create a new user
+        if provider and identifier:
+            user = User(
+                email=email,
+                state=initial_state,
+                external_logins=[
+                    ExternalLogin(provider=provider, identifier=identifier)
+                ],
+            )
+        else:
+            user = User(email=email, state=initial_state)
+        session.add(user)
+        await session.flush()
+        await session.refresh(user)
+        return user
+
+    @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "User":
         stmt = select(User).where(User.id == int(id_))
         return await session.scalar(stmt)
+
+    @classmethod
+    async def get_previous_ids_by_id(cls, session: AsyncSession, id: int) -> List[int]:
+        result = await session.execute(
+            select(user_merge_association.c.merged_user_id).where(
+                user_merge_association.c.user_id == id
+            )
+        )
+        merged_user_ids = result.scalars().all()
+        return [user_id for user_id in merged_user_ids if user_id is not None]
 
     @classmethod
     async def get_all_by_id(cls, session: AsyncSession, ids: List[int]) -> List["User"]:
