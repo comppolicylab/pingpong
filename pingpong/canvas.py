@@ -145,7 +145,6 @@ class CanvasCourseClient(ABC):
         self,
         buffer: int = 60,
         force_refresh: bool = False,
-        log_out: bool = False,
     ) -> str:
         """Get the Canvas access token for the class.
 
@@ -162,10 +161,6 @@ class CanvasCourseClient(ABC):
         # No Canvas access token is found for this class
         if not response.access_token:
             raise CanvasException("No Canvas access token for class")
-
-        # If we are simply logging the user out (killing the connection), return the current token
-        if log_out:
-            return response.access_token
 
         # Check if the user making the request is the user whose Canvas account is connected for the class
         if response.user_id != self.user_id:
@@ -194,28 +189,27 @@ class CanvasCourseClient(ABC):
     async def _request_access_token(
         self, params: CanvasInitialAccessTokenRequest | CanvasRefreshAccessTokenRequest
     ) -> CanvasAccessToken:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                self.config.url("/login/oauth2/token"),
-                data=params.__dict__,
-                raise_for_status=True,
-            ) as resp:
-                response = await resp.json()
-                return CanvasAccessToken(
-                    access_token=response["access_token"],
-                    refresh_token=response.get("refresh_token", ""),
-                    expires_in=int(response["expires_in"]),
-                )
-
-    async def log_out(self) -> None:
-        async with aiohttp.ClientSession() as session:
-            token = await self._get_access_token(log_out=True)
-            params = {"access_token": token}
-            await session.delete(
-                self.config.url("/login/oauth2/token"),
-                data=params,
-                raise_for_status=True,
+        async with self.http_session.post(
+            self.config.url("/login/oauth2/token"),
+            data=params.__dict__,
+            raise_for_status=True,
+        ) as resp:
+            response = await resp.json()
+            return CanvasAccessToken(
+                access_token=response["access_token"],
+                refresh_token=response.get("refresh_token", ""),
+                expires_in=int(response["expires_in"]),
             )
+
+    @with_retry(max_retries=3)
+    async def log_out(self, retry_attempt: int = 0) -> None:
+        access_token = await self._get_access_token(force_refresh=retry_attempt > 0)
+        params = {"access_token": access_token}
+        await self.http_session.delete(
+            self.config.url("/login/oauth2/token"),
+            data=params,
+            raise_for_status=True,
+        )
 
     async def create_response(
         self, resp: aiohttp.ClientResponse

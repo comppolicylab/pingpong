@@ -909,10 +909,7 @@ async def sync_canvas_class(
     response_model=schemas.GenericStatus,
 )
 async def unlink_canvas_class(
-    class_id: str,
-    tenant: str,
-    request: Request,
-    keep_users: bool = True,
+    class_id: str, tenant: str, request: Request, keep_users: bool = True
 ):
     canvas_settings = get_canvas_config(tenant)
     userIds = await models.Class.remove_lms_sync(
@@ -932,7 +929,10 @@ async def unlink_canvas_class(
     response_model=schemas.GenericStatus,
 )
 async def remove_canvas_connection(
-    class_id: str, tenant: str, request: Request, keep_users: bool = True
+    class_id: str,
+    tenant: str,
+    request: Request,
+    keep_users: bool = True,
 ):
     canvas_settings = get_canvas_config(tenant)
 
