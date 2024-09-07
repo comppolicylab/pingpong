@@ -44,7 +44,8 @@
     SortHorizontalOutline,
     AdjustmentsHorizontalOutline,
     UserRemoveSolid,
-    ExclamationCircleOutline
+    ExclamationCircleOutline,
+    FileLinesOutline
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
@@ -501,7 +502,26 @@
 <div
   class="container p-12 space-y-12 divide-y-3 divide-blue-dark-40 dark:divide-gray-700 overflow-y-auto w-full flex flex-col justify-between h-[calc(100%-5rem)]"
 >
-  <Heading tag="h2" class="text-3xl font-serif font-medium text-blue-dark-40">Manage Group</Heading>
+  <div class="flex flex-row justify-between">
+    <Heading tag="h2" class="text-3xl font-serif font-medium text-blue-dark-40"
+      >Manage Group</Heading
+    >
+
+    <div class="flex items-start shrink-0">
+      <Button
+        pill
+        size="sm"
+        href="https://docs.google.com/document/d/1W6RtXiNDxlbji7BxmzMGaXT__yyITDmHzczH0d344lY/edit?usp=sharing"
+        rel="noopener noreferrer"
+        target="_blank"
+        class="bg-white border border-blue-dark-40 text-blue-dark-40 hover:text-white hover:bg-blue-dark-40"
+        ><div class="flex flex-row justify-between gap-2">
+          <FileLinesOutline />
+          <div>User Guide</div>
+        </div></Button
+      >
+    </div>
+  </div>
   {#if canEditClassInfo}
     <form on:submit={updateClass} class="pt-4">
       <div class="grid md:grid-cols-3 gap-x-6 gap-y-8">
