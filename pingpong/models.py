@@ -1034,13 +1034,27 @@ class Class(Base):
     async def update(
         cls, session: AsyncSession, id_: int, data: schemas.UpdateClass
     ) -> "Class":
-        stmt = (
-            update(Class)
-            .where(Class.id == int(id_))
-            .values(**data.dict(exclude_none=True))
-        )
+        update_data = data.dict(exclude_none=True)
+
+        # Fetch the current state of the record
+        existing_class = await cls.get_by_id(session, id_)
+
+        if not existing_class:
+            raise ValueError("Update failed: Group not found.")
+
+        # If `private` is being updated to False, ensure it is currently public
+        if (
+            "private" in update_data
+            and update_data["private"] is False
+            and existing_class.private is True
+        ):
+            raise ValueError("Update failed: Cannot change a private group to public.")
+
+        # Proceed with the update
+        stmt = update(Class).where(Class.id == int(id_)).values(**update_data)
         await session.execute(stmt)
-        return await cls.get_by_id(session, int(id_))
+
+        return await cls.get_by_id(session, id_)
 
     @classmethod
     async def get_by_institution(

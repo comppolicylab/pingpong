@@ -44,7 +44,9 @@
     SortHorizontalOutline,
     AdjustmentsHorizontalOutline,
     UserRemoveSolid,
-    FileLinesOutline
+    FileLinesOutline,
+    ExclamationCircleOutline,
+    LockSolid
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
@@ -255,7 +257,7 @@
       name: d.name.toString(),
       term: d.term.toString(),
       any_can_publish_thread: d.any_can_publish_thread?.toString() === 'on',
-      private: d.make_private?.toString() === 'on',
+      private: makePrivate,
       ...parseAssistantPermissions(d.asst_perm.toString())
     };
 
@@ -508,6 +510,43 @@
     },
     { name: 'Manage group information and user list', member: false, moderator: true }
   ];
+
+  let aboutToSetPrivate: boolean = false;
+  let confirmText: string = '';
+  let originalEvent: Event;
+
+  function handleClick(event: MouseEvent): void {
+    event.preventDefault();
+    originalEvent = event;
+    aboutToSetPrivate = true;
+  }
+
+  function handleConfirmTextChange(event: Event): void {
+    const target = event.target as HTMLInputElement;
+    confirmText = target.value;
+  }
+
+  function handleMakePrivate(): void {
+    if (
+      !confirm(
+        `You are about to make threads and assistants private in this group. This action CANNOT be undone and you'll have to create a new group to see threads and assistants of other members as a Moderator.\n\nAre you sure you want to continue?`
+      )
+    ) {
+      handleCancel();
+      return;
+    }
+    makePrivate = true;
+    if (originalEvent) {
+      submitParentForm(originalEvent);
+    }
+    aboutToSetPrivate = false;
+    confirmText = '';
+  }
+
+  function handleCancel(): void {
+    aboutToSetPrivate = false;
+    confirmText = '';
+  }
 </script>
 
 <div
@@ -566,20 +605,58 @@
           />
         </div>
 
-        <div></div>
-        <Helper
-          >Choose whether to make threads and assistants in this group private. When checked, only
-          members can view unpublished threads and assistants they create.</Helper
-        >
-        <div>
-          <Checkbox
-            id="make_private"
-            name="make_private"
-            disabled={$updatingClass}
-            on:change={submitParentForm}
-            bind:checked={makePrivate}>Make threads and assistants private</Checkbox
+        {#if !makePrivate}
+          <div></div>
+          <Helper
+            >Choose whether to make threads and assistants in this group private. When checked,
+            unpublished threads and assistants can only be viewed by those who created them.</Helper
           >
-        </div>
+          <div>
+            <Checkbox
+              id="make_private"
+              name="make_private"
+              disabled={$updatingClass || makePrivate}
+              on:click={handleClick}
+              bind:checked={makePrivate}
+            >
+              Make threads and assistants private
+            </Checkbox>
+            <Modal bind:open={aboutToSetPrivate} size="sm" autoclose>
+              <div class="text-center px-2">
+                <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
+                <h3 class="mb-5 text-xl text-gray-900 dark:text-white font-bold">
+                  Are you sure you want to make threads and assistants private?
+                </h3>
+                <p class="mb-5 text-sm text-gray-700 dark:text-gray-300">
+                  If you turn this setting on, only members can view unpublished threads and
+                  assistants they create.
+                  <span class="font-bold">This action cannot be undone.</span>
+                </p>
+                <div class="mb-4 px-4">
+                  <input
+                    type="text"
+                    class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full py-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
+                    placeholder="Type 'confirm' to proceed"
+                    bind:value={confirmText}
+                    on:input={handleConfirmTextChange}
+                  />
+                </div>
+                <div class="flex justify-center gap-4">
+                  <Button pill color="alternative" on:click={handleCancel}>Cancel</Button>
+                  <Button
+                    pill
+                    outline
+                    color="red"
+                    disabled={confirmText.toLowerCase() !== 'confirm'}
+                    on:click={handleMakePrivate}
+                  >
+                    Make private
+                  </Button>
+                </div>
+              </div>
+            </Modal>
+          </div>
+        {/if}
 
         <div></div>
         <Helper
@@ -610,6 +687,19 @@
           disabled={$updatingClass}
         />
 
+        {#if makePrivate}
+          <div></div>
+          <div
+            class="flex col-span-2 items-center rounded-lg text-sm text-white bg-gradient-to-r from-gray-800 to-gray-600 border-gradient-to-r from-gray-800 to-gray-600 p-4"
+          >
+            <LockSolid class="w-8 h-8 mr-3" />
+            <span>
+              Unpublished threads and assistants are private in your group. <span
+                class="font-semibold">This setting cannot be changed.</span
+              >
+            </span>
+          </div>
+        {/if}
         <div></div>
 
         <div class="col-span-2">
