@@ -595,7 +595,7 @@ class CanvasCourseClient(ABC):
         self._sync_allowed(class_.lms_last_synced, now)
         self.new_ucr = CreateUserClassRoles(
             roles=await self._get_course_users(class_.lms_class.lms_id),
-            silent=False,
+            silent=True,
             lms_tenant=self.config.tenant,
             lms_type=self.config.type,
             sso_tenant=self.config.sso_tenant,
