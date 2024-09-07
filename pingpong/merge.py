@@ -14,6 +14,7 @@ from pingpong.models import (
     UserClassRole,
     UserInstitutionRole,
     user_thread_association,
+    user_merge_association,
     File,
 )
 
@@ -202,11 +203,14 @@ async def merge_users(
             pass
 
     new_user.super_admin = new_user.super_admin or old_user.super_admin
-    new_user.previous_ids = (
-        (new_user.previous_ids or []) + (old_user.previous_ids or []) + [old_user_id]
+    stmt = (
+        update(user_merge_association)
+        .where(user_merge_association.c.user_id == old_user_id)
+        .values(user_id=new_user_id)
     )
-    stmt = delete(User).where(User.id == old_user_id)
     await session.execute(stmt)
+    stmt_ = delete(User).where(User.id == old_user_id)
+    await session.execute(stmt_)
     session.add(new_user)
     await session.flush()
     await session.refresh(new_user)

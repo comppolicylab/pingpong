@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional
 
-from sqlalchemy import ARRAY, Boolean, Column, DateTime, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, UniqueConstraint
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
     ForeignKey,
@@ -27,7 +27,6 @@ from sqlalchemy.orm import (
     relationship,
 )
 from sqlalchemy.sql import func
-from sqlalchemy.ext.mutable import MutableList
 import pingpong.schemas as schemas
 
 
@@ -239,6 +238,15 @@ class ExternalLogin(Base):
         return list(set(row[0] for row in result))
 
 
+user_merge_association = Table(
+    "users_merged_users",
+    Base.metadata,
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE")),
+    Column("merged_user_id", Integer),
+    Index("user_user_id_idx", "user_id", "merged_user_id", unique=True),
+)
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -272,7 +280,6 @@ class User(Base):
     )
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
-    previous_ids = Column(MutableList.as_mutable(ARRAY(Integer)), default=[])
 
     async def verify(self, session: AsyncSession) -> None:
         self.state = schemas.UserState.VERIFIED
@@ -382,8 +389,13 @@ class User(Base):
 
     @classmethod
     async def get_previous_ids_by_id(cls, session: AsyncSession, id: int) -> List[int]:
-        stmt = select(User.previous_ids).where(User.id == int(id))
-        return await session.scalar(stmt)
+        result = await session.execute(
+            select(user_merge_association.c.merged_user_id).where(
+                user_merge_association.c.user_id == id
+            )
+        )
+        merged_user_ids = result.scalars().all()
+        return [user_id for user_id in merged_user_ids if user_id is not None]
 
     @classmethod
     async def get_all_by_id(cls, session: AsyncSession, ids: List[int]) -> List["User"]:
