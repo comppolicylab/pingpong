@@ -242,7 +242,9 @@ class ExternalLogin(Base):
 user_merge_association = Table(
     "users_merged_users",
     Base.metadata,
-    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column(
+        "user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    ),
     Column("merged_user_id", Integer, nullable=False),
     Index("user_user_id_idx", "user_id", "merged_user_id", unique=True),
 )
