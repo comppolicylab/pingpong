@@ -823,7 +823,8 @@
                   >{canvasLinkedClass?.course_code}: {canvasLinkedClass?.name}</span
                 >
                 on Canvas. The class roster is automatically synced with this group's user list about
-                once every hour. Use the Sync button below to request an immediate sync.
+                once every hour. Use the Sync button below to request an immediate sync. Users are not
+                notified when they get added to this group though Canvas Sync.
               </p>
               <p class="mt-2 mb-4 text-sm">
                 Last sync: {data.class.lms_last_synced
