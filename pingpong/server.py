@@ -1379,7 +1379,11 @@ async def get_thread(
         openai_client.beta.threads.runs.list(thread.thread_id, limit=1, order="desc"),
     )
     last_run = [r async for r in runs_result]
-
+    current_user_ids = [
+        request.state.session.user.id
+    ] + await models.User.get_previous_ids_by_id(
+        request.state.db, request.state.session.user.id
+    )
     if messages.data:
         users = {str(u.id): u for u in thread.users}
 
@@ -1387,9 +1391,7 @@ async def get_thread(
         user_id = message.metadata.pop("user_id", None)
         if not user_id:
             continue
-        message.metadata["is_current_user"] = user_id == str(
-            request.state.session.user.id
-        )
+        message.metadata["is_current_user"] = int(user_id) in current_user_ids
         message.metadata["name"] = (
             "Anonymous User" if thread.private else pseudonym(thread, users[user_id])
         )

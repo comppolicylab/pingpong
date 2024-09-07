@@ -118,7 +118,11 @@ class AddNewUsers(ABC):
         pass
 
     async def _merge_accounts(self):
+        if not self.new_ucr.sso_tenant:
+            return
         for user_id, sso_id in self.newly_synced_identifiers.items():
+            if not sso_id:
+                continue
             user_ids = await models.ExternalLogin.accounts_to_merge(
                 self.session,
                 user_id,

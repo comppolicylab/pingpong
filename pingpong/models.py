@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional
 
-from sqlalchemy import Boolean, Column, DateTime, UniqueConstraint
+from sqlalchemy import ARRAY, Boolean, Column, DateTime, UniqueConstraint
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
     ForeignKey,
@@ -27,6 +27,7 @@ from sqlalchemy.orm import (
     relationship,
 )
 from sqlalchemy.sql import func
+from sqlalchemy.ext.mutable import MutableList
 import pingpong.schemas as schemas
 
 
@@ -271,6 +272,7 @@ class User(Base):
     )
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
+    previous_ids = Column(MutableList.as_mutable(ARRAY(Integer)), default=[])
 
     async def verify(self, session: AsyncSession) -> None:
         self.state = schemas.UserState.VERIFIED
@@ -376,6 +378,11 @@ class User(Base):
     @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "User":
         stmt = select(User).where(User.id == int(id_))
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_previous_ids_by_id(cls, session: AsyncSession, id: int) -> List[int]:
+        stmt = select(User.previous_ids).where(User.id == int(id))
         return await session.scalar(stmt)
 
     @classmethod
