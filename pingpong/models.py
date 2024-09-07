@@ -205,7 +205,7 @@ class ExternalLogin(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     user = relationship("User", back_populates="external_logins")
     provider = Column(String, nullable=False)
     identifier = Column(String, nullable=False)
@@ -242,8 +242,8 @@ class ExternalLogin(Base):
 user_merge_association = Table(
     "users_merged_users",
     Base.metadata,
-    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE")),
-    Column("merged_user_id", Integer),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("merged_user_id", Integer, nullable=False),
     Index("user_user_id_idx", "user_id", "merged_user_id", unique=True),
 )
 
