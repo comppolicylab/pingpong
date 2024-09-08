@@ -1712,14 +1712,18 @@ export const finished = (run: OpenAIRun | null | undefined) => {
  */
 export type MagicLoginRequest = {
   email: string;
+  forward: string;
 };
 
 /**
  * Perform a login sending a magic link.
  */
-export const loginWithMagicLink = async (f: Fetcher, email: string) => {
+export const loginWithMagicLink = async (f: Fetcher, email: string, forward: string) => {
   const url = `login/magic`;
-  const response = await POST<MagicLoginRequest, GenericStatus>(f, url, { email });
+  const response = await POST<MagicLoginRequest, GenericStatus>(f, url, {
+    email: email,
+    forward: forward
+  });
   if (response.$status === 403 && response.detail?.startsWith('/')) {
     if (browser) {
       // Force the browser to request the SSO page to trigger a chain of redirects

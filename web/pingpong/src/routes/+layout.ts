@@ -39,14 +39,24 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   if (url.pathname === LOGIN) {
     // If the user is logged in, go to the home page.
     if (authed) {
-      redirect(302, HOME);
+      const destination = url.searchParams.get('forward') || HOME;
+      redirect(302, destination);
     }
   } else {
-    if (url.pathname === ABOUT || url.pathname === PRIVACY_POLICY || url.pathname === EDU) {
+    if (
+      url.pathname === ABOUT ||
+      url.pathname === PRIVACY_POLICY ||
+      url.pathname === EDU ||
+      url.pathname === HOME
+    ) {
       isPublicPage = true;
+      if (url.pathname === HOME && !authed) {
+        // If the user is not logged in and tries to access the root path, go to the About page.
+        redirect(302, ABOUT);
+      }
     } else if (!authed) {
-      // If the user is not logged in, go to the About page.
-      redirect(302, ABOUT);
+      const destination = encodeURIComponent(`${url.pathname}${url.search}`);
+      redirect(302, `${LOGIN}?forward=${destination}`);
     } else {
       if (needsOnboarding && url.pathname !== ONBOARDING) {
         const destination = encodeURIComponent(`${url.pathname}${url.search}`);

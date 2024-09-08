@@ -375,7 +375,9 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
             raise HTTPException(status_code=401, detail="User does not exist")
 
     nowfn = get_now_fn(request)
-    magic_link = generate_auth_link(user.id, expiry=login_config.expiry, nowfn=nowfn)
+    magic_link = generate_auth_link(
+        user.id, expiry=login_config.expiry, nowfn=nowfn, redirect=body.forward
+    )
 
     message = message_template.substitute(
         {

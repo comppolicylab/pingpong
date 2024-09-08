@@ -52,6 +52,7 @@ class InspectAuthz(BaseModel):
 
 class MagicLoginRequest(BaseModel):
     email: str
+    forward: str = "/"
 
 
 class Profile(BaseModel):
