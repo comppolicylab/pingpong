@@ -37,20 +37,21 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   let isPublicPage = false;
 
   if (url.pathname === LOGIN) {
-    // If the user is logged in, go to the home page.
+    // If the user is logged in, go to the forward page.
     if (authed) {
       const destination = url.searchParams.get('forward') || HOME;
       redirect(302, destination);
     }
   } else {
     if (
-      url.pathname === ABOUT ||
-      url.pathname === PRIVACY_POLICY ||
-      url.pathname === EDU ||
-      url.pathname === HOME
+      (url.pathname === ABOUT ||
+        url.pathname === PRIVACY_POLICY ||
+        url.pathname === EDU ||
+        url.pathname === HOME) &&
+      !authed
     ) {
       isPublicPage = true;
-      if (url.pathname === HOME && !authed) {
+      if (url.pathname === HOME) {
         // If the user is not logged in and tries to access the root path, go to the About page.
         redirect(302, ABOUT);
       }
