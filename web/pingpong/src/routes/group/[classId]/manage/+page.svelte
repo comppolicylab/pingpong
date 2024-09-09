@@ -50,10 +50,11 @@
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
-  import { invalidateAll, onNavigate } from '$app/navigation';
+  import { goto, invalidateAll, onNavigate } from '$app/navigation';
   import { browser } from '$app/environment';
   import { submitParentForm } from '$lib/form';
   import { page } from '$app/stores';
+  import { loading, loadingMessage } from '$lib/stores/general';
   import DropdownContainer from '$lib/components/DropdownContainer.svelte';
   import CanvasClassDropdownOptions from '$lib/components/CanvasClassDropdownOptions.svelte';
   import PermissionsTable from '$lib/components/PermissionsTable.svelte';
@@ -143,7 +144,7 @@
       any_can_upload_class_file: upload
     };
   };
-
+  let deleteModal = false;
   let usersModalOpen = false;
   let anyCanPublishThread = data?.class.any_can_publish_thread || false;
   let makePrivate = data?.class.private || false;
@@ -271,6 +272,36 @@
       $updatingClass = false;
       happyToast('Saved group info');
     }
+  };
+
+  /**
+   * Delete the class.
+   */
+  const deleteClass = async (evt: MouseEvent) => {
+    evt.preventDefault();
+    $loadingMessage = 'Deleting group. This may take a while.';
+    $loading = true;
+
+    if (!data.class.id) {
+      $loadingMessage = '';
+      $loading = false;
+      sadToast(`Error: Group ID not found.`);
+      return;
+    }
+
+    const result = await api.deleteClass(fetch, data.class.id);
+    if (result.$status >= 300) {
+      $loadingMessage = '';
+      $loading = false;
+      sadToast(`Error deleting group: ${JSON.stringify(result.detail, null, '  ')}`);
+      return;
+    }
+
+    $loadingMessage = '';
+    $loading = false;
+    happyToast('Group deleted');
+    await goto(`/`, { invalidateAll: true });
+    return;
   };
 
   const updatingApiKey = writable(false);
@@ -557,7 +588,7 @@
       >Manage Group</Heading
     >
 
-    <div class="flex items-start shrink-0">
+    <div class="flex items-start shrink-0 gap-1">
       <Button
         pill
         size="sm"
@@ -570,6 +601,29 @@
           <div>User Guide</div>
         </div></Button
       >
+      <Button
+        pill
+        size="sm"
+        class="bg-white border border-red-700 text-red-700 hover:text-white hover:bg-red-700"
+        type="button"
+        on:click={() => (deleteModal = true)}
+        disabled={$loading}>Delete group</Button
+      >
+
+      <Modal bind:open={deleteModal} size="xs" autoclose>
+        <div class="text-center">
+          <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
+          <h3 class="mb-5 text-xl text-black font-bold">
+            Delete {data?.class.name || 'this group'}?
+          </h3>
+          <h4 class="mb-5 text-sm text-black font-normal">
+            All assistants, threads and files associated with this group will be deleted. This
+            action cannot be undone.
+          </h4>
+          <Button pill color="alternative">Cancel</Button>
+          <Button pill color="red" on:click={deleteClass}>Delete</Button>
+        </div>
+      </Modal>
     </div>
   </div>
   {#if canEditClassInfo}

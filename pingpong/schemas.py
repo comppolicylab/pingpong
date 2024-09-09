@@ -182,6 +182,14 @@ class VectorStore(BaseModel):
         from_attributes = True
 
 
+class VectorStoreDeleteResponse(BaseModel):
+    vector_store_id: str
+    deleted_file_ids: list[int]
+
+    class Config:
+        from_attributes = True
+
+
 class VectorStoreType(Enum):
     ASSISTANT = "assistant"
     THREAD = "thread"
