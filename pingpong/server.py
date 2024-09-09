@@ -977,6 +977,12 @@ async def remove_canvas_connection(
                 detail="Canvas returned an error when removing your account: "
                 + e.message,
             )
+        except CanvasException as e:
+            logger.exception("delete_canvas_permissions: CanvasException occurred")
+            raise HTTPException(
+                status_code=e.code or 500,
+                detail="We faced an error while removing your account: " + e.detail,
+            )
         except Exception:
             logger.exception("delete_canvas_permissions: Exception occurred")
             raise HTTPException(
