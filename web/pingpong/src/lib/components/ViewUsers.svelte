@@ -344,7 +344,7 @@
           <TableBodyRow>
             <TableBodyCell {tdClass}
               ><div class="flex flex-col">
-                <div>{user.name}</div>
+                <div>{user.strict_name || ''}</div>
                 <div class="font-normal">{user.email}</div>
               </div></TableBodyCell
             >
