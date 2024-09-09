@@ -145,6 +145,7 @@ class CanvasCourseClient(ABC):
         self,
         buffer: int = 60,
         force_refresh: bool = False,
+        log_out: bool = False,
     ) -> str:
         """Get the Canvas access token for the class.
 
@@ -163,7 +164,7 @@ class CanvasCourseClient(ABC):
             raise CanvasException("No Canvas access token for class")
 
         # Check if the user making the request is the user whose Canvas account is connected for the class
-        if response.user_id != self.user_id:
+        if not log_out and response.user_id != self.user_id:
             raise CanvasException(
                 "You're not the authorized Canvas user for this class",
             )
@@ -203,7 +204,9 @@ class CanvasCourseClient(ABC):
 
     @with_retry(max_retries=3)
     async def log_out(self, retry_attempt: int = 0) -> None:
-        access_token = await self._get_access_token(force_refresh=retry_attempt > 0)
+        access_token = await self._get_access_token(
+            force_refresh=retry_attempt > 0, log_out=True
+        )
         params = {"access_token": access_token}
         await self.http_session.delete(
             self.config.url("/login/oauth2/token"),
