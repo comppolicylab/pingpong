@@ -113,14 +113,10 @@ class UserNameMixin:
 
     @computed_field  # type: ignore
     @property
-    def strict_name(self) -> str | None:
+    def strict_name(self) -> bool:
         """Return a strict name for the user."""
-        if self.display_name:
-            return self.display_name
-        parts = [name for name in [self.first_name, self.last_name] if name]
-        if not parts:
-            return None
-        return " ".join(parts)
+        return bool(self.display_name or self.first_name or self.last_name)
+
 
 class User(BaseModel, UserNameMixin):
     id: int
