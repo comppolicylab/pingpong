@@ -1391,6 +1391,15 @@ async def get_thread(
         users = {str(u.id): u for u in thread.users}
 
     for message in messages.data:
+        for content in message.content:
+            if content.type and content.type == "text" and content.text.annotations:
+                for annotation in content.text.annotations:
+                    if annotation.type == "file_citation":
+                        annotation.file_citation.file_name = (
+                            await models.File.get_file_name(
+                                request.state.db, annotation.file_citation.file_id
+                            )
+                        )
         user_id = message.metadata.pop("user_id", None)
         if not user_id:
             continue
@@ -1487,6 +1496,15 @@ async def list_thread_messages(
         users = {u.id: u.created for u in thread.users}
 
     for message in messages.data:
+        for content in message.content:
+            if content.type == "text" and content.text.get("annotations"):
+                for annotation in content.text["annotations"]:
+                    if annotation["type"] == "file_citation":
+                        annotation["file_citation"][
+                            "file_name"
+                        ] = await models.File.get_file_name(
+                            request.state.db, annotation["file_citation"]["file_id"]
+                        )
         user_id = message.metadata.pop("user_id", None)
         if not user_id:
             continue
@@ -1792,6 +1810,7 @@ async def create_run(
         thread_id=thread.thread_id,
         assistant_id=asst.assistant_id,
         message=[],
+        session=request.state.db,
     )
 
     return StreamingResponse(stream, media_type="text/event-stream")
@@ -1888,6 +1907,7 @@ async def send_message(
         assistant_id=asst.assistant_id,
         message=messageContent,
         metadata={"user_id": str(request.state.session.user.id)},
+        session=request.state.db,
     )
     return StreamingResponse(stream, media_type="text/event-stream")
 

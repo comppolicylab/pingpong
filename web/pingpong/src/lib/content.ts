@@ -18,6 +18,10 @@ export const parseTextContent = (text: Text, baseUrl: string = '') => {
         const { start_index, end_index, file_path } = annotation;
         const url = join(baseUrl, `/file/${file_path.file_id}`);
         replacements.push({ start: start_index, end: end_index, newValue: url });
+      } else if (annotation.type === 'file_citation') {
+        const { start_index, end_index, file_citation } = annotation;
+        const fileName = ` (${file_citation.file_name})`;
+        replacements.push({ start: start_index, end: end_index, newValue: fileName });
       }
     }
   }

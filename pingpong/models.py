@@ -583,6 +583,11 @@ class File(Base):
         for row in result:
             yield row
 
+    @classmethod
+    async def get_file_name(cls, session: AsyncSession, file_id: str) -> str:
+        stmt = select(File.name).where(File.file_id == file_id)
+        return await session.scalar(stmt)
+
 
 class VectorStore(Base):
     __tablename__ = "vector_stores"
