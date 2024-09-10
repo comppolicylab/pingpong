@@ -76,8 +76,8 @@ const getCachedRenderer = memoize(getMarkdownRenderer, keyFromOpts);
 /**
  * Convert markdown to HTML.
  */
-export const markdown = (markdown: string, options?: MarkdownRendererOptions) => {
+export const markdown = (str: string, options?: MarkdownRendererOptions) => {
   const fullOpts = { ...DEFAULT_OPTIONS, ...(options || {}) };
   const renderer = getCachedRenderer(fullOpts);
-  return renderer.parse(markdown);
+  return renderer.parse(str);
 };
