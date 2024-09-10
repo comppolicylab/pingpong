@@ -43,7 +43,12 @@ const DEFAULT_OPTIONS: MarkedKatexOptions = {
     { left: '$', right: '$', display: false },
     { left: '\\(', right: '\\)', display: false },
     { left: '\\[', right: '\\]', display: true },
-    { left: /\\begin\{(.*?)\}/, right: m => new RegExp(`\\\\end\\{${escapeRegExp(m[1])}\\}`), display: true, preserve: true }
+    {
+      left: /\\begin\{(.*?)\}/,
+      right: (m) => new RegExp(`\\\\end\\{${escapeRegExp(m[1])}\\}`),
+      display: true,
+      preserve: true
+    }
   ]
 };
 
@@ -57,7 +62,10 @@ const escapeRegExp = (str: string) => {
 /**
  * Create a KaTeX extension for Marked that renders with the given delimiters.
  */
-const markedKatexExtension = (delimiters: MarkedKatexOptions["delimiters"], options: KatexOptions) => {
+const markedKatexExtension = (
+  delimiters: MarkedKatexOptions['delimiters'],
+  options: KatexOptions
+) => {
   const delims = delimiters.map((delimiter) => {
     const { left, right, display, preserve } = delimiter;
     const startDelim = left instanceof RegExp ? left : new RegExp(escapeRegExp(left));
@@ -85,7 +93,7 @@ const markedKatexExtension = (delimiters: MarkedKatexOptions["delimiters"], opti
       return isFinite(earliestMatch) ? earliestMatch : undefined;
     },
     tokenizer(src: string): KatexToken | undefined {
-      let delim: typeof delims[number] | undefined;
+      let delim: (typeof delims)[number] | undefined;
       let startMatch: RegExpMatchArray | null = null;
       let longestMatchLength = 0;
 
@@ -112,10 +120,12 @@ const markedKatexExtension = (delimiters: MarkedKatexOptions["delimiters"], opti
 
       // Get a regular expression for the end delimiter.
       // The pattern must match from the beginning of the string.
-      const endDelimReSource = typeof delim.right === 'function' ?
-        delim.right(startMatch).source :
-        typeof delim.right === 'string' ? escapeRegExp(delim.right) :
-        delim.right.source;
+      const endDelimReSource =
+        typeof delim.right === 'function'
+          ? delim.right(startMatch).source
+          : typeof delim.right === 'string'
+            ? escapeRegExp(delim.right)
+            : delim.right.source;
       const beginsWithEndDelim = new RegExp(`^${endDelimReSource}`);
 
       // Go over the rest of the string and try to find the corresponding
@@ -137,7 +147,7 @@ const markedKatexExtension = (delimiters: MarkedKatexOptions["delimiters"], opti
             raw,
             // If `preserve` is specified, keep start and end delimiters.
             content: delim.preserve ? raw : content,
-            display: delim.display,
+            display: delim.display
           };
         }
       }
@@ -159,6 +169,6 @@ const markedKatexExtension = (delimiters: MarkedKatexOptions["delimiters"], opti
 export const markedKatex = (options: Partial<MarkedKatexOptions> = {}) => {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   return {
-    extensions: [markedKatexExtension(opts.delimiters, opts)],
+    extensions: [markedKatexExtension(opts.delimiters, opts)]
   };
 };
