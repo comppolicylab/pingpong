@@ -70,6 +70,20 @@ async def user(request, config, db):
 
 
 @pytest.fixture
+async def institution(request, config, db):
+    if not hasattr(request, "param"):
+        yield None
+    else:
+        from pingpong.models import Institution
+
+        async with db.async_session() as session:
+            i = Institution(**request.param)
+            session.add(i)
+            await session.commit()
+        yield i
+
+
+@pytest.fixture
 async def valid_user_token(user, now):
     from pingpong.auth import encode_session_token
     from pingpong.now import offset

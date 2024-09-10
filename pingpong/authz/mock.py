@@ -3,6 +3,7 @@ import json
 import logging
 import multiprocessing
 import time
+from typing import Tuple
 
 import aiohttp
 import uvicorn
@@ -15,10 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class _MockFgaAuthzServer:
-    """A mock implementation of the FGA authz server.
-
-    Server is async and runs in the same thread.
-    """
+    """A mock implementation of the FGA authz server."""
 
     @classmethod
     def run(
@@ -36,6 +34,8 @@ class _MockFgaAuthzServer:
             raise ValueError("Only http scheme is supported for mock authz server.")
 
         self.params = params or {}
+        self._all_ops = list[Tuple[str, str, str, str]]()
+        self._all_grants = set(self.params.get("grants", []))
 
         self._store = driver.store
         self._test_store_id = "01BX5ZZKBKACTAV9WEVGEMMVRY"
@@ -54,6 +54,8 @@ class _MockFgaAuthzServer:
             f"/stores/{self._test_store_id}/authorization-models/{self._test_model_id}"
         )(self._api_test_store_get_model)
         self.app.post(f"/stores/{self._test_store_id}/check")(self._api_check)
+        self.app.post(f"/stores/{self._test_store_id}/write")(self._api_write)
+        self.app.get("/inspect/calls")(self._api_inspect_calls)
 
     def _api_stores(self):
         return {
@@ -80,6 +82,9 @@ class _MockFgaAuthzServer:
             "authorization_model": self._test_model,
         }
 
+    def _has_grant(self, grant):
+        return grant in self._all_grants
+
     async def _api_check(self, request: Request):
         body = await request.json()
         tup = body.get("tuple_key")
@@ -90,14 +95,35 @@ class _MockFgaAuthzServer:
         relation = tup.get("relation")
         obj = tup.get("object")
 
-        if (user, relation, obj) in self.params.get("grants", []):
-            return {
-                "allowed": True,
-            }
-
         return {
-            "allowed": False,
+            "allowed": self._has_grant((user, relation, obj)),
         }
+
+    async def _api_write(self, request: Request):
+        body = await request.json()
+        # Process added permissions
+        writes = body.get("writes", {})
+        write_keys = writes.get("tuple_keys", [])
+        for write in write_keys:
+            user = write.get("user")
+            relation = write.get("relation")
+            obj = write.get("object")
+            self._all_ops.append(("grant", user, relation, obj))
+            self._all_grants.add((user, relation, obj))
+        # Process revoked permissions
+        deletes = body.get("deletes", {})
+        delete_keys = deletes.get("tuple_keys", [])
+        for delete in delete_keys:
+            user = delete.get("user")
+            relation = delete.get("relation")
+            obj = delete.get("object")
+            self._all_ops.append(("revoke", user, relation, obj))
+            self._all_grants.discard((user, relation, obj))
+
+        return None
+
+    def _api_inspect_calls(self, request: Request):
+        return {"operations": self._all_ops}
 
     def _api_middleware_exception(self, request, exc):
         return PlainTextResponse("Internal server error", status_code=500)
@@ -112,6 +138,14 @@ class MockFgaAuthzServer:
         self.proc = multiprocessing.Process(
             target=_MockFgaAuthzServer.run, args=(driver, params, host, int(port))
         )
+
+    async def get_all_calls(self):
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{self._base_url}/inspect/calls", raise_for_status=True
+            ) as resp:
+                data = await resp.json()
+                return [tuple(t) for t in data["operations"]]
 
     async def __aenter__(self):
         self.proc.start()
