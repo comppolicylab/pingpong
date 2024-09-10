@@ -378,7 +378,7 @@
                     items={roleOptions.filter((ro) => {
                       // `admin` role is deprecated, don't let it be assigned to new people.
                       // Only show it for people who already have it (typically via inheritance).
-                      return roleInfo.admin === 'admin' || ro.value !== 'admin';
+                      return roleInfo.primary === 'admin' || ro.value !== 'admin';
                     })}
                     value={roleInfo.primary}
                     placeholder="Select a user role..."
