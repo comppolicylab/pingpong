@@ -86,6 +86,21 @@ $$
     ).toMatchSnapshot();
   });
 
+  it('should render block LaTeX in this test case that failed somehow', () => {
+    expect(
+      markdown(
+        `
+The 75th percentile, also known as the third quartile, is the value below which 75% of the data falls. To find the 75th percentile in a dataset, you can sort the data in ascending order, then find the position of the 75th percentile using the formula:
+
+$$ P = \\left(\\frac{75}{100} \\times (N + 1)\\right)^{th} \\text{ position} $$
+
+Where \\( N \\) is the number of observations in the dataset. If this formula results in a non-integer value, you interpolate between the surrounding data points. This concept helps in understanding the spread and distribution of policy-relevant data, such as income or test scores, by showing the value below which 75% of the observed population falls.
+`,
+        { latex: true }
+      )
+    ).toMatchSnapshot();
+  });
+
   it('should render block LaTeX inside a list', () => {
     expect(
       markdown(
