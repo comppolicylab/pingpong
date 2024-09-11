@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional, Union
@@ -1681,20 +1682,7 @@ class Thread(Base):
         thread = await session.scalar(stmt)
         if not thread:
             return {}
-
-        thread_file_names = dict[str, str]()
-        # Cannot async.gather two queries because of the way the ORM works
-        if thread.vector_store_id:
-            thread_file_names = await VectorStore.get_file_names_ids_by_id(
-                session, thread.vector_store_id
-            )
-        if thread.assistant.vector_store_id:
-            thread_file_names.update(
-                await VectorStore.get_file_names_ids_by_id(
-                    session, thread.assistant.vector_store_id
-                )
-            )
-        return thread_file_names
+        return await cls.get_file_search_files_by_id(session, thread)
 
     @classmethod
     async def get_file_search_files_assistant(
@@ -1708,16 +1696,20 @@ class Thread(Base):
         thread = await session.scalar(stmt)
         if not thread:
             return None, {}
+        return thread.assistant, await cls.get_file_search_files_by_id(session, thread)
 
-        thread_file_names = dict[str, str]()
-        if thread.vector_store_id:
-            thread_file_names = await VectorStore.get_file_names_ids_by_id(
-                session, thread.vector_store_id
-            )
-        if thread.assistant.vector_store_id:
-            thread_file_names.update(
-                await VectorStore.get_file_names_ids_by_id(
-                    session, thread.assistant.vector_store_id
-                )
-            )
-        return thread.assistant, thread_file_names
+    @classmethod
+    async def get_file_search_files_by_id(
+        cls, session: AsyncSession, thread: "Thread"
+    ) -> dict[str, str]:
+        vector_store_ids: list[int] = list(
+            filter(None, [thread.assistant.vector_store_id, thread.vector_store_id])
+        )
+        if not vector_store_ids:
+            return {}
+        tasks = [
+            VectorStore.get_file_names_ids_by_id(session, vector_store_id)
+            for vector_store_id in vector_store_ids
+        ]
+        results = await asyncio.gather(*tasks)
+        return {k: v for result in results for k, v in result.items()}

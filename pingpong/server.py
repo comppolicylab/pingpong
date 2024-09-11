@@ -1386,7 +1386,6 @@ async def get_thread(
             status_code=404,
             detail="Assistant not found",
         )
-    file_names = await models.Thread.get_file_search_files(request.state.db, thread.id)
     last_run = [r async for r in runs_result]
     current_user_ids = [
         request.state.session.user.id
