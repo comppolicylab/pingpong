@@ -1,6 +1,6 @@
 import json
 from datetime import datetime
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator, List, Optional, Union
 
 from sqlalchemy import Boolean, Column, DateTime, UniqueConstraint
 from sqlalchemy import Enum as SQLEnum
@@ -675,6 +675,16 @@ class VectorStore(Base):
             return
         for file in vector_store.files:
             yield file.file_id, file.id
+
+    @classmethod
+    async def get_file_names_ids_by_id(
+        cls, session: AsyncSession, id_: int
+    ) -> dict[str, str]:
+        stmt = select(VectorStore).where(VectorStore.id == int(id_))
+        vector_store = await session.scalar(stmt)
+        if not vector_store:
+            return {}
+        return {file.file_id: file.name for file in vector_store.files}
 
     @classmethod
     async def add_files(
@@ -1655,3 +1665,59 @@ class Thread(Base):
             )
         )
         await session.execute(stmt)
+
+    @classmethod
+    async def get_file_search_files(
+        cls, session: AsyncSession, thread_id: int
+    ) -> dict[str, str]:
+        stmt = (
+            select(Thread)
+            .outerjoin(Thread.assistant)
+            .options(
+                contains_eager(Thread.assistant).load_only(Assistant.vector_store_id)
+            )
+            .where(Thread.id == thread_id)
+        )
+        thread = await session.scalar(stmt)
+        if not thread:
+            return {}
+
+        thread_file_names = dict[str, str]()
+        # Cannot async.gather two queries because of the way the ORM works
+        if thread.vector_store_id:
+            thread_file_names = await VectorStore.get_file_names_ids_by_id(
+                session, thread.vector_store_id
+            )
+        if thread.assistant.vector_store_id:
+            thread_file_names.update(
+                await VectorStore.get_file_names_ids_by_id(
+                    session, thread.assistant.vector_store_id
+                )
+            )
+        return thread_file_names
+
+    @classmethod
+    async def get_file_search_files_assistant(
+        cls, session: AsyncSession, thread_id: int
+    ) -> tuple[Union["Assistant", None], dict[str, str]]:
+        stmt = (
+            select(Thread)
+            .options(joinedload(Thread.assistant))
+            .where(Thread.id == thread_id)
+        )
+        thread = await session.scalar(stmt)
+        if not thread:
+            return None, {}
+
+        thread_file_names = dict[str, str]()
+        if thread.vector_store_id:
+            thread_file_names = await VectorStore.get_file_names_ids_by_id(
+                session, thread.vector_store_id
+            )
+        if thread.assistant.vector_store_id:
+            thread_file_names.update(
+                await VectorStore.get_file_names_ids_by_id(
+                    session, thread.assistant.vector_store_id
+                )
+            )
+        return thread.assistant, thread_file_names

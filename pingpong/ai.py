@@ -10,7 +10,6 @@ from openai.types.beta.assistant_stream_event import ThreadRunStepCompleted
 from openai.types.beta.threads import ImageFile, MessageContentPartParam
 from openai.types.beta.threads.runs import ToolCallsStepDetails, CodeInterpreterToolCall
 from pingpong.schemas import CodeInterpreterMessage
-from sqlalchemy.ext.asyncio import AsyncSession
 import pingpong.models as models
 from .config import config
 
@@ -118,10 +117,10 @@ async def get_ci_messages_from_step(
 
 
 class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
-    def __init__(self, session: AsyncSession, *args, **kwargs):
+    def __init__(self, file_names: dict[str, str], *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.__buffer = io.BytesIO()
-        self.session = session
+        self.file_names = file_names
 
     def enqueue(self, data: Dict) -> None:
         self.__buffer.write(orjson.dumps(data))
@@ -156,10 +155,8 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
             if content["text"]["annotations"]:
                 for annotation in content["text"]["annotations"]:
                     if annotation["type"] == "file_citation":
-                        annotation["file_citation"][
-                            "file_name"
-                        ] = await models.File.get_file_name(
-                            self.session, annotation["file_citation"]["file_id"]
+                        annotation["file_citation"]["file_name"] = self.file_names.get(
+                            annotation["file_citation"]["file_id"], ""
                         )
         self.enqueue(
             {
@@ -210,7 +207,7 @@ async def run_thread(
     thread_id: str,
     assistant_id: int,
     message: list[MessageContentPartParam],
-    session: AsyncSession,
+    file_names: dict[str, str] = {},
     metadata: Dict[str, str | int] | None = None,
 ):
     try:
@@ -221,8 +218,7 @@ async def run_thread(
                 content=message,
                 metadata=metadata,
             )
-
-        handler = BufferedStreamHandler(session=session)
+        handler = BufferedStreamHandler(file_names=file_names)
         async with cli.beta.threads.runs.stream(
             thread_id=thread_id,
             assistant_id=assistant_id,
