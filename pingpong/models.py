@@ -1691,7 +1691,9 @@ class Thread(Base):
         thread = await session.scalar(stmt)
         if not thread:
             return None, {}
-        return thread.assistant, await cls.get_file_search_files_by_thread(session, thread)
+        return thread.assistant, await cls.get_file_search_files_by_thread(
+            session, thread
+        )
 
     @classmethod
     async def get_file_search_files_by_thread(
