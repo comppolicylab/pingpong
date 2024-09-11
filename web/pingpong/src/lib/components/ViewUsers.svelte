@@ -345,7 +345,7 @@
             <TableBodyCell {tdClass}
               ><div class="flex flex-col">
                 <div>{user.name}</div>
-                <div class="font-normal">{user.email}</div>
+                <div class="font-normal">{user.has_real_name ? user.email : ''}</div>
               </div></TableBodyCell
             >
             <TableBodyCell {tdClass}>

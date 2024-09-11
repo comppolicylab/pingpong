@@ -103,6 +103,7 @@ async def test_me_with_valid_user(api, user, now, valid_user_token):
             "first_name": None,
             "last_name": None,
             "display_name": None,
+            "has_real_name": False,
             "state": "verified",
             "updated": None,
         },

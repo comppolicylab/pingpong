@@ -112,6 +112,12 @@ class UserNameMixin:
             return self.email
         return " ".join(parts)
 
+    @computed_field  # type: ignore
+    @property
+    def has_real_name(self) -> bool:
+        """Return whether we have a name to display for a user."""
+        return bool(self.display_name or self.first_name or self.last_name)
+
 
 class User(BaseModel, UserNameMixin):
     id: int

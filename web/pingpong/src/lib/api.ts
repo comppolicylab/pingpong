@@ -1073,6 +1073,7 @@ export type LMSType = 'canvas';
 export type ClassUser = {
   id: number;
   name: string | null;
+  has_real_name: boolean;
   email: string;
   roles: ClassUserRoles;
   state: UserState;
