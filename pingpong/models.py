@@ -584,11 +584,6 @@ class File(Base):
         for row in result:
             yield row
 
-    @classmethod
-    async def get_file_name(cls, session: AsyncSession, file_id: str) -> str:
-        stmt = select(File.name).where(File.file_id == file_id)
-        return await session.scalar(stmt)
-
 
 class VectorStore(Base):
     __tablename__ = "vector_stores"
@@ -1682,7 +1677,7 @@ class Thread(Base):
         thread = await session.scalar(stmt)
         if not thread:
             return {}
-        return await cls.get_file_search_files_by_id(session, thread)
+        return await cls.get_file_search_files_by_thread(session, thread)
 
     @classmethod
     async def get_file_search_files_assistant(
@@ -1696,10 +1691,10 @@ class Thread(Base):
         thread = await session.scalar(stmt)
         if not thread:
             return None, {}
-        return thread.assistant, await cls.get_file_search_files_by_id(session, thread)
+        return thread.assistant, await cls.get_file_search_files_by_thread(session, thread)
 
     @classmethod
-    async def get_file_search_files_by_id(
+    async def get_file_search_files_by_thread(
         cls, session: AsyncSession, thread: "Thread"
     ) -> dict[str, str]:
         vector_store_ids: list[int] = list(
