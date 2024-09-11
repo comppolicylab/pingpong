@@ -1721,8 +1721,8 @@ export type MagicLoginRequest = {
 export const loginWithMagicLink = async (f: Fetcher, email: string, forward: string) => {
   const url = `login/magic`;
   const response = await POST<MagicLoginRequest, GenericStatus>(f, url, {
-    email: email,
-    forward: forward
+    email,
+    forward
   });
   if (response.$status === 403 && response.detail?.startsWith('/')) {
     if (browser) {
