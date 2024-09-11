@@ -1402,7 +1402,7 @@ async def get_thread(
                 for annotation in content.text.annotations:
                     if annotation.type == "file_citation":
                         annotation.file_citation.file_name = file_names.get(
-                            annotation.file_citation.file_id
+                            annotation.file_citation.file_id, ""
                         )
         user_id = message.metadata.pop("user_id", None)
         if not user_id:
@@ -1506,7 +1506,7 @@ async def list_thread_messages(
                 for annotation in content.text.annotations:
                     if annotation.type == "file_citation":
                         annotation.file_citation.file_name = file_names.get(
-                            annotation.file_citation.file_id
+                            annotation.file_citation.file_id, ""
                         )
         user_id = message.metadata.pop("user_id", None)
         if not user_id:
