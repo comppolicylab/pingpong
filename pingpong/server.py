@@ -64,6 +64,8 @@ from .runs import get_placeholder_ci_calls
 from .vector_stores import (
     create_vector_store,
     append_vector_store_files,
+    delete_vector_store,
+    delete_vector_store_db_returning_file_ids,
     sync_vector_store_files,
     delete_vector_store_db,
     delete_vector_store_oai,
@@ -764,6 +766,47 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
     await request.state.authz.write_safe(grant=grants, revoke=revokes)
 
     return cls
+
+
+@v1.delete(
+    "/class/{class_id}",
+    dependencies=[Depends(Authz("can_delete", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def delete_class(class_id: str, request: Request, openai_client: OpenAIClient):
+    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    if not class_:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    # Delete all threads
+    async for thread in models.Thread.get_ids_by_class_id(request.state.db, class_.id):
+        await delete_thread(class_id, str(thread.id), request, openai_client)
+
+    # Delete all class assistants
+    async for assistant_id in models.Assistant.async_get_by_class_id(
+        request.state.db, class_.id
+    ):
+        await delete_assistant(class_id, str(assistant_id), request, openai_client)
+
+    # Double check that we deleted all vector stores
+    async for vector_store_id in models.VectorStore.get_id_by_class_id(
+        request.state.db, class_.id
+    ):
+        await delete_vector_store(request.state.db, openai_client, vector_store_id)
+
+    # All private and class files associated with the class_id
+    # are deleted by the database cascade
+
+    if class_.lms_status and class_.lms_status != schemas.LMSStatus.NONE:
+        await remove_canvas_connection(request.state.db, class_.id, request=request)
+
+    stmt = delete(models.UserClassRole).where(
+        models.UserClassRole.class_id == class_.id
+    )
+    await request.state.db.execute(stmt)
+
+    await class_.delete(request.state.db)
+    return {"status": "ok"}
 
 
 @v1.get(
@@ -1937,13 +1980,65 @@ async def delete_thread(
     class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    # Detach the vector store from the thread and delete it
+    vector_store_obj_id = None
+    file_ids_to_delete = []
+    if thread.vector_store_id:
+        vector_store_id = thread.vector_store_id
+        thread.vector_store_id = None
+        # Keep the OAI vector store ID for deletion
+        result_vector = await delete_vector_store_db_returning_file_ids(
+            request.state.db, vector_store_id
+        )
+        vector_store_obj_id = result_vector.vector_store_id
+        file_ids_to_delete.extend(result_vector.deleted_file_ids)
+
+    # Remove any CI files associations with the thread
+    stmt = (
+        delete(models.code_interpreter_file_thread_association)
+        .where(
+            models.code_interpreter_file_thread_association.c.thread_id
+            == int(thread.id)
+        )
+        .returning(models.code_interpreter_file_thread_association.c.file_id)
+    )
+    result_ci = await request.state.db.execute(stmt)
+    file_ids_to_delete.extend([row[0] for row in result_ci.fetchall()])
+
+    # Remove any image files associations with the thread
+    stmt = (
+        delete(models.image_file_thread_association)
+        .where(models.image_file_thread_association.c.thread_id == int(thread.id))
+        .returning(models.image_file_thread_association.c.file_id)
+    )
+    result_image = await request.state.db.execute(stmt)
+    file_ids_to_delete.extend([row[0] for row in result_image.fetchall()])
+
     revokes = [(f"class:{class_id}", "parent", f"thread:{thread_id}")] + [
         (f"user:{u.id}", "party", f"thread:{thread_id}") for u in thread.users
     ]
-    await thread.delete(request.state.db)
-    await openai_client.beta.threads.delete(thread.thread_id)
-    await request.state.authz.write_safe(revoke=revokes)
 
+    if not thread.private:
+        revokes.append(
+            (f"class:{class_id}#member", "can_view", f"thread:{thread.id}"),
+        )
+
+    # Keep the OAI thread ID for deletion
+    await thread.delete(request.state.db)
+
+    # Delete vector store as late as possible to avoid orphaned thread
+    if vector_store_obj_id:
+        await delete_vector_store_oai(openai_client, vector_store_obj_id)
+
+    try:
+        await openai_client.beta.threads.delete(thread.thread_id)
+    except openai.NotFoundError:
+        pass
+    except openai.BadRequestError as e:
+        raise HTTPException(400, e.message or "OpenAI rejected this request")
+
+    # clean up grants
+    await request.state.authz.write_safe(revoke=revokes)
     return {"status": "ok"}
 
 
@@ -2417,10 +2512,15 @@ async def delete_assistant(
     if vector_store_obj_id:
         await delete_vector_store_oai(openai_client, vector_store_obj_id)
 
-    await openai_client.beta.assistants.delete(assistant_id)
+    try:
+        await openai_client.beta.assistants.delete(assistant_id)
+    except openai.NotFoundError:
+        pass
+    except openai.BadRequestError as e:
+        raise HTTPException(400, e.message or "OpenAI rejected this request")
 
     # clean up grants
-    await request.state.authz.write(revoke=revokes)
+    await request.state.authz.write_safe(revoke=revokes)
     return {"status": "ok"}
 
 

@@ -45,19 +45,20 @@
     AdjustmentsHorizontalOutline,
     UserRemoveSolid,
     FileLinesOutline,
-    ExclamationCircleOutline,
     LockSolid
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
-  import { invalidateAll, onNavigate } from '$app/navigation';
+  import { goto, invalidateAll, onNavigate } from '$app/navigation';
   import { browser } from '$app/environment';
   import { submitParentForm } from '$lib/form';
   import { page } from '$app/stores';
+  import { loading, loadingMessage } from '$lib/stores/general';
   import DropdownContainer from '$lib/components/DropdownContainer.svelte';
   import CanvasClassDropdownOptions from '$lib/components/CanvasClassDropdownOptions.svelte';
   import PermissionsTable from '$lib/components/PermissionsTable.svelte';
   import CanvasDisconnectModal from '$lib/components/CanvasDisconnectModal.svelte';
+  import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
 
   /**
    * Application data.
@@ -143,7 +144,7 @@
       any_can_upload_class_file: upload
     };
   };
-
+  let deleteModal = false;
   let usersModalOpen = false;
   let anyCanPublishThread = data?.class.any_can_publish_thread || false;
   let makePrivate = data?.class.private || false;
@@ -271,6 +272,36 @@
       $updatingClass = false;
       happyToast('Saved group info');
     }
+  };
+
+  /**
+   * Delete the class.
+   */
+  const deleteClass = async (evt: CustomEvent) => {
+    evt.preventDefault();
+    $loadingMessage = 'Deleting group. This may take a while.';
+    $loading = true;
+
+    if (!data.class.id) {
+      $loadingMessage = '';
+      $loading = false;
+      sadToast(`Error: Group ID not found.`);
+      return;
+    }
+
+    const result = await api.deleteClass(fetch, data.class.id);
+    if (result.$status >= 300) {
+      $loadingMessage = '';
+      $loading = false;
+      sadToast(`Error deleting group: ${JSON.stringify(result.detail, null, '  ')}`);
+      return;
+    }
+
+    $loadingMessage = '';
+    $loading = false;
+    happyToast('Group deleted');
+    await goto(`/`, { invalidateAll: true });
+    return;
   };
 
   const updatingApiKey = writable(false);
@@ -512,7 +543,6 @@
   ];
 
   let aboutToSetPrivate: boolean = false;
-  let confirmText: string = '';
   let originalEvent: Event;
 
   function handleClick(event: MouseEvent): void {
@@ -521,18 +551,13 @@
     aboutToSetPrivate = true;
   }
 
-  function handleConfirmTextChange(event: Event): void {
-    const target = event.target as HTMLInputElement;
-    confirmText = target.value;
-  }
-
   function handleMakePrivate(): void {
     if (
       !confirm(
         `You are about to make threads and assistants private in this group. This action CANNOT be undone and you'll have to create a new group to see threads and assistants of other members as a Moderator.\n\nAre you sure you want to continue?`
       )
     ) {
-      handleCancel();
+      aboutToSetPrivate = false;
       return;
     }
     makePrivate = true;
@@ -540,12 +565,6 @@
       submitParentForm(originalEvent);
     }
     aboutToSetPrivate = false;
-    confirmText = '';
-  }
-
-  function handleCancel(): void {
-    aboutToSetPrivate = false;
-    confirmText = '';
   }
 </script>
 
@@ -557,7 +576,7 @@
       >Manage Group</Heading
     >
 
-    <div class="flex items-start shrink-0">
+    <div class="flex items-start shrink-0 gap-1">
       <Button
         pill
         size="sm"
@@ -570,6 +589,27 @@
           <div>User Guide</div>
         </div></Button
       >
+      <Button
+        pill
+        size="sm"
+        class="bg-white border border-red-700 text-red-700 hover:text-white hover:bg-red-700"
+        type="button"
+        on:click={() => (deleteModal = true)}
+        disabled={$loading}>Delete group</Button
+      >
+
+      <Modal bind:open={deleteModal} size="xs" autoclose>
+        <ConfirmationModal
+          warningTitle={`Delete ${data?.class.name || 'this group'}?`}
+          warningDescription="All assistants, threads and files associated with this group will be deleted."
+          warningMessage="This action cannot be undone."
+          cancelButtonText="Cancel"
+          confirmText="delete"
+          confirmButtonText="Delete group"
+          on:confirm={deleteClass}
+          on:cancel={() => (deleteModal = false)}
+        />
+      </Modal>
     </div>
   </div>
   {#if canEditClassInfo}
@@ -622,38 +662,16 @@
               Make threads and assistants private
             </Checkbox>
             <Modal bind:open={aboutToSetPrivate} size="sm" autoclose>
-              <div class="text-center px-2">
-                <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
-                <h3 class="mb-5 text-xl text-gray-900 dark:text-white font-bold">
-                  Are you sure you want to make threads and assistants private?
-                </h3>
-                <p class="mb-5 text-sm text-gray-700 dark:text-gray-300">
-                  If you turn this setting on, only members can view unpublished threads and
-                  assistants they create.
-                  <span class="font-bold">This action cannot be undone.</span>
-                </p>
-                <div class="mb-4 px-4">
-                  <input
-                    type="text"
-                    class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full py-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
-                    placeholder="Type 'confirm' to proceed"
-                    bind:value={confirmText}
-                    on:input={handleConfirmTextChange}
-                  />
-                </div>
-                <div class="flex justify-center gap-4">
-                  <Button pill color="alternative" on:click={handleCancel}>Cancel</Button>
-                  <Button
-                    pill
-                    outline
-                    color="red"
-                    disabled={confirmText.toLowerCase() !== 'confirm'}
-                    on:click={handleMakePrivate}
-                  >
-                    Make private
-                  </Button>
-                </div>
-              </div>
+              <ConfirmationModal
+                warningTitle="Are you sure you want to make threads and assistants private?"
+                warningDescription="If you turn this setting on, only members can view unpublished threads and assistants they create."
+                warningMessage="This action cannot be undone."
+                cancelButtonText="Cancel"
+                confirmText="confirm"
+                confirmButtonText="Make private"
+                on:confirm={handleMakePrivate}
+                on:cancel={() => (aboutToSetPrivate = false)}
+              />
             </Modal>
           </div>
         {/if}

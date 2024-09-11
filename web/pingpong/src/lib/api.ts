@@ -593,6 +593,14 @@ export const updateClass = async (f: Fetcher, classId: number, data: UpdateClass
 };
 
 /**
+ * Delete a new class.
+ */
+export const deleteClass = async (f: Fetcher, classId: number) => {
+  const url = `class/${classId}`;
+  return await DELETE<never, GenericStatus>(f, url);
+};
+
+/**
  * Api key from the server.
  */
 export type ApiKey = {

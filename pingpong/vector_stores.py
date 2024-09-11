@@ -1,7 +1,7 @@
 import openai
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from .schemas import VectorStoreType
+from .schemas import VectorStoreDeleteResponse, VectorStoreType
 
 import pingpong.models as models
 
@@ -174,6 +174,35 @@ async def delete_vector_store_db(
     await models.VectorStore.delete(session, vector_store_object_id)
 
     return vector_store_id
+
+
+async def delete_vector_store_db_returning_file_ids(
+    session: AsyncSession,
+    vector_store_object_id: int,
+) -> VectorStoreDeleteResponse:
+    """
+    Deletes the vector store from the DB with the given vector store object id (DB PK). This is used when an assistant is deleted, and we need to delete the vector store associated with them.
+
+    Args:
+        session (AsyncSession): SQLAlchemy session
+        openai_client (openai.AsyncClient): OpenAI client
+        vector_store_object_id (int): DB PK of the vector store
+
+    Returns:
+        str: vector store object id
+        file_ids: list of file ids that were in the vector store
+    """
+    vector_store_id = await models.VectorStore.get_vector_store_id_by_id(
+        session, vector_store_object_id
+    )
+
+    file_ids = await models.VectorStore.delete_return_file_ids(
+        session, vector_store_object_id
+    )
+
+    return VectorStoreDeleteResponse(
+        vector_store_id=vector_store_id, deleted_file_ids=file_ids
+    )
 
 
 async def delete_vector_store_oai(
