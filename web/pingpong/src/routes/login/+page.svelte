@@ -6,9 +6,10 @@
   import { fail } from '@sveltejs/kit';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
+  import { page } from '$app/stores';
 
   export let form;
-
+  const forward = $page.url.searchParams.get('forward') || '/';
   const loggingIn = writable(false);
   const success = writable(false);
   const loginWithMagicLink = async (evt: SubmitEvent) => {
@@ -24,7 +25,7 @@
       return fail(400, { email, success: false, error: 'Missing email' });
     }
 
-    const result = await api.loginWithMagicLink(fetch, email);
+    const result = await api.loginWithMagicLink(fetch, email, forward);
     if (result.$status < 300) {
       success.set(true);
       loggingIn.set(false);
