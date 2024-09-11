@@ -161,6 +161,10 @@
           "can_manage_assistants": {
             "directly_related_user_types": [
               {
+                "relation": "admin",
+                "type": "class"
+              },
+              {
                 "relation": "supervisor",
                 "type": "class"
               }
