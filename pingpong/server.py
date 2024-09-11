@@ -590,7 +590,6 @@ async def create_class(
 
     grants = [
         (f"institution:{institution_id}", "parent", f"class:{new_class.id}"),
-        (f"user:{request.state.session.user.id}", "admin", f"class:{new_class.id}"),
     ]
 
     if not new_class.private:
