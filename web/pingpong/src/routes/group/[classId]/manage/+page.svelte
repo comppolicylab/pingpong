@@ -45,7 +45,6 @@
     AdjustmentsHorizontalOutline,
     UserRemoveSolid,
     FileLinesOutline,
-    ExclamationCircleOutline,
     LockSolid
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
@@ -59,6 +58,7 @@
   import CanvasClassDropdownOptions from '$lib/components/CanvasClassDropdownOptions.svelte';
   import PermissionsTable from '$lib/components/PermissionsTable.svelte';
   import CanvasDisconnectModal from '$lib/components/CanvasDisconnectModal.svelte';
+  import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
 
   /**
    * Application data.
@@ -277,7 +277,7 @@
   /**
    * Delete the class.
    */
-  const deleteClass = async (evt: MouseEvent) => {
+  const deleteClass = async (evt: CustomEvent) => {
     evt.preventDefault();
     $loadingMessage = 'Deleting group. This may take a while.';
     $loading = true;
@@ -543,7 +543,6 @@
   ];
 
   let aboutToSetPrivate: boolean = false;
-  let confirmText: string = '';
   let originalEvent: Event;
 
   function handleClick(event: MouseEvent): void {
@@ -552,18 +551,13 @@
     aboutToSetPrivate = true;
   }
 
-  function handleConfirmTextChange(event: Event): void {
-    const target = event.target as HTMLInputElement;
-    confirmText = target.value;
-  }
-
   function handleMakePrivate(): void {
     if (
       !confirm(
         `You are about to make threads and assistants private in this group. This action CANNOT be undone and you'll have to create a new group to see threads and assistants of other members as a Moderator.\n\nAre you sure you want to continue?`
       )
     ) {
-      handleCancel();
+      aboutToSetPrivate = false;
       return;
     }
     makePrivate = true;
@@ -571,12 +565,6 @@
       submitParentForm(originalEvent);
     }
     aboutToSetPrivate = false;
-    confirmText = '';
-  }
-
-  function handleCancel(): void {
-    aboutToSetPrivate = false;
-    confirmText = '';
   }
 </script>
 
@@ -611,18 +599,16 @@
       >
 
       <Modal bind:open={deleteModal} size="xs" autoclose>
-        <div class="text-center">
-          <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
-          <h3 class="mb-5 text-xl text-black font-bold">
-            Delete {data?.class.name || 'this group'}?
-          </h3>
-          <h4 class="mb-5 text-sm text-black font-normal">
-            All assistants, threads and files associated with this group will be deleted. This
-            action cannot be undone.
-          </h4>
-          <Button pill color="alternative">Cancel</Button>
-          <Button pill color="red" on:click={deleteClass}>Delete</Button>
-        </div>
+        <ConfirmationModal
+          warningTitle={`Delete ${data?.class.name || 'this group'}?`}
+          warningDescription="All assistants, threads and files associated with this group will be deleted."
+          warningMessage="This action cannot be undone."
+          cancelButtonText="Cancel"
+          confirmText="delete"
+          confirmButtonText="Delete group"
+          on:confirm={deleteClass}
+          on:cancel={() => (deleteModal = false)}
+        />
       </Modal>
     </div>
   </div>
@@ -676,38 +662,16 @@
               Make threads and assistants private
             </Checkbox>
             <Modal bind:open={aboutToSetPrivate} size="sm" autoclose>
-              <div class="text-center px-2">
-                <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
-                <h3 class="mb-5 text-xl text-gray-900 dark:text-white font-bold">
-                  Are you sure you want to make threads and assistants private?
-                </h3>
-                <p class="mb-5 text-sm text-gray-700 dark:text-gray-300">
-                  If you turn this setting on, only members can view unpublished threads and
-                  assistants they create.
-                  <span class="font-bold">This action cannot be undone.</span>
-                </p>
-                <div class="mb-4 px-4">
-                  <input
-                    type="text"
-                    class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full py-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
-                    placeholder="Type 'confirm' to proceed"
-                    bind:value={confirmText}
-                    on:input={handleConfirmTextChange}
-                  />
-                </div>
-                <div class="flex justify-center gap-4">
-                  <Button pill color="alternative" on:click={handleCancel}>Cancel</Button>
-                  <Button
-                    pill
-                    outline
-                    color="red"
-                    disabled={confirmText.toLowerCase() !== 'confirm'}
-                    on:click={handleMakePrivate}
-                  >
-                    Make private
-                  </Button>
-                </div>
-              </div>
+              <ConfirmationModal
+                warningTitle="Are you sure you want to make threads and assistants private?"
+                warningDescription="If you turn this setting on, only members can view unpublished threads and assistants they create."
+                warningMessage="This action cannot be undone."
+                cancelButtonText="Cancel"
+                confirmText="confirm"
+                confirmButtonText="Make private"
+                on:confirm={handleMakePrivate}
+                on:cancel={() => (aboutToSetPrivate = false)}
+              />
             </Modal>
           </div>
         {/if}

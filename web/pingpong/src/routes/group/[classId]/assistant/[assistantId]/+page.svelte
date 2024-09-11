@@ -20,7 +20,6 @@
   import {
     CloseOutline,
     ImageOutline,
-    ExclamationCircleOutline,
     QuestionCircleSolid,
     ArrowUpRightFromSquareOutline
   } from 'flowbite-svelte-icons';
@@ -31,6 +30,7 @@
   import DropdownContainer from '$lib/components/DropdownContainer.svelte';
   import DropdownHeader from '$lib/components/DropdownHeader.svelte';
   import DropdownFooter from '$lib/components/DropdownFooter.svelte';
+  import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
   export let data;
 
   // Flag indicating whether we should check for changes before navigating away.
@@ -327,7 +327,7 @@
   /**
    * Delete the assistant.
    */
-  const deleteAssistant = async (evt: MouseEvent) => {
+  const deleteAssistant = async (evt: CustomEvent) => {
     evt.preventDefault();
     const private_files = [
       ...data.selectedCodeInterpreterFiles.filter((f) => f.private),
@@ -459,18 +459,16 @@
         >
 
         <Modal bind:open={deleteModal} size="xs" autoclose>
-          <div class="text-center">
-            <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
-            <h3 class="mb-5 text-xl text-black font-bold">
-              Delete {data?.assistant?.name || 'this assistant'}?
-            </h3>
-            <h4 class="mb-5 text-sm text-black font-normal">
-              All threads associated with this assistant will become read-only. This action cannot
-              be undone.
-            </h4>
-            <Button pill color="alternative">Cancel</Button>
-            <Button pill color="red" on:click={deleteAssistant}>Delete</Button>
-          </div>
+          <ConfirmationModal
+            warningTitle={`Delete ${data?.assistant?.name || 'this assistant'}?`}
+            warningDescription="All threads associated with this assistant will become read-only."
+            warningMessage="This action cannot be undone."
+            cancelButtonText="Cancel"
+            confirmText="delete"
+            confirmButtonText="Delete assistant"
+            on:cancel={() => (deleteModal = false)}
+            on:confirm={deleteAssistant}
+          />
         </Modal>
       </div>
     {/if}

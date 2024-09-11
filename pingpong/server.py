@@ -768,7 +768,7 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
 
 @v1.delete(
     "/class/{class_id}",
-    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    dependencies=[Depends(Authz("can_delete", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
 async def delete_class(class_id: str, request: Request, openai_client: OpenAIClient):

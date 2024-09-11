@@ -232,13 +232,8 @@
           }
         },
         "can_delete": {
-          "tupleToUserset": {
-            "computedUserset": {
-              "relation": "admin"
-            },
-            "tupleset": {
-              "relation": "parent"
-            }
+          "computedUserset": {
+            "relation": "supervisor"
           }
         },
         "can_edit_info": {
