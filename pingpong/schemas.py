@@ -113,8 +113,8 @@ class UserNameMixin:
 
     @computed_field  # type: ignore
     @property
-    def strict_name(self) -> bool:
-        """Return a strict name for the user."""
+    def has_real_name(self) -> bool:
+        """Return whether we have a name to display for a user."""
         return bool(self.display_name or self.first_name or self.last_name)
 
 
