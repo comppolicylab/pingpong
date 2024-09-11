@@ -43,7 +43,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
       redirect(302, destination);
     }
   } else {
-    if (url.pathname in new Set ([ABOUT, PRIVACY_POLICY, EDU, HOME]) && !authed) {
+    if (url.pathname in new Set([ABOUT, PRIVACY_POLICY, EDU, HOME]) && !authed) {
       isPublicPage = true;
       if (url.pathname === HOME) {
         // If the user is not logged in and tries to access the root path, go to the About page.
