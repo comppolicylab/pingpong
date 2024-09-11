@@ -6,6 +6,7 @@ import uvicorn
 from .server import app as server
 from typing import Generator
 
+
 # Adapted from: https://github.com/stanford-policylab/blind-charging-api/blob/main/app/server/bg.py
 class BackgroundServer(uvicorn.Server):
     """A uvicorn server that can be run in a background thread."""
@@ -26,5 +27,7 @@ class BackgroundServer(uvicorn.Server):
 
 def get_server() -> BackgroundServer:
     """Get the background server."""
-    config = uvicorn.Config(server, host="localhost", port=8001, log_level="info", loop="asyncio")
+    config = uvicorn.Config(
+        server, host="localhost", port=8001, log_level="info", loop="asyncio"
+    )
     return BackgroundServer(config)
