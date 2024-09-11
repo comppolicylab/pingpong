@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from .auth import encode_auth_token
+from .bg import get_server
 from .canvas import canvas_sync_all
 from .config import config
 from .models import Base, User
@@ -209,29 +210,54 @@ def db_set_version(version: str, alembic_config: str) -> None:
     alembic.command.stamp(al_cfg, version)
 
 
+async def _sync_all() -> None:
+    await config.authz.driver.init()
+    async with config.db.driver.async_session() as session:
+        async with config.authz.driver.get_client() as c:
+            for lms in config.lms.lms_instances:
+                match lms.type:
+                    case "canvas":
+                        logger.info(
+                            f"Syncing all classes in {lms.tenant}'s {lms.type} instance..."
+                        )
+                        await canvas_sync_all(session, c, lms)
+                    case _:
+                        raise NotImplementedError(f"Unsupported LMS type: {lms.type}")
+
+
 @lms.command("sync-all")
 def sync_all() -> None:
     """
     Sync all classes with a linked LMS class.
     """
-
-    async def _sync_all() -> None:
-        await config.authz.driver.init()
-        async with config.db.driver.async_session() as session:
-            async with config.authz.driver.get_client() as c:
-                for lms in config.lms.lms_instances:
-                    match lms.type:
-                        case "canvas":
-                            logger.info(
-                                f"Syncing all classes in {lms.tenant}'s {lms.type} instance..."
-                            )
-                            await canvas_sync_all(session, c, lms)
-                        case _:
-                            raise NotImplementedError(
-                                f"Unsupported LMS type: {lms.type}"
-                            )
-
     asyncio.run(_sync_all())
+
+
+@lms.command("sync-all-hourly")
+def sync_all_hourly() -> None:
+    """
+    Run the sync-all command every hour in a background server.
+    """
+
+    async def run_sync_all():
+        while True:
+            await _sync_all()
+            logger.info("Sync complete. Sleeping for 1 hour...")
+            await asyncio.sleep(3600)
+
+    server = get_server()
+    # Run the Uvicorn server in the background
+    with server.run_in_thread():
+        loop = asyncio.get_event_loop()
+        sync_task = loop.create_task(run_sync_all())
+
+        try:
+            # Keep the main thread alive while the server and sync are running
+            loop.run_forever()
+        except KeyboardInterrupt:
+            print("Stopping sync scheduler...")
+            sync_task.cancel()
+            loop.stop()
 
 
 if __name__ == "__main__":
