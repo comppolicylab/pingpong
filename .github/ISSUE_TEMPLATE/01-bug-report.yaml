@@ -6,15 +6,16 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to fill out this bug report! Please complete all questions and provide a descriptive title, e.g. Assistant files are missing after creating an assistant.
+        Thanks for taking the time to fill out this bug report! 
+        
+        Please complete all questions and provide a descriptive title, e.g. *Assistant files are missing after creating an assistant*
   - type: markdown
     attributes:
       value: "## Basic Information"
   - type: dropdown
     id: problem-area
     attributes:
-      label: Problem Area
-      description: Which area are you seeing an issue with?
+      label: Which area are you seeing an issue with?
       options:
         - Admin Page
         - Assistants — Creating & Managing
@@ -35,62 +36,53 @@ body:
   - type: dropdown
     id: problem-type
     attributes:
-      label: Issue type
-      description: What type of issue are you reporting?
+      label: What type of issue are you reporting?
       options:
         - Incorrect/Unexpected Behavior
         - Application Crash
         - Application Slow/Unresponsive
   - type: markdown
     attributes:
-      value: "## Description"
+      value: |
+        ## Description
+        Please describe the issue and what steps we can take to reproduce it.
   - type: textarea
     id: what-happened
     attributes:
       label: Describe the bug
       description: A clear and concise description of what the bug is.
       placeholder: Tell us what you see!
-    validations:
-      required: false
   - type: textarea
     id: to-reproduce
     attributes:
-      label: To Reproduce
+      label: Steps to reproduce
       description: A step-by-step set of instructions to reproduce the problem (if possible).
       placeholder: |
         1. Go to '...'
         2. Click on '....'
         3. Scroll down to '....'
         4. See error
-    validations:
-      required: false
   - type: textarea
     id: expected
     attributes:
-      label: Expected Behavior
+      label: Expected behavior
       description: A clear and concise description of what you expected to happen.
-    validations:
-      required: false
   - type: textarea
     id: actual
     attributes:
-      label: Actual Behavior
+      label: Actual behavior
       description: A clear and concise description of what actually happened.
-    validations:
-      required: false
   - type: markdown
     attributes:
       value: "## Attachments"
   - type: textarea
     id: attachments
     attributes:
-      label: Relevant Files
+      label: Relevant files
       description: Please provide any relevant files or screenshots that might help demonstrate the problem. Use the Attach files button to add files and screenshots here.
-    validations:
-      required: false
   - type: textarea
     id: logs
     attributes:
-      label: Relevant Log Output
+      label: Relevant log output
       description: Please copy and paste any relevant log output. This will be automatically formatted into code, so no need for backticks.
       render: shell

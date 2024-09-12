@@ -6,15 +6,16 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to fill out this feature request! Please complete all questions and provide a descriptive title, e.g. Assistant names should accept multi-line input.
+        Thanks for taking the time to fill out this feature request!
+        
+        Please complete all questions and provide a descriptive title, e.g. *Assistant names should accept multi-line input*
   - type: markdown
     attributes:
       value: "## Basic Information"
   - type: dropdown
     id: problem-area
     attributes:
-      label: Suggestion Area
-      description: Which area are you seeing an issue with?
+      label: Which area are you seeing an issue with?
       options:
         - Admin Page
         - Assistants — Creating & Managing
@@ -34,48 +35,40 @@ body:
         - Something else not on this list
   - type: markdown
     attributes:
-      value: "## Description"
+      value: |
+        ## Description
+        Please describe the issue and what steps we can take to reproduce it.
   - type: textarea
     id: what-happened
     attributes:
       label: Is your feature request related to a problem? Please describe.
       description: A clear and concise description of what the issue is.
       placeholder: Ex. I'm always frustrated when [...]
-    validations:
-      required: false
   - type: textarea
     id: to-reproduce
     attributes:
-      label: To Reproduce
+      label: Steps to reproduce
       description: A step-by-step set of instructions to reproduce the problem (if applicable).
       placeholder: |
         1. Go to '...'
         2. Click on '....'
         3. Scroll down to '....'
         4. See error
-    validations:
-      required: false
   - type: textarea
     id: suggestion
     attributes:
-      label: Suggestion
+      label: What's your suggestion?
       description: A clear and concise description of the solution you'd like to see.
-    validations:
-      required: false
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternatives Considered
+      label: What alternatives have you considered?
       description: A clear and concise description of any alternative solutions or features you've considered.
-    validations:
-      required: false
   - type: markdown
     attributes:
       value: "## Attachments"
   - type: textarea
     id: attachments
     attributes:
-      label: Additional Context & Relevant Files
+      label: Additional context & relevant files
       description: Please provide any relevant context, files or screenshots that might help demonstrate the problem or suggestion. Use the Attach files button to add files and screenshots here.
-    validations:
-      required: false
