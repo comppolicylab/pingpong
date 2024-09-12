@@ -4,7 +4,7 @@ services:
 
   authz:
     platform: linux/amd64
-    image: openfga/openfga:v1.5.0
+    image: openfga/openfga:v1.6.0
     container_name: pingpong-authz
     command: [run]
     expose: [8080, 8081, 3003]
@@ -13,6 +13,7 @@ services:
       OPENFGA_DATASTORE_MAX_OPEN_CONNS: 40
       OPENFGA_DATASTORE_MAX_IDLE_CONNS: 25
       OPENFGA_MAX_CONCURRENT_READS_FOR_CHECK: 100
+      OPENFGA_EXPERIMENTALS: enable-list-users
     secrets:
     - source: openfgacfg
       mode: 0400

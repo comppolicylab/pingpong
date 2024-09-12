@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock
 
 from .auth import encode_session_token
 from .now import offset
-from .testutil import with_authz, with_authz_series, with_user
+from .testutil import with_authz, with_authz_series, with_user, with_institution
 
 
 async def test_me_without_token(api):
@@ -665,3 +665,126 @@ async def test_magic_link_login(api, config, monkeypatch):
 </html>
 """,
     )
+
+
+@with_user(123, "foo@hks.harvard.edu")
+@with_institution(11, "Harvard Kennedy School")
+async def test_create_class_missing_permission(api, now, valid_user_token, institution):
+    response = api.post(
+        "/api/v1/institution/11/class",
+        json={
+            "name": "Test Class",
+            "term": "Fall 2024",
+            "private": False,
+        },
+        cookies={
+            "session": valid_user_token,
+        },
+    )
+    assert response.status_code == 403
+
+
+@with_user(123, "foo@hks.harvard.edu")
+@with_institution(11, "Harvard Kennedy School")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_class", "institution:11"),
+    ],
+)
+async def test_create_class(api, now, institution, valid_user_token, authz):
+    response = api.post(
+        "/api/v1/institution/11/class",
+        json={
+            "name": "Test Class",
+            "term": "Fall 2024",
+            "private": False,
+        },
+        cookies={
+            "session": valid_user_token,
+        },
+    )
+    assert response.status_code == 200
+    response_data = response.json()
+    assert response.json() == {
+        "id": 1,
+        "institution_id": 11,
+        "name": "Test Class",
+        "term": "Fall 2024",
+        "private": False,
+        "any_can_create_assistant": False,
+        "any_can_publish_assistant": False,
+        "any_can_publish_thread": False,
+        "any_can_upload_class_file": False,
+        "api_key": None,
+        "created": response_data["created"],
+        "updated": None,
+        "institution": {
+            "id": 11,
+            "name": "Harvard Kennedy School",
+            "description": None,
+            "logo": None,
+            "updated": None,
+            "created": response_data["institution"]["created"],
+        },
+        "lms_class": None,
+        "lms_last_synced": None,
+        "lms_status": "none",
+        "lms_user": None,
+    }
+    assert await authz.get_all_calls() == [
+        ("grant", "institution:11", "parent", "class:1"),
+        ("grant", "class:1#supervisor", "can_manage_threads", "class:1"),
+        ("grant", "class:1#supervisor", "can_manage_assistants", "class:1"),
+    ]
+
+
+@with_user(123, "foo@hks.harvard.edu")
+@with_institution(11, "Harvard Kennedy School")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_class", "institution:11"),
+    ],
+)
+async def test_create_class_private(api, now, institution, valid_user_token, authz):
+    response = api.post(
+        "/api/v1/institution/11/class",
+        json={
+            "name": "Test Class",
+            "term": "Fall 2024",
+            "private": True,
+        },
+        cookies={
+            "session": valid_user_token,
+        },
+    )
+    assert response.status_code == 200
+    response_data = response.json()
+    assert response.json() == {
+        "id": 1,
+        "institution_id": 11,
+        "name": "Test Class",
+        "term": "Fall 2024",
+        "private": True,
+        "any_can_create_assistant": False,
+        "any_can_publish_assistant": False,
+        "any_can_publish_thread": False,
+        "any_can_upload_class_file": False,
+        "api_key": None,
+        "created": response_data["created"],
+        "updated": None,
+        "institution": {
+            "id": 11,
+            "name": "Harvard Kennedy School",
+            "description": None,
+            "logo": None,
+            "updated": None,
+            "created": response_data["institution"]["created"],
+        },
+        "lms_class": None,
+        "lms_last_synced": None,
+        "lms_status": "none",
+        "lms_user": None,
+    }
+    assert await authz.get_all_calls() == [
+        ("grant", "institution:11", "parent", "class:1"),
+    ]

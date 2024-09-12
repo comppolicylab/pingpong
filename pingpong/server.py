@@ -594,7 +594,6 @@ async def create_class(
 
     grants = [
         (f"institution:{institution_id}", "parent", f"class:{new_class.id}"),
-        (f"user:{request.state.session.user.id}", "admin", f"class:{new_class.id}"),
     ]
 
     if not new_class.private:
@@ -607,7 +606,7 @@ async def create_class(
         )
         grants.append(
             (
-                f"class:{new_class.id}#admin",
+                f"class:{new_class.id}#supervisor",
                 "can_manage_assistants",
                 f"class:{new_class.id}",
             )
@@ -730,8 +729,8 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
         "can_manage_threads",
         f"class:{class_id}",
     )
-    admin_as_can_manage_assistants = (
-        f"class:{class_id}#admin",
+    supervisor_as_can_manage_assistants = (
+        f"class:{class_id}#supervisor",
         "can_manage_assistants",
         f"class:{class_id}",
     )
@@ -758,10 +757,10 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
 
     if cls.private:
         revokes.append(supervisor_as_can_manage_threads)
-        revokes.append(admin_as_can_manage_assistants)
+        revokes.append(supervisor_as_can_manage_assistants)
     else:
         grants.append(supervisor_as_can_manage_threads)
-        grants.append(admin_as_can_manage_assistants)
+        grants.append(supervisor_as_can_manage_assistants)
 
     await request.state.authz.write_safe(grant=grants, revoke=revokes)
 

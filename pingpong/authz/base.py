@@ -20,7 +20,12 @@ class AuthzClient(Protocol):
     async def check(self, checks: List[Relation]) -> List[bool]: ...
 
     @abstractmethod
-    async def list(self, entity: str, relation: str, type_: str) -> list[int]: ...
+    async def list(self, entity: str, relation: str, type_: str) -> List[int]: ...
+
+    @abstractmethod
+    async def list_entities(
+        self, target: str, relation: str, type_: str
+    ) -> List[int]: ...
 
     @abstractmethod
     async def expand(
