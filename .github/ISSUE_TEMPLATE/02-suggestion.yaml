@@ -1,0 +1,81 @@
+name: Feature Request
+description: File a feature request if you'd like to suggest an idea for this project.
+title: "[Suggestion]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this feature request! Please complete all questions and provide a descriptive title, e.g. Assistant names should accept multi-line input.
+  - type: markdown
+    attributes:
+      value: "## Basic Information"
+  - type: dropdown
+    id: problem-area
+    attributes:
+      label: Suggestion Area
+      description: Which area are you seeing an issue with?
+      options:
+        - Admin Page
+        - Assistants — Creating & Managing
+        - Assistants — Files
+        - Canvas Integration
+        - Groups — Creating & Managing
+        - Groups — Shared Files
+        - Groups — View All Assistants Page
+        - Logging In
+        - Sidebar
+        - Threads — Archive
+        - Threads — Creating & Managing
+        - Threads — Files
+        - Threads — Message Rendering
+        - Threads — Unexpected Output
+        - User Permissions
+        - Something else not on this list
+  - type: markdown
+    attributes:
+      value: "## Description"
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Is your feature request related to a problem? Please describe.
+      description: A clear and concise description of what the issue is.
+      placeholder: Ex. I'm always frustrated when [...]
+    validations:
+      required: false
+  - type: textarea
+    id: to-reproduce
+    attributes:
+      label: To Reproduce
+      description: A step-by-step set of instructions to reproduce the problem (if applicable).
+      placeholder: |
+        1. Go to '...'
+        2. Click on '....'
+        3. Scroll down to '....'
+        4. See error
+    validations:
+      required: false
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggestion
+      description: A clear and concise description of the solution you'd like to see.
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: A clear and concise description of any alternative solutions or features you've considered.
+    validations:
+      required: false
+  - type: markdown
+    attributes:
+      value: "## Attachments"
+  - type: textarea
+    id: attachments
+    attributes:
+      label: Additional Context & Relevant Files
+      description: Please provide any relevant context, files or screenshots that might help demonstrate the problem or suggestion. Use the Attach files button to add files and screenshots here.
+    validations:
+      required: false
