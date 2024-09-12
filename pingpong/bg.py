@@ -37,5 +37,5 @@ class BackgroundServer(uvicorn.Server):
 
 def get_server(host="localhost", port=8001) -> BackgroundServer:
     """Get the background server."""
-    config = uvicorn.Config(app, host="localhost", port=8001, log_level="info")
+    config = uvicorn.Config(app, host=host, port=port, log_level="info")
     return BackgroundServer(config)
