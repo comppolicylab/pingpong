@@ -1,12 +1,13 @@
 import asyncio
 import logging
 import webbrowser
-
 import click
-
 import alembic
 import alembic.command
 import alembic.config
+
+from croniter import croniter
+from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -234,30 +235,43 @@ def sync_all() -> None:
 
 
 @lms.command("sync-all-hourly")
-def sync_all_hourly() -> None:
+@click.option("--crontime", default="0 * * * *")
+@click.option("--host", default="localhost")
+@click.option("--port", default=8001)
+def sync_all_hourly(crontime: str, host: str, port: int) -> None:
     """
-    Run the sync-all command every hour in a background server.
+    Run the sync-all command in a background server.
     """
+    server = get_server(host=host, port=port)
 
-    async def run_sync_all():
-        while True:
-            await _sync_all()
-            logger.info("Sync complete. Sleeping for 1 hour...")
-            await asyncio.sleep(3600)
-
-    server = get_server()
     # Run the Uvicorn server in the background
     with server.run_in_thread():
-        loop = asyncio.get_event_loop()
-        sync_task = loop.create_task(run_sync_all())
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
-        try:
-            # Keep the main thread alive while the server and sync are running
-            loop.run_forever()
-        except KeyboardInterrupt:
-            print("Stopping sync scheduler...")
-            sync_task.cancel()
-            loop.stop()
+        async def run_sync_tasks():
+            cron_iter = croniter(crontime, datetime.now())
+            while True:
+                # Calculate the next run time
+                # Note that this ensures that the next run time is always in the future
+                # so there are no overlaps in the sync tasks
+                next_run_time = cron_iter.get_next(datetime)
+                wait_time = (next_run_time - datetime.now()).total_seconds()
+                logger.info(
+                    f"Next sync scheduled at: {next_run_time} (in {wait_time} seconds)"
+                )
+
+                # Wait asynchronously until the next run time
+                await asyncio.sleep(wait_time)
+
+                # Run the sync task
+                try:
+                    await _sync_all()
+                    logger.info(f"Sync completed successfully at {datetime.now()}")
+                except Exception as e:
+                    logger.error(f"Error during sync: {e}")
+
+        loop.run_until_complete(run_sync_tasks())
 
 
 if __name__ == "__main__":

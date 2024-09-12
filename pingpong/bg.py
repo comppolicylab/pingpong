@@ -1,13 +1,23 @@
 import contextlib
+import logging
 import threading
 import time
 import uvicorn
 
-from .server import app as server
+from fastapi import FastAPI
 from typing import Generator
 
+logger = logging.getLogger(__name__)
 
-# Adapted from: https://github.com/stanford-policylab/blind-charging-api/blob/main/app/server/bg.py
+app = FastAPI()
+
+
+@app.get("/")
+def root() -> None:
+    """Root endpoint."""
+    return None
+
+
 class BackgroundServer(uvicorn.Server):
     """A uvicorn server that can be run in a background thread."""
 
@@ -25,9 +35,7 @@ class BackgroundServer(uvicorn.Server):
             thread.join()
 
 
-def get_server() -> BackgroundServer:
+def get_server(host="localhost", port=8001) -> BackgroundServer:
     """Get the background server."""
-    config = uvicorn.Config(
-        server, host="localhost", port=8001, log_level="info", loop="asyncio"
-    )
+    config = uvicorn.Config(app, host="localhost", port=8001, log_level="info")
     return BackgroundServer(config)
