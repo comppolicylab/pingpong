@@ -1,6 +1,7 @@
+import asyncio
 import json
 from datetime import datetime
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator, List, Optional, Union
 
 from sqlalchemy import Boolean, Column, DateTime, UniqueConstraint
 from sqlalchemy import Enum as SQLEnum
@@ -686,6 +687,16 @@ class VectorStore(Base):
             return
         for file in vector_store.files:
             yield file.file_id, file.id
+
+    @classmethod
+    async def get_file_names_ids_by_id(
+        cls, session: AsyncSession, id_: int
+    ) -> dict[str, str]:
+        stmt = select(VectorStore).where(VectorStore.id == int(id_))
+        vector_store = await session.scalar(stmt)
+        if not vector_store:
+            return {}
+        return {file.file_id: file.name for file in vector_store.files}
 
     @classmethod
     async def add_files(
@@ -1698,3 +1709,52 @@ class Thread(Base):
             )
         )
         await session.execute(stmt)
+
+    @classmethod
+    async def get_file_search_files(
+        cls, session: AsyncSession, thread_id: int
+    ) -> dict[str, str]:
+        stmt = (
+            select(Thread)
+            .outerjoin(Thread.assistant)
+            .options(
+                contains_eager(Thread.assistant).load_only(Assistant.vector_store_id)
+            )
+            .where(Thread.id == thread_id)
+        )
+        thread = await session.scalar(stmt)
+        if not thread:
+            return {}
+        return await cls.get_file_search_files_by_thread(session, thread)
+
+    @classmethod
+    async def get_file_search_files_assistant(
+        cls, session: AsyncSession, thread_id: int
+    ) -> tuple[Union["Assistant", None], dict[str, str]]:
+        stmt = (
+            select(Thread)
+            .options(joinedload(Thread.assistant))
+            .where(Thread.id == thread_id)
+        )
+        thread = await session.scalar(stmt)
+        if not thread:
+            return None, {}
+        return thread.assistant, await cls.get_file_search_files_by_thread(
+            session, thread
+        )
+
+    @classmethod
+    async def get_file_search_files_by_thread(
+        cls, session: AsyncSession, thread: "Thread"
+    ) -> dict[str, str]:
+        vector_store_ids: list[int] = list(
+            filter(None, [thread.assistant.vector_store_id, thread.vector_store_id])
+        )
+        if not vector_store_ids:
+            return {}
+        tasks = [
+            VectorStore.get_file_names_ids_by_id(session, vector_store_id)
+            for vector_store_id in vector_store_ids
+        ]
+        results = await asyncio.gather(*tasks)
+        return {k: v for result in results for k, v in result.items()}
