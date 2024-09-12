@@ -150,22 +150,13 @@
           "this": {}
         },
         "admin": {
-          "union": {
-            "child": [
-              {
-                "this": {}
-              },
-              {
-                "tupleToUserset": {
-                  "computedUserset": {
-                    "relation": "admin"
-                  },
-                  "tupleset": {
-                    "relation": "parent"
-                  }
-                }
-              }
-            ]
+          "tupleToUserset": {
+            "computedUserset": {
+              "relation": "admin"
+            },
+            "tupleset": {
+              "relation": "parent"
+            }
           }
         },
         "teacher": {
@@ -329,11 +320,7 @@
             ]
           },
           "admin": {
-            "directly_related_user_types": [
-              {
-                "type": "user"
-              }
-            ]
+            "directly_related_user_types": []
           },
           "teacher": {
             "directly_related_user_types": [
