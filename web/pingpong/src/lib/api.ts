@@ -1307,6 +1307,7 @@ export type TextAnnotationFilePath = {
 
 export type TextAnnotationFileCitationFileCitation = {
   file_id: string;
+  file_name: string;
   quote: string;
 };
 

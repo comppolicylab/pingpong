@@ -594,7 +594,6 @@ async def create_class(
 
     grants = [
         (f"institution:{institution_id}", "parent", f"class:{new_class.id}"),
-        (f"user:{request.state.session.user.id}", "admin", f"class:{new_class.id}"),
     ]
 
     if not new_class.private:
@@ -607,7 +606,7 @@ async def create_class(
         )
         grants.append(
             (
-                f"class:{new_class.id}#admin",
+                f"class:{new_class.id}#supervisor",
                 "can_manage_assistants",
                 f"class:{new_class.id}",
             )
@@ -730,8 +729,8 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
         "can_manage_threads",
         f"class:{class_id}",
     )
-    admin_as_can_manage_assistants = (
-        f"class:{class_id}#admin",
+    supervisor_as_can_manage_assistants = (
+        f"class:{class_id}#supervisor",
         "can_manage_assistants",
         f"class:{class_id}",
     )
@@ -758,10 +757,10 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
 
     if cls.private:
         revokes.append(supervisor_as_can_manage_threads)
-        revokes.append(admin_as_can_manage_assistants)
+        revokes.append(supervisor_as_can_manage_assistants)
     else:
         grants.append(supervisor_as_can_manage_threads)
-        grants.append(admin_as_can_manage_assistants)
+        grants.append(supervisor_as_can_manage_assistants)
 
     await request.state.authz.write_safe(grant=grants, revoke=revokes)
 
@@ -1419,13 +1418,18 @@ async def get_thread(
     class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
-    messages, assistant, runs_result = await asyncio.gather(
+    messages, [assistant, file_names], runs_result = await asyncio.gather(
         openai_client.beta.threads.messages.list(
             thread.thread_id, limit=20, order="desc"
         ),
-        models.Assistant.get_by_id(request.state.db, thread.assistant_id),
+        models.Thread.get_file_search_files_assistant(request.state.db, thread.id),
         openai_client.beta.threads.runs.list(thread.thread_id, limit=1, order="desc"),
     )
+    if not assistant:
+        raise HTTPException(
+            status_code=404,
+            detail="Assistant not found",
+        )
     last_run = [r async for r in runs_result]
     current_user_ids = [
         request.state.session.user.id
@@ -1436,6 +1440,13 @@ async def get_thread(
         users = {str(u.id): u for u in thread.users}
 
     for message in messages.data:
+        for content in message.content:
+            if content.type and content.type == "text" and content.text.annotations:
+                for annotation in content.text.annotations:
+                    if annotation.type == "file_citation":
+                        annotation.file_citation.file_name = file_names.get(
+                            annotation.file_citation.file_id, ""
+                        )
         user_id = message.metadata.pop("user_id", None)
         if not user_id:
             continue
@@ -1527,11 +1538,19 @@ async def list_thread_messages(
     messages = await openai_client.beta.threads.messages.list(
         thread.thread_id, limit=limit, order="asc", before=before
     )
+    file_names = await models.Thread.get_file_search_files(request.state.db, thread.id)
 
     if messages.data:
         users = {u.id: u.created for u in thread.users}
 
     for message in messages.data:
+        for content in message.content:
+            if content.type == "text" and content.text.annotations:
+                for annotation in content.text.annotations:
+                    if annotation.type == "file_citation":
+                        annotation.file_citation.file_name = file_names.get(
+                            annotation.file_citation.file_id, ""
+                        )
         user_id = message.metadata.pop("user_id", None)
         if not user_id:
             continue
@@ -1831,12 +1850,13 @@ async def create_run(
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
     asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
-
+    file_names = await models.Thread.get_file_search_files(request.state.db, thread.id)
     stream = run_thread(
         openai_client,
         thread_id=thread.thread_id,
         assistant_id=asst.assistant_id,
         message=[],
+        file_names=file_names,
     )
 
     return StreamingResponse(stream, media_type="text/event-stream")
@@ -1926,6 +1946,7 @@ async def send_message(
         thread=thread.thread_id,
     )
 
+    file_names = await models.Thread.get_file_search_files(request.state.db, thread.id)
     # Create a generator that will stream chunks to the client.
     stream = run_thread(
         openai_client,
@@ -1933,6 +1954,7 @@ async def send_message(
         assistant_id=asst.assistant_id,
         message=messageContent,
         metadata={"user_id": str(request.state.session.user.id)},
+        file_names=file_names,
     )
     return StreamingResponse(stream, media_type="text/event-stream")
 

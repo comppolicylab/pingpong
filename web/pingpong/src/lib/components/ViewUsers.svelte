@@ -81,7 +81,7 @@
 
   // The list of role options for the dropdown selector
   const roleOptions = [
-    ...ROLES.filter((role) => checkUserEditPermissions(role)).map((role) => ({
+    ...ROLES.filter((role) => role !== 'admin' && checkUserEditPermissions(role)).map((role) => ({
       value: role,
       name: ROLE_LABELS[role]
     })),
@@ -375,7 +375,11 @@
                   <input type="hidden" name="user_id" value={user.id} />
                   <Select
                     name="role"
-                    items={roleOptions}
+                    items={roleOptions.filter((ro) => {
+                      // `admin` role is deprecated, don't let it be assigned to new people.
+                      // Only show it for people who already have it (typically via inheritance).
+                      return roleInfo.primary === 'admin' || ro.value !== 'admin';
+                    })}
                     value={roleInfo.primary}
                     placeholder="Select a user role..."
                     on:change={submitParentForm}

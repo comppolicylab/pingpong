@@ -11,6 +11,11 @@ from openfga_sdk.client.models import (
     ClientTuple,
     ClientWriteRequest,
 )
+from openfga_sdk.client.models.list_users_request import (
+    ClientListUsersRequest,
+    UserTypeFilter,
+    FgaObject,
+)
 from openfga_sdk.credentials import CredentialConfiguration, Credentials
 from openfga_sdk.models import CreateStoreRequest
 from openfga_sdk.models.read_request_tuple_key import ReadRequestTupleKey
@@ -52,7 +57,7 @@ class OpenFgaAuthzClient(AuthzClient):
     async def close(self):
         return await self._cli.close()
 
-    async def list(self, entity: str, relation: str, type_: str) -> list[int]:
+    async def list(self, entity: str, relation: str, type_: str) -> List[int]:
         query = ClientListObjectsRequest(
             user=entity,
             relation=relation,
@@ -61,6 +66,16 @@ class OpenFgaAuthzClient(AuthzClient):
         response = await self._cli.list_objects(query)
         n = len(type_) + 1
         return [int(slug[n:]) for slug in response.objects]
+
+    async def list_entities(self, target: str, relation: str, type_: str) -> List[int]:
+        object_type, object_id = target.split(":")
+        query = ClientListUsersRequest(
+            relation=relation,
+            object=FgaObject(type=object_type, id=object_id),
+            user_filters=[UserTypeFilter(type=type_)],
+        )
+        response = await self._cli.list_users(query)
+        return [int(user.object.id) for user in response.users]
 
     async def read(self, key: ReadRequestTupleKey) -> List[ClientTuple]:
         response: ReadResponse = await self._cli.read(key)

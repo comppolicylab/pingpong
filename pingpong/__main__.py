@@ -17,6 +17,7 @@ from .bg import get_server
 from .canvas import canvas_sync_all
 from .config import config
 from .models import Base, User
+from .authz.admin_migration import remove_class_admin_perms
 
 from sqlalchemy import inspect
 
@@ -82,6 +83,11 @@ def update_model() -> None:
         await config.authz.driver.update_model()
 
     asyncio.run(_update_model())
+
+
+@auth.command("update_group_admin_perms")
+def update_group_admin_perms() -> None:
+    asyncio.run(remove_class_admin_perms())
 
 
 @auth.command("login")
