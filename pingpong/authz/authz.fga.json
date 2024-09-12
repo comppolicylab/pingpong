@@ -2,9 +2,34 @@
   "schema_version": "1.1",
   "type_definitions": [
     {
-      "type": "user"
+      "type": "user",
+      "relations": {},
+      "metadata": null
     },
     {
+      "type": "root",
+      "relations": {
+        "admin": {
+          "this": {}
+        },
+        "can_create_institution": {
+          "union": {
+            "child": [
+              {
+                "this": {}
+              },
+              {
+                "computedUserset": {
+                  "relation": "admin"
+                }
+              }
+            ]
+          }
+        },
+        "can_do_reckless_things": {
+          "this": {}
+        }
+      },
       "metadata": {
         "relations": {
           "admin": {
@@ -29,60 +54,14 @@
             ]
           }
         }
-      },
-      "relations": {
-        "admin": {
-          "this": {}
-        },
-        "can_create_institution": {
-          "union": {
-            "child": [
-              {
-                "this": {}
-              },
-              {
-                "computedUserset": {
-                  "relation": "admin"
-                }
-              }
-            ]
-          }
-        },
-        "can_do_reckless_things": {
-          "this": {}
-        }
-      },
-      "type": "root"
+      }
     },
     {
-      "metadata": {
-        "relations": {
-          "admin": {
-            "directly_related_user_types": [
-              {
-                "type": "user"
-              }
-            ]
-          },
-          "can_create_class": {
-            "directly_related_user_types": [
-              {
-                "type": "user"
-              }
-            ]
-          },
-          "can_delete": {},
-          "can_view": {},
-          "parent": {
-            "directly_related_user_types": [
-              {
-                "type": "root"
-              }
-            ]
-          }
-        }
-      },
+      "type": "institution",
       "relations": {
+        "parent": {
+          "this": {}
+        },
         "admin": {
           "union": {
             "child": [
@@ -130,16 +109,17 @@
           "computedUserset": {
             "relation": "admin"
           }
-        },
-        "parent": {
-          "this": {}
         }
       },
-      "type": "institution"
-    },
-    {
       "metadata": {
         "relations": {
+          "parent": {
+            "directly_related_user_types": [
+              {
+                "type": "root"
+              }
+            ]
+          },
           "admin": {
             "directly_related_user_types": [
               {
@@ -147,92 +127,28 @@
               }
             ]
           },
-          "can_create_assistants": {
-            "directly_related_user_types": [
-              {
-                "relation": "student",
-                "type": "class"
-              }
-            ]
-          },
-          "can_create_thread": {},
-          "can_delete": {},
-          "can_edit_info": {},
-          "can_manage_assistants": {
-            "directly_related_user_types": [
-              {
-                "relation": "admin",
-                "type": "class"
-              },
-              {
-                "relation": "supervisor",
-                "type": "class"
-              }
-            ]
-          },
-          "can_manage_threads": {
-            "directly_related_user_types": [
-              {
-                "relation": "supervisor",
-                "type": "class"
-              }
-            ]
-          },
-          "can_manage_users": {},
-          "can_publish_assistants": {
-            "directly_related_user_types": [
-              {
-                "relation": "student",
-                "type": "class"
-              }
-            ]
-          },
-          "can_publish_threads": {
-            "directly_related_user_types": [
-              {
-                "relation": "student",
-                "type": "class"
-              }
-            ]
-          },
-          "can_upload_class_files": {
-            "directly_related_user_types": [
-              {
-                "relation": "student",
-                "type": "class"
-              }
-            ]
-          },
-          "can_upload_user_files": {},
-          "can_view": {},
-          "can_view_api_key": {},
-          "can_view_users": {},
-          "member": {},
-          "parent": {
-            "directly_related_user_types": [
-              {
-                "type": "institution"
-              }
-            ]
-          },
-          "student": {
+          "can_create_class": {
             "directly_related_user_types": [
               {
                 "type": "user"
               }
             ]
           },
-          "supervisor": {},
-          "teacher": {
-            "directly_related_user_types": [
-              {
-                "type": "user"
-              }
-            ]
+          "can_delete": {
+            "directly_related_user_types": []
+          },
+          "can_view": {
+            "directly_related_user_types": []
           }
         }
-      },
+      }
+    },
+    {
+      "type": "class",
       "relations": {
+        "parent": {
+          "this": {}
+        },
         "admin": {
           "union": {
             "child": [
@@ -252,6 +168,89 @@
             ]
           }
         },
+        "teacher": {
+          "this": {}
+        },
+        "student": {
+          "this": {}
+        },
+        "supervisor": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "admin"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "teacher"
+                }
+              }
+            ]
+          }
+        },
+        "member": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "admin"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "teacher"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "student"
+                }
+              }
+            ]
+          }
+        },
+        "can_view": {
+          "computedUserset": {
+            "relation": "member"
+          }
+        },
+        "can_view_users": {
+          "computedUserset": {
+            "relation": "supervisor"
+          }
+        },
+        "can_view_api_key": {
+          "tupleToUserset": {
+            "computedUserset": {
+              "relation": "admin"
+            },
+            "tupleset": {
+              "relation": "parent"
+            }
+          }
+        },
+        "can_delete": {
+          "computedUserset": {
+            "relation": "supervisor"
+          }
+        },
+        "can_edit_info": {
+          "computedUserset": {
+            "relation": "supervisor"
+          }
+        },
+        "can_manage_users": {
+          "computedUserset": {
+            "relation": "supervisor"
+          }
+        },
+        "can_create_thread": {
+          "computedUserset": {
+            "relation": "member"
+          }
+        },
         "can_create_assistants": {
           "union": {
             "child": [
@@ -266,31 +265,8 @@
             ]
           }
         },
-        "can_create_thread": {
-          "computedUserset": {
-            "relation": "member"
-          }
-        },
-        "can_delete": {
-          "computedUserset": {
-            "relation": "supervisor"
-          }
-        },
-        "can_edit_info": {
-          "computedUserset": {
-            "relation": "supervisor"
-          }
-        },
         "can_manage_assistants": {
           "this": {}
-        },
-        "can_manage_threads": {
-          "this": {}
-        },
-        "can_manage_users": {
-          "computedUserset": {
-            "relation": "supervisor"
-          }
         },
         "can_publish_assistants": {
           "union": {
@@ -305,6 +281,9 @@
               }
             ]
           }
+        },
+        "can_manage_threads": {
+          "this": {}
         },
         "can_publish_threads": {
           "union": {
@@ -338,119 +317,159 @@
           "computedUserset": {
             "relation": "can_create_thread"
           }
-        },
-        "can_view": {
-          "computedUserset": {
-            "relation": "member"
-          }
-        },
-        "can_view_api_key": {
-          "tupleToUserset": {
-            "computedUserset": {
-              "relation": "admin"
-            },
-            "tupleset": {
-              "relation": "parent"
-            }
-          }
-        },
-        "can_view_users": {
-          "computedUserset": {
-            "relation": "supervisor"
-          }
-        },
-        "member": {
-          "union": {
-            "child": [
-              {
-                "computedUserset": {
-                  "relation": "admin"
-                }
-              },
-              {
-                "computedUserset": {
-                  "relation": "teacher"
-                }
-              },
-              {
-                "computedUserset": {
-                  "relation": "student"
-                }
-              }
-            ]
-          }
-        },
-        "parent": {
-          "this": {}
-        },
-        "student": {
-          "this": {}
-        },
-        "supervisor": {
-          "union": {
-            "child": [
-              {
-                "computedUserset": {
-                  "relation": "admin"
-                }
-              },
-              {
-                "computedUserset": {
-                  "relation": "teacher"
-                }
-              }
-            ]
-          }
-        },
-        "teacher": {
-          "this": {}
         }
       },
-      "type": "class"
-    },
-    {
       "metadata": {
         "relations": {
-          "can_delete": {},
-          "can_participate": {},
-          "can_publish": {},
-          "can_view": {
-            "directly_related_user_types": [
-              {
-                "relation": "member",
-                "type": "class"
-              }
-            ]
-          },
           "parent": {
             "directly_related_user_types": [
               {
-                "type": "class"
+                "type": "institution"
               }
             ]
           },
-          "party": {
+          "admin": {
             "directly_related_user_types": [
               {
                 "type": "user"
               }
             ]
+          },
+          "teacher": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "student": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "supervisor": {
+            "directly_related_user_types": []
+          },
+          "member": {
+            "directly_related_user_types": []
+          },
+          "can_view": {
+            "directly_related_user_types": []
+          },
+          "can_view_users": {
+            "directly_related_user_types": []
+          },
+          "can_view_api_key": {
+            "directly_related_user_types": []
+          },
+          "can_delete": {
+            "directly_related_user_types": []
+          },
+          "can_edit_info": {
+            "directly_related_user_types": []
+          },
+          "can_manage_users": {
+            "directly_related_user_types": []
+          },
+          "can_create_thread": {
+            "directly_related_user_types": []
+          },
+          "can_create_assistants": {
+            "directly_related_user_types": [
+              {
+                "type": "class",
+                "relation": "student"
+              }
+            ]
+          },
+          "can_manage_assistants": {
+            "directly_related_user_types": [
+              {
+                "type": "class",
+                "relation": "supervisor"
+              }
+            ]
+          },
+          "can_publish_assistants": {
+            "directly_related_user_types": [
+              {
+                "type": "class",
+                "relation": "student"
+              }
+            ]
+          },
+          "can_manage_threads": {
+            "directly_related_user_types": [
+              {
+                "type": "class",
+                "relation": "supervisor"
+              }
+            ]
+          },
+          "can_publish_threads": {
+            "directly_related_user_types": [
+              {
+                "type": "class",
+                "relation": "student"
+              }
+            ]
+          },
+          "can_upload_class_files": {
+            "directly_related_user_types": [
+              {
+                "type": "class",
+                "relation": "student"
+              }
+            ]
+          },
+          "can_upload_user_files": {
+            "directly_related_user_types": []
           }
         }
-      },
+      }
+    },
+    {
+      "type": "thread",
       "relations": {
-        "can_delete": {
-          "union": {
+        "parent": {
+          "this": {}
+        },
+        "party": {
+          "this": {}
+        },
+        "can_view": {
+          "intersection": {
             "child": [
               {
-                "computedUserset": {
-                  "relation": "party"
+                "union": {
+                  "child": [
+                    {
+                      "this": {}
+                    },
+                    {
+                      "computedUserset": {
+                        "relation": "party"
+                      }
+                    },
+                    {
+                      "tupleToUserset": {
+                        "computedUserset": {
+                          "relation": "can_manage_threads"
+                        },
+                        "tupleset": {
+                          "relation": "parent"
+                        }
+                      }
+                    }
+                  ]
                 }
               },
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "can_manage_threads"
+                    "relation": "member"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -472,6 +491,27 @@
                 "tupleToUserset": {
                   "computedUserset": {
                     "relation": "member"
+                  },
+                  "tupleset": {
+                    "relation": "parent"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "can_delete": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "party"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "can_manage_threads"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -549,38 +589,65 @@
               }
             ]
           }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "parent": {
+            "directly_related_user_types": [
+              {
+                "type": "class"
+              }
+            ]
+          },
+          "party": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "can_view": {
+            "directly_related_user_types": [
+              {
+                "type": "class",
+                "relation": "member"
+              }
+            ]
+          },
+          "can_participate": {
+            "directly_related_user_types": []
+          },
+          "can_delete": {
+            "directly_related_user_types": []
+          },
+          "can_publish": {
+            "directly_related_user_types": []
+          }
+        }
+      }
+    },
+    {
+      "type": "assistant",
+      "relations": {
+        "parent": {
+          "this": {}
         },
-        "can_view": {
-          "intersection": {
+        "owner": {
+          "this": {}
+        },
+        "can_edit": {
+          "union": {
             "child": [
               {
-                "union": {
-                  "child": [
-                    {
-                      "this": {}
-                    },
-                    {
-                      "computedUserset": {
-                        "relation": "party"
-                      }
-                    },
-                    {
-                      "tupleToUserset": {
-                        "computedUserset": {
-                          "relation": "can_manage_threads"
-                        },
-                        "tupleset": {
-                          "relation": "parent"
-                        }
-                      }
-                    }
-                  ]
+                "computedUserset": {
+                  "relation": "owner"
                 }
               },
               {
                 "tupleToUserset": {
                   "computedUserset": {
-                    "relation": "member"
+                    "relation": "can_manage_assistants"
                   },
                   "tupleset": {
                     "relation": "parent"
@@ -590,47 +657,6 @@
             ]
           }
         },
-        "parent": {
-          "this": {}
-        },
-        "party": {
-          "this": {}
-        }
-      },
-      "type": "thread"
-    },
-    {
-      "metadata": {
-        "relations": {
-          "can_delete": {},
-          "can_edit": {},
-          "can_interact_with": {},
-          "can_publish": {},
-          "can_view": {
-            "directly_related_user_types": [
-              {
-                "relation": "member",
-                "type": "class"
-              }
-            ]
-          },
-          "owner": {
-            "directly_related_user_types": [
-              {
-                "type": "user"
-              }
-            ]
-          },
-          "parent": {
-            "directly_related_user_types": [
-              {
-                "type": "class"
-              }
-            ]
-          }
-        }
-      },
-      "relations": {
         "can_delete": {
           "union": {
             "child": [
@@ -652,9 +678,12 @@
             ]
           }
         },
-        "can_edit": {
+        "can_view": {
           "union": {
             "child": [
+              {
+                "this": {}
+              },
               {
                 "computedUserset": {
                   "relation": "owner"
@@ -730,52 +759,10 @@
               }
             ]
           }
-        },
-        "can_view": {
-          "union": {
-            "child": [
-              {
-                "this": {}
-              },
-              {
-                "computedUserset": {
-                  "relation": "owner"
-                }
-              },
-              {
-                "tupleToUserset": {
-                  "computedUserset": {
-                    "relation": "can_manage_assistants"
-                  },
-                  "tupleset": {
-                    "relation": "parent"
-                  }
-                }
-              }
-            ]
-          }
-        },
-        "owner": {
-          "this": {}
-        },
-        "parent": {
-          "this": {}
         }
       },
-      "type": "assistant"
-    },
-    {
       "metadata": {
         "relations": {
-          "can_delete": {},
-          "can_view": {},
-          "owner": {
-            "directly_related_user_types": [
-              {
-                "type": "user"
-              }
-            ]
-          },
           "parent": {
             "directly_related_user_types": [
               {
@@ -783,16 +770,48 @@
               }
             ]
           },
-          "thread": {
+          "owner": {
             "directly_related_user_types": [
               {
-                "type": "thread"
+                "type": "user"
               }
             ]
+          },
+          "can_edit": {
+            "directly_related_user_types": []
+          },
+          "can_delete": {
+            "directly_related_user_types": []
+          },
+          "can_view": {
+            "directly_related_user_types": [
+              {
+                "type": "class",
+                "relation": "member"
+              }
+            ]
+          },
+          "can_interact_with": {
+            "directly_related_user_types": []
+          },
+          "can_publish": {
+            "directly_related_user_types": []
           }
         }
-      },
+      }
+    },
+    {
+      "type": "user_file",
       "relations": {
+        "parent": {
+          "this": {}
+        },
+        "owner": {
+          "this": {}
+        },
+        "thread": {
+          "this": {}
+        },
         "can_delete": {
           "union": {
             "child": [
@@ -844,24 +863,17 @@
               }
             ]
           }
-        },
-        "owner": {
-          "this": {}
-        },
-        "parent": {
-          "this": {}
-        },
-        "thread": {
-          "this": {}
         }
       },
-      "type": "user_file"
-    },
-    {
       "metadata": {
         "relations": {
-          "can_delete": {},
-          "can_view": {},
+          "parent": {
+            "directly_related_user_types": [
+              {
+                "type": "class"
+              }
+            ]
+          },
           "owner": {
             "directly_related_user_types": [
               {
@@ -869,16 +881,31 @@
               }
             ]
           },
-          "parent": {
+          "thread": {
             "directly_related_user_types": [
               {
-                "type": "class"
+                "type": "thread"
               }
             ]
+          },
+          "can_delete": {
+            "directly_related_user_types": []
+          },
+          "can_view": {
+            "directly_related_user_types": []
           }
         }
-      },
+      }
+    },
+    {
+      "type": "class_file",
       "relations": {
+        "parent": {
+          "this": {}
+        },
+        "owner": {
+          "this": {}
+        },
         "can_delete": {
           "union": {
             "child": [
@@ -909,15 +936,32 @@
               "relation": "parent"
             }
           }
-        },
-        "owner": {
-          "this": {}
-        },
-        "parent": {
-          "this": {}
         }
       },
-      "type": "class_file"
+      "metadata": {
+        "relations": {
+          "parent": {
+            "directly_related_user_types": [
+              {
+                "type": "class"
+              }
+            ]
+          },
+          "owner": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "can_delete": {
+            "directly_related_user_types": []
+          },
+          "can_view": {
+            "directly_related_user_types": []
+          }
+        }
+      }
     }
   ]
 }
