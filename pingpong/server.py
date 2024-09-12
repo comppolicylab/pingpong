@@ -1545,7 +1545,7 @@ async def list_thread_messages(
 
     for message in messages.data:
         for content in message.content:
-            if content.type == "text" and content.text.annotations:
+            if content.type and content.type == "text" and content.text.annotations:
                 for annotation in content.text.annotations:
                     if annotation.type == "file_citation":
                         annotation.file_citation.file_name = file_names.get(
