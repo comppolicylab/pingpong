@@ -1,16 +1,18 @@
 import asyncio
 import logging
 import webbrowser
-
 import click
-
 import alembic
 import alembic.command
 import alembic.config
+
+from croniter import croniter
+from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from .auth import encode_auth_token
+from .bg import get_server
 from .canvas import canvas_sync_all
 from .config import config
 from .models import Base, User
@@ -215,29 +217,64 @@ def db_set_version(version: str, alembic_config: str) -> None:
     alembic.command.stamp(al_cfg, version)
 
 
+async def _lms_sync_all() -> None:
+    await config.authz.driver.init()
+    async with config.db.driver.async_session() as session:
+        async with config.authz.driver.get_client() as c:
+            for lms in config.lms.lms_instances:
+                match lms.type:
+                    case "canvas":
+                        logger.info(
+                            f"Syncing all classes in {lms.tenant}'s {lms.type} instance..."
+                        )
+                        await canvas_sync_all(session, c, lms)
+                    case _:
+                        raise NotImplementedError(f"Unsupported LMS type: {lms.type}")
+
+
 @lms.command("sync-all")
 def sync_all() -> None:
     """
     Sync all classes with a linked LMS class.
     """
+    asyncio.run(_lms_sync_all())
 
-    async def _sync_all() -> None:
-        await config.authz.driver.init()
-        async with config.db.driver.async_session() as session:
-            async with config.authz.driver.get_client() as c:
-                for lms in config.lms.lms_instances:
-                    match lms.type:
-                        case "canvas":
-                            logger.info(
-                                f"Syncing all classes in {lms.tenant}'s {lms.type} instance..."
-                            )
-                            await canvas_sync_all(session, c, lms)
-                        case _:
-                            raise NotImplementedError(
-                                f"Unsupported LMS type: {lms.type}"
-                            )
 
-    asyncio.run(_sync_all())
+@lms.command("sync-all-cron")
+@click.option("--crontime", default="0 * * * *")
+@click.option("--host", default="localhost")
+@click.option("--port", default=8001)
+def sync_all_cron(crontime: str, host: str, port: int) -> None:
+    """
+    Run the sync-all command in a background server.
+    """
+    server = get_server(host=host, port=port)
+
+    async def _sync_all_cron():
+        cron_iter = croniter(crontime, datetime.now())
+        while True:
+            # Calculate the next run time
+            # Note that this ensures that the next run time is always in the future
+            # so there are no overlaps in the sync tasks
+            next_run_time = cron_iter.get_next(datetime)
+            wait_time = (next_run_time - datetime.now()).total_seconds()
+            logger.info(
+                f"Next sync scheduled at: {next_run_time} (in {wait_time} seconds)"
+            )
+
+            # Wait asynchronously until the next run time
+            await asyncio.sleep(wait_time)
+
+            # Run the sync task
+            try:
+                await _lms_sync_all()
+                logger.info(f"Sync completed successfully at {datetime.now()}")
+            except Exception as e:
+                logger.error(f"Error during sync: {e}")
+
+    # Run the Uvicorn server in the background
+    with server.run_in_thread():
+        asyncio.run(_sync_all_cron())
 
 
 if __name__ == "__main__":
