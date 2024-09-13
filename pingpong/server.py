@@ -51,6 +51,7 @@ from .authz import Relation
 from .config import config
 from .canvas import (
     CanvasException,
+    CanvasWarning,
     LightweightCanvasClient,
     ManualCanvasClient,
     decode_canvas_token,
@@ -875,6 +876,13 @@ async def get_canvas_classes(class_id: str, tenant: str, request: Request):
                 detail=e.detail
                 or "We faced an error while getting your Canvas classes.",
             ) from e
+        except CanvasWarning as e:
+            logger.warning("get_canvas_classes: CanvasWarning occurred: %s", e.detail)
+            raise HTTPException(
+                status_code=e.code or 500,
+                detail=e.detail
+                or "We faced an error while getting your Canvas classes.",
+            ) from e
         except Exception as e:
             logger.exception("get_canvas_classes: Exception occurred")
             raise HTTPException(
@@ -901,11 +909,17 @@ async def update_canvas_class(
             await client.set_canvas_class(canvas_class_id)
             return {"status": "ok"}
         except CanvasException as e:
-            logger.exception("update_canvas_class: ClientResponseError occurred")
+            logger.exception("update_canvas_class: CanvasException occurred")
             raise HTTPException(
                 status_code=e.code or 500,
                 detail=e.detail or "We faced an error while setting your Canvas class.",
             )
+        except CanvasWarning as e:
+            logger.warning("update_canvas_class: CanvasWarning occurred: %s", e.detail)
+            raise HTTPException(
+                status_code=e.code or 500,
+                detail=e.detail or "We faced an error while setting your Canvas class.",
+            ) from e
         except ClientResponseError as e:
             # If we get a 401 error, mark the class as having a sync error.
             # Otherwise, just display an error message.
@@ -954,6 +968,12 @@ async def sync_canvas_class(
             logger.exception(
                 "sync_canvas_class: CanvasException or AddUserException occurred"
             )
+            raise HTTPException(
+                status_code=e.code or 500,
+                detail=e.detail or "We faced an error while syncing with Canvas.",
+            )
+        except CanvasWarning as e:
+            logger.warning("sync_canvas_class: CanvasWarning occurred: %s", e.detail)
             raise HTTPException(
                 status_code=e.code or 500,
                 detail=e.detail or "We faced an error while syncing with Canvas.",
@@ -1027,6 +1047,15 @@ async def remove_canvas_connection(
                 status_code=e.code or 500,
                 detail="We faced an error while removing your account: " + e.detail,
             )
+        except CanvasWarning as e:
+            logger.warning(
+                "delete_canvas_permissions: CanvasWarning occurred: %s", e.detail
+            )
+            raise HTTPException(
+                status_code=e.code or 500,
+                detail=e.detail
+                or "We faced an error while getting your Canvas classes.",
+            ) from e
         except Exception:
             logger.exception("delete_canvas_permissions: Exception occurred")
             raise HTTPException(

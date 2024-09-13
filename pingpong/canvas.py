@@ -39,6 +39,12 @@ class CanvasException(Exception):
         self.detail = detail
 
 
+class CanvasWarning(Exception):
+    def __init__(self, detail: str = "", code: int | None = None):
+        self.code = code
+        self.detail = detail
+
+
 def decode_canvas_token(token: str, nowfn: NowFn) -> CanvasToken:
     """Decodes the Canvas State Token.
 
@@ -153,6 +159,11 @@ class CanvasCourseClient(ABC):
             buffer (int, optional): Buffer time in seconds. Defaults to 60.
             force_refresh (bool, optional): Refresh the token even if it's still valid. Defaults to False.
         """
+        raise CanvasWarning(
+            code=429,
+            detail="A Canvas sync was recently completed. Please wait before trying again.\
+                Y",
+        )
         response = await Class.get_lms_token(self.db, int(self.class_id))
 
         # If no Canvas class is found, the tuple will be None, so we can detect that here
@@ -635,7 +646,7 @@ class ManualCanvasClient(CanvasCourseClient):
                 last_synced + timedelta(seconds=self.config.sync_wait) - now
             ).total_seconds() + 1
 
-            raise CanvasException(
+            raise CanvasWarning(
                 code=429,
                 detail=f"A Canvas sync was recently completed. Please wait before trying again.\
                 You can request a manual sync in {convert_seconds(int(time_remaining)) if int(time_remaining) > 60 else 'a minute'}.",
