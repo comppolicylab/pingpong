@@ -1747,9 +1747,11 @@ class Thread(Base):
     async def get_file_search_files_by_thread(
         cls, session: AsyncSession, thread: "Thread"
     ) -> dict[str, str]:
-        vector_store_ids: list[int] = list(
-            filter(None, [thread.assistant.vector_store_id, thread.vector_store_id])
-        )
+        vector_store_ids: list[int] = []
+        if thread.assistant and thread.assistant.vector_store_id:
+            vector_store_ids.append(thread.assistant.vector_store_id)
+        if thread.vector_store_id:
+            vector_store_ids.append(thread.vector_store_id)
         if not vector_store_ids:
             return {}
         tasks = [
