@@ -1431,11 +1431,6 @@ async def get_thread(
         models.Thread.get_file_search_files_assistant(request.state.db, thread.id),
         openai_client.beta.threads.runs.list(thread.thread_id, limit=1, order="desc"),
     )
-    if not assistant:
-        raise HTTPException(
-            status_code=404,
-            detail="Assistant not found",
-        )
     last_run = [r async for r in runs_result]
     current_user_ids = [
         request.state.session.user.id
@@ -1451,7 +1446,7 @@ async def get_thread(
                 for annotation in content.text.annotations:
                     if annotation.type == "file_citation":
                         annotation.file_citation.file_name = file_names.get(
-                            annotation.file_citation.file_id, ""
+                            annotation.file_citation.file_id, "Unknown citation"
                         )
         user_id = message.metadata.pop("user_id", None)
         if not user_id:
@@ -1471,7 +1466,7 @@ async def get_thread(
             messages.data[-1].created_at,
         )
 
-    if assistant.id:
+    if assistant:
         thread.assistant_names = {assistant.id: assistant.name}
     else:
         thread.assistant_names = {0: "Deleted Assistant"}
@@ -1479,7 +1474,7 @@ async def get_thread(
 
     return {
         "thread": thread,
-        "model": assistant.model if assistant.id else "None",
+        "model": assistant.model if assistant else "None",
         "tools_available": thread.tools_available,
         "run": last_run[0] if last_run else None,
         "messages": list(messages.data),
@@ -1555,7 +1550,7 @@ async def list_thread_messages(
                 for annotation in content.text.annotations:
                     if annotation.type == "file_citation":
                         annotation.file_citation.file_name = file_names.get(
-                            annotation.file_citation.file_id, ""
+                            annotation.file_citation.file_id, "Unknown citation"
                         )
         user_id = message.metadata.pop("user_id", None)
         if not user_id:
