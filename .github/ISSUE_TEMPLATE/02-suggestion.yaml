@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Thanks for taking the time to fill out this feature request!
-        
+
         Please complete all questions and provide a descriptive title, e.g. *Assistant names should accept multi-line input*
   - type: markdown
     attributes:
