@@ -6,8 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to fill out this bug report! 
-        
+        Thanks for taking the time to fill out this bug report!
+
         Please complete all questions and provide a descriptive title, e.g. *Assistant files are missing after creating an assistant*
   - type: markdown
     attributes:
