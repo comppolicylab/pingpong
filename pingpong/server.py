@@ -317,7 +317,7 @@ async def login_sso_saml_acs(provider: str, request: Request):
     for uid in user_ids:
         await merge(request.state.db, request.state.authz, user.id, uid)
 
-    next_url = saml_client.redirect_to("/")
+    next_url = saml_client.redirect_to()
     return redirect_with_session(next_url, user.id, nowfn=get_now_fn(request))
 
 
@@ -352,7 +352,7 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
     if login_config.method == "sso":
         raise HTTPException(
             status_code=403,
-            detail=f"/api/v1/login/sso?provider={login_config.provider}",
+            detail=f"/api/v1/login/sso?provider={login_config.provider}&redirect={body.forward}",
         )
     elif login_config.method != "magic_link":
         raise HTTPException(
