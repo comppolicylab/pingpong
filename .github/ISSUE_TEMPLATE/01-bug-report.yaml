@@ -1,0 +1,88 @@
+name: Bug Report
+description: File a bug report if you're seeing something that doesn't look right.
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report! 
+        
+        Please complete all questions and provide a descriptive title, e.g. *Assistant files are missing after creating an assistant*
+  - type: markdown
+    attributes:
+      value: "## Basic Information"
+  - type: dropdown
+    id: problem-area
+    attributes:
+      label: Which area are you seeing an issue with?
+      options:
+        - Admin Page
+        - Assistants — Creating & Managing
+        - Assistants — Files
+        - Canvas Integration
+        - Groups — Creating & Managing
+        - Groups — Shared Files
+        - Groups — View All Assistants Page
+        - Logging In
+        - Sidebar
+        - Threads — Archive
+        - Threads — Creating & Managing
+        - Threads — Files
+        - Threads — Message Rendering
+        - Threads — Unexpected Output
+        - User Permissions
+        - Something else not on this list
+  - type: dropdown
+    id: problem-type
+    attributes:
+      label: What type of issue are you reporting?
+      options:
+        - Incorrect/Unexpected Behavior
+        - Application Crash
+        - Application Slow/Unresponsive
+  - type: markdown
+    attributes:
+      value: |
+        ## Description
+        Please describe the issue and what steps we can take to reproduce it.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is.
+      placeholder: Tell us what you see!
+  - type: textarea
+    id: to-reproduce
+    attributes:
+      label: Steps to reproduce
+      description: A step-by-step set of instructions to reproduce the problem (if possible).
+      placeholder: |
+        1. Go to '...'
+        2. Click on '....'
+        3. Scroll down to '....'
+        4. See error
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: A clear and concise description of what you expected to happen.
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: A clear and concise description of what actually happened.
+  - type: markdown
+    attributes:
+      value: "## Attachments"
+  - type: textarea
+    id: attachments
+    attributes:
+      label: Relevant files
+      description: Please provide any relevant files or screenshots that might help demonstrate the problem. Use the Attach files button to add files and screenshots here.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Please copy and paste any relevant log output. This will be automatically formatted into code, so no need for backticks.
+      render: shell
