@@ -129,12 +129,6 @@
           activeClass="bg-blue-dark-40"
         />
         <SidebarItem
-          href="/eduaccess"
-          label="Educational Access"
-          class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2"
-          activeClass="bg-blue-dark-40"
-        />
-        <SidebarItem
           href="/privacy-policy"
           label="Privacy Policy"
           class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2"
