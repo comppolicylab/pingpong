@@ -75,8 +75,8 @@
   </div>
   {#if state !== 'pending' && state !== 'deleting'}
     <div class="absolute top-[-6px] right-[-6px] -delete-button">
-      <Button pill color="dark" class="p-0" on:click={deleteFile}>
-        <CloseOutline class="w-4 h-4" />
+      <Button pill color="dark" class="p-0">
+        <CloseOutline class="w-4 h-4" on:click={deleteFile} />
       </Button>
     </div>
   {/if}
