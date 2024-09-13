@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import time
 import webbrowser
 import click
 import alembic
@@ -264,7 +263,7 @@ def sync_all_cron(crontime: str, host: str, port: int) -> None:
             )
 
             # Wait asynchronously until the next run time
-            time.sleep(wait_time)
+            await asyncio.sleep(wait_time)
 
             # Run the sync task
             try:
