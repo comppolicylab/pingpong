@@ -62,7 +62,7 @@ def decode_canvas_token(token: str, nowfn: NowFn) -> CanvasToken:
             exp=auth_token.exp,
         )
     except Exception as e:
-        raise CanvasException("Invalid Canvas token") from e
+        raise CanvasException("Invalid Canvas token", code=400) from e
 
 
 def get_canvas_config(tenant: str) -> CanvasSettings:
@@ -77,7 +77,7 @@ def get_canvas_config(tenant: str) -> CanvasSettings:
     for lms in config.lms.lms_instances:
         if lms.type == "canvas" and lms.tenant == tenant:
             return lms
-    raise CanvasException("No Canvas configuration found")
+    raise CanvasException("No Canvas configuration found", code=404)
 
 
 T = TypeVar("T")
@@ -113,10 +113,10 @@ class CanvasCourseClient(ABC):
             str: Canvas State Token
         """
         if not self.user_id:
-            raise CanvasException("No user ID provided")
+            raise CanvasException("No user ID provided", code=400)
 
         if not self.class_id:
-            raise CanvasException("No class ID provided")
+            raise CanvasException("No class ID provided", code=400)
 
         return encode_auth_token(
             sub=json.dumps(
@@ -157,16 +157,17 @@ class CanvasCourseClient(ABC):
 
         # If no Canvas class is found, the tuple will be None, so we can detect that here
         if not response.now:
-            raise CanvasException("Could not locate PingPong group")
+            raise CanvasException("Could not locate PingPong group", code=404)
 
         # No Canvas access token is found for this class
         if not response.access_token:
-            raise CanvasException("No Canvas access token for class")
+            raise CanvasException("No Canvas access token for class", code=404)
 
         # Check if the user making the request is the user whose Canvas account is connected for the class
         if not log_out and response.user_id != self.user_id:
             raise CanvasException(
                 "You're not the authorized Canvas user for this class",
+                code=403,
             )
 
         # Set the access token to use for the request as the current access token
@@ -491,7 +492,7 @@ class CanvasCourseClient(ABC):
         async for result in self._request_all_pages(request_url, params=params):
             return self._process_course(result)
 
-        raise CanvasException("Course not found")
+        raise CanvasException("Course not found", code=404)
 
     async def set_canvas_class(self, course_id: str) -> None:
         """Set the Canvas class for the PingPong class."""
@@ -593,7 +594,7 @@ class CanvasCourseClient(ABC):
 
         class_, now = await Class.get_lms_course_id(self.db, self.class_id)
         if not class_:
-            raise CanvasException("No linked Canvas course found")
+            raise CanvasException("No linked Canvas course found", code=404)
 
         self._sync_allowed(class_.lms_last_synced, now)
         self.new_ucr = CreateUserClassRoles(
