@@ -1699,6 +1699,7 @@ async def list_all_threads(
         "can_view",
         "thread",
     )
+    logger.info("/threads: FGA Returned %s thread_ids", len(thread_ids))
     threads = await models.Thread.get_n_by_id(
         request.state.db,
         thread_ids,
