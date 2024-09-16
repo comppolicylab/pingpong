@@ -194,7 +194,7 @@
                 {asst.name}
                 <div>
                   <Badge class="bg-blue-light-50 mt-1 text-blue-dark-30 text-xs normal-case"
-                    >Course assistant</Badge
+                    >Group assistant</Badge
                   >
                 </div>
               </DropdownItem>
@@ -220,7 +220,7 @@
                 <div>
                   {#if meta.isCourseAssistant}
                     <Badge class="bg-blue-light-50 mt-1 text-blue-dark-30 text-xs normal-case"
-                      >Course assistant</Badge
+                      >Group assistant</Badge
                     >
                   {:else if meta.isMyAssistant}
                     <Badge class="bg-blue-light-50 mt-1 text-blue-dark-30 text-xs normal-case"
