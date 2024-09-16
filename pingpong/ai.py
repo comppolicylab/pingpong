@@ -6,6 +6,10 @@ from typing import Dict
 
 import openai
 import orjson
+import csv
+import io
+import boto3
+from sqlalchemy.ext.asyncio import AsyncSession
 from openai.types.beta.assistant_stream_event import ThreadRunStepCompleted
 from openai.types.beta.threads import ImageFile, MessageContentPartParam
 from openai.types.beta.threads.runs import ToolCallsStepDetails, CodeInterpreterToolCall
@@ -281,7 +285,74 @@ def format_instructions(instructions: str, use_latex: bool = False) -> str:
 
     return instructions
 
+import hashlib
+import base64
+from datetime import datetime
+
+def generate_user_hash(id: int, created: datetime) -> str:
+    combined_input = f"{id}{created.isoformat()}"
+    hash_object = hashlib.sha256()
+    hash_object.update(combined_input.encode('utf-8'))
+    
+    binary_hash = hash_object.digest()
+    alphanumeric_hash = base64.urlsafe_b64encode(binary_hash).decode('utf-8')
+    return alphanumeric_hash.rstrip('=')
+
+async def export_class_threads(
+    cli: openai.AsyncClient, session: AsyncSession, class_id: str, s3_bucket: str, s3_key: str
+) -> None:
+    csv_buffer = io.StringIO()
+    csvwriter = csv.writer(csv_buffer)
+    csvwriter.writerow(['User ID', 'Assistant Name', 'Thread ID', 'Message ID', 'Created At', 'Content'])
+    
+    async for thread in models.Thread.get_thread_assistant_name_by_class_id(
+        config.db.driver, class_id=class_id
+    ):
+        thread_id = thread.id
+        user_hashes = thread.users.map(lambda user: generate_user_hash(user.id, user.created))
+        user_hash = ', '.join(user_hashes)
+        
+        before = None
+        while True:
+            # Fetch messages for the current page using the `before` cursor for pagination
+            messages = await cli.beta.threads.messages.list(
+                thread_id=thread.id,
+                before=before
+            )
+            # Write each message into the CSV
+            for message in messages.data:
+                csvwriter.writerow([
+                    user_hash,
+                    thread_id,
+                    message.id,
+                    message.user_id,
+                    message.content,
+                    message.created_at
+                ])
+
+            # If no more messages are returned, break the loop
+            if len(messages.data) == 0:
+                break
+
+            # Set the `before` cursor to the last message ID for pagination
+            before = messages.data[-1].id
+
+    # After writing all the data, reset the buffer's position to the start
+    csv_buffer.seek(0)
+
+    # Upload the CSV data from the buffer to AWS S3
+    s3_client = boto3.client('s3', aws_access_key_id=config.aws_access_key_id, aws_secret_access_key=config.aws_secret_access_key)
+    s3_client.put_object(
+        Bucket=s3_bucket,
+        Key=s3_key,
+        Body=csv_buffer.getvalue(),
+        ContentType='text/csv'
+    )
+
+    # Close the buffer
+    csv_buffer.close()
 
 @functools.cache
 def get_openai_client(api_key: str) -> openai.AsyncClient:
     return openai.AsyncClient(api_key=api_key)
+

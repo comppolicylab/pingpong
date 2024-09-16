@@ -1652,6 +1652,24 @@ class Thread(Base):
             yield row.Thread
 
     @classmethod
+    async def get_thread_assistant_name_by_class_id(
+        cls,
+        session: AsyncSession,
+        class_id: int,
+    ) -> AsyncGenerator["Thread", None]:
+        stmt = (
+            select(Thread).outerjoin(Thread.assistant)
+            .outerjoin(Thread.users)
+            .options(
+                contains_eager(Thread.users).load_only(User.id, User.created),
+                contains_eager(Thread.assistant).load_only(Assistant.name)
+            ).order_by(Thread.updated.desc()).where(Thread.class_id == int(class_id))
+        )
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.Thread
+
+    @classmethod
     async def add_code_interpeter_files(
         cls, session: AsyncSession, thread_id: int, file_ids: list[str]
     ) -> None:
