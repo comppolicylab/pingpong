@@ -318,7 +318,12 @@ async def login_sso_saml_acs(provider: str, request: Request):
     for uid in user_ids:
         await merge(request.state.db, request.state.authz, user.id, uid)
 
-    next_url = saml_client.redirect_to()
+    url = "/"
+    if "RelayState" in saml_client._request_data["get_data"]:
+        url = saml_client._request_data["get_data"]["RelayState"]
+    elif "RelayState" in saml_client._request_data["post_data"]:
+        url = saml_client._request_data["post_data"]["RelayState"]
+    next_url = saml_client.redirect_to(url)
     return redirect_with_session(next_url, user.id, nowfn=get_now_fn(request))
 
 
