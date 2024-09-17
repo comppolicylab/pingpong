@@ -38,6 +38,7 @@ jobs:
         uses: aws-actions/amazon-ecr-login@cef2380b0d4c6813048ef6e1f7fd9ec1639bd3b5
 
       - name: Build server image for release
+        if: contains(github.event.comment.body, 'server') || contains(github.event.comment.body, 'srv') || contains(github.event.comment.body, 'all')
         env:
           ENVIRONMENT: 'stage'
           SRV_VERSION: ${{ env.SRV_VERSION }}
@@ -46,6 +47,7 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.prod.yml build srv
 
       - name: Push server image for release
+        if: contains(github.event.comment.body, 'server') || contains(github.event.comment.body, 'srv') || contains(github.event.comment.body, 'all')
         env:
           ENVIRONMENT: 'stage'
           SRV_VERSION: ${{ env.SRV_VERSION }}
@@ -57,6 +59,7 @@ jobs:
           echo "Built and pushed Server Image (${{ env.SRV_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
 
       - name: Reply to the PR comment (Server image pushed)
+        if: contains(github.event.comment.body, 'server') || contains(github.event.comment.body, 'srv') || contains(github.event.comment.body, 'all')
         env:
           ENVIRONMENT: 'stage'
           SRV_VERSION: ${{ env.SRV_VERSION }}
@@ -69,6 +72,7 @@ jobs:
                "https://api.github.com/repos/${{ github.repository }}/issues/$PR_NUMBER/comments"
 
       - name: Build web image for release
+        if: contains(github.event.comment.body, 'web') || contains(github.event.comment.body, 'all')
         env:
           ENVIRONMENT: 'stage'
           WEB_VERSION: ${{ env.WEB_VERSION }}
@@ -77,6 +81,7 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.prod.yml build web
 
       - name: Push web image for release
+        if: contains(github.event.comment.body, 'web') || contains(github.event.comment.body, 'all')
         env:
           ENVIRONMENT: 'stage'
           WEB_VERSION: ${{ env.WEB_VERSION }}
@@ -88,6 +93,7 @@ jobs:
           echo "Built and pushed Web Image (${{ env.WEB_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
 
       - name: Reply to the PR comment (Web image pushed)
+        if: contains(github.event.comment.body, 'web') || contains(github.event.comment.body, 'all')
         env:
           ENVIRONMENT: 'stage'
           WEB_VERSION: ${{ env.WEB_VERSION }}
