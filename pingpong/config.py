@@ -246,7 +246,7 @@ class S3Settings(BaseSettings):
     """Settings for S3 storage."""
 
     bucket: str
-    presigned_url_expiration : int = Field(60 * 60)  # 1 hour
+    presigned_url_expiration: int = Field(60 * 60)  # 1 hour
 
 
 class Config(BaseSettings):

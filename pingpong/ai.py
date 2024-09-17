@@ -10,7 +10,6 @@ import orjson
 from pingpong.invite import send_export_download
 import pingpong.models as models
 
-from botocore.exceptions import ClientError
 from datetime import datetime, timedelta, timezone
 from openai.types.beta.assistant_stream_event import ThreadRunStepCompleted
 from openai.types.beta.threads import ImageFile, MessageContentPartParam
@@ -291,6 +290,7 @@ def format_instructions(instructions: str, use_latex: bool = False) -> str:
 
     return instructions
 
+
 def generate_user_hash(id: int, created: datetime) -> str:
     combined_input = f"{id}{created.isoformat()}"
     hash_object = hashlib.sha256()
@@ -299,6 +299,7 @@ def generate_user_hash(id: int, created: datetime) -> str:
     binary_hash = hash_object.digest()
     alphanumeric_hash = base64.urlsafe_b64encode(binary_hash).decode("utf-8")
     return alphanumeric_hash.rstrip("=")
+
 
 async def export_class_threads(
     cli: openai.AsyncClient,
@@ -309,11 +310,11 @@ async def export_class_threads(
     class_ = await models.Class.get_by_id(session, int(class_id))
     if not class_:
         raise ValueError(f"Class with ID {class_id} not found")
-    
+
     user = await models.User.get_by_id(session, user_id)
     if not user:
         raise ValueError(f"User with ID {user_id} not found")
-    
+
     csv_buffer = io.StringIO()
     csvwriter = csv.writer(csv_buffer)
     csvwriter.writerow(
@@ -385,13 +386,13 @@ async def export_class_threads(
                         process_message_content(message.content, file_names),
                     ]
                 )
-            
+
             if len(messages.data) == 0:
                 break
             after = messages.data[-1].id
 
     csv_buffer.seek(0)
-    
+
     s3_key = f"thread_export_{class_id}_{user_id}_{datetime.now().isoformat()}.csv"
     s3_client = boto3.client(
         "s3",
@@ -401,7 +402,9 @@ async def export_class_threads(
         Key=s3_key,
         Body=csv_buffer.getvalue(),
         ContentType="text/csv",
-        Expires=datetime.now() + timedelta(seconds=config.s3.presigned_url_expiration) + timedelta(hours=1),
+        Expires=datetime.now()
+        + timedelta(seconds=config.s3.presigned_url_expiration)
+        + timedelta(hours=1),
     )
 
     csv_buffer.close()
@@ -412,11 +415,13 @@ async def export_class_threads(
         ExpiresIn=config.s3.presigned_url_expiration,
     )
     export_opts = DownloadExport(
-        class_name = class_.name,
+        class_name=class_.name,
         email=user.email,
         link=download_link,
     )
-    await send_export_download(config.email.sender, export_opts, expires=config.s3.presigned_url_expiration)
+    await send_export_download(
+        config.email.sender, export_opts, expires=config.s3.presigned_url_expiration
+    )
 
 
 def process_message_content(

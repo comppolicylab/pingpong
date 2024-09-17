@@ -39,6 +39,7 @@ async def send_invite(
 
     await sender.send(invite.email, subject, message)
 
+
 async def send_export_download(
     sender: EmailSender,
     invite: DownloadExport,
@@ -48,7 +49,7 @@ async def send_export_download(
 
     message = message_template.substitute(
         {
-            "title": f"Your data export is ready.",
+            "title": "Your data export is ready.",
             "subtitle": (
                 f"{invite.inviter_name} has invited you"
                 if invite.inviter_name
@@ -58,7 +59,7 @@ async def send_export_download(
             + invite.class_name
             + ". You can download your data export below in a CSV format. Please note that user ids are anonymized, but consistent across threads and exports.",
             "type": "download link",
-            "cta": f"Download your data export",
+            "cta": "Download your data export",
             "underline": "If your download link has expired, you can create a new export from the Manage Group page on PingPong. All exports are deleted after they expire.",
             "expires": convert_seconds(expires),
             "link": invite.link,

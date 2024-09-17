@@ -361,10 +361,12 @@ class CreateInvite(BaseModel):
     class_name: str = Field(..., min_length=3, max_length=100)
     formatted_role: str | None = None
 
+
 class DownloadExport(BaseModel):
     link: str
     email: str
     class_name: str
+
 
 class CreateUserInviteConfig(BaseModel):
     invites: list[CreateInvite] = []
