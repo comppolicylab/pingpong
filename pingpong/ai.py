@@ -369,7 +369,7 @@ async def export_class_threads(
             messages = await cli.beta.threads.messages.list(
                 thread_id=thread.thread_id,
                 after=after,
-                order="desc",
+                order="asc",
             )
 
             for message in messages.data:

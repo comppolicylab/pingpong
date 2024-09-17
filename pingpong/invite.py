@@ -50,12 +50,7 @@ async def send_export_download(
     message = message_template.substitute(
         {
             "title": "Your data export is ready.",
-            "subtitle": (
-                f"{invite.inviter_name} has invited you"
-                if invite.inviter_name
-                else "You have been invited"
-            )
-            + "We have successfully exported the thread data you requested from "
+            "subtitle": "We have successfully exported the thread data you requested from "
             + invite.class_name
             + ". You can download your data export below in a CSV format. Please note that user ids are anonymized, but consistent across threads and exports.",
             "type": "download link",
