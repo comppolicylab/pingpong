@@ -2,6 +2,9 @@ log_level = "DEBUG"
 public_url = "http://localhost:5173"
 development = true
 
+[s3]
+bucket = "bucket-test"
+
 [db]
 engine = "sqlite"
 path = "test_db.sqlite"

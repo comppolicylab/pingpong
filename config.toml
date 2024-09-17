@@ -22,7 +22,7 @@ development = true
 [s3]
 # S3 Backend for temporarily storing thread exports for download
 # S3 Bucket name
-bucket = "pp-stage-artifacts"
+bucket = "bucket-test"
 # Time (in seconds) that the pre-signed url we send to users
 # requesting the data export should be valid for.
 # Defaults to 1 hour. Maximum value is 43200 seconds, or 12 hours.
