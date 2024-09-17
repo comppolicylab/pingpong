@@ -242,6 +242,13 @@ class UploadSettings(BaseSettings):
     class_file_max_size: int = Field(512 * 1024 * 1024)  # 512 MB
 
 
+class S3Settings(BaseSettings):
+    """Settings for S3 storage."""
+
+    bucket: str
+    presigned_url_expiration : int = Field(60 * 60)  # 1 hour
+
+
 class Config(BaseSettings):
     """Stats Chat Bot config."""
 
@@ -250,6 +257,7 @@ class Config(BaseSettings):
     reload: int = Field(0)
     public_url: str = Field("http://localhost:8000")
     development: bool = Field(False, env="DEVELOPMENT")
+    s3: S3Settings
     db: DbSettings
     auth: AuthSettings
     authz: AuthzSettings
@@ -260,9 +268,6 @@ class Config(BaseSettings):
     init: InitSettings = Field(InitSettings())
     support: SupportSettings = Field(NoSupportSettings(type="none"))
     upload: UploadSettings = Field(UploadSettings())
-    aws_access_key_id: str | None = Field(None)
-    aws_secret_access_key: str | None = Field(None)
-    aws_session_token: str | None = Field(None)
 
     def url(self, path: str | None) -> str:
         """Return a URL relative to the public URL."""

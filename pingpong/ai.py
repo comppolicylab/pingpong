@@ -395,9 +395,6 @@ async def export_class_threads(
     s3_key = f"thread_export_{class_id}_{user_id}_{datetime.now().isoformat()}.csv"
     s3_client = boto3.client(
         "s3",
-        aws_access_key_id=config.aws_access_key_id,
-        aws_secret_access_key=config.aws_secret_access_key,
-        aws_session_token=config.aws_session_token,
     )
     s3_client.put_object(
         Bucket="pp-stage-artifacts",
