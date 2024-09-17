@@ -411,7 +411,11 @@ async def export_class_threads(
 
     download_link = s3_client.generate_presigned_url(
         "get_object",
-        Params={"Bucket": "pp-stage-artifacts", "Key": s3_key},
+        Params={
+            "Bucket": "pp-stage-artifacts",
+            "Key": s3_key,
+            "ResponseContentDisposition": f"attachment; filename={s3_key}",
+        },
         ExpiresIn=config.s3.presigned_url_expiration,
     )
     export_opts = DownloadExport(
