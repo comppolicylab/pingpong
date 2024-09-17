@@ -1,21 +1,27 @@
+import base64
+import boto3
+import csv
 import functools
+import hashlib
 import io
 import logging
-from datetime import datetime
-from typing import Dict
-
 import openai
 import orjson
-import csv
-import io
-import boto3
-from sqlalchemy.ext.asyncio import AsyncSession
+from pingpong.invite import send_export_download
+import pingpong.models as models
+
+from botocore.exceptions import ClientError
+from datetime import datetime, timedelta, timezone
 from openai.types.beta.assistant_stream_event import ThreadRunStepCompleted
 from openai.types.beta.threads import ImageFile, MessageContentPartParam
+from openai.types.beta.threads.annotation import FileCitationAnnotation
 from openai.types.beta.threads.runs import ToolCallsStepDetails, CodeInterpreterToolCall
-from pingpong.schemas import CodeInterpreterMessage
-import pingpong.models as models
-from .config import config
+from openai.types.beta.threads.text_content_block import TextContentBlock
+from pingpong.schemas import CodeInterpreterMessage, DownloadExport
+from pingpong.config import config
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Dict
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -285,74 +291,166 @@ def format_instructions(instructions: str, use_latex: bool = False) -> str:
 
     return instructions
 
-import hashlib
-import base64
-from datetime import datetime
-
 def generate_user_hash(id: int, created: datetime) -> str:
     combined_input = f"{id}{created.isoformat()}"
     hash_object = hashlib.sha256()
-    hash_object.update(combined_input.encode('utf-8'))
-    
+    hash_object.update(combined_input.encode("utf-8"))
+
     binary_hash = hash_object.digest()
-    alphanumeric_hash = base64.urlsafe_b64encode(binary_hash).decode('utf-8')
-    return alphanumeric_hash.rstrip('=')
+    alphanumeric_hash = base64.urlsafe_b64encode(binary_hash).decode("utf-8")
+    return alphanumeric_hash.rstrip("=")
 
 async def export_class_threads(
-    cli: openai.AsyncClient, session: AsyncSession, class_id: str, s3_bucket: str, s3_key: str
+    cli: openai.AsyncClient,
+    session: AsyncSession,
+    class_id: str,
+    user_id: int,
 ) -> None:
+    class_ = await models.Class.get_by_id(session, int(class_id))
+    if not class_:
+        raise ValueError(f"Class with ID {class_id} not found")
+    
+    user = await models.User.get_by_id(session, user_id)
+    if not user:
+        raise ValueError(f"User with ID {user_id} not found")
+    
     csv_buffer = io.StringIO()
     csvwriter = csv.writer(csv_buffer)
-    csvwriter.writerow(['User ID', 'Assistant Name', 'Thread ID', 'Message ID', 'Created At', 'Content'])
-    
-    async for thread in models.Thread.get_thread_assistant_name_by_class_id(
-        config.db.driver, class_id=class_id
-    ):
-        thread_id = thread.id
-        user_hashes = thread.users.map(lambda user: generate_user_hash(user.id, user.created))
-        user_hash = ', '.join(user_hashes)
-        
-        before = None
-        while True:
-            # Fetch messages for the current page using the `before` cursor for pagination
-            messages = await cli.beta.threads.messages.list(
-                thread_id=thread.id,
-                before=before
-            )
-            # Write each message into the CSV
-            for message in messages.data:
-                csvwriter.writerow([
-                    user_hash,
-                    thread_id,
-                    message.id,
-                    message.user_id,
-                    message.content,
-                    message.created_at
-                ])
-
-            # If no more messages are returned, break the loop
-            if len(messages.data) == 0:
-                break
-
-            # Set the `before` cursor to the last message ID for pagination
-            before = messages.data[-1].id
-
-    # After writing all the data, reset the buffer's position to the start
-    csv_buffer.seek(0)
-
-    # Upload the CSV data from the buffer to AWS S3
-    s3_client = boto3.client('s3', aws_access_key_id=config.aws_access_key_id, aws_secret_access_key=config.aws_secret_access_key)
-    s3_client.put_object(
-        Bucket=s3_bucket,
-        Key=s3_key,
-        Body=csv_buffer.getvalue(),
-        ContentType='text/csv'
+    csvwriter.writerow(
+        [
+            "User ID",
+            "Assistant Name",
+            "Role",
+            "Thread ID",
+            "Message ID",
+            "Created At",
+            "Content",
+        ]
     )
 
-    # Close the buffer
+    async for thread in models.Thread.get_thread_by_class_id(
+        session, class_id=int(class_id)
+    ):
+        assistant, file_names = await models.Thread.get_file_search_files_assistant(
+            session, thread.id
+        )
+        assistant_name = assistant.name if assistant else "Deleted Assistant"
+
+        user_hashes = (
+            list(
+                map(
+                    lambda user: generate_user_hash(user.id, user.created), thread.users
+                )
+            )
+            if thread.users
+            else ["Unknown User"]
+        )
+        user_hashes_str = ", ".join(user_hashes)
+
+        csvwriter.writerow(
+            [
+                user_hashes_str,
+                assistant_name,
+                "system_prompt",
+                thread.id,
+                "N/A",
+                thread.created.astimezone(ZoneInfo("America/New_York")).strftime(
+                    "%Y-%m-%d %H:%M:%S %Z"
+                ),
+                thread.assistant.instructions
+                if thread.assistant
+                else "Unknown Prompt (Deleted Assistant)",
+            ]
+        )
+
+        after = None
+        while True:
+            messages = await cli.beta.threads.messages.list(
+                thread_id=thread.thread_id,
+                after=after,
+                order="desc",
+            )
+
+            for message in messages.data:
+                csvwriter.writerow(
+                    [
+                        user_hashes_str,
+                        assistant_name,
+                        message.role,
+                        thread.id,
+                        message.id,
+                        datetime.fromtimestamp(message.created_at, tz=timezone.utc)
+                        .astimezone(ZoneInfo("America/New_York"))
+                        .strftime("%Y-%m-%d %H:%M:%S %Z"),
+                        process_message_content(message.content, file_names),
+                    ]
+                )
+            
+            if len(messages.data) == 0:
+                break
+            after = messages.data[-1].id
+
+    csv_buffer.seek(0)
+    
+    s3_key = f"thread_export_{class_id}_{user_id}_{datetime.now().isoformat()}.csv"
+    s3_client = boto3.client(
+        "s3",
+        aws_access_key_id=config.aws_access_key_id,
+        aws_secret_access_key=config.aws_secret_access_key,
+        aws_session_token=config.aws_session_token,
+    )
+    s3_client.put_object(
+        Bucket="pp-stage-artifacts",
+        Key=s3_key,
+        Body=csv_buffer.getvalue(),
+        ContentType="text/csv",
+        Expires=datetime.now() + timedelta(seconds=config.s3.presigned_url_expiration) + timedelta(hours=1),
+    )
+
     csv_buffer.close()
+
+    download_link = s3_client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": "pp-stage-artifacts", "Key": s3_key},
+        ExpiresIn=config.s3.presigned_url_expiration,
+    )
+    export_opts = DownloadExport(
+        class_name = class_.name,
+        email=user.email,
+        link=download_link,
+    )
+    await send_export_download(config.email.sender, export_opts, expires=config.s3.presigned_url_expiration)
+
+
+def process_message_content(
+    content: list[MessageContentPartParam], file_names: dict[str, str]
+) -> str:
+    """Process message content for CSV export. The end result is a single string with all the content combined.
+    Images are replaced with their file names, and text is extracted from the content parts.
+    File citations are replaced with their file names inside the text
+    """
+    processed_content = []
+    for part in content:
+        if isinstance(part, TextContentBlock):
+            processed_content.append(
+                replace_annotations_in_text(text=part, file_names=file_names)
+            )
+    return "\n".join(processed_content)
+
+
+def replace_annotations_in_text(
+    text: TextContentBlock, file_names: dict[str, str]
+) -> str:
+    updated_text = text.text.value
+    for annotation in text.text.annotations:
+        if isinstance(annotation, FileCitationAnnotation) and annotation.text:
+            updated_text = updated_text.replace(
+                annotation.text,
+                f" [{file_names.get(annotation.file_citation.file_id, 'Unknown citation/Deleted Assistant')}] ",
+            )
+    return updated_text
+
 
 @functools.cache
 def get_openai_client(api_key: str) -> openai.AsyncClient:
     return openai.AsyncClient(api_key=api_key)
-

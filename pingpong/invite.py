@@ -1,5 +1,5 @@
 from .email import EmailSender
-from .schemas import CreateInvite
+from .schemas import CreateInvite, DownloadExport
 from .template import email_template as message_template
 from .time import convert_seconds
 
@@ -34,6 +34,36 @@ async def send_invite(
             "link": link,
             "email": invite.email,
             "legal_text": "because a PingPong user invited you to join their Group",
+        }
+    )
+
+    await sender.send(invite.email, subject, message)
+
+async def send_export_download(
+    sender: EmailSender,
+    invite: DownloadExport,
+    expires: int = 43200,
+):
+    subject = f"Your data export is ready for {invite.class_name}"
+
+    message = message_template.substitute(
+        {
+            "title": f"Your data export is ready.",
+            "subtitle": (
+                f"{invite.inviter_name} has invited you"
+                if invite.inviter_name
+                else "You have been invited"
+            )
+            + "We have successfully exported the thread data you requested from "
+            + invite.class_name
+            + ". You can download your data export below in a CSV format. Please note that user ids are anonymized, but consistent across threads and exports.",
+            "type": "download link",
+            "cta": f"Download your data export",
+            "underline": "If your download link has expired, you can create a new export from the Manage Group page on PingPong. All exports are deleted after they expire.",
+            "expires": convert_seconds(expires),
+            "link": invite.link,
+            "email": invite.email,
+            "legal_text": "because you requested a data export from PingPong",
         }
     )
 

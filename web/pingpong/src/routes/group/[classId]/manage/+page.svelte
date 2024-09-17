@@ -489,6 +489,16 @@
     }
   };
 
+  const exportThreads = async () => {
+    const result = await api.exportThreads(fetch, data.class.id);
+    const response = api.expandResponse(result);
+    if (response.error) {
+      sadToast(response.error.detail || 'An unknown error occurred');
+    } else {
+      happyToast('All set!');
+    }
+  };
+
   const reconnectCanvasAccount = async () => {
     const result = await api.removeCanvasConnection(fetch, data.class.id, 'harvard', true);
     const response = api.expandResponse(result);
@@ -587,6 +597,16 @@
         ><div class="flex flex-row justify-between gap-2">
           <FileLinesOutline />
           <div>User Guide</div>
+        </div></Button
+      >
+      <Button
+        pill
+        size="sm"
+        class="bg-white border border-blue-dark-40 text-blue-dark-40 hover:text-white hover:bg-blue-dark-40"
+        on:click={exportThreads}
+        ><div class="flex flex-row justify-between gap-2">
+          <FileLinesOutline />
+          <div>Export Threads</div>
         </div></Button
       >
       <Button

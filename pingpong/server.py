@@ -34,6 +34,7 @@ from .time import convert_seconds
 from .saml import get_saml2_client, get_saml2_settings, get_saml2_attrs
 
 from .ai import (
+    export_class_threads,
     format_instructions,
     generate_name,
     get_openai_client,
@@ -1542,6 +1543,18 @@ async def get_ci_messages(
     return {
         "ci_messages": messages,
     }
+
+
+@v1.get(
+    "/class/{class_id}/export",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def export_class(
+    class_id: str, request: Request, tasks: BackgroundTasks, openai_client: OpenAIClient
+):
+    await export_class_threads(openai_client, request.state.db, class_id)
+    return {"status": "ok"}
 
 
 @v1.get(

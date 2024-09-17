@@ -262,7 +262,7 @@ class Config(BaseSettings):
     upload: UploadSettings = Field(UploadSettings())
     aws_access_key_id: str | None = Field(None)
     aws_secret_access_key: str | None = Field(None)
-
+    aws_session_token: str | None = Field(None)
 
     def url(self, path: str | None) -> str:
         """Return a URL relative to the public URL."""
