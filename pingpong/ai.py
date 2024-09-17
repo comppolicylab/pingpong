@@ -18,7 +18,6 @@ from openai.types.beta.threads.runs import ToolCallsStepDetails, CodeInterpreter
 from openai.types.beta.threads.text_content_block import TextContentBlock
 from pingpong.schemas import CodeInterpreterMessage, DownloadExport
 from pingpong.config import config
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Dict
 from zoneinfo import ZoneInfo
 
@@ -303,130 +302,131 @@ def generate_user_hash(id: int, created: datetime) -> str:
 
 async def export_class_threads(
     cli: openai.AsyncClient,
-    session: AsyncSession,
     class_id: str,
     user_id: int,
 ) -> None:
-    class_ = await models.Class.get_by_id(session, int(class_id))
-    if not class_:
-        raise ValueError(f"Class with ID {class_id} not found")
+    async with config.db.driver.async_session() as session:
+        class_ = await models.Class.get_by_id(session, int(class_id))
+        if not class_:
+            raise ValueError(f"Class with ID {class_id} not found")
 
-    user = await models.User.get_by_id(session, user_id)
-    if not user:
-        raise ValueError(f"User with ID {user_id} not found")
+        user = await models.User.get_by_id(session, user_id)
+        if not user:
+            raise ValueError(f"User with ID {user_id} not found")
 
-    csv_buffer = io.StringIO()
-    csvwriter = csv.writer(csv_buffer)
-    csvwriter.writerow(
-        [
-            "User ID",
-            "Assistant Name",
-            "Role",
-            "Thread ID",
-            "Message ID",
-            "Created At",
-            "Content",
-        ]
-    )
-
-    async for thread in models.Thread.get_thread_by_class_id(
-        session, class_id=int(class_id)
-    ):
-        assistant, file_names = await models.Thread.get_file_search_files_assistant(
-            session, thread.id
-        )
-        assistant_name = assistant.name if assistant else "Deleted Assistant"
-
-        user_hashes = (
-            list(
-                map(
-                    lambda user: generate_user_hash(user.id, user.created), thread.users
-                )
-            )
-            if thread.users
-            else ["Unknown User"]
-        )
-        user_hashes_str = ", ".join(user_hashes)
-
+        csv_buffer = io.StringIO()
+        csvwriter = csv.writer(csv_buffer)
         csvwriter.writerow(
             [
-                user_hashes_str,
-                assistant_name,
-                "system_prompt",
-                thread.id,
-                "N/A",
-                thread.created.astimezone(ZoneInfo("America/New_York")).strftime(
-                    "%Y-%m-%d %H:%M:%S %Z"
-                ),
-                thread.assistant.instructions
-                if thread.assistant
-                else "Unknown Prompt (Deleted Assistant)",
+                "User ID",
+                "Assistant Name",
+                "Role",
+                "Thread ID",
+                "Message ID",
+                "Created At",
+                "Content",
             ]
         )
 
-        after = None
-        while True:
-            messages = await cli.beta.threads.messages.list(
-                thread_id=thread.thread_id,
-                after=after,
-                order="asc",
+        async for thread in models.Thread.get_thread_by_class_id(
+            session, class_id=int(class_id)
+        ):
+            assistant, file_names = await models.Thread.get_file_search_files_assistant(
+                session, thread.id
+            )
+            assistant_name = assistant.name if assistant else "Deleted Assistant"
+
+            user_hashes = (
+                list(
+                    map(
+                        lambda user: generate_user_hash(user.id, user.created),
+                        thread.users,
+                    )
+                )
+                if thread.users
+                else ["Unknown User"]
+            )
+            user_hashes_str = ", ".join(user_hashes)
+
+            csvwriter.writerow(
+                [
+                    user_hashes_str,
+                    assistant_name,
+                    "system_prompt",
+                    thread.id,
+                    "N/A",
+                    thread.created.astimezone(ZoneInfo("America/New_York")).strftime(
+                        "%Y-%m-%d %H:%M:%S %Z"
+                    ),
+                    thread.assistant.instructions
+                    if thread.assistant
+                    else "Unknown Prompt (Deleted Assistant)",
+                ]
             )
 
-            for message in messages.data:
-                csvwriter.writerow(
-                    [
-                        user_hashes_str,
-                        assistant_name,
-                        message.role,
-                        thread.id,
-                        message.id,
-                        datetime.fromtimestamp(message.created_at, tz=timezone.utc)
-                        .astimezone(ZoneInfo("America/New_York"))
-                        .strftime("%Y-%m-%d %H:%M:%S %Z"),
-                        process_message_content(message.content, file_names),
-                    ]
+            after = None
+            while True:
+                messages = await cli.beta.threads.messages.list(
+                    thread_id=thread.thread_id,
+                    after=after,
+                    order="asc",
                 )
 
-            if len(messages.data) == 0:
-                break
-            after = messages.data[-1].id
+                for message in messages.data:
+                    csvwriter.writerow(
+                        [
+                            user_hashes_str,
+                            assistant_name,
+                            message.role,
+                            thread.id,
+                            message.id,
+                            datetime.fromtimestamp(message.created_at, tz=timezone.utc)
+                            .astimezone(ZoneInfo("America/New_York"))
+                            .strftime("%Y-%m-%d %H:%M:%S %Z"),
+                            process_message_content(message.content, file_names),
+                        ]
+                    )
 
-    csv_buffer.seek(0)
+                if len(messages.data) == 0:
+                    break
+                after = messages.data[-1].id
 
-    s3_key = f"thread_export_{class_id}_{user_id}_{datetime.now().isoformat()}.csv"
-    s3_client = boto3.client(
-        "s3",
-    )
-    s3_client.put_object(
-        Bucket="pp-stage-artifacts",
-        Key=s3_key,
-        Body=csv_buffer.getvalue(),
-        ContentType="text/csv",
-        Expires=datetime.now()
-        + timedelta(seconds=config.s3.presigned_url_expiration)
-        + timedelta(hours=1),
-        ContentDisposition=f'attachment; filename="{s3_key}"',
-    )
+        csv_buffer.seek(0)
 
-    csv_buffer.close()
+        s3_key = f"thread_export_{class_id}_{user_id}_{datetime.now().isoformat()}.csv"
+        s3_client = boto3.client(
+            "s3",
+        )
+        s3_client.put_object(
+            Bucket="pp-stage-artifacts",
+            Key=s3_key,
+            Body=csv_buffer.getvalue(),
+            ContentType="text/csv",
+            Expires=datetime.now()
+            + timedelta(seconds=config.s3.presigned_url_expiration)
+            + timedelta(hours=1),
+            ContentDisposition=f'attachment; filename="{s3_key}"',
+        )
 
-    download_link = s3_client.generate_presigned_url(
-        "get_object",
-        Params={
-            "Bucket": "pp-stage-artifacts",
-            "Key": s3_key,
-            "ResponseContentDisposition": f'attachment; "filename={s3_key}"',
-        },
-        ExpiresIn=config.s3.presigned_url_expiration,
-    )
-    export_opts = DownloadExport(
-        class_name=class_.name,
-        email=user.email,
-        link=download_link,
-    )
-    await send_export_download(
-        config.email.sender, export_opts, expires=config.s3.presigned_url_expiration
-    )
+        csv_buffer.close()
+
+        download_link = s3_client.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": "pp-stage-artifacts",
+                "Key": s3_key,
+                "ResponseContentDisposition": f'attachment; "filename={s3_key}"',
+            },
+            ExpiresIn=config.s3.presigned_url_expiration,
+        )
+        export_opts = DownloadExport(
+            class_name=class_.name,
+            email=user.email,
+            link=download_link,
+        )
+        await send_export_download(
+            config.email.sender, export_opts, expires=config.s3.presigned_url_expiration
+        )
 
 
 def process_message_content(

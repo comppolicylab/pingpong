@@ -1553,8 +1553,11 @@ async def get_ci_messages(
 async def export_class(
     class_id: str, request: Request, tasks: BackgroundTasks, openai_client: OpenAIClient
 ):
-    await export_class_threads(
-        openai_client, request.state.db, class_id, request.state.session.user.id
+    tasks.add_task(
+        export_class_threads,
+        openai_client,
+        class_id,
+        request.state.session.user.id,
     )
     return {"status": "ok"}
 
