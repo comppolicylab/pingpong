@@ -96,4 +96,3 @@ jobs:
                 -X POST \
                 -d "{\"body\":\"$COMMENT_BODY\"}" \
                 "https://api.github.com/repos/${{ github.repository }}/issues/$PR_NUMBER/comments"
-  
