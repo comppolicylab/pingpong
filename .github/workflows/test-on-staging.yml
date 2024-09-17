@@ -15,7 +15,7 @@ jobs:
       - name: Checkout release code at tag commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.issue.pull_request.head.sha }}
+          ref: refs/pull/${{ github.event.issue.number }}/head
 
       - name: Create version tag
         run: |
