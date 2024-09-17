@@ -1,0 +1,99 @@
+name: Push PR code to AWS Staging
+run-name: "Staging Test: Push ${{ github.event.issue.number }} on AWS"
+concurrency: release
+
+on:
+  issue_comment:
+    types: [created]
+jobs:
+  release:
+    name: Build and Push/Tag Docker Images for Testing
+    if: github.event.issue.pull_request != null && contains(github.event.comment.body, '/test-on-staging')
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release code at tag commit
+        uses: actions/checkout@v4
+
+      - name: Create version tag
+        run: |
+          # Get the release tag
+          RELEASE_TAG=${{ github.event.issue.number }}
+          # Set GitHub environment variables
+          echo "SRV_VERSION=pr_${RELEASE_TAG}" >> $GITHUB_ENV
+          echo "WEB_VERSION=pr_${RELEASE_TAG}" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@0e613a0980cbf65ed5b322eb7a1e075d28913a83
+        with:
+          aws-access-key-id: ${{ secrets.PINGPONG_AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.PINGPONG_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@cef2380b0d4c6813048ef6e1f7fd9ec1639bd3b5
+
+      - name: Build server image for release
+        env:
+          ENVIRONMENT: 'stage'
+          SRV_VERSION: ${{ env.SRV_VERSION }}
+        run: |
+          echo "Building Server Image with tag ${{ env.SRV_VERSION }}"
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml build srv
+
+      - name: Push server image for release
+        env:
+          ENVIRONMENT: 'stage'
+          SRV_VERSION: ${{ env.SRV_VERSION }}
+        run: |
+          aws ecr get-login-password --region ${{ vars.AWS_REGION }} | docker login --username AWS --password-stdin ${{ vars.PINGPONG_REGISTRY_ENDPOINT }}
+          docker tag ${{ vars.PINGPONG_SRV_REGISTRY }}:${{ env.SRV_VERSION }} ${{ vars.PINGPONG_SRV_REGISTRY }}:${{ env.ENVIRONMENT }}
+          docker push ${{ vars.PINGPONG_SRV_REGISTRY }}:${{ env.SRV_VERSION }}
+          docker push ${{ vars.PINGPONG_SRV_REGISTRY }}:${{ env.ENVIRONMENT }}
+          echo "Built and pushed Server Image (${{ env.SRV_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
+
+      - name: Reply to the PR comment (Server image pushed)
+        env:
+          ENVIRONMENT: 'stage'
+          SRV_VERSION: ${{ env.SRV_VERSION }}
+        run: |
+          COMMENT_BODY="*Built* and pushed *Server Image (${{ env.SRV_VERSION }})* for testing on *${{ env.ENVIRONMENT }}* environment"
+          PR_NUMBER=${{ github.event.issue.number }}
+          curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+               -X POST \
+               -d "{\"body\":\"$COMMENT_BODY\"}" \
+               "https://api.github.com/repos/${{ github.repository }}/issues/$PR_NUMBER/comments"
+
+      - name: Build web image for release
+        env:
+          ENVIRONMENT: 'stage'
+          WEB_VERSION: ${{ env.WEB_VERSION }}
+        run: |
+          echo "Building Web Image with tag ${{ env.WEB_VERSION }}"
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml build web
+
+      - name: Push web image for release
+        env:
+          ENVIRONMENT: 'stage'
+          WEB_VERSION: ${{ env.WEB_VERSION }}
+        run: |
+          aws ecr get-login-password --region ${{ vars.AWS_REGION }} | docker login --username AWS --password-stdin ${{ vars.PINGPONG_REGISTRY_ENDPOINT }}
+          docker tag ${{ vars.PINGPONG_WEB_REGISTRY }}:${{ env.WEB_VERSION }} ${{ vars.PINGPONG_WEB_REGISTRY }}:${{ env.ENVIRONMENT }}
+          docker push ${{ vars.PINGPONG_WEB_REGISTRY }}:${{ env.WEB_VERSION }}
+          docker push ${{ vars.PINGPONG_WEB_REGISTRY }}:${{ env.ENVIRONMENT }}
+          echo "Built and pushed Web Image (${{ env.WEB_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
+
+      - name: Reply to the PR comment (Server image pushed)
+        env:
+          ENVIRONMENT: 'stage'
+          WEB_VERSION: ${{ env.WEB_VERSION }}
+        run: |
+          COMMENT_BODY="*Built* and pushed *Server Image (${{ env.WEB_VERSION }})* for testing on *${{ env.ENVIRONMENT }}* environment"
+          PR_NUMBER=${{ github.event.issue.number }}
+          curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -X POST \
+                -d "{\"body\":\"$COMMENT_BODY\"}" \
+                "https://api.github.com/repos/${{ github.repository }}/issues/$PR_NUMBER/comments"
+  
