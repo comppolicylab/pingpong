@@ -405,7 +405,7 @@ async def export_class_threads(
         Expires=datetime.now()
         + timedelta(seconds=config.s3.presigned_url_expiration)
         + timedelta(hours=1),
-        ResponseContentDisposition=f'attachment; filename="{s3_key}"',
+        ContentDisposition=f'attachment; filename="{s3_key}"',
     )
 
     csv_buffer.close()
@@ -415,7 +415,7 @@ async def export_class_threads(
         Params={
             "Bucket": "pp-stage-artifacts",
             "Key": s3_key,
-            "ResponseContentDisposition": f"attachment; filename={s3_key}",
+            "ResponseContentDisposition": f'attachment; "filename={s3_key}"',
         },
         ExpiresIn=config.s3.presigned_url_expiration,
     )
