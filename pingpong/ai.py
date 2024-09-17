@@ -405,6 +405,7 @@ async def export_class_threads(
         Expires=datetime.now()
         + timedelta(seconds=config.s3.presigned_url_expiration)
         + timedelta(hours=1),
+        ResponseContentDisposition=f'attachment; filename="{s3_key}"',
     )
 
     csv_buffer.close()
