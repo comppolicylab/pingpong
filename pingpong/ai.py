@@ -357,7 +357,9 @@ async def export_class_threads(
                     "system_prompt",
                     thread.id,
                     "N/A",
-                    thread.created.astimezone(ZoneInfo("America/New_York")).isoformat(),
+                    thread.created.astimezone(ZoneInfo("America/New_York"))
+                    .replace(microsecond=0)
+                    .isoformat(),
                     thread.assistant.instructions
                     if thread.assistant
                     else "Unknown Prompt (Deleted Assistant)",
