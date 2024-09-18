@@ -6,21 +6,25 @@ from datetime import datetime, timedelta
 from io import BytesIO, StringIO
 from typing import Union
 
-class BaseArtifactStore(ABC):  
-    @abstractmethod  
-    async def put(self, name: str, content: Union[BytesIO, StringIO], content_type: str) -> str:  
-        """Save file to the store and return a URL."""  
-        ...  
+
+class BaseArtifactStore(ABC):
+    @abstractmethod
+    async def put(
+        self, name: str, content: Union[BytesIO, StringIO], content_type: str
+    ) -> str:
+        """Save file to the store and return a URL."""
+        ...
 
 
-class S3ArtifactStore(BaseArtifactStore):  
-    
-    def __init__(self, bucket: str, expiry: int = 43_200):  
-        self._bucket = bucket  
-        self._expiry = expiry  
-        self._s3_client = boto3.client("s3")  
+class S3ArtifactStore(BaseArtifactStore):
+    def __init__(self, bucket: str, expiry: int = 43_200):
+        self._bucket = bucket
+        self._expiry = expiry
+        self._s3_client = boto3.client("s3")
 
-    async def put(self, name: str, content: Union[BytesIO, StringIO], content_type: str) -> str:  
+    async def put(
+        self, name: str, content: Union[BytesIO, StringIO], content_type: str
+    ) -> str:
         self._s3_client.put_object(
             Bucket=self._bucket,
             Key=name,
@@ -39,11 +43,11 @@ class S3ArtifactStore(BaseArtifactStore):
                 "ResponseContentDisposition": f'attachment; "filename={name}"',
             },
             ExpiresIn=self._expiry,
-        ) 
+        )
 
 
-class LocalArtifactStore(BaseArtifactStore):  
-    # Saves files locally for dev/test  
+class LocalArtifactStore(BaseArtifactStore):
+    # Saves files locally for dev/test
     def __init__(self, directory: str):
         self._directory = directory
         print(f"LocalArtifactStore: {directory}")
@@ -51,12 +55,13 @@ class LocalArtifactStore(BaseArtifactStore):
             print(f"Creating directory {directory}")
             os.makedirs(directory)
 
-    async def put(self, name: str, content: Union[BytesIO, StringIO], content_type: str) -> str:
+    async def put(
+        self, name: str, content: Union[BytesIO, StringIO], content_type: str
+    ) -> str:
         file_path = os.path.join(self._directory, name)
         # Write the file content to the local file system
-        with open(file_path, 'wb' if isinstance(content, BytesIO) else 'w') as f:
+        with open(file_path, "wb" if isinstance(content, BytesIO) else "w") as f:
             f.write(content.getvalue())
-        
+
         # Return a local file URL
         return f"file://{os.path.abspath(file_path)}"
-
