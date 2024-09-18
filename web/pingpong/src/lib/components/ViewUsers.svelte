@@ -182,11 +182,7 @@
     const other = allRoles.filter((role) => user.roles[role] && role !== primary);
     return {
       primary: primary || (other[0] !== 'admin' ? other[0] : null) || null,
-      label: primary
-        ? ROLE_LABELS_INHERIT_ADMIN[primary]
-        : other[0]
-          ? ROLE_LABELS_INHERIT_ADMIN[other[0]]
-          : 'No Access',
+      label: primary ? ROLE_LABELS_INHERIT_ADMIN[primary] : 'No Access',
       other,
       otherLabels: other.map((role) => ROLE_LABELS_INHERIT_ADMIN[role])
     };
