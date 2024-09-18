@@ -1547,7 +1547,7 @@ async def get_ci_messages(
 
 @v1.get(
     "/class/{class_id}/export",
-    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
 async def export_class(

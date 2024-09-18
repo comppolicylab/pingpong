@@ -1,5 +1,3 @@
-import base64
-import boto3
 import csv
 import functools
 import hashlib
@@ -10,7 +8,7 @@ import orjson
 from pingpong.invite import send_export_download
 import pingpong.models as models
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from openai.types.beta.assistant_stream_event import ThreadRunStepCompleted
 from openai.types.beta.threads import ImageFile, MessageContentPartParam
 from openai.types.beta.threads.annotation import FileCitationAnnotation
@@ -19,6 +17,7 @@ from openai.types.beta.threads.image_url_content_block import ImageURLContentBlo
 from openai.types.beta.threads.message_content import MessageContent
 from openai.types.beta.threads.runs import ToolCallsStepDetails, CodeInterpreterToolCall
 from openai.types.beta.threads.text_content_block import TextContentBlock
+from pingpong.now import NowFn, utcnow
 from pingpong.schemas import CodeInterpreterMessage, DownloadExport
 from pingpong.config import config
 from typing import Dict
@@ -293,20 +292,20 @@ def format_instructions(instructions: str, use_latex: bool = False) -> str:
     return instructions
 
 
-def generate_user_hash(id: int, created: datetime) -> str:
-    combined_input = f"{id}{created.isoformat()}"
+def generate_user_hash(class_: models.Class, user: models.User) -> str:
+    combined_input = (
+        f"{id}_{user.created.isoformat()}-{class_.id}_{class_.created.isoformat()}"
+    )
     hash_object = hashlib.sha256()
     hash_object.update(combined_input.encode("utf-8"))
-
-    binary_hash = hash_object.digest()
-    alphanumeric_hash = base64.urlsafe_b64encode(binary_hash).decode("utf-8")
-    return alphanumeric_hash.rstrip("=")
+    return hash_object.hexdigest().rstrip("=")
 
 
 async def export_class_threads(
     cli: openai.AsyncClient,
     class_id: str,
     user_id: int,
+    nowfn: NowFn = utcnow,
 ) -> None:
     async with config.db.driver.async_session() as session:
         class_ = await models.Class.get_by_id(session, int(class_id))
@@ -342,7 +341,7 @@ async def export_class_threads(
             user_hashes = (
                 list(
                     map(
-                        lambda user: generate_user_hash(user.id, user.created),
+                        lambda user: generate_user_hash(class_, user),
                         thread.users,
                     )
                 )
@@ -358,9 +357,7 @@ async def export_class_threads(
                     "system_prompt",
                     thread.id,
                     "N/A",
-                    thread.created.astimezone(ZoneInfo("America/New_York")).strftime(
-                        "%Y-%m-%d %H:%M:%S %Z"
-                    ),
+                    thread.created.astimezone(ZoneInfo("America/New_York")).isoformat(),
                     thread.assistant.instructions
                     if thread.assistant
                     else "Unknown Prompt (Deleted Assistant)",
@@ -385,7 +382,7 @@ async def export_class_threads(
                             message.id,
                             datetime.fromtimestamp(message.created_at, tz=timezone.utc)
                             .astimezone(ZoneInfo("America/New_York"))
-                            .strftime("%Y-%m-%d %H:%M:%S %Z"),
+                            .isoformat(),
                             process_message_content(message.content, file_names),
                         ]
                     )
@@ -396,39 +393,23 @@ async def export_class_threads(
 
         csv_buffer.seek(0)
 
-        s3_key = f"thread_export_{class_id}_{user_id}_{datetime.now().isoformat()}.csv"
-        s3_client = boto3.client(
-            "s3",
+        file_name = (
+            f"thread_export_{class_id}_{user_id}_{datetime.now().isoformat()}.csv"
         )
-        s3_client.put_object(
-            Bucket="pp-stage-artifacts",
-            Key=s3_key,
-            Body=csv_buffer.getvalue(),
-            ContentType="text/csv",
-            Expires=datetime.now()
-            + timedelta(seconds=config.s3.presigned_url_expiration)
-            + timedelta(hours=1),
-            ContentDisposition=f'attachment; filename="{s3_key}"',
+        download_link = await config.artifactStore.store.put(
+            file_name, csv_buffer, "text/csv;charset=utf-8"
         )
-
         csv_buffer.close()
 
-        download_link = s3_client.generate_presigned_url(
-            "get_object",
-            Params={
-                "Bucket": "pp-stage-artifacts",
-                "Key": s3_key,
-                "ResponseContentDisposition": f'attachment; "filename={s3_key}"',
-            },
-            ExpiresIn=config.s3.presigned_url_expiration,
-        )
         export_opts = DownloadExport(
             class_name=class_.name,
             email=user.email,
             link=download_link,
         )
         await send_export_download(
-            config.email.sender, export_opts, expires=config.s3.presigned_url_expiration
+            config.email.sender,
+            export_opts,
+            expires=config.artifactStore.presigned_url_expiration,
         )
 
 
@@ -455,7 +436,7 @@ def process_message_content(
                     f"[Image URL: {part.image_url.url if part.image_url else 'Unknown image URL'}]"
                 )
             case _:
-                pass
+                logger.warning(f"Unknown content type: {part}")
     return "\n".join(processed_content)
 
 

@@ -186,7 +186,7 @@
     }) as FileUploadInfo[];
 
   $: hasApiKey = !!data?.class?.api_key;
-
+  $: isAdmin = !!data?.grants?.isAdmin;
   $: canEditClassInfo = !!data?.grants?.canEditInfo;
   $: canManageClassUsers = !!data?.grants?.canManageUsers;
   $: canUploadClassFiles = !!data?.grants?.canUploadClassFiles;
@@ -612,19 +612,21 @@
         >More options <ChevronDownOutline /></Button
       >
       <Dropdown class="overflow-y-auto">
-        <DropdownItem
-          on:touchstart={() => (exportThreadsModal = true)}
-          on:click={() => (exportThreadsModal = true)}
-          disabled={makePrivate}
-          class="tracking-wide flex flex-row items-center gap-2 text-blue-dark-40 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:bg-white"
-        >
-          <ShareAllOutline />
-          <div>Export threads</div>
-        </DropdownItem>
-        {#if makePrivate}
-          <Tooltip defaultClass="text-wrap py-2 px-3 text-sm font-normal shadow-sm" arrow={false}
-            >You can't export threads because they are private in this group.</Tooltip
+        {#if isAdmin}
+          <DropdownItem
+            on:touchstart={() => (exportThreadsModal = true)}
+            on:click={() => (exportThreadsModal = true)}
+            disabled={makePrivate}
+            class="tracking-wide flex flex-row items-center gap-2 text-blue-dark-40 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:bg-white"
           >
+            <ShareAllOutline />
+            <div>Export threads</div>
+          </DropdownItem>
+          {#if makePrivate}
+            <Tooltip defaultClass="text-wrap py-2 px-3 text-sm font-normal shadow-sm" arrow={false}
+              >You can't export threads because they are private in this group.</Tooltip
+            >
+          {/if}
         {/if}
         <DropdownItem
           on:touchstart={() => (deleteModal = true)}

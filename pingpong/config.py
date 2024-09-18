@@ -10,6 +10,7 @@ from glowplug import PostgresSettings, SqliteSettings
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+from pingpong.artifacts import LocalArtifactStore, S3ArtifactStore
 from .authz import OpenFgaAuthzDriver
 from .email import AzureEmailSender, GmailEmailSender, MockEmailSender, SmtpEmailSender
 from .support import DiscordSupportDriver
@@ -242,11 +243,31 @@ class UploadSettings(BaseSettings):
     class_file_max_size: int = Field(512 * 1024 * 1024)  # 512 MB
 
 
-class S3Settings(BaseSettings):
+class S3StoreSettings(BaseSettings):
     """Settings for S3 storage."""
 
+    type: Literal["s3"]
     bucket: str
     presigned_url_expiration: int = Field(60 * 60)  # 1 hour
+
+    @cached_property
+    def store(self):
+        return S3ArtifactStore(self.bucket, expiry=self.presigned_url_expiration)
+
+
+class LocalStoreSettings(BaseSettings):
+    """Settings for S3 storage."""
+
+    type: Literal["local"]
+    dir: str
+    presigned_url_expiration: int = Field(60 * 60)  # 1 hour
+
+    @cached_property
+    def store(self):
+        return LocalArtifactStore(self.dir)
+
+
+ArtifactStoreSettings = Union[S3StoreSettings, LocalStoreSettings]
 
 
 class Config(BaseSettings):
@@ -257,7 +278,7 @@ class Config(BaseSettings):
     reload: int = Field(0)
     public_url: str = Field("http://localhost:8000")
     development: bool = Field(False, env="DEVELOPMENT")
-    s3: S3Settings
+    artifactStore: ArtifactStoreSettings
     db: DbSettings
     auth: AuthSettings
     authz: AuthzSettings
