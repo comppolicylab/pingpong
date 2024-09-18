@@ -1686,7 +1686,7 @@ class Thread(Base):
         stmt = (
             update(Thread)
             .where(Thread.assistant_id == int(assistant_id))
-            .values(tools_available=tools)
+            .values(tools_available=tools, updated=Thread.updated)
         )
         await session.execute(stmt)
 
