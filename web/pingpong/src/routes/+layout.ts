@@ -1,8 +1,6 @@
 import { redirect, error } from '@sveltejs/kit';
 import * as api from '$lib/api';
 import type { LayoutLoad } from './$types';
-import { browser } from '$app/environment';
-import { invalidateAll } from '$app/navigation';
 
 const LOGIN = '/login';
 const HOME = '/';
