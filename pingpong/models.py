@@ -1657,6 +1657,7 @@ class Thread(Base):
         cls,
         session: AsyncSession,
         class_id: int,
+        desc: bool = True,
     ) -> AsyncGenerator["Thread", None]:
         stmt = (
             select(Thread)
@@ -1664,7 +1665,7 @@ class Thread(Base):
             .options(
                 selectinload(Thread.users).load_only(User.id, User.created),
             )
-            .order_by(Thread.updated.desc())
+            .order_by(Thread.updated.desc() if desc else Thread.updated.asc())
             .where(Thread.class_id == int(class_id))
         )
         result = await session.execute(stmt)

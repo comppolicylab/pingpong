@@ -332,7 +332,7 @@ async def export_class_threads(
         )
 
         async for thread in models.Thread.get_thread_by_class_id(
-            session, class_id=int(class_id)
+            session, class_id=int(class_id), desc=False
         ):
             assistant, file_names = await models.Thread.get_file_search_files_assistant(
                 session, thread.id

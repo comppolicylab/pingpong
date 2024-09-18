@@ -1553,6 +1553,14 @@ async def get_ci_messages(
 async def export_class(
     class_id: str, request: Request, tasks: BackgroundTasks, openai_client: OpenAIClient
 ):
+    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    if not class_:
+        raise HTTPException(status_code=404, detail="Class not found")
+    if class_.private:
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot export private classes",
+        )
     tasks.add_task(
         export_class_threads,
         openai_client,

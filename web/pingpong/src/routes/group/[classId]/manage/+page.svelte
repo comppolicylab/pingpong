@@ -20,6 +20,7 @@
     Heading,
     Label,
     Input,
+    Tooltip,
     Select,
     InputAddon,
     Alert,
@@ -42,6 +43,7 @@
     LinkOutline,
     RefreshOutline,
     ChevronDownOutline,
+    ShareAllOutline,
     TrashBinOutline,
     EnvelopeOutline,
     SortHorizontalOutline,
@@ -607,17 +609,23 @@
         pill
         size="sm"
         class="bg-white text-blue-dark-40 border-solid border border-blue-dark-40 hover:text-white hover:bg-blue-dark-40"
-        >More options <ChevronDownOutline class="w-3 h-3 ms-2" /></Button
+        >More options <ChevronDownOutline /></Button
       >
       <Dropdown class="overflow-y-auto">
         <DropdownItem
           on:touchstart={() => (exportThreadsModal = true)}
           on:click={() => (exportThreadsModal = true)}
-          class="tracking-wide flex flex-row items-center gap-2 text-blue-dark-40"
+          disabled={makePrivate}
+          class="tracking-wide flex flex-row items-center gap-2 text-blue-dark-40 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:bg-white"
         >
-          <FileLinesOutline />
+          <ShareAllOutline />
           <div>Export threads</div>
         </DropdownItem>
+        {#if makePrivate}
+          <Tooltip defaultClass="text-wrap py-2 px-3 text-sm font-normal shadow-sm" arrow={false}
+            >You can't export threads because they are private in this group.</Tooltip
+          >
+        {/if}
         <DropdownItem
           on:touchstart={() => (deleteModal = true)}
           on:click={() => (deleteModal = true)}
