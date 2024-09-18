@@ -22,7 +22,7 @@
     Tooltip
   } from 'flowbite-svelte';
   import { SearchOutline } from 'flowbite-svelte-icons';
-  import { ROLES, ROLE_LABELS } from '$lib/api';
+  import { ROLES, ROLE_LABELS_INHERIT_ADMIN } from '$lib/api';
   import type { ClassUser, Role, ClassUsersResponse } from '$lib/api';
   import { sadToast, happyToast } from '$lib/toast';
   import * as api from '$lib/api';
@@ -83,7 +83,7 @@
   const roleOptions = [
     ...ROLES.filter((role) => role !== 'admin' && checkUserEditPermissions(role)).map((role) => ({
       value: role,
-      name: ROLE_LABELS[role]
+      name: ROLE_LABELS_INHERIT_ADMIN[role]
     })),
     // Need a value for "no access" role, dropdown defaults to Select a Role otherwise
     { value: null, name: 'No Access' }
@@ -181,10 +181,14 @@
     const primary = priorityRoles.find((role) => user.roles[role]);
     const other = allRoles.filter((role) => user.roles[role] && role !== primary);
     return {
-      primary: primary || other[0] || null,
-      label: primary ? ROLE_LABELS[primary] : other[0] ? ROLE_LABELS[other[0]] : 'No Access',
+      primary: primary || (other[0] !== 'admin' ? other[0] : null) || null,
+      label: primary
+        ? ROLE_LABELS_INHERIT_ADMIN[primary]
+        : other[0]
+          ? ROLE_LABELS_INHERIT_ADMIN[other[0]]
+          : 'No Access',
       other,
-      otherLabels: other.map((role) => ROLE_LABELS[role])
+      otherLabels: other.map((role) => ROLE_LABELS_INHERIT_ADMIN[role])
     };
   };
 
@@ -255,7 +259,7 @@
       return;
     }
 
-    const roleLabel = ROLE_LABELS[role as Role] || role || 'No Access';
+    const roleLabel = ROLE_LABELS_INHERIT_ADMIN[role as Role] || role || 'No Access';
     const user = users.find((u) => u.id === +userId);
     const userName = user?.name || user?.email || `User ${userId}`;
     const action = `Set ${userName} group role to "${roleLabel}"`;
@@ -388,17 +392,13 @@
                   <input type="hidden" name="user_id" value={user.id} />
                   <Select
                     name="role"
-                    items={roleOptions.filter((ro) => {
-                      // `admin` role is deprecated, don't let it be assigned to new people.
-                      // Only show it for people who already have it (typically via inheritance).
-                      return roleInfo.primary === 'admin' || ro.value !== 'admin';
-                    })}
+                    items={roleOptions}
                     value={roleInfo.primary}
                     placeholder="Select a user role..."
                     on:change={submitParentForm}
                   />
                 </form>
-                {#if !roleInfo.primary}
+                {#if !roleInfo.primary && roleInfo.other.length === 0}
                   <div class="text-xs whitespace-normal font-light text-pretty text-gray-500 mt-2">
                     * This user is not assigned to any role currently.
                   </div>
