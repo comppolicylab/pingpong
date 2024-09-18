@@ -1478,7 +1478,7 @@ async def get_thread(
         for content in message.content:
             if content.type == "text" and content.text.annotations:
                 for annotation in content.text.annotations:
-                    if annotation.type == "file_citation":
+                    if annotation.type == "file_citation" and annotation.file_citation:
                         annotation.file_citation.file_name = file_names.get(
                             annotation.file_citation.file_id, "Unknown citation"
                         )
@@ -1582,7 +1582,7 @@ async def list_thread_messages(
         for content in message.content:
             if content.type == "text" and content.text.annotations:
                 for annotation in content.text.annotations:
-                    if annotation.type == "file_citation":
+                    if annotation.type == "file_citation" and annotation.file_citation:
                         annotation.file_citation.file_name = file_names.get(
                             annotation.file_citation.file_id, "Unknown citation"
                         )
