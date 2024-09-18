@@ -175,7 +175,6 @@
   const getRoleInfoForUser = (user: ClassUser) => {
     // Roles in order of most permissive to least.
     // Administrator roles are only inherited, so they are not shown in the dropdown UI.
-    console.log(user);
     const priorityRoles: Role[] = ['teacher', 'student'];
     const allRoles: Role[] = ['admin', 'teacher', 'student'];
     // The primary role is the one the user is granted that has maximal permissions.
