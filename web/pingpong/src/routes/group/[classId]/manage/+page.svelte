@@ -41,6 +41,9 @@
     EyeSlashOutline,
     LinkOutline,
     RefreshOutline,
+    ChevronDownOutline,
+    TrashBinOutline,
+    EnvelopeOutline,
     SortHorizontalOutline,
     AdjustmentsHorizontalOutline,
     UserRemoveSolid,
@@ -145,6 +148,7 @@
     };
   };
   let deleteModal = false;
+  let exportThreadsModal = false;
   let usersModalOpen = false;
   let anyCanPublishThread = data?.class.any_can_publish_thread || false;
   let makePrivate = data?.class.private || false;
@@ -495,7 +499,7 @@
     if (response.error) {
       sadToast(response.error.detail || 'An unknown error occurred');
     } else {
-      happyToast('All set!');
+      happyToast("We've started exporting your threads. You'll receive an email when it's ready.");
     }
   };
 
@@ -602,22 +606,46 @@
       <Button
         pill
         size="sm"
-        class="bg-white border border-blue-dark-40 text-blue-dark-40 hover:text-white hover:bg-blue-dark-40"
-        on:click={exportThreads}
-        ><div class="flex flex-row justify-between gap-2">
+        class="bg-white text-blue-dark-40 border-solid border border-blue-dark-40 hover:text-white hover:bg-blue-dark-40"
+        >More options <ChevronDownOutline class="w-3 h-3 ms-2" /></Button
+      >
+      <Dropdown class="overflow-y-auto">
+        <DropdownItem
+          on:touchstart={() => (exportThreadsModal = true)}
+          on:click={() => (exportThreadsModal = true)}
+          class="tracking-wide flex flex-row items-center gap-2 text-blue-dark-40"
+        >
           <FileLinesOutline />
-          <div>Export Threads</div>
-        </div></Button
-      >
-      <Button
-        pill
-        size="sm"
-        class="bg-white border border-red-700 text-red-700 hover:text-white hover:bg-red-700"
-        type="button"
-        on:click={() => (deleteModal = true)}
-        disabled={$loading}>Delete group</Button
-      >
-
+          <div>Export threads</div>
+        </DropdownItem>
+        <DropdownItem
+          on:touchstart={() => (deleteModal = true)}
+          on:click={() => (deleteModal = true)}
+          class="tracking-wide flex flex-row items-center gap-2 text-red-700"
+        >
+          <TrashBinOutline />
+          <div>Delete group</div>
+        </DropdownItem>
+      </Dropdown>
+      <Modal bind:open={exportThreadsModal} size="xs" autoclose>
+        <div class="text-center px-2">
+          <EnvelopeOutline class="mx-auto mb-4 text-slate-500 w-12 h-12" />
+          <h3 class="mb-5 text-xl text-gray-900 dark:text-white font-bold">
+            Before we start exporting...
+          </h3>
+          <p class="mb-5 text-sm text-gray-700 dark:text-gray-300">
+            Depending on the number of threads in your group, exporting may take a while. You'll
+            receive an email when your threads are ready to download.
+            <span class="font-bold">The download link will be valid for 12 hours.</span>
+          </p>
+          <div class="flex justify-center gap-4">
+            <Button pill color="alternative" on:click={() => (exportThreadsModal = false)}
+              >Cancel</Button
+            >
+            <Button pill outline color="blue" on:click={exportThreads}>Export threads</Button>
+          </div>
+        </div>
+      </Modal>
       <Modal bind:open={deleteModal} size="xs" autoclose>
         <ConfirmationModal
           warningTitle={`Delete ${data?.class.name || 'this group'}?`}
