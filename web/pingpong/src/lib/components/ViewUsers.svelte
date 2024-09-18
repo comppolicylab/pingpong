@@ -174,13 +174,16 @@
    */
   const getRoleInfoForUser = (user: ClassUser) => {
     // Roles in order of most permissive to least.
-    const priorityRoles: Role[] = ['admin', 'teacher', 'student'];
+    // Administrator roles are only inherited, so they are not shown in the dropdown UI.
+    console.log(user);
+    const priorityRoles: Role[] = ['teacher', 'student'];
+    const allRoles: Role[] = ['admin', 'teacher', 'student'];
     // The primary role is the one the user is granted that has maximal permissions.
     const primary = priorityRoles.find((role) => user.roles[role]);
-    const other = priorityRoles.filter((role) => user.roles[role] && role !== primary);
+    const other = allRoles.filter((role) => user.roles[role] && role !== primary);
     return {
-      primary: primary || null,
-      label: primary ? ROLE_LABELS[primary] : 'No Access',
+      primary: primary || other[0] || null,
+      label: primary ? ROLE_LABELS[primary] : other[0] ? ROLE_LABELS[other[0]] : 'No Access',
       other,
       otherLabels: other.map((role) => ROLE_LABELS[role])
     };
@@ -256,7 +259,7 @@
     const roleLabel = ROLE_LABELS[role as Role] || role || 'No Access';
     const user = users.find((u) => u.id === +userId);
     const userName = user?.name || user?.email || `User ${userId}`;
-    const action = `Set ${userName} role to "${roleLabel}"`;
+    const action = `Set ${userName} group role to "${roleLabel}"`;
 
     const result = await api.updateClassUserRole(fetch, classId, userId, {
       role: role || null
@@ -350,8 +353,19 @@
             >
             <TableBodyCell {tdClass}>
               {#if noPermissions || currentUser || user.lms_type}
-                <div class="flex felx-row justify-between">
-                  <div>{roleInfo.label}</div>
+                <div class="flex flex-row justify-between">
+                  <div class="flex flex-col">
+                    <div>{roleInfo.label}</div>
+                    {#if roleInfo.other.length > 0}
+                      <div
+                        class="text-xs whitespace-normal font-light text-pretty text-gray-500 mt-2"
+                      >
+                        * {noPermissions || user.lms_type ? 'This user is' : 'You are'} also assigned
+                        to the following roles:
+                        <span class="font-medium">{roleInfo.otherLabels.join(', ')}</span>
+                      </div>
+                    {/if}
+                  </div>
                   <div>
                     <QuestionCircleOutline color="gray" />
                     <Tooltip
@@ -391,7 +405,7 @@
                   </div>
                 {:else if roleInfo.other.length > 0}
                   <div class="text-xs whitespace-normal font-light text-pretty text-gray-500 mt-2">
-                    * This user is also assigned to the following roles: <span class="font-bold"
+                    * This user is also assigned to the following roles: <span class="font-medium"
                       >{roleInfo.otherLabels.join(', ')}</span
                     >
                   </div>
