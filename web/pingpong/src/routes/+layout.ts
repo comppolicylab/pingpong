@@ -1,6 +1,8 @@
 import { redirect, error } from '@sveltejs/kit';
 import * as api from '$lib/api';
 import type { LayoutLoad } from './$types';
+import { browser } from '$app/environment';
+import { invalidateAll } from '$app/navigation';
 
 const LOGIN = '/login';
 const HOME = '/';
@@ -8,6 +10,7 @@ const ONBOARDING = '/onboarding';
 const ABOUT = '/about';
 const PRIVACY_POLICY = '/privacy-policy';
 const EDU = '/eduaccess';
+const LOGOUT = '/logout';
 
 /**
  * Load the current user and redirect if they are not logged in.
@@ -49,7 +52,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
         // If the user is not logged in and tries to access the root path, go to the About page.
         redirect(302, ABOUT);
       }
-    } else if (!authed) {
+    } else if (!authed && url.pathname !== LOGOUT) {
       const destination = encodeURIComponent(`${url.pathname}${url.search}`);
       redirect(302, `${LOGIN}?forward=${destination}`);
     } else {
