@@ -1650,7 +1650,13 @@ async def get_last_run(
         return {"thread": thread, "run": last_run}
 
     t0 = time.monotonic()
-    while last_run.status not in {"completed", "failed", "expired", "cancelled"}:
+    while last_run.status not in {
+        "completed",
+        "failed",
+        "incomplete",
+        "expired",
+        "cancelled",
+    }:
         if time.monotonic() - t0 > TIMEOUT:
             raise HTTPException(
                 status_code=504, detail="Timeout waiting for run to complete"
