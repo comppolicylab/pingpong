@@ -5,6 +5,7 @@
   import { happyToast, sadToast } from '$lib/toast.js';
   import * as api from '$lib/api';
   import PingPongDemoCarousel from '$lib/components/PingPongDemoCarousel.svelte';
+  import { ExclamationCircleOutline, LockSolid } from 'flowbite-svelte-icons';
 
   export let data;
 
@@ -152,11 +153,27 @@
             You can send us a message with the following form and we will try to get back to you
             soon!
           </P>
-          <P class="m-4 p-2 bg-amber-100 rounded" color="text-gray-600">
-            Please note that if you choose to share your personal information (name, email) with us,
-            we will only use it if we need to contact you regarding your message. We do not store
-            this information with our other app data and will not share it with anyone else.
-          </P>
+          <div
+            class="flex col-span-2 items-center rounded-lg text-white bg-gradient-to-r from-red-900 to-red-700 border border-gradient-to-r from-red-800 to-red-600 p-4 my-3"
+          >
+            <ExclamationCircleOutline class="w-8 h-8 mr-3" />
+            <span>
+              Heads up: <span class="font-semibold"
+                >This form is for app feedback and bug reports only.</span
+              > If you have a question about your group or course, please reach out to your instructor
+              or teaching staff directly. We can't help with those kinds of questions here.
+            </span>
+          </div>
+          <div
+            class="flex col-span-2 items-center rounded-lg text-white bg-gradient-to-r from-gray-800 to-gray-600 border-gradient-to-r from-gray-800 to-gray-600 p-4"
+          >
+            <LockSolid class="w-8 h-8 mr-3" />
+            <span>
+              Please note that if you choose to share your personal information (name, email) with
+              us, we will only use it if we need to contact you regarding your message. We do not
+              store this information with our other app data and will not share it with anyone else.
+            </span>
+          </div>
           <div class="mt-6">
             <form on:submit={submitForm}>
               <div class="flex flex-col gap-4">
