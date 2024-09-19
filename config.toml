@@ -19,7 +19,7 @@ public_url = "http://localhost:5173"
 # Whether the server is running in development mode. Should be `false` in prod.
 development = true
 
-[artifactStore]
+[artifact_store]
 # Store for temporarily storing thread exports for download
 # accepts `s3` and `local`
 type = "s3"
