@@ -35,15 +35,15 @@ class S3ArtifactStore(BaseArtifactStore):
                 + timedelta(hours=1),
                 ContentDisposition=f'attachment; filename="{name}"',
             )
-        return await s3.generate_presigned_url(
-            "get_object",
-            Params={
-                "Bucket": self._bucket,
-                "Key": name,
-                "ResponseContentDisposition": f'attachment; "filename={name}"',
-            },
-            ExpiresIn=self._expiry,
-        )
+            return await s3.generate_presigned_url(
+                "get_object",
+                Params={
+                    "Bucket": self._bucket,
+                    "Key": name,
+                    "ResponseContentDisposition": f'attachment; "filename={name}"',
+                },
+                ExpiresIn=self._expiry,
+            )
 
 
 class LocalArtifactStore(BaseArtifactStore):
