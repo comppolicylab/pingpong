@@ -34,6 +34,7 @@ from .time import convert_seconds
 from .saml import get_saml2_client, get_saml2_settings, get_saml2_attrs
 
 from .ai import (
+    export_class_threads,
     format_instructions,
     generate_name,
     get_openai_client,
@@ -1545,6 +1546,31 @@ async def get_ci_messages(
     return {
         "ci_messages": messages,
     }
+
+
+@v1.get(
+    "/class/{class_id}/export",
+    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def export_class(
+    class_id: str, request: Request, tasks: BackgroundTasks, openai_client: OpenAIClient
+):
+    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    if not class_:
+        raise HTTPException(status_code=404, detail="Class not found")
+    if class_.private:
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot export private classes",
+        )
+    tasks.add_task(
+        export_class_threads,
+        openai_client,
+        class_id,
+        request.state.session.user.id,
+    )
+    return {"status": "ok"}
 
 
 @v1.get(

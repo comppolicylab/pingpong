@@ -362,6 +362,12 @@ class CreateInvite(BaseModel):
     formatted_role: str | None = None
 
 
+class DownloadExport(BaseModel):
+    link: str
+    email: str
+    class_name: str
+
+
 class CreateUserInviteConfig(BaseModel):
     invites: list[CreateInvite] = []
     formatted_roles: dict[str, str] = {}

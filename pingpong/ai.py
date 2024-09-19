@@ -1,17 +1,27 @@
+import csv
 import functools
+import hashlib
 import io
 import logging
-from datetime import datetime
-from typing import Dict
-
 import openai
 import orjson
+from pingpong.invite import send_export_download
+import pingpong.models as models
+
+from datetime import datetime, timezone
 from openai.types.beta.assistant_stream_event import ThreadRunStepCompleted
 from openai.types.beta.threads import ImageFile, MessageContentPartParam
+from openai.types.beta.threads.annotation import FileCitationAnnotation
+from openai.types.beta.threads.image_file_content_block import ImageFileContentBlock
+from openai.types.beta.threads.image_url_content_block import ImageURLContentBlock
+from openai.types.beta.threads.message_content import MessageContent
 from openai.types.beta.threads.runs import ToolCallsStepDetails, CodeInterpreterToolCall
-from pingpong.schemas import CodeInterpreterMessage
-import pingpong.models as models
-from .config import config
+from openai.types.beta.threads.text_content_block import TextContentBlock
+from pingpong.now import NowFn, utcnow
+from pingpong.schemas import CodeInterpreterMessage, DownloadExport
+from pingpong.config import config
+from typing import Dict
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -280,6 +290,162 @@ def format_instructions(instructions: str, use_latex: bool = False) -> str:
     )
 
     return instructions
+
+
+def generate_user_hash(class_: models.Class, user: models.User) -> str:
+    combined_input = (
+        f"{user.id}_{user.created.isoformat()}-{class_.id}_{class_.created.isoformat()}"
+    )
+    hash_object = hashlib.sha256()
+    hash_object.update(combined_input.encode("utf-8"))
+    return hash_object.hexdigest().rstrip("=")
+
+
+async def export_class_threads(
+    cli: openai.AsyncClient,
+    class_id: str,
+    user_id: int,
+    nowfn: NowFn = utcnow,
+) -> None:
+    async with config.db.driver.async_session() as session:
+        class_ = await models.Class.get_by_id(session, int(class_id))
+        if not class_:
+            raise ValueError(f"Class with ID {class_id} not found")
+
+        user = await models.User.get_by_id(session, user_id)
+        if not user:
+            raise ValueError(f"User with ID {user_id} not found")
+
+        csv_buffer = io.StringIO()
+        csvwriter = csv.writer(csv_buffer)
+        csvwriter.writerow(
+            [
+                "User ID",
+                "Assistant Name",
+                "Role",
+                "Thread ID",
+                "Message ID",
+                "Created At",
+                "Content",
+            ]
+        )
+
+        async for thread in models.Thread.get_thread_by_class_id(
+            session, class_id=int(class_id), desc=False
+        ):
+            assistant, file_names = await models.Thread.get_file_search_files_assistant(
+                session, thread.id
+            )
+            assistant_name = assistant.name if assistant else "Deleted Assistant"
+
+            user_hashes = [
+                generate_user_hash(class_, user) for user in thread.users
+            ] or ["Unknown user"]
+            user_hashes_str = ", ".join(user_hashes)
+
+            csvwriter.writerow(
+                [
+                    user_hashes_str,
+                    assistant_name,
+                    "system_prompt",
+                    thread.id,
+                    "N/A",
+                    thread.created.astimezone(ZoneInfo("America/New_York"))
+                    .replace(microsecond=0)
+                    .isoformat(),
+                    thread.assistant.instructions
+                    if thread.assistant
+                    else "Unknown Prompt (Deleted Assistant)",
+                ]
+            )
+
+            after = None
+            while True:
+                messages = await cli.beta.threads.messages.list(
+                    thread_id=thread.thread_id,
+                    after=after,
+                    order="asc",
+                )
+
+                for message in messages.data:
+                    csvwriter.writerow(
+                        [
+                            user_hashes_str,
+                            assistant_name,
+                            message.role,
+                            thread.id,
+                            message.id,
+                            datetime.fromtimestamp(message.created_at, tz=timezone.utc)
+                            .astimezone(ZoneInfo("America/New_York"))
+                            .isoformat(),
+                            process_message_content(message.content, file_names),
+                        ]
+                    )
+
+                if len(messages.data) == 0:
+                    break
+                after = messages.data[-1].id
+
+        csv_buffer.seek(0)
+
+        file_name = (
+            f"thread_export_{class_id}_{user_id}_{datetime.now().isoformat()}.csv"
+        )
+        download_link = await config.artifact_store.store.put(
+            file_name, csv_buffer, "text/csv;charset=utf-8"
+        )
+        csv_buffer.close()
+
+        export_opts = DownloadExport(
+            class_name=class_.name,
+            email=user.email,
+            link=download_link,
+        )
+        await send_export_download(
+            config.email.sender,
+            export_opts,
+            expires=config.artifact_store.presigned_url_expiration,
+        )
+
+
+def process_message_content(
+    content: list[MessageContent], file_names: dict[str, str]
+) -> str:
+    """Process message content for CSV export. The end result is a single string with all the content combined.
+    Images are replaced with their file names, and text is extracted from the content parts.
+    File citations are replaced with their file names inside the text
+    """
+    processed_content = []
+    for part in content:
+        match part:
+            case TextContentBlock():
+                processed_content.append(
+                    replace_annotations_in_text(text=part, file_names=file_names)
+                )
+            case ImageFileContentBlock():
+                processed_content.append(
+                    f"[Image file: {part.image_file.file_id if part.image_file else 'Unknown image file'}]"
+                )
+            case ImageURLContentBlock():
+                processed_content.append(
+                    f"[Image URL: {part.image_url.url if part.image_url else 'Unknown image URL'}]"
+                )
+            case _:
+                logger.warning(f"Unknown content type: {part}")
+    return "\n".join(processed_content)
+
+
+def replace_annotations_in_text(
+    text: TextContentBlock, file_names: dict[str, str]
+) -> str:
+    updated_text = text.text.value
+    for annotation in text.text.annotations:
+        if isinstance(annotation, FileCitationAnnotation) and annotation.text:
+            updated_text = updated_text.replace(
+                annotation.text,
+                f" [{file_names.get(annotation.file_citation.file_id, 'Unknown citation/Deleted Assistant')}] ",
+            )
+    return updated_text
 
 
 @functools.cache

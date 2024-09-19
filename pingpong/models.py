@@ -24,6 +24,7 @@ from sqlalchemy.orm import (
     Mapped,
     joinedload,
     contains_eager,
+    selectinload,
     mapped_column,
     relationship,
 )
@@ -1652,6 +1653,26 @@ class Thread(Base):
             .order_by(Thread.last_activity.desc())
             .where(condition)
             .limit(limit)
+        )
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.Thread
+
+    @classmethod
+    async def get_thread_by_class_id(
+        cls,
+        session: AsyncSession,
+        class_id: int,
+        desc: bool = True,
+    ) -> AsyncGenerator["Thread", None]:
+        stmt = (
+            select(Thread)
+            .outerjoin(Thread.users)
+            .options(
+                selectinload(Thread.users).load_only(User.id, User.created),
+            )
+            .order_by(Thread.updated.desc() if desc else Thread.updated.asc())
+            .where(Thread.class_id == int(class_id))
         )
         result = await session.execute(stmt)
         for row in result:
