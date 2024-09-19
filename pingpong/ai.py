@@ -338,16 +338,9 @@ async def export_class_threads(
             )
             assistant_name = assistant.name if assistant else "Deleted Assistant"
 
-            user_hashes = (
-                list(
-                    map(
-                        lambda user: generate_user_hash(class_, user),
-                        thread.users,
-                    )
-                )
-                if thread.users
-                else ["Unknown User"]
-            )
+            user_hashes = [
+                generate_user_hash(class_, user) for user in thread.users
+            ] or ["Unknown user"]
             user_hashes_str = ", ".join(user_hashes)
 
             csvwriter.writerow(

@@ -24,9 +24,10 @@ development = true
 # accepts `s3` and `local`
 type = "s3"
 # IF `s3`, set the s3 bucket to save exports to
-bucket = "your-bucket-here"
+# IF `local` set the directory to save exports to
+# e.g. save_target = "your-bucket-here"
 # IF `local`, set the directory to save exports to
-dir = "/your/path/here"
+save_target = "/your/path/here"
 # Time (in seconds) that the pre-signed url we send to users
 # requesting the data export should be valid for.
 # Defaults to 1 hour. Maximum value is 43200 seconds, or 12 hours.

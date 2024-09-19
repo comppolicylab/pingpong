@@ -247,24 +247,24 @@ class S3StoreSettings(BaseSettings):
     """Settings for S3 storage."""
 
     type: Literal["s3"]
-    bucket: str
+    save_target: str
     presigned_url_expiration: int = Field(60 * 60)  # 1 hour
 
     @cached_property
     def store(self):
-        return S3ArtifactStore(self.bucket, expiry=self.presigned_url_expiration)
+        return S3ArtifactStore(self.save_target, expiry=self.presigned_url_expiration)
 
 
 class LocalStoreSettings(BaseSettings):
     """Settings for S3 storage."""
 
     type: Literal["local"]
-    dir: str
+    save_target: str
     presigned_url_expiration: int = Field(60 * 60)  # 1 hour
 
     @cached_property
     def store(self):
-        return LocalArtifactStore(self.dir)
+        return LocalArtifactStore(self.save_target)
 
 
 ArtifactStoreSettings = Union[S3StoreSettings, LocalStoreSettings]
@@ -278,7 +278,7 @@ class Config(BaseSettings):
     reload: int = Field(0)
     public_url: str = Field("http://localhost:8000")
     development: bool = Field(False, env="DEVELOPMENT")
-    artifactStore: ArtifactStoreSettings
+    artifact_store: ArtifactStoreSettings
     db: DbSettings
     auth: AuthSettings
     authz: AuthzSettings
