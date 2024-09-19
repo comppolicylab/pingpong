@@ -778,30 +778,33 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
     dependencies=[Depends(Authz("can_delete", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
-async def delete_class(class_id: str, request: Request, openai_client: OpenAIClient):
+async def delete_class(class_id: str, request: Request):
     class_ = await models.Class.get_by_id(request.state.db, int(class_id))
     if not class_:
-        raise HTTPException(status_code=404, detail="Class not found")
+        raise HTTPException(status_code=404, detail="Group not found")
 
-    # Delete all threads
-    async for thread in models.Thread.get_ids_by_class_id(request.state.db, class_.id):
-        await delete_thread(class_id, str(thread.id), request, openai_client)
+    if class_.api_key:
+        openai_client = get_openai_client(class_.api_key)
+        # Delete all threads
+        async for thread in models.Thread.get_ids_by_class_id(
+            request.state.db, class_.id
+        ):
+            await delete_thread(class_id, str(thread.id), request, openai_client)
 
-    # Delete all class assistants
-    async for assistant_id in models.Assistant.async_get_by_class_id(
-        request.state.db, class_.id
-    ):
-        await delete_assistant(class_id, str(assistant_id), request, openai_client)
+        # Delete all class assistants
+        async for assistant_id in models.Assistant.async_get_by_class_id(
+            request.state.db, class_.id
+        ):
+            await delete_assistant(class_id, str(assistant_id), request, openai_client)
 
-    # Double check that we deleted all vector stores
-    async for vector_store_id in models.VectorStore.get_id_by_class_id(
-        request.state.db, class_.id
-    ):
-        await delete_vector_store(request.state.db, openai_client, vector_store_id)
+        # Double check that we deleted all vector stores
+        async for vector_store_id in models.VectorStore.get_id_by_class_id(
+            request.state.db, class_.id
+        ):
+            await delete_vector_store(request.state.db, openai_client, vector_store_id)
 
     # All private and class files associated with the class_id
     # are deleted by the database cascade
-
     if class_.lms_status and class_.lms_status != schemas.LMSStatus.NONE:
         await remove_canvas_connection(request.state.db, class_.id, request=request)
 
