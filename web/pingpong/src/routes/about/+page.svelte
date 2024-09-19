@@ -14,10 +14,10 @@
   const year = new Date().getFullYear();
 
   const categories = [
-    { value: 'other', name: 'Not sure!' },
     { value: 'bug', name: 'Bug Report' },
-    { value: 'feature', name: 'Feature request' },
-    { value: 'question', name: 'Question' }
+    { value: 'feature', name: 'Feature Request' },
+    { value: 'question', name: 'Question' },
+    { value: 'other', name: 'Other' }
   ];
 
   const loading = writable(false);
@@ -151,7 +151,8 @@
         <div>
           <P class="ml-0.5 mt-4">
             You can send us a message with the following form and we will try to get back to you
-            soon!
+            soon! If you do not provide an email address, we will not be able to respond to your
+            message.
           </P>
           <div
             class="flex col-span-2 items-center rounded-lg text-white bg-gradient-to-r from-red-900 to-red-700 border border-gradient-to-r from-red-800 to-red-600 p-4 my-3"
@@ -160,8 +161,9 @@
             <span>
               Heads up: <span class="font-semibold"
                 >This form is for app feedback and bug reports only.</span
-              > If you have a question about your group or course, please reach out to your instructor
-              or teaching staff directly. We can't help with those kinds of questions here.
+              > If you have a question about your group or course, or can't access your group's assistants,
+              please reach out to your teaching staff directly. We can't help with those kinds of questions
+              here.
             </span>
           </div>
           <div
