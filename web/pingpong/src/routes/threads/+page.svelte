@@ -39,7 +39,7 @@
 
     $loading = true;
 
-    const lastTs = threads.length ? threads[threads.length - 1].updated : undefined;
+    const lastTs = threads.length ? threads[threads.length - 1].last_activity : undefined;
     const currentClassId = parseInt(currentClass, 10) || undefined;
     const more = await api.getAllThreads(fetch, { before: lastTs, class_id: currentClassId });
     $loading = false;

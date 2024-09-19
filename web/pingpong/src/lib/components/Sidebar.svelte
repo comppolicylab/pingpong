@@ -177,7 +177,8 @@
             </svelte:fragment>
 
             <svelte:fragment slot="subtext">
-              <span class="text-xs text-gray-400 w-full">{dayjs.utc(thread.last_activity).fromNow()}</span
+              <span class="text-xs text-gray-400 w-full"
+                >{dayjs.utc(thread.last_activity).fromNow()}</span
               >
             </svelte:fragment>
           </SidebarItem>
