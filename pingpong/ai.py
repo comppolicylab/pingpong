@@ -294,7 +294,7 @@ def format_instructions(instructions: str, use_latex: bool = False) -> str:
 
 def generate_user_hash(class_: models.Class, user: models.User) -> str:
     combined_input = (
-        f"{id}_{user.created.isoformat()}-{class_.id}_{class_.created.isoformat()}"
+        f"{user.id}_{user.created.isoformat()}-{class_.id}_{class_.created.isoformat()}"
     )
     hash_object = hashlib.sha256()
     hash_object.update(combined_input.encode("utf-8"))
