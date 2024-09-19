@@ -271,7 +271,13 @@ class AssistantsApiRateLimitLoadTest(LoadTest):
         )
 
         # Poll until run is in terminal state
-        while run.status not in {"completed", "failed", "expired", "cancelled"}:
+        while run.status not in {
+            "completed",
+            "failed",
+            "incomplete",
+            "expired",
+            "cancelled",
+        }:
             time.sleep(1)
             run = client.beta.threads.runs.retrieve(
                 run_id=run.id,

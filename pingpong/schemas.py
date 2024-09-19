@@ -652,6 +652,7 @@ class OpenAIRun(BaseModel):
         | Literal["cancelling"]
         | Literal["cancelled"]
         | Literal["failed"]
+        | Literal["incomplete"]
         | Literal["completed"]
         | Literal["expired"]
     )

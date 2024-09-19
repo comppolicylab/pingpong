@@ -1286,6 +1286,7 @@ export type OpenAIRun = {
     | 'cancelling'
     | 'cancelled'
     | 'failed'
+    | 'incomplete'
     | 'completed'
     | 'expired';
   thread_id: string;
@@ -1704,7 +1705,7 @@ export const postSupportRequest = async (f: Fetcher, data: SupportRequest) => {
 /**
  * OpenAI generation states.
  */
-const TERMINAL_STATES = new Set(['expired', 'completed', 'failed', 'cancelled']);
+const TERMINAL_STATES = new Set(['expired', 'completed', 'incomplete', 'failed', 'cancelled']);
 
 /**
  * Check if a run is in a terminal state.
