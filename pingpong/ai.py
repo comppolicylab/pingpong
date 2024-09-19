@@ -391,7 +391,7 @@ async def export_class_threads(
         file_name = (
             f"thread_export_{class_id}_{user_id}_{datetime.now().isoformat()}.csv"
         )
-        download_link = await config.artifactStore.store.put(
+        download_link = await config.artifact_store.store.put(
             file_name, csv_buffer, "text/csv;charset=utf-8"
         )
         csv_buffer.close()
@@ -404,7 +404,7 @@ async def export_class_threads(
         await send_export_download(
             config.email.sender,
             export_opts,
-            expires=config.artifactStore.presigned_url_expiration,
+            expires=config.artifact_store.presigned_url_expiration,
         )
 
 
