@@ -154,7 +154,7 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
         for content in message_delta["content"]:
             if content.get("type") == "text" and content["text"].get("annotations"):
                 for annotation in content["text"]["annotations"]:
-                    if annotation["type"] == "file_citation":
+                    if annotation.get("file_citation"):
                         annotation["file_citation"]["file_name"] = self.file_names.get(
                             annotation["file_citation"]["file_id"], ""
                         )
