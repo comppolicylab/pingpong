@@ -86,7 +86,7 @@
       name: ROLE_LABELS_INHERIT_ADMIN[role]
     })),
     // Need a value for "no access" role, dropdown defaults to Select a Role otherwise
-    { value: null, name: 'No Access' }
+    { value: null, name: 'No Group Role' }
   ];
 
   // Whether a request is in flight.
@@ -182,7 +182,7 @@
     const other = allRoles.filter((role) => user.roles[role] && role !== primary);
     return {
       primary: primary || (other[0] !== 'admin' ? other[0] : null) || null,
-      label: primary ? ROLE_LABELS_INHERIT_ADMIN[primary] : 'No Access',
+      label: primary ? ROLE_LABELS_INHERIT_ADMIN[primary] : 'No Group Role',
       other,
       otherLabels: other.map((role) => ROLE_LABELS_INHERIT_ADMIN[role])
     };
@@ -255,7 +255,7 @@
       return;
     }
 
-    const roleLabel = ROLE_LABELS_INHERIT_ADMIN[role as Role] || role || 'No Access';
+    const roleLabel = ROLE_LABELS_INHERIT_ADMIN[role as Role] || role || 'No Group Role';
     const user = users.find((u) => u.id === +userId);
     const userName = user?.name || user?.email || `User ${userId}`;
     const action = `Set ${userName} group role to "${roleLabel}"`;
