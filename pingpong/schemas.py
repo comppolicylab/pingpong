@@ -274,7 +274,7 @@ class Thread(BaseModel):
     tools_available: str | None
     user_names: list[str] = []
     created: datetime
-    updated: datetime | None
+    last_activity: datetime
 
     class Config:
         from_attributes = True

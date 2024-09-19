@@ -1856,6 +1856,7 @@ async def create_thread(
         "image_file_ids": req.vision_file_ids or [],
         "tools_available": json.dumps(tools_export["tools_available"] or []),
         "version": 2,
+        "last_activity": func.now(),
     }
 
     result: None | models.Thread = None
@@ -1981,7 +1982,7 @@ async def send_message(
     except openai.BadRequestError as e:
         raise HTTPException(400, e.message or "OpenAI rejected this request")
 
-    thread.updated = func.now()
+    thread.last_activity = func.now()
     request.state.db.add(thread)
 
     metrics.inbound_messages.inc(
@@ -2567,7 +2568,7 @@ async def delete_assistant(
     _stmt = (
         update(models.Thread)
         .where(models.Thread.assistant_id == int(asst.id))
-        .values(assistant_id=None, updated=models.Thread.updated)
+        .values(assistant_id=None)
     )
     await request.state.db.execute(_stmt)
 

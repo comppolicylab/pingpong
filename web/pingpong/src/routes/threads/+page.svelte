@@ -39,7 +39,7 @@
 
     $loading = true;
 
-    const lastTs = threads.length ? threads[threads.length - 1].updated : undefined;
+    const lastTs = threads.length ? threads[threads.length - 1].last_activity : undefined;
     const currentClassId = parseInt(currentClass, 10) || undefined;
     const more = await api.getAllThreads(fetch, { before: lastTs, class_id: currentClassId });
     $loading = false;
@@ -101,7 +101,7 @@
                 {thread.name}
               </div>
               <div class="text-gray-400 text-xs tracking-wide pb-1 uppercase">
-                {dayjs.utc(thread.updated).fromNow()}
+                {dayjs.utc(thread.last_activity).fromNow()}
               </div>
               <div class="text-gray-400 text-xs uppercase tracking-wide">
                 {thread.private
