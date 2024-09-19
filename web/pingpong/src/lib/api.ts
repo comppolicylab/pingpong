@@ -1845,6 +1845,15 @@ export const ROLE_LABELS: Record<Role, string> = {
 };
 
 /**
+ * List of available roles. Adds explanation for admin.
+ */
+export const ROLE_LABELS_INHERIT_ADMIN: Record<Role, string> = {
+  admin: 'Administrator (Inherited)',
+  teacher: 'Moderator',
+  student: 'Member'
+};
+
+/**
  * Information about file types and support.
  */
 export type FileTypeInfo = {
