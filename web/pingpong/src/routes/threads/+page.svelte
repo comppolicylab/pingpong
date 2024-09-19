@@ -101,7 +101,7 @@
                 {thread.name}
               </div>
               <div class="text-gray-400 text-xs tracking-wide pb-1 uppercase">
-                {dayjs.utc(thread.updated).fromNow()}
+                {dayjs.utc(thread.last_activity).fromNow()}
               </div>
               <div class="text-gray-400 text-xs uppercase tracking-wide">
                 {thread.private

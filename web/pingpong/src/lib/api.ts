@@ -1220,7 +1220,7 @@ export type Thread = {
   tools_available: string | null;
   user_names?: string[];
   created: string;
-  updated: string;
+  last_activity: string;
 };
 
 /**

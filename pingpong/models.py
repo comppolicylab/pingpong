@@ -1479,6 +1479,9 @@ class Thread(Base):
         ForeignKey("vector_stores.id", name="fk_threads_vector_store_id_vector_store"),
     )
     vector_store = relationship("VectorStore", back_populates="threads", uselist=False)
+    last_activity = Column(
+        DateTime(timezone=True), index=True, nullable=False, default=func.now()
+    )
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(
         DateTime(timezone=True),
@@ -1582,8 +1585,8 @@ class Thread(Base):
             async for new_thread in cls.get_all_by_id(
                 session, ids, limit=n, before=next_latest_time, **kwargs
             ):
-                if not next_latest_time or new_thread.updated < next_latest_time:
-                    next_latest_time = new_thread.updated
+                if not next_latest_time or new_thread.last_activity < next_latest_time:
+                    next_latest_time = new_thread.last_activity
 
                 threads.append(new_thread)
                 added_in_page += 1
@@ -1615,7 +1618,7 @@ class Thread(Base):
 
         condition = Thread.id.in_([int(id_) for id_ in ids])
         if before:
-            condition = and_(condition, Thread.updated < before)
+            condition = and_(condition, Thread.last_activity < before)
         if class_id:
             condition = and_(condition, Thread.class_id == int(class_id))
         if private is not None:
@@ -1625,7 +1628,7 @@ class Thread(Base):
             select(Thread)
             .outerjoin(Thread.assistant)
             .options(contains_eager(Thread.assistant).load_only(Assistant.name))
-            .order_by(Thread.updated.desc())
+            .order_by(Thread.last_activity.desc())
             .where(condition)
             .limit(limit)
         )
@@ -1643,9 +1646,12 @@ class Thread(Base):
     ) -> AsyncGenerator["Thread", None]:
         condition = Thread.class_id == int(class_id)
         if before:
-            condition = and_(condition, Thread.updated < before)
+            condition = and_(condition, Thread.last_activity < before)
         stmt = (
-            select(Thread).order_by(Thread.updated.desc()).where(condition).limit(limit)
+            select(Thread)
+            .order_by(Thread.last_activity.desc())
+            .where(condition)
+            .limit(limit)
         )
         result = await session.execute(stmt)
         for row in result:
@@ -1686,7 +1692,7 @@ class Thread(Base):
         stmt = (
             update(Thread)
             .where(Thread.assistant_id == int(assistant_id))
-            .values(tools_available=tools, updated=Thread.updated)
+            .values(tools_available=tools)
         )
         await session.execute(stmt)
 
