@@ -298,7 +298,7 @@ def generate_user_hash(class_: models.Class, user: models.User) -> str:
     )
     hash_object = hashlib.sha256()
     hash_object.update(combined_input.encode("utf-8"))
-    return hash_object.hexdigest().rstrip("=")
+    return hash_object.hexdigest().rstrip("=")[0:10]
 
 
 async def export_class_threads(
@@ -324,7 +324,6 @@ async def export_class_threads(
                 "Assistant Name",
                 "Role",
                 "Thread ID",
-                "Message ID",
                 "Created At",
                 "Content",
             ]
@@ -349,7 +348,6 @@ async def export_class_threads(
                     assistant_name,
                     "system_prompt",
                     thread.id,
-                    "N/A",
                     thread.created.astimezone(ZoneInfo("America/New_York"))
                     .replace(microsecond=0)
                     .isoformat(),
@@ -374,7 +372,6 @@ async def export_class_threads(
                             assistant_name,
                             message.role,
                             thread.id,
-                            message.id,
                             datetime.fromtimestamp(message.created_at, tz=timezone.utc)
                             .astimezone(ZoneInfo("America/New_York"))
                             .isoformat(),
