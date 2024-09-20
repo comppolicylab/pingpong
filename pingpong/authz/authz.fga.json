@@ -640,6 +640,27 @@
                     "relation": "parent"
                   }
                 }
+              },
+              {
+                "intersection": {
+                  "child": [
+                    {
+                      "computedUserset": {
+                        "relation": "can_view"
+                      }
+                    },
+                    {
+                      "tupleToUserset": {
+                        "computedUserset": {
+                          "relation": "supervisor"
+                        },
+                        "tupleset": {
+                          "relation": "parent"
+                        }
+                      }
+                    }
+                  ]
+                }
               }
             ]
           }

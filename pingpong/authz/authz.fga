@@ -53,7 +53,7 @@ type assistant
   relations
     define parent: [class]
     define owner: [user]
-    define can_edit: owner or can_manage_assistants from parent
+    define can_edit: owner or can_manage_assistants from parent or (can_view and supervisor from parent)
     define can_delete: owner or can_manage_assistants from parent
     define can_view: [class#member] or owner or can_manage_assistants from parent
     define can_interact_with: can_view
