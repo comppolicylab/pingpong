@@ -220,6 +220,9 @@ class CanvasCourseClient(ABC):
             data=params,
             raise_for_status=True,
         )
+        logger.info(
+            f"Canvas access token deleted for class {self.class_id} by user {self.user_id}"
+        )
 
     async def create_response(
         self, resp: aiohttp.ClientResponse
@@ -339,6 +342,9 @@ class CanvasCourseClient(ABC):
             response.expires_in,
             refresh_token=response.refresh_token,
             user_id=self.user_id,
+        )
+        logger.info(
+            f"Canvas access token saved for class {self.class_id} by user {self.user_id}"
         )
         return RedirectResponse(
             config.url(f"/group/{self.class_id}/manage"),
@@ -515,6 +521,9 @@ class CanvasCourseClient(ABC):
             lms_type=self.config.type,
         )
         lms_class = await CanvasClass.create_or_update(self.db, r)
+        logger.info(
+            f"Canvas class {lms_class.lms_id} was set as the LMS class for PingPong class {self.class_id} by user {self.user_id}."
+        )
         await Class.update_lms_class(self.db, self.class_id, lms_class.id)
 
     @abstractmethod
