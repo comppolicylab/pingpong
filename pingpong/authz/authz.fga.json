@@ -682,6 +682,27 @@
                     "relation": "parent"
                   }
                 }
+              },
+              {
+                "intersection": {
+                  "child": [
+                    {
+                      "computedUserset": {
+                        "relation": "can_view"
+                      }
+                    },
+                    {
+                      "tupleToUserset": {
+                        "computedUserset": {
+                          "relation": "supervisor"
+                        },
+                        "tupleset": {
+                          "relation": "parent"
+                        }
+                      }
+                    }
+                  ]
+                }
               }
             ]
           }
@@ -756,6 +777,27 @@
                       "tupleToUserset": {
                         "computedUserset": {
                           "relation": "can_publish_assistants"
+                        },
+                        "tupleset": {
+                          "relation": "parent"
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "intersection": {
+                  "child": [
+                    {
+                      "computedUserset": {
+                        "relation": "can_view"
+                      }
+                    },
+                    {
+                      "tupleToUserset": {
+                        "computedUserset": {
+                          "relation": "supervisor"
                         },
                         "tupleset": {
                           "relation": "parent"
