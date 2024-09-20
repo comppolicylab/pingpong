@@ -681,7 +681,11 @@ async def get_my_classes(request: Request):
     response_model=schemas.Class,
 )
 async def get_class(class_id: str, request: Request):
-    return await models.Class.get_by_id(request.state.db, int(class_id))
+    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    class_.presigned_url_expiration = convert_seconds(
+        config.artifact_store.presigned_url_expiration
+    )
+    return class_
 
 
 @v1.get(

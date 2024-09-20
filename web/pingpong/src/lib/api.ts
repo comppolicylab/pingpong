@@ -527,6 +527,7 @@ export type Class = {
   any_can_publish_assistant: boolean | null;
   any_can_publish_thread: boolean | null;
   any_can_upload_class_file: boolean | null;
+  presigned_url_expiration: string | null;
 };
 
 /**
