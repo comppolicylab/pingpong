@@ -1013,7 +1013,7 @@ async def unlink_canvas_class(
     )
     await delete_canvas_permissions(request.state.authz, userIds, class_id)
     logger.info(
-        f"Canvas class unlinked for class {class_id} by user {request.state.session.user.id}."
+        f"Canvas class unlinked from PingPong class {class_id} by user {request.state.session.user.id}."
     )
     return {"status": "ok"}
 
