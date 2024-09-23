@@ -1012,6 +1012,9 @@ async def unlink_canvas_class(
         keep_users=keep_users,
     )
     await delete_canvas_permissions(request.state.authz, userIds, class_id)
+    logger.info(
+        f"Canvas class unlinked for class {class_id} by user {request.state.session.user.id}."
+    )
     return {"status": "ok"}
 
 
