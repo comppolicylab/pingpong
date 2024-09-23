@@ -153,6 +153,7 @@
   let exportThreadsModal = false;
   let usersModalOpen = false;
   let anyCanPublishThread = data?.class.any_can_publish_thread || false;
+  let presignedUrlExpiration = data?.class.presigned_url_expiration || null;
   let makePrivate = data?.class.private || false;
   let assistantPermissions = formatAssistantPermissions(data?.class);
   const asstPermOptions = [
@@ -641,12 +642,14 @@
         <div class="text-center px-2">
           <EnvelopeOutline class="mx-auto mb-4 text-slate-500 w-12 h-12" />
           <h3 class="mb-5 text-xl text-gray-900 dark:text-white font-bold">
-            Before we start exporting...
+            Before we start exporting
           </h3>
           <p class="mb-5 text-sm text-gray-700 dark:text-gray-300">
             Depending on the number of threads in your group, exporting may take a while. You'll
             receive an email when your threads are ready to download.
-            <span class="font-bold">The download link will be valid for 12 hours.</span>
+            {#if presignedUrlExpiration}<span class="font-bold"
+                >The download link will be valid for {presignedUrlExpiration}.</span
+              >{/if}
           </p>
           <div class="flex justify-center gap-4">
             <Button pill color="alternative" on:click={() => (exportThreadsModal = false)}
