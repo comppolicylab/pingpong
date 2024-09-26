@@ -122,8 +122,7 @@ async def parse_session_token(request: Request, call_next):
             user_id = int(token.sub)
             user = await models.User.get_by_id(request.state.db, user_id)
             if not user:
-                raise ValueError("User does not exist")
-
+                raise ValueError("We couldn't locate your account.")
             # Modify user state if necessary
             if user.state == schemas.UserState.UNVERIFIED:
                 await user.verify(request.state.db)
@@ -136,9 +135,21 @@ async def parse_session_token(request: Request, call_next):
                 profile=schemas.Profile.from_email(user.email),
             )
         except PyJWTError as e:
+            [error, user_id_] = str(e).split(":")
             request.state.session = schemas.SessionState(
                 status=schemas.SessionStatus.INVALID,
-                error=str(e),
+                error=error,
+            )
+            forward = request.query_params.get("forward", "/")
+            user = await models.User.get_by_id(request.state.db, int(user_id_))
+            if user.email:
+                await login_magic(
+                    schemas.MagicLoginRequest(email=user.email, forward=forward),
+                    request,
+                )
+                return RedirectResponse("login/expired-retry", status_code=303)
+            return RedirectResponse(
+                f"/login/?expired=true&forward={forward}", status_code=303
             )
         except Exception as e:
             logger.exception("Error parsing session token: %s", e)
@@ -505,7 +516,17 @@ async def auth(request: Request):
     try:
         auth_token = decode_auth_token(stok, nowfn=nowfn)
     except jwt.exceptions.PyJWTError as e:
-        raise HTTPException(status_code=401, detail=str(e))
+        [error, user_id] = str(e).split(":")
+        user = await models.User.get_by_id(request.state.db, int(user_id) + 66)
+        forward = request.query_params.get("redirect", "/")
+        if user and user.email:
+            await login_magic(
+                schemas.MagicLoginRequest(email=user.email, forward=forward), request
+            )
+            return RedirectResponse("/login/expired-retry", status_code=303)
+        return RedirectResponse(
+            f"/login/?expired=true&forward={forward}", status_code=303
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

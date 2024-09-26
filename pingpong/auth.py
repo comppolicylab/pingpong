@@ -37,8 +37,11 @@ def decode_session_token(token: str, nowfn: NowFn = utcnow) -> SessionToken:
     Returns:
         SessionToken: Session Token
     """
-    auth_token = decode_auth_token(token, nowfn=nowfn)
-    return SessionToken(**auth_token.model_dump())
+    try:
+        auth_token = decode_auth_token(token, nowfn=nowfn)
+        return SessionToken(**auth_token.model_dump())
+    except PyJWTError as e:
+        raise ValueError(f"invalid session token: {e}") from e
 
 
 def encode_auth_token(
@@ -115,11 +118,11 @@ def decode_auth_token(token: str, nowfn: NowFn = utcnow) -> AuthToken:
             now = nowfn().timestamp()
             nbf = getattr(tok, "nbf", None)
             if nbf is not None and now < nbf:
-                raise PyJWTError("Token not valid yet")
+                raise PyJWTError(f"Token not valid yet:{tok.sub}")
 
             exp = getattr(tok, "exp", None)
             if exp is not None and now > exp:
-                raise PyJWTError("Token expired")
+                raise PyJWTError(f"Token expired:{tok.sub}")
 
             return tok
 

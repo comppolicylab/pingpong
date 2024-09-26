@@ -1,6 +1,6 @@
 <script lang="ts">
   import PingPongLogo from '$lib/components/PingPongLogo.svelte';
-  import { Button, P, InputAddon, Input, Helper, Heading, ButtonGroup } from 'flowbite-svelte';
+  import { Button, InputAddon, Input, Heading, ButtonGroup } from 'flowbite-svelte';
   import { EnvelopeSolid } from 'flowbite-svelte-icons';
   import { writable } from 'svelte/store';
   import { fail } from '@sveltejs/kit';
@@ -10,6 +10,8 @@
 
   export let form;
   const forward = $page.url.searchParams.get('forward') || '/';
+  const expired = $page.url.searchParams.get('expired') === 'true' || false;
+  const resent = $page.url.searchParams.get('resent') === 'true' || false;
   const loggingIn = writable(false);
   const success = writable(false);
   const loginWithMagicLink = async (evt: SubmitEvent) => {
@@ -41,13 +43,43 @@
     <header class="bg-blue-dark-40 px-5 md:px-12 py-8">
       <Heading tag="h1" class="logo w-full text-center"><PingPongLogo size="full" /></Heading>
     </header>
-    <div class="px-5 md:px-12 py-16 bg-white">
+    <div class="px-5 md:px-12 pb-16 pt-10 bg-white">
       {#if $success}
-        <div class="text-orange">Success! Follow the link in your email to finish signing in.</div>
+        <div class="text-4xl text-center font-serif font-bold mt-5 mb-2 text-blue-dark-50">
+          Success!
+        </div>
+        <div class="text-lg text-center">Follow the link in your email to finish signing in.</div>
+      {:else if resent}
+        <div class="text-4xl text-center font-serif font-bold mt-5 mb-4 text-blue-dark-50">
+          Let's try this again.
+        </div>
+        <div class="text-lg text-center">
+          This log-in link isn't currently valid.<br />We sent a new link to your email.
+        </div>
       {:else}
+        <div class="mb-6">
+          {#if expired}
+            <div class="text-4xl text-center font-serif font-bold mb-2 text-blue-dark-50">
+              Let's try this again.
+            </div>
+            <div class="text-lg text-center">
+              This log-in link isn't currently valid.<br />Try logging in with your school email
+              address again.
+            </div>
+          {:else}
+            <div class="text-4xl text-center font-serif font-bold mb-2 text-blue-dark-50">
+              {form?.error ? 'We could not sign you in.' : 'Welcome to PingPong'}
+            </div>
+            <div class="text-lg text-center">
+              {form?.error
+                ? 'Please make sure you are using the correct email address and try again.'
+                : 'Use your school email address to log in.'}
+            </div>
+          {/if}
+        </div>
         <form on:submit={loginWithMagicLink}>
           <ButtonGroup class="w-full rounded-full bg-blue-light-50 shadow-inner p-4">
-            <InputAddon class="rounded-none border-none bg-transparent text-blue-light-40">
+            <InputAddon class="rounded-none border-none bg-transparent text-blue-dark-30">
               <EnvelopeSolid />
             </InputAddon>
             <Input
@@ -57,25 +89,15 @@
               placeholder="you@school.edu"
               name="email"
               id="email"
-              class="bg-transparent border-none"
+              class="bg-transparent border-none text-md"
             ></Input>
             <Button
               pill
-              class="p-3 px-6 mr-2 rounded-full bg-orange text-white hover:bg-orange-dark"
+              class="p-3 px-6 mr-2 rounded-full bg-orange-dark hover:bg-orange text-white text-md py-2 px-4"
               type="submit"
               disabled={$loggingIn}>Login</Button
             >
           </ButtonGroup>
-          {#if form?.error}
-            <div class="p-2">
-              <P class="text-orange">We could not sign you in.</P>
-              <P class="text-orange"
-                >Please make sure you are using the correct email address and try again.
-              </P>
-            </div>
-          {:else}
-            <Helper class="my-2 text-black text-sm">Log in with your school email address.</Helper>
-          {/if}
         </form>
       {/if}
     </div>
