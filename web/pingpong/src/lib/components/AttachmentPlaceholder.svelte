@@ -1,21 +1,6 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
-  import type {
-    MimeTypeLookupFn,
-    FileUploadInfo,
-    FileUploadFailure,
-    FileUploadPurpose,
-    ServerFile
-  } from '$lib/api';
-  import {
-    CloseOutline,
-    FileSolid,
-    ExclamationCircleOutline,
-    ImageSolid
-  } from 'flowbite-svelte-icons';
-  import { Tooltip, Button } from 'flowbite-svelte';
-  import ProgressCircle from './ProgressCircle.svelte';
-  import { Jumper } from 'svelte-loading-spinners';
+  import type { MimeTypeLookupFn, ServerFile } from '$lib/api';
+  import { FileSolid } from 'flowbite-svelte-icons';
 
   /**
    * Information about a file that is being uploaded.
@@ -24,22 +9,8 @@
 
   export let mimeType: MimeTypeLookupFn;
 
-  // Custom events
-  const dispatch = createEventDispatcher();
-
-  // Look up info about the file type.
-  const nameForMimeType = (type: string) => {
-    const mime = mimeType(type);
-    return mime?.name || 'Unsupported!';
-  };
-
-  $: type = file.content_type || '';
-  $: name = file.name || 'Deleted file';
-
-  // Delete button clicked.
-  const deleteFile = () => {
-    dispatch('delete', file);
-  };
+  $: type = mimeType(file.content_type)?.name || 'Unsupported';
+  $: name = file.name;
 </script>
 
 <div
@@ -52,21 +23,4 @@
     <div class="text-xs text-gray-500 font-bold">{name}</div>
     <div class="text-xs text-gray-500">{type}</div>
   </div>
-  <!-- {#if state !== 'pending' && state !== 'deleting'}
-      <div class="absolute top-[-6px] right-[-6px] -delete-button">
-        <Button pill color="dark" class="p-0" on:click={deleteFile}>
-          <CloseOutline class="w-4 h-4" />
-        </Button>
-      </div>
-    {/if} -->
 </div>
-
-<!-- <style lang="css">
-    .-delete-button {
-      display: none;
-    }
-    .-delete-button-container:hover .-delete-button {
-      display: block !important;
-    }
-  </style>
-   -->
