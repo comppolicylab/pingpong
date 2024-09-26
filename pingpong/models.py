@@ -475,7 +475,7 @@ code_interpreter_file_assistant_association = Table(
 code_interpreter_file_thread_association = Table(
     "code_interpreter_files_threads",
     Base.metadata,
-    Column("file_id", Integer, ForeignKey("files.id")),
+    Column("file_id", Integer, ForeignKey("files.id", ondelete="CASCADE")),
     Column("thread_id", Integer, ForeignKey("threads.id")),
     Index("code_interpreter_file_thread_idx", "file_id", "thread_id", unique=True),
 )
@@ -491,7 +491,7 @@ image_file_thread_association = Table(
 file_vector_store_association = Table(
     "file_vector_stores",
     Base.metadata,
-    Column("file_id", Integer, ForeignKey("files.id")),
+    Column("file_id", Integer, ForeignKey("files.id", ondelete="CASCADE")),
     Column("vector_store_id", Integer, ForeignKey("vector_stores.id")),
     Index("file_vector_store_idx", "file_id", "vector_store_id", unique=True),
 )
@@ -546,8 +546,18 @@ class File(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_by_file_id(cls, session: AsyncSession, file_id: str) -> "File":
+        stmt = select(File).where(File.file_id == file_id)
+        return await session.scalar(stmt)
+
+    @classmethod
     async def delete(cls, session: AsyncSession, id_: int) -> None:
         stmt = delete(File).where(File.id == int(id_))
+        await session.execute(stmt)
+
+    @classmethod
+    async def delete_by_file_id(cls, session: AsyncSession, file_id: str) -> None:
+        stmt = delete(File).where(File.file_id == file_id)
         await session.execute(stmt)
 
     @classmethod

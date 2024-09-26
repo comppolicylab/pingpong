@@ -1053,6 +1053,19 @@ export const deleteFile = async (f: Fetcher, classId: number, fileId: number) =>
 };
 
 /**
+ * Delete a thread file.
+ */
+export const deleteThreadFile = async (
+  f: Fetcher,
+  classId: number,
+  threadId: number,
+  fileId: string
+) => {
+  const url = `class/${classId}/thread/${threadId}/file/${fileId}`;
+  return await DELETE<never, GenericStatus>(f, url);
+};
+
+/**
  * Delete a user file.
  */
 export const deleteUserFile = async (

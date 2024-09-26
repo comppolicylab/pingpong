@@ -30,8 +30,9 @@
   } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
-  import AttachmentPlaceholder from '$lib/components/AttachmentPlaceholder.svelte';
   import AttachmentDeletedPlaceholder from '$lib/components/AttachmentDeletedPlaceholder.svelte';
+  import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
+  import { writable } from 'svelte/store';
 
   export let data;
 
@@ -47,7 +48,22 @@
   $: error = threadMgr.error;
   $: assistantId = threadMgr.assistantId;
   $: isCurrentUser = $participants.user.includes('Me');
+  let trashThreadFiles = writable<string[]>([]);
   $: threadAttachments = threadMgr.attachments;
+  $: allFiles = Object.fromEntries(
+    Object.entries($threadAttachments)
+      .filter(([k, v]) => !$trashThreadFiles.includes(k))
+      .map(([k, v]) => [
+        k,
+        {
+          state: 'success',
+          progress: 100,
+          file: { type: v.content_type, name: v.name },
+          response: v,
+          promise: Promise.resolve(v)
+        } as api.FileUploadInfo
+      ])
+  );
   let supportsVision = false;
   $: {
     const supportVisionModels = (data.models.filter((model) => model.supports_vision) || []).map(
@@ -236,6 +252,31 @@
       sadToast(`Failed to delete thread. Error: ${errorMessage(e)}`);
     }
   };
+
+  /*
+   * Delete a file from the thread.
+   */
+  const removeFile = async (evt: CustomEvent<api.FileUploadInfo>) => {
+    const file = evt.detail;
+    if (file.state === 'deleting' || !(file.response && 'file_id' in file.response)) {
+      return;
+    } else {
+      allFiles[(file.response as api.ServerFile).file_id].state = 'deleting';
+      const result = await api.deleteThreadFile(
+        fetch,
+        data.class.id,
+        threadId,
+        (file.response as api.ServerFile).file_id
+      );
+      if (result.$status >= 300) {
+        allFiles[(file.response as api.ServerFile).file_id].state = 'success';
+        sadToast(`Failed to delete file: ${result.detail || 'unknown error'}`);
+      } else {
+        trashThreadFiles.update((files) => [...files, (file.response as api.ServerFile).file_id]);
+        happyToast('Thread file successfully deleted.');
+      }
+    }
+  };
 </script>
 
 <div class="w-full flex flex-col justify-between grow min-h-0 relative">
@@ -276,10 +317,11 @@
               {#if attachment_file_ids}
                 <div class="flex flex-wrap gap-2">
                   {#each attachment_file_ids as file_id}
-                    {#if $threadAttachments[file_id]}
-                      <AttachmentPlaceholder
-                        file={$threadAttachments[file_id]}
+                    {#if allFiles[file_id]}
+                      <FilePlaceholder
+                        info={allFiles[file_id]}
                         mimeType={data.uploadInfo.mimeType}
+                        on:delete={removeFile}
                       />
                     {:else}
                       <AttachmentDeletedPlaceholder {file_id} />

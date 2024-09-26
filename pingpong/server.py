@@ -2067,6 +2067,30 @@ async def unpublish_thread(class_id: str, thread_id: str, request: Request):
 
 
 @v1.delete(
+    "/class/{class_id}/thread/{thread_id}/file/{file_id}",
+    dependencies=[
+        Depends(Authz("can_participate", "thread:{thread_id}")),
+    ],
+)
+async def remove_file_from_thread(
+    class_id: str,
+    thread_id: str,
+    file_id: str,
+    request: Request,
+    openai_client: OpenAIClient,
+):
+    try:
+        await models.File.delete_by_file_id(request.state.db, file_id)
+        await openai_client.files.delete(file_id)
+    except openai.NotFoundError:
+        pass
+    except openai.BadRequestError as e:
+        raise HTTPException(400, e.message or "OpenAI rejected this request")
+
+    return {"status": "ok"}
+
+
+@v1.delete(
     "/class/{class_id}/thread/{thread_id}",
     dependencies=[Depends(Authz("can_delete", "thread:{thread_id}"))],
     response_model=schemas.GenericStatus,
