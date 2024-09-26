@@ -37,11 +37,8 @@ def decode_session_token(token: str, nowfn: NowFn = utcnow) -> SessionToken:
     Returns:
         SessionToken: Session Token
     """
-    try:
-        auth_token = decode_auth_token(token, nowfn=nowfn)
-        return SessionToken(**auth_token.model_dump())
-    except PyJWTError as e:
-        raise ValueError(f"invalid session token: {e}") from e
+    auth_token = decode_auth_token(token, nowfn=nowfn)
+    return SessionToken(**auth_token.model_dump())
 
 
 def encode_auth_token(
