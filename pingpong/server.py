@@ -1836,7 +1836,6 @@ async def create_thread(
     openai_client: OpenAIClient,
 ):
     parties = list[models.User]()
-    tool_resources: ToolResources = {}
     vector_store_id = None
     vector_store_object_id = None
 
@@ -1847,20 +1846,31 @@ async def create_thread(
             class_id,
             req.file_search_file_ids,
             type=schemas.VectorStoreType.THREAD,
+            upload_to_oai=False,
         )
-        tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
-
-    if req.code_interpreter_file_ids:
-        tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
 
     messageContent: MessageContentPartParam = [{"type": "text", "text": req.message}]
 
+    attachments = []
+    if req.file_search_file_ids:
+        attachments.extend(
+            [
+                {"tools": [{"type": "file_search"}], "file_id": file_id}
+                for file_id in req.file_search_file_ids
+            ]
+        )
+    if req.code_interpreter_file_ids:
+        attachments.extend(
+            [
+                {"tools": [{"type": "code_interpreter"}], "file_id": file_id}
+                for file_id in req.code_interpreter_file_ids
+            ]
+        )
     if req.vision_file_ids:
         [
             messageContent.append({"type": "image_file", "image_file": {"file_id": id}})
             for id in req.vision_file_ids
         ]
-
     name, thread, parties = await asyncio.gather(
         generate_name(openai_client, req.message),
         openai_client.beta.threads.create(
@@ -1869,9 +1879,9 @@ async def create_thread(
                     "metadata": {"user_id": str(request.state.session.user.id)},
                     "role": "user",
                     "content": messageContent,
+                    "attachments": attachments,
                 }
             ],
-            tool_resources=tool_resources,
         ),
         models.User.get_all_by_id(request.state.db, req.parties),
     )
