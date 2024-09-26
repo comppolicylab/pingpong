@@ -147,7 +147,7 @@ async def parse_session_token(request: Request, call_next):
                     schemas.MagicLoginRequest(email=user.email, forward=forward),
                     request,
                 )
-                return RedirectResponse("login/expired-retry", status_code=303)
+                return RedirectResponse("login/?resent=true", status_code=303)
             return RedirectResponse(
                 f"/login/?expired=true&forward={forward}", status_code=303
             )
@@ -523,7 +523,7 @@ async def auth(request: Request):
             await login_magic(
                 schemas.MagicLoginRequest(email=user.email, forward=forward), request
             )
-            return RedirectResponse("/login/expired-retry", status_code=303)
+            return RedirectResponse("login/?resent=true", status_code=303)
         return RedirectResponse(
             f"/login/?expired=true&forward={forward}", status_code=303
         )
