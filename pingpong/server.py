@@ -1469,12 +1469,11 @@ async def get_thread(
     class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
-    messages, [assistant, file_names], all_files, runs_result = await asyncio.gather(
+    messages, [assistant, file_names, all_files], runs_result = await asyncio.gather(
         openai_client.beta.threads.messages.list(
             thread.thread_id, limit=20, order="desc"
         ),
-        models.Thread.get_file_search_files_assistant(request.state.db, thread.id),
-        models.Thread.get_thread_attachment_files(request.state.db, thread.id),
+        models.Thread.get_thread_components(request.state.db, thread.id),
         openai_client.beta.threads.runs.list(thread.thread_id, limit=1, order="desc"),
     )
     last_run = [r async for r in runs_result]
