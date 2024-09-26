@@ -76,6 +76,11 @@
   export let maxSize: number = 0;
 
   /**
+   * The list of files being uploaded.
+   */
+  export let attachments: ServerFile[] = [];
+
+  /**
    * Mime type lookup function.
    */
   export let mimeType: MimeTypeLookupFn;
@@ -115,6 +120,15 @@
     .filter((f) => f.state === 'success' && (f.response as ServerFile).vision_file_id)
     .map((f) => (f.response as ServerFile).vision_file_id)
     .join(',');
+
+  $: attachments = $allFiles
+    .filter(
+      (f) =>
+        f.state === 'success' &&
+        ((f.response as ServerFile).code_interpreter_file_id ||
+          (f.response as ServerFile).file_search_file_id)
+    )
+    .map((f) => f.response as ServerFile);
 
   // Fix the height of the textarea to match the content.
   // The technique is to render an off-screen textarea with a scrollheight,

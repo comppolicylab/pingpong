@@ -1303,6 +1303,15 @@ export type OpenAIRun = {
   // usage: unknown | null;
 };
 
+export type AttachmentTool = {
+  type: 'file_search' | 'code_interpreter';
+};
+
+export type OpenAIAttachment = {
+  file_id: string;
+  tools: AttachmentTool[] | null;
+};
+
 export type TextAnnotationFilePathFilePath = {
   file_id: string;
 };
@@ -1387,6 +1396,7 @@ export type OpenAIMessage = {
   role: 'user' | 'assistant';
   run_id: string | null;
   thread_id: string;
+  attachments: OpenAIAttachment[] | null;
 };
 
 /**
@@ -1408,6 +1418,7 @@ export type ThreadWithMeta = {
   limit: number;
   messages: OpenAIMessage[];
   ci_messages: OpenAIMessage[];
+  attachments: Record<string, ServerFile>;
 };
 
 /**

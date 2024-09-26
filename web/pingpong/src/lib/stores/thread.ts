@@ -18,6 +18,7 @@ export type ThreadManagerState = {
   submitting: boolean;
   supportsFileSearch: boolean;
   supportsCodeInterpreter: boolean;
+  attachments: Record<string, api.ServerFile>;
 };
 
 /**
@@ -47,6 +48,11 @@ export class ThreadManager {
    * The current list of messages in the thread.
    */
   messages: Readable<Message[]>;
+
+  /**
+   * The current list of messages in the thread.
+   */
+  attachments: Readable<Record<string, api.ServerFile>>;
 
   /**
    * Whether the thread data is currently being loaded.
@@ -115,7 +121,8 @@ export class ThreadManager {
       optimistic: [],
       loading: false,
       waiting: false,
-      submitting: false
+      submitting: false,
+      attachments: expanded.data?.attachments || {}
     });
 
     this.#ensureRun(threadData);
@@ -170,6 +177,10 @@ export class ThreadManager {
         user: $data?.data?.thread?.user_names || [],
         assistant: $data?.data?.thread?.assistant_names || {}
       };
+    });
+
+    this.attachments = derived(this.#data, ($data) => {
+      return $data?.attachments || {};
     });
   }
 
@@ -384,7 +395,8 @@ export class ThreadManager {
     message: string,
     code_interpreter_file_ids?: string[],
     file_search_file_ids?: string[],
-    vision_file_ids?: string[]
+    vision_file_ids?: string[],
+    attachments?: api.ServerFile[]
   ) {
     if (!message) {
       throw new Error('Please enter a message before sending.');
@@ -417,15 +429,23 @@ export class ThreadManager {
       code_interpreter_file_ids: code_interpreter_file_ids || [],
       vision_file_ids: vision_file_ids || [],
       run_id: null,
-      object: 'thread.message'
+      object: 'thread.message',
+      attachments: (attachments || []).map((file) => ({ file_id: file.file_id, tools: [] }))
     };
 
     this.#data.update((d) => ({
       ...d,
       error: null,
       optimistic: [...d.optimistic, optimistic],
-      submitting: true
+      submitting: true,
+      attachments: {
+        ...d.attachments,
+        ...attachments?.reduce((acc, file) => ({ ...acc, [file.file_id]: file }), {})
+      }
     }));
+    this.attachments = derived(this.#data, ($data) => {
+      return $data?.attachments || {};
+    });
     const chunks = await api.postMessage(this.#fetcher, this.classId, this.threadId, {
       message,
       file_search_file_ids,
@@ -545,7 +565,8 @@ export class ThreadManager {
           file_search_file_ids: [],
           code_interpreter_file_ids: [],
           object: 'thread.message',
-          run_id: null
+          run_id: null,
+          attachments: []
         });
       }
       return { ...d };

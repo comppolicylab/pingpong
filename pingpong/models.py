@@ -1771,6 +1771,29 @@ class Thread(Base):
         )
 
     @classmethod
+    async def get_thread_attachment_files(
+        cls, session: AsyncSession, id_: int
+    ) -> dict[str, "File"]:
+        stmt = (
+            select(Thread)
+            .options(joinedload(Thread.code_interpreter_files))
+            .where(Thread.id == int(id_))
+        )
+        thread = await session.scalar(stmt)
+        if not thread:
+            return {}
+        return await cls.get_file_search_attachments_by_thread(session, thread)
+
+    @classmethod
+    async def get_file_search_attachments_by_thread(
+        cls, session: AsyncSession, thread: "Thread"
+    ) -> dict[str, "File"]:
+        if not thread.vector_store_id:
+            return {}
+        results = await VectorStore.get_files_by_id(session, thread.vector_store_id)
+        return {file.file_id: file for file in results}
+
+    @classmethod
     async def get_file_search_files_by_thread(
         cls, session: AsyncSession, thread: "Thread"
     ) -> dict[str, str]:

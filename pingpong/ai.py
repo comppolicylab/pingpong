@@ -219,14 +219,32 @@ async def run_thread(
     message: list[MessageContentPartParam],
     file_names: dict[str, str] = {},
     metadata: Dict[str, str | int] | None = None,
+    file_search_file_ids: list[str] | None = None,
+    code_interpreter_file_ids: list[str] | None = None,
 ):
     try:
         if message:
+            attachments = []
+            if file_search_file_ids:
+                attachments.extend(
+                    [
+                        {"tools": [{"type": "file_search"}], "file_id": file_id}
+                        for file_id in file_search_file_ids
+                    ]
+                )
+            if code_interpreter_file_ids:
+                attachments.extend(
+                    [
+                        {"tools": [{"type": "code_interpreter"}], "file_id": file_id}
+                        for file_id in code_interpreter_file_ids
+                    ]
+                )
             await cli.beta.threads.messages.create(
                 thread_id,
                 role="user",
                 content=message,
                 metadata=metadata,
+                attachments=attachments,
             )
         handler = BufferedStreamHandler(file_names=file_names)
         async with cli.beta.threads.runs.stream(

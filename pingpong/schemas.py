@@ -740,6 +740,7 @@ class ThreadWithMeta(BaseModel):
     messages: list[OpenAIMessage]
     limit: int
     ci_messages: list[CodeInterpreterMessage] | None
+    attachments: dict[str, File] | None
 
     class Config:
         from_attributes = True
