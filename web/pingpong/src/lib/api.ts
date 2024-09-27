@@ -1053,6 +1053,19 @@ export const deleteFile = async (f: Fetcher, classId: number, fileId: number) =>
 };
 
 /**
+ * Delete a thread file.
+ */
+export const deleteThreadFile = async (
+  f: Fetcher,
+  classId: number,
+  threadId: number,
+  fileId: string
+) => {
+  const url = `class/${classId}/thread/${threadId}/file/${fileId}`;
+  return await DELETE<never, GenericStatus>(f, url);
+};
+
+/**
  * Delete a user file.
  */
 export const deleteUserFile = async (
@@ -1303,6 +1316,15 @@ export type OpenAIRun = {
   // usage: unknown | null;
 };
 
+export type AttachmentTool = {
+  type: 'file_search' | 'code_interpreter';
+};
+
+export type OpenAIAttachment = {
+  file_id: string;
+  tools: AttachmentTool[] | null;
+};
+
 export type TextAnnotationFilePathFilePath = {
   file_id: string;
 };
@@ -1387,6 +1409,7 @@ export type OpenAIMessage = {
   role: 'user' | 'assistant';
   run_id: string | null;
   thread_id: string;
+  attachments: OpenAIAttachment[] | null;
 };
 
 /**
@@ -1408,6 +1431,7 @@ export type ThreadWithMeta = {
   limit: number;
   messages: OpenAIMessage[];
   ci_messages: OpenAIMessage[];
+  attachments: Record<string, ServerFile>;
 };
 
 /**

@@ -12,6 +12,7 @@ async def create_vector_store(
     class_id: str,
     file_search_file_ids: list[str],
     type: VectorStoreType,
+    upload_to_oai: bool = True,
 ) -> tuple[str, int]:
     """
     Creates a new vector store with the give file_search file ids and class id
@@ -26,9 +27,10 @@ async def create_vector_store(
     Returns:
         tuple[str, int]: vector store id (used for OpenAI API requests, and vector store object id (DB PK, used for database queries)
     """
+
     try:
         new_vector_store = await openai_client.beta.vector_stores.create(
-            file_ids=file_search_file_ids,
+            file_ids=file_search_file_ids if upload_to_oai else [],
             metadata={
                 "class_id": class_id,
             },
@@ -62,7 +64,9 @@ async def append_vector_store_files(
     file_search_file_ids: list[str],
 ) -> str:
     """
-    Adds the given file_search file ids to the vector store specified by vector_store_id (the OpenAI API vector store id). This is used to add files to a thread's vector store, for which we don't need to replace files, but simply add new ones, to save on DB calls.
+    Adds the given file_search file ids to the vector store specified by vector_store_id
+    (the OpenAI API vector store id). This is used to add files to a thread's vector store,
+    for which we don't need to replace files, but simply add new ones, to save on DB calls.
 
     Args:
         session (AsyncSession): SQLAlchemy session
@@ -73,7 +77,7 @@ async def append_vector_store_files(
     Returns:
         int: vector store object id (DB PK, used for database queries)
     """
-    vector_store_id = await models.VectorStore.add_files_return_id(
+    vector_store_id = await add_vector_store_files_to_db(
         session, vector_store_object_id, file_search_file_ids
     )
 
@@ -85,6 +89,28 @@ async def append_vector_store_files(
         raise HTTPException(400, e.message or "OpenAI rejected this request")
 
     return vector_store_id
+
+
+async def add_vector_store_files_to_db(
+    session: AsyncSession,
+    vector_store_object_id: int,
+    file_search_file_ids: list[str],
+) -> str:
+    """
+    Adds the given file_search file ids to the vector store specified by vector_store_id (the PK).
+
+    Args:
+        session (AsyncSession): SQLAlchemy session
+        openai_client (openai.AsyncClient): OpenAI client
+        vector_store_object_id (int): DB PK of the vector store
+        file_search_file_ids (list[str]): list of file ids to add to the vector store
+
+    Returns:
+        int: vector store object id (DB PK, used for database queries)
+    """
+    return await models.VectorStore.add_files_return_id(
+        session, vector_store_object_id, file_search_file_ids
+    )
 
 
 async def sync_vector_store_files(

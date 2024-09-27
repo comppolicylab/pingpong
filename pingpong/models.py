@@ -475,7 +475,7 @@ code_interpreter_file_assistant_association = Table(
 code_interpreter_file_thread_association = Table(
     "code_interpreter_files_threads",
     Base.metadata,
-    Column("file_id", Integer, ForeignKey("files.id")),
+    Column("file_id", Integer, ForeignKey("files.id", ondelete="CASCADE")),
     Column("thread_id", Integer, ForeignKey("threads.id")),
     Index("code_interpreter_file_thread_idx", "file_id", "thread_id", unique=True),
 )
@@ -491,7 +491,7 @@ image_file_thread_association = Table(
 file_vector_store_association = Table(
     "file_vector_stores",
     Base.metadata,
-    Column("file_id", Integer, ForeignKey("files.id")),
+    Column("file_id", Integer, ForeignKey("files.id", ondelete="CASCADE")),
     Column("vector_store_id", Integer, ForeignKey("vector_stores.id")),
     Index("file_vector_store_idx", "file_id", "vector_store_id", unique=True),
 )
@@ -546,8 +546,18 @@ class File(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_by_file_id(cls, session: AsyncSession, file_id: str) -> "File":
+        stmt = select(File).where(File.file_id == file_id)
+        return await session.scalar(stmt)
+
+    @classmethod
     async def delete(cls, session: AsyncSession, id_: int) -> None:
         stmt = delete(File).where(File.id == int(id_))
+        await session.execute(stmt)
+
+    @classmethod
+    async def delete_by_file_id(cls, session: AsyncSession, file_id: str) -> None:
+        stmt = delete(File).where(File.file_id == file_id)
         await session.execute(stmt)
 
     @classmethod
@@ -1755,20 +1765,66 @@ class Thread(Base):
         return await cls.get_file_search_files_by_thread(session, thread)
 
     @classmethod
-    async def get_file_search_files_assistant(
+    async def get_thread_components(
         cls, session: AsyncSession, thread_id: int
-    ) -> tuple[Union["Assistant", None], dict[str, str]]:
+    ) -> tuple[Union["Assistant", None], dict[str, str], dict[str, "File"]]:
         stmt = (
             select(Thread)
             .options(joinedload(Thread.assistant))
             .where(Thread.id == thread_id)
         )
         thread = await session.scalar(stmt)
+
         if not thread:
-            return None, {}
-        return thread.assistant, await cls.get_file_search_files_by_thread(
-            session, thread
+            return None, {}, {}
+
+        file_search_result, attachment_files = await asyncio.gather(
+            cls.get_file_search_files_by_thread(session, thread),
+            cls.get_thread_attachment_files(session, thread.id),
         )
+        return thread.assistant, file_search_result or {}, attachment_files or {}
+
+    @classmethod
+    async def get_thread_attachment_files(
+        cls, session: AsyncSession, id_: int
+    ) -> dict[str, "File"]:
+        stmt = (
+            select(Thread)
+            .options(joinedload(Thread.code_interpreter_files))
+            .where(Thread.id == int(id_))
+        )
+        thread = await session.scalar(stmt)
+        if not thread:
+            return {}
+        files_dict = await cls.get_code_interpreter_files_by_thread_id(
+            session, thread.id
+        )
+        files_dict.update(
+            await cls.get_vector_store_attachments_by_thread(session, thread)
+        )
+        return files_dict
+
+    @classmethod
+    async def get_vector_store_attachments_by_thread(
+        cls, session: AsyncSession, thread: "Thread"
+    ) -> dict[str, "File"]:
+        if not thread.vector_store_id:
+            return {}
+        results = await VectorStore.get_files_by_id(session, thread.vector_store_id)
+        return {file.file_id: file for file in results}
+
+    @classmethod
+    async def get_code_interpreter_files_by_thread_id(
+        cls, session: AsyncSession, thread_id: int
+    ) -> dict[str, "File"]:
+        stmt = (
+            select(File)
+            .join(code_interpreter_file_thread_association)
+            .where(code_interpreter_file_thread_association.c.thread_id == thread_id)
+        )
+        result = await session.execute(stmt)
+        files = result.scalars().all()
+        return {file.file_id: file for file in files}
 
     @classmethod
     async def get_file_search_files_by_thread(

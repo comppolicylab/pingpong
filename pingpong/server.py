@@ -64,8 +64,8 @@ from .now import NowFn, utcnow
 from .permission import Authz, LoggedIn
 from .runs import get_placeholder_ci_calls
 from .vector_stores import (
+    add_vector_store_files_to_db,
     create_vector_store,
-    append_vector_store_files,
     delete_vector_store,
     delete_vector_store_db_returning_file_ids,
     sync_vector_store_files,
@@ -1469,11 +1469,11 @@ async def get_thread(
     class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
-    messages, [assistant, file_names], runs_result = await asyncio.gather(
+    messages, [assistant, file_names, all_files], runs_result = await asyncio.gather(
         openai_client.beta.threads.messages.list(
             thread.thread_id, limit=20, order="desc"
         ),
-        models.Thread.get_file_search_files_assistant(request.state.db, thread.id),
+        models.Thread.get_thread_components(request.state.db, thread.id),
         openai_client.beta.threads.runs.list(thread.thread_id, limit=1, order="desc"),
     )
     last_run = [r async for r in runs_result]
@@ -1500,7 +1500,6 @@ async def get_thread(
         message.metadata["name"] = (
             "Anonymous User" if thread.private else pseudonym(thread, users[user_id])
         )
-
     placeholder_ci_calls = []
     if "code_interpreter" in thread.tools_available:
         placeholder_ci_calls = await get_placeholder_ci_calls(
@@ -1525,6 +1524,7 @@ async def get_thread(
         "messages": list(messages.data),
         "limit": 20,
         "ci_messages": placeholder_ci_calls,
+        "attachments": all_files,
     }
 
 
@@ -1835,7 +1835,6 @@ async def create_thread(
     openai_client: OpenAIClient,
 ):
     parties = list[models.User]()
-    tool_resources: ToolResources = {}
     vector_store_id = None
     vector_store_object_id = None
 
@@ -1846,20 +1845,31 @@ async def create_thread(
             class_id,
             req.file_search_file_ids,
             type=schemas.VectorStoreType.THREAD,
+            upload_to_oai=False,
         )
-        tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
-
-    if req.code_interpreter_file_ids:
-        tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
 
     messageContent: MessageContentPartParam = [{"type": "text", "text": req.message}]
 
+    attachments = []
+    if req.file_search_file_ids:
+        attachments.extend(
+            [
+                {"tools": [{"type": "file_search"}], "file_id": file_id}
+                for file_id in req.file_search_file_ids
+            ]
+        )
+    if req.code_interpreter_file_ids:
+        attachments.extend(
+            [
+                {"tools": [{"type": "code_interpreter"}], "file_id": file_id}
+                for file_id in req.code_interpreter_file_ids
+            ]
+        )
     if req.vision_file_ids:
         [
             messageContent.append({"type": "image_file", "image_file": {"file_id": id}})
             for id in req.vision_file_ids
         ]
-
     name, thread, parties = await asyncio.gather(
         generate_name(openai_client, req.message),
         openai_client.beta.threads.create(
@@ -1868,9 +1878,9 @@ async def create_thread(
                     "metadata": {"user_id": str(request.state.session.user.id)},
                     "role": "user",
                     "content": messageContent,
+                    "attachments": attachments,
                 }
             ],
-            tool_resources=tool_resources,
         ),
         models.User.get_all_by_id(request.state.db, req.parties),
     )
@@ -1957,45 +1967,34 @@ async def send_message(
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
     asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
 
-    tool_resources: ToolResources = {}
+    # tool_resources: ToolResources = {}
 
     if data.file_search_file_ids:
         if thread.vector_store_id:
             # Vector store already exists, update
-            vector_store_id = await append_vector_store_files(
+            await add_vector_store_files_to_db(
                 request.state.db,
-                openai_client,
                 thread.vector_store_id,
                 data.file_search_file_ids,
             )
-            tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
         else:
             # Store doesn't exist, create a new one
-            vector_store_id, vector_store_object_id = await create_vector_store(
+            # (empty, since we're adding files as attachments)
+            # and relate files with new vector store
+            _, vector_store_object_id = await create_vector_store(
                 request.state.db,
                 openai_client,
                 class_id,
                 data.file_search_file_ids,
                 type=schemas.VectorStoreType.THREAD,
+                upload_to_oai=False,
             )
             thread.vector_store_id = vector_store_object_id
-            tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
 
     if data.code_interpreter_file_ids:
-        existing_file_ids = [
-            file_id
-            async for file_id in models.Thread.get_file_ids_by_id(
-                request.state.db, thread.id
-            )
-        ]
-
         await models.Thread.add_code_interpeter_files(
             request.state.db, thread.id, data.code_interpreter_file_ids
         )
-
-        tool_resources["code_interpreter"] = {
-            "file_ids": existing_file_ids + data.code_interpreter_file_ids
-        }
 
     messageContent: MessageContentPartParam = [{"type": "text", "text": data.message}]
 
@@ -2007,13 +2006,6 @@ async def send_message(
             messageContent.append({"type": "image_file", "image_file": {"file_id": id}})
             for id in data.vision_file_ids
         ]
-
-    try:
-        await openai_client.beta.threads.update(
-            thread.thread_id, tool_resources=tool_resources
-        )
-    except openai.BadRequestError as e:
-        raise HTTPException(400, e.message or "OpenAI rejected this request")
 
     thread.last_activity = func.now()
     request.state.db.add(thread)
@@ -2034,6 +2026,8 @@ async def send_message(
         message=messageContent,
         metadata={"user_id": str(request.state.session.user.id)},
         file_names=file_names,
+        file_search_file_ids=data.file_search_file_ids,
+        code_interpreter_file_ids=data.code_interpreter_file_ids,
     )
     return StreamingResponse(stream, media_type="text/event-stream")
 
@@ -2069,6 +2063,30 @@ async def unpublish_thread(class_id: str, thread_id: str, request: Request):
     await request.state.authz.write_safe(
         revoke=[(f"class:{class_id}#member", "can_view", f"thread:{thread_id}")]
     )
+    return {"status": "ok"}
+
+
+@v1.delete(
+    "/class/{class_id}/thread/{thread_id}/file/{file_id}",
+    dependencies=[
+        Depends(Authz("can_participate", "thread:{thread_id}")),
+    ],
+)
+async def remove_file_from_thread(
+    class_id: str,
+    thread_id: str,
+    file_id: str,
+    request: Request,
+    openai_client: OpenAIClient,
+):
+    try:
+        await models.File.delete_by_file_id(request.state.db, file_id)
+        await openai_client.files.delete(file_id)
+    except openai.NotFoundError:
+        pass
+    except openai.BadRequestError as e:
+        raise HTTPException(400, e.message or "OpenAI rejected this request")
+
     return {"status": "ok"}
 
 
