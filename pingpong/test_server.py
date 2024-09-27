@@ -24,7 +24,6 @@ async def test_me_with_expired_token(api, now):
             "session": encode_session_token(123, nowfn=offset(now, seconds=-100_000)),
         },
     )
-    print(response.json())
     assert response.status_code == 200
     assert response.json() == {
         "error": "Token expired",

@@ -30,6 +30,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
       error(code, { message: `Error reaching the server: ${message}` });
     }
   }
+
   const authed = me.data.status === 'valid';
   const needsOnboarding = !!me.data?.user && (!me.data.user.first_name || !me.data.user.last_name);
 
