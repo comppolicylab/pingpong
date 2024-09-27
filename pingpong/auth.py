@@ -101,8 +101,7 @@ def decode_auth_token(token: str, nowfn: NowFn = utcnow) -> AuthToken:
     Raises:
         jwt.exceptions.PyJWTError when token is not valid
     """
-    exc: PyJWTError | None = None
-    time_exc: TimeException | None = None
+    exc: PyJWTError | TimeException | None = None
 
     for secret in config.auth.secret_keys:
         try:
@@ -130,18 +129,12 @@ def decode_auth_token(token: str, nowfn: NowFn = utcnow) -> AuthToken:
 
             return tok
 
-        except TimeException as e:
-            time_exc = e
-            continue
-
-        except PyJWTError as e:
+        except (TimeException, PyJWTError) as e:
             exc = e
             continue
 
     if exc is not None:
         raise exc
-    if time_exc is not None:
-        raise time_exc
 
     # Unclear why we would get here
     raise ValueError("invalid token")

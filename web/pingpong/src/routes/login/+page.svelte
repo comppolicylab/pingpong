@@ -11,7 +11,7 @@
   export let form;
   const forward = $page.url.searchParams.get('forward') || '/';
   const expired = $page.url.searchParams.get('expired') === 'true' || false;
-  const resent = $page.url.searchParams.get('resent') === 'true' || false;
+  const new_link = $page.url.searchParams.get('new_link') === 'true' || false;
   const loggingIn = writable(false);
   const success = writable(false);
   const loginWithMagicLink = async (evt: SubmitEvent) => {
@@ -49,7 +49,7 @@
           Success!
         </div>
         <div class="text-lg text-center">Follow the link in your email to finish signing in.</div>
-      {:else if resent}
+      {:else if new_link}
         <div class="text-4xl text-center font-serif font-bold mt-5 mb-4 text-blue-dark-50">
           Let's try this again.
         </div>
