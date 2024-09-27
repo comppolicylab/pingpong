@@ -65,7 +65,7 @@ async def test_me_with_valid_token_but_missing_user(api, now):
     )
     assert response.status_code == 200
     assert response.json() == {
-        "error": "User does not exist",
+        "error": "We couldn't locate your account.",
         "profile": None,
         "status": "error",
         "token": None,
@@ -160,9 +160,9 @@ async def test_auth_with_invalid_token(api):
 
 async def test_auth_with_expired_token(api, now):
     expired_token = encode_session_token(123, nowfn=offset(now, seconds=-100_000))
-    response = api.get(f"/api/v1/auth?token={expired_token}")
-    assert response.status_code == 401
-    assert response.json() == {"detail": "Token expired"}
+    response = api.get(f"/api/v1/auth?token={expired_token}", allow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login/?expired=true&forward=/"
 
 
 @with_user(123, "foo@bar.com")

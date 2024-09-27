@@ -28,7 +28,7 @@ from sqlalchemy.sql import func, delete, update
 import pingpong.metrics as metrics
 import pingpong.models as models
 import pingpong.schemas as schemas
-from .auth import authn_method_for_email
+from .auth import TimeException, authn_method_for_email
 from .template import email_template as message_template
 from .time import convert_seconds
 from .saml import get_saml2_client, get_saml2_settings, get_saml2_attrs
@@ -122,8 +122,7 @@ async def parse_session_token(request: Request, call_next):
             user_id = int(token.sub)
             user = await models.User.get_by_id(request.state.db, user_id)
             if not user:
-                raise ValueError("User does not exist")
-
+                raise ValueError("We couldn't locate your account.")
             # Modify user state if necessary
             if user.state == schemas.UserState.UNVERIFIED:
                 await user.verify(request.state.db)
@@ -134,6 +133,11 @@ async def parse_session_token(request: Request, call_next):
                 error=None,
                 user=user,
                 profile=schemas.Profile.from_email(user.email),
+            )
+        except TimeException as e:
+            request.state.session = schemas.SessionState(
+                status=schemas.SessionStatus.INVALID,
+                error=e.detail,
             )
         except PyJWTError as e:
             request.state.session = schemas.SessionState(
@@ -506,6 +510,17 @@ async def auth(request: Request):
         auth_token = decode_auth_token(stok, nowfn=nowfn)
     except jwt.exceptions.PyJWTError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except TimeException as e:
+        user = await models.User.get_by_id(request.state.db, int(e.user_id))
+        forward = request.query_params.get("redirect", "/")
+        if user and user.email:
+            await login_magic(
+                schemas.MagicLoginRequest(email=user.email, forward=forward), request
+            )
+            return RedirectResponse("/login/?new_link=true", status_code=303)
+        return RedirectResponse(
+            f"/login/?expired=true&forward={forward}", status_code=303
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
