@@ -82,6 +82,12 @@ def encode_auth_token(
     )
 
 
+class TimeException(Exception):
+    def __init__(self, detail: str = "", user_id: str = ""):
+        self.user_id = user_id
+        self.detail = detail
+
+
 def decode_auth_token(token: str, nowfn: NowFn = utcnow) -> AuthToken:
     """Decodes the Auth Token.
 
@@ -96,6 +102,7 @@ def decode_auth_token(token: str, nowfn: NowFn = utcnow) -> AuthToken:
         jwt.exceptions.PyJWTError when token is not valid
     """
     exc: PyJWTError | None = None
+    time_exc: TimeException | None = None
 
     for secret in config.auth.secret_keys:
         try:
@@ -115,13 +122,17 @@ def decode_auth_token(token: str, nowfn: NowFn = utcnow) -> AuthToken:
             now = nowfn().timestamp()
             nbf = getattr(tok, "nbf", None)
             if nbf is not None and now < nbf:
-                raise PyJWTError(f"Token not valid yet:{tok.sub}")
+                raise TimeException(detail="Token not valid yet", user_id=tok.sub)
 
             exp = getattr(tok, "exp", None)
             if exp is not None and now > exp:
-                raise PyJWTError(f"Token expired:{tok.sub}")
+                raise TimeException(detail="Token expired", user_id=tok.sub)
 
             return tok
+
+        except TimeException as e:
+            time_exc = e
+            continue
 
         except PyJWTError as e:
             exc = e
@@ -129,6 +140,8 @@ def decode_auth_token(token: str, nowfn: NowFn = utcnow) -> AuthToken:
 
     if exc is not None:
         raise exc
+    if time_exc is not None:
+        raise time_exc
 
     # Unclear why we would get here
     raise ValueError("invalid token")

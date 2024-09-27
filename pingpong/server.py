@@ -28,7 +28,7 @@ from sqlalchemy.sql import func, delete, update
 import pingpong.metrics as metrics
 import pingpong.models as models
 import pingpong.schemas as schemas
-from .auth import authn_method_for_email
+from .auth import TimeException, authn_method_for_email
 from .template import email_template as message_template
 from .time import convert_seconds
 from .saml import get_saml2_client, get_saml2_settings, get_saml2_attrs
@@ -134,22 +134,15 @@ async def parse_session_token(request: Request, call_next):
                 user=user,
                 profile=schemas.Profile.from_email(user.email),
             )
-        except PyJWTError as e:
-            [error, user_id_] = str(e).split(":")
+        except TimeException as e:
             request.state.session = schemas.SessionState(
                 status=schemas.SessionStatus.INVALID,
-                error=error,
+                error=e.detail,
             )
-            forward = request.query_params.get("forward", "/")
-            user = await models.User.get_by_id(request.state.db, int(user_id_))
-            if user.email:
-                await login_magic(
-                    schemas.MagicLoginRequest(email=user.email, forward=forward),
-                    request,
-                )
-                return RedirectResponse("login/?resent=true", status_code=303)
-            return RedirectResponse(
-                f"/login/?expired=true&forward={forward}", status_code=303
+        except PyJWTError as e:
+            request.state.session = schemas.SessionState(
+                status=schemas.SessionStatus.INVALID,
+                error=str(e),
             )
         except Exception as e:
             logger.exception("Error parsing session token: %s", e)
@@ -516,14 +509,15 @@ async def auth(request: Request):
     try:
         auth_token = decode_auth_token(stok, nowfn=nowfn)
     except jwt.exceptions.PyJWTError as e:
-        [error, user_id] = str(e).split(":")
-        user = await models.User.get_by_id(request.state.db, int(user_id) + 66)
+        raise HTTPException(status_code=401, detail=str(e))
+    except TimeException as e:
+        user = await models.User.get_by_id(request.state.db, int(e.user_id))
         forward = request.query_params.get("redirect", "/")
         if user and user.email:
             await login_magic(
                 schemas.MagicLoginRequest(email=user.email, forward=forward), request
             )
-            return RedirectResponse("login/?resent=true", status_code=303)
+            return RedirectResponse("/login/?resent=true", status_code=303)
         return RedirectResponse(
             f"/login/?expired=true&forward={forward}", status_code=303
         )
