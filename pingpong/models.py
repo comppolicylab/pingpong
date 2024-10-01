@@ -1785,6 +1785,24 @@ class Thread(Base):
         return thread.assistant, file_search_result or {}, attachment_files or {}
 
     @classmethod
+    async def get_file_search_files_assistant(
+        cls, session: AsyncSession, thread_id: int
+    ) -> tuple[Union["Assistant", None], dict[str, str]]:
+        stmt = (
+            select(Thread)
+            .options(joinedload(Thread.assistant))
+            .where(Thread.id == thread_id)
+        )
+        thread = await session.scalar(stmt)
+
+        if not thread:
+            return None, {}
+
+        return thread.assistant, await cls.get_file_search_files_by_thread(
+            session, thread
+        )
+
+    @classmethod
     async def get_thread_attachment_files(
         cls, session: AsyncSession, id_: int
     ) -> dict[str, "File"]:
