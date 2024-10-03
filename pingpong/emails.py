@@ -70,6 +70,8 @@ async def validate_email_addresses(
     validated_addresses = [x for x in result if x.valid]
     unvalidated_addresses = [x for x in result if not x.valid]
 
+    unique_addresses = {}
+
     # Check if user exists in the database and replace name if it does
     for i, data in enumerate(validated_addresses):
         user = await models.User.get_by_email(session, data.email)
@@ -79,9 +81,18 @@ async def validate_email_addresses(
                 if user.first_name and user.last_name
                 else user.display_name
                 if user.display_name
-                else None
+                else validated_addresses[i].name
             )
             validated_addresses[i].isUser = True
+
+        if data.email not in unique_addresses:
+            unique_addresses[data.email] = data
+        else:
+            existing_entry = unique_addresses[data.email]
+            if data.name and (not existing_entry.name or not existing_entry.isUser):
+                unique_addresses[data.email] = data
+
+    validated_addresses = list(unique_addresses.values())
 
     return EmailValidationResults(results=validated_addresses + unvalidated_addresses)
 
@@ -89,6 +100,7 @@ async def validate_email_addresses(
 async def revalidate_email_addresses(
     session: AsyncSession, input: list[EmailValidationResult]
 ) -> EmailValidationResults:
+    unique_addresses = {}
     for email in input:
         email.valid = is_email_valid(email.email)
         if email.valid:
@@ -99,8 +111,18 @@ async def revalidate_email_addresses(
                     if user.first_name and user.last_name
                     else user.display_name
                     if user.display_name
-                    else None
+                    else email.name
                 )
                 email.isUser = True
 
-    return EmailValidationResults(results=input)
+            if email.email not in unique_addresses:
+                unique_addresses[email.email] = email
+            else:
+                existing_entry = unique_addresses[email.email]
+                if email.name and (
+                    not existing_entry.name or existing_entry.isUser is False
+                ):
+                    unique_addresses[email.email] = email
+
+    results = list(unique_addresses.values())
+    return EmailValidationResults(results=results)
