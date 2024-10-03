@@ -265,7 +265,7 @@ class Assistants(BaseModel):
 
 class Thread(BaseModel):
     id: int
-    name: str
+    name: str | None
     thread_id: str
     class_id: int
     assistant_names: dict[int, str] = {}

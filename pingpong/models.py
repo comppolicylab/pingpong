@@ -1454,7 +1454,7 @@ class Thread(Base):
     __tablename__ = "threads"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String)
+    name = Column(String, nullable=True)
     version = Column(Integer, default=1)
     thread_id = Column(String, unique=True)
     class_id = Column(Integer, ForeignKey("classes.id"))
@@ -1462,6 +1462,7 @@ class Thread(Base):
     assistant_id = Column(Integer, ForeignKey("assistants.id"), index=True)
     assistant = relationship("Assistant", back_populates="threads", uselist=False)
     private = Column(Boolean)
+    user_message_ct = Column(Integer, server_default="1")
     users = relationship(
         "User",
         secondary=user_thread_association,

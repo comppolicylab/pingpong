@@ -154,7 +154,7 @@
             class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2"
             spanClass="flex-1 truncate"
             href={`/group/${thread.class_id}/thread/${thread.id}`}
-            label={thread.name || 'Undefined'}
+            label={thread.name || 'New Conversation'}
             activeClass="bg-blue-dark-40"
           >
             <svelte:fragment slot="icon">
