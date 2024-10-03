@@ -36,7 +36,8 @@ async def generate_name(
     :param model: Model to use
     :return: Generated name
     """
-    system_prompt = 'You will be provided with a transcript between a user and an assistant. Return A TITLE OF 3-4 WORDS summarizing what the user is seeking help with. Messages the user sent are prepended with "USER", and messages the assistant sent are prepended with "ASSISTANT". DO NOT RETURN MORE THAN 4 WORDS!'
+    system_prompt = 'You will be provided with a transcript between a user and an assistant. Return A TITLE OF 3-4 WORDS summarizing what the conversation is about. Messages the user sent are prepended with "USER", and messages the assistant sent are prepended with "ASSISTANT". DO NOT RETURN MORE THAN 4 WORDS!'
+    print(transcript)
 
     response = await cli.chat.completions.create(
         messages=[

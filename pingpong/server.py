@@ -1981,7 +1981,7 @@ async def send_message(
     asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
 
     # If we have more than 3 user messages and no thread name, generate a new one. Only use the first 100 words of each user and assistant message to maintain a low token count.
-    if thread.user_message_ct > 1 and thread.name == "New Conversation":
+    if thread.user_message_ct > 1 and thread.name is None:
         messages = await openai_client.beta.threads.messages.list(
             thread.thread_id, limit=10, order="asc"
         )
@@ -1996,7 +1996,6 @@ async def send_message(
         message_str += f"USER: {data.message}\n"
         if data.vision_file_ids:
             message_str += "USER: Sent image file\n"
-        print(message_str)
         new_name = await generate_name(openai_client, message_str)
         thread.name = new_name
 
