@@ -4,7 +4,8 @@ import pingpong.models as models
 from pingpong.schemas import Statistics
 from sqlalchemy.ext.asyncio import AsyncSession
 
-async def get_statistics(session: AsyncSession) -> Statistics:    
+
+async def get_statistics(session: AsyncSession) -> Statistics:
     results = await asyncio.gather(
         session.execute(select(func.count()).select_from(models.Institution)),
         session.execute(select(func.count()).select_from(models.Class)),
@@ -12,7 +13,7 @@ async def get_statistics(session: AsyncSession) -> Statistics:
         session.execute(select(func.count()).select_from(models.UserClassRole)),
         session.execute(select(func.count()).select_from(models.Assistant)),
         session.execute(select(func.count()).select_from(models.Thread)),
-        session.execute(select(func.count()).select_from(models.File))
+        session.execute(select(func.count()).select_from(models.File)),
     )
 
     institutions_count = results[0].scalar_one()
@@ -31,5 +32,5 @@ async def get_statistics(session: AsyncSession) -> Statistics:
         enrollments=enrollments_count,
         assistants=assistants_count,
         threads=threads_count,
-        files=files_count
+        files=files_count,
     )
