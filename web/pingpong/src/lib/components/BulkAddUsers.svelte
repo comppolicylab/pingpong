@@ -48,7 +48,7 @@
   let showResults = false;
   let permissionsModalOpen = false;
   let results: api.CreateUserResult[] = [];
-  let withErrors = results.some((r) => r.error);
+  $: withErrors = results.some((r) => r.error);
 
   const dispatch = createEventDispatcher();
 
