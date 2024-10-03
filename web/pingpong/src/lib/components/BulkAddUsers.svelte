@@ -1,7 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import * as api from '$lib/api';
-  import { parseAddresses, type EmailTuple } from '$lib/email';
   import { Select, Helper, Button, Label, Textarea, Hr, Checkbox, Table, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Input } from 'flowbite-svelte';
   import { writable } from 'svelte/store';
   import { sadToast } from '$lib/toast';
@@ -15,13 +14,14 @@
   import PermissionsTable from './PermissionsTable.svelte';
 
   export let role: api.Role;
+  export let classId: string = '3';
   export let className: string = 'your group';
   export let isPrivate: boolean = false;
   export let permissions: { name: string; member: boolean; moderator: boolean }[] = [];
   let emailString: string = '';
-  let emailList: EmailTuple[] = [];
-  $: verifiedEmails = emailList.filter((e) => e[2]);
-  $: unverifiedEmails = emailList.filter((e) => !e[2]);
+  let emailList: api.EmailValidationResult[] = [];
+  $: verifiedEmails = emailList.filter((e) => e.valid);
+  $: unverifiedEmails = emailList.filter((e) => !e.valid);
   let selectedRole: api.Role | undefined = role;
   let silentAdd = false;
   let showEmailForm = true;
@@ -32,7 +32,7 @@
   const dispatch = createEventDispatcher();
 
   const loading = writable(false);
-  const submitEmailForm = (evt: SubmitEvent) => {
+  const submitEmailForm = async (evt: SubmitEvent) => {
     evt.preventDefault();
     $loading = true;
 
@@ -47,14 +47,21 @@
       return;
     }
     emailString = emails;
-    emailList = parseAddresses(emails);
-
+    
     selectedRole = d.role as api.Role | undefined;
     if (!selectedRole) {
       $loading = false;
       sadToast('Role is required');
       return;
     }
+
+    let rawValidateEmails = await api.validateEmails(fetch, classId, {emails: emailString});
+    const validateEmailsResponse = api.expandResponse(rawValidateEmails);
+    if (validateEmailsResponse.error) {
+      $loading = false;
+      return sadToast(validateEmailsResponse.error.detail || 'Unknown error validating emails.');
+    }
+    emailList = validateEmailsResponse.data.results;
 
     silentAdd = d.notify !== 'on';
 
@@ -75,6 +82,58 @@
     showEmailForm = false;
     showNameForm = true;
   };
+
+  const submitNameForm = async (evt: SubmitEvent) => {
+    evt.preventDefault();
+    $loading = true;
+
+    const form = evt.target as HTMLFormElement;
+    const formData = new FormData(form);
+    const d = Object.fromEntries(formData.entries());
+
+    const emails = (d.emails as string) || '';
+    if (!emails) {
+      $loading = false;
+      sadToast('Emails are required');
+      return;
+    }
+    emailString = emails;
+    
+    selectedRole = d.role as api.Role | undefined;
+    if (!selectedRole) {
+      $loading = false;
+      sadToast('Role is required');
+      return;
+    }
+
+    let rawValidateEmails = await api.validateEmails(fetch, classId, {emails: emailString});
+    const validateEmailsResponse = api.expandResponse(rawValidateEmails);
+    if (validateEmailsResponse.error) {
+      $loading = false;
+      return sadToast(validateEmailsResponse.error.detail || 'Unknown error validating emails.');
+    }
+    emailList = validateEmailsResponse.data.results;
+
+    silentAdd = d.notify !== 'on';
+
+    // const request: api.CreateClassUsersRequest = {
+    //   roles: emailList.map((e) => ({
+    //     email: e,
+    //     roles: {
+    //       admin: role === 'admin',
+    //       teacher: role === 'teacher',
+    //       student: role === 'student'
+    //     }
+    //   })),
+    //   silent: silent
+    // };
+
+    // dispatch('submit', request);
+    $loading = false;
+    showEmailForm = false;
+    showNameForm = true;
+  };
+
 
   const roles = api.ROLES.filter((role) => role !== 'admin').map((role) => ({
     value: role,
@@ -193,7 +252,7 @@ class="flex items-center text-sm text-white bg-gradient-to-r from-red-900 to-red
       <TableHeadCell class="px-6 py-4 font-medium text-gray-900">Email</TableHeadCell>
   </TableHead>
   <TableBody>
-    {#each emailList as tuple, index}
+    {#each unverifiedEmails as tuple}
       <TableBodyRow class="bg-white border-b">
         <!-- Name Input -->
         <TableBodyCell class="px-3 py-2">
@@ -201,7 +260,7 @@ class="flex items-center text-sm text-white bg-gradient-to-r from-red-900 to-red
             type="text"
             placeholder="Name"
             class="w-full px-2 py-1 border rounded"
-            value={tuple[0] || ''}
+            value={tuple.name || ''}
           />
         </TableBodyCell>
 
@@ -211,7 +270,7 @@ class="flex items-center text-sm text-white bg-gradient-to-r from-red-900 to-red
             type="email"
             placeholder="Email"
             class="w-full px-2 py-1 border rounded"
-            value={tuple[1]}
+            value={tuple.email}
           />
         </TableBodyCell>
       </TableBodyRow>
@@ -226,7 +285,37 @@ class="flex items-center text-sm text-white bg-gradient-to-r from-red-900 to-red
       <CheckOutline class="w-8 h-8 mr-3 text-green-400" />
       <span>The following users are ready to be added to the group.</span>
     </div>
-
+    <Table class="min-w-full text-sm text-left text-gray-500">
+      <TableHead>
+          <TableHeadCell class="px-6 py-4 font-medium text-gray-900">Name</TableHeadCell>
+          <TableHeadCell class="px-6 py-4 font-medium text-gray-900">Email</TableHeadCell>
+      </TableHead>
+      <TableBody>
+        {#each verifiedEmails as tuple}
+          <TableBodyRow class="bg-white border-b">
+            <!-- Name Input -->
+            <TableBodyCell class="px-3 py-2">
+              <Input
+                type="text"
+                placeholder="Name"
+                class="w-full px-2 py-1 border rounded"
+                value={tuple.name || ''}
+              />
+            </TableBodyCell>
+    
+            <!-- Email Input -->
+            <TableBodyCell class="px-6 py-4">
+              <Input
+                type="email"
+                placeholder="Email"
+                class="w-full px-2 py-1 border rounded"
+                value={tuple.email}
+              />
+            </TableBodyCell>
+          </TableBodyRow>
+        {/each}
+      </TableBody>
+    </Table>
     <Hr />
 
     <div class="flex flex-row justify-end gap-2">

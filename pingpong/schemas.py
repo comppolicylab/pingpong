@@ -349,6 +349,17 @@ class UserClassRole(BaseModel):
 class UserClassRoles(BaseModel):
     roles: list[UserClassRole]
 
+class EmailValidationRequest(BaseModel):
+    emails: str
+
+class EmailValidationResult(BaseModel):
+    email: str
+    valid: bool
+    isUser: bool = False
+    name: str | None
+
+class EmailValidationResults(BaseModel):
+    results: list[EmailValidationResult]
 
 class UpdateUserClassRole(BaseModel):
     role: Literal["admin"] | Literal["teacher"] | Literal["student"] | None

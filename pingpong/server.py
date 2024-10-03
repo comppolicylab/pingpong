@@ -19,6 +19,8 @@ from fastapi import (
     Header,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+
+from pingpong.emails import parse_addresses, validate_email_addresses
 from .animal_hash import process_threads, pseudonym, user_names
 from jwt.exceptions import PyJWTError
 from openai.types.beta.assistant_create_params import ToolResources
@@ -1151,6 +1153,15 @@ async def list_class_users(
 
     return {"users": class_users, "limit": limit, "offset": offset, "total": total}
 
+@v1.post(
+    "/class/{class_id}/user/validate",
+    dependencies=[Depends(Authz("can_manage_users", "class:{class_id}"))],
+    response_model=schemas.EmailValidationResults,
+)
+async def validate_user_emails(
+    class_id: str, data: schemas.EmailValidationRequest, request: Request
+):
+    return await validate_email_addresses(request.state.db, data.emails)
 
 @v1.post(
     "/class/{class_id}/user",

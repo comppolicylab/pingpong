@@ -1167,6 +1167,26 @@ export type CreateClassUsersRequest = {
   silent: boolean;
 };
 
+export type EmailValidationResult = {
+  email: string;
+  valid: boolean;
+  isUser: boolean;
+  name: string | null;
+};
+
+export type EmailValidationRequest = {
+  emails: string;
+};
+
+export type EmailValidationResults = {
+  results: EmailValidationResult[];
+};
+
+export const validateEmails = async (f: Fetcher, classId: string, data: EmailValidationRequest) => {
+  const url = `class/${classId}/user/validate`;
+  return await POST<EmailValidationRequest, EmailValidationResults>(f, url, data);
+}
+
 /**
  * Create multiple class users.
  */
