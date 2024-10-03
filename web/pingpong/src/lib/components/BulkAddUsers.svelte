@@ -413,7 +413,7 @@
   <div class="flex flex-col items-center">
     <CheckCircleOutline class="text-green-600 w-12 h-12" />
     <div class="text-xl font-bold text-gray-800 mt-2">Success!</div>
-    {#if !withErrors}
+    {#if withErrors}
       <div class="text-gray-500 mt-1 mb-3 px-10">
         Your request was successfully processed. We were unable to add some users. We've included
         the errors we faced below.
@@ -430,7 +430,7 @@
         <TableHeadCell padding="px-3 py-1" class="font-medium text-gray-900"></TableHeadCell>
       </TableHead>
       <TableBody>
-        {#each results as tuple, index}
+        {#each results as tuple}
           <TableBodyRow class="px-2 py-1">
             <!-- Name Input -->
             <TableBodyCell class="px-3 py-1">
