@@ -19,6 +19,8 @@ from fastapi import (
     Header,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+
+from pingpong.stats import get_statistics
 from .animal_hash import process_threads, pseudonym, user_names
 from jwt.exceptions import PyJWTError
 from openai.types.beta.assistant_create_params import ToolResources
@@ -673,6 +675,16 @@ async def create_class(
     await request.state.authz.write(grant=grants)
 
     return new_class
+
+
+@v1.get(
+    "/stats",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.StatisticsResponse,
+)
+async def get_stats(request: Request):
+    statistics = await get_statistics(request.state.db)
+    return schemas.StatisticsResponse(statistics=statistics)
 
 
 @v1.get(

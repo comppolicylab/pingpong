@@ -552,6 +552,31 @@ export const getMyClasses = async (f: Fetcher) => {
 };
 
 /**
+ * Information about all PingPong stats.
+ */
+
+export type Statistics = {
+  institutions: number;
+  classes: number;
+  users: number;
+  enrollments: number;
+  assistants: number;
+  threads: number;
+  files: number;
+};
+
+export type StatisticsResponse = {
+  statistics: Statistics;
+};
+
+/**
+ * Get all PingPong stats.
+ */
+export const getStatistics = async (f: Fetcher) => {
+  return await GET<never, StatisticsResponse>(f, `stats`);
+};
+
+/**
  * Parameters for creating a new class.
  */
 export type CreateClassRequest = {
