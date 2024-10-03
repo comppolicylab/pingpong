@@ -357,6 +357,7 @@ class User(Base):
         provider: str | None,
         identifier: str | None,
         initial_state: schemas.UserState = schemas.UserState.UNVERIFIED,
+        display_name: str | None = None,
     ) -> "User":
         existing = await cls.get_by_email_sso(
             session, email, provider=provider, identifier=identifier
@@ -379,9 +380,10 @@ class User(Base):
                 external_logins=[
                     ExternalLogin(provider=provider, identifier=identifier)
                 ],
+                display_name=display_name,
             )
         else:
-            user = User(email=email, state=initial_state)
+            user = User(email=email, state=initial_state, display_name=display_name)
         session.add(user)
         await session.flush()
         await session.refresh(user)

@@ -327,12 +327,23 @@ class ClassUserRoles(BaseModel):
 
 class CreateUserClassRole(BaseModel):
     email: str = Field(..., min_length=3, max_length=100)
+    display_name: str | None = None
     sso_id: str | None = None
     roles: ClassUserRoles
 
 
 class LMSType(Enum):
     CANVAS = "canvas"
+
+
+class CreateUserResult(BaseModel):
+    email: str
+    display_name: str | None = None
+    error: str | None = None
+
+
+class CreateUserResults(BaseModel):
+    results: list[CreateUserResult]
 
 
 class UserClassRole(BaseModel):
@@ -349,8 +360,10 @@ class UserClassRole(BaseModel):
 class UserClassRoles(BaseModel):
     roles: list[UserClassRole]
 
+
 class EmailValidationRequest(BaseModel):
     emails: str
+
 
 class EmailValidationResult(BaseModel):
     email: str
@@ -358,8 +371,10 @@ class EmailValidationResult(BaseModel):
     isUser: bool = False
     name: str | None
 
+
 class EmailValidationResults(BaseModel):
     results: list[EmailValidationResult]
+
 
 class UpdateUserClassRole(BaseModel):
     role: Literal["admin"] | Literal["teacher"] | Literal["student"] | None

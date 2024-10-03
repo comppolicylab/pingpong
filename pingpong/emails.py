@@ -1,9 +1,9 @@
-from typing import Optional
 import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from pingpong import models
 from pingpong.schemas import EmailValidationResult, EmailValidationResults
+
 
 def parse_addresses(input: str) -> list[EmailValidationResult]:
     result: list[EmailValidationResult] = []
@@ -34,6 +34,7 @@ def parse_addresses(input: str) -> list[EmailValidationResult]:
 
     return result
 
+
 # Helper function to check if an email address is valid
 def is_email_valid(email: str) -> bool:
     email_regex = re.compile(
@@ -41,6 +42,7 @@ def is_email_valid(email: str) -> bool:
         r"(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$"
     )
     return bool(email_regex.match(email))
+
 
 # Helper function to parse a single address or name <email>
 def parse_single_address(address: str) -> EmailValidationResult:
@@ -51,16 +53,19 @@ def parse_single_address(address: str) -> EmailValidationResult:
         name, email = match.groups()
         is_valid = is_email_valid(email.strip())
         return EmailValidationResult(
-            name=name.strip() if name.strip() else None, email=email.strip(), valid=is_valid
+            name=name.strip() if name.strip() else None,
+            email=email.strip(),
+            valid=is_valid,
         )
     else:
         # If it's just an email address, check validity
         is_valid = is_email_valid(address.strip())
-        return EmailValidationResult(
-            name=None, email=address.strip(), valid=is_valid
-        )
+        return EmailValidationResult(name=None, email=address.strip(), valid=is_valid)
 
-async def validate_email_addresses(session: AsyncSession, input: str) -> EmailValidationResults:
+
+async def validate_email_addresses(
+    session: AsyncSession, input: str
+) -> EmailValidationResults:
     result = parse_addresses(input)
     validated_addresses = [x for x in result if x.valid]
     unvalidated_addresses = [x for x in result if not x.valid]
@@ -69,7 +74,33 @@ async def validate_email_addresses(session: AsyncSession, input: str) -> EmailVa
     for i, data in enumerate(validated_addresses):
         user = await models.User.get_by_email(session, data.email)
         if user:
-            validated_addresses[i].name = user.first_name + " " + user.last_name if user.first_name and user.last_name else user.display_name if user.display_name else None
+            validated_addresses[i].name = (
+                user.first_name + " " + user.last_name
+                if user.first_name and user.last_name
+                else user.display_name
+                if user.display_name
+                else None
+            )
             validated_addresses[i].isUser = True
 
     return EmailValidationResults(results=validated_addresses + unvalidated_addresses)
+
+
+async def revalidate_email_addresses(
+    session: AsyncSession, input: list[EmailValidationResult]
+) -> EmailValidationResults:
+    for email in input:
+        email.valid = is_email_valid(email.email)
+        if email.valid:
+            user = await models.User.get_by_email(session, email.email)
+            if user:
+                email.name = (
+                    user.first_name + " " + user.last_name
+                    if user.first_name and user.last_name
+                    else user.display_name
+                    if user.display_name
+                    else None
+                )
+                email.isUser = True
+
+    return EmailValidationResults(results=input)

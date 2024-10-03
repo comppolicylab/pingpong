@@ -20,7 +20,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
-from pingpong.emails import parse_addresses, validate_email_addresses
+from pingpong.emails import revalidate_email_addresses, validate_email_addresses
 from .animal_hash import process_threads, pseudonym, user_names
 from jwt.exceptions import PyJWTError
 from openai.types.beta.assistant_create_params import ToolResources
@@ -1153,6 +1153,7 @@ async def list_class_users(
 
     return {"users": class_users, "limit": limit, "offset": offset, "total": total}
 
+
 @v1.post(
     "/class/{class_id}/user/validate",
     dependencies=[Depends(Authz("can_manage_users", "class:{class_id}"))],
@@ -1163,10 +1164,22 @@ async def validate_user_emails(
 ):
     return await validate_email_addresses(request.state.db, data.emails)
 
+
+@v1.post(
+    "/class/{class_id}/user/revalidate",
+    dependencies=[Depends(Authz("can_manage_users", "class:{class_id}"))],
+    response_model=schemas.EmailValidationResults,
+)
+async def revalidate_user_emails(
+    class_id: str, data: schemas.EmailValidationResults, request: Request
+):
+    return await revalidate_email_addresses(request.state.db, data.results)
+
+
 @v1.post(
     "/class/{class_id}/user",
     dependencies=[Depends(Authz("can_manage_users", "class:{class_id}"))],
-    response_model=schemas.UserClassRoles,
+    response_model=schemas.CreateUserResults,
 )
 async def add_users_to_class(
     class_id: str,

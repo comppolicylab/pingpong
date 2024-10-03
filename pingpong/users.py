@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
+import logging
+from typing import Optional
 from pingpong.authz.openfga import OpenFgaAuthzClient
+from pingpong.emails import is_email_valid
 import pingpong.models as models
 import pingpong.schemas as schemas
 
@@ -11,6 +14,8 @@ from .config import config
 from .invite import send_invite
 from .now import NowFn, utcnow
 from .merge import merge
+
+logger = logging.getLogger(__name__)
 
 
 class AddUserException(Exception):
@@ -161,16 +166,16 @@ class AddNewUsers(ABC):
 
         return invite_config
 
-    async def _check_permissions(self, ucr: schemas.UserClassRole):
+    async def _check_permissions(self, ucr: schemas.UserClassRole) -> Optional[str]:
         if not self.is_admin and ucr.roles.admin:
-            raise AddUserException(
-                code=403, detail="Lacking permission to add Administrators."
-            )
+            logger.info("add_users_to_class: AddUserException occurred")
+            return "Lacking permission to add Administrators."
 
         if not self.is_supervisor and ucr.roles.teacher:
-            raise AddUserException(
-                code=403, detail="Lacking permission to add Moderators."
-            )
+            logger.info("add_users_to_class: AddUserException occurred")
+            return "Lacking permission to add Moderators."
+
+        return None
 
     async def _update_user_enrollment(
         self,
@@ -259,7 +264,7 @@ class AddNewUsers(ABC):
         # Finally, add permission revokes for the users that were deleted
         self.revokes.extend(self._permissions_to_revoke(users_to_delete))
 
-    async def add_new_users(self) -> schemas.UserClassRoles:
+    async def add_new_users(self) -> schemas.CreateUserResults:
         """
         Add new users to a class.
         """
@@ -287,10 +292,41 @@ class AddNewUsers(ABC):
             self.newly_synced: list[int] = []
             self.newly_synced_identifiers: dict[int, str | None] = {}
 
+        results: list[schemas.CreateUserResult] = []
         for ucr in self.new_ucr.roles:
-            await self._check_permissions(ucr)
+            error = await self._check_permissions(ucr)
+            if error:
+                logger.info("add_users_to_class: AddUserException occurred")
+                results.append(
+                    schemas.CreateUserResult(
+                        email=ucr.email, display_name=ucr.display_name, error=error
+                    )
+                )
+                continue
+            if not is_email_valid(ucr.email):
+                logger.info("add_users_to_class: AddUserException occurred")
+                results.append(
+                    schemas.CreateUserResult(
+                        email=ucr.email,
+                        display_name=ucr.display_name,
+                        error="Invalid email address.",
+                    )
+                )
+                continue
             user = await models.User.get_or_create_by_email_sso(
-                self.session, ucr.email, self.new_ucr.sso_tenant, ucr.sso_id
+                self.session,
+                ucr.email,
+                self.new_ucr.sso_tenant,
+                ucr.sso_id,
+                display_name=ucr.display_name,
+            )
+
+            display_name = (
+                user.first_name + " " + user.last_name
+                if user.first_name and user.last_name
+                else user.display_name
+                if user.display_name
+                else None
             )
 
             if self.new_ucr.lms_tenant:
@@ -302,9 +338,15 @@ class AddNewUsers(ABC):
                     continue
                 # If the user is an admin, they can't demote themselves
                 else:
-                    raise AddUserException(
-                        code=403, detail="You cannot change your own role."
+                    logger.info("add_users_to_class: AddUserException occurred")
+                    results.append(
+                        schemas.CreateUserResult(
+                            email=ucr.email,
+                            display_name=display_name,
+                            error="You cannot change your own role.",
+                        )
                     )
+                    continue
 
             # Check if the user is already enrolled in the class
             enrollment = await models.UserClassRole.get(
@@ -312,10 +354,15 @@ class AddNewUsers(ABC):
             )
 
             if enrollment and enrollment.lms_tenant and not self.new_ucr.lms_tenant:
-                raise AddUserException(
-                    code=403,
-                    detail="You cannot manually change the role of an imported user. Please update the user's role in Canvas.",
+                logger.info("add_users_to_class: AddUserException occurred")
+                results.append(
+                    schemas.CreateUserResult(
+                        email=ucr.email,
+                        display_name=display_name,
+                        error="You cannot manually change the role of an imported user. Please update the user's role in Canvas.",
+                    )
                 )
+                continue
 
             invite_roles = []
             for role in ["admin", "teacher", "student"]:
@@ -330,8 +377,14 @@ class AddNewUsers(ABC):
 
             if enrollment:
                 await self._update_user_enrollment(enrollment, ucr.roles, ucr.sso_id)
+                results.append(
+                    schemas.CreateUserResult(email=ucr.email, display_name=display_name)
+                )
             else:
                 await self._create_user_enrollment(user, ucr, invite_roles, ucr.sso_id)
+                results.append(
+                    schemas.CreateUserResult(email=ucr.email, display_name=display_name)
+                )
 
         # Send emails to new users in the background
         if not self.new_ucr.silent:
@@ -342,7 +395,7 @@ class AddNewUsers(ABC):
             await self._merge_accounts()
 
         await self.client.write_safe(grant=grants, revoke=self.revokes)
-        return schemas.UserClassRoles(roles=self.new_roles)
+        return schemas.CreateUserResults(results=results)
 
 
 class AddNewUsersManual(AddNewUsers):
