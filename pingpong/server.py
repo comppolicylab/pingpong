@@ -20,7 +20,6 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
-from pingpong.stats import get_statistics
 from pingpong.emails import revalidate_email_addresses, validate_email_addresses
 from .animal_hash import process_threads, pseudonym, user_names
 from jwt.exceptions import PyJWTError
@@ -676,16 +675,6 @@ async def create_class(
     await request.state.authz.write(grant=grants)
 
     return new_class
-
-
-@v1.get(
-    "/stats",
-    dependencies=[Depends(Authz("admin"))],
-    response_model=schemas.StatisticsResponse,
-)
-async def get_stats(request: Request):
-    statistics = await get_statistics(request.state.db)
-    return schemas.StatisticsResponse(statistics=statistics)
 
 
 @v1.get(
