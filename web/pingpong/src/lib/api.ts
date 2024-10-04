@@ -1198,6 +1198,7 @@ export type EmailValidationResult = {
   valid: boolean;
   isUser: boolean;
   name: string | null;
+  error: string | null;
 };
 
 export type EmailValidationRequest = {

@@ -388,6 +388,7 @@ class EmailValidationResult(BaseModel):
     valid: bool
     isUser: bool = False
     name: str | None
+    error: str | None = None
 
 
 class EmailValidationResults(BaseModel):

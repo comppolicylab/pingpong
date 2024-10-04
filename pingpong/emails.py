@@ -1,66 +1,36 @@
-import re
-
 from sqlalchemy.ext.asyncio import AsyncSession
 from pingpong import models
+from email.utils import getaddresses
+from email_validator import validate_email, EmailSyntaxError
 from pingpong.schemas import EmailValidationResult, EmailValidationResults
 
 
 def parse_addresses(input: str) -> list[EmailValidationResult]:
     result: list[EmailValidationResult] = []
+    emails = getaddresses([input])
 
-    # Split the input string by newlines
-    lines = [line.strip() for line in input.splitlines() if line.strip()]
-
-    for line in lines:
-        # Check if the line contains a group definition (e.g., Friends: alice@example.com, bob@example.com;)
-        group_match = re.match(r"^(.*?):\s*(.*?)\s*;$", line)
-
-        if group_match:
-            # Parse the group: groupName and groupAddresses
-            _, group_addresses = group_match.groups()
-            inner_addresses = [addr.strip() for addr in group_addresses.split(",")]
-
-            # Push each address in the group, skipping the group name
-            for addr in inner_addresses:
-                result.append(parse_single_address(addr))
-            continue
-
-        # Split the line by commas in case it contains multiple addresses (e.g., john@example.com, jane@example.com)
-        addresses = [addr.strip() for addr in line.split(",")]
-
-        # Process each address in the line
-        for address in addresses:
-            result.append(parse_single_address(address))
+    for email in emails:
+        result.append(parse_single_address(email))
 
     return result
 
 
-# Helper function to check if an email address is valid
-def is_email_valid(email: str) -> bool:
-    email_regex = re.compile(
-        r"^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
-        r"(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$"
-    )
-    return bool(email_regex.match(email))
-
-
 # Helper function to parse a single address or name <email>
-def parse_single_address(address: str) -> EmailValidationResult:
-    match = re.match(r"^(.*?)\s*<([^>]+)>$", address)
-
-    if match:
-        # If there's a match, we have a name and an email
-        name, email = match.groups()
-        is_valid = is_email_valid(email.strip())
+def parse_single_address(address: tuple[str, str]) -> EmailValidationResult:
+    try:
+        validated = validate_email(address[1], check_deliverability=False)
         return EmailValidationResult(
-            name=name.strip() if name.strip() else None,
-            email=email.strip(),
-            valid=is_valid,
+            name=address[0].strip() if address[0].strip() else None,
+            email=validated.normalized,
+            valid=True,
         )
-    else:
-        # If it's just an email address, check validity
-        is_valid = is_email_valid(address.strip())
-        return EmailValidationResult(name=None, email=address.strip(), valid=is_valid)
+    except EmailSyntaxError as e:
+        return EmailValidationResult(
+            name=address[0].strip() if address[0].strip() else None,
+            email=address[1].strip(),
+            valid=False,
+            error=str(e),
+        )
 
 
 async def validate_email_addresses(
@@ -102,8 +72,9 @@ async def revalidate_email_addresses(
 ) -> EmailValidationResults:
     unique_addresses = {}
     for email in input:
-        email.valid = is_email_valid(email.email)
-        if email.valid:
+        try:
+            validate_email(email.email, check_deliverability=False)
+            email.valid = True
             user = await models.User.get_by_email(session, email.email)
             if user:
                 email.name = (
@@ -115,14 +86,18 @@ async def revalidate_email_addresses(
                 )
                 email.isUser = True
 
-            if email.email not in unique_addresses:
+        except EmailSyntaxError as e:
+            email.valid = False
+            email.error = str(e)
+
+        if email.email not in unique_addresses:
+            unique_addresses[email.email] = email
+        else:
+            existing_entry = unique_addresses[email.email]
+            if email.name and (
+                not existing_entry.name or existing_entry.isUser is False
+            ):
                 unique_addresses[email.email] = email
-            else:
-                existing_entry = unique_addresses[email.email]
-                if email.name and (
-                    not existing_entry.name or existing_entry.isUser is False
-                ):
-                    unique_addresses[email.email] = email
 
     results = list(unique_addresses.values())
     return EmailValidationResults(results=results)

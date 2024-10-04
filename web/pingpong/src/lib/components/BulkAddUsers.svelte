@@ -250,7 +250,7 @@
           >Users with invalid emails</span
         ><span
           >We were unable to confirm the emails you entered for the following users. Please correct
-          or delete these users before continuing.</span
+          these addresses or delete these users before continuing.</span
         >
       </div>
     </div>
@@ -261,6 +261,7 @@
           >Name <span class="font-light">(optional)</span></TableHeadCell
         >
         <TableHeadCell padding="px-3 py-1" class="font-medium text-gray-900">Email</TableHeadCell>
+        <TableHeadCell padding="px-3 py-1" class="font-medium text-gray-900"></TableHeadCell>
         <TableHeadCell padding="px-3 py-1" class="font-medium text-gray-900"></TableHeadCell>
       </TableHead>
       <TableBody>
@@ -285,6 +286,16 @@
                 bind:value={tuple.email}
               />
             </TableBodyCell>
+
+            <!-- Email Error Reporting -->
+            {#if tuple.error}
+              <TableBodyCell class="px-1 py-1">
+                <QuestionCircleOutline class="w-6 h-6 text-gray-400" />
+                <Tooltip arrow={false} class="overflow-visible font-light text-xs text-wrap"
+                  >{tuple.error}</Tooltip
+                >
+              </TableBodyCell>
+            {/if}
 
             <TableBodyCell class="px-3 py-1">
               <Button
@@ -324,7 +335,7 @@
           <TableBodyCell class="px-3 py-1">
             {#if tuple.isUser}
               <span>{tuple.name || ''}</span>
-              <Tooltip arrow={false} class="overflow-visible font-light text-wrap"
+              <Tooltip arrow={false} class="overflow-visible font-light text-xs text-wrap"
                 >This user already has a profile, so you cannot edit their name.</Tooltip
               >
             {:else}
@@ -345,7 +356,7 @@
               <Tooltip
                 placement="bottom"
                 arrow={false}
-                class="overflow-visible font-light text-wrap"
+                class="overflow-visible font-light text-xs text-wrap"
                 >This email has been verified, so you cannot edit it.</Tooltip
               >
             {:else}
@@ -377,7 +388,10 @@
   <Button
     class="text-blue-500 hover:underline"
     on:click={() => {
-      verifiedEmails = [...verifiedEmails, { email: '', name: '', valid: false, isUser: false }];
+      verifiedEmails = [
+        ...verifiedEmails,
+        { email: '', name: '', valid: false, isUser: false, error: '' }
+      ];
     }}><div class="flex flex-row gap-1"><PlusOutline /><span>Add another user</span></div></Button
   >
   <Hr />
