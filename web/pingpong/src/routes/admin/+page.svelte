@@ -1,7 +1,7 @@
 <script lang="ts">
   import dayjs from '$lib/time';
   import { page } from '$app/stores';
-  import { Button, Select } from 'flowbite-svelte';
+  import { Button, Select, Hr } from 'flowbite-svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import { updateSearch, getValue } from '$lib/urlstate';
 
@@ -51,6 +51,44 @@
             href="/admin/createGroup">Create a new group</Button
           >
         </div>
+        {#if data.statistics}
+          <Hr />
+          <div class="flex flex-col">
+            <span class="text-lg font-bold mb-3">PingPong Stats</span>
+            <span class="text-5xl font-light text-gray-800">
+              {data.statistics.institutions}
+            </span>
+            <span class="text-md font-bold uppercase text-gray-700 mb-5">Institutions</span>
+            <span class="text-5xl font-light text-gray-800">
+              {data.statistics.classes}
+            </span>
+            <span class="text-md font-bold uppercase text-gray-700 mb-5">Groups</span>
+            <span class="text-5xl font-light text-gray-800">
+              {data.statistics.users}
+            </span>
+            <span class="text-md font-bold uppercase text-gray-700 mb-5">Users</span>
+            {#if data.statistics.users}
+              <span class="text-5xl font-light text-gray-800">
+                {(data.statistics.enrollments / data.statistics.users).toFixed(1)}
+              </span>
+              <span class="text-md font-bold uppercase text-gray-700 mb-5"
+                >Avg enrollments per user</span
+              >
+            {/if}
+            <span class="text-5xl font-light text-gray-800">
+              {data.statistics.assistants}
+            </span>
+            <span class="text-md font-bold uppercase text-gray-700 mb-5">Assistants</span>
+            <span class="text-5xl font-light text-gray-800">
+              {data.statistics.threads}
+            </span>
+            <span class="text-md font-bold uppercase text-gray-700 mb-5">Threads</span>
+            <span class="text-5xl font-light text-gray-800">
+              {data.statistics.files}
+            </span>
+            <span class="text-md font-bold uppercase text-gray-700 mb-5">Files</span>
+          </div>
+        {/if}
       </div>
     </div>
 

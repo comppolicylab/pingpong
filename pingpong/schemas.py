@@ -9,6 +9,24 @@ from pydantic import BaseModel, Field, SecretStr, computed_field
 from .gravatar import get_email_hash, get_gravatar_image
 
 
+class Statistics(BaseModel):
+    """Statistics about the system."""
+
+    institutions: int
+    classes: int
+    users: int
+    enrollments: int
+    assistants: int
+    threads: int
+    files: int
+
+
+class StatisticsResponse(BaseModel):
+    """Statistics response."""
+
+    statistics: Statistics
+
+
 class GenericStatus(BaseModel):
     status: str
 
@@ -265,7 +283,7 @@ class Assistants(BaseModel):
 
 class Thread(BaseModel):
     id: int
-    name: str
+    name: str | None
     thread_id: str
     class_id: int
     assistant_names: dict[int, str] = {}
