@@ -1273,7 +1273,7 @@ export type CreateThreadRequest = {
  */
 export type Thread = {
   id: number;
-  name: string | null;
+  name: string;
   thread_id: string;
   class_id: number;
   assistant_names?: Record<number, string> | null;

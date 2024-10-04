@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 async def generate_name(
-    cli: openai.AsyncClient, transcript: str, model: str = "gpt-4o-mini"
+    cli: openai.AsyncClient, prompt: str, model: str = "gpt-3.5-turbo"
 ) -> str:
     """Generate a name for a prompt using the given model.
 
@@ -36,19 +36,24 @@ async def generate_name(
     :param model: Model to use
     :return: Generated name
     """
-    system_prompt = 'You will be provided with a transcript between a user and an assistant. Return A TITLE OF 3-4 WORDS summarizing what the conversation is about. Messages the user sent are prepended with "USER", and messages the assistant sent are prepended with "ASSISTANT". DO NOT RETURN MORE THAN 4 WORDS!'
-    print(transcript)
+    content = (
+        "Summarize what the user is seeking help with in a couple of words:\n\n"
+        f"{prompt}"
+    )
+
+    # The GPT-3.5-turbo model has a 16k token context window. Realistically,
+    # the result probably won't change much if we use a much smaller snippet
+    # of the prompt. It will also be much cheaper and faster if we don't submit
+    # huge prompts to the API. So we'll just use the first 764 words (which is
+    # approximately 1,024 tokens, assuming ~1.3 tokens per word).
+    content = " ".join(content.split()[:764])
 
     response = await cli.chat.completions.create(
         messages=[
             {
-                "role": "system",
-                "content": system_prompt,
-            },
-            {
                 "role": "user",
-                "content": transcript,
-            },
+                "content": content,
+            }
         ],
         model=model,
     )

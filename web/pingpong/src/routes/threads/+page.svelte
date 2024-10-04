@@ -98,7 +98,7 @@
                 </h4>
               </div>
               <div class="pt-2 font-light text-lg pb-2">
-                {thread.name || 'New Conversation'}
+                {thread.name}
               </div>
               <div class="text-gray-400 text-xs tracking-wide pb-1 uppercase">
                 {dayjs.utc(thread.last_activity).fromNow()}

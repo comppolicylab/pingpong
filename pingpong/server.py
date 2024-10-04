@@ -1909,7 +1909,8 @@ async def create_thread(
             messageContent.append({"type": "image_file", "image_file": {"file_id": id}})
             for id in req.vision_file_ids
         ]
-    thread, parties = await asyncio.gather(
+    name, thread, parties = await asyncio.gather(
+        generate_name(openai_client, req.message),
         openai_client.beta.threads.create(
             messages=[
                 {
@@ -1927,6 +1928,7 @@ async def create_thread(
 
     new_thread = {
         "class_id": int(class_id),
+        "name": name,
         "private": True if parties else False,
         "users": parties or [],
         "thread_id": thread.id,
@@ -2004,24 +2006,7 @@ async def send_message(
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
     asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
 
-    # If we have more than 3 user messages and no thread name, generate a new one. Only use the first 100 words of each user and assistant message to maintain a low token count.
-    if thread.user_message_ct > 1 and thread.name is None:
-        messages = await openai_client.beta.threads.messages.list(
-            thread.thread_id, limit=10, order="asc"
-        )
-
-        message_str = ""
-        for message in messages.data:
-            for content in message.content:
-                if content.type == "text":
-                    message_str += f"{message.role.upper()}: {' '.join(content.text.value.split()[:100])}\n"
-                if content.type in ["image_file", "image_url"]:
-                    message_str += f"{message.role.upper()}: Sent image file\n"
-        message_str += f"USER: {data.message}\n"
-        if data.vision_file_ids:
-            message_str += "USER: Sent image file\n"
-        new_name = await generate_name(openai_client, message_str)
-        thread.name = new_name
+    # tool_resources: ToolResources = {}
 
     if data.file_search_file_ids:
         if thread.vector_store_id:
@@ -2062,7 +2047,6 @@ async def send_message(
         ]
 
     thread.last_activity = func.now()
-    thread.user_message_ct += 1
     request.state.db.add(thread)
 
     metrics.inbound_messages.inc(
