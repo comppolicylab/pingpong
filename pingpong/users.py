@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import logging
 from typing import Optional
 from pingpong.authz.openfga import OpenFgaAuthzClient
-from email_validator import validate_email, EmailSyntaxError
+from email_validator import validate_email, EmailNotValidError
 import pingpong.models as models
 import pingpong.schemas as schemas
 
@@ -304,14 +304,16 @@ class AddNewUsers(ABC):
                 )
                 continue
             try:
-                ucr.email = validate_email(ucr.email).normalized
-            except EmailSyntaxError:
+                ucr.email = validate_email(
+                    ucr.email, check_deliverability=False
+                ).normalized
+            except EmailNotValidError as e:
                 logger.info("add_users_to_class: AddUserException occurred")
                 results.append(
                     schemas.CreateUserResult(
                         email=ucr.email,
                         display_name=ucr.display_name,
-                        error="Invalid email address.",
+                        error=str(e),
                     )
                 )
                 continue
