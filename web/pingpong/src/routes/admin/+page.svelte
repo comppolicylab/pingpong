@@ -2,7 +2,6 @@
   import dayjs from '$lib/time';
   import { page } from '$app/stores';
   import { Button, Select, Hr } from 'flowbite-svelte';
-  import { BuildingOutline } from 'flowbite-svelte-icons';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import { updateSearch, getValue } from '$lib/urlstate';
 
