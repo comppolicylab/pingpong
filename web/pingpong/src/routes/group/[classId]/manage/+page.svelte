@@ -232,20 +232,10 @@
    * Bulk add users to a class.
    */
   let timesAdded = 0;
-  const submitCreateUsers = async (e: CustomEvent<CreateClassUsersRequest>) => {
-    const result = await api.createClassUsers(fetch, data.class.id, e.detail);
-
-    if (api.isErrorResponse(result)) {
-      invalidateAll();
-      usersModalOpen = false;
-      let msg = result.detail || 'An unknown error occurred';
-      sadToast(msg);
-    } else {
-      invalidateAll();
-      usersModalOpen = false;
-      timesAdded++;
-      happyToast('Success!');
-    }
+  const resetInterface = (e: CustomEvent<CreateClassUsersRequest>) => {
+    invalidateAll();
+    usersModalOpen = false;
+    timesAdded++;
   };
 
   const updatingClass = writable(false);
@@ -1255,13 +1245,14 @@
           {/if}
         </div>
         {#if usersModalOpen}
-          <Modal bind:open={usersModalOpen} title="Invite new users">
+          <Modal bind:open={usersModalOpen} title="Invite new users" dismissable={false}>
             <BulkAddUsers
               {permissions}
               className={data.class.name}
+              classId={data.class.id}
               isPrivate={makePrivate}
-              on:submit={submitCreateUsers}
               on:cancel={() => (usersModalOpen = false)}
+              on:close={resetInterface}
               role="student"
             />
           </Modal>

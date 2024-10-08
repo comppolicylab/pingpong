@@ -1181,6 +1181,7 @@ export type ClassUsersResponse = ReturnType<typeof getClassUsers>;
  */
 export type CreateClassUserRequest = {
   email: string;
+  display_name: string | null;
   roles: ClassUserRoles;
 };
 
@@ -1192,6 +1193,46 @@ export type CreateClassUsersRequest = {
   silent: boolean;
 };
 
+export type EmailValidationResult = {
+  email: string;
+  valid: boolean;
+  isUser: boolean;
+  name: string | null;
+  error: string | null;
+};
+
+export type EmailValidationRequest = {
+  emails: string;
+};
+
+export type EmailValidationResults = {
+  results: EmailValidationResult[];
+};
+
+export const validateEmails = async (f: Fetcher, classId: number, data: EmailValidationRequest) => {
+  const url = `class/${classId}/user/validate`;
+  return await POST<EmailValidationRequest, EmailValidationResults>(f, url, data);
+};
+
+export const revalidateEmails = async (
+  f: Fetcher,
+  classId: number,
+  data: EmailValidationResults
+) => {
+  const url = `class/${classId}/user/revalidate`;
+  return await POST<EmailValidationResults, EmailValidationResults>(f, url, data);
+};
+
+export type CreateUserResult = {
+  email: string;
+  display_name: string | null;
+  error: string | null;
+};
+
+export type CreateUserResults = {
+  results: CreateUserResult[];
+};
+
 /**
  * Create multiple class users.
  */
@@ -1201,7 +1242,7 @@ export const createClassUsers = async (
   data: CreateClassUsersRequest
 ) => {
   const url = `class/${classId}/user`;
-  return await POST<CreateClassUsersRequest, UserClassRoles>(f, url, data);
+  return await POST<CreateClassUsersRequest, CreateUserResults>(f, url, data);
 };
 
 /**
