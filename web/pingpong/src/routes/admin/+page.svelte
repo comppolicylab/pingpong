@@ -32,7 +32,7 @@
   <!-- TODO: search is not yet fully supported. -->
 
   <div class="grid gap-12 p-12 sm:grid-cols-[2fr_1fr] min-h-0 grow shrink">
-    <div class="sm:col-start-2 sm:col-end-3">
+    <div class="sm:col-start-2 sm:col-end-3 overflow-y-auto">
       <div class="flex flex-col gap-4">
         <div>
           <label for="institution" class="text-xs uppercase tracking-wide block pb-2 pt-8"
@@ -53,40 +53,68 @@
         </div>
         {#if data.statistics}
           <Hr />
-          <div class="flex flex-col">
-            <span class="text-lg font-bold mb-3">PingPong Stats</span>
-            <span class="text-5xl font-light text-gray-800">
-              {data.statistics.institutions}
-            </span>
-            <span class="text-md font-bold uppercase text-gray-700 mb-5">Institutions</span>
-            <span class="text-5xl font-light text-gray-800">
-              {data.statistics.classes}
-            </span>
-            <span class="text-md font-bold uppercase text-gray-700 mb-5">Groups</span>
-            <span class="text-5xl font-light text-gray-800">
-              {data.statistics.users}
-            </span>
-            <span class="text-md font-bold uppercase text-gray-700 mb-5">Users</span>
-            {#if data.statistics.users}
-              <span class="text-5xl font-light text-gray-800">
-                {(data.statistics.enrollments / data.statistics.users).toFixed(1)}
+          <div class="flex flex-col gap-2 mb-6">
+            <span class="text-lg font-medium text-center uppercase mb-3">PingPong Stats</span>
+            <div
+              class="flex flex-col gap-2 bg-gold-light rounded-2xl px-8 pt-6 py-4 pb-6 text-center"
+            >
+              <span class="text-5xl font-light text-blue-dark-40">
+                {data.statistics.institutions}
               </span>
-              <span class="text-md font-bold uppercase text-gray-700 mb-5"
-                >Avg enrollments per user</span
+              <span class="text-md font-medium uppercase text-blue-dark-50">Institutions</span>
+            </div>
+            <div
+              class="flex flex-col gap-2 bg-gold-light rounded-2xl px-8 pt-6 py-4 pb-6 text-center"
+            >
+              <span class="text-5xl font-light text-blue-dark-40">
+                {data.statistics.classes}
+              </span>
+              <span class="text-md font-medium uppercase text-blue-dark-50">Groups</span>
+            </div>
+            <div
+              class="flex flex-col gap-2 bg-gold-light rounded-2xl px-8 pt-6 py-4 pb-6 text-center"
+            >
+              <span class="text-5xl font-light text-blue-dark-40">
+                {data.statistics.users}
+              </span>
+              <span class="text-md font-medium uppercase text-blue-dark-50">Users</span>
+            </div>
+            {#if data.statistics.users}
+              <div
+                class="flex flex-col gap-2 bg-gold-light rounded-2xl px-8 pt-6 py-4 pb-6 text-center"
               >
+                <span class="text-5xl font-light text-blue-dark-40">
+                  {(data.statistics.enrollments / data.statistics.users).toFixed(1)}
+                </span>
+                <span class="text-md font-medium uppercase text-blue-dark-50"
+                  >Average enrollments<br />per user</span
+                >
+              </div>
             {/if}
-            <span class="text-5xl font-light text-gray-800">
-              {data.statistics.assistants}
-            </span>
-            <span class="text-md font-bold uppercase text-gray-700 mb-5">Assistants</span>
-            <span class="text-5xl font-light text-gray-800">
-              {data.statistics.threads}
-            </span>
-            <span class="text-md font-bold uppercase text-gray-700 mb-5">Threads</span>
-            <span class="text-5xl font-light text-gray-800">
-              {data.statistics.files}
-            </span>
-            <span class="text-md font-bold uppercase text-gray-700 mb-5">Files</span>
+            <div
+              class="flex flex-col gap-2 bg-gold-light rounded-2xl px-8 pt-6 py-4 pb-6 text-center"
+            >
+              <span class="text-5xl font-light text-blue-dark-40">
+                {data.statistics.assistants}
+              </span>
+              <span class="text-md font-medium uppercase text-blue-dark-50">Assistants</span>
+            </div>
+            <div
+              class="flex flex-col gap-2 bg-gold-light rounded-2xl px-8 pt-6 py-4 pb-6 text-center"
+            >
+              <span class="text-5xl font-light text-blue-dark-40">
+                {data.statistics.threads}
+              </span>
+              <span class="text-md font-medium uppercase text-blue-dark-50">Threads</span>
+            </div>
+            <div
+              class="flex flex-col gap-2 bg-gold-light rounded-2xl px-8 pt-6 py-4 pb-6 text-center"
+            >
+              <span class="text-5xl font-light text-blue-dark-40">
+                {data.statistics.files}
+              </span>
+              <span class="text-md font-medium uppercase text-blue-dark-50">Files</span>
+            </div>
           </div>
         {/if}
       </div>
