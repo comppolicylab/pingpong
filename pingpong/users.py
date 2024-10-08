@@ -304,14 +304,16 @@ class AddNewUsers(ABC):
                 )
                 continue
             try:
-                ucr.email = validate_email(ucr.email).normalized
-            except EmailSyntaxError:
+                ucr.email = validate_email(
+                    ucr.email, check_deliverability=False
+                ).normalized
+            except EmailSyntaxError as e:
                 logger.info("add_users_to_class: AddUserException occurred")
                 results.append(
                     schemas.CreateUserResult(
                         email=ucr.email,
                         display_name=ucr.display_name,
-                        error="Invalid email address.",
+                        error=str(e),
                     )
                 )
                 continue
