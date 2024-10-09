@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 async def generate_name(
     cli: openai.AsyncClient, transcript: str, model: str = "gpt-4o-mini"
-) -> str:
+) -> str | None:
     """Generate a name for a prompt using the given model.
 
     :param cli: OpenAI client
@@ -37,22 +37,25 @@ async def generate_name(
     :return: Generated name
     """
     system_prompt = 'You will be provided with a transcript between a user and an assistant. Return A TITLE OF 3-4 WORDS summarizing what the conversation is about. Messages the user sent are prepended with "USER", and messages the assistant sent are prepended with "ASSISTANT". DO NOT RETURN MORE THAN 4 WORDS!'
-    print(transcript)
 
-    response = await cli.chat.completions.create(
-        messages=[
-            {
-                "role": "system",
-                "content": system_prompt,
-            },
-            {
-                "role": "user",
-                "content": transcript,
-            },
-        ],
-        model=model,
-    )
-    return response.choices[0].message.content
+    try:
+        response = await cli.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": transcript,
+                },
+            ],
+            model=model,
+        )
+        return response.choices[0].message.content
+    except openai.APIError as e:
+        logger.exception(f"Error generating name, {e}")
+        return None
 
 
 async def validate_api_key(api_key: str) -> bool:
