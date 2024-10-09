@@ -20,13 +20,15 @@ export const load: PageLoad = async ({ fetch, params }) => {
   if (!expanded.error) {
     threadTools = expanded.data.tools_available || '';
     threadModel = expanded.data.model || '';
-    assistantGrants = await api.grants(fetch, {
-      canViewAssistant: {
-        target_type: 'assistant',
-        target_id: expanded.data.thread.assistant_id,
-        relation: 'can_view'
-      }
-    });
+    if (expanded.data.thread.assistant_id) {
+      assistantGrants = await api.grants(fetch, {
+        canViewAssistant: {
+          target_type: 'assistant',
+          target_id: expanded.data.thread.assistant_id,
+          relation: 'can_view'
+        }
+      });
+    }
   }
 
   return {
