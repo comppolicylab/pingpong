@@ -41,6 +41,10 @@
    */
   export let assistantDeleted = false;
   /**
+   * Whether the user has permissions to interact with this assistant.
+   */
+  export let canViewAssistant = true;
+  /**
    * Whether we're waiting for an in-flight request.
    */
   export let loading = false;
@@ -290,8 +294,10 @@
       placeholder={canSubmit
         ? 'Ask me anything'
         : assistantDeleted
-          ? 'Read-only thread: the assistant associated with this thread is deleted'
-          : "You can't reply in this thread"}
+          ? 'Read-only thread: the assistant associated with this thread is deleted.'
+          : canViewAssistant
+            ? 'Read-only thread: You no longer have permissions to interact with this assistant.'
+            : "You can't reply in this thread."}
       class:text-gray-700={disabled}
       class:animate-pulse={loading}
       disabled={loading || disabled}
@@ -317,7 +323,7 @@
           on:error={(e) => sadToast(e.detail.message)}
           on:change={handleFilesChange}
         />
-        {#if codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || visionAcceptedFiles}
+        {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || visionAcceptedFiles) && !(loading || disabled || !upload)}
           <Popover arrow={false}>Upload files to thread</Popover>
         {:else}
           <Popover arrow={false}>File upload is disabled</Popover>

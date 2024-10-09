@@ -1684,6 +1684,10 @@ export type ThreadStreamDoneChunk = {
   type: 'done';
 };
 
+export type ThreadHTTPErrorChunk = {
+  detail: string;
+};
+
 export type ThreadStreamChunk =
   | ThreadStreamMessageDeltaChunk
   | ThreadStreamMessageCreatedChunk
@@ -1704,6 +1708,17 @@ const streamThreadChunks = (res: Response) => {
     .pipeThrough(new TextLineStream())
     .pipeThrough(new JSONStream());
   const reader = stream.getReader();
+  if (res.status !== 200) {
+    return {
+      stream,
+      reader,
+      async *[Symbol.asyncIterator]() {
+        const error = await reader.read();
+        const error_ = error.value as ThreadHTTPErrorChunk;
+        yield { type: 'error', detail: error_.detail } as ThreadStreamErrorChunk;
+      }
+    };
+  }
   return {
     stream,
     reader,
