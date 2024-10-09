@@ -1607,7 +1607,7 @@ async def get_ci_messages(
 
 @v1.get(
     "/class/{class_id}/export",
-    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    dependencies=[Depends(Authz("supervisor", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
 async def export_class(
@@ -1628,6 +1628,41 @@ async def export_class(
         request.state.session.user.id,
     )
     return {"status": "ok"}
+
+
+@v1.get(
+    "/class/{class_id}/export/download",
+    dependencies=[Depends(Authz("supervisor", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def redirect_to_export(class_id: str, request: Request):
+    token = request.query_params.get("token")
+    nowfn = get_now_fn(request)
+    try:
+        auth_token = decode_auth_token(token, nowfn=nowfn)
+        sub_data = json.loads(auth_token.sub)
+        requestor_user_id = sub_data["user_id"]
+        download_name = sub_data["download_name"]
+        if requestor_user_id != request.state.session.user.id:
+            return RedirectResponse(
+                config.url(f"/group/{class_id}/manage?error_code=8"),
+                status_code=303,
+            )
+        download_link = await config.artifact_store.store.get_presigned_link(
+            download_name
+        )
+        return RedirectResponse(download_link, status_code=303)
+
+    except TimeException:
+        return RedirectResponse(
+            config.url(f"/group/{class_id}/manage?error_code=7"),
+            status_code=303,
+        )
+    except (jwt.exceptions.PyJWTError, Exception):
+        return RedirectResponse(
+            config.url(f"/group/{class_id}/manage?error_code=6"),
+            status_code=303,
+        )
 
 
 @v1.get(

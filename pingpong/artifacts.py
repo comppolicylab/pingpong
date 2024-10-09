@@ -14,11 +14,15 @@ class BaseArtifactStore(ABC):
         """Save file to the store and return a URL."""
         ...
 
+    @abstractmethod
+    async def get_presigned_link(self, name: str) -> str:
+        """Return a presigned URL for the file."""
+        ...
+
 
 class S3ArtifactStore(BaseArtifactStore):
-    def __init__(self, bucket: str, expiry: int = 43_200):
+    def __init__(self, bucket: str):
         self._bucket = bucket
-        self._expiry = expiry
 
     async def put(self, name: str, content: IO, content_type: str) -> str:
         content.seek(0)
@@ -30,14 +34,14 @@ class S3ArtifactStore(BaseArtifactStore):
                 ContentType=content_type,
                 ContentDisposition=f'attachment; filename="{name}"',
             )
+            return name
+
+    async def get_presigned_link(self, name: str) -> str:
+        async with aioboto3.Session().client("s3") as s3:
             return await s3.generate_presigned_url(
                 "get_object",
-                Params={
-                    "Bucket": self._bucket,
-                    "Key": name,
-                    "ResponseContentDisposition": f'attachment; "filename={name}"',
-                },
-                ExpiresIn=self._expiry,
+                Params={"Bucket": self._bucket, "Key": name},
+                ExpiresIn=60,
             )
 
 
@@ -59,3 +63,6 @@ class LocalArtifactStore(BaseArtifactStore):
 
         # Return a local file URL
         return f"file://{os.path.abspath(file_path)}"
+
+    async def get_presigned_link(self, name: str) -> str:
+        return name

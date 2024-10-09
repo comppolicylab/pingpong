@@ -2,9 +2,11 @@ import csv
 import functools
 import hashlib
 import io
+import json
 import logging
 import openai
 import orjson
+from pingpong.auth import encode_auth_token
 from pingpong.invite import send_export_download
 import pingpong.models as models
 
@@ -401,10 +403,25 @@ async def export_class_threads(
         file_name = (
             f"thread_export_{class_id}_{user_id}_{datetime.now().isoformat()}.csv"
         )
-        download_link = await config.artifact_store.store.put(
+        download_name = await config.artifact_store.store.put(
             file_name, csv_buffer, "text/csv;charset=utf-8"
         )
         csv_buffer.close()
+
+        tok = encode_auth_token(
+            sub=json.dumps(
+                {
+                    "user_id": user_id,
+                    "download_name": download_name,
+                }
+            ),
+            expiry=config.artifact_store.download_link_expiration,
+            nowfn=nowfn,
+        )
+
+        download_link = config.url(
+            f"/api/v1/class/{class_id}/export/download?token={tok}"
+        )
 
         export_opts = DownloadExport(
             class_name=class_.name,
