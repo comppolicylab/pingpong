@@ -20,6 +20,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
+from pingpong.artifacts import ArtifactStoreError
 from pingpong.emails import revalidate_email_addresses, validate_email_addresses
 from pingpong.stats import get_statistics
 from .animal_hash import process_threads, pseudonym, user_names
@@ -710,8 +711,8 @@ async def get_my_classes(request: Request):
 )
 async def get_class(class_id: str, request: Request):
     class_ = await models.Class.get_by_id(request.state.db, int(class_id))
-    class_.presigned_url_expiration = convert_seconds(
-        config.artifact_store.presigned_url_expiration
+    class_.download_link_expiration = convert_seconds(
+        config.artifact_store.download_link_expiration
     )
     return class_
 
@@ -1633,7 +1634,6 @@ async def export_class(
 @v1.get(
     "/class/{class_id}/export/download",
     dependencies=[Depends(Authz("supervisor", "class:{class_id}"))],
-    response_model=schemas.GenericStatus,
 )
 async def redirect_to_export(class_id: str, request: Request):
     token = request.query_params.get("token")
@@ -1648,11 +1648,11 @@ async def redirect_to_export(class_id: str, request: Request):
                 config.url(f"/group/{class_id}/manage?error_code=8"),
                 status_code=303,
             )
-        download_link = await config.artifact_store.store.get_presigned_link(
-            download_name
+        return StreamingResponse(
+            config.artifact_store.store.get(download_name),
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename={download_name}"},
         )
-        return RedirectResponse(download_link, status_code=303)
-
     except TimeException:
         return RedirectResponse(
             config.url(f"/group/{class_id}/manage?error_code=7"),
@@ -1661,6 +1661,11 @@ async def redirect_to_export(class_id: str, request: Request):
     except (jwt.exceptions.PyJWTError, Exception):
         return RedirectResponse(
             config.url(f"/group/{class_id}/manage?error_code=6"),
+            status_code=303,
+        )
+    except ArtifactStoreError:
+        return RedirectResponse(
+            config.url(f"/group/{class_id}/manage?error_code=9"),
             status_code=303,
         )
 
