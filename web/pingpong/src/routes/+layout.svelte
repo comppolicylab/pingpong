@@ -19,6 +19,7 @@
       </Main>
     </div>
   </div>
+  <script src="https://pingpong-hks.statuspage.io/embed/script.js"></script>
 {:else if data.isPublicPage}
   <div class=" w-full flex lg:gap-4 h-[calc(100vh-3rem)]">
     <div class="basis-[320px] shrink-0 grow-0 min-w-0">
