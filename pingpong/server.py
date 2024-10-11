@@ -26,6 +26,7 @@ from pingpong.stats import get_statistics
 from .animal_hash import process_threads, pseudonym, user_names
 from jwt.exceptions import PyJWTError
 from openai.types.beta.assistant_create_params import ToolResources
+from openai.types.beta.threads.message_create_params import Attachment
 from openai.types.beta.threads import MessageContentPartParam
 from sqlalchemy.sql import func, delete, update
 
@@ -1928,6 +1929,25 @@ async def create_thread(
     vector_store_id = None
     vector_store_object_id = None
 
+    if len(req.vision_file_ids or []) > 10:
+        raise HTTPException(
+            status_code=400,
+            detail="You cannot upload more than 10 images in a single message."
+        )
+
+    if (
+        len(
+            set(req.file_search_file_ids or []).union(
+                set(req.code_interpreter_file_ids or [])
+            )
+        )
+        > 10
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="You cannot upload more than 10 files in a single message."
+        )
+    
     if req.file_search_file_ids:
         vector_store_id, vector_store_object_id = await create_vector_store(
             request.state.db,
@@ -1940,21 +1960,24 @@ async def create_thread(
 
     messageContent: MessageContentPartParam = [{"type": "text", "text": req.message}]
 
-    attachments = []
+    attachments: list[Attachment] = []
+    attachments_dict: dict[str, list[dict[str, str]]] = {}
+
     if req.file_search_file_ids:
-        attachments.extend(
-            [
-                {"tools": [{"type": "file_search"}], "file_id": file_id}
-                for file_id in req.file_search_file_ids
-            ]
-        )
+        for file_id in req.file_search_file_ids:
+            attachments_dict.setdefault(file_id, []).append(
+                {"type": "file_search"}
+            )
+
     if req.code_interpreter_file_ids:
-        attachments.extend(
-            [
-                {"tools": [{"type": "code_interpreter"}], "file_id": file_id}
-                for file_id in req.code_interpreter_file_ids
-            ]
-        )
+        for file_id in req.code_interpreter_file_ids:
+            attachments_dict.setdefault(file_id, []).append(
+                {"type": "code_interpreter"}
+            )
+    
+    for file_id, tools in attachments_dict.items():
+        attachments.append({"file_id": file_id, "tools": tools})
+
     if req.vision_file_ids:
         [
             messageContent.append({"type": "image_file", "image_file": {"file_id": id}})

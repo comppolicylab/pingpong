@@ -522,6 +522,9 @@ export class ThreadManager {
       case 'done':
         break;
       case 'error':
+        if (Array.isArray(chunk.detail)) {
+          throw new Error(chunk.detail.join('\n'));
+        }
         throw new Error(chunk.detail || 'An unknown error occurred.');
       case 'tool_call_created':
         this.#createToolCall(chunk.tool_call);

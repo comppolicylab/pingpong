@@ -4,7 +4,7 @@ from typing import Generic, Literal, TypeVar, Union, TypedDict
 
 from openai.types.beta.assistant_tool import AssistantTool as Tool
 from openai.types.beta.threads import Message as OpenAIMessage
-from pydantic import BaseModel, Field, SecretStr, computed_field
+from pydantic import BaseModel, Field, SecretStr, computed_field, field_validator
 
 from .gravatar import get_email_hash, get_gravatar_image
 

@@ -4,7 +4,7 @@
     file_search_file_ids: string[];
     vision_file_ids: string[];
     message: string;
-    callback?: () => void;
+    callback: (success: boolean) => void;
   };
 </script>
 
@@ -183,19 +183,21 @@
       return;
     }
     const message = ref.value;
-    $allFiles = [];
     dispatcher('submit', {
       file_search_file_ids,
       code_interpreter_file_ids,
       vision_file_ids,
       message,
-      callback: () => {
-        document.getElementById('message')?.focus();
+      callback: (success: boolean) => {
+        if (success) {
+          $allFiles = [];
+          document.getElementById('message')?.focus();
+          ref.value = '';
+          realRef.value = '';
+          fixHeight(realRef);
+        }
       }
     });
-    ref.value = '';
-    realRef.value = '';
-    fixHeight(realRef);
   };
 
   // Submit form when Enter (but not Shift+Enter) is pressed in textarea
@@ -313,18 +315,31 @@
       {#if upload && purpose}
         <FileUpload
           {maxSize}
-          accept={(codeInterpreterAcceptedFiles ?? '') +
-            (fileSearchAcceptedFiles ?? '') +
-            (visionAcceptedFiles ?? '')}
-          disabled={loading || disabled || !upload}
+          accept={(attachments.length >= 10 ? '' : (codeInterpreterAcceptedFiles ?? '')) +
+            (attachments.length >= 10 ? '' : (fileSearchAcceptedFiles ?? '')) +
+            (visionFileIds.length >= 10 ? '' : (visionAcceptedFiles ?? ''))}
+          disabled={loading ||
+            disabled ||
+            !upload ||
+            (attachments.length >= 10 && visionFileIds.length >= 10)}
           type="multimodal"
           {purpose}
           {upload}
           on:error={(e) => sadToast(e.detail.message)}
           on:change={handleFilesChange}
         />
-        {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || visionAcceptedFiles) && !(loading || disabled || !upload)}
-          <Popover arrow={false}>Upload files to thread</Popover>
+        {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || visionAcceptedFiles) && !(attachments.length >= 10 || visionFileIds.length >= 10) && !(loading || disabled || !upload)}
+          <Popover defaultClass="py-2 px-3 max-w-56" arrow={false}>Upload files to thread.</Popover>
+        {:else if attachments.length >= 10}
+          <Popover defaultClass="py-2 px-3 max-w-56" arrow={false}
+            >Maximum number of document attachments reached{visionFileIds.length < 10
+              ? '. You can still upload images.'
+              : ''}</Popover
+          >
+        {:else if visionFileIds.length >= 10}
+          <Popover defaultClass="py-2 px-3 max-w-56" arrow={false}
+            >Maximum number of image uploads reached. You can still upload documents.</Popover
+          >
         {:else}
           <Popover arrow={false}>File upload is disabled</Popover>
         {/if}

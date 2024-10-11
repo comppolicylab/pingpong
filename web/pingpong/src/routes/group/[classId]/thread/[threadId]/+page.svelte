@@ -174,7 +174,8 @@
     message,
     code_interpreter_file_ids,
     file_search_file_ids,
-    vision_file_ids
+    vision_file_ids,
+    callback
   }: ChatInputMessage) => {
     try {
       await threadMgr.postMessage(
@@ -185,15 +186,16 @@
         vision_file_ids,
         currentMessageAttachments
       );
+      callback(true);
     } catch (e) {
       sadToast(`Failed to send message. Error: ${errorMessage(e)}`);
+      callback(false);
     }
   };
 
   // Handle submit on the chat input
   const handleSubmit = async (e: CustomEvent<ChatInputMessage>) => {
     await postMessage(e.detail);
-    e.detail.callback?.();
   };
 
   // Handle file upload
@@ -408,7 +410,7 @@
         <div class="m-auto">
           <div class="text-center">
             <div class="text-2xl font-bold text-red-600">Error loading thread.</div>
-            <div class="text-red-400">{errorMessage($error)}</div>
+            <div class="text-red-400 max-w-2/3">{errorMessage($error)}</div>
           </div>
         </div>
       </div>

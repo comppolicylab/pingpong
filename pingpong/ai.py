@@ -17,6 +17,7 @@ from openai.types.beta.threads.annotation import FileCitationAnnotation
 from openai.types.beta.threads.image_file_content_block import ImageFileContentBlock
 from openai.types.beta.threads.image_url_content_block import ImageURLContentBlock
 from openai.types.beta.threads.message_content import MessageContent
+from openai.types.beta.threads.message_create_params import Attachment
 from openai.types.beta.threads.runs import ToolCallsStepDetails, CodeInterpreterToolCall
 from openai.types.beta.threads.text_content_block import TextContentBlock
 from pingpong.now import NowFn, utcnow
@@ -224,21 +225,36 @@ async def run_thread(
 ):
     try:
         if message:
-            attachments = []
+            if (
+                len(
+                    set(file_search_file_ids or []).union(
+                        set(code_interpreter_file_ids or [])
+                    )
+                )
+                > 10
+            ):
+                raise ValueError(
+                    "You cannot upload more than 10 files in a single message."
+                )
+
+            attachments: list[Attachment] = []
+            attachments_dict: dict[str, list[dict[str, str]]] = {}
+
             if file_search_file_ids:
-                attachments.extend(
-                    [
-                        {"tools": [{"type": "file_search"}], "file_id": file_id}
-                        for file_id in file_search_file_ids
-                    ]
-                )
+                for file_id in file_search_file_ids:
+                    attachments_dict.setdefault(file_id, []).append(
+                        {"type": "file_search"}
+                    )
+
             if code_interpreter_file_ids:
-                attachments.extend(
-                    [
-                        {"tools": [{"type": "code_interpreter"}], "file_id": file_id}
-                        for file_id in code_interpreter_file_ids
-                    ]
-                )
+                for file_id in code_interpreter_file_ids:
+                    attachments_dict.setdefault(file_id, []).append(
+                        {"type": "code_interpreter"}
+                    )
+            
+            for file_id, tools in attachments_dict.items():
+                attachments.append({"file_id": file_id, "tools": tools})
+            
             await cli.beta.threads.messages.create(
                 thread_id,
                 role="user",
