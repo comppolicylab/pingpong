@@ -1024,6 +1024,7 @@ class Class(Base):
     threads = relationship("Thread", back_populates="class_")
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
+    last_rate_limited_at = Column(DateTime(timezone=True), nullable=True)
 
     @classmethod
     async def get_members(
@@ -1386,6 +1387,16 @@ class Class(Base):
             await session.execute(stmt)
 
         return user_ids
+
+    @classmethod
+    async def log_rate_limit_error(cls, session: AsyncSession, class_id: str) -> None:
+        """Log the time of the last rate limit error."""
+        stmt = (
+            update(Class)
+            .where(Class.id == int(class_id))
+            .values(last_rate_limited_at=func.now())
+        )
+        await session.execute(stmt)
 
     async def delete(self, session: AsyncSession) -> None:
         self.institution = None

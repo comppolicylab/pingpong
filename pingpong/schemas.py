@@ -612,6 +612,7 @@ class Class(BaseModel):
     any_can_publish_thread: bool | None = None
     any_can_upload_class_file: bool | None = None
     download_link_expiration: str | None = None
+    last_rate_limited_at: datetime | None = None
 
     class Config:
         from_attributes = True

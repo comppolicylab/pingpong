@@ -1,4 +1,5 @@
 import * as api from '$lib/api';
+import { error } from '@sveltejs/kit';
 import type { PageLoad } from './$types';
 
 /**
@@ -6,7 +7,9 @@ import type { PageLoad } from './$types';
  */
 export const load: PageLoad = async ({ fetch, params }) => {
   const classId = parseInt(params.classId, 10);
-  const [grants] = await Promise.all([
+  const [classDataResponse, grants] = await Promise.all([
+    // Even though we `getClass` at the parent layout, we need to do it again here since we might have an updated lastRateLimitedAt value.
+    api.getClass(fetch, classId).then(api.expandResponse),
     api.grants(fetch, {
       canEditInfo: { target_type: 'class', target_id: classId, relation: 'can_edit_info' },
       canPublishThreads: {
@@ -41,6 +44,10 @@ export const load: PageLoad = async ({ fetch, params }) => {
     })
   ]);
 
+  if (classDataResponse.error) {
+    error(classDataResponse.$status, classDataResponse.error.detail || 'Unknown error');
+  }
+
   let api_key = '';
   if (grants.canViewApiKey) {
     const apiKeyResponse = api.expandResponse(await api.getApiKey(fetch, classId));
@@ -53,6 +60,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
 
   return {
     apiKey: api_key || '',
-    grants
+    grants,
+    class: classDataResponse.data
   };
 };

@@ -59,6 +59,8 @@ async def generate_name(
             model=model,
         )
         return response.choices[0].message.content
+    except openai.RateLimitError as e:
+        raise e
     except openai.APIError as e:
         logger.exception(f"Error generating name, {e}")
         return None
@@ -218,6 +220,7 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
 async def run_thread(
     cli: openai.AsyncClient,
     *,
+    class_id: str,
     thread_id: str,
     assistant_id: int,
     message: list[MessageContentPartParam],
@@ -277,8 +280,16 @@ async def run_thread(
                     async with config.db.driver.async_session() as session:
                         await models.CodeInterpreterCall.create(session, data)
                         await session.commit()
-                elif isinstance(event, ThreadRunStepFailed):
+                elif isinstance(event, ThreadRunStepFailed) or isinstance(
+                    event, ThreadRunFailed
+                ):
                     if event.data.last_error.code == "rate_limit_exceeded":
+                        await config.authz.driver.init()
+                        async with config.db.driver.async_session() as session:
+                            await models.Class.log_rate_limit_error(
+                                session, class_id=class_id
+                            )
+                            await session.commit()
                         yield (
                             orjson.dumps(
                                 {
@@ -292,27 +303,7 @@ async def run_thread(
                         orjson.dumps(
                             {
                                 "type": "error",
-                                "detail": f"Run step failed: {event.data.last_error.message}",
-                            }
-                        )
-                        + b"\n"
-                    )
-                elif isinstance(event, ThreadRunFailed):
-                    if event.data.last_error.code == "rate_limit_exceeded":
-                        yield (
-                            orjson.dumps(
-                                {
-                                    "type": "error",
-                                    "detail": "Your account's OpenAI rate limit was exceeded. Please try again later. If you're seeing this message frequently, please contact your group's moderators.",
-                                }
-                            )
-                            + b"\n"
-                        )
-                    yield (
-                        orjson.dumps(
-                            {
-                                "type": "error",
-                                "detail": f"Run failed: {event.data.last_error.message}",
+                                "detail": f"{event.data.last_error.message}",
                             }
                         )
                         + b"\n"
