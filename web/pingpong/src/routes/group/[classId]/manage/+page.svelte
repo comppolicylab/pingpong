@@ -85,7 +85,11 @@
     2: 'You denied the request for PingPong to access your Canvas account. Please try again.',
     3: 'Canvas is currently unable to complete the authorization request. Please try again later.',
     4: 'We received an invalid response from Canvas. Please try again.',
-    5: 'We were unable to complete the authorization request with Canvas. Please try again.'
+    5: 'We were unable to complete the authorization request with Canvas. Please try again.',
+    6: 'We were unable to process your Thread Export link. Please generate a new one.',
+    7: 'Your Thread Export link has expired. Please generate a new one.',
+    8: 'You are not the authorized user to perform this action. Only the user that initiated the Thread Export can download the file.',
+    9: 'We were unable to fetch your Thread Export file. Please try again.'
   };
 
   // Function to get error message from error code
@@ -153,7 +157,7 @@
   let exportThreadsModal = false;
   let usersModalOpen = false;
   let anyCanPublishThread = data?.class.any_can_publish_thread || false;
-  let presignedUrlExpiration = data?.class.presigned_url_expiration || null;
+  let presignedUrlExpiration = data?.class.download_link_expiration || null;
   let makePrivate = data?.class.private || false;
   let assistantPermissions = formatAssistantPermissions(data?.class);
   const asstPermOptions = [

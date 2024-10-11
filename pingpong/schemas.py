@@ -611,7 +611,7 @@ class Class(BaseModel):
     any_can_publish_assistant: bool | None = None
     any_can_publish_thread: bool | None = None
     any_can_upload_class_file: bool | None = None
-    presigned_url_expiration: str | None = None
+    download_link_expiration: str | None = None
 
     class Config:
         from_attributes = True

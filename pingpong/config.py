@@ -248,11 +248,11 @@ class S3StoreSettings(BaseSettings):
 
     type: Literal["s3"]
     save_target: str
-    presigned_url_expiration: int = Field(60 * 60)  # 1 hour
+    download_link_expiration: int = Field(60 * 60, gt=0, le=86400)  # 1 hour
 
     @cached_property
     def store(self):
-        return S3ArtifactStore(self.save_target, expiry=self.presigned_url_expiration)
+        return S3ArtifactStore(self.save_target)
 
 
 class LocalStoreSettings(BaseSettings):
@@ -260,7 +260,7 @@ class LocalStoreSettings(BaseSettings):
 
     type: Literal["local"]
     save_target: str
-    presigned_url_expiration: int = Field(60 * 60)  # 1 hour
+    download_link_expiration: int = Field(60 * 60, gt=0, le=86400)  # 1 hour
 
     @cached_property
     def store(self):

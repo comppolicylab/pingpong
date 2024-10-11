@@ -28,10 +28,10 @@ type = "s3"
 # e.g. save_target = "your-bucket-here"
 # IF `local`, set the directory to save exports to
 save_target = "/your/path/here"
-# Time (in seconds) that the pre-signed url we send to users
+# Time (in seconds) that the export download link we send to users
 # requesting the data export should be valid for.
-# Defaults to 1 hour. Maximum value is 43200 seconds, or 12 hours.
-presigned_url_expiration = 43200
+# Defaults to 1 hour. Maximum value is 86400 seconds, or 24 hours.
+download_link_expiration = 86400
 
 
 [db]
