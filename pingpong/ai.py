@@ -11,7 +11,11 @@ from pingpong.invite import send_export_download
 import pingpong.models as models
 
 from datetime import datetime, timezone
-from openai.types.beta.assistant_stream_event import ThreadRunStepCompleted
+from openai.types.beta.assistant_stream_event import (
+    ThreadRunStepCompleted,
+    ThreadRunStepFailed,
+    ThreadRunFailed,
+)
 from openai.types.beta.threads import ImageFile, MessageContentPartParam
 from openai.types.beta.threads.annotation import FileCitationAnnotation
 from openai.types.beta.threads.image_file_content_block import ImageFileContentBlock
@@ -252,27 +256,67 @@ async def run_thread(
             assistant_id=assistant_id,
             event_handler=handler,
         ) as run:
-            async for step in run:
+            async for event in run:
                 if (
-                    isinstance(step, ThreadRunStepCompleted)
-                    and isinstance(step.data.step_details, ToolCallsStepDetails)
+                    isinstance(event, ThreadRunStepCompleted)
+                    and isinstance(event.data.step_details, ToolCallsStepDetails)
                     and any(
                         isinstance(tool_call, CodeInterpreterToolCall)
-                        for tool_call in step.data.step_details.tool_calls
+                        for tool_call in event.data.step_details.tool_calls
                     )
                 ):
                     data = {
                         "version": 2,
-                        "run_id": step.data.run_id,
-                        "step_id": step.data.id,
-                        "thread_id": step.data.thread_id,
-                        "created_at": step.data.created_at,
+                        "run_id": event.data.run_id,
+                        "step_id": event.data.id,
+                        "thread_id": event.data.thread_id,
+                        "created_at": event.data.created_at,
                     }
                     # Create a new DB session to commit the new CI call
                     await config.authz.driver.init()
                     async with config.db.driver.async_session() as session:
                         await models.CodeInterpreterCall.create(session, data)
                         await session.commit()
+                elif isinstance(event, ThreadRunStepFailed):
+                    if event.data.last_error.code == "rate_limit_exceeded":
+                        yield (
+                            orjson.dumps(
+                                {
+                                    "type": "error",
+                                    "detail": "Your account's OpenAI rate limit was exceeded. Please try again later. If you're seeing this message frequently, please contact your group's moderators.",
+                                }
+                            )
+                            + b"\n"
+                        )
+                    yield (
+                        orjson.dumps(
+                            {
+                                "type": "error",
+                                "detail": f"Run step failed: {event.data.last_error.message}",
+                            }
+                        )
+                        + b"\n"
+                    )
+                elif isinstance(event, ThreadRunFailed):
+                    if event.data.last_error.code == "rate_limit_exceeded":
+                        yield (
+                            orjson.dumps(
+                                {
+                                    "type": "error",
+                                    "detail": "Your account's OpenAI rate limit was exceeded. Please try again later. If you're seeing this message frequently, please contact your group's moderators.",
+                                }
+                            )
+                            + b"\n"
+                        )
+                    yield (
+                        orjson.dumps(
+                            {
+                                "type": "error",
+                                "detail": f"Run failed: {event.data.last_error.message}",
+                            }
+                        )
+                        + b"\n"
+                    )
                 yield handler.flush()
 
     except Exception as e:
