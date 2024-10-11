@@ -82,7 +82,6 @@ class LocalArtifactStore(BaseArtifactStore):
     ) -> AsyncGenerator[bytes, None]:
         """Stream file content asynchronously from local storage."""
         file_path = os.path.join(self._directory, name)
-        print(file_path)
         if not os.path.exists(file_path):
             raise ArtifactStoreError(code=404, detail="File not found")
 
