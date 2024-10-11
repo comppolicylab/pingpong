@@ -191,7 +191,7 @@
     }) as FileUploadInfo[];
 
   $: hasApiKey = !!data?.class?.api_key;
-  $: isAdmin = !!data?.grants?.isAdmin;
+  $: canExportThreads = !!data?.grants?.isAdmin || !!data?.grants?.isTeacher;
   $: canEditClassInfo = !!data?.grants?.canEditInfo;
   $: canManageClassUsers = !!data?.grants?.canManageUsers;
   $: canUploadClassFiles = !!data?.grants?.canUploadClassFiles;
@@ -607,7 +607,7 @@
         >More options <ChevronDownOutline /></Button
       >
       <Dropdown class="overflow-y-auto">
-        {#if isAdmin}
+        {#if canExportThreads}
           <DropdownItem
             on:touchstart={() => (exportThreadsModal = true)}
             on:click={() => (exportThreadsModal = true)}
