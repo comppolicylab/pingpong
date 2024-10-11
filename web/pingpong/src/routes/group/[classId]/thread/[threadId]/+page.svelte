@@ -42,6 +42,7 @@
   $: isPrivate = data.class.private || false;
   $: canDeleteThread = data.canDeleteThread;
   $: canPublishThread = data.canPublishThread;
+  $: canViewAssistant = data.canViewAssistant;
   $: messages = threadMgr.messages;
   $: participants = threadMgr.participants;
   $: published = threadMgr.published;
@@ -448,8 +449,9 @@
               })
             : null}
           {assistantDeleted}
-          canSubmit={canSubmit && !assistantDeleted}
-          disabled={!canSubmit || assistantDeleted || !!$navigating}
+          {canViewAssistant}
+          canSubmit={canSubmit && !assistantDeleted && canViewAssistant}
+          disabled={!canSubmit || assistantDeleted || !!$navigating || !canViewAssistant}
           loading={$submitting || $waiting}
           upload={handleUpload}
           remove={handleRemove}

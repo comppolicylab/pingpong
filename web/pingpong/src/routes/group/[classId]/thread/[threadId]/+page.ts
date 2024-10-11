@@ -16,9 +16,19 @@ export const load: PageLoad = async ({ fetch, params }) => {
   const expanded = api.expandResponse(threadData);
   let threadModel = '';
   let threadTools = '';
+  let assistantGrants = { canViewAssistant: false };
   if (!expanded.error) {
     threadTools = expanded.data.tools_available || '';
     threadModel = expanded.data.model || '';
+    if (expanded.data.thread.assistant_id) {
+      assistantGrants = await api.grants(fetch, {
+        canViewAssistant: {
+          target_type: 'assistant',
+          target_id: expanded.data.thread.assistant_id,
+          relation: 'can_view'
+        }
+      });
+    }
   }
 
   return {
@@ -26,6 +36,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
     threadModel,
     availableTools: threadTools,
     canDeleteThread: threadGrants.canDelete,
-    canPublishThread: threadGrants.canPublish
+    canPublishThread: threadGrants.canPublish,
+    canViewAssistant: assistantGrants.canViewAssistant
   };
 };

@@ -2013,6 +2013,31 @@ async def send_message(
     openai_client: OpenAIClient,
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+
+    # Check that assistant exists
+    if not thread.assistant_id:
+        raise HTTPException(
+            status_code=404,
+            detail="The assistant for this thread no longer exists.",
+        )
+
+    # Check user has permission to view this assistant
+    if not (
+        await request.state.authz.check(
+            [
+                (
+                    f"user:{request.state.session.user.id}",
+                    "can_view",
+                    f"assistant:{thread.assistant_id}",
+                ),
+            ]
+        )
+    )[0]:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to interact with this assistant.",
+        )
+
     asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
 
     # If we have more than 3 user messages and no thread name, generate a new one. Only use the first 100 words of each user and assistant message to maintain a low token count.
