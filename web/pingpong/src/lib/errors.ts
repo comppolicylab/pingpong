@@ -4,7 +4,6 @@
  * Usually we expect an `Error` object here.
  */
 export const errorMessage = (error: unknown, fallback: string = 'unknown error'): string => {
-  console.log('error', error);
   if (!error) {
     return fallback;
   } else if (error instanceof Error) {
