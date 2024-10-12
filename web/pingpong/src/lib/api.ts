@@ -1720,6 +1720,8 @@ export type ThreadValidationErrorChunk = {
   detail: {
     loc: string[];
     msg: string;
+    type: string;
+    
   };
 };
 
@@ -1797,18 +1799,6 @@ export const postMessage = async (
     { 'Content-Type': 'application/json' },
     JSON.stringify(data)
   );
-
-  if (res.status === 422) {
-    const errorResponse = await res.json();
-    return {
-      stream: null,
-      reader: null,
-      async *[Symbol.asyncIterator]() {
-        yield { type: 'error', detail: errorResponse.detail } as ThreadStreamErrorChunk;
-      }
-    };
-  }
-
   return streamThreadChunks(res);
 };
 

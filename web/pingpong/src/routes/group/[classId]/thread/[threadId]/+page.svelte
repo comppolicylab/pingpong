@@ -407,10 +407,10 @@
 
     {#if $error}
       <div class="flex w-full items-center">
-        <div class="m-auto">
-          <div class="text-center">
-            <div class="text-2xl font-bold text-red-600">Error loading thread.</div>
-            <div class="text-red-400 max-w-2/3">{errorMessage($error)}</div>
+        <div class="m-auto w-2/3">
+          <div class="flex flex-col text-center items-center">
+            <div class="text-2xl font-bold text-red-600">Something went wrong.</div>
+            <div class="text-red-400">{errorMessage($error)}</div>
           </div>
         </div>
       </div>

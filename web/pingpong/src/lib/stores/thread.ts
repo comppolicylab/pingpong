@@ -433,6 +433,12 @@ export class ThreadManager {
       attachments: (attachments || []).map((file) => ({ file_id: file.file_id, tools: [] }))
     };
 
+    const chunks = await api.postMessage(this.#fetcher, this.classId, this.threadId, {
+      message,
+      file_search_file_ids,
+      code_interpreter_file_ids,
+      vision_file_ids
+    });
     this.#data.update((d) => ({
       ...d,
       error: null,
@@ -445,12 +451,6 @@ export class ThreadManager {
     }));
     this.attachments = derived(this.#data, ($data) => {
       return $data?.attachments || {};
-    });
-    const chunks = await api.postMessage(this.#fetcher, this.classId, this.threadId, {
-      message,
-      file_search_file_ids,
-      code_interpreter_file_ids,
-      vision_file_ids
     });
     await this.#handleStreamChunks(chunks);
   }

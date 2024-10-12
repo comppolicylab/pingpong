@@ -211,7 +211,7 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
             }
         )
 
-
+import httpx
 async def run_thread(
     cli: openai.AsyncClient,
     *,
@@ -290,7 +290,28 @@ async def run_thread(
                         await models.CodeInterpreterCall.create(session, data)
                         await session.commit()
                 yield handler.flush()
-
+    except openai.APIError as e:
+        if e.type == "server_error":
+            try:
+                logger.warning(f"Server error in thread run: {e}")
+                yield orjson.dumps({"type": "error", "detail": "OpenAI was unable to process your request. Please refresh the page and try again. If the issue persists, check https://pingpong-hks.statuspage.io/."}) + b"\n"
+            except Exception as e:
+                logger.exception("Error writing to stream")
+                pass
+        else:
+            try:
+                logger.exception("Error adding new thread message")
+                yield orjson.dumps({"type": "error", "detail": "OpenAI was unable to process your request: " + str(e.message)}) + b"\n"
+            except Exception:
+                logger.exception("Error writing to stream")
+                pass
+    except ValueError as e:
+        try:
+            logger.warning(f"Error adding new thread message: {e}")
+            yield orjson.dumps({"type": "error", "detail": str(e)}) + b"\n"
+        except Exception as e:
+            logger.exception("Error writing to stream")
+            pass
     except Exception as e:
         try:
             logger.exception("Error adding new thread message")
