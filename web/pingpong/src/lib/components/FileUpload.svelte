@@ -10,7 +10,8 @@
       type: string,
       detail: { file: File; message: string } | Writable<FileUploadInfo[]>
     ) => void,
-    value?: Writable<string[]>
+    value?: Writable<string[]>,
+    inputRef?: HTMLInputElement 
   ) => {
     if (!upload) {
       return;
@@ -77,6 +78,10 @@
 
     files.update((existingFiles) => [...existingFiles, ...newFiles]);
     dispatch('change', files);
+
+    if (inputRef) {
+      inputRef.value = '';
+    }
   };
 
   // Make sure the input resets when the form submits.
@@ -204,7 +209,7 @@
       return;
     }
 
-    autoupload(Array.from(input.files), upload, files, maxSize, purpose, dispatch);
+    autoupload(Array.from(input.files), upload, files, maxSize, purpose, dispatch, undefined, uploadRef);
   };
 
   // Due to how drag events are handled on child elements, we need to keep

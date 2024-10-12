@@ -211,7 +211,6 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
             }
         )
 
-import httpx
 async def run_thread(
     cli: openai.AsyncClient,
     *,
