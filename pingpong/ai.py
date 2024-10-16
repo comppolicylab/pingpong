@@ -310,11 +310,14 @@ async def run_thread(
             try:
                 logger.exception("Error adding new thread message")
                 yield (
+                    # openai_error.message returns the entire error message in a string with all parameters. We can use the body to get the message if it exists, or we fall back to the whole thing.
                     orjson.dumps(
                         {
                             "type": "error",
                             "detail": "OpenAI was unable to process your request: "
-                            + str(openai_error.message),
+                            + str(
+                                openai_error.body.get("message") or openai_error.message
+                            ),
                         }
                     )
                     + b"\n"

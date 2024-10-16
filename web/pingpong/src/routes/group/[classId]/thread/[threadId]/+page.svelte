@@ -65,6 +65,37 @@
         } as api.FileUploadInfo
       ])
   );
+  $: fileSearchAcceptedFiles = supportsFileSearch
+    ? data.uploadInfo.fileTypes({
+        file_search: true,
+        code_interpreter: false,
+        vision: false
+      })
+    : null;
+  $: codeInterpreterAcceptedFiles = supportsCodeInterpreter
+    ? data.uploadInfo.fileTypes({
+        file_search: false,
+        code_interpreter: true,
+        vision: false
+      })
+    : null;
+  $: visionAcceptedFiles = supportsVision
+    ? data.uploadInfo.fileTypes({
+        file_search: false,
+        code_interpreter: false,
+        vision: true
+      })
+    : null;
+  $: fileSearchAttachmentCount = Object.entries($threadAttachments).filter(
+    ([k, v]) =>
+      !$trashThreadFiles.includes(k) && (fileSearchAcceptedFiles ?? '').includes(v.content_type)
+  ).length;
+  $: codeInterpreterAttachmentCount = Object.entries($threadAttachments).filter(
+    ([k, v]) =>
+      !$trashThreadFiles.includes(k) &&
+      (codeInterpreterAcceptedFiles ?? '').includes(v.content_type)
+  ).length;
+
   let supportsVision = false;
   $: {
     const supportVisionModels = (data.models.filter((model) => model.supports_vision) || []).map(
@@ -429,32 +460,16 @@
           mimeType={data.uploadInfo.mimeType}
           maxSize={data.uploadInfo.private_file_max_size}
           bind:attachments={currentMessageAttachments}
-          visionAcceptedFiles={supportsVision
-            ? data.uploadInfo.fileTypes({
-                file_search: false,
-                code_interpreter: false,
-                vision: true
-              })
-            : null}
-          fileSearchAcceptedFiles={supportsFileSearch
-            ? data.uploadInfo.fileTypes({
-                file_search: true,
-                code_interpreter: false,
-                vision: false
-              })
-            : null}
-          codeInterpreterAcceptedFiles={supportsCodeInterpreter
-            ? data.uploadInfo.fileTypes({
-                file_search: false,
-                code_interpreter: true,
-                vision: false
-              })
-            : null}
+          {visionAcceptedFiles}
+          {fileSearchAcceptedFiles}
+          {codeInterpreterAcceptedFiles}
           {assistantDeleted}
           {canViewAssistant}
           canSubmit={canSubmit && !assistantDeleted && canViewAssistant}
           disabled={!canSubmit || assistantDeleted || !!$navigating || !canViewAssistant}
           loading={$submitting || $waiting}
+          {fileSearchAttachmentCount}
+          {codeInterpreterAttachmentCount}
           upload={handleUpload}
           remove={handleRemove}
           on:submit={handleSubmit}

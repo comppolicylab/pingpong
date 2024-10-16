@@ -175,11 +175,15 @@
    * Types of file search files to accept.
    */
   export let fileSearchAcceptedFiles: string | null = null;
+  export let fileSearchAttachmentCount = 0;
+  export let threadFileSearchMaxCount = 0;
 
   /**
    * Types of code interpreter files to accept.
    */
   export let codeInterpreterAcceptedFiles: string | null = null;
+  export let codeInterpreterAttachmentCount = 0;
+  export let threadCodeInterpreterMaxCount = 0;
 
   /**
    * Types of vision files to accept.
@@ -237,6 +241,8 @@
     }
 
     let numberOfDocumentFiles = 0;
+    let numberOfFileSearchFiles = 0;
+    let numberOfCodeInterpreterFiles = 0;
     let numberOfVisionFiles = 0;
 
     for (let i = 0; i < input.files.length; i++) {
@@ -246,6 +252,12 @@
         (codeInterpreterAcceptedFiles && codeInterpreterAcceptedFiles.includes(file.type))
       ) {
         numberOfDocumentFiles++;
+      }
+      if (fileSearchAcceptedFiles && fileSearchAcceptedFiles.includes(file.type)) {
+        numberOfFileSearchFiles++;
+      }
+      if (codeInterpreterAcceptedFiles && codeInterpreterAcceptedFiles.includes(file.type)) {
+        numberOfCodeInterpreterFiles++;
       }
       if (visionAcceptedFiles && visionAcceptedFiles.includes(file.type)) {
         numberOfVisionFiles++;
@@ -260,13 +272,42 @@
     for (const [key, value] of Object.entries(fileCounts)) {
       if (value[0] > value[2] - value[1]) {
         dispatch('error', {
-          message: `<strong>Upload unsuccessful: File limit reached</strong><br>You can upload up to ${value[2] - value[1]} additional ${key} ${
+          message: `<strong>Upload unsuccessful: Message attachment limit reached</strong><br>You can upload up to ${value[2] - value[1]} additional ${key} ${
             value[2] - value[1] === 1 ? 'attachment' : 'attachments'
-          }.${value[1] > 0 ? ` Remove some uploaded files to upload more.` : ''}`
+          } in this message.${value[1] > 0 ? ` Remove some uploaded files from your message to upload more.` : ''}`
         });
         return;
       }
     }
+
+    if (
+      threadFileSearchMaxCount &&
+      numberOfFileSearchFiles + fileSearchAttachmentCount > threadFileSearchMaxCount
+    ) {
+      dispatch('error', {
+        message: `<strong>Upload unsuccessful: Thread file limit reached</strong><br>You can upload up to ${threadFileSearchMaxCount - fileSearchAttachmentCount} additional file ${
+          threadFileSearchMaxCount - fileSearchAttachmentCount === 1 ? 'attachment' : 'attachments'
+        } in this thread.${fileSearchAttachmentCount > 0 ? ` Remove some uploaded files from this thread or message to upload more.` : ''}`
+      });
+      return;
+    }
+
+    if (
+      threadCodeInterpreterMaxCount &&
+      numberOfCodeInterpreterFiles + codeInterpreterAttachmentCount > threadCodeInterpreterMaxCount
+    ) {
+      dispatch('error', {
+        message: `<strong>Upload unsuccessful: Thread file limit reached</strong><br>You can upload up to ${
+          threadCodeInterpreterMaxCount - codeInterpreterAttachmentCount
+        } additional file ${
+          threadCodeInterpreterMaxCount - codeInterpreterAttachmentCount === 1
+            ? 'attachment'
+            : 'attachments'
+        } in this thread.${codeInterpreterAttachmentCount > 0 ? ` Remove some uploaded files from this thread or message to upload more.` : ''}`
+      });
+      return;
+    }
+
     autoupload(
       Array.from(input.files),
       upload,
