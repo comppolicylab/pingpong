@@ -2021,6 +2021,19 @@ async def create_thread(
         await request.state.authz.write(grant=grants)
 
         return result
+    except openai.APIError as e:
+        logger.error("Error creating thread: %s", e.body.get("message") or e.message)
+        if vector_store_id:
+            await openai_client.beta.vector_stores.delete(vector_store_id)
+        if result:
+            # Delete users-threads mapping
+            for user in result.users:
+                result.users.remove(user)
+            await result.delete(request.state.db)
+        raise HTTPException(
+            status_code=400,
+            detail="Error creating thread",
+        )
     except Exception as e:
         logger.error("Error creating thread: %s", e)
         if vector_store_id:
