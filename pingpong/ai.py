@@ -225,18 +225,6 @@ async def run_thread(
 ):
     try:
         if message:
-            if (
-                len(
-                    set(file_search_file_ids or []).union(
-                        set(code_interpreter_file_ids or [])
-                    )
-                )
-                > 10
-            ):
-                raise ValueError(
-                    "You cannot upload more than 10 files in a single message."
-                )
-
             attachments: list[Attachment] = []
             attachments_dict: dict[str, list[dict[str, str]]] = {}
 
