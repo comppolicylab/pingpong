@@ -189,7 +189,7 @@
   /**
    * Max number of file search and code interpreter files to accept.
    */
-   export let documentMaxCount = 0;
+  export let documentMaxCount = 0;
   export let currentDocumentCount = 0;
 
   /**
@@ -241,7 +241,10 @@
 
     for (let i = 0; i < input.files.length; i++) {
       const file = input.files[i];
-      if ((fileSearchAcceptedFiles && fileSearchAcceptedFiles.includes(file.type)) || (codeInterpreterAcceptedFiles && codeInterpreterAcceptedFiles.includes(file.type))) {
+      if (
+        (fileSearchAcceptedFiles && fileSearchAcceptedFiles.includes(file.type)) ||
+        (codeInterpreterAcceptedFiles && codeInterpreterAcceptedFiles.includes(file.type))
+      ) {
         numberOfDocumentFiles++;
       }
       if (visionAcceptedFiles && visionAcceptedFiles.includes(file.type)) {

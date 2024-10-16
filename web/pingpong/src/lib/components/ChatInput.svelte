@@ -328,7 +328,9 @@
           {visionAcceptedFiles}
           documentMaxCount={10}
           visionMaxCount={10}
-          currentDocumentCount={attachments.filter((f) => f.file_search_file_id || f.code_interpreter_file_id).length}
+          currentDocumentCount={attachments.filter(
+            (f) => f.file_search_file_id || f.code_interpreter_file_id
+          ).length}
           currentVisionCount={visionFileIds.length}
           {purpose}
           {upload}
