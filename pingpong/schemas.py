@@ -305,10 +305,8 @@ def file_validator(self):
             )
         )
         > 10
-    ):
+    ) or len(self.vision_file_ids) > 10:
         raise ValueError("You cannot upload more than 10 files in a single message.")
-    if len(self.vision_file_ids) > 10:
-        raise ValueError("You cannot upload more than 10 images in a single message.")
     return self
 
 
