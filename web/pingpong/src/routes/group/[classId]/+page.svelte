@@ -125,6 +125,7 @@
     if (!form.message) {
       $loading = false;
       sadToast('Please enter a message.');
+      form.callback(false);
       return;
     }
 
@@ -151,10 +152,12 @@
       );
       data.threads = [newThread as api.Thread, ...data.threads];
       $loading = false;
+      form.callback(true);
       await goto(`/group/${$page.params.classId}/thread/${newThread.id}`);
     } catch (e) {
-      sadToast(`Failed to create thread. Error: ${errorMessage(e)}`);
+      sadToast(`Failed to create thread:\n${errorMessage(e)}`);
       $loading = false;
+      form.callback(false);
     }
   };
 

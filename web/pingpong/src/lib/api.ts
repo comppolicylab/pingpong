@@ -31,10 +31,19 @@ export type Error = {
   detail?: string;
 };
 
+export type ValidationError = {
+  detail: {
+    loc: string[];
+    msg: string;
+    type: string;
+  }[];
+};
+
 /**
  * Error response. The $status will be >= 400.
  */
 export type ErrorResponse = Error & BaseResponse;
+export type ValidationErrorResponse = ValidationError & BaseResponse;
 
 /**
  * Check whether a response is an error.
@@ -43,12 +52,34 @@ export const isErrorResponse = (r: unknown): r is ErrorResponse => {
   return !!r && Object.hasOwn(r, '$status') && (r as BaseResponse).$status >= 400;
 };
 
+export const isValidationError = (r: unknown): r is ValidationErrorResponse => {
+  if (!!r && Object.hasOwn(r, '$status') && (r as BaseResponse).$status === 422) {
+    const detail = (r as ValidationError).detail;
+    // Check if the detail is an array and contains objects with "type" and "msg" keys.
+    if (Array.isArray(detail) && detail.every((item) => item.type && item.msg)) {
+      return true;
+    }
+  }
+  return false;
+};
+
 /**
  * Expand a response into its error and data components.
  */
-export const expandResponse = <R extends BaseData>(r: BaseResponse & (Error | R)) => {
-  const $status = r.$status || 0;
-  if (isErrorResponse(r)) {
+export const expandResponse = <R extends BaseData>(
+  r: BaseResponse & (Error | ValidationError | R)
+) => {
+  const $status = r.$status || 200;
+  if (isValidationError(r)) {
+    const detail = (r as ValidationError).detail;
+    const error = detail
+      .map((error) => {
+        const location = error.loc.join(' -> '); // Join location array with arrow for readability
+        return `Error at ${location}: ${error.msg}`;
+      })
+      .join('\n'); // Join all error messages with newlines
+    return { $status, error: { detail: error } as Error, data: null };
+  } else if (isErrorResponse(r)) {
     return { $status, error: r as Error, data: null };
   } else {
     return { $status, error: null, data: r as R };
@@ -58,8 +89,18 @@ export const expandResponse = <R extends BaseData>(r: BaseResponse & (Error | R)
 /**
  * Return response data or throw an error if one occurred.
  */
-export const explodeResponse = <R extends BaseData>(r: BaseResponse & (Error | R)) => {
-  if (isErrorResponse(r)) {
+export const explodeResponse = <R extends BaseData>(
+  r: BaseResponse & (Error | ValidationError | R)
+) => {
+  if (isValidationError(r)) {
+    const detail = (r as ValidationError).detail;
+    throw detail
+      .map((error) => {
+        const location = error.loc.join(' -> '); // Join location array with arrow for readability
+        return `Error at ${location}: ${error.msg}`;
+      })
+      .join('\n'); // Join all error messages with newlines
+  } else if (isErrorResponse(r)) {
     throw r;
   } else {
     return r as R;
@@ -127,7 +168,7 @@ const _fetchJSON = async <R extends BaseData>(
   path: string,
   headers?: Record<string, string>,
   body?: string | FormData
-): Promise<(R | Error) & BaseResponse> => {
+): Promise<(R | Error | ValidationError) & BaseResponse> => {
   const res = await _fetch(f, method, path, headers, body);
 
   let data: BaseData = {};
@@ -1689,6 +1730,14 @@ export type ThreadHTTPErrorChunk = {
   detail: string;
 };
 
+export type ThreadValidationErrorChunk = {
+  detail: {
+    loc: string[];
+    msg: string;
+    type: string;
+  }[];
+};
+
 export type ThreadStreamChunk =
   | ThreadStreamMessageDeltaChunk
   | ThreadStreamMessageCreatedChunk
@@ -1709,7 +1758,7 @@ const streamThreadChunks = (res: Response) => {
     .pipeThrough(new TextLineStream())
     .pipeThrough(new JSONStream());
   const reader = stream.getReader();
-  if (res.status !== 200) {
+  if (res.status !== 200 && res.status !== 422) {
     return {
       stream,
       reader,
@@ -1717,6 +1766,25 @@ const streamThreadChunks = (res: Response) => {
         const error = await reader.read();
         const error_ = error.value as ThreadHTTPErrorChunk;
         yield { type: 'error', detail: error_.detail } as ThreadStreamErrorChunk;
+      }
+    };
+  } else if (res.status === 422) {
+    return {
+      stream,
+      reader,
+      async *[Symbol.asyncIterator]() {
+        const error = await reader.read();
+        const error_ = error.value as ThreadValidationErrorChunk;
+        const message = error_.detail
+          .map((error) => {
+            const location = error.loc.join(' -> ');
+            return `Error at ${location}: ${error.msg}`;
+          })
+          .join('\n');
+        yield {
+          type: 'error',
+          detail: `Your request was invalid: ${message}.`
+        } as ThreadStreamErrorChunk;
       }
     };
   }
@@ -1750,7 +1818,6 @@ export const postMessage = async (
     { 'Content-Type': 'application/json' },
     JSON.stringify(data)
   );
-
   return streamThreadChunks(res);
 };
 

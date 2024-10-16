@@ -4,7 +4,7 @@
     file_search_file_ids: string[];
     vision_file_ids: string[];
     message: string;
-    callback?: () => void;
+    callback: (success: boolean) => void;
   };
 </script>
 
@@ -66,10 +66,12 @@
    * Files to accept for file search. If null, file search is disabled.
    */
   export let fileSearchAcceptedFiles: string | null = null;
+  export let fileSearchAttachmentCount = 0;
   /**
    * Files to accept for code interpreter. If null, code interpreter is disabled.
    */
   export let codeInterpreterAcceptedFiles: string | null = null;
+  export let codeInterpreterAttachmentCount = 0;
   /**
    * Files to accept for Vision. If null, vision capabilities are disabled.
    */
@@ -110,15 +112,18 @@
         : visionAcceptedFiles
           ? 'vision'
           : null;
-  $: codeInterpreterFileIds = $allFiles
+  $: codeInterpreterFiles = $allFiles
     .filter((f) => f.state === 'success' && (f.response as ServerFile).code_interpreter_file_id)
-    .map((f) => (f.response as ServerFile).file_id)
-    .join(',');
+    .map((f) => (f.response as ServerFile).file_id);
+  $: codeInterpreterFileIds = codeInterpreterFiles.join(',');
 
-  $: fileSearchFileIds = $allFiles
+  $: fileSearchFiles = $allFiles
     .filter((f) => f.state === 'success' && (f.response as ServerFile).file_search_file_id)
-    .map((f) => (f.response as ServerFile).file_id)
-    .join(',');
+    .map((f) => (f.response as ServerFile).file_id);
+  $: fileSearchFileIds = fileSearchFiles.join(',');
+
+  let threadCodeInterpreterMaxCount = 20;
+  let threadFileSearchMaxCount = 10_000;
 
   $: visionFileIds = $allFiles
     .filter((f) => f.state === 'success' && (f.response as ServerFile).vision_file_id)
@@ -133,6 +138,24 @@
           (f.response as ServerFile).file_search_file_id)
     )
     .map((f) => f.response as ServerFile);
+
+  $: currentFileSearchFileCount = fileSearchAttachmentCount + fileSearchFiles.length;
+  $: currentCodeInterpreterFileCount = codeInterpreterAttachmentCount + codeInterpreterFiles.length;
+
+  $: currentAccept =
+    (attachments.length >= 10 || currentCodeInterpreterFileCount >= threadCodeInterpreterMaxCount
+      ? ''
+      : (codeInterpreterAcceptedFiles ?? '')) +
+    (attachments.length >= 10 || currentFileSearchFileCount >= threadFileSearchMaxCount
+      ? ''
+      : (fileSearchAcceptedFiles ?? '')) +
+    (visionFileIds.length >= 10 ? '' : (visionAcceptedFiles ?? ''));
+
+  $: tooManyFiles =
+    (attachments.length >= 10 ||
+      currentFileSearchFileCount >= threadFileSearchMaxCount ||
+      currentCodeInterpreterFileCount >= threadCodeInterpreterMaxCount) &&
+    visionFileIds.length >= 10;
 
   // Fix the height of the textarea to match the content.
   // The technique is to render an off-screen textarea with a scrollheight,
@@ -183,19 +206,21 @@
       return;
     }
     const message = ref.value;
-    $allFiles = [];
     dispatcher('submit', {
       file_search_file_ids,
       code_interpreter_file_ids,
       vision_file_ids,
       message,
-      callback: () => {
-        document.getElementById('message')?.focus();
+      callback: (success: boolean) => {
+        if (success) {
+          $allFiles = [];
+          document.getElementById('message')?.focus();
+          ref.value = '';
+          realRef.value = '';
+          fixHeight(realRef);
+        }
       }
     });
-    ref.value = '';
-    realRef.value = '';
-    fixHeight(realRef);
   };
 
   // Submit form when Enter (but not Shift+Enter) is pressed in textarea
@@ -313,18 +338,48 @@
       {#if upload && purpose}
         <FileUpload
           {maxSize}
-          accept={(codeInterpreterAcceptedFiles ?? '') +
-            (fileSearchAcceptedFiles ?? '') +
-            (visionAcceptedFiles ?? '')}
-          disabled={loading || disabled || !upload}
+          accept={currentAccept}
+          disabled={loading || disabled || !upload || tooManyFiles || uploading}
           type="multimodal"
+          {fileSearchAcceptedFiles}
+          {codeInterpreterAcceptedFiles}
+          {visionAcceptedFiles}
+          documentMaxCount={10}
+          visionMaxCount={10}
+          currentDocumentCount={attachments.filter(
+            (f) => f.file_search_file_id || f.code_interpreter_file_id
+          ).length}
+          currentVisionCount={visionFileIds.length}
+          fileSearchAttachmentCount={currentFileSearchFileCount}
+          codeInterpreterAttachmentCount={currentCodeInterpreterFileCount}
+          {threadFileSearchMaxCount}
+          {threadCodeInterpreterMaxCount}
           {purpose}
           {upload}
           on:error={(e) => sadToast(e.detail.message)}
           on:change={handleFilesChange}
         />
-        {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || visionAcceptedFiles) && !(loading || disabled || !upload)}
-          <Popover arrow={false}>Upload files to thread</Popover>
+        {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || visionAcceptedFiles) && !(attachments.length >= 10 || visionFileIds.length >= 10) && !(loading || disabled || !upload) && currentFileSearchFileCount < threadFileSearchMaxCount && currentCodeInterpreterFileCount < threadCodeInterpreterMaxCount}
+          <Popover defaultClass="py-2 px-3 max-w-56" arrow={false}
+            >Upload files to thread.<br />File Search: {currentFileSearchFileCount}/10,000<br />Code
+            Interpreter: {currentCodeInterpreterFileCount}/20</Popover
+          >
+        {:else if currentFileSearchFileCount >= threadFileSearchMaxCount || currentCodeInterpreterFileCount >= threadCodeInterpreterMaxCount}
+          <Popover defaultClass="py-2 px-3 max-w-56" arrow={false}
+            >Maximum number of thread document attachments reached{visionFileIds.length < 10
+              ? '. You can still upload images.'
+              : ''}</Popover
+          >
+        {:else if attachments.length >= 10}
+          <Popover defaultClass="py-2 px-3 max-w-56" arrow={false}
+            >Maximum number of document attachments reached{visionFileIds.length < 10
+              ? '. You can still upload images.'
+              : ''}</Popover
+          >
+        {:else if visionFileIds.length >= 10}
+          <Popover defaultClass="py-2 px-3 max-w-56" arrow={false}
+            >Maximum number of image uploads reached. You can still upload documents.</Popover
+          >
         {:else}
           <Popover arrow={false}>File upload is disabled</Popover>
         {/if}

@@ -34,10 +34,13 @@ async def create_vector_store(
             metadata={
                 "class_id": class_id,
             },
+            expires_after={"anchor": "last_active_at", "days": 1460},
         )
 
     except openai.BadRequestError as e:
-        raise HTTPException(400, e.message or "OpenAI rejected this request")
+        raise HTTPException(
+            400, e.body.get("message") or e.message or "OpenAI rejected this request"
+        )
 
     try:
         data = {
@@ -86,7 +89,9 @@ async def append_vector_store_files(
             vector_store_id, file_ids=file_search_file_ids
         )
     except openai.BadRequestError as e:
-        raise HTTPException(400, e.message or "OpenAI rejected this request")
+        raise HTTPException(
+            400, e.body.get("message") or e.message or "OpenAI rejected this request"
+        )
 
     return vector_store_id
 
@@ -247,4 +252,6 @@ async def delete_vector_store_oai(
     except openai.NotFoundError:
         pass
     except openai.BadRequestError as e:
-        raise HTTPException(400, e.message or "OpenAI rejected this request")
+        raise HTTPException(
+            400, e.body.get("message") or e.message or "OpenAI rejected this request"
+        )

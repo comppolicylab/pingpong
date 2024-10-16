@@ -21,6 +21,7 @@ from openai.types.beta.threads.annotation import FileCitationAnnotation
 from openai.types.beta.threads.image_file_content_block import ImageFileContentBlock
 from openai.types.beta.threads.image_url_content_block import ImageURLContentBlock
 from openai.types.beta.threads.message_content import MessageContent
+from openai.types.beta.threads.message_create_params import Attachment
 from openai.types.beta.threads.runs import ToolCallsStepDetails, CodeInterpreterToolCall
 from openai.types.beta.threads.text_content_block import TextContentBlock
 from pingpong.now import NowFn, utcnow
@@ -231,21 +232,24 @@ async def run_thread(
 ):
     try:
         if message:
-            attachments = []
+            attachments: list[Attachment] = []
+            attachments_dict: dict[str, list[dict[str, str]]] = {}
+
             if file_search_file_ids:
-                attachments.extend(
-                    [
-                        {"tools": [{"type": "file_search"}], "file_id": file_id}
-                        for file_id in file_search_file_ids
-                    ]
-                )
+                for file_id in file_search_file_ids:
+                    attachments_dict.setdefault(file_id, []).append(
+                        {"type": "file_search"}
+                    )
+
             if code_interpreter_file_ids:
-                attachments.extend(
-                    [
-                        {"tools": [{"type": "code_interpreter"}], "file_id": file_id}
-                        for file_id in code_interpreter_file_ids
-                    ]
-                )
+                for file_id in code_interpreter_file_ids:
+                    attachments_dict.setdefault(file_id, []).append(
+                        {"type": "code_interpreter"}
+                    )
+
+            for file_id, tools in attachments_dict.items():
+                attachments.append({"file_id": file_id, "tools": tools})
+
             await cli.beta.threads.messages.create(
                 thread_id,
                 role="user",
@@ -309,13 +313,47 @@ async def run_thread(
                         + b"\n"
                     )
                 yield handler.flush()
-
-    except Exception as e:
+    except openai.APIError as openai_error:
+        if openai_error.type == "server_error":
+            try:
+                logger.warning(f"Server error in thread run: {openai_error}")
+                yield (
+                    orjson.dumps(
+                        {
+                            "type": "error",
+                            "detail": "OpenAI was unable to process your request. Please refresh the page and try again. If the issue persists, check https://pingpong-hks.statuspage.io/.",
+                        }
+                    )
+                    + b"\n"
+                )
+            except Exception as e:
+                logger.exception(f"Error writing to stream: {e}")
+                pass
+        else:
+            try:
+                logger.exception("Error adding new thread message")
+                yield (
+                    # openai_error.message returns the entire error message in a string with all parameters. We can use the body to get the message if it exists, or we fall back to the whole thing.
+                    orjson.dumps(
+                        {
+                            "type": "error",
+                            "detail": "OpenAI was unable to process your request: "
+                            + str(
+                                openai_error.body.get("message") or openai_error.message
+                            ),
+                        }
+                    )
+                    + b"\n"
+                )
+            except Exception as e:
+                logger.exception(f"Error writing to stream: {e}")
+                pass
+    except (ValueError, Exception) as e:
         try:
-            logger.exception("Error adding new thread message")
+            logger.warning(f"Error adding new thread message: {e}")
             yield orjson.dumps({"type": "error", "detail": str(e)}) + b"\n"
-        except Exception:
-            logger.exception("Error writing to stream")
+        except Exception as e_:
+            logger.exception(f"Error writing to stream: {e_}")
             pass
     finally:
         yield b'{"type":"done"}\n'

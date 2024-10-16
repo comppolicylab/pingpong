@@ -397,9 +397,8 @@
     const expanded = api.expandResponse(result);
 
     if (expanded.error) {
-      // TODO(jnu): error message is hard to read right now, improve this.
       $loading = false;
-      sadToast(`Error: ${JSON.stringify(expanded.error, null, '  ')}`);
+      sadToast(`Could not save your response:\n${expanded.error.detail}`);
     } else {
       $loading = false;
       happyToast('Assistant saved');
