@@ -121,9 +121,9 @@
         email: e.email,
         display_name: e.name,
         roles: {
-          admin: role === 'admin',
-          teacher: role === 'teacher',
-          student: role === 'student'
+          admin: selectedRole === 'admin',
+          teacher: selectedRole === 'teacher',
+          student: selectedRole === 'student'
         }
       })),
       silent: silentAdd
