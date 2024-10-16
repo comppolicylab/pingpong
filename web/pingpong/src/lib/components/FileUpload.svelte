@@ -177,26 +177,20 @@
   export let fileSearchAcceptedFiles: string | null = null;
 
   /**
-   * Max number of file search files to accept.
-   */
-  export let fileSearchMaxCount = 0;
-  export let currentFileSearchCount = 0;
-
-  /**
    * Types of code interpreter files to accept.
    */
   export let codeInterpreterAcceptedFiles: string | null = null;
 
   /**
-   * Max number of code interpreter files to accept.
-   */
-  export let codeInterpreterMaxCount = 0;
-  export let currentCodeInterpreterCount = 0;
-
-  /**
    * Types of vision files to accept.
    */
   export let visionAcceptedFiles: string | null = null;
+
+  /**
+   * Max number of file search and code interpreter files to accept.
+   */
+   export let documentMaxCount = 0;
+  export let currentDocumentCount = 0;
 
   /**
    * Max number of vision files to accept.
@@ -242,17 +236,13 @@
       return;
     }
 
-    let numberOfFileSearchFiles = 0;
-    let numberOfCodeInterpreterFiles = 0;
+    let numberOfDocumentFiles = 0;
     let numberOfVisionFiles = 0;
 
     for (let i = 0; i < input.files.length; i++) {
       const file = input.files[i];
-      if (fileSearchAcceptedFiles && fileSearchAcceptedFiles.includes(file.type)) {
-        numberOfFileSearchFiles++;
-      }
-      if (codeInterpreterAcceptedFiles && codeInterpreterAcceptedFiles.includes(file.type)) {
-        numberOfCodeInterpreterFiles++;
+      if ((fileSearchAcceptedFiles && fileSearchAcceptedFiles.includes(file.type)) || (codeInterpreterAcceptedFiles && codeInterpreterAcceptedFiles.includes(file.type))) {
+        numberOfDocumentFiles++;
       }
       if (visionAcceptedFiles && visionAcceptedFiles.includes(file.type)) {
         numberOfVisionFiles++;
@@ -260,8 +250,7 @@
     }
 
     let fileCounts = {
-      document: [numberOfFileSearchFiles, currentFileSearchCount, fileSearchMaxCount],
-      file: [numberOfCodeInterpreterFiles, currentCodeInterpreterCount, codeInterpreterMaxCount],
+      document: [numberOfDocumentFiles, currentDocumentCount, documentMaxCount],
       images: [numberOfVisionFiles, currentVisionCount, visionMaxCount]
     };
 

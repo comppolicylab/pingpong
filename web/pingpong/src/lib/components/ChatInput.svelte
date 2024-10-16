@@ -326,11 +326,9 @@
           {fileSearchAcceptedFiles}
           {codeInterpreterAcceptedFiles}
           {visionAcceptedFiles}
-          fileSearchMaxCount={10}
-          codeInterpreterMaxCount={10}
+          documentMaxCount={10}
           visionMaxCount={10}
-          currentFileSearchCount={attachments.filter((f) => f.file_search_file_id).length}
-          currentCodeInterpreterCount={attachments.filter((f) => f.code_interpreter_file_id).length}
+          currentDocumentCount={attachments.filter((f) => f.file_search_file_id || f.code_interpreter_file_id).length}
           currentVisionCount={visionFileIds.length}
           {purpose}
           {upload}
