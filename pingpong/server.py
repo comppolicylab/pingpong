@@ -1929,25 +1929,6 @@ async def create_thread(
     vector_store_id = None
     vector_store_object_id = None
 
-    if len(req.vision_file_ids or []) > 10:
-        raise HTTPException(
-            status_code=400,
-            detail="You cannot upload more than 10 images in a single message.",
-        )
-
-    if (
-        len(
-            set(req.file_search_file_ids or []).union(
-                set(req.code_interpreter_file_ids or [])
-            )
-        )
-        > 10
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="You cannot upload more than 10 files in a single message.",
-        )
-
     if req.file_search_file_ids:
         vector_store_id, vector_store_object_id = await create_vector_store(
             request.state.db,
