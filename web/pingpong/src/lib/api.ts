@@ -31,10 +31,19 @@ export type Error = {
   detail?: string;
 };
 
+export type ValidationError = {
+  detail: {
+    loc: string[];
+    msg: string;
+    type: string;
+  }[];
+};
+
 /**
  * Error response. The $status will be >= 400.
  */
 export type ErrorResponse = Error & BaseResponse;
+export type ValidationErrorResponse = ValidationError & BaseResponse;
 
 /**
  * Check whether a response is an error.
@@ -43,9 +52,9 @@ export const isErrorResponse = (r: unknown): r is ErrorResponse => {
   return !!r && Object.hasOwn(r, '$status') && (r as BaseResponse).$status >= 400;
 };
 
-export const isValidationError = (r: unknown): r is ErrorResponse => {
+export const isValidationError = (r: unknown): r is ValidationErrorResponse => {
   if (!!r && Object.hasOwn(r, '$status') && (r as BaseResponse).$status === 422) {
-    const detail = (r as any).detail;
+    const detail = (r as ValidationError).detail;
     // Check if the detail is an array and contains objects with "type" and "msg" keys.
     if (Array.isArray(detail) && detail.every((item) => item.type && item.msg)) {
       return true;
@@ -57,12 +66,14 @@ export const isValidationError = (r: unknown): r is ErrorResponse => {
 /**
  * Expand a response into its error and data components.
  */
-export const expandResponse = <R extends BaseData>(r: BaseResponse & (Error | R)) => {
-  const $status = r.$status || 0;
+export const expandResponse = <R extends BaseData>(
+  r: BaseResponse & (Error | ValidationError | R)
+) => {
+  const $status = r.$status || 200;
   if (isValidationError(r)) {
-    const detail = (r as any).detail;
+    const detail = (r as ValidationError).detail;
     const error = detail
-      .map((error: any) => {
+      .map((error) => {
         const location = error.loc.join(' -> '); // Join location array with arrow for readability
         return `Error at ${location}: ${error.msg}`;
       })
@@ -78,11 +89,13 @@ export const expandResponse = <R extends BaseData>(r: BaseResponse & (Error | R)
 /**
  * Return response data or throw an error if one occurred.
  */
-export const explodeResponse = <R extends BaseData>(r: BaseResponse & (Error | R)) => {
+export const explodeResponse = <R extends BaseData>(
+  r: BaseResponse & (Error | ValidationError | R)
+) => {
   if (isValidationError(r)) {
-    const detail = (r as any).detail;
+    const detail = (r as ValidationError).detail;
     throw detail
-      .map((error: any) => {
+      .map((error) => {
         const location = error.loc.join(' -> '); // Join location array with arrow for readability
         return `Error at ${location}: ${error.msg}`;
       })
@@ -155,7 +168,7 @@ const _fetchJSON = async <R extends BaseData>(
   path: string,
   headers?: Record<string, string>,
   body?: string | FormData
-): Promise<(R | Error) & BaseResponse> => {
+): Promise<(R | Error | ValidationError) & BaseResponse> => {
   const res = await _fetch(f, method, path, headers, body);
 
   let data: BaseData = {};
@@ -1721,7 +1734,6 @@ export type ThreadValidationErrorChunk = {
     loc: string[];
     msg: string;
     type: string;
-    
   };
 };
 

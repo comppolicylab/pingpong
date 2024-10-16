@@ -11,7 +11,7 @@
       detail: { file: File; message: string } | Writable<FileUploadInfo[]>
     ) => void,
     value?: Writable<string[]>,
-    inputRef?: HTMLInputElement 
+    inputRef?: HTMLInputElement
   ) => {
     if (!upload) {
       return;
@@ -171,6 +171,39 @@
    */
   export let drop = false;
 
+  /**
+   * Types of file search files to accept.
+   */
+  export let fileSearchAcceptedFiles: string | null = null;
+
+  /**
+   * Max number of file search files to accept.
+   */
+  export let fileSearchMaxCount = 0;
+  export let currentFileSearchCount = 0;
+
+  /**
+   * Types of code interpreter files to accept.
+   */
+  export let codeInterpreterAcceptedFiles: string | null = null;
+
+  /**
+   * Max number of code interpreter files to accept.
+   */
+  export let codeInterpreterMaxCount = 0;
+  export let currentCodeInterpreterCount = 0;
+
+  /**
+   * Types of vision files to accept.
+   */
+  export let visionAcceptedFiles: string | null = null;
+
+  /**
+   * Max number of vision files to accept.
+   */
+  export let visionMaxCount = 0;
+  export let currentVisionCount = 0;
+
   // Ref to the dropzone.
   let dropzone: HTMLDivElement;
 
@@ -209,7 +242,49 @@
       return;
     }
 
-    autoupload(Array.from(input.files), upload, files, maxSize, purpose, dispatch, undefined, uploadRef);
+    let numberOfFileSearchFiles = 0;
+    let numberOfCodeInterpreterFiles = 0;
+    let numberOfVisionFiles = 0;
+
+    for (let i = 0; i < input.files.length; i++) {
+      const file = input.files[i];
+      if (fileSearchAcceptedFiles && fileSearchAcceptedFiles.includes(file.type)) {
+        numberOfFileSearchFiles++;
+      }
+      if (codeInterpreterAcceptedFiles && codeInterpreterAcceptedFiles.includes(file.type)) {
+        numberOfCodeInterpreterFiles++;
+      }
+      if (visionAcceptedFiles && visionAcceptedFiles.includes(file.type)) {
+        numberOfVisionFiles++;
+      }
+    }
+
+    let fileCounts = {
+      document: [numberOfFileSearchFiles, currentFileSearchCount, fileSearchMaxCount],
+      file: [numberOfCodeInterpreterFiles, currentCodeInterpreterCount, codeInterpreterMaxCount],
+      images: [numberOfVisionFiles, currentVisionCount, visionMaxCount]
+    };
+
+    for (const [key, value] of Object.entries(fileCounts)) {
+      if (value[0] > value[2] - value[1]) {
+        dispatch('error', {
+          message: `<strong>Upload unsuccessful: File limit reached</strong><br>You can upload up to ${value[2] - value[1]} additional ${key} ${
+            value[2] - value[1] === 1 ? 'attachment' : 'attachments'
+          }.${value[1] > 0 ? ` Remove some uploaded files to upload more.` : ''}`
+        });
+        return;
+      }
+    }
+    autoupload(
+      Array.from(input.files),
+      upload,
+      files,
+      maxSize,
+      purpose,
+      dispatch,
+      undefined,
+      uploadRef
+    );
   };
 
   // Due to how drag events are handled on child elements, we need to keep

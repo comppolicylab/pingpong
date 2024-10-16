@@ -323,6 +323,15 @@
             !upload ||
             (attachments.length >= 10 && visionFileIds.length >= 10)}
           type="multimodal"
+          {fileSearchAcceptedFiles}
+          {codeInterpreterAcceptedFiles}
+          {visionAcceptedFiles}
+          fileSearchMaxCount={10}
+          codeInterpreterMaxCount={10}
+          visionMaxCount={10}
+          currentFileSearchCount={attachments.filter((f) => f.file_search_file_id).length}
+          currentCodeInterpreterCount={attachments.filter((f) => f.code_interpreter_file_id).length}
+          currentVisionCount={visionFileIds.length}
           {purpose}
           {upload}
           on:error={(e) => sadToast(e.detail.message)}

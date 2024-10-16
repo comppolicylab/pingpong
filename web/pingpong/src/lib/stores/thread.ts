@@ -104,7 +104,7 @@ export class ThreadManager {
     fetcher: api.Fetcher,
     classId: number,
     threadId: number,
-    threadData: BaseResponse & (ThreadWithMeta | Error)
+    threadData: BaseResponse & (ThreadWithMeta | Error | api.ValidationError)
   ) {
     const expanded = api.expandResponse(threadData);
     this.#fetcher = fetcher;
