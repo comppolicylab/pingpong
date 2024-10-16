@@ -304,7 +304,7 @@ async def run_thread(
                     + b"\n"
                 )
             except Exception:
-                logger.exception("Error writing to stream: {e}")
+                logger.exception("Error writing to stream: {ex_oai}")
                 pass
         else:
             try:
@@ -320,21 +320,14 @@ async def run_thread(
                     + b"\n"
                 )
             except Exception:
-                logger.exception("Error writing to stream: {e}")
+                logger.exception("Error writing to stream: {ex_oai_2}")
                 pass
-    except ValueError as e:
+    except (ValueError, Exception) as exception:
         try:
-            logger.warning(f"Error adding new thread message: {e}")
-            yield orjson.dumps({"type": "error", "detail": str(e)}) + b"\n"
-        except Exception as e:
-            logger.exception("Error writing to stream")
-            pass
-    except Exception as e:
-        try:
-            logger.exception("Error adding new thread message")
-            yield orjson.dumps({"type": "error", "detail": str(e)}) + b"\n"
+            logger.warning(f"Error adding new thread message: {exception}")
+            yield orjson.dumps({"type": "error", "detail": str(exception)}) + b"\n"
         except Exception:
-            logger.exception("Error writing to stream")
+            logger.exception("Error writing to stream: {exc_}")
             pass
     finally:
         yield b'{"type":"done"}\n'
