@@ -4,16 +4,16 @@
  * Usually we expect an `Error` object here.
  */
 
-import * as api from '$lib/api';
+import { isValidationError, isErrorResponse } from '$lib/api';
 
 export const errorMessage = (error: unknown, fallback: string = 'unknown error'): string => {
   if (!error) {
     return fallback;
   } else if (error instanceof Error) {
     return error.message || `${error}` || fallback;
-  } else if (api.isErrorResponse(error)) {
+  } else if (isErrorResponse(error)) {
     return error.detail || `${error}` || fallback;
-  } else if (api.isValidationError(error)) {
+  } else if (isValidationError(error)) {
     if (!error.detail) {
       return `${error}` || fallback;
     } else {

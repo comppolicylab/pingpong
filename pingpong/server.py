@@ -2043,21 +2043,14 @@ async def create_run(
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
     asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
     file_names = await models.Thread.get_file_search_files(request.state.db, thread.id)
-    try:
-        stream = run_thread(
-            openai_client,
-            thread_id=thread.thread_id,
-            assistant_id=asst.assistant_id,
-            message=[],
-            file_names=file_names,
-        )
-        return StreamingResponse(stream, media_type="text/event-stream")
-    except ValueError as e:
-        logger.warning("Error creating run: %s", e)
-        raise HTTPException(
-            status_code=400,
-            detail=str(e),
-        )
+    stream = run_thread(
+        openai_client,
+        thread_id=thread.thread_id,
+        assistant_id=asst.assistant_id,
+        message=[],
+        file_names=file_names,
+    )
+    return StreamingResponse(stream, media_type="text/event-stream")
 
 
 @v1.post(
@@ -2170,25 +2163,18 @@ async def send_message(
     )
 
     file_names = await models.Thread.get_file_search_files(request.state.db, thread.id)
-    try:
-        # Create a generator that will stream chunks to the client.
-        stream = run_thread(
-            openai_client,
-            thread_id=thread.thread_id,
-            assistant_id=asst.assistant_id,
-            message=messageContent,
-            metadata={"user_id": str(request.state.session.user.id)},
-            file_names=file_names,
-            file_search_file_ids=data.file_search_file_ids,
-            code_interpreter_file_ids=data.code_interpreter_file_ids,
-        )
-        return StreamingResponse(stream, media_type="text/event-stream")
-    except ValueError as e:
-        logger.warning("Error creating run: %s", e)
-        raise HTTPException(
-            status_code=400,
-            detail=str(e),
-        )
+    # Create a generator that will stream chunks to the client.
+    stream = run_thread(
+        openai_client,
+        thread_id=thread.thread_id,
+        assistant_id=asst.assistant_id,
+        message=messageContent,
+        metadata={"user_id": str(request.state.session.user.id)},
+        file_names=file_names,
+        file_search_file_ids=data.file_search_file_ids,
+        code_interpreter_file_ids=data.code_interpreter_file_ids,
+    )
+    return StreamingResponse(stream, media_type="text/event-stream")
 
 
 @v1.post(
