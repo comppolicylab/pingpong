@@ -731,6 +731,7 @@ async def test_create_class(api, now, institution, valid_user_token, authz):
         "lms_status": "none",
         "lms_user": None,
         "download_link_expiration": None,
+        "last_rate_limited_at": None,
     }
     assert await authz.get_all_calls() == [
         ("grant", "institution:11", "parent", "class:1"),
@@ -786,6 +787,7 @@ async def test_create_class_private(api, now, institution, valid_user_token, aut
         "lms_status": "none",
         "lms_user": None,
         "download_link_expiration": None,
+        "last_rate_limited_at": None,
     }
     assert await authz.get_all_calls() == [
         ("grant", "institution:11", "parent", "class:1"),

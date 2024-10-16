@@ -2040,16 +2040,27 @@ async def create_run(
     request: Request,
     openai_client: OpenAIClient,
 ):
-    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
-    asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
-    file_names = await models.Thread.get_file_search_files(request.state.db, thread.id)
-    stream = run_thread(
-        openai_client,
-        thread_id=thread.thread_id,
-        assistant_id=asst.assistant_id,
-        message=[],
-        file_names=file_names,
-    )
+    try:
+        thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+        asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
+        file_names = await models.Thread.get_file_search_files(
+            request.state.db, thread.id
+        )
+        stream = run_thread(
+            openai_client,
+            class_id=class_id,
+            thread_id=thread.thread_id,
+            assistant_id=asst.assistant_id,
+            message=[],
+            file_names=file_names,
+        )
+    except Exception:
+        logger.exception("Error running thread")
+        raise HTTPException(
+            status_code=500,
+            detail="We faced an error while sending your message.",
+        )
+
     return StreamingResponse(stream, media_type="text/event-stream")
 
 
@@ -2092,88 +2103,109 @@ async def send_message(
             detail="You do not have permission to interact with this assistant.",
         )
 
-    asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
+    try:
+        asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
 
-    # If we have more than 3 user messages and no thread name, generate a new one. Only use the first 100 words of each user and assistant message to maintain a low token count.
-    if thread.user_message_ct > 1 and thread.name is None:
-        messages = await openai_client.beta.threads.messages.list(
-            thread.thread_id, limit=10, order="asc"
-        )
-
-        message_str = ""
-        for message in messages.data:
-            for content in message.content:
-                if content.type == "text":
-                    message_str += f"{message.role.upper()}: {' '.join(content.text.value.split()[:100])}\n"
-                if content.type in ["image_file", "image_url"]:
-                    message_str += f"{message.role.upper()}: Sent image file\n"
-        message_str += f"USER: {data.message}\n"
-        if data.vision_file_ids:
-            message_str += "USER: Sent image file\n"
-        new_name = await generate_name(openai_client, message_str)
-        thread.name = new_name
-
-    if data.file_search_file_ids:
-        if thread.vector_store_id:
-            # Vector store already exists, update
-            await add_vector_store_files_to_db(
-                request.state.db,
-                thread.vector_store_id,
-                data.file_search_file_ids,
+        # If we have more than 3 user messages and no thread name, generate a new one. Only use the first 100 words of each user and assistant message to maintain a low token count.
+        if thread.user_message_ct > 1 and thread.name is None:
+            messages = await openai_client.beta.threads.messages.list(
+                thread.thread_id, limit=10, order="asc"
             )
-        else:
-            # Store doesn't exist, create a new one
-            # (empty, since we're adding files as attachments)
-            # and relate files with new vector store
-            _, vector_store_object_id = await create_vector_store(
-                request.state.db,
-                openai_client,
-                class_id,
-                data.file_search_file_ids,
-                type=schemas.VectorStoreType.THREAD,
-                upload_to_oai=False,
+
+            message_str = ""
+            for message in messages.data:
+                for content in message.content:
+                    if content.type == "text":
+                        message_str += f"{message.role.upper()}: {' '.join(content.text.value.split()[:100])}\n"
+                    if content.type in ["image_file", "image_url"]:
+                        message_str += f"{message.role.upper()}: Sent image file\n"
+            message_str += f"USER: {data.message}\n"
+            if data.vision_file_ids:
+                message_str += "USER: Sent image file\n"
+            try:
+                new_name = await generate_name(openai_client, message_str)
+            except openai.RateLimitError:
+                new_name = None
+                await models.Class.log_rate_limit_error(
+                    request.state.db,
+                    class_id,
+                )
+            thread.name = new_name
+
+        if data.file_search_file_ids:
+            if thread.vector_store_id:
+                # Vector store already exists, update
+                await add_vector_store_files_to_db(
+                    request.state.db,
+                    thread.vector_store_id,
+                    data.file_search_file_ids,
+                )
+            else:
+                # Store doesn't exist, create a new one
+                # (empty, since we're adding files as attachments)
+                # and relate files with new vector store
+                _, vector_store_object_id = await create_vector_store(
+                    request.state.db,
+                    openai_client,
+                    class_id,
+                    data.file_search_file_ids,
+                    type=schemas.VectorStoreType.THREAD,
+                    upload_to_oai=False,
+                )
+                thread.vector_store_id = vector_store_object_id
+
+        if data.code_interpreter_file_ids:
+            await models.Thread.add_code_interpeter_files(
+                request.state.db, thread.id, data.code_interpreter_file_ids
             )
-            thread.vector_store_id = vector_store_object_id
 
-    if data.code_interpreter_file_ids:
-        await models.Thread.add_code_interpeter_files(
-            request.state.db, thread.id, data.code_interpreter_file_ids
-        )
-
-    messageContent: MessageContentPartParam = [{"type": "text", "text": data.message}]
-
-    if data.vision_file_ids:
-        await models.Thread.add_image_files(
-            request.state.db, thread.id, data.vision_file_ids
-        )
-        [
-            messageContent.append({"type": "image_file", "image_file": {"file_id": id}})
-            for id in data.vision_file_ids
+        messageContent: MessageContentPartParam = [
+            {"type": "text", "text": data.message}
         ]
 
-    thread.last_activity = func.now()
-    thread.user_message_ct += 1
-    request.state.db.add(thread)
+        if data.vision_file_ids:
+            await models.Thread.add_image_files(
+                request.state.db, thread.id, data.vision_file_ids
+            )
+            [
+                messageContent.append(
+                    {"type": "image_file", "image_file": {"file_id": id}}
+                )
+                for id in data.vision_file_ids
+            ]
 
-    metrics.inbound_messages.inc(
-        app=config.public_url,
-        class_=int(class_id),
-        user=request.state.session.user.id,
-        thread=thread.thread_id,
-    )
+        thread.last_activity = func.now()
+        thread.user_message_ct += 1
+        request.state.db.add(thread)
 
-    file_names = await models.Thread.get_file_search_files(request.state.db, thread.id)
-    # Create a generator that will stream chunks to the client.
-    stream = run_thread(
-        openai_client,
-        thread_id=thread.thread_id,
-        assistant_id=asst.assistant_id,
-        message=messageContent,
-        metadata={"user_id": str(request.state.session.user.id)},
-        file_names=file_names,
-        file_search_file_ids=data.file_search_file_ids,
-        code_interpreter_file_ids=data.code_interpreter_file_ids,
-    )
+        metrics.inbound_messages.inc(
+            app=config.public_url,
+            class_=int(class_id),
+            user=request.state.session.user.id,
+            thread=thread.thread_id,
+        )
+
+        file_names = await models.Thread.get_file_search_files(
+            request.state.db, thread.id
+        )
+        # Create a generator that will stream chunks to the client.
+        stream = run_thread(
+            openai_client,
+            class_id=class_id,
+            thread_id=thread.thread_id,
+            assistant_id=asst.assistant_id,
+            message=messageContent,
+            metadata={"user_id": str(request.state.session.user.id)},
+            file_names=file_names,
+            file_search_file_ids=data.file_search_file_ids,
+            code_interpreter_file_ids=data.code_interpreter_file_ids,
+        )
+    except Exception:
+        logger.exception("Error running thread")
+        raise HTTPException(
+            status_code=500,
+            detail="We faced an error while sending your message.",
+        )
     return StreamingResponse(stream, media_type="text/event-stream")
 
 

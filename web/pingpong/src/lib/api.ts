@@ -569,6 +569,7 @@ export type Class = {
   any_can_publish_thread: boolean | null;
   any_can_upload_class_file: boolean | null;
   download_link_expiration: string | null;
+  last_rate_limited_at: string | null;
 };
 
 /**

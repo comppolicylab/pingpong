@@ -50,6 +50,7 @@
     AdjustmentsHorizontalOutline,
     UserRemoveSolid,
     FileLinesOutline,
+    ExclamationCircleOutline,
     LockSolid
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
@@ -166,12 +167,20 @@
     { value: 'create:1,publish:1,upload:1', name: 'Members can create and publish' }
   ];
 
+  // Check if the group has been rate limited by OpenAI recently
+  $: lastRateLimitedAt = data?.class.last_rate_limited_at
+    ? dayjs().diff(dayjs(data.class.last_rate_limited_at), 'day') > 7
+      ? null
+      : dayjs(data.class.last_rate_limited_at).format('MMMM D, YYYY [at] h:mma')
+    : null;
+
   const blurred = writable(true);
-  let uploads = writable<FileUploadInfo[]>([]);
-  const trashFiles = writable<number[]>([]);
   $: apiKey = data.apiKey || '';
   $: apiKeyBlur =
     apiKey.substring(0, 6) + '**************' + apiKey.substring(Math.max(6, apiKey.length - 6));
+
+  let uploads = writable<FileUploadInfo[]>([]);
+  const trashFiles = writable<number[]>([]);
   $: files = data?.files || [];
   $: allFiles = [
     ...$uploads,
@@ -782,66 +791,67 @@
     </form>
   {/if}
 
-  {#if canViewApiKey}
-    <form on:submit={submitUpdateApiKey} class="pt-6">
-      <div class="grid md:grid-cols-3 gap-x-6 gap-y-8">
-        <div>
-          <Heading customSize="text-xl font-bold" tag="h3"
-            ><Secondary class="text-3xl text-black font-normal">Billing</Secondary></Heading
-          >
-          <Info>Manage OpenAI credentials</Info>
-        </div>
-
+  {#if canViewApiKey || lastRateLimitedAt}
+    <div class="grid md:grid-cols-3 gap-x-6 gap-y-8 pt-6">
+      <div>
+        <Heading customSize="text-xl font-bold" tag="h3"
+          ><Secondary class="text-3xl text-black font-normal">Billing</Secondary></Heading
+        >
+        <Info>Information about your group's OpenAI credentials.</Info>
+      </div>
+      {#if canViewApiKey}
         <div class="col-span-2">
-          <Label for="apiKey">API Key</Label>
-          <div class="w-full relative pt-2 pb-2" class:cursor-pointer={$blurred}>
-            {#if !hasApiKey}
-              <ButtonGroup class="w-full">
-                <InputAddon>
-                  <PenOutline class="w-6 h-6" />
-                </InputAddon>
-                <Input
-                  id="apiKey"
-                  name="apiKey"
-                  label="API Key"
-                  autocomplete="off"
-                  value={apiKey}
-                  placeholder="Your API key here"
-                />
-              </ButtonGroup>
-            {:else}
-              <ButtonGroup class="w-full">
-                <InputAddon>
-                  <button type="button" on:click={() => ($blurred = !$blurred)}>
-                    {#if !$blurred}
-                      <EyeOutline class="w-6 h-6" />
-                    {:else}
-                      <EyeSlashOutline class="w-6 h-6" />
-                    {/if}
-                  </button>
-                </InputAddon>
-                <Input
-                  id="apiKey"
-                  name="apiKey"
-                  label="API Key"
-                  autocomplete="off"
-                  class={$blurred ? 'cursor-pointer' : undefined}
-                  value={$blurred ? apiKeyBlur : apiKey}
-                  on:focus={() => ($blurred = false)}
-                  on:blur={() => ($blurred = true)}
-                  readonly
-                  placeholder="Your API key here"
-                />
-              </ButtonGroup>
-            {/if}
-          </div>
+          <form on:submit={submitUpdateApiKey}>
+            <Label for="apiKey">API Key</Label>
+            <div class="w-full relative pt-2 pb-2" class:cursor-pointer={$blurred}>
+              {#if !hasApiKey}
+                <ButtonGroup class="w-full">
+                  <InputAddon>
+                    <PenOutline class="w-6 h-6" />
+                  </InputAddon>
+                  <Input
+                    id="apiKey"
+                    name="apiKey"
+                    label="API Key"
+                    autocomplete="off"
+                    value={apiKey}
+                    placeholder="Your API key here"
+                  />
+                </ButtonGroup>
+              {:else}
+                <ButtonGroup class="w-full">
+                  <InputAddon>
+                    <button type="button" on:click={() => ($blurred = !$blurred)}>
+                      {#if !$blurred}
+                        <EyeOutline class="w-6 h-6" />
+                      {:else}
+                        <EyeSlashOutline class="w-6 h-6" />
+                      {/if}
+                    </button>
+                  </InputAddon>
+                  <Input
+                    id="apiKey"
+                    name="apiKey"
+                    label="API Key"
+                    autocomplete="off"
+                    class={$blurred ? 'cursor-pointer' : undefined}
+                    value={$blurred ? apiKeyBlur : apiKey}
+                    on:focus={() => ($blurred = false)}
+                    on:blur={() => ($blurred = true)}
+                    readonly
+                    placeholder="Your API key here"
+                  />
+                </ButtonGroup>
+              {/if}
+            </div>
 
-          {#if hasApiKey}
-            <Helper
-              >Note: Changing the API key will break all threads and assistants in the group, so it
-              is not currently supported.</Helper
-            >
-          {/if}
+            {#if hasApiKey}
+              <Helper
+                >Note: Changing the API key will break all threads and assistants in the group, so
+                it is not currently supported.</Helper
+              >
+            {/if}
+          </form>
         </div>
 
         {#if !hasApiKey}
@@ -856,8 +866,41 @@
             >
           </div>
         {/if}
-      </div>
-    </form>
+      {/if}
+
+      {#if lastRateLimitedAt}
+        {#if canViewApiKey}
+          <div></div>
+        {/if}
+        <div class="col-span-2">
+          <Alert color="red" defaultClass="p-4 gap-3 text-sm border-2">
+            <div class="p-1.5">
+              <div class="flex items-center gap-3">
+                <ExclamationCircleOutline class="w-6 h-6" />
+                <span class="text-lg font-medium"
+                  >Important: Your group has reached OpenAI's request limit</span
+                >
+              </div>
+              <p class="mt-2 mb-4 text-md">
+                Your group has recently made more requests to OpenAI than allowed, which means
+                you've hit the maximum request limit for now. While you can continue using this
+                group, you might have trouble starting new threads or continuing existing
+                conversations.
+              </p>
+              <p class="mt-2 mb-4 text-sm">
+                The last time this limit was reached was on <span class="font-medium"
+                  >{lastRateLimitedAt}</span
+                >. This warning will disappear after 7 days.
+              </p>
+              <p class="mt-2 text-sm">
+                To fix this, try making fewer requests, or if you need more, talk to your group
+                administrator about increasing your limit.
+              </p>
+            </div>
+          </Alert>
+        </div>
+      {/if}
+    </div>
   {/if}
 
   {#if canManageClassUsers}
