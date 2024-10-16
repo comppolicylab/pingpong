@@ -1932,7 +1932,7 @@ async def create_thread(
     if len(req.vision_file_ids or []) > 10:
         raise HTTPException(
             status_code=400,
-            detail="You cannot upload more than 10 images in a single message."
+            detail="You cannot upload more than 10 images in a single message.",
         )
 
     if (
@@ -1945,9 +1945,9 @@ async def create_thread(
     ):
         raise HTTPException(
             status_code=400,
-            detail="You cannot upload more than 10 files in a single message."
+            detail="You cannot upload more than 10 files in a single message.",
         )
-    
+
     if req.file_search_file_ids:
         vector_store_id, vector_store_object_id = await create_vector_store(
             request.state.db,
@@ -1965,16 +1965,14 @@ async def create_thread(
 
     if req.file_search_file_ids:
         for file_id in req.file_search_file_ids:
-            attachments_dict.setdefault(file_id, []).append(
-                {"type": "file_search"}
-            )
+            attachments_dict.setdefault(file_id, []).append({"type": "file_search"})
 
     if req.code_interpreter_file_ids:
         for file_id in req.code_interpreter_file_ids:
             attachments_dict.setdefault(file_id, []).append(
                 {"type": "code_interpreter"}
             )
-    
+
     for file_id, tools in attachments_dict.items():
         attachments.append({"file_id": file_id, "tools": tools})
 
@@ -2197,6 +2195,7 @@ async def send_message(
             status_code=400,
             detail=str(e),
         )
+
 
 @v1.post(
     "/class/{class_id}/thread/{thread_id}/publish",

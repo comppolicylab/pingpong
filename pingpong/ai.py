@@ -211,6 +211,7 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
             }
         )
 
+
 async def run_thread(
     cli: openai.AsyncClient,
     *,
@@ -250,10 +251,10 @@ async def run_thread(
                     attachments_dict.setdefault(file_id, []).append(
                         {"type": "code_interpreter"}
                     )
-            
+
             for file_id, tools in attachments_dict.items():
                 attachments.append({"file_id": file_id, "tools": tools})
-            
+
             await cli.beta.threads.messages.create(
                 thread_id,
                 role="user",
@@ -289,20 +290,37 @@ async def run_thread(
                         await models.CodeInterpreterCall.create(session, data)
                         await session.commit()
                 yield handler.flush()
-    except openai.APIError as e:
-        if e.type == "server_error":
+    except openai.APIError as openai_error:
+        if openai_error.type == "server_error":
             try:
-                logger.warning(f"Server error in thread run: {e}")
-                yield orjson.dumps({"type": "error", "detail": "OpenAI was unable to process your request. Please refresh the page and try again. If the issue persists, check https://pingpong-hks.statuspage.io/."}) + b"\n"
-            except Exception as e:
-                logger.exception("Error writing to stream")
+                logger.warning(f"Server error in thread run: {openai_error}")
+                yield (
+                    orjson.dumps(
+                        {
+                            "type": "error",
+                            "detail": "OpenAI was unable to process your request. Please refresh the page and try again. If the issue persists, check https://pingpong-hks.statuspage.io/.",
+                        }
+                    )
+                    + b"\n"
+                )
+            except Exception:
+                logger.exception("Error writing to stream: {e}")
                 pass
         else:
             try:
                 logger.exception("Error adding new thread message")
-                yield orjson.dumps({"type": "error", "detail": "OpenAI was unable to process your request: " + str(e.message)}) + b"\n"
+                yield (
+                    orjson.dumps(
+                        {
+                            "type": "error",
+                            "detail": "OpenAI was unable to process your request: "
+                            + str(openai_error.message),
+                        }
+                    )
+                    + b"\n"
+                )
             except Exception:
-                logger.exception("Error writing to stream")
+                logger.exception("Error writing to stream: {e}")
                 pass
     except ValueError as e:
         try:
