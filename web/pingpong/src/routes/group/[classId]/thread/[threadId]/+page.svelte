@@ -212,15 +212,15 @@
       await threadMgr.postMessage(
         data.me.user!.id,
         message,
+        callback,
         code_interpreter_file_ids,
         file_search_file_ids,
         vision_file_ids,
         currentMessageAttachments
       );
-      callback(true);
     } catch (e) {
-      sadToast(`Failed to send message. Error: ${errorMessage(e)}`);
       callback(false);
+      sadToast(`Failed to send message. Error: ${errorMessage(e)}`);
     }
   };
 

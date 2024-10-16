@@ -4,8 +4,7 @@ from typing import Generic, Literal, TypeVar, Union, TypedDict
 
 from openai.types.beta.assistant_tool import AssistantTool as Tool
 from openai.types.beta.threads import Message as OpenAIMessage
-from pydantic import BaseModel, Field, SecretStr, computed_field
-
+from pydantic import BaseModel, Field, SecretStr, computed_field, model_validator
 from .gravatar import get_email_hash, get_gravatar_image
 
 
@@ -298,21 +297,40 @@ class Thread(BaseModel):
         from_attributes = True
 
 
+def file_validator(self):
+    if (
+        len(
+            set(self.file_search_file_ids or []).union(
+                set(self.code_interpreter_file_ids or [])
+            )
+        )
+        > 10
+    ):
+        raise ValueError("You cannot upload more than 10 files in a single message.")
+    if len(self.vision_file_ids) > 10:
+        raise ValueError("You cannot upload more than 10 images in a single message.")
+    return self
+
+
 class CreateThread(BaseModel):
     parties: list[int] = []
     message: str = Field(..., min_length=1)
-    code_interpreter_file_ids: list[str] = Field([], min_length=0, max_length=10)
-    file_search_file_ids: list[str] = Field([], min_length=0, max_length=10)
-    vision_file_ids: list[str] = Field([], min_length=0, max_length=10)
+    code_interpreter_file_ids: list[str] = Field([])
+    file_search_file_ids: list[str] = Field([])
+    vision_file_ids: list[str] = Field([])
     tools_available: list[Tool]
     assistant_id: int
+
+    _file_check = model_validator(mode="after")(file_validator)
 
 
 class NewThreadMessage(BaseModel):
     message: str = Field(..., min_length=1)
-    file_search_file_ids: list[str]
-    code_interpreter_file_ids: list[str]
-    vision_file_ids: list[str]
+    code_interpreter_file_ids: list[str] = Field([])
+    file_search_file_ids: list[str] = Field([])
+    vision_file_ids: list[str] = Field([])
+
+    _file_check = model_validator(mode="after")(file_validator)
 
 
 class Threads(BaseModel):

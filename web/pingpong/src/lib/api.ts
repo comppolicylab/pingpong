@@ -1734,7 +1734,7 @@ export type ThreadValidationErrorChunk = {
     loc: string[];
     msg: string;
     type: string;
-  };
+  }[];
 };
 
 export type ThreadStreamChunk =
@@ -1774,9 +1774,15 @@ const streamThreadChunks = (res: Response) => {
       async *[Symbol.asyncIterator]() {
         const error = await reader.read();
         const error_ = error.value as ThreadValidationErrorChunk;
+        const message = error_.detail
+          .map((error) => {
+            const location = error.loc.join(' -> ');
+            return `Error at ${location}: ${error.msg}`;
+          })
+          .join('\n');
         yield {
           type: 'error',
-          detail: `Your request was invalid: ${error_.detail.msg} Triggered by ${error_.detail.loc.join(', ')}.`
+          detail: `Your request was invalid: ${message}.`
         } as ThreadStreamErrorChunk;
       }
     };

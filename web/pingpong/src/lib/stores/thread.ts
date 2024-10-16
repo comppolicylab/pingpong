@@ -393,6 +393,7 @@ export class ThreadManager {
   async postMessage(
     fromUserId: number,
     message: string,
+    callback: (success: boolean) => void,
     code_interpreter_file_ids?: string[],
     file_search_file_ids?: string[],
     vision_file_ids?: string[],
@@ -409,6 +410,8 @@ export class ThreadManager {
         'A response to the previous message is being generated. Please wait before sending a new message.'
       );
     }
+
+    callback(true);
 
     // Generate an optimistic update for the UI
     const optimisticMsgId = `optimistic-${(Math.random() + 1).toString(36).substring(2)}`;
@@ -433,12 +436,6 @@ export class ThreadManager {
       attachments: (attachments || []).map((file) => ({ file_id: file.file_id, tools: [] }))
     };
 
-    const chunks = await api.postMessage(this.#fetcher, this.classId, this.threadId, {
-      message,
-      file_search_file_ids,
-      code_interpreter_file_ids,
-      vision_file_ids
-    });
     this.#data.update((d) => ({
       ...d,
       error: null,
@@ -449,6 +446,14 @@ export class ThreadManager {
         ...attachments?.reduce((acc, file) => ({ ...acc, [file.file_id]: file }), {})
       }
     }));
+
+    const chunks = await api.postMessage(this.#fetcher, this.classId, this.threadId, {
+      message,
+      file_search_file_ids,
+      code_interpreter_file_ids,
+      vision_file_ids
+    });
+
     this.attachments = derived(this.#data, ($data) => {
       return $data?.attachments || {};
     });
