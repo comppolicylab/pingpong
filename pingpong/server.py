@@ -2087,7 +2087,7 @@ async def send_message(
         )
 
     # Check user has permission to view this assistant
-    if not (
+    if (
         await request.state.authz.check(
             [
                 (

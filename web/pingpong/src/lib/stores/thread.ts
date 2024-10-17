@@ -411,8 +411,6 @@ export class ThreadManager {
       );
     }
 
-    callback(true);
-
     // Generate an optimistic update for the UI
     const optimisticMsgId = `optimistic-${(Math.random() + 1).toString(36).substring(2)}`;
     const optimisticImageContent: api.MessageContentImageFile[] =
@@ -457,10 +455,14 @@ export class ThreadManager {
     this.attachments = derived(this.#data, ($data) => {
       return $data?.attachments || {};
     });
-    await this.#handleStreamChunks(chunks);
+    await this.#handleStreamChunks(chunks, callback);
+    callback(true);
   }
 
-  async #handleStreamChunks(chunks: AsyncIterable<api.ThreadStreamChunk>) {
+  async #handleStreamChunks(
+    chunks: AsyncIterable<api.ThreadStreamChunk>,
+    callback: (success: boolean) => void = () => {}
+  ) {
     this.#data.update((d) => ({
       ...d,
       error: null,
@@ -477,6 +479,7 @@ export class ThreadManager {
         ...d,
         error: e as Error
       }));
+      callback(false);
     } finally {
       this.#data.update((d) => ({
         ...d,

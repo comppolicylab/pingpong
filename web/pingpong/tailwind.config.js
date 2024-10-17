@@ -29,6 +29,8 @@ const config = {
         'blue-dark-30': '#545193',
         'blue-light-50': '#F1F4FF',
         'blue-light-40': '#D9E2FF',
+        'chat-error-bg': '#f1e3e3',
+        'chat-error-text': '#3d3929',
         orange: '#FC624D',
         'orange-dark': '#E33F0C',
         'orange-light': '#FFF7F1',

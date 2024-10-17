@@ -1722,6 +1722,16 @@ export type ThreadStreamErrorChunk = {
   detail: string;
 };
 
+export type ThreadValidationErrorChunk = {
+  type: 'validation_error';
+  detail: string;
+};
+
+export type ThreadServerErrorChunk = {
+  type: 'server_error';
+  detail: string;
+};
+
 export type ThreadStreamDoneChunk = {
   type: 'done';
 };
@@ -1730,7 +1740,7 @@ export type ThreadHTTPErrorChunk = {
   detail: string;
 };
 
-export type ThreadValidationErrorChunk = {
+export type ThreadValidationError = {
   detail: {
     loc: string[];
     msg: string;
@@ -1742,6 +1752,8 @@ export type ThreadStreamChunk =
   | ThreadStreamMessageDeltaChunk
   | ThreadStreamMessageCreatedChunk
   | ThreadStreamErrorChunk
+  | ThreadValidationErrorChunk
+  | ThreadServerErrorChunk
   | ThreadStreamDoneChunk
   | ThreadStreamToolCallCreatedChunk
   | ThreadStreamToolCallDeltaChunk;
@@ -1774,7 +1786,7 @@ const streamThreadChunks = (res: Response) => {
       reader,
       async *[Symbol.asyncIterator]() {
         const error = await reader.read();
-        const error_ = error.value as ThreadValidationErrorChunk;
+        const error_ = error.value as ThreadValidationError;
         const message = error_.detail
           .map((error) => {
             const location = error.loc.join(' -> ');
@@ -1782,9 +1794,9 @@ const streamThreadChunks = (res: Response) => {
           })
           .join('\n');
         yield {
-          type: 'error',
+          type: 'validation_error',
           detail: `Your request was invalid: ${message}.`
-        } as ThreadStreamErrorChunk;
+        } as ThreadValidationErrorChunk;
       }
     };
   }
