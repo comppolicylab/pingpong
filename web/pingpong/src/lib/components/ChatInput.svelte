@@ -12,7 +12,7 @@
   import { createEventDispatcher } from 'svelte';
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
-  import { Button, Popover } from 'flowbite-svelte';
+  import { Button, Popover, Span } from 'flowbite-svelte';
   import { page } from '$app/stores';
   import type {
     MimeTypeLookupFn,
@@ -25,6 +25,13 @@
   import FileUpload from '$lib/components/FileUpload.svelte';
   import { sadToast } from '$lib/toast';
   import type { FileUploadPurpose } from '$lib/api';
+  import {
+    ArrowUpOutline,
+    CloseOutline,
+    ExclamationCircleOutline,
+    EyeSlashOutline,
+    LockSolid
+  } from 'flowbite-svelte-icons';
 
   const dispatcher = createEventDispatcher();
 
@@ -297,33 +304,68 @@
     const target = e.target as HTMLTextAreaElement;
     fixHeight(target);
   };
+
+  let isPrivate = false;
+  let errorMessage =
+    "OpenAI was unable to process your request. Please refresh the page and try again. If the issue persists, check PingPong's status page.";
 </script>
 
 <div use:init={$page.params.threadId} class="w-full relative">
   <input type="hidden" name="vision_file_ids" bind:value={visionFileIds} />
   <input type="hidden" name="file_search_file_ids" bind:value={fileSearchFileIds} />
   <input type="hidden" name="code_interpreter_file_ids" bind:value={codeInterpreterFileIds} />
-  {#if $allFiles.length > 0}
-    <div
-      class="z-10 top-0 p-2 flex gap-2 flex-wrap"
-      use:fixFileListHeight={$allFiles}
-      bind:this={allFileListRef}
-    >
-      {#each $allFiles as file}
-        <FilePlaceholder {mimeType} info={file} purpose="multimodal" on:delete={removeFile} />
-      {/each}
+  <div class="flex px-1 md:px-2 flex-col">
+    <div style="opacity: 1; height: auto;">
+      {#if $allFiles.length > 0}
+        <div
+          class="border border-blue-light-40 relative flex -mb-3 gap-2 flex-wrap rounded-t-2xl pb-5 pt-2.5 bg-blue-light-50"
+          use:fixFileListHeight={$allFiles}
+          bind:this={allFileListRef}
+        >
+          <div class="flex gap-2 flex-wrap px-2 py-0">
+            {#each $allFiles as file}
+              <FilePlaceholder {mimeType} info={file} purpose="multimodal" on:delete={removeFile} />
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      {#if errorMessage}
+        <div
+          class="border relative z-10 px-3.5 text-chat-error-text border-chat-error-border bg-chat-error-bg -mb-1 rounded-t-xl border-b-0 pb-2.5 pt-2"
+        >
+          <div class="w-full">
+            <div class="flex w-full flex-col items-center md:flex-row gap-2">
+              <div class="text-danger-000 flex flex-row items-center gap-2 md:w-full">
+                <ExclamationCircleOutline />
+                <div>
+                  <div class="text-sm">
+                    {errorMessage}
+                  </div>
+                </div>
+              </div>
+              <Button
+                class="text-chat-error-text -mt-px hover:bg-chat-error-bg-hover p-1 rounded-lg"
+                on:click={() => (errorMessage = '')}
+              >
+                <CloseOutline class="cursor-pointer" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      {/if}
     </div>
-  {/if}
-    <div
-      class="relative flex gap-3 items-center p-2 rounded-full bg-blue-light-50 shadow-inner w-full"
-      bind:this={containerRef}
-    >
+  </div>
+  <div
+    class="flex flex-col bg-chat-bg gap-2 border border-chat-border pl-4 pt-2.5 pr-2.5 pb-2.5 items-stretch transition-all duration-200 relative shadow-[0_0.25rem_1.25rem_rgba(0,0,0,0.035)] focus-within:shadow-[0_0.25rem_1.25rem_rgba(0,0,0,0.075)] hover:border-chat-border-hover focus-within:border-chat-border-hover z-20 rounded-t-2xl border-b-0"
+  >
+    <div class="flex gap-2" bind:this={containerRef}>
       <textarea
         bind:this={realRef}
         id="message"
         rows="1"
         name="message"
-        class="w-full !outline-none focus:ring-0 resize-none border-none bg-transparent pt-[12px] pb-[10px] pl-2 sm:pl-6 pr-2 sm:pr-8"
+        class="w-full !outline-none focus:ring-0 resize-none border-none bg-transparent p-0 mt-1"
         placeholder={canSubmit
           ? 'Ask me anything'
           : assistantDeleted
@@ -333,7 +375,7 @@
               : "You can't reply in this thread."}
         class:text-gray-700={disabled}
         class:animate-pulse={loading}
-        disabled={loading || disabled}
+        disabled={loading || disabled || !canSubmit || assistantDeleted || !canViewAssistant}
         on:keydown={maybeSubmit}
         on:input={handleTextAreaInput}
         style={`height: 48px; max-height: ${maxHeight}px; font-size: 1rem; line-height: 1.5rem;`}
@@ -342,7 +384,7 @@
         bind:this={ref}
         style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
       />
-      <div class="flex flex-row gap-1.5">
+      <div class="flex flex-row gap-1">
         {#if upload && purpose}
           <FileUpload
             {maxSize}
@@ -368,42 +410,65 @@
             on:change={handleFilesChange}
           />
           {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || visionAcceptedFiles) && !(attachments.length >= 10 || visionFileIds.length >= 10) && !(loading || disabled || !upload) && currentFileSearchFileCount < threadFileSearchMaxCount && currentCodeInterpreterFileCount < threadCodeInterpreterMaxCount}
-            <Popover defaultClass="py-2 px-3 max-w-56" arrow={false}
-              >Upload files to thread.<br />File Search: {currentFileSearchFileCount}/10,000<br />Code
-              Interpreter: {currentCodeInterpreterFileCount}/20</Popover
+            <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
+              >Upload files to thread<br />File Search: {currentFileSearchFileCount}/10,000<br
+              />Code Interpreter: {currentCodeInterpreterFileCount}/20</Popover
             >
           {:else if currentFileSearchFileCount >= threadFileSearchMaxCount || currentCodeInterpreterFileCount >= threadCodeInterpreterMaxCount}
-            <Popover defaultClass="py-2 px-3 max-w-56" arrow={false}
+            <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
               >Maximum number of thread document attachments reached{visionFileIds.length < 10
                 ? '. You can still upload images.'
                 : ''}</Popover
             >
           {:else if attachments.length >= 10}
-            <Popover defaultClass="py-2 px-3 max-w-56" arrow={false}
+            <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
               >Maximum number of document attachments reached{visionFileIds.length < 10
                 ? '. You can still upload images.'
                 : ''}</Popover
             >
           {:else if visionFileIds.length >= 10}
-            <Popover defaultClass="py-2 px-3 max-w-56" arrow={false}
+            <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
               >Maximum number of image uploads reached. You can still upload documents.</Popover
             >
           {:else}
             <Popover arrow={false}>File upload is disabled</Popover>
           {/if}
         {/if}
+        <div>
+          <Button
+            on:click={submit}
+            on:touchstart={submit}
+            on:keydown={maybeSubmit}
+            class={`${loading ? 'animate-pulse cursor-progress' : ''} bg-orange w-8 h-8 p-1 hover:bg-orange-dark `}
+            disabled={uploading || loading || disabled}
+          >
+            <ArrowUpOutline class="w-6 h-6" />
+          </Button>
+        </div>
       </div>
-      <Button
-        pill
-        on:click={submit}
-        on:touchstart={submit}
-        on:keydown={maybeSubmit}
-        class={`${
-          loading ? 'animate-pulse cursor-progress' : ''
-        } p-3 px-4 mr-2 bg-orange hover:bg-orange-dark`}
-        disabled={uploading || loading || disabled}
-      >
-        Submit
-      </Button>
+    </div>
+    {#if isPrivate}
+      <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
+        <LockSolid size="sm" class="text-orange pt-0" />
+        <Span class="text-gray-400 text-xs font-normal"
+          >Moderators <span class="font-semibold">cannot</span> see this thread or your name. For
+          more information, please review
+          <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
+            >PingPong's privacy statement</a
+          >. Assistants can make mistakes. Check important info.</Span
+        >
+      </div>
+    {:else}
+      <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
+        <EyeSlashOutline size="sm" class="text-orange pt-0" />
+        <Span class="text-gray-600 text-xs font-normal"
+          >Moderators can see this thread but not your name. For more information, please review <a
+            href="/privacy-policy"
+            rel="noopener noreferrer"
+            class="underline">PingPong's privacy statement</a
+          >. Assistants can make mistakes. Check important info.</Span
+        >
+      </div>
+    {/if}
   </div>
 </div>

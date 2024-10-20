@@ -381,7 +381,7 @@
       type="button"
       color={drop ? 'alternative' : 'blue'}
       {disabled}
-      class={`p-2.5 bg-blue-light-40 border-transparent ${
+      class={`p-1.5 w-8 h-8 bg-blue-light-40 border-transparent ${
         drop ? 'bg-blue-light-40 border-transparent' : ''
       } ${dropzoneActive ? 'animate-bounce' : ''}`}
       on:click={() => uploadRef.click()}

@@ -316,7 +316,7 @@
           remove={handleRemove}
           on:submit={handleSubmit}
         />
-        {#if isPrivate}
+        <!-- {#if isPrivate}
           <div class="flex gap-2 px-4 py-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
             <LockSolid size="sm" class="text-orange pt-0" />
             <Span class="text-gray-400 text-xs font-normal"
@@ -338,7 +338,7 @@
               >. Assistants can make mistakes. Check important info.</Span
             >
           </div>
-        {/if}
+        {/if} -->
         <input type="hidden" name="assistant_id" bind:value={assistant.id} />
         <input type="hidden" name="parties" bind:value={parties} />
       </div>
