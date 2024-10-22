@@ -2054,11 +2054,11 @@ async def create_run(
             message=[],
             file_names=file_names,
         )
-    except Exception:
+    except Exception as e:
         logger.exception("Error running thread")
         raise HTTPException(
             status_code=500,
-            detail="We faced an error while sending your message.",
+            detail="We faced an error while sending your message. " + str(e),
         )
 
     return StreamingResponse(stream, media_type="text/event-stream")
@@ -2087,7 +2087,7 @@ async def send_message(
         )
 
     # Check user has permission to view this assistant
-    if (
+    if not (
         await request.state.authz.check(
             [
                 (
@@ -2200,11 +2200,11 @@ async def send_message(
             file_search_file_ids=data.file_search_file_ids,
             code_interpreter_file_ids=data.code_interpreter_file_ids,
         )
-    except Exception:
+    except Exception as e:
         logger.exception("Error running thread")
         raise HTTPException(
             status_code=500,
-            detail="We faced an error while sending your message.",
+            detail="We faced an error while sending your message. " + str(e),
         )
     return StreamingResponse(stream, media_type="text/event-stream")
 

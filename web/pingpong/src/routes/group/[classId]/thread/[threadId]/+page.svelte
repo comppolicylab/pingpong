@@ -5,29 +5,12 @@
   import { happyToast, sadToast } from '$lib/toast';
   import { errorMessage } from '$lib/errors';
   import { blur } from 'svelte/transition';
-  import {
-    Span,
-    Accordion,
-    AccordionItem,
-    Avatar,
-    Button,
-    Dropdown,
-    DropdownItem,
-    Card
-  } from 'flowbite-svelte';
+  import { Accordion, AccordionItem, Avatar, Button, Card } from 'flowbite-svelte';
   import { DoubleBounce } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
   import Logo from '$lib/components/Logo.svelte';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
-  import {
-    EyeSlashOutline,
-    EyeOutline,
-    RefreshOutline,
-    CodeOutline,
-    ImageSolid,
-    LockSolid,
-    CogOutline
-  } from 'flowbite-svelte-icons';
+  import { RefreshOutline, CodeOutline, ImageSolid } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
   import AttachmentDeletedPlaceholder from '$lib/components/AttachmentDeletedPlaceholder.svelte';
@@ -47,6 +30,7 @@
   $: participants = threadMgr.participants;
   $: published = threadMgr.published;
   $: error = threadMgr.error;
+  $: threadManagerError = $error?.detail || null;
   $: assistantId = threadMgr.assistantId;
   $: isCurrentUser = $participants.user.includes('Me');
   let trashThreadFiles = writable<string[]>([]);
@@ -219,8 +203,7 @@
         currentMessageAttachments
       );
     } catch (e) {
-      callback(false);
-      sadToast(`Failed to send message. Error: ${errorMessage(e)}`);
+      callback(false, `Failed to send message. Error: ${errorMessage(e)}`, false);
     }
   };
 
@@ -245,6 +228,10 @@
       sadToast(`Failed to delete file. Error: ${result.detail || 'unknown error'}`);
       throw new Error(result.detail || 'unknown error');
     }
+  };
+
+  const handleDismissError = () => {
+    threadMgr.dismissError();
   };
 
   /**
@@ -435,17 +422,6 @@
         </div>
       </div>
     {/each}
-
-    {#if $error}
-      <div class="flex w-full items-center">
-        <div class="m-auto w-2/3">
-          <div class="flex flex-col text-center items-center">
-            <div class="text-2xl font-bold text-red-600">Something went wrong.</div>
-            <div class="text-red-400">{errorMessage($error)}</div>
-          </div>
-        </div>
-      </div>
-    {/if}
   </div>
 
   {#if !$loading}
@@ -460,6 +436,7 @@
           mimeType={data.uploadInfo.mimeType}
           maxSize={data.uploadInfo.private_file_max_size}
           bind:attachments={currentMessageAttachments}
+          {threadManagerError}
           {visionAcceptedFiles}
           {fileSearchAcceptedFiles}
           {codeInterpreterAcceptedFiles}
@@ -470,65 +447,19 @@
           loading={$submitting || $waiting}
           {fileSearchAttachmentCount}
           {codeInterpreterAttachmentCount}
+          {canDeleteThread}
+          {canPublishThread}
+          {isCurrentUser}
+          isNewChat={false}
+          {isPrivate}
+          isPublished={$published}
           upload={handleUpload}
           remove={handleRemove}
           on:submit={handleSubmit}
+          on:dismissError={handleDismissError}
+          on:deleteThread={deleteThread}
+          on:togglePublish={togglePublish}
         />
-        <div class="flex gap-2 px-4 py-2 items-center w-full text-sm justify-between grow">
-          <div class="flex gap-2 grow shrink min-w-0">
-            {#if !$published && isPrivate}
-              <LockSolid size="sm" class="text-orange" />
-              <Span class="text-gray-400 text-xs font-normal"
-                >Moderators <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
-                  more information, please review <a
-                    href="/privacy-policy"
-                    rel="noopener noreferrer"
-                    class="underline">PingPong's privacy statement</a
-                  >.
-                {/if}Assistants can make mistakes. Check important info.</Span
-              >
-            {:else if !$published}
-              <EyeSlashOutline size="sm" class="text-orange" />
-              <Span class="text-gray-400 text-xs font-normal"
-                >Moderators can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
-                {#if isCurrentUser}For more information, please review <a
-                    href="/privacy-policy"
-                    rel="noopener noreferrer"
-                    class="underline">PingPong's privacy statement</a
-                  >.
-                {/if}Assistants can make mistakes. Check important info.</Span
-              >
-            {:else}
-              <EyeOutline size="sm" class="text-orange" />
-              <Span class="text-gray-400 text-xs font-normal"
-                >Everyone in this group can see this thread but not {isCurrentUser
-                  ? 'your'
-                  : "the user's"} name. Assistants can make mistakes. Check important info.</Span
-              >
-            {/if}
-          </div>
-
-          <div class="shrink-0 grow-0 h-auto">
-            <CogOutline
-              class="dark:text-white cursor-pointer w-6 h-4 bg-white dark:bg-slate-700 font-light"
-              size="lg"
-            />
-            <Dropdown>
-              <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
-                <span class:text-gray-300={!canPublishThread}>
-                  {#if $published}
-                    Unpublish
-                  {:else}
-                    Publish
-                  {/if}
-                </span>
-              </DropdownItem>
-              <DropdownItem on:click={deleteThread} disabled={!canDeleteThread}>
-                <span class:text-gray-300={!canDeleteThread}>Delete</span>
-              </DropdownItem>
-            </Dropdown>
-          </div>
-        </div>
       </div>
     </div>
   {/if}

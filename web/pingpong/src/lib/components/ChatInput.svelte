@@ -4,7 +4,7 @@
     file_search_file_ids: string[];
     vision_file_ids: string[];
     message: string;
-    callback: (success: boolean) => void;
+    callback: (success: boolean, errorMessage: string | null, message_sent: boolean) => void;
   };
 </script>
 
@@ -12,7 +12,7 @@
   import { createEventDispatcher } from 'svelte';
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
-  import { Button, Popover, Span } from 'flowbite-svelte';
+  import { Button, Popover, Span, Dropdown, DropdownItem } from 'flowbite-svelte';
   import { page } from '$app/stores';
   import type {
     MimeTypeLookupFn,
@@ -30,7 +30,9 @@
     CloseOutline,
     ExclamationCircleOutline,
     EyeSlashOutline,
-    LockSolid
+    LockSolid,
+    EyeOutline,
+    CogOutline
   } from 'flowbite-svelte-icons';
 
   const dispatcher = createEventDispatcher();
@@ -55,7 +57,10 @@
    * Whether we're waiting for an in-flight request.
    */
   export let loading = false;
-
+  /**
+   * Error message provided by thread manager.
+   */
+  export let threadManagerError: string | null = null;
   /**
    * The maximum height of the container before scrolling.
    */
@@ -97,6 +102,13 @@
    * Mime type lookup function.
    */
   export let mimeType: MimeTypeLookupFn;
+
+  export let isPrivate = false;
+  export let isNewChat = true;
+  export let isCurrentUser = false;
+  export let isPublished = false;
+  export let canPublishThread = false;
+  export let canDeleteThread = false;
 
   // Input container
   let containerRef: HTMLDivElement;
@@ -201,6 +213,14 @@
     };
   };
 
+  let errorMessage: string | null = null;
+  $: combinedErrorMessage = errorMessage || threadManagerError;
+
+  const dismissError = () => {
+    errorMessage = null;
+    dispatcher('dismissError');
+  };
+
   // Submit the form.
   const submit = () => {
     const code_interpreter_file_ids = codeInterpreterFileIds
@@ -212,6 +232,7 @@
     if (!ref.value || disabled) {
       return;
     }
+    errorMessage = null;
     const message = ref.value;
     const realMessage = realRef.value;
     const tempFiles = $allFiles;
@@ -226,14 +247,27 @@
       code_interpreter_file_ids,
       vision_file_ids,
       message,
-      callback: (success: boolean) => {
-        if (!success) {
+      callback: (
+        success: boolean,
+        _errorMessage: string | null = null,
+        message_sent: boolean = true
+      ) => {
+        if (success) {
+          return;
+        }
+        if (!message_sent) {
+          errorMessage =
+            _errorMessage ||
+            'We faced an error while trying to send your message. Please try again.';
           $allFiles = tempFiles;
-          document.getElementById('message')?.focus();
           ref.value = message;
           realRef.value = realMessage;
           fixHeight(realRef);
         }
+        errorMessage =
+          _errorMessage ||
+          'We faced an error while generating a response to your message. Your message was successfully sent. Please try again by sending a new message.';
+        isPrivate = true;
       }
     });
   };
@@ -304,10 +338,6 @@
     const target = e.target as HTMLTextAreaElement;
     fixHeight(target);
   };
-
-  let isPrivate = false;
-  let errorMessage =
-    "OpenAI was unable to process your request. Please refresh the page and try again. If the issue persists, check PingPong's status page.";
 </script>
 
 <div use:init={$page.params.threadId} class="w-full relative">
@@ -330,7 +360,7 @@
         </div>
       {/if}
 
-      {#if errorMessage}
+      {#if combinedErrorMessage}
         <div
           class="border relative z-10 px-3.5 text-chat-error-text border-chat-error-border bg-chat-error-bg -mb-1 rounded-t-xl border-b-0 pb-2.5 pt-2"
         >
@@ -340,13 +370,13 @@
                 <ExclamationCircleOutline />
                 <div>
                   <div class="text-sm">
-                    {errorMessage}
+                    {combinedErrorMessage}
                   </div>
                 </div>
               </div>
               <Button
-                class="text-chat-error-text -mt-px hover:bg-chat-error-bg-hover p-1 rounded-lg"
-                on:click={() => (errorMessage = '')}
+                class="text-chat-error-text -mt-px hover:bg-chat-error-button-hover p-1 rounded-lg"
+                on:click={dismissError}
               >
                 <CloseOutline class="cursor-pointer" />
               </Button>
@@ -357,9 +387,9 @@
     </div>
   </div>
   <div
-    class="flex flex-col bg-chat-bg gap-2 border border-chat-border pl-4 pt-2.5 pr-2.5 pb-2.5 items-stretch transition-all duration-200 relative shadow-[0_0.25rem_1.25rem_rgba(0,0,0,0.035)] focus-within:shadow-[0_0.25rem_1.25rem_rgba(0,0,0,0.075)] hover:border-chat-border-hover focus-within:border-chat-border-hover z-20 rounded-t-2xl border-b-0"
+    class="flex flex-col bg-chat-bg gap-2 border border-chat-border pl-4 pt-2.5 pr-2.5 pb-2.5 items-stretch transition-all duration-200 relative shadow-[0_0.25rem_1.25rem_rgba(254,184,175,0.15)] focus-within:shadow-[0_0.25rem_1.25rem_rgba(253,148,134,0.25)] hover:border-chat-border-hover focus-within:border-chat-border-hover z-20 rounded-t-2xl border-b-0"
   >
-    <div class="flex gap-2" bind:this={containerRef}>
+    <div class="flex flex-row gap-4" bind:this={containerRef}>
       <textarea
         bind:this={realRef}
         id="message"
@@ -447,27 +477,92 @@
         </div>
       </div>
     </div>
-    {#if isPrivate}
-      <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
-        <LockSolid size="sm" class="text-orange pt-0" />
-        <Span class="text-gray-400 text-xs font-normal"
-          >Moderators <span class="font-semibold">cannot</span> see this thread or your name. For
-          more information, please review
-          <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
-            >PingPong's privacy statement</a
-          >. Assistants can make mistakes. Check important info.</Span
-        >
-      </div>
+    {#if isNewChat}
+      {#if isPrivate}
+        <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
+          <LockSolid size="sm" class="text-orange pt-0" />
+          <Span class="text-gray-600 text-xs font-normal"
+            >Moderators <span class="font-semibold">cannot</span> see this thread or your name. For
+            more information, please review
+            <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
+              >PingPong's privacy statement</a
+            >. Assistants can make mistakes. Check important info.</Span
+          >
+        </div>
+      {:else}
+        <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
+          <EyeSlashOutline size="sm" class="text-orange pt-0" />
+          <Span class="text-gray-600 text-xs font-normal"
+            >Moderators can see this thread but not your name. For more information, please review <a
+              href="/privacy-policy"
+              rel="noopener noreferrer"
+              class="underline">PingPong's privacy statement</a
+            >. Assistants can make mistakes. Check important info.</Span
+          >
+        </div>
+      {/if}
     {:else}
-      <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
-        <EyeSlashOutline size="sm" class="text-orange pt-0" />
-        <Span class="text-gray-600 text-xs font-normal"
-          >Moderators can see this thread but not your name. For more information, please review <a
-            href="/privacy-policy"
-            rel="noopener noreferrer"
-            class="underline">PingPong's privacy statement</a
-          >. Assistants can make mistakes. Check important info.</Span
-        >
+      <div class="flex gap-2 items-center w-full text-sm justify-between grow">
+        <div class="flex gap-2 grow shrink min-w-0">
+          {#if !isPublished && isPrivate}
+            <LockSolid size="sm" class="text-orange" />
+            <Span class="text-gray-600 text-xs font-normal"
+              >Moderators <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
+                more information, please review <a
+                  href="/privacy-policy"
+                  rel="noopener noreferrer"
+                  class="underline">PingPong's privacy statement</a
+                >.
+              {/if}Assistants can make mistakes. Check important info.</Span
+            >
+          {:else if !isPublished}
+            <EyeSlashOutline size="sm" class="text-orange" />
+            <Span class="text-gray-600 text-xs font-normal"
+              >Moderators can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
+              {#if isCurrentUser}For more information, please review <a
+                  href="/privacy-policy"
+                  rel="noopener noreferrer"
+                  class="underline">PingPong's privacy statement</a
+                >.
+              {/if}Assistants can make mistakes. Check important info.</Span
+            >
+          {:else}
+            <EyeOutline size="sm" class="text-orange" />
+            <Span class="text-gray-600 text-xs font-normal"
+              >Everyone in this group can see this thread but not {isCurrentUser
+                ? 'your'
+                : "the user's"} name. Assistants can make mistakes. Check important info.</Span
+            >
+          {/if}
+        </div>
+
+        <div class="shrink-0 grow-0 h-auto">
+          <CogOutline class="dark:text-white cursor-pointer w-6 h-4 font-light" size="lg" />
+          <Dropdown>
+            <DropdownItem
+              on:click={() => {
+                dispatcher('togglePublish');
+              }}
+              disabled={!canPublishThread}
+            >
+              <span class:text-gray-300={!canPublishThread}>
+                {#if isPublished}
+                  Unpublish
+                {:else}
+                  Publish
+                {/if}
+              </span>
+            </DropdownItem>
+            <DropdownItem
+              on:click={() => {
+                dispatcher('deleteThread');
+              }}
+              disabled={!canDeleteThread}
+            >
+              <span class:text-gray-300={!canDeleteThread}>Delete</span>
+            </DropdownItem>
+          </Dropdown>
+        </div>
       </div>
     {/if}
   </div>

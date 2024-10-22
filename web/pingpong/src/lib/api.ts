@@ -39,6 +39,20 @@ export type ValidationError = {
   }[];
 };
 
+export class PresendError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PresendError';
+  }
+}
+
+export class StreamError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StreamError';
+  }
+}
+
 /**
  * Error response. The $status will be >= 400.
  */
@@ -1722,8 +1736,8 @@ export type ThreadStreamErrorChunk = {
   detail: string;
 };
 
-export type ThreadValidationErrorChunk = {
-  type: 'validation_error';
+export type ThreadPreSendErrorChunk = {
+  type: 'presend_error';
   detail: string;
 };
 
@@ -1752,7 +1766,7 @@ export type ThreadStreamChunk =
   | ThreadStreamMessageDeltaChunk
   | ThreadStreamMessageCreatedChunk
   | ThreadStreamErrorChunk
-  | ThreadValidationErrorChunk
+  | ThreadPreSendErrorChunk
   | ThreadServerErrorChunk
   | ThreadStreamDoneChunk
   | ThreadStreamToolCallCreatedChunk
@@ -1770,17 +1784,7 @@ const streamThreadChunks = (res: Response) => {
     .pipeThrough(new TextLineStream())
     .pipeThrough(new JSONStream());
   const reader = stream.getReader();
-  if (res.status !== 200 && res.status !== 422) {
-    return {
-      stream,
-      reader,
-      async *[Symbol.asyncIterator]() {
-        const error = await reader.read();
-        const error_ = error.value as ThreadHTTPErrorChunk;
-        yield { type: 'error', detail: error_.detail } as ThreadStreamErrorChunk;
-      }
-    };
-  } else if (res.status === 422) {
+  if (res.status === 422) {
     return {
       stream,
       reader,
@@ -1794,9 +1798,22 @@ const streamThreadChunks = (res: Response) => {
           })
           .join('\n');
         yield {
-          type: 'validation_error',
-          detail: `Your request was invalid: ${message}.`
-        } as ThreadValidationErrorChunk;
+          type: 'presend_error',
+          detail: `We were unable to send your message, because it was not accepted by our server: ${message}`
+        } as ThreadPreSendErrorChunk;
+      }
+    };
+  } else if (res.status !== 200) {
+    return {
+      stream,
+      reader,
+      async *[Symbol.asyncIterator]() {
+        const error = await reader.read();
+        const error_ = error.value as ThreadHTTPErrorChunk;
+        yield {
+          type: 'presend_error',
+          detail: `We were unable to send your message: ${error_.detail}`
+        } as ThreadPreSendErrorChunk;
       }
     };
   }

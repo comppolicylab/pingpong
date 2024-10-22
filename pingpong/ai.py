@@ -320,8 +320,8 @@ async def run_thread(
                 yield (
                     orjson.dumps(
                         {
-                            "type": "server_error",
-                            "detail": "OpenAI was unable to process your request. Please refresh the page and try again. If the issue persists, check https://pingpong-hks.statuspage.io/.",
+                            "type": "rate_limit_error",
+                            "detail": "OpenAI was unable to process your request. If the issue persists, check PingPong's status page for updates.",
                         }
                     )
                     + b"\n"
@@ -336,8 +336,8 @@ async def run_thread(
                     # openai_error.message returns the entire error message in a string with all parameters. We can use the body to get the message if it exists, or we fall back to the whole thing.
                     orjson.dumps(
                         {
-                            "type": "server_error",
-                            "detail": "OpenAI was unable to process your request: "
+                            "type": "presend_error",
+                            "detail": "OpenAI was unable to process your request. "
                             + str(
                                 openai_error.body.get("message") or openai_error.message
                             ),
@@ -351,7 +351,7 @@ async def run_thread(
     except (ValueError, Exception) as e:
         try:
             logger.warning(f"Error adding new thread message: {e}")
-            yield orjson.dumps({"type": "server_error", "detail": str(e)}) + b"\n"
+            yield orjson.dumps({"type": "presend_error", "detail": str(e)}) + b"\n"
         except Exception as e_:
             logger.exception(f"Error writing to stream: {e_}")
             pass
