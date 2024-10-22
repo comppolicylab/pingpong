@@ -74,7 +74,7 @@
     name: 'File Search',
     description:
       'File Search augments the Assistant with knowledge from outside its model using documents you provide.',
-    max_count: 50
+    max_count: 100
   };
   const codeInterpreterMetadata = {
     value: 'code_interpreter',
