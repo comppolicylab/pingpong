@@ -1110,9 +1110,15 @@ const _doUpload = (
           resolve(info.response);
         } else {
           info.state = 'error';
-          info.response = {
-            error: xhr.responseText ? JSON.parse(xhr.responseText) : { detail: '' }
-          };
+          if (xhr.responseText) {
+            try {
+              info.response = { error: JSON.parse(xhr.responseText) };
+            } catch {
+              info.response = { error: { detail: xhr.responseText } };
+            }
+          } else {
+            info.response = { error: { detail: 'Unknown error.' } };
+          }
           reject(info.response);
         }
       }
