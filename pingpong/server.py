@@ -1928,6 +1928,7 @@ async def create_thread(
     parties = list[models.User]()
     vector_store_id = None
     vector_store_object_id = None
+    tool_resources: ToolResources = {}
 
     if req.file_search_file_ids:
         vector_store_id, vector_store_object_id = await create_vector_store(
@@ -1938,6 +1939,7 @@ async def create_thread(
             type=schemas.VectorStoreType.THREAD,
             upload_to_oai=False,
         )
+        tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
 
     messageContent: MessageContentPartParam = [{"type": "text", "text": req.message}]
 
@@ -1972,6 +1974,7 @@ async def create_thread(
                     "attachments": attachments,
                 }
             ],
+            tool_resources=tool_resources,
         ),
         models.User.get_all_by_id(request.state.db, req.parties),
     )
@@ -2078,6 +2081,7 @@ async def send_message(
     openai_client: OpenAIClient,
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    tool_resources: ToolResources = {}
 
     # Check that assistant exists
     if not thread.assistant_id:
@@ -2144,7 +2148,7 @@ async def send_message(
                 # Store doesn't exist, create a new one
                 # (empty, since we're adding files as attachments)
                 # and relate files with new vector store
-                _, vector_store_object_id = await create_vector_store(
+                vector_store_id, vector_store_object_id = await create_vector_store(
                     request.state.db,
                     openai_client,
                     class_id,
@@ -2153,6 +2157,7 @@ async def send_message(
                     upload_to_oai=False,
                 )
                 thread.vector_store_id = vector_store_object_id
+                tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
 
         if data.code_interpreter_file_ids:
             await models.Thread.add_code_interpeter_files(
