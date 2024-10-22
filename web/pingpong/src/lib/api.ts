@@ -846,6 +846,7 @@ export type Assistant = {
   description: string | null;
   instructions: string;
   model: string;
+  temperature: number;
   tools: string;
   class_id: number;
   creator_id: number;
@@ -915,6 +916,7 @@ export type CreateAssistantRequest = {
   description: string;
   instructions: string;
   model: string;
+  temperature: number;
   tools: Tool[];
   code_interpreter_file_ids: string[];
   file_search_file_ids: string[];
@@ -932,6 +934,7 @@ export type UpdateAssistantRequest = {
   description?: string;
   instructions?: string;
   model?: string;
+  temperature?: number;
   tools?: Tool[];
   code_interpreter_file_ids?: string[];
   file_search_file_ids?: string[];

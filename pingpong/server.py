@@ -2550,6 +2550,7 @@ async def create_assistant(
             instructions=format_instructions(req.instructions, use_latex=req.use_latex),
             model=req.model,
             tools=req.tools,
+            temperature=req.temperature,
             metadata={"class_id": class_id, "creator_id": str(creator_id)},
             tool_resources=tool_resources,
         )
@@ -2702,6 +2703,9 @@ async def update_assistant(
     if req.tools is not None:
         openai_update["tools"] = req.tools
         asst.tools = json.dumps([t.model_dump() for t in req.tools])
+    if req.temperature is not None:
+        openai_update["temperature"] = req.temperature
+        asst.temperature = req.temperature
     if req.published is not None:
         ptuple = (f"class:{class_id}#member", "can_view", f"assistant:{asst.id}")
         if req.published:
