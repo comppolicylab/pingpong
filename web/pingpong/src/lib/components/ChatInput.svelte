@@ -144,10 +144,11 @@
   let threadCodeInterpreterMaxCount = 20;
   let threadFileSearchMaxCount = 10_000;
 
-  $: visionFileIds = $allFiles
+  $: visionFiles = $allFiles
     .filter((f) => f.state === 'success' && (f.response as ServerFile).vision_file_id)
-    .map((f) => (f.response as ServerFile).vision_file_id)
-    .join(',');
+    .map((f) => (f.response as ServerFile).vision_file_id);
+
+  $: visionFileIds = visionFiles.join(',');
 
   $: attachments = $allFiles
     .filter(
@@ -168,13 +169,13 @@
     (attachments.length >= 10 || currentFileSearchFileCount >= threadFileSearchMaxCount
       ? ''
       : (fileSearchAcceptedFiles ?? '')) +
-    (visionFileIds.length >= 10 ? '' : (visionAcceptedFiles ?? ''));
+    (visionFiles.length >= 10 ? '' : (visionAcceptedFiles ?? ''));
 
   $: tooManyFiles =
     (attachments.length >= 10 ||
       currentFileSearchFileCount >= threadFileSearchMaxCount ||
       currentCodeInterpreterFileCount >= threadCodeInterpreterMaxCount) &&
-    visionFileIds.length >= 10;
+    visionFiles.length >= 10;
 
   // Fix the height of the textarea to match the content.
   // The technique is to render an off-screen textarea with a scrollheight,
@@ -429,7 +430,7 @@
             currentDocumentCount={attachments.filter(
               (f) => f.file_search_file_id || f.code_interpreter_file_id
             ).length}
-            currentVisionCount={visionFileIds.length}
+            currentVisionCount={visionFiles.length}
             fileSearchAttachmentCount={currentFileSearchFileCount}
             codeInterpreterAttachmentCount={currentCodeInterpreterFileCount}
             {threadFileSearchMaxCount}
@@ -439,24 +440,24 @@
             on:error={(e) => sadToast(e.detail.message)}
             on:change={handleFilesChange}
           />
-          {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || visionAcceptedFiles) && !(attachments.length >= 10 || visionFileIds.length >= 10) && !(loading || disabled || !upload) && currentFileSearchFileCount < threadFileSearchMaxCount && currentCodeInterpreterFileCount < threadCodeInterpreterMaxCount}
+          {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || visionAcceptedFiles) && !(attachments.length >= 10 || visionFiles.length >= 10) && !(loading || disabled || !upload) && currentFileSearchFileCount < threadFileSearchMaxCount && currentCodeInterpreterFileCount < threadCodeInterpreterMaxCount}
             <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
               >Upload files to thread<br />File Search: {currentFileSearchFileCount}/10,000<br
               />Code Interpreter: {currentCodeInterpreterFileCount}/20</Popover
             >
           {:else if currentFileSearchFileCount >= threadFileSearchMaxCount || currentCodeInterpreterFileCount >= threadCodeInterpreterMaxCount}
             <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
-              >Maximum number of thread document attachments reached{visionFileIds.length < 10
+              >Maximum number of thread document attachments reached{visionFiles.length < 10
                 ? '. You can still upload images.'
                 : ''}</Popover
             >
           {:else if attachments.length >= 10}
             <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
-              >Maximum number of document attachments reached{visionFileIds.length < 10
+              >Maximum number of document attachments reached{visionFiles.length < 10
                 ? '. You can still upload images.'
                 : ''}</Popover
             >
-          {:else if visionFileIds.length >= 10}
+          {:else if visionFiles.length >= 10}
             <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
               >Maximum number of image uploads reached. You can still upload documents.</Popover
             >
