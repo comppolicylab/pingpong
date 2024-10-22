@@ -14,7 +14,8 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
     filesResponse,
     uploadInfoResponse,
     grants,
-    modelsResponse
+    modelsResponse,
+    teachersResponse
   ] = await Promise.all([
     api.getClass(fetch, classId).then(api.expandResponse),
     api.getAssistants(fetch, classId).then(api.expandResponse),
@@ -28,7 +29,8 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
         relation: 'supervisor'
       }
     }),
-    api.getModels(fetch, classId).then(api.expandResponse)
+    api.getModels(fetch, classId).then(api.expandResponse),
+    api.getSupervisors(fetch, classId).then(api.expandResponse)
   ]);
 
   if (classDataResponse.error) {
@@ -44,6 +46,8 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
 
   const models = modelsResponse.error ? [] : modelsResponse.data.models;
 
+  const supervisors = teachersResponse.error ? [] : teachersResponse.data.users;
+
   return {
     hasAssistants: !!assistants && assistants.length > 0,
     hasBilling: !!classDataResponse.data.api_key,
@@ -54,6 +58,7 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
     uploadInfo: uploadInfoResponse,
     canManage: grants.canManage,
     isSupervisor: grants.isSupervisor,
-    models
+    models,
+    supervisors
   };
 };

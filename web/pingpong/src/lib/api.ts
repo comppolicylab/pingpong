@@ -1233,6 +1233,24 @@ export const getClassUsers = async (f: Fetcher, classId: number, opts?: GetClass
   };
 };
 
+export type ClassSupervisors = {
+  users: SupervisorUser[];
+};
+
+export type SupervisorUser = {
+  name: string | null;
+  email: string;
+};
+
+/**
+ * Fetch teachers in a class.
+ *
+ */
+export const getSupervisors = async (f: Fetcher, classId: number) => {
+  const url = `class/${classId}/supervisors`;
+  return await GET<never, ClassSupervisors>(f, url);
+};
+
 /**
  * Response type for getClassUsers.
  */

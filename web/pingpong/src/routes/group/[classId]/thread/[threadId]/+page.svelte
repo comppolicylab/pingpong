@@ -5,7 +5,7 @@
   import { happyToast, sadToast } from '$lib/toast';
   import { errorMessage } from '$lib/errors';
   import { blur } from 'svelte/transition';
-  import { Accordion, AccordionItem, Avatar, Button, Card } from 'flowbite-svelte';
+  import { Accordion, AccordionItem, Avatar, Button, Card, Modal } from 'flowbite-svelte';
   import { DoubleBounce } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
   import Logo from '$lib/components/Logo.svelte';
@@ -16,6 +16,7 @@
   import AttachmentDeletedPlaceholder from '$lib/components/AttachmentDeletedPlaceholder.svelte';
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import { writable } from 'svelte/store';
+  import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
 
   export let data;
 
@@ -23,6 +24,7 @@
   $: threadId = parseInt($page.params.threadId);
   $: threadMgr = new ThreadManager(fetch, classId, threadId, data.threadData);
   $: isPrivate = data.class.private || false;
+  $: teachers = data?.supervisors || [];
   $: canDeleteThread = data.canDeleteThread;
   $: canPublishThread = data.canPublishThread;
   $: canViewAssistant = data.canViewAssistant;
@@ -105,6 +107,7 @@
       console.warn(`Definition for assistant ${$assistantId} not found.`);
     }
   }
+  let showModerators = false;
 
   let currentMessageAttachments: api.ServerFile[] = [];
   // Get the name of the participant in the chat thread.
@@ -423,7 +426,9 @@
       </div>
     {/each}
   </div>
-
+  <Modal title="Group Moderators" bind:open={showModerators} autoclose outsideclose
+    ><ModeratorsTable moderators={teachers} /></Modal
+  >
   {#if !$loading}
     <div class="w-full bg-gradient-to-t from-white to-transparent">
       <div class="w-11/12 mx-auto relative flex flex-col">
@@ -459,6 +464,7 @@
           on:dismissError={handleDismissError}
           on:deleteThread={deleteThread}
           on:togglePublish={togglePublish}
+          on:showModerators={() => (showModerators = true)}
         />
       </div>
     </div>

@@ -222,6 +222,10 @@
     dispatcher('dismissError');
   };
 
+  const showModerators = () => {
+    dispatcher('showModerators');
+  };
+
   // Submit the form.
   const submit = () => {
     const code_interpreter_file_ids = codeInterpreterFileIds
@@ -483,8 +487,12 @@
         <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
           <LockSolid size="sm" class="text-orange pt-0" />
           <Span class="text-gray-600 text-xs font-normal"
-            >Moderators <span class="font-semibold">cannot</span> see this thread or your name. For
-            more information, please review
+            ><Button
+              class="p-0 text-gray-600 text-xs underline font-normal"
+              on:click={showModerators}
+              on:touchstart={showModerators}>Moderators</Button
+            > <span class="font-semibold">cannot</span> see this thread or your name. For more
+            information, please review
             <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
               >PingPong's privacy statement</a
             >. Assistants can make mistakes. Check important info.</Span
@@ -494,10 +502,13 @@
         <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
           <EyeSlashOutline size="sm" class="text-orange pt-0" />
           <Span class="text-gray-600 text-xs font-normal"
-            >Moderators can see this thread but not your name. For more information, please review <a
-              href="/privacy-policy"
-              rel="noopener noreferrer"
-              class="underline">PingPong's privacy statement</a
+            ><Button
+              class="p-0 text-gray-600 text-xs underline font-normal"
+              on:click={showModerators}
+              on:touchstart={showModerators}>Moderators</Button
+            > can see this thread but not your name. For more information, please review
+            <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
+              >PingPong's privacy statement</a
             >. Assistants can make mistakes. Check important info.</Span
           >
         </div>
@@ -508,7 +519,11 @@
           {#if !isPublished && isPrivate}
             <LockSolid size="sm" class="text-orange" />
             <Span class="text-gray-600 text-xs font-normal"
-              >Moderators <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
+              ><Button
+                class="p-0 text-gray-600 text-xs underline font-normal"
+                on:click={showModerators}
+                on:touchstart={showModerators}>Moderators</Button
+              > <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
                 more information, please review <a
                   href="/privacy-policy"
                   rel="noopener noreferrer"
@@ -519,7 +534,11 @@
           {:else if !isPublished}
             <EyeSlashOutline size="sm" class="text-orange" />
             <Span class="text-gray-600 text-xs font-normal"
-              >Moderators can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
+              ><Button
+                class="p-0 text-gray-600 text-xs underline font-normal"
+                on:click={showModerators}
+                on:touchstart={showModerators}>Moderators</Button
+              > can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
               {#if isCurrentUser}For more information, please review <a
                   href="/privacy-policy"
                   rel="noopener noreferrer"

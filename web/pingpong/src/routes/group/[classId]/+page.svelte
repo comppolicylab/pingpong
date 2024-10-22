@@ -2,7 +2,15 @@
   import { goto } from '$app/navigation';
   import { navigating, page } from '$app/stores';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
-  import { Button, Dropdown, DropdownItem, Heading, Badge, DropdownDivider } from 'flowbite-svelte';
+  import {
+    Button,
+    Dropdown,
+    DropdownItem,
+    Heading,
+    Badge,
+    DropdownDivider,
+    Modal
+  } from 'flowbite-svelte';
   import { EyeSlashOutline, ChevronDownOutline, ArrowRightOutline } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
@@ -10,6 +18,7 @@
   import type { Assistant, FileUploadPurpose } from '$lib/api';
   import { onMount } from 'svelte';
   import { loading } from '$lib/stores/general';
+  import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
 
   /**
    * Application data.
@@ -59,6 +68,7 @@
   $: isPrivate = data.class.private || false;
   // Currently selected assistant.
   $: assistants = data?.assistants || [];
+  $: teachers = data?.supervisors || [];
   $: courseAssistants = assistants.filter((asst) => asst.endorsed);
   $: otherAssistants = assistants.filter((asst) => !asst.endorsed);
   $: assistant = data?.assistants[0] || {};
@@ -86,6 +96,7 @@
     supportsVision = supportVisionModels.includes(assistant.model);
   }
   $: allowVisionUpload = true;
+  let showModerators = false;
 
   // Handle file upload
   const handleUpload = (
@@ -269,7 +280,9 @@
           </div>
         {/if}
       </div>
-
+      <Modal title="Group Moderators" bind:open={showModerators} autoclose outsideclose>
+        <ModeratorsTable moderators={teachers} />
+      </Modal>
       <div class="shrink-0 grow-0">
         <ChatInput
           mimeType={data.uploadInfo.mimeType}
@@ -303,6 +316,7 @@
           upload={handleUpload}
           remove={handleRemove}
           on:submit={handleSubmit}
+          on:showModerators={() => (showModerators = true)}
         />
         <input type="hidden" name="assistant_id" bind:value={assistant.id} />
         <input type="hidden" name="parties" bind:value={parties} />
