@@ -6,33 +6,35 @@
   import { errorMessage } from '$lib/errors';
   import { blur } from 'svelte/transition';
   import {
-    Span,
     Accordion,
     AccordionItem,
     Avatar,
     Button,
+    Card,
     Dropdown,
     DropdownItem,
-    Card
+    Modal,
+    Span
   } from 'flowbite-svelte';
   import { DoubleBounce } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
   import Logo from '$lib/components/Logo.svelte';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
   import {
-    EyeSlashOutline,
-    EyeOutline,
     RefreshOutline,
     CodeOutline,
     ImageSolid,
-    LockSolid,
-    CogOutline
+    CogOutline,
+    EyeOutline,
+    EyeSlashOutline,
+    LockSolid
   } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
   import AttachmentDeletedPlaceholder from '$lib/components/AttachmentDeletedPlaceholder.svelte';
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import { writable } from 'svelte/store';
+  import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
 
   export let data;
 
@@ -40,6 +42,7 @@
   $: threadId = parseInt($page.params.threadId);
   $: threadMgr = new ThreadManager(fetch, classId, threadId, data.threadData);
   $: isPrivate = data.class.private || false;
+  $: teachers = data?.supervisors || [];
   $: canDeleteThread = data.canDeleteThread;
   $: canPublishThread = data.canPublishThread;
   $: canViewAssistant = data.canViewAssistant;
@@ -47,6 +50,7 @@
   $: participants = threadMgr.participants;
   $: published = threadMgr.published;
   $: error = threadMgr.error;
+  $: threadManagerError = $error?.detail || null;
   $: assistantId = threadMgr.assistantId;
   $: isCurrentUser = $participants.user.includes('Me');
   let trashThreadFiles = writable<string[]>([]);
@@ -121,6 +125,7 @@
       console.warn(`Definition for assistant ${$assistantId} not found.`);
     }
   }
+  let showModerators = false;
 
   let currentMessageAttachments: api.ServerFile[] = [];
   // Get the name of the participant in the chat thread.
@@ -219,8 +224,11 @@
         currentMessageAttachments
       );
     } catch (e) {
-      callback(false);
-      sadToast(`Failed to send message. Error: ${errorMessage(e)}`);
+      callback({
+        success: false,
+        errorMessage: `Failed to send message. Error: ${errorMessage(e)}`,
+        message_sent: false
+      });
     }
   };
 
@@ -245,6 +253,10 @@
       sadToast(`Failed to delete file. Error: ${result.detail || 'unknown error'}`);
       throw new Error(result.detail || 'unknown error');
     }
+  };
+
+  const handleDismissError = () => {
+    threadMgr.dismissError();
   };
 
   /**
@@ -310,6 +322,10 @@
         happyToast('Thread file successfully deleted.');
       }
     }
+  };
+
+  const showModeratorsModal = () => {
+    showModerators = true;
   };
 </script>
 
@@ -435,19 +451,10 @@
         </div>
       </div>
     {/each}
-
-    {#if $error}
-      <div class="flex w-full items-center">
-        <div class="m-auto w-2/3">
-          <div class="flex flex-col text-center items-center">
-            <div class="text-2xl font-bold text-red-600">Something went wrong.</div>
-            <div class="text-red-400">{errorMessage($error)}</div>
-          </div>
-        </div>
-      </div>
-    {/if}
   </div>
-
+  <Modal title="Group Moderators" bind:open={showModerators} autoclose outsideclose
+    ><ModeratorsTable moderators={teachers} /></Modal
+  >
   {#if !$loading}
     <div class="w-full bg-gradient-to-t from-white to-transparent">
       <div class="w-11/12 mx-auto relative flex flex-col">
@@ -460,6 +467,7 @@
           mimeType={data.uploadInfo.mimeType}
           maxSize={data.uploadInfo.private_file_max_size}
           bind:attachments={currentMessageAttachments}
+          {threadManagerError}
           {visionAcceptedFiles}
           {fileSearchAcceptedFiles}
           {codeInterpreterAcceptedFiles}
@@ -473,13 +481,18 @@
           upload={handleUpload}
           remove={handleRemove}
           on:submit={handleSubmit}
+          on:dismissError={handleDismissError}
         />
-        <div class="flex gap-2 px-4 py-2 items-center w-full text-sm justify-between grow">
+        <div class="flex gap-2 items-center w-full text-sm justify-between grow my-3">
           <div class="flex gap-2 grow shrink min-w-0">
             {#if !$published && isPrivate}
               <LockSolid size="sm" class="text-orange" />
-              <Span class="text-gray-400 text-xs font-normal"
-                >Moderators <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
+              <Span class="text-gray-600 text-xs font-normal"
+                ><Button
+                  class="p-0 text-gray-600 text-xs underline font-normal"
+                  on:click={showModeratorsModal}
+                  on:touchstart={showModeratorsModal}>Moderators</Button
+                > <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
                   more information, please review <a
                     href="/privacy-policy"
                     rel="noopener noreferrer"
@@ -489,8 +502,12 @@
               >
             {:else if !$published}
               <EyeSlashOutline size="sm" class="text-orange" />
-              <Span class="text-gray-400 text-xs font-normal"
-                >Moderators can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
+              <Span class="text-gray-600 text-xs font-normal"
+                ><Button
+                  class="p-0 text-gray-600 text-xs underline font-normal"
+                  on:click={showModeratorsModal}
+                  on:touchstart={showModeratorsModal}>Moderators</Button
+                > can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
                 {#if isCurrentUser}For more information, please review <a
                     href="/privacy-policy"
                     rel="noopener noreferrer"
@@ -500,7 +517,7 @@
               >
             {:else}
               <EyeOutline size="sm" class="text-orange" />
-              <Span class="text-gray-400 text-xs font-normal"
+              <Span class="text-gray-600 text-xs font-normal"
                 >Everyone in this group can see this thread but not {isCurrentUser
                   ? 'your'
                   : "the user's"} name. Assistants can make mistakes. Check important info.</Span
@@ -509,10 +526,7 @@
           </div>
 
           <div class="shrink-0 grow-0 h-auto">
-            <CogOutline
-              class="dark:text-white cursor-pointer w-6 h-4 bg-white dark:bg-slate-700 font-light"
-              size="lg"
-            />
+            <CogOutline class="dark:text-white cursor-pointer w-6 h-4 font-light" size="lg" />
             <Dropdown>
               <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
                 <span class:text-gray-300={!canPublishThread}>

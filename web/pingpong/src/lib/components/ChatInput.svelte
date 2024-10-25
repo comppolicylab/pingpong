@@ -1,10 +1,16 @@
 <script lang="ts" context="module">
+  export type CallbackParams = {
+    success: boolean;
+    errorMessage: string | null;
+    message_sent: boolean;
+  };
+
   export type ChatInputMessage = {
     code_interpreter_file_ids: string[];
     file_search_file_ids: string[];
     vision_file_ids: string[];
     message: string;
-    callback: (success: boolean) => void;
+    callback: ({ success, errorMessage, message_sent }: CallbackParams) => void;
   };
 </script>
 
@@ -25,6 +31,7 @@
   import FileUpload from '$lib/components/FileUpload.svelte';
   import { sadToast } from '$lib/toast';
   import type { FileUploadPurpose } from '$lib/api';
+  import { ArrowUpOutline, CloseOutline, ExclamationCircleOutline } from 'flowbite-svelte-icons';
 
   const dispatcher = createEventDispatcher();
 
@@ -48,7 +55,10 @@
    * Whether we're waiting for an in-flight request.
    */
   export let loading = false;
-
+  /**
+   * Error message provided by thread manager.
+   */
+  export let threadManagerError: string | null = null;
   /**
    * The maximum height of the container before scrolling.
    */
@@ -125,10 +135,11 @@
   let threadCodeInterpreterMaxCount = 20;
   let threadFileSearchMaxCount = 10_000;
 
-  $: visionFileIds = $allFiles
+  $: visionFiles = $allFiles
     .filter((f) => f.state === 'success' && (f.response as ServerFile).vision_file_id)
-    .map((f) => (f.response as ServerFile).vision_file_id)
-    .join(',');
+    .map((f) => (f.response as ServerFile).vision_file_id);
+
+  $: visionFileIds = visionFiles.join(',');
 
   $: attachments = $allFiles
     .filter(
@@ -141,6 +152,10 @@
 
   $: currentFileSearchFileCount = fileSearchAttachmentCount + fileSearchFiles.length;
   $: currentCodeInterpreterFileCount = codeInterpreterAttachmentCount + codeInterpreterFiles.length;
+  $: tooManyFileSearchFiles = currentFileSearchFileCount >= threadFileSearchMaxCount;
+  $: tooManyCodeInterpreterFiles = currentCodeInterpreterFileCount >= threadCodeInterpreterMaxCount;
+  $: tooManyAttachments = attachments.length >= 10;
+  $: tooManyVisionFiles = visionFiles.length >= 10;
 
   $: currentAccept =
     (attachments.length >= 10 || currentCodeInterpreterFileCount >= threadCodeInterpreterMaxCount
@@ -149,13 +164,11 @@
     (attachments.length >= 10 || currentFileSearchFileCount >= threadFileSearchMaxCount
       ? ''
       : (fileSearchAcceptedFiles ?? '')) +
-    (visionFileIds.length >= 10 ? '' : (visionAcceptedFiles ?? ''));
+    (visionFiles.length >= 10 ? '' : (visionAcceptedFiles ?? ''));
 
   $: tooManyFiles =
-    (attachments.length >= 10 ||
-      currentFileSearchFileCount >= threadFileSearchMaxCount ||
-      currentCodeInterpreterFileCount >= threadCodeInterpreterMaxCount) &&
-    visionFileIds.length >= 10;
+    (tooManyAttachments || tooManyFileSearchFiles || tooManyCodeInterpreterFiles) &&
+    tooManyVisionFiles;
 
   // Fix the height of the textarea to match the content.
   // The technique is to render an off-screen textarea with a scrollheight,
@@ -194,6 +207,14 @@
     };
   };
 
+  let errorMessage: string | null = null;
+  $: combinedErrorMessage = errorMessage || threadManagerError;
+
+  const dismissError = () => {
+    errorMessage = null;
+    dispatcher('dismissError');
+  };
+
   // Submit the form.
   const submit = () => {
     const code_interpreter_file_ids = codeInterpreterFileIds
@@ -205,20 +226,41 @@
     if (!ref.value || disabled) {
       return;
     }
+    errorMessage = null;
     const message = ref.value;
+    const realMessage = realRef.value;
+    const tempFiles = $allFiles;
+    $allFiles = [];
+    document.getElementById('message')?.focus();
+    ref.value = '';
+    realRef.value = '';
+    fixHeight(realRef);
+
     dispatcher('submit', {
       file_search_file_ids,
       code_interpreter_file_ids,
       vision_file_ids,
       message,
-      callback: (success: boolean) => {
+      callback: (
+        success: boolean,
+        _errorMessage: string | null = null,
+        message_sent: boolean = true
+      ) => {
         if (success) {
-          $allFiles = [];
-          document.getElementById('message')?.focus();
-          ref.value = '';
-          realRef.value = '';
+          return;
+        }
+        if (!message_sent) {
+          errorMessage =
+            _errorMessage ||
+            'We faced an error while trying to send your message. Please try again.';
+          $allFiles = tempFiles;
+          ref.value = message;
+          realRef.value = realMessage;
           fixHeight(realRef);
         }
+        errorMessage =
+          _errorMessage ||
+          'We faced an error while generating a response to your message. Your message was successfully sent. Please try again by sending a new message.';
       }
     });
   };
@@ -295,107 +337,138 @@
   <input type="hidden" name="vision_file_ids" bind:value={visionFileIds} />
   <input type="hidden" name="file_search_file_ids" bind:value={fileSearchFileIds} />
   <input type="hidden" name="code_interpreter_file_ids" bind:value={codeInterpreterFileIds} />
-  {#if $allFiles.length > 0}
-    <div
-      class="z-10 top-0 p-2 flex gap-2 flex-wrap"
-      use:fixFileListHeight={$allFiles}
-      bind:this={allFileListRef}
-    >
-      {#each $allFiles as file}
-        <FilePlaceholder {mimeType} info={file} purpose="multimodal" on:delete={removeFile} />
-      {/each}
-    </div>
-  {/if}
-  <div
-    class="relative flex gap-3 items-center p-2 rounded-full bg-blue-light-50 shadow-inner w-full"
-    bind:this={containerRef}
-  >
-    <textarea
-      bind:this={realRef}
-      id="message"
-      rows="1"
-      name="message"
-      class="w-full !outline-none focus:ring-0 resize-none border-none bg-transparent pt-[12px] pb-[10px] pl-2 sm:pl-6 pr-2 sm:pr-8"
-      placeholder={canSubmit
-        ? 'Ask me anything'
-        : assistantDeleted
-          ? 'Read-only thread: the assistant associated with this thread is deleted.'
-          : canViewAssistant
-            ? 'Read-only thread: You no longer have permissions to interact with this assistant.'
-            : "You can't reply in this thread."}
-      class:text-gray-700={disabled}
-      class:animate-pulse={loading}
-      disabled={loading || disabled}
-      on:keydown={maybeSubmit}
-      on:input={handleTextAreaInput}
-      style={`height: 48px; max-height: ${maxHeight}px; font-size: 1rem; line-height: 1.5rem;`}
-    />
-    <textarea
-      bind:this={ref}
-      style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
-    />
-    <div class="flex flex-row gap-1.5">
-      {#if upload && purpose}
-        <FileUpload
-          {maxSize}
-          accept={currentAccept}
-          disabled={loading || disabled || !upload || tooManyFiles || uploading}
-          type="multimodal"
-          {fileSearchAcceptedFiles}
-          {codeInterpreterAcceptedFiles}
-          {visionAcceptedFiles}
-          documentMaxCount={10}
-          visionMaxCount={10}
-          currentDocumentCount={attachments.filter(
-            (f) => f.file_search_file_id || f.code_interpreter_file_id
-          ).length}
-          currentVisionCount={visionFileIds.length}
-          fileSearchAttachmentCount={currentFileSearchFileCount}
-          codeInterpreterAttachmentCount={currentCodeInterpreterFileCount}
-          {threadFileSearchMaxCount}
-          {threadCodeInterpreterMaxCount}
-          {purpose}
-          {upload}
-          on:error={(e) => sadToast(e.detail.message)}
-          on:change={handleFilesChange}
-        />
-        {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || visionAcceptedFiles) && !(attachments.length >= 10 || visionFileIds.length >= 10) && !(loading || disabled || !upload) && currentFileSearchFileCount < threadFileSearchMaxCount && currentCodeInterpreterFileCount < threadCodeInterpreterMaxCount}
-          <Popover defaultClass="py-2 px-3 max-w-56" arrow={false}
-            >Upload files to thread.<br />File Search: {currentFileSearchFileCount}/10,000<br />Code
-            Interpreter: {currentCodeInterpreterFileCount}/20</Popover
-          >
-        {:else if currentFileSearchFileCount >= threadFileSearchMaxCount || currentCodeInterpreterFileCount >= threadCodeInterpreterMaxCount}
-          <Popover defaultClass="py-2 px-3 max-w-56" arrow={false}
-            >Maximum number of thread document attachments reached{visionFileIds.length < 10
-              ? '. You can still upload images.'
-              : ''}</Popover
-          >
-        {:else if attachments.length >= 10}
-          <Popover defaultClass="py-2 px-3 max-w-56" arrow={false}
-            >Maximum number of document attachments reached{visionFileIds.length < 10
-              ? '. You can still upload images.'
-              : ''}</Popover
-          >
-        {:else if visionFileIds.length >= 10}
-          <Popover defaultClass="py-2 px-3 max-w-56" arrow={false}
-            >Maximum number of image uploads reached. You can still upload documents.</Popover
-          >
-        {:else}
-          <Popover arrow={false}>File upload is disabled</Popover>
-        {/if}
+  <div class="flex px-1 md:px-2 flex-col">
+    <div style="opacity: 1; height: auto;">
+      {#if $allFiles.length > 0}
+        <div
+          class="border border-blue-light-40 relative flex -mb-3 gap-2 flex-wrap rounded-t-2xl pb-5 pt-2.5 bg-blue-light-50"
+          use:fixFileListHeight={$allFiles}
+          bind:this={allFileListRef}
+        >
+          <div class="flex gap-2 flex-wrap px-2 py-0">
+            {#each $allFiles as file}
+              <FilePlaceholder {mimeType} info={file} purpose="multimodal" on:delete={removeFile} />
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      {#if combinedErrorMessage}
+        <div
+          class="border relative z-10 px-3.5 text-brown-dark border-red-light-30 bg-red-light-40 -mb-1 rounded-t-xl border-b-0 pb-2.5 pt-2"
+        >
+          <div class="w-full">
+            <div class="flex w-full flex-col items-center md:flex-row gap-2">
+              <div class="text-danger-000 flex flex-row items-center gap-2 md:w-full">
+                <ExclamationCircleOutline />
+                <div>
+                  <div class="text-sm">
+                    {combinedErrorMessage}
+                  </div>
+                </div>
+              </div>
+              <Button
+                class="text-brown-dark -mt-px hover:bg-red-light-50 p-1 rounded-lg"
+                on:click={dismissError}
+              >
+                <CloseOutline class="cursor-pointer" />
+              </Button>
+            </div>
+          </div>
+        </div>
       {/if}
     </div>
-    <Button
-      pill
-      on:click={submit}
-      on:touchstart={submit}
-      on:keydown={maybeSubmit}
-      class={`${
-        loading ? 'animate-pulse cursor-progress' : ''
-      } p-3 px-4 mr-2 bg-orange hover:bg-orange-dark`}
-      disabled={uploading || loading || disabled}
-    >
-      Submit
-    </Button>
+  </div>
+  <div
+    class="flex flex-col bg-seasalt gap-2 border border-melon pl-4 py-2.5 pr-3 items-stretch transition-all duration-200 relative shadow-[0_0.25rem_1.25rem_rgba(254,184,175,0.15)] focus-within:shadow-[0_0.25rem_1.25rem_rgba(253,148,134,0.25)] hover:border-coral-pink focus-within:border-coral-pink z-20 rounded-2xl"
+  >
+    <div class="flex flex-row gap-4" bind:this={containerRef}>
+      <textarea
+        bind:this={realRef}
+        id="message"
+        rows="1"
+        name="message"
+        class="w-full !outline-none focus:ring-0 resize-none border-none bg-transparent p-0 mt-1"
+        placeholder={canSubmit
+          ? 'Ask me anything'
+          : assistantDeleted
+            ? 'Read-only thread: the assistant associated with this thread is deleted.'
+            : canViewAssistant
+              ? 'Read-only thread: You no longer have permissions to interact with this assistant.'
+              : "You can't reply in this thread."}
+        class:text-gray-700={disabled}
+        class:animate-pulse={loading}
+        disabled={loading || disabled || !canSubmit || assistantDeleted || !canViewAssistant}
+        on:keydown={maybeSubmit}
+        on:input={handleTextAreaInput}
+        style={`max-height: ${maxHeight}px; font-size: 1rem; line-height: 1.5rem;`}
+      />
+      <textarea
+        bind:this={ref}
+        style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
+      />
+      <div class="flex flex-row gap-1">
+        {#if upload && purpose}
+          <FileUpload
+            {maxSize}
+            accept={currentAccept}
+            disabled={loading || disabled || !upload || tooManyFiles || uploading}
+            type="multimodal"
+            {fileSearchAcceptedFiles}
+            {codeInterpreterAcceptedFiles}
+            {visionAcceptedFiles}
+            documentMaxCount={10}
+            visionMaxCount={10}
+            currentDocumentCount={attachments.filter(
+              (f) => f.file_search_file_id || f.code_interpreter_file_id
+            ).length}
+            currentVisionCount={visionFiles.length}
+            fileSearchAttachmentCount={currentFileSearchFileCount}
+            codeInterpreterAttachmentCount={currentCodeInterpreterFileCount}
+            {threadFileSearchMaxCount}
+            {threadCodeInterpreterMaxCount}
+            {purpose}
+            {upload}
+            on:error={(e) => sadToast(e.detail.message)}
+            on:change={handleFilesChange}
+          />
+          {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || visionAcceptedFiles) && !(tooManyAttachments || tooManyVisionFiles) && !(loading || disabled || !upload) && !tooManyFileSearchFiles && !tooManyCodeInterpreterFiles}
+            <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
+              >Upload files to thread<br />File Search: {currentFileSearchFileCount}/10,000<br
+              />Code Interpreter: {currentCodeInterpreterFileCount}/20</Popover
+            >
+          {:else if tooManyFileSearchFiles || tooManyCodeInterpreterFiles}
+            <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
+              >Maximum number of thread document attachments reached{visionFiles.length < 10
+                ? '. You can still upload images.'
+                : ''}</Popover
+            >
+          {:else if tooManyAttachments}
+            <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
+              >Maximum number of document attachments reached{tooManyVisionFiles
+                ? '. You can still upload images.'
+                : ''}</Popover
+            >
+          {:else if tooManyVisionFiles}
+            <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
+              >Maximum number of image uploads reached. You can still upload documents.</Popover
+            >
+          {:else}
+            <Popover arrow={false}>File upload is disabled</Popover>
+          {/if}
+        {/if}
+        <div>
+          <Button
+            on:click={submit}
+            on:touchstart={submit}
+            on:keydown={maybeSubmit}
+            class={`${loading ? 'animate-pulse cursor-progress' : ''} bg-orange w-8 h-8 p-1 hover:bg-orange-dark `}
+            disabled={uploading || loading || disabled}
+          >
+            <ArrowUpOutline class="w-6 h-6" />
+          </Button>
+        </div>
+      </div>
+    </div>
   </div>
 </div>

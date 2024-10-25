@@ -16,6 +16,7 @@
 
   $: hasApiKey = !!data?.class?.api_key;
   $: creators = data?.assistantCreators || {};
+  $: moderators = data?.supervisors || [];
   // "Course" assistants are endorsed by the class. Right now this means
   // they are created by the teaching team and are published.
   let courseAssistants: Assistant[] = [];
@@ -139,5 +140,30 @@
         </TableBody>
       </Table>
     {/if}
+  {/if}
+  <Heading tag="h2" class="text-3xl font-serif font-medium mt-12 mb-4 text-dark-blue-40"
+    >Group Moderators</Heading
+  >
+  {#if moderators.length === 0}
+    <div>No supervisors</div>
+  {:else}
+    <Table>
+      <TableHead class="bg-blue-light-40 p-1 text-blue-dark-50 tracking-wide rounded-2xl">
+        <TableHeadCell>Moderator Name</TableHeadCell>
+        <TableHeadCell>Email</TableHeadCell>
+      </TableHead>
+      <TableBody>
+        {#each moderators as moderator}
+          <TableBodyRow>
+            {#if moderator.name}
+              <TableBodyCell class="font-light">{moderator.name}</TableBodyCell>
+            {:else}
+              <TableBodyCell class="font-light italic">No recorded name</TableBodyCell>
+            {/if}
+            <TableBodyCell class="font-light">{moderator.email}</TableBodyCell>
+          </TableBodyRow>
+        {/each}
+      </TableBody>
+    </Table>
   {/if}
 </div>

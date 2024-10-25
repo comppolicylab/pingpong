@@ -39,6 +39,20 @@ export type ValidationError = {
   }[];
 };
 
+export class PresendError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PresendError';
+  }
+}
+
+export class StreamError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StreamError';
+  }
+}
+
 /**
  * Error response. The $status will be >= 400.
  */
@@ -1099,9 +1113,15 @@ const _doUpload = (
           resolve(info.response);
         } else {
           info.state = 'error';
-          info.response = {
-            error: xhr.responseText ? JSON.parse(xhr.responseText) : { detail: '' }
-          };
+          if (xhr.responseText) {
+            try {
+              info.response = { error: JSON.parse(xhr.responseText) };
+            } catch {
+              info.response = { error: { detail: xhr.responseText } };
+            }
+          } else {
+            info.response = { error: { detail: 'Unknown error.' } };
+          }
           reject(info.response);
         }
       }
@@ -1214,6 +1234,24 @@ export const getClassUsers = async (f: Fetcher, classId: number, opts?: GetClass
     lastPage,
     error: null
   };
+};
+
+export type ClassSupervisors = {
+  users: SupervisorUser[];
+};
+
+export type SupervisorUser = {
+  name: string | null;
+  email: string;
+};
+
+/**
+ * Fetch teachers in a class.
+ *
+ */
+export const getSupervisors = async (f: Fetcher, classId: number) => {
+  const url = `class/${classId}/supervisors`;
+  return await GET<never, ClassSupervisors>(f, url);
 };
 
 /**
@@ -1725,6 +1763,16 @@ export type ThreadStreamErrorChunk = {
   detail: string;
 };
 
+export type ThreadPreSendErrorChunk = {
+  type: 'presend_error';
+  detail: string;
+};
+
+export type ThreadServerErrorChunk = {
+  type: 'server_error';
+  detail: string;
+};
+
 export type ThreadStreamDoneChunk = {
   type: 'done';
 };
@@ -1733,7 +1781,7 @@ export type ThreadHTTPErrorChunk = {
   detail: string;
 };
 
-export type ThreadValidationErrorChunk = {
+export type ThreadValidationError = {
   detail: {
     loc: string[];
     msg: string;
@@ -1745,6 +1793,8 @@ export type ThreadStreamChunk =
   | ThreadStreamMessageDeltaChunk
   | ThreadStreamMessageCreatedChunk
   | ThreadStreamErrorChunk
+  | ThreadPreSendErrorChunk
+  | ThreadServerErrorChunk
   | ThreadStreamDoneChunk
   | ThreadStreamToolCallCreatedChunk
   | ThreadStreamToolCallDeltaChunk;
@@ -1761,23 +1811,13 @@ const streamThreadChunks = (res: Response) => {
     .pipeThrough(new TextLineStream())
     .pipeThrough(new JSONStream());
   const reader = stream.getReader();
-  if (res.status !== 200 && res.status !== 422) {
+  if (res.status === 422) {
     return {
       stream,
       reader,
       async *[Symbol.asyncIterator]() {
         const error = await reader.read();
-        const error_ = error.value as ThreadHTTPErrorChunk;
-        yield { type: 'error', detail: error_.detail } as ThreadStreamErrorChunk;
-      }
-    };
-  } else if (res.status === 422) {
-    return {
-      stream,
-      reader,
-      async *[Symbol.asyncIterator]() {
-        const error = await reader.read();
-        const error_ = error.value as ThreadValidationErrorChunk;
+        const error_ = error.value as ThreadValidationError;
         const message = error_.detail
           .map((error) => {
             const location = error.loc.join(' -> ');
@@ -1785,9 +1825,22 @@ const streamThreadChunks = (res: Response) => {
           })
           .join('\n');
         yield {
-          type: 'error',
-          detail: `Your request was invalid: ${message}.`
-        } as ThreadStreamErrorChunk;
+          type: 'presend_error',
+          detail: `We were unable to send your message, because it was not accepted by our server: ${message}`
+        } as ThreadPreSendErrorChunk;
+      }
+    };
+  } else if (res.status !== 200) {
+    return {
+      stream,
+      reader,
+      async *[Symbol.asyncIterator]() {
+        const error = await reader.read();
+        const error_ = error.value as ThreadHTTPErrorChunk;
+        yield {
+          type: 'presend_error',
+          detail: `We were unable to send your message: ${error_.detail}`
+        } as ThreadPreSendErrorChunk;
       }
     };
   }

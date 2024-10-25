@@ -9,7 +9,7 @@ import { Deferred } from '$lib/deferred';
  */
 export type ThreadManagerState = {
   data: (BaseResponse & ThreadWithMeta) | null;
-  error: Error | null;
+  error: ErrorWithSent | null;
   optimistic: api.OpenAIMessage[];
   limit: number;
   canFetchMore: boolean;
@@ -19,6 +19,17 @@ export type ThreadManagerState = {
   supportsFileSearch: boolean;
   supportsCodeInterpreter: boolean;
   attachments: Record<string, api.ServerFile>;
+};
+
+export type ErrorWithSent = {
+  detail?: string;
+  wasSent: boolean;
+};
+
+export type CallbackParams = {
+  success: boolean;
+  errorMessage: string | null;
+  message_sent: boolean;
 };
 
 /**
@@ -92,7 +103,7 @@ export class ThreadManager {
   /**
    * Any error that occurred while fetching the thread.
    */
-  error: Readable<Error | null>;
+  error: Readable<ErrorWithSent | null>;
 
   #data: Writable<ThreadManagerState>;
   #fetcher: api.Fetcher;
@@ -112,7 +123,7 @@ export class ThreadManager {
     this.threadId = threadId;
     this.#data = writable({
       data: expanded.data || null,
-      error: expanded.error || null,
+      error: expanded.error ? { detail: expanded.error?.detail, wasSent: true } : null,
       limit: expanded.data?.limit || 20,
       canFetchMore: expanded.data ? expanded.data.messages.length === expanded.data.limit : false,
       supportsFileSearch: expanded.data?.thread?.tools_available?.includes('file_search') || false,
@@ -208,7 +219,25 @@ export class ThreadManager {
 
     this.#data.update((d) => ({ ...d, submitting: true }));
     const chunks = await api.createThreadRun(this.#fetcher, this.classId, this.threadId);
-    await this.#handleStreamChunks(chunks);
+    try {
+      await this.#handleStreamChunks(chunks);
+    } catch (e) {
+      if (e instanceof api.StreamError) {
+        this.#data.update((d) => ({
+          ...d,
+          error: { detail: e.message, wasSent: true },
+          submitting: false
+        }));
+      } else if (e instanceof api.PresendError) {
+        this.#data.update((d) => ({
+          ...d,
+          error: { detail: e.message, wasSent: false },
+          submitting: false
+        }));
+      } else {
+        this.#data.update((d) => ({ ...d, error: { detail: (e as Error).detail, wasSent: true } }));
+      }
+    }
   }
 
   /**
@@ -228,7 +257,7 @@ export class ThreadManager {
         this.#data.update((d) => ({
           ...d,
           data: expanded.data,
-          error: expanded.error,
+          error: expanded.error ? { detail: expanded.error?.detail, wasSent: true } : null,
           waiting: false
         }));
         deferred.resolve();
@@ -239,7 +268,7 @@ export class ThreadManager {
         clearInterval(interval);
         this.#data.update((d) => ({
           ...d,
-          error: { detail: 'The thread run took too long to complete.' },
+          error: { detail: 'The thread run took too long to complete.', wasSent: true },
           waiting: false
         }));
         deferred.reject(new Error('The thread run took too long to complete.'));
@@ -263,7 +292,11 @@ export class ThreadManager {
       }
       this.#data.update((d) => ({ ...d, loading: false }));
     } catch (e) {
-      this.#data.update((d) => ({ ...d, error: e as Error, loading: false }));
+      this.#data.update((d) => ({
+        ...d,
+        error: { detail: (e as Error).detail, wasSent: true },
+        loading: false
+      }));
       throw e;
     }
   }
@@ -277,7 +310,11 @@ export class ThreadManager {
       await api.publishThread(this.#fetcher, this.classId, this.threadId);
       this.#data.update((d) => ({ ...d, loading: false }));
     } catch (e) {
-      this.#data.update((d) => ({ ...d, error: e as Error, loading: false }));
+      this.#data.update((d) => ({
+        ...d,
+        error: { detail: (e as Error).detail, wasSent: true },
+        loading: false
+      }));
       throw e;
     }
   }
@@ -291,7 +328,11 @@ export class ThreadManager {
       await api.unpublishThread(this.#fetcher, this.classId, this.threadId);
       this.#data.update((d) => ({ ...d, loading: false }));
     } catch (e) {
-      this.#data.update((d) => ({ ...d, error: e as Error, loading: false }));
+      this.#data.update((d) => ({
+        ...d,
+        error: { detail: (e as Error).detail, wasSent: true },
+        loading: false
+      }));
       throw e;
     }
   }
@@ -329,7 +370,7 @@ export class ThreadManager {
           )
         },
         limit: response.limit || d.limit,
-        error: response.error,
+        error: response.error ? { detail: response.error?.detail, wasSent: true } : null,
         loading: false,
         canFetchMore: !response.lastPage
       };
@@ -374,7 +415,11 @@ export class ThreadManager {
       });
       return result;
     } catch (e) {
-      this.#data.update((d) => ({ ...d, error: e as Error, waiting: false }));
+      this.#data.update((d) => ({
+        ...d,
+        error: { detail: (e as Error).detail, wasSent: true },
+        waiting: false
+      }));
       throw e;
     }
   }
@@ -388,30 +433,56 @@ export class ThreadManager {
   }
 
   /**
+   * Dismiss the current error.
+   */
+  async dismissError() {
+    this.#data.update((d) => ({ ...d, error: null }));
+  }
+
+  /**
    * Send a new message to this thread.
    */
   async postMessage(
     fromUserId: number,
     message: string,
-    callback: (success: boolean) => void,
+    callback: ({ success, errorMessage, message_sent }: CallbackParams) => void,
     code_interpreter_file_ids?: string[],
     file_search_file_ids?: string[],
     vision_file_ids?: string[],
     attachments?: api.ServerFile[]
   ) {
     if (!message) {
-      throw new Error('Please enter a message before sending.');
+      callback({
+        success: false,
+        errorMessage: 'Please enter a message before sending.',
+        message_sent: false
+      });
+      this.#data.update((d) => ({
+        ...d,
+        error: { detail: 'Please enter a message before sending.', wasSent: false }
+      }));
+      return;
     }
 
     const current = get(this.#data);
 
     if (current.waiting || current.submitting) {
-      throw new Error(
-        'A response to the previous message is being generated. Please wait before sending a new message.'
-      );
+      callback({
+        success: false,
+        errorMessage:
+          'A response to the previous message is being generated. Please wait before sending a new message.',
+        message_sent: false
+      });
+      this.#data.update((d) => ({
+        ...d,
+        error: {
+          detail:
+            'A response to the previous message is being generated. Please wait before sending a new message.',
+          wasSent: false
+        }
+      }));
+      return;
     }
-
-    callback(true);
 
     // Generate an optimistic update for the UI
     const optimisticMsgId = `optimistic-${(Math.random() + 1).toString(36).substring(2)}`;
@@ -457,10 +528,41 @@ export class ThreadManager {
     this.attachments = derived(this.#data, ($data) => {
       return $data?.attachments || {};
     });
-    await this.#handleStreamChunks(chunks);
+    try {
+      await this.#handleStreamChunks(chunks, callback);
+      callback({ success: true, errorMessage: null, message_sent: true });
+    } catch (e) {
+      console.error('Error posting message', e);
+      if (e instanceof api.PresendError) {
+        this.#data.update((d) => ({
+          ...d,
+          optimistic: d.optimistic.filter((msg) => msg.id !== optimisticMsgId),
+          error: { detail: e.message, wasSent: false },
+          attachments: Object.keys(d.attachments).reduce(
+            (acc: Record<string, api.ServerFile>, key: string) => {
+              if (!attachments?.find((file) => file.file_id === key)) {
+                acc[key] = d.attachments[key];
+              }
+              return acc;
+            },
+            {} as Record<string, api.ServerFile>
+          )
+        }));
+      } else if (e instanceof api.StreamError) {
+        this.#data.update((d) => ({
+          ...d,
+          error: { detail: e.message, wasSent: true }
+        }));
+      } else {
+        this.#data.update((d) => ({ ...d, error: { detail: (e as Error).detail, wasSent: true } }));
+      }
+    }
   }
 
-  async #handleStreamChunks(chunks: AsyncIterable<api.ThreadStreamChunk>) {
+  async #handleStreamChunks(
+    chunks: AsyncIterable<api.ThreadStreamChunk>,
+    callback: ({ success, errorMessage, message_sent }: CallbackParams) => void = () => {}
+  ) {
     this.#data.update((d) => ({
       ...d,
       error: null,
@@ -470,13 +572,15 @@ export class ThreadManager {
 
     try {
       for await (const chunk of chunks) {
-        this.#handleStreamChunk(chunk);
+        this.#handleStreamChunk(chunk, callback);
       }
     } catch (e) {
+      console.error('Error handling stream chunks', e);
       this.#data.update((d) => ({
         ...d,
-        error: e as Error
+        waiting: false
       }));
+      throw e;
     } finally {
       this.#data.update((d) => ({
         ...d,
@@ -497,7 +601,10 @@ export class ThreadManager {
   /**
    * Handle a new chunk of data from a streaming response.
    */
-  #handleStreamChunk(chunk: api.ThreadStreamChunk) {
+  #handleStreamChunk(
+    chunk: api.ThreadStreamChunk,
+    callback: ({ success, errorMessage, message_sent }: CallbackParams) => void = () => {}
+  ) {
     console.debug('Received chunk', chunk);
     switch (chunk.type) {
       case 'message_created':
@@ -528,9 +635,23 @@ export class ThreadManager {
         break;
       case 'error':
         if (Array.isArray(chunk.detail)) {
-          throw new Error(chunk.detail.join('\n'));
+          const errorMessage = chunk.detail.join('\n') || 'An unknown error occurred.';
+          callback({ success: false, errorMessage, message_sent: true });
+          throw new api.StreamError(errorMessage);
         }
-        throw new Error(chunk.detail || 'An unknown error occurred.');
+        callback({
+          success: false,
+          errorMessage: chunk.detail || 'An unknown error occurred.',
+          message_sent: true
+        });
+        throw new api.StreamError(chunk.detail || 'An unknown error occurred.');
+      case 'presend_error':
+        callback({
+          success: false,
+          errorMessage: chunk.detail || 'An unknown error occurred.',
+          message_sent: false
+        });
+        throw new api.PresendError(chunk.detail || 'An unknown error occurred.');
       case 'tool_call_created':
         this.#createToolCall(chunk.tool_call);
         this.#appendToolCallDelta(chunk.tool_call);

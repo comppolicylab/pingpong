@@ -6,10 +6,11 @@
     Button,
     Dropdown,
     DropdownItem,
-    Span,
     Heading,
     Badge,
-    DropdownDivider
+    DropdownDivider,
+    Span,
+    Modal
   } from 'flowbite-svelte';
   import {
     EyeSlashOutline,
@@ -23,6 +24,7 @@
   import type { Assistant, FileUploadPurpose } from '$lib/api';
   import { onMount } from 'svelte';
   import { loading } from '$lib/stores/general';
+  import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
 
   /**
    * Application data.
@@ -72,6 +74,7 @@
   $: isPrivate = data.class.private || false;
   // Currently selected assistant.
   $: assistants = data?.assistants || [];
+  $: teachers = data?.supervisors || [];
   $: courseAssistants = assistants.filter((asst) => asst.endorsed);
   $: otherAssistants = assistants.filter((asst) => !asst.endorsed);
   $: assistant = data?.assistants[0] || {};
@@ -99,6 +102,7 @@
     supportsVision = supportVisionModels.includes(assistant.model);
   }
   $: allowVisionUpload = true;
+  let showModerators = false;
 
   // Handle file upload
   const handleUpload = (
@@ -124,8 +128,11 @@
     const form = e.detail;
     if (!form.message) {
       $loading = false;
-      sadToast('Please enter a message.');
-      form.callback(false);
+      form.callback({
+        success: false,
+        errorMessage: 'Please enter a message.',
+        message_sent: false
+      });
       return;
     }
 
@@ -152,18 +159,25 @@
       );
       data.threads = [newThread as api.Thread, ...data.threads];
       $loading = false;
-      form.callback(true);
+      form.callback({ success: true, errorMessage: null, message_sent: true });
       await goto(`/group/${$page.params.classId}/thread/${newThread.id}`);
     } catch (e) {
-      sadToast(`Failed to create thread:\n${errorMessage(e)}`);
       $loading = false;
-      form.callback(false);
+      form.callback({
+        success: false,
+        errorMessage: `Failed to create thread. Error: ${errorMessage(e)}`,
+        message_sent: false
+      });
     }
   };
 
   // Set the new assistant selection.
   const selectAi = async (asst: Assistant) => {
     await goto(`/group/${data.class.id}/?assistant=${asst.id}`);
+  };
+
+  const showModeratorsModal = () => {
+    showModerators = true;
   };
 </script>
 
@@ -284,7 +298,9 @@
           </div>
         {/if}
       </div>
-
+      <Modal title="Group Moderators" bind:open={showModerators} autoclose outsideclose>
+        <ModeratorsTable moderators={teachers} />
+      </Modal>
       <div class="shrink-0 grow-0">
         <ChatInput
           mimeType={data.uploadInfo.mimeType}
@@ -316,31 +332,40 @@
           remove={handleRemove}
           on:submit={handleSubmit}
         />
-        {#if isPrivate}
-          <div class="flex gap-2 px-4 py-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
-            <LockSolid size="sm" class="text-orange pt-0" />
-            <Span class="text-gray-400 text-xs font-normal"
-              >Moderators <span class="font-semibold">cannot</span> see this thread or your name.
-              For more information, please review
-              <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
-                >PingPong's privacy statement</a
-              >. Assistants can make mistakes. Check important info.</Span
-            >
-          </div>
-        {:else}
-          <div class="flex gap-2 px-4 py-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
-            <EyeSlashOutline size="sm" class="text-orange pt-0" />
-            <Span class="text-gray-400 text-xs font-normal"
-              >Moderators can see this thread but not your name. For more information, please review <a
-                href="/privacy-policy"
-                rel="noopener noreferrer"
-                class="underline">PingPong's privacy statement</a
-              >. Assistants can make mistakes. Check important info.</Span
-            >
-          </div>
-        {/if}
         <input type="hidden" name="assistant_id" bind:value={assistant.id} />
         <input type="hidden" name="parties" bind:value={parties} />
+        <div class="my-3">
+          {#if isPrivate}
+            <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
+              <LockSolid size="sm" class="text-orange pt-0" />
+              <Span class="text-gray-600 text-xs font-normal"
+                ><Button
+                  class="p-0 text-gray-600 text-xs underline font-normal"
+                  on:click={showModeratorsModal}
+                  on:touchstart={showModeratorsModal}>Moderators</Button
+                > <span class="font-semibold">cannot</span> see this thread or your name. For more
+                information, please review
+                <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
+                  >PingPong's privacy statement</a
+                >. Assistants can make mistakes. Check important info.</Span
+              >
+            </div>
+          {:else}
+            <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
+              <EyeSlashOutline size="sm" class="text-orange pt-0" />
+              <Span class="text-gray-600 text-xs font-normal"
+                ><Button
+                  class="p-0 text-gray-600 text-xs underline font-normal"
+                  on:click={showModeratorsModal}
+                  on:touchstart={showModeratorsModal}>Moderators</Button
+                > can see this thread but not your name. For more information, please review
+                <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
+                  >PingPong's privacy statement</a
+                >. Assistants can make mistakes. Check important info.</Span
+              >
+            </div>
+          {/if}
+        </div>
       </div>
     {:else}
       <div class="text-center m-auto">
