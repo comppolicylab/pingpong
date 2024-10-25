@@ -13,6 +13,7 @@
     Card,
     Dropdown,
     DropdownItem,
+    Modal,
     Span
   } from 'flowbite-svelte';
   import { DoubleBounce } from 'svelte-loading-spinners';
@@ -322,6 +323,10 @@
       }
     }
   };
+
+  const showModeratorsModal = () => {
+    showModerators = true;
+  };
 </script>
 
 <div class="w-full flex flex-col justify-between grow min-h-0 relative">
@@ -483,7 +488,11 @@
             {#if !$published && isPrivate}
               <LockSolid size="sm" class="text-orange" />
               <Span class="text-gray-600 text-xs font-normal"
-                >Moderators <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
+                ><Button
+                  class="p-0 text-gray-600 text-xs underline font-normal"
+                  on:click={showModeratorsModal}
+                  on:touchstart={showModeratorsModal}>Moderators</Button
+                > <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
                   more information, please review <a
                     href="/privacy-policy"
                     rel="noopener noreferrer"
@@ -494,7 +503,11 @@
             {:else if !$published}
               <EyeSlashOutline size="sm" class="text-orange" />
               <Span class="text-gray-600 text-xs font-normal"
-                >Moderators can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
+                ><Button
+                  class="p-0 text-gray-600 text-xs underline font-normal"
+                  on:click={showModeratorsModal}
+                  on:touchstart={showModeratorsModal}>Moderators</Button
+                > can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
                 {#if isCurrentUser}For more information, please review <a
                     href="/privacy-policy"
                     rel="noopener noreferrer"
