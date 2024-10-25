@@ -34,7 +34,6 @@ async def create_vector_store(
             metadata={
                 "class_id": class_id,
             },
-            expires_after={"anchor": "last_active_at", "days": 1460},
         )
 
     except openai.BadRequestError as e:
