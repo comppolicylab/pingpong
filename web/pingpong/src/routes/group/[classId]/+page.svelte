@@ -2,8 +2,21 @@
   import { goto } from '$app/navigation';
   import { navigating, page } from '$app/stores';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
-  import { Button, Dropdown, DropdownItem, Heading, Badge, DropdownDivider } from 'flowbite-svelte';
-  import { EyeSlashOutline, ChevronDownOutline, ArrowRightOutline } from 'flowbite-svelte-icons';
+  import {
+    Button,
+    Dropdown,
+    DropdownItem,
+    Heading,
+    Badge,
+    DropdownDivider,
+    Span
+  } from 'flowbite-svelte';
+  import {
+    EyeSlashOutline,
+    ChevronDownOutline,
+    ArrowRightOutline,
+    LockSolid
+  } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
   import { errorMessage } from '$lib/errors';
@@ -111,7 +124,11 @@
     const form = e.detail;
     if (!form.message) {
       $loading = false;
-      form.callback(false, 'Please enter a message.', false);
+      form.callback({
+        success: false,
+        errorMessage: 'Please enter a message.',
+        message_sent: false
+      });
       return;
     }
 
@@ -138,11 +155,15 @@
       );
       data.threads = [newThread as api.Thread, ...data.threads];
       $loading = false;
-      form.callback(true, null, true);
+      form.callback({ success: true, errorMessage: null, message_sent: true });
       await goto(`/group/${$page.params.classId}/thread/${newThread.id}`);
     } catch (e) {
       $loading = false;
-      form.callback(false, `Failed to create thread. Error: ${errorMessage(e)}`, false);
+      form.callback({
+        success: false,
+        errorMessage: `Failed to create thread. Error: ${errorMessage(e)}`,
+        message_sent: false
+      });
     }
   };
 
@@ -297,15 +318,36 @@
                 vision: false
               })
             : null}
-          isCurrentUser={true}
-          isNewChat={true}
-          {isPrivate}
           upload={handleUpload}
           remove={handleRemove}
           on:submit={handleSubmit}
         />
         <input type="hidden" name="assistant_id" bind:value={assistant.id} />
         <input type="hidden" name="parties" bind:value={parties} />
+        <div class="my-3">
+          {#if isPrivate}
+            <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
+              <LockSolid size="sm" class="text-orange pt-0" />
+              <Span class="text-gray-600 text-xs font-normal"
+                >Moderators <span class="font-semibold">cannot</span> see this thread or your name.
+                For more information, please review
+                <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
+                  >PingPong's privacy statement</a
+                >. Assistants can make mistakes. Check important info.</Span
+              >
+            </div>
+          {:else}
+            <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
+              <EyeSlashOutline size="sm" class="text-orange pt-0" />
+              <Span class="text-gray-600 text-xs font-normal"
+                >Moderators can see this thread but not your name. For more information, please
+                review <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
+                  >PingPong's privacy statement</a
+                >. Assistants can make mistakes. Check important info.</Span
+              >
+            </div>
+          {/if}
+        </div>
       </div>
     {:else}
       <div class="text-center m-auto">

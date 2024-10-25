@@ -26,6 +26,12 @@ export type ErrorWithSent = {
   wasSent: boolean;
 };
 
+export type CallbackParams = {
+  success: boolean;
+  errorMessage: string | null;
+  message_sent: boolean;
+};
+
 /**
  * A message in a thread.
  */
@@ -439,14 +445,18 @@ export class ThreadManager {
   async postMessage(
     fromUserId: number,
     message: string,
-    callback: (success: boolean, errorMessage: string | null, message_sent: boolean) => void,
+    callback: ({ success, errorMessage, message_sent }: CallbackParams) => void,
     code_interpreter_file_ids?: string[],
     file_search_file_ids?: string[],
     vision_file_ids?: string[],
     attachments?: api.ServerFile[]
   ) {
     if (!message) {
-      callback(false, 'Please enter a message before sending.', false);
+      callback({
+        success: false,
+        errorMessage: 'Please enter a message before sending.',
+        message_sent: false
+      });
       this.#data.update((d) => ({
         ...d,
         error: { detail: 'Please enter a message before sending.', wasSent: false }
@@ -457,11 +467,12 @@ export class ThreadManager {
     const current = get(this.#data);
 
     if (current.waiting || current.submitting) {
-      callback(
-        false,
-        'A response to the previous message is being generated. Please wait before sending a new message.',
-        false
-      );
+      callback({
+        success: false,
+        errorMessage:
+          'A response to the previous message is being generated. Please wait before sending a new message.',
+        message_sent: false
+      });
       this.#data.update((d) => ({
         ...d,
         error: {
@@ -519,7 +530,7 @@ export class ThreadManager {
     });
     try {
       await this.#handleStreamChunks(chunks, callback);
-      callback(true, null, true);
+      callback({ success: true, errorMessage: null, message_sent: true });
     } catch (e) {
       console.error('Error posting message', e);
       if (e instanceof api.PresendError) {
@@ -550,11 +561,7 @@ export class ThreadManager {
 
   async #handleStreamChunks(
     chunks: AsyncIterable<api.ThreadStreamChunk>,
-    callback: (
-      success: boolean,
-      errorMessage: string | null,
-      message_sent: boolean
-    ) => void = () => {}
+    callback: ({ success, errorMessage, message_sent }: CallbackParams) => void = () => {}
   ) {
     this.#data.update((d) => ({
       ...d,
@@ -596,11 +603,7 @@ export class ThreadManager {
    */
   #handleStreamChunk(
     chunk: api.ThreadStreamChunk,
-    callback: (
-      success: boolean,
-      errorMessage: string | null,
-      message_sent: boolean
-    ) => void = () => {}
+    callback: ({ success, errorMessage, message_sent }: CallbackParams) => void = () => {}
   ) {
     console.debug('Received chunk', chunk);
     switch (chunk.type) {
@@ -633,13 +636,21 @@ export class ThreadManager {
       case 'error':
         if (Array.isArray(chunk.detail)) {
           const errorMessage = chunk.detail.join('\n') || 'An unknown error occurred.';
-          callback(false, errorMessage, true);
+          callback({ success: false, errorMessage, message_sent: true });
           throw new api.StreamError(errorMessage);
         }
-        callback(false, chunk.detail || 'An unknown error occurred.', true);
+        callback({
+          success: false,
+          errorMessage: chunk.detail || 'An unknown error occurred.',
+          message_sent: true
+        });
         throw new api.StreamError(chunk.detail || 'An unknown error occurred.');
       case 'presend_error':
-        callback(false, chunk.detail || 'An unknown error occurred.', false);
+        callback({
+          success: false,
+          errorMessage: chunk.detail || 'An unknown error occurred.',
+          message_sent: false
+        });
         throw new api.PresendError(chunk.detail || 'An unknown error occurred.');
       case 'tool_call_created':
         this.#createToolCall(chunk.tool_call);
