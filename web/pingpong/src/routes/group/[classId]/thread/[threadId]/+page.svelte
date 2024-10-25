@@ -13,6 +13,7 @@
     Card,
     Dropdown,
     DropdownItem,
+    Modal,
     Span
   } from 'flowbite-svelte';
   import { DoubleBounce } from 'svelte-loading-spinners';
@@ -33,6 +34,7 @@
   import AttachmentDeletedPlaceholder from '$lib/components/AttachmentDeletedPlaceholder.svelte';
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import { writable } from 'svelte/store';
+  import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
 
   export let data;
 
@@ -40,6 +42,7 @@
   $: threadId = parseInt($page.params.threadId);
   $: threadMgr = new ThreadManager(fetch, classId, threadId, data.threadData);
   $: isPrivate = data.class.private || false;
+  $: teachers = data?.supervisors || [];
   $: canDeleteThread = data.canDeleteThread;
   $: canPublishThread = data.canPublishThread;
   $: canViewAssistant = data.canViewAssistant;
@@ -122,6 +125,7 @@
       console.warn(`Definition for assistant ${$assistantId} not found.`);
     }
   }
+  let showModerators = false;
 
   let currentMessageAttachments: api.ServerFile[] = [];
   // Get the name of the participant in the chat thread.
@@ -319,6 +323,10 @@
       }
     }
   };
+
+  const showModeratorsModal = () => {
+    showModerators = true;
+  };
 </script>
 
 <div class="w-full flex flex-col justify-between grow min-h-0 relative">
@@ -444,7 +452,9 @@
       </div>
     {/each}
   </div>
-
+  <Modal title="Group Moderators" bind:open={showModerators} autoclose outsideclose
+    ><ModeratorsTable moderators={teachers} /></Modal
+  >
   {#if !$loading}
     <div class="w-full bg-gradient-to-t from-white to-transparent">
       <div class="w-11/12 mx-auto relative flex flex-col">
@@ -478,7 +488,11 @@
             {#if !$published && isPrivate}
               <LockSolid size="sm" class="text-orange" />
               <Span class="text-gray-600 text-xs font-normal"
-                >Moderators <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
+                ><Button
+                  class="p-0 text-gray-600 text-xs underline font-normal"
+                  on:click={showModeratorsModal}
+                  on:touchstart={showModeratorsModal}>Moderators</Button
+                > <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
                   more information, please review <a
                     href="/privacy-policy"
                     rel="noopener noreferrer"
@@ -489,7 +503,11 @@
             {:else if !$published}
               <EyeSlashOutline size="sm" class="text-orange" />
               <Span class="text-gray-600 text-xs font-normal"
-                >Moderators can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
+                ><Button
+                  class="p-0 text-gray-600 text-xs underline font-normal"
+                  on:click={showModeratorsModal}
+                  on:touchstart={showModeratorsModal}>Moderators</Button
+                > can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
                 {#if isCurrentUser}For more information, please review <a
                     href="/privacy-policy"
                     rel="noopener noreferrer"

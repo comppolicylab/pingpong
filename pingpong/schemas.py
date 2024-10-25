@@ -457,6 +457,15 @@ class UserGroup(BaseModel):
     explanation: list[list[str]] | None
 
 
+class SupervisorUser(BaseModel):
+    name: str | None = None
+    email: str
+
+
+class ClassSupervisors(BaseModel):
+    users: list[SupervisorUser]
+
+
 class ClassUsers(BaseModel):
     users: list[ClassUser]
     limit: int

@@ -1113,6 +1113,36 @@ async def remove_canvas_connection(
 
 
 @v1.get(
+    "/class/{class_id}/supervisors",
+    dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
+    response_model=schemas.ClassSupervisors,
+)
+async def list_class_supervisors(class_id: str, request: Request):
+    supervisor_ids = await request.state.authz.list_entities(
+        f"class:{class_id}",
+        "supervisor",
+        "user",
+    )
+    supervisors = await models.User.get_all_by_id(request.state.db, supervisor_ids)
+    supervisors_users = []
+    for supervisor in supervisors:
+        supervisors_users.append(
+            schemas.SupervisorUser(
+                name=(
+                    supervisor.display_name
+                    if supervisor.display_name
+                    else " ".join(
+                        filter(None, [supervisor.first_name, supervisor.last_name])
+                    )
+                    or None
+                ),
+                email=supervisor.email,
+            )
+        )
+    return {"users": supervisors_users}
+
+
+@v1.get(
     "/class/{class_id}/users",
     dependencies=[Depends(Authz("can_view_users", "class:{class_id}"))],
     response_model=schemas.ClassUsers,
