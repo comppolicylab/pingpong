@@ -215,10 +215,6 @@
     dispatcher('dismissError');
   };
 
-  const showModerators = () => {
-    dispatcher('showModerators');
-  };
-
   // Submit the form.
   const submit = () => {
     const code_interpreter_file_ids = codeInterpreterFileIds
