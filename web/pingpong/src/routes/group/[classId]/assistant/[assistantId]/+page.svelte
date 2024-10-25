@@ -9,7 +9,10 @@
     Textarea,
     Modal,
     type SelectOptionType,
-    Badge
+    Badge,
+    Accordion,
+    AccordionItem,
+    Range
   } from 'flowbite-svelte';
   import type { Tool, ServerFile, FileUploadInfo } from '$lib/api';
   import { beforeNavigate, goto } from '$app/navigation';
@@ -21,7 +24,8 @@
     CloseOutline,
     ImageOutline,
     QuestionCircleSolid,
-    ArrowUpRightFromSquareOutline
+    ArrowUpRightFromSquareOutline,
+    CogOutline
   } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
   import { writable, type Writable } from 'svelte/store';
@@ -159,6 +163,11 @@
     $trashPrivateFileIds = [...$trashPrivateFileIds, ...files];
   };
 
+  let temperatureValue: number;
+  $: if (assistant?.temperature !== undefined && temperatureValue === undefined) {
+    temperatureValue = assistant.temperature;
+  }
+
   let dropdownOpen = false;
   /**
    * Check if the assistant model supports vision capabilities.
@@ -199,6 +208,9 @@
           ((oldValue as string) || '');
         break;
       case 'model':
+        dirty = newValue !== oldValue;
+        break;
+      case 'temperature':
         dirty = newValue !== oldValue;
         break;
       case 'published':
@@ -299,6 +311,7 @@
       tools,
       code_interpreter_file_ids: codeInterpreterToolSelect ? $selectedCodeInterpreterFiles : [],
       file_search_file_ids: fileSearchToolSelect ? $selectedFileSearchFiles : [],
+      temperature: temperatureValue,
       published: body.published?.toString() === 'on',
       use_latex: body.use_latex?.toString() === 'on',
       hide_prompt: body.hide_prompt?.toString() === 'on',
@@ -398,7 +411,7 @@
 
     if (expanded.error) {
       $loading = false;
-      sadToast(`Could not save your response:\n${expanded.error.detail}`);
+      sadToast(`Could not save your response:\n${expanded.error.detail || 'Unknown error'}`);
     } else {
       $loading = false;
       happyToast('Assistant saved');
@@ -716,6 +729,41 @@
           the assistant with the rest of your group, select this option.</Helper
         >
       {/if}
+    </div>
+
+    <div class="leading-6 w-full">
+      <Accordion flush>
+        <AccordionItem class="py-2">
+          <span slot="header"
+            ><div class="flex-row flex items-center space-x-2 py-0">
+              <div><CogOutline size="md" strokeWidth="1" /></div>
+              <div class="font-light text-sm">Advanced Settings</div>
+            </div></span
+          >
+          <Label for="temperature">Temperature</Label>
+          <Helper class="pb-1"
+            >Select the model's "temperature," a setting from 0 to 2 that controls how creative or
+            predictable the assistant's responses are. For reliable, focused answers, choose a
+            temperature closer to 0.2. For more varied or creative responses, try a setting closer
+            to 1. Avoid setting the temperature much above 1 unless you need very experimental
+            responses, as it may lead to less predictable and more random answers. You can change
+            this setting anytime.</Helper
+          >
+          <Range
+            id="temperature"
+            name="temperature"
+            min="0"
+            max="2"
+            bind:value={temperatureValue}
+            step="0.1"
+          />
+          <div class="mt-2 flex flex-row justify-between">
+            <p class="text-sm">More focused</p>
+            <p class="text-sm">Temperature: {temperatureValue}</p>
+            <p class="text-sm">More creative</p>
+          </div>
+        </AccordionItem>
+      </Accordion>
     </div>
 
     <input type="hidden" name="assistantId" value={assistant?.id} />

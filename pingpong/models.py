@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional, Union
 
-from sqlalchemy import Boolean, Column, DateTime, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Float, UniqueConstraint
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
     ForeignKey,
@@ -821,6 +821,7 @@ class Assistant(Base):
     hide_prompt = Column(Boolean, default=False)
     tools = Column(String)
     model = Column(String)
+    temperature = Column(Float, server_default="1.0")
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="assistants", foreign_keys=[class_id])
     threads = relationship("Thread", back_populates="assistant")
