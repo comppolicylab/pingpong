@@ -462,7 +462,7 @@ class SupervisorUser(BaseModel):
     email: str
 
 
-class ClassSupervisor(BaseModel):
+class ClassSupervisors(BaseModel):
     users: list[SupervisorUser]
 
 
