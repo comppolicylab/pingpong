@@ -2205,11 +2205,11 @@ async def send_message(
             file_search_file_ids=data.file_search_file_ids,
             code_interpreter_file_ids=data.code_interpreter_file_ids,
         )
-    except Exception as e:
+    except Exception:
         logger.exception("Error running thread")
         raise HTTPException(
             status_code=500,
-            detail="We faced an error while sending your message. " + str(e),
+            detail="We faced an error while sending your message. Please try again later.",
         )
     return StreamingResponse(stream, media_type="text/event-stream")
 
