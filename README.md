@@ -83,7 +83,7 @@ type = "mock"
 Then, run the following command to start the dev server:
 
 ```
-CONFIG_PATH=config.local.toml poetry run uvicorn pingpong:server --port 8000 --host 0.0.0.0 --reload
+CONFIG_PATH=config.local.toml poetry run fastapi dev pingpong --port 8000 --host 0.0.0.0 --reload
 ```
 
 This will start a `uvicorn` server that will automatically reload with code changes as you make them.
