@@ -25,4 +25,4 @@ RUN poetry install --only main --no-interaction --no-ansi
 
 COPY . /code
 
-CMD ["fastapi", "run", "pingpong:server", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+CMD ["fastapi", "run", "pingpong", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
