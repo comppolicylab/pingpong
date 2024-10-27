@@ -41,7 +41,8 @@ from .saml import get_saml2_client, get_saml2_settings, get_saml2_attrs
 from .ai import (
     export_class_threads,
     format_instructions,
-    generate_name,
+    get_thread_conversation_name,
+    get_initial_thread_conversation_name,
     get_openai_client,
     run_thread,
     validate_api_key,
@@ -1994,7 +1995,7 @@ async def create_thread(
             messageContent.append({"type": "image_file", "image_file": {"file_id": id}})
             for id in req.vision_file_ids
         ]
-    thread, parties = await asyncio.gather(
+    thread, parties, thread_name = await asyncio.gather(
         openai_client.beta.threads.create(
             messages=[
                 {
@@ -2007,11 +2008,15 @@ async def create_thread(
             tool_resources=tool_resources,
         ),
         models.User.get_all_by_id(request.state.db, req.parties),
+        get_initial_thread_conversation_name(
+            openai_client, request.state.db, req.message, req.vision_file_ids, class_id
+        ),
     )
 
     tools_export = req.model_dump(include={"tools_available"})
 
     new_thread = {
+        "name": thread_name,
         "class_id": int(class_id),
         "private": True if parties else False,
         "users": parties or [],
@@ -2140,31 +2145,15 @@ async def send_message(
     try:
         asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
 
-        # If we have more than 3 user messages and no thread name, generate a new one. Only use the first 100 words of each user and assistant message to maintain a low token count.
-        if thread.user_message_ct > 1 and thread.name is None:
-            messages = await openai_client.beta.threads.messages.list(
-                thread.thread_id, limit=10, order="asc"
+        # When we reach 3 user messages, or if we failed to generate a title before, generate a new one. Only use the first 100 words of each user and assistant message to maintain a low token count.
+        if thread.user_message_ct == 3 or thread.name is None:
+            thread.name = await get_thread_conversation_name(
+                openai_client,
+                request.state.db,
+                data,
+                thread.thread_id,
+                class_id,
             )
-
-            message_str = ""
-            for message in messages.data:
-                for content in message.content:
-                    if content.type == "text":
-                        message_str += f"{message.role.upper()}: {' '.join(content.text.value.split()[:100])}\n"
-                    if content.type in ["image_file", "image_url"]:
-                        message_str += f"{message.role.upper()}: Sent image file\n"
-            message_str += f"USER: {data.message}\n"
-            if data.vision_file_ids:
-                message_str += "USER: Sent image file\n"
-            try:
-                new_name = await generate_name(openai_client, message_str)
-            except openai.RateLimitError:
-                new_name = None
-                await models.Class.log_rate_limit_error(
-                    request.state.db,
-                    class_id,
-                )
-            thread.name = new_name
 
         if data.file_search_file_ids:
             if thread.vector_store_id:
