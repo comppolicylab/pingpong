@@ -1123,7 +1123,9 @@ async def list_class_supervisors(class_id: str, request: Request):
         "supervisor",
         "user",
     )
-    supervisors = await models.User.get_all_by_id(request.state.db, supervisor_ids)
+    supervisors = await models.User.get_all_by_id_if_in_class(
+        request.state.db, supervisor_ids, int(class_id)
+    )
     supervisors_users = []
     for supervisor in supervisors:
         supervisors_users.append(

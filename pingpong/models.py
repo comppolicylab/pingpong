@@ -413,6 +413,25 @@ class User(Base):
         return [row.User for row in result]
 
     @classmethod
+    async def get_all_by_id_if_in_class(
+        cls, session: AsyncSession, ids: List[int], class_id: int
+    ) -> List["User"]:
+        if not ids:
+            return []
+
+        stmt = (
+            select(User)
+            .join(UserClassRole)
+            .where(
+                User.id.in_([int(id_) for id_ in ids]),
+                UserClassRole.class_id == class_id,
+            )
+        )
+
+        result = await session.execute(stmt)
+        return [row.User for row in result]
+
+    @classmethod
     async def get_display_name(cls, session: AsyncSession, id_: int) -> str | None:
         stmt = select(User.display_name, User.first_name, User.last_name).where(
             User.id == int(id_)
