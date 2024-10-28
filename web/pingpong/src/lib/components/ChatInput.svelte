@@ -115,13 +115,21 @@
   $: uploading = $allFiles.some((f) => f.state === 'pending');
   let purpose: FileUploadPurpose | null = null;
   $: purpose =
-    (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles) && visionAcceptedFiles
+    codeInterpreterAcceptedFiles && fileSearchAcceptedFiles && visionAcceptedFiles
       ? 'multimodal'
-      : codeInterpreterAcceptedFiles || fileSearchAcceptedFiles
-        ? 'assistants'
-        : visionAcceptedFiles
-          ? 'vision'
-          : null;
+      : codeInterpreterAcceptedFiles && visionAcceptedFiles
+        ? 'codeInterpreterVision'
+        : fileSearchAcceptedFiles && visionAcceptedFiles
+          ? 'fileSearchVision'
+          : codeInterpreterAcceptedFiles && fileSearchAcceptedFiles
+            ? 'assistants'
+            : codeInterpreterAcceptedFiles
+              ? 'codeInterpreter'
+              : fileSearchAcceptedFiles
+                ? 'fileSearch'
+                : visionAcceptedFiles
+                  ? 'vision'
+                  : null;
   $: codeInterpreterFiles = $allFiles
     .filter((f) => f.state === 'success' && (f.response as ServerFile).code_interpreter_file_id)
     .map((f) => (f.response as ServerFile).file_id);
@@ -133,7 +141,7 @@
   $: fileSearchFileIds = fileSearchFiles.join(',');
 
   let threadCodeInterpreterMaxCount = 20;
-  let threadFileSearchMaxCount = 10_000;
+  let threadFileSearchMaxCount = 20;
 
   $: visionFiles = $allFiles
     .filter((f) => f.state === 'success' && (f.response as ServerFile).vision_file_id)
@@ -434,8 +442,10 @@
           />
           {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || visionAcceptedFiles) && !(tooManyAttachments || tooManyVisionFiles) && !(loading || disabled || !upload) && !tooManyFileSearchFiles && !tooManyCodeInterpreterFiles}
             <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
-              >Upload files to thread<br />File Search: {currentFileSearchFileCount}/10,000<br
-              />Code Interpreter: {currentCodeInterpreterFileCount}/20</Popover
+              >Upload files to thread<br />Documents: {Math.max(
+                currentFileSearchFileCount,
+                currentCodeInterpreterFileCount
+              )}/20</Popover
             >
           {:else if tooManyFileSearchFiles || tooManyCodeInterpreterFiles}
             <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
@@ -454,7 +464,9 @@
               >Maximum number of image uploads reached. You can still upload documents.</Popover
             >
           {:else}
-            <Popover arrow={false}>File upload is disabled</Popover>
+            <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
+              >File upload is disabled</Popover
+            >
           {/if}
         {/if}
         <div>
