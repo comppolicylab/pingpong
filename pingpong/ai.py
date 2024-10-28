@@ -45,7 +45,7 @@ async def generate_name(
     :param model: Model to use
     :return: Generated name
     """
-    system_prompt = 'You will be given a transcript between a user and an assistant. Messages the user sent are prepended with "USER", and messages the assistant sent are prepended with "ASSISTANT". Return a title of 3 to 4 words summarizing what the conversation is about. ONLY RETURN A TITLE IF THE CONVERSATION TOPIC IS CLEAR, OTHERWISE SET can_generate TO false. DO NOT RETURN MORE THAN 4 WORDS!'
+    system_prompt = 'You will be given a transcript between a user and an assistant. Messages the user sent are prepended with "USER", and messages the assistant sent are prepended with "ASSISTANT". Return a title of 3 to 4 words summarizing what the conversation is about. If you are unsure about the conversation topic, set name to None and set can_generate to false. DO NOT RETURN MORE THAN 4 WORDS!'
     try:
         response = await cli.beta.chat.completions.parse(
             messages=[
@@ -60,6 +60,7 @@ async def generate_name(
             ],
             model=model,
             response_format=ThreadName,
+            temperature=0.0,
         )
         return response.choices[0].message.parsed
     except openai.RateLimitError as e:
@@ -84,10 +85,10 @@ async def get_thread_conversation_name(
             if content.type == "text":
                 message_str += f"{message.role.upper()}: {' '.join(content.text.value.split()[:100])}\n"
             if content.type in ["image_file", "image_url"]:
-                message_str += f"{message.role.upper()}: Sent image file\n"
+                message_str += f"{message.role.upper()}: Uploaded an image file\n"
     message_str += f"USER: {data.message}\n"
     if data.vision_file_ids:
-        message_str += "USER: Sent image file\n"
+        message_str += "USER: Uploaded an image file\n"
     return await generate_thread_name(cli, session, message_str, class_id)
 
 
@@ -100,7 +101,7 @@ async def get_initial_thread_conversation_name(
 ) -> str | None:
     message_str = f"USER: {message}\n"
     for _ in vision_files:
-        message_str += "USER: Sent image file\n"
+        message_str += "USER: Uploaded an image file\n"
     return await generate_thread_name(cli, session, message_str, class_id)
 
 
