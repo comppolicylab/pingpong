@@ -165,14 +165,51 @@
   $: tooManyAttachments = attachments.length >= 10;
   $: tooManyVisionFiles = visionFiles.length >= 10;
 
+  // When one of the file upload types is disabled, we need to exclude it from the list of accepted files from the other types, otherwise we will still try to upload it.
+  $: fileSearchStringToExclude = !tooManyFileSearchFiles ? '' : (fileSearchAcceptedFiles ?? '');
+  $: codeInterpreterStringToExclude = !tooManyCodeInterpreterFiles
+    ? ''
+    : (codeInterpreterAcceptedFiles ?? '');
+  $: visionStringToExclude = !tooManyVisionFiles ? '' : (visionAcceptedFiles ?? '');
+  $: currentFileSearchAcceptedFiles = Array.from(
+    new Set(
+      (tooManyFileSearchFiles ? '' : (fileSearchAcceptedFiles ?? ''))
+        .split(',')
+        .filter(
+          (file) =>
+            !codeInterpreterStringToExclude.split(',').includes(file) &&
+            !visionStringToExclude.split(',').includes(file)
+        )
+    )
+  ).join(',');
+  $: currentCodeInterpreterAcceptedFiles = Array.from(
+    new Set(
+      (tooManyCodeInterpreterFiles ? '' : (codeInterpreterAcceptedFiles ?? ''))
+        .split(',')
+        .filter(
+          (file) =>
+            !fileSearchStringToExclude.split(',').includes(file) &&
+            !visionStringToExclude.split(',').includes(file)
+        )
+    )
+  ).join(',');
+  $: currentVisionAcceptedFiles = Array.from(
+    new Set(
+      (tooManyVisionFiles ? '' : (visionAcceptedFiles ?? ''))
+        .split(',')
+        .filter(
+          (file) =>
+            !fileSearchStringToExclude.split(',').includes(file) &&
+            !codeInterpreterStringToExclude.split(',').includes(file)
+        )
+    )
+  ).join(',');
   $: currentAccept =
-    (attachments.length >= 10 || currentCodeInterpreterFileCount >= threadCodeInterpreterMaxCount
-      ? ''
-      : (codeInterpreterAcceptedFiles ?? '')) +
-    (attachments.length >= 10 || currentFileSearchFileCount >= threadFileSearchMaxCount
-      ? ''
-      : (fileSearchAcceptedFiles ?? '')) +
-    (visionFiles.length >= 10 ? '' : (visionAcceptedFiles ?? ''));
+    currentFileSearchAcceptedFiles +
+    ',' +
+    currentCodeInterpreterAcceptedFiles +
+    ',' +
+    currentVisionAcceptedFiles;
 
   $: tooManyFiles =
     (tooManyAttachments || tooManyFileSearchFiles || tooManyCodeInterpreterFiles) &&
@@ -450,7 +487,7 @@
           {:else if tooManyFileSearchFiles || tooManyCodeInterpreterFiles}
             <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
               >Maximum number of thread document attachments reached{visionFiles.length < 10
-                ? '. You can still upload images.'
+                ? `. You can still upload images${tooManyCodeInterpreterFiles ? ' (.webp only)' : ''}.`
                 : ''}</Popover
             >
           {:else if tooManyAttachments}
