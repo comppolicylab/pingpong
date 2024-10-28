@@ -487,7 +487,7 @@
           {:else if tooManyFileSearchFiles || tooManyCodeInterpreterFiles}
             <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
               >Maximum number of thread document attachments reached{visionFiles.length < 10
-                ? `. You can still upload images${tooManyCodeInterpreterFiles ? ' (.webp only)' : ''}.`
+                ? `. You can still upload images${codeInterpreterAcceptedFiles && tooManyCodeInterpreterFiles ? ' (.webp only)' : ''}.`
                 : ''}</Popover
             >
           {:else if tooManyAttachments}
