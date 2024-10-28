@@ -9,6 +9,7 @@ import orjson
 from pingpong.auth import encode_auth_token
 from pingpong.invite import send_export_download
 import pingpong.models as models
+from pingpong.schemas import ThreadName, NewThreadMessage
 
 from datetime import datetime, timezone
 from openai.types.beta.assistant_stream_event import (
@@ -28,6 +29,7 @@ from pingpong.now import NowFn, utcnow
 from pingpong.schemas import CodeInterpreterMessage, DownloadExport
 from pingpong.config import config
 from typing import Dict
+from sqlalchemy.ext.asyncio import AsyncSession
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
@@ -35,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 async def generate_name(
     cli: openai.AsyncClient, transcript: str, model: str = "gpt-4o-mini"
-) -> str | None:
+) -> ThreadName | None:
     """Generate a name for a prompt using the given model.
 
     :param cli: OpenAI client
@@ -43,10 +45,9 @@ async def generate_name(
     :param model: Model to use
     :return: Generated name
     """
-    system_prompt = 'You will be provided with a transcript between a user and an assistant. Return A TITLE OF 3-4 WORDS summarizing what the conversation is about. Messages the user sent are prepended with "USER", and messages the assistant sent are prepended with "ASSISTANT". DO NOT RETURN MORE THAN 4 WORDS!'
-
+    system_prompt = 'You will be given a transcript between a user and an assistant. Messages the user sent are prepended with "USER", and messages the assistant sent are prepended with "ASSISTANT". Return a title of 3 to 4 words summarizing what the conversation is about. If you are unsure about the conversation topic, set name to None and set can_generate to false. DO NOT RETURN MORE THAN 4 WORDS!'
     try:
-        response = await cli.chat.completions.create(
+        response = await cli.beta.chat.completions.parse(
             messages=[
                 {
                     "role": "system",
@@ -58,12 +59,64 @@ async def generate_name(
                 },
             ],
             model=model,
+            response_format=ThreadName,
+            temperature=0.0,
         )
-        return response.choices[0].message.content
+        return response.choices[0].message.parsed
     except openai.RateLimitError as e:
         raise e
     except openai.APIError as e:
         logger.exception(f"Error generating name, {e}")
+        return None
+
+
+async def get_thread_conversation_name(
+    cli: openai.AsyncClient,
+    session: AsyncSession,
+    data: NewThreadMessage,
+    thread_id: str,
+    class_id: str,
+) -> str | None:
+    messages = await cli.beta.threads.messages.list(thread_id, limit=10, order="asc")
+
+    message_str = ""
+    for message in messages.data:
+        for content in message.content:
+            if content.type == "text":
+                message_str += f"{message.role.upper()}: {' '.join(content.text.value.split()[:100])}\n"
+            if content.type in ["image_file", "image_url"]:
+                message_str += f"{message.role.upper()}: Uploaded an image file\n"
+    message_str += f"USER: {data.message}\n"
+    if data.vision_file_ids:
+        message_str += "USER: Uploaded an image file\n"
+    return await generate_thread_name(cli, session, message_str, class_id)
+
+
+async def get_initial_thread_conversation_name(
+    cli: openai.AsyncClient,
+    session: AsyncSession,
+    message: str,
+    vision_files: list[str],
+    class_id: str,
+) -> str | None:
+    message_str = f"USER: {message}\n"
+    for _ in vision_files:
+        message_str += "USER: Uploaded an image file\n"
+    return await generate_thread_name(cli, session, message_str, class_id)
+
+
+async def generate_thread_name(
+    cli: openai.AsyncClient, session: AsyncSession, transcript: str, class_id: str
+) -> str | None:
+    thread_name = None
+    try:
+        name_response = await generate_name(cli, transcript)
+        thread_name = (
+            name_response.name if name_response and name_response.can_generate else None
+        )
+        return thread_name
+    except openai.RateLimitError:
+        await models.Class.log_rate_limit_error(session=session, class_id=class_id)
         return None
 
 

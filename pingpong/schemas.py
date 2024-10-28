@@ -325,6 +325,11 @@ class CreateThread(BaseModel):
     _file_check = model_validator(mode="after")(file_validator)
 
 
+class ThreadName(BaseModel):
+    name: str | None
+    can_generate: bool
+
+
 class NewThreadMessage(BaseModel):
     message: str = Field(..., min_length=1)
     code_interpreter_file_ids: list[str] = Field([])
