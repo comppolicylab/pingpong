@@ -122,20 +122,20 @@
         : visionAcceptedFiles
           ? 'vision'
           : null;
-  $: codeInterpreterFiles = $allFiles
+  $: codeInterpreterFiles = (codeInterpreterAcceptedFiles ? $allFiles : [])
     .filter((f) => f.state === 'success' && (f.response as ServerFile).code_interpreter_file_id)
     .map((f) => (f.response as ServerFile).file_id);
   $: codeInterpreterFileIds = codeInterpreterFiles.join(',');
 
-  $: fileSearchFiles = $allFiles
+  $: fileSearchFiles = (fileSearchAcceptedFiles ? $allFiles : [])
     .filter((f) => f.state === 'success' && (f.response as ServerFile).file_search_file_id)
     .map((f) => (f.response as ServerFile).file_id);
   $: fileSearchFileIds = fileSearchFiles.join(',');
 
   let threadCodeInterpreterMaxCount = 20;
-  let threadFileSearchMaxCount = 10_000;
+  let threadFileSearchMaxCount = 20;
 
-  $: visionFiles = $allFiles
+  $: visionFiles = (visionAcceptedFiles ? $allFiles : [])
     .filter((f) => f.state === 'success' && (f.response as ServerFile).vision_file_id)
     .map((f) => (f.response as ServerFile).vision_file_id);
 
@@ -157,14 +157,51 @@
   $: tooManyAttachments = attachments.length >= 10;
   $: tooManyVisionFiles = visionFiles.length >= 10;
 
+  // When one of the file upload types is disabled, we need to exclude it from the list of accepted files from the other types, otherwise we will still try to upload it.
+  $: fileSearchStringToExclude = !tooManyFileSearchFiles ? '' : (fileSearchAcceptedFiles ?? '');
+  $: codeInterpreterStringToExclude = !tooManyCodeInterpreterFiles
+    ? ''
+    : (codeInterpreterAcceptedFiles ?? '');
+  $: visionStringToExclude = !tooManyVisionFiles ? '' : (visionAcceptedFiles ?? '');
+  $: currentFileSearchAcceptedFiles = Array.from(
+    new Set(
+      (tooManyFileSearchFiles ? '' : (fileSearchAcceptedFiles ?? ''))
+        .split(',')
+        .filter(
+          (file) =>
+            !codeInterpreterStringToExclude.split(',').includes(file) &&
+            !visionStringToExclude.split(',').includes(file)
+        )
+    )
+  ).join(',');
+  $: currentCodeInterpreterAcceptedFiles = Array.from(
+    new Set(
+      (tooManyCodeInterpreterFiles ? '' : (codeInterpreterAcceptedFiles ?? ''))
+        .split(',')
+        .filter(
+          (file) =>
+            !fileSearchStringToExclude.split(',').includes(file) &&
+            !visionStringToExclude.split(',').includes(file)
+        )
+    )
+  ).join(',');
+  $: currentVisionAcceptedFiles = Array.from(
+    new Set(
+      (tooManyVisionFiles ? '' : (visionAcceptedFiles ?? ''))
+        .split(',')
+        .filter(
+          (file) =>
+            !fileSearchStringToExclude.split(',').includes(file) &&
+            !codeInterpreterStringToExclude.split(',').includes(file)
+        )
+    )
+  ).join(',');
   $: currentAccept =
-    (attachments.length >= 10 || currentCodeInterpreterFileCount >= threadCodeInterpreterMaxCount
-      ? ''
-      : (codeInterpreterAcceptedFiles ?? '')) +
-    (attachments.length >= 10 || currentFileSearchFileCount >= threadFileSearchMaxCount
-      ? ''
-      : (fileSearchAcceptedFiles ?? '')) +
-    (visionFiles.length >= 10 ? '' : (visionAcceptedFiles ?? ''));
+    currentFileSearchAcceptedFiles +
+    ',' +
+    currentCodeInterpreterAcceptedFiles +
+    ',' +
+    currentVisionAcceptedFiles;
 
   $: tooManyFiles =
     (tooManyAttachments || tooManyFileSearchFiles || tooManyCodeInterpreterFiles) &&
@@ -217,11 +254,15 @@
 
   // Submit the form.
   const submit = () => {
-    const code_interpreter_file_ids = codeInterpreterFileIds
+    const code_interpreter_file_ids = (codeInterpreterAcceptedFiles ? codeInterpreterFileIds : '')
       ? codeInterpreterFileIds.split(',')
       : [];
-    const file_search_file_ids = fileSearchFileIds ? fileSearchFileIds.split(',') : [];
-    const vision_file_ids = visionFileIds ? visionFileIds.split(',') : [];
+    const file_search_file_ids = (fileSearchAcceptedFiles ? fileSearchFileIds : '')
+      ? fileSearchFileIds.split(',')
+      : [];
+    const vision_file_ids = (visionAcceptedFiles ? visionFileIds : '')
+      ? visionFileIds.split(',')
+      : [];
 
     if (!ref.value || disabled) {
       return;
@@ -434,13 +475,15 @@
           />
           {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || visionAcceptedFiles) && !(tooManyAttachments || tooManyVisionFiles) && !(loading || disabled || !upload) && !tooManyFileSearchFiles && !tooManyCodeInterpreterFiles}
             <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
-              >Upload files to thread<br />File Search: {currentFileSearchFileCount}/10,000<br
-              />Code Interpreter: {currentCodeInterpreterFileCount}/20</Popover
+              >Upload files to thread<br />Documents: {Math.max(
+                currentFileSearchFileCount,
+                currentCodeInterpreterFileCount
+              )}/20</Popover
             >
           {:else if tooManyFileSearchFiles || tooManyCodeInterpreterFiles}
             <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
               >Maximum number of thread document attachments reached{visionFiles.length < 10
-                ? '. You can still upload images.'
+                ? `. You can still upload images${codeInterpreterAcceptedFiles && tooManyCodeInterpreterFiles ? ' (.webp only)' : ''}.`
                 : ''}</Popover
             >
           {:else if tooManyAttachments}
@@ -454,7 +497,9 @@
               >Maximum number of image uploads reached. You can still upload documents.</Popover
             >
           {:else}
-            <Popover arrow={false}>File upload is disabled</Popover>
+            <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
+              >File upload is disabled</Popover
+            >
           {/if}
         {/if}
         <div>
