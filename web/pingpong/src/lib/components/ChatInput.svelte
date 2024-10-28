@@ -115,27 +115,19 @@
   $: uploading = $allFiles.some((f) => f.state === 'pending');
   let purpose: FileUploadPurpose | null = null;
   $: purpose =
-    codeInterpreterAcceptedFiles && fileSearchAcceptedFiles && visionAcceptedFiles
+    (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles) && visionAcceptedFiles
       ? 'multimodal'
-      : codeInterpreterAcceptedFiles && visionAcceptedFiles
-        ? 'codeInterpreterVision'
-        : fileSearchAcceptedFiles && visionAcceptedFiles
-          ? 'fileSearchVision'
-          : codeInterpreterAcceptedFiles && fileSearchAcceptedFiles
-            ? 'assistants'
-            : codeInterpreterAcceptedFiles
-              ? 'codeInterpreter'
-              : fileSearchAcceptedFiles
-                ? 'fileSearch'
-                : visionAcceptedFiles
-                  ? 'vision'
-                  : null;
-  $: codeInterpreterFiles = $allFiles
+      : codeInterpreterAcceptedFiles || fileSearchAcceptedFiles
+        ? 'assistants'
+        : visionAcceptedFiles
+          ? 'vision'
+          : null;
+  $: codeInterpreterFiles = (codeInterpreterAcceptedFiles ? $allFiles : [])
     .filter((f) => f.state === 'success' && (f.response as ServerFile).code_interpreter_file_id)
     .map((f) => (f.response as ServerFile).file_id);
   $: codeInterpreterFileIds = codeInterpreterFiles.join(',');
 
-  $: fileSearchFiles = $allFiles
+  $: fileSearchFiles = (fileSearchAcceptedFiles ? $allFiles : [])
     .filter((f) => f.state === 'success' && (f.response as ServerFile).file_search_file_id)
     .map((f) => (f.response as ServerFile).file_id);
   $: fileSearchFileIds = fileSearchFiles.join(',');
@@ -143,7 +135,7 @@
   let threadCodeInterpreterMaxCount = 20;
   let threadFileSearchMaxCount = 20;
 
-  $: visionFiles = $allFiles
+  $: visionFiles = (visionAcceptedFiles ? $allFiles : [])
     .filter((f) => f.state === 'success' && (f.response as ServerFile).vision_file_id)
     .map((f) => (f.response as ServerFile).vision_file_id);
 
@@ -262,11 +254,15 @@
 
   // Submit the form.
   const submit = () => {
-    const code_interpreter_file_ids = codeInterpreterFileIds
+    const code_interpreter_file_ids = (codeInterpreterAcceptedFiles ? codeInterpreterFileIds : '')
       ? codeInterpreterFileIds.split(',')
       : [];
-    const file_search_file_ids = fileSearchFileIds ? fileSearchFileIds.split(',') : [];
-    const vision_file_ids = visionFileIds ? visionFileIds.split(',') : [];
+    const file_search_file_ids = (fileSearchAcceptedFiles ? fileSearchFileIds : '')
+      ? fileSearchFileIds.split(',')
+      : [];
+    const vision_file_ids = (visionAcceptedFiles ? visionFileIds : '')
+      ? visionFileIds.split(',')
+      : [];
 
     if (!ref.value || disabled) {
       return;

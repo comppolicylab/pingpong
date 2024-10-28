@@ -998,14 +998,7 @@ export interface UploadOptions {
   onProgress?: (percent: number) => void;
 }
 
-export type FileUploadPurpose =
-  | 'assistants'
-  | 'vision'
-  | 'multimodal'
-  | 'codeInterpreterVision'
-  | 'fileSearchVision'
-  | 'codeInterpreter'
-  | 'fileSearch';
+export type FileUploadPurpose = 'assistants' | 'vision' | 'multimodal';
 
 /**
  * Upload a file to a class.

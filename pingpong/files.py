@@ -81,7 +81,7 @@ async def handle_create_file(
             status_code=403, detail="File type not supported for File Search by OpenAI!"
         )
 
-    if purpose in ["multimodal", "codeInterpreterVision", "fileSearchVision"]:
+    if purpose == "multimodal":
         tasks: list[asyncio.Task[FileSchema]] = []
         if _is_vision_supported(content_type):
             tasks.append(
@@ -152,11 +152,9 @@ async def handle_create_file(
             vision_obj_id=new_v_file.id if new_v_file and new_f_file else None,
             file_search_file_id=primary_file.file_id
             if _is_fs_supported(content_type)
-            and purpose in ["multimodal", "fileSearchVision"]
             else None,
             code_interpreter_file_id=primary_file.file_id
             if _is_ci_supported(content_type)
-            and purpose in ["multimodal", "codeInterpreterVision"]
             else None,
             vision_file_id=new_v_file.file_id if new_v_file else None,
             class_id=primary_file.class_id,
@@ -167,15 +165,6 @@ async def handle_create_file(
         )
 
     try:
-        if purpose in ["fileSearch", "codeInterpreter"]:
-            _purpose = "assistants"
-        elif purpose in ["fileSearchVision", "codeInterpreterVision"]:
-            raise HTTPException(
-                status_code=500,
-                detail="File not uploaded, something went wrong!",
-            )
-        else:
-            _purpose = purpose
         new_f = await oai_client.files.create(
             # NOTE(jnu): the client tries to infer the filename, which doesn't
             # work on this file that exists as bytes in memory. There's an
@@ -183,7 +172,7 @@ async def handle_create_file(
             # we use here to force correctness.
             # https://github.com/stanford-policylab/pingpong/issues/147
             file=(upload.filename.lower(), upload.file, upload.content_type),
-            purpose=_purpose,
+            purpose=purpose,
         )
     except openai.BadRequestError as e:
         raise HTTPException(
@@ -212,12 +201,10 @@ async def handle_create_file(
             content_type=f.content_type,
             file_id=f.file_id,
             file_search_file_id=f.file_id
-            if _is_fs_supported(content_type)
-            and purpose == ["assistants", "fileSearch"]
+            if _is_fs_supported(content_type) and purpose == "assistants"
             else None,
             code_interpreter_file_id=f.file_id
-            if _is_ci_supported(content_type)
-            and purpose in ["assistants", "codeInterpreter"]
+            if _is_ci_supported(content_type) and purpose == "assistants"
             else None,
             vision_file_id=f.file_id
             if _is_vision_supported(content_type) and purpose == "vision"
