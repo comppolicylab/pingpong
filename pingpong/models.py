@@ -30,6 +30,9 @@ from sqlalchemy.orm import (
 )
 from sqlalchemy.sql import func
 import pingpong.schemas as schemas
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _get_upsert_stmt(session: AsyncSession):
@@ -225,6 +228,9 @@ class ExternalLogin(Base):
             )
         )
         await session.execute(stmt)
+        logger.info(
+            f"External login created/updated: user_id: {user_id}, provider: {provider}, identifier: {identifier}"
+        )
 
     @classmethod
     async def accounts_to_merge(
@@ -312,11 +318,20 @@ class User(Base):
         provider: str | None,
         identifier: str | None,
     ) -> "User":
+        logging.info(f"get_by_email_sso: Attempting to find user with email {email}")
         # First attempt: query by email
         stmt_by_email = select(User).where(func.lower(User.email) == func.lower(email))
         user = await session.scalar(stmt_by_email)
 
         if user or not provider or not identifier:
+            if user:
+                logging.info(
+                    f"get_by_email_sso: Found user with email {email} (id: {user.id})"
+                )
+            else:
+                logging.info(
+                    f"get_by_email_sso: No user found with email {email}, and provider or identifier is missing"
+                )
             return user
 
         # If user is not found by email, attempt to query by external login
@@ -331,7 +346,16 @@ class User(Base):
             )
         )
 
-        return await session.scalar(stmt_by_sso)
+        user_ = await session.scalar(stmt_by_sso)
+        if user_:
+            logging.info(
+                f"get_by_email_sso: Found user with provider {provider} and identifier {identifier} (id: {user_.id}, email: {user_.email})"
+            )
+        else:
+            logging.info(
+                f"get_by_email_sso: No user found with provider {provider} and identifier {identifier}"
+            )
+        return user_
 
     @classmethod
     async def get_or_create_by_email(
@@ -364,12 +388,26 @@ class User(Base):
         )
         # User already exists
         if existing:
+            logging.info(
+                f"get_or_create_by_email_sso: Found existing user with email {email} (id: {existing.id})"
+            )
             if provider and identifier:
+                logging.info(
+                    f"get_or_create_by_email_sso: Updating external login for user {existing.id} with provider {provider} and identifier {identifier}"
+                )
                 # We might not have the external login information stored
                 await ExternalLogin.create_or_update(
                     session, existing.id, provider=provider, identifier=identifier
                 )
             # Now that we updated the external login, we can return the user
+            await session.refresh(existing)
+            logging.info(
+                f"get_or_create_by_email_sso: Existing user {existing.id} has the following external logins:"
+            )
+            for login in existing.external_logins:
+                logging.info(
+                    f"get_or_create_by_email_sso: {login.provider}: {login.identifier}"
+                )
             return existing
 
         # User does not exist, create a new user
@@ -387,6 +425,13 @@ class User(Base):
         session.add(user)
         await session.flush()
         await session.refresh(user)
+        logging.info(
+            f"get_or_create_by_email_sso: Created new user with id {user.id}, email {user.email}, and the following external logins:"
+        )
+        for login in user.external_logins:
+            logging.info(
+                f"get_or_create_by_email_sso: {login.provider}: {login.identifier}"
+            )
         return user
 
     @classmethod
