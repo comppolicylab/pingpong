@@ -85,7 +85,7 @@ from .users import (
     check_permissions,
     delete_canvas_permissions,
 )
-from .merge import merge
+from .merge import list_all_permissions, merge
 
 logger = logging.getLogger(__name__)
 
@@ -244,27 +244,42 @@ async def inspect_authz(request: Request, subj: str, obj: str, rel: str):
     obj_type_, _, obj_id_ = obj.partition(":")
     try:
         result: schemas.InspectAuthzResult | None = None
-        if obj_id_:
+        if obj_id_ and subj_id_:
+            logger.info(f"Inspecting authz for {subj} {rel} {obj}")
             verdict = await request.state.authz.test(subj, rel, obj)
             result = schemas.InspectAuthzTestResult(
                 verdict=verdict,
             )
-        else:
+        elif subj_id_:
             ids = await request.state.authz.list(subj, rel, obj)
             result = schemas.InspectAuthzListResult(
                 list=ids,
             )
+        elif obj_id_ and subj_type_ == "user":
+            ids = await request.state.authz.list_entities(obj, rel, subj_type_)
+            result = schemas.InspectAuthzListResult(
+                list=ids,
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Bad request")
     except Exception as e:
         result = schemas.InspectAuthzErrorResult(error=str(e))
 
     return schemas.InspectAuthz(
-        subject=schemas.AuthzEntity(id=int(subj_id_), type=subj_type_),
+        subject=schemas.AuthzEntity(
+            id=int(subj_id_) if subj_id_ else None, type=subj_type_
+        ),
         relation=rel,
         object=schemas.AuthzEntity(
             id=int(obj_id_) if obj_id_ else None, type=obj_type_
         ),
         result=result,
     )
+
+
+@v1.get("/authz/audit_all", dependencies=[Depends(Authz("admin"))])
+async def list_all_user_permissions(request: Request, user_id: str):
+    return await list_all_permissions(request.state.authz, int(user_id))
 
 
 @v1.post(

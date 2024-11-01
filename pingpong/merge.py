@@ -2,6 +2,7 @@ import asyncio
 import json
 from sqlalchemy import delete, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
+import logging
 
 from pingpong.config import config
 from pingpong.authz.base import Relation
@@ -17,6 +18,8 @@ from pingpong.models import (
     user_merge_association,
     File,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def merge(
@@ -180,8 +183,11 @@ async def list_all_permissions(
 async def merge_permissions(
     client: OpenFgaAuthzClient, new_user_id: int, old_user_id: int
 ) -> None:
+    logging.info(f"Merging permissions for {old_user_id} into {new_user_id}")
     old_permissions = await list_all_permissions(client, old_user_id)
     new_permissions = [(f"user:{new_user_id}", r, o) for _, r, o in old_permissions]
+    logging.info(f"Revoking {old_permissions}")
+    logging.info(f"Granting {new_permissions}")
     await client.write_safe(grant=new_permissions, revoke=old_permissions)
 
 
@@ -190,7 +196,10 @@ async def merge_users(
 ) -> "User":
     old_user = await User.get_by_id(session, old_user_id)
     new_user = await User.get_by_id(session, new_user_id)
-
+    logging.info(f"Merging user {old_user_id} into {new_user_id}")
+    logging.info(
+        f"Old user: {old_user.id}, {old_user.email}, {old_user.state}, {'Super admin' if old_user.super_admin else 'Not super admin'}"
+    )
     match old_user.state:
         case "verified":
             new_user.state = (
@@ -213,4 +222,7 @@ async def merge_users(
     session.add(new_user)
     await session.flush()
     await session.refresh(new_user)
+    logging.info(
+        f"New user: {new_user.id}, {new_user.email}, {new_user.state}, {'Super admin' if new_user.super_admin else 'Not super admin'}"
+    )
     return new_user
