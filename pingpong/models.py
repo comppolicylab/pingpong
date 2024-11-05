@@ -383,6 +383,14 @@ class User(Base):
         initial_state: schemas.UserState = schemas.UserState.UNVERIFIED,
         display_name: str | None = None,
     ) -> "User":
+        if not provider:
+            logging.warning(
+                f"get_by_email_sso: Provider is missing, identifier is {identifier}"
+            )
+        if not identifier:
+            logging.warning(
+                f"get_by_email_sso: Identifier is missing, provider is {provider}"
+            )
         existing = await cls.get_by_email_sso(
             session, email, provider=provider, identifier=identifier
         )

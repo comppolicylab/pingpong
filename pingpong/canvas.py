@@ -561,6 +561,10 @@ class CanvasCourseClient(ABC):
                 if enrollment["type"] in ["TeacherEnrollment", "TaEnrollment"]:
                     is_teacher = True
                     break
+            if not user.get(self.config.sso_target):
+                logging.warning(
+                    f"User {user['email']} does not have an SSO ID in the Canvas response. Data provided:]\n{json.dumps(user, indent=2)}"
+                )
             yield CreateUserClassRole(
                 email=user["email"],
                 sso_id=user.get(self.config.sso_target),
