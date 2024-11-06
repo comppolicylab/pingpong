@@ -82,16 +82,20 @@ class OpenFgaAuthzClient(AuthzClient):
         continuation_token = None
 
         while True:
-            response: ReadResponse = await self._cli.read(key, {"continuation_token": continuation_token})
+            response: ReadResponse = await self._cli.read(
+                key, {"continuation_token": continuation_token}
+            )
 
-            client_tuples.extend([
-                ClientTuple(
-                    user=tuple.key.user,
-                    relation=tuple.key.relation,
-                    object=tuple.key.object,
-                )
-                for tuple in response.tuples
-            ])
+            client_tuples.extend(
+                [
+                    ClientTuple(
+                        user=tuple.key.user,
+                        relation=tuple.key.relation,
+                        object=tuple.key.object,
+                    )
+                    for tuple in response.tuples
+                ]
+            )
 
             if not response.continuation_token:
                 break

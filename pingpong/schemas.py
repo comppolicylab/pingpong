@@ -136,6 +136,11 @@ class UserNameMixin:
         return bool(self.display_name or self.first_name or self.last_name)
 
 
+class MergedUserTuple(BaseModel):
+    current_user_id: int
+    merged_user_id: int
+
+
 class User(BaseModel, UserNameMixin):
     id: int
     state: UserState

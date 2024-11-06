@@ -1,6 +1,7 @@
 import asyncio
 import json
-from sqlalchemy import delete, text, update
+from typing import AsyncGenerator
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
@@ -14,10 +15,12 @@ from pingpong.models import (
     User,
     UserClassRole,
     UserInstitutionRole,
+    _get_upsert_stmt,
     user_thread_association,
     user_merge_association,
     File,
 )
+from pingpong.schemas import MergedUserTuple
 
 logger = logging.getLogger(__name__)
 
@@ -29,16 +32,24 @@ async def merge(
     old_user_id: int,
 ) -> "User":
     await asyncio.gather(
-        merge_classes(session, new_user_id, old_user_id),
-        merge_institutions(session, new_user_id, old_user_id),
-        merge_assistants(session, new_user_id, old_user_id),
-        merge_threads(session, new_user_id, old_user_id),
-        merge_lms_users(session, new_user_id, old_user_id),
-        merge_external_logins(session, new_user_id, old_user_id),
-        merge_user_files(session, new_user_id, old_user_id),
+        merge_db_operations(session, new_user_id, old_user_id),
         merge_permissions(client, new_user_id, old_user_id),
     )
     return await merge_users(session, new_user_id, old_user_id)
+
+
+async def merge_db_operations(
+    session: AsyncSession,
+    new_user_id: int,
+    old_user_id: int,
+):
+    await merge_classes(session, new_user_id, old_user_id)
+    await merge_institutions(session, new_user_id, old_user_id)
+    await merge_assistants(session, new_user_id, old_user_id)
+    await merge_threads(session, new_user_id, old_user_id)
+    await merge_lms_users(session, new_user_id, old_user_id)
+    await merge_external_logins(session, new_user_id, old_user_id)
+    await merge_user_files(session, new_user_id, old_user_id)
 
 
 async def merge_classes(
@@ -180,14 +191,23 @@ async def list_all_permissions(
     return all_relations
 
 
+async def get_merged_user_tuples(
+    session: AsyncSession,
+) -> AsyncGenerator[MergedUserTuple, None]:
+    stmt = select(
+        user_merge_association.c.user_id, user_merge_association.c.merged_user_id
+    )
+    result = await session.execute(stmt)
+    for row in result:
+        yield MergedUserTuple(current_user_id=row[0], merged_user_id=row[1])
+
+
 async def merge_permissions(
     client: OpenFgaAuthzClient, new_user_id: int, old_user_id: int
 ) -> None:
     logging.info(f"Merging permissions for {old_user_id} into {new_user_id}")
     old_permissions = await list_all_permissions(client, old_user_id)
     new_permissions = [(f"user:{new_user_id}", r, o) for _, r, o in old_permissions]
-    logging.info(f"Revoking {old_permissions}")
-    logging.info(f"Granting {new_permissions}")
     await client.write_safe(grant=new_permissions, revoke=old_permissions)
 
 
@@ -196,29 +216,40 @@ async def merge_users(
 ) -> "User":
     old_user = await User.get_by_id(session, old_user_id)
     new_user = await User.get_by_id(session, new_user_id)
+    if not new_user:
+        raise ValueError(f"New user {new_user_id} not found.")
     logging.info(f"Merging user {old_user_id} into {new_user_id}")
-    logging.info(
-        f"Old user: {old_user.id}, {old_user.email}, {old_user.state}, {'Super admin' if old_user.super_admin else 'Not super admin'}"
-    )
-    match old_user.state:
-        case "verified":
-            new_user.state = (
-                "verified" if new_user.state != "banned" else new_user.state
-            )
-        case "banned":
-            new_user.state = "banned"
-        case _:
-            pass
+    if old_user:
+        logging.info(
+            f"Old user: {old_user.id}, {old_user.email}, {old_user.state}, {'Super admin' if old_user.super_admin else 'Not super admin'}"
+        )
+        match old_user.state:
+            case "verified":
+                new_user.state = (
+                    "verified" if new_user.state != "banned" else new_user.state
+                )
+            case "banned":
+                new_user.state = "banned"
+            case _:
+                pass
 
-    new_user.super_admin = new_user.super_admin or old_user.super_admin
+        new_user.super_admin = new_user.super_admin or old_user.super_admin
+        stmt = (
+            update(user_merge_association)
+            .where(user_merge_association.c.user_id == old_user_id)
+            .values(user_id=new_user_id)
+        )
+        await session.execute(stmt)
+        stmt_ = delete(User).where(User.id == old_user_id)
+        await session.execute(stmt_)
     stmt = (
-        update(user_merge_association)
-        .where(user_merge_association.c.user_id == old_user_id)
-        .values(user_id=new_user_id)
+        _get_upsert_stmt(session)(user_merge_association)
+        .values(user_id=new_user_id, merged_user_id=old_user_id)
+        .on_conflict_do_nothing(
+            index_elements=["user_id", "merged_user_id"],
+        )
     )
     await session.execute(stmt)
-    stmt_ = delete(User).where(User.id == old_user_id)
-    await session.execute(stmt_)
     session.add(new_user)
     await session.flush()
     await session.refresh(new_user)

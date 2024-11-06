@@ -11,6 +11,8 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from pingpong.merge import get_merged_user_tuples, merge_permissions, merge
+
 from .auth import encode_auth_token
 from .bg import get_server
 from .canvas import canvas_sync_all
@@ -116,6 +118,36 @@ def login(email: str, redirect: str, super_user: bool) -> None:
 
     # Open the URL in the default browser
     webbrowser.open(url)
+
+
+@auth.command("merge_permissions")
+def users_merge_permissions() -> None:
+    async def _users_merge_permissions() -> None:
+        await config.authz.driver.init()
+        async with config.db.driver.async_session() as session:
+            async with config.authz.driver.get_client() as c:
+                logger.info("Merging permissions for all users...")
+                async for row in get_merged_user_tuples(session):
+                    logging.info(
+                        f"Merging permissions for {row.merged_user_id} into {row.current_user_id}"
+                    )
+                    await merge_permissions(c, row.current_user_id, row.merged_user_id)
+
+    asyncio.run(_users_merge_permissions())
+
+
+@auth.command("merge_users")
+@click.argument("new_user_id", type=int)
+@click.argument("old_user_id", type=int)
+def merge_users(new_user_id: int, old_user_id: int) -> None:
+    async def _merge_users() -> None:
+        await config.authz.driver.init()
+        async with config.db.driver.async_session() as session:
+            async with config.authz.driver.get_client() as c:
+                await merge(session, c, new_user_id, old_user_id)
+            await session.commit()
+
+    asyncio.run(_merge_users())
 
 
 def _load_alembic(alembic_config="alembic.ini") -> alembic.config.Config:
