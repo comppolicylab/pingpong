@@ -129,6 +129,7 @@ def login(email: str, redirect: str, super_user: bool) -> None:
     webbrowser.open(url)
 
 
+# This command is used to list all explicitly granted permissions for a user
 @auth.command("list_permissions")
 @click.argument("user_id", type=int)
 def list_permissions(user_id: int) -> None:
@@ -141,7 +142,9 @@ def list_permissions(user_id: int) -> None:
     asyncio.run(_list_permissions())
 
 
-@auth.command("merge_outstanding_permissions")
+# This command attempts to merge any outstanding permissions
+# from one user to another based on the users_merged_users table
+@auth.command("redo_permission_merges")
 def users_merge_permissions() -> None:
     async def _users_merge_permissions() -> None:
         await config.authz.driver.init()
@@ -157,6 +160,9 @@ def users_merge_permissions() -> None:
     asyncio.run(_users_merge_permissions())
 
 
+# This command is used to recover any missing permissions for a user
+# after a user(s) has/have been merged into said user. This command uses
+# fields in the database to infer which permissions the user should have
 @auth.command("add_missing_permissions")
 @click.argument("new_user_id", type=int)
 def add_missing_permissions(new_user_id: int) -> None:
@@ -178,6 +184,11 @@ def add_missing_permissions(new_user_id: int) -> None:
     asyncio.run(_add_missing_permissions())
 
 
+# This command is used to merge all permissions from one user to another.
+# This command can be used if a user has been merged into another user
+# and some permissions were not transferred over.
+# Important: This command should only be used when the merged user has been deleted,
+# as it will remove all permissions from the merged user
 @auth.command("merge_users")
 @click.argument("new_user_id", type=int)
 @click.argument("old_user_id", type=int)
