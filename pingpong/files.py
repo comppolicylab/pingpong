@@ -1,4 +1,3 @@
-import asyncio
 import openai
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.exc import IntegrityError
@@ -84,21 +83,17 @@ async def handle_create_file(
         )
 
     if "multimodal" in purpose:
-        tasks: list[asyncio.Task[FileObject]] = []
-        await upload.seek(0)
-        file_data = await upload.read()
+        new_v_file, new_f_file = None, None
         if _is_vision_supported(content_type):
-            tasks.append(
-                asyncio.create_task(
-                    upload_file_to_openai(
-                        oai_client,
-                        file_data,
-                        upload.filename,
-                        content_type,
-                        purpose="vision",
-                    ),
-                    name="vision_upload",
-                )
+            new_v_file = await handle_create_file(
+                session,
+                authz,
+                oai_client,
+                upload=upload,
+                class_id=class_id,
+                uploader_id=uploader_id,
+                private=private,
+                purpose="vision",
             )
 
         # There is a case where the file is vision supported but not file search or code interpreter supported
@@ -106,69 +101,22 @@ async def handle_create_file(
         if (_is_fs_supported(content_type) and "fs" in purpose) or (
             _is_ci_supported(content_type) and "ci" in purpose
         ):
-            tasks.append(
-                asyncio.create_task(
-                    upload_file_to_openai(
-                        oai_client,
-                        file_data,
-                        upload.filename,
-                        content_type,
-                        purpose="assistants",
-                    ),
-                    name="assistants_upload",
-                )
-            )
-
-        await asyncio.gather(*tasks)
-        oai_v_file, oai_f_file = (
-            next(
-                (task.result() for task in tasks if task.get_name() == "vision_upload"),
-                None,
-            ),
-            next(
-                (
-                    task.result()
-                    for task in tasks
-                    if task.get_name() == "assistants_upload"
-                ),
-                None,
-            ),
-        )
-
-        new_v_file, new_f_file = None, None
-        try:
-            if oai_v_file:
-                new_v_file = await File.create(
+            try:
+                new_f_file = await handle_create_file(
                     session,
-                    {
-                        "file_id": oai_v_file.id,
-                        "class_id": int(class_id),
-                        "private": private,
-                        "uploader_id": int(uploader_id),
-                        "name": upload.filename,
-                        "content_type": upload.content_type,
-                    },
+                    authz,
+                    oai_client,
+                    upload=upload,
+                    class_id=class_id,
+                    uploader_id=uploader_id,
+                    private=private,
+                    purpose="assistants",
                 )
-                await authz.write(grant=_file_grants(new_v_file))
-            if oai_f_file:
-                new_f_file = await File.create(
-                    session,
-                    {
-                        "file_id": oai_f_file.id,
-                        "class_id": int(class_id),
-                        "private": private,
-                        "uploader_id": int(uploader_id),
-                        "name": upload.filename,
-                        "content_type": upload.content_type,
-                    },
-                )
-                await authz.write(grant=_file_grants(new_f_file))
-        except Exception as e:
-            if oai_v_file:
-                await oai_client.files.delete(oai_v_file.id)
-            if oai_f_file:
-                await oai_client.files.delete(oai_f_file.id)
-            raise e
+            except Exception as e:
+                if new_v_file:
+                    await oai_client.files.delete(new_v_file.vision_file_id)
+                    await authz.write(revoke=_file_grants(new_v_file))
+                raise e
 
         primary_file = new_f_file if new_f_file else new_v_file
 
@@ -186,10 +134,10 @@ async def handle_create_file(
             file_id=primary_file.file_id,
             vision_obj_id=new_v_file.id if new_v_file and new_f_file else None,
             file_search_file_id=primary_file.file_id
-            if _is_fs_supported(content_type)
+            if _is_fs_supported(content_type) and "fs" in purpose
             else None,
             code_interpreter_file_id=primary_file.file_id
-            if _is_ci_supported(content_type)
+            if _is_ci_supported(content_type) and "ci" in purpose
             else None,
             vision_file_id=new_v_file.file_id if new_v_file else None,
             class_id=primary_file.class_id,
@@ -199,6 +147,7 @@ async def handle_create_file(
             updated=primary_file.updated,
         )
 
+    await upload.seek(0)
     try:
         new_f = await oai_client.files.create(
             # NOTE(jnu): the client tries to infer the filename, which doesn't
@@ -252,6 +201,7 @@ async def handle_create_file(
         )
     except Exception as e:
         await oai_client.files.delete(new_f.id)
+        await authz.write(revoke=_file_grants(f))
         raise e
 
 
