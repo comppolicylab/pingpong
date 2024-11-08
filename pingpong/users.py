@@ -403,7 +403,8 @@ class AddNewUsers(ABC):
             self.send_invites()
 
         if self.new_ucr.lms_tenant:
-            await self._remove_deleted_users()
+            if not self.new_ucr.missing_some_sso_ids:
+                await self._remove_deleted_users()
             await self._merge_accounts()
 
         await self.client.write_safe(grant=grants, revoke=self.revokes)

@@ -527,6 +527,7 @@ class CreateUserClassRoles(BaseModel):
     lms_tenant: str | None = None
     lms_type: LMSType | None = None
     sso_tenant: str | None = None
+    missing_some_sso_ids: bool = False
 
 
 class LMSClass(BaseModel):

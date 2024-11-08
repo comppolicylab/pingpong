@@ -104,6 +104,7 @@ class CanvasCourseClient(ABC):
         self.class_id = class_id
         self.user_id = user_id
         self.nowfn = nowfn
+        self.missing_sso_ids = False
 
     async def __aenter__(self):
         self.http_session = aiohttp.ClientSession()
@@ -563,8 +564,10 @@ class CanvasCourseClient(ABC):
                     break
             if not user.get(self.config.sso_target):
                 logging.warning(
-                    f"User {user['email']} does not have an SSO ID in the Canvas response. Data provided:]\n{json.dumps(user, indent=2)}"
+                    f"User {user['email']} does not have an SSO ID in the Canvas response. Skipping."
                 )
+                self.missing_sso_ids = True
+                pass
             yield CreateUserClassRole(
                 email=user["email"],
                 sso_id=user.get(self.config.sso_target),
@@ -622,6 +625,7 @@ class CanvasCourseClient(ABC):
             lms_tenant=self.config.tenant,
             lms_type=self.config.type,
             sso_tenant=self.config.sso_tenant,
+            missing_some_sso_ids=self.missing_sso_ids,
         )
         await self._update_user_roles()
         await Class.update_last_synced(self.db, self.class_id)
