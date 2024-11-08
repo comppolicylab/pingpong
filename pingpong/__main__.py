@@ -11,7 +11,15 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from pingpong.merge import get_merged_user_tuples, merge_permissions, merge
+from pingpong.merge import (
+    get_merged_user_tuples,
+    merge_missing_assistant_permissions,
+    merge_missing_class_file_permissions,
+    merge_missing_thread_permissions,
+    merge_missing_user_file_permissions,
+    merge_permissions,
+    merge,
+)
 
 from .auth import encode_auth_token
 from .bg import get_server
@@ -134,6 +142,27 @@ def users_merge_permissions() -> None:
                     await merge_permissions(c, row.current_user_id, row.merged_user_id)
 
     asyncio.run(_users_merge_permissions())
+
+
+@auth.command("add_missing_permissions")
+@click.argument("new_user_id", type=int)
+def add_missing_permissions(new_user_id: int) -> None:
+    async def _add_missing_permissions() -> None:
+        await config.authz.driver.init()
+        async with config.db.driver.async_session() as session:
+            async with config.authz.driver.get_client() as c:
+                logger.info(f"Adding missing permissions for user {new_user_id}...")
+                logger.info("Merging assistant permissions...")
+                await merge_missing_assistant_permissions(c, session, new_user_id)
+                logger.info("Merging thread permissions...")
+                await merge_missing_thread_permissions(c, session, new_user_id)
+                logger.info("Merging user file permissions...")
+                await merge_missing_user_file_permissions(c, session, new_user_id)
+                logger.info("Merging class file permissions...")
+                await merge_missing_class_file_permissions(c, session, new_user_id)
+                logger.info("Done!")
+
+    asyncio.run(_add_missing_permissions())
 
 
 @auth.command("merge_users")
