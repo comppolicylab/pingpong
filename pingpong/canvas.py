@@ -567,7 +567,7 @@ class CanvasCourseClient(ABC):
                     f"User {user['email']} does not have an SSO ID in the Canvas response. Skipping."
                 )
                 self.missing_sso_ids = True
-                pass
+                continue
             yield CreateUserClassRole(
                 email=user["email"],
                 sso_id=user.get(self.config.sso_target),
