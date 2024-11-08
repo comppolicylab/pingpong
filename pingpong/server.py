@@ -2174,7 +2174,7 @@ async def send_message(
             )
 
         if data.file_search_file_ids:
-            if thread.vector_store_id is not None:
+            if thread.vector_store_id:
                 # Vector store already exists, update
                 await add_vector_store_files_to_db(
                     request.state.db,
@@ -2195,6 +2195,16 @@ async def send_message(
                 )
                 thread.vector_store_id = vector_store_object_id
                 tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
+
+                existing_file_ids = [
+                    file_id
+                    async for file_id in models.Thread.get_file_ids_by_id(
+                        request.state.db, thread.id
+                    )
+                ]
+                tool_resources["code_interpreter"] = {
+                    "file_ids": existing_file_ids + data.code_interpreter_file_ids
+                }
 
         if data.code_interpreter_file_ids:
             await models.Thread.add_code_interpeter_files(
