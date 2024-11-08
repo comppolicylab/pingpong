@@ -2202,9 +2202,18 @@ async def send_message(
                         request.state.db, thread.id
                     )
                 ]
-                tool_resources["code_interpreter"] = {
-                    "file_ids": existing_file_ids + data.code_interpreter_file_ids
-                }
+                tool_resources["code_interpreter"] = {"file_ids": existing_file_ids}
+
+                try:
+                    await openai_client.beta.threads.update(
+                        thread.thread_id, tool_resources=tool_resources
+                    )
+                except openai.BadRequestError as e:
+                    raise HTTPException(
+                        400, e.message or "OpenAI rejected this request"
+                    )
+
+                thread.updated = func.now()
 
         if data.code_interpreter_file_ids:
             await models.Thread.add_code_interpeter_files(
@@ -2226,14 +2235,6 @@ async def send_message(
                 for id in data.vision_file_ids
             ]
 
-        try:
-            await openai_client.beta.threads.update(
-                thread.thread_id, tool_resources=tool_resources
-            )
-        except openai.BadRequestError as e:
-            raise HTTPException(400, e.message or "OpenAI rejected this request")
-
-        thread.updated = func.now()
         thread.last_activity = func.now()
         thread.user_message_ct += 1
         request.state.db.add(thread)
