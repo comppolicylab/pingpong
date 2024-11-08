@@ -2,8 +2,6 @@ import openai
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from io import BytesIO
-from openai.types.file_object import FileObject
 
 from .authz import AuthzClient, Relation
 from .models import File
@@ -203,33 +201,6 @@ async def handle_create_file(
         await oai_client.files.delete(new_f.id)
         await authz.write(revoke=_file_grants(f))
         raise e
-
-
-async def upload_file_to_openai(
-    oai_client: openai.AsyncClient,
-    file_data: bytes,
-    file_name: str,
-    content_type: str,
-    purpose: FileUploadPurpose = "assistants",
-) -> FileObject:
-    try:
-        _file_data = BytesIO(file_data)
-        return await oai_client.files.create(
-            # NOTE(jnu): the client tries to infer the filename, which doesn't
-            # work on this file that exists as bytes in memory. There's an
-            # undocumented way to specify name, content, and content_type which
-            # we use here to force correctness.
-            # https://github.com/stanford-policylab/pingpong/issues/147
-            file=(file_name.lower(), _file_data, content_type),
-            purpose=purpose,
-        )
-    except openai.BadRequestError as e:
-        raise HTTPException(
-            status_code=400,
-            detail=e.response.json()
-            .get("error", {})
-            .get("message", "OpenAI rejected this request"),
-        )
 
 
 # Support information comes from:
