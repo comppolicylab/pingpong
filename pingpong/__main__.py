@@ -11,6 +11,17 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from pingpong.merge import (
+    get_merged_user_tuples,
+    list_all_permissions,
+    merge_missing_assistant_permissions,
+    merge_missing_class_file_permissions,
+    merge_missing_thread_permissions,
+    merge_missing_user_file_permissions,
+    merge_permissions,
+    merge,
+)
+
 from .auth import encode_auth_token
 from .bg import get_server
 from .canvas import canvas_sync_all
@@ -116,6 +127,79 @@ def login(email: str, redirect: str, super_user: bool) -> None:
 
     # Open the URL in the default browser
     webbrowser.open(url)
+
+
+# This command lists all explicitly granted permissions for a user
+@auth.command("list_permissions")
+@click.argument("user_id", type=int)
+def list_permissions(user_id: int) -> None:
+    async def _list_permissions() -> None:
+        await config.authz.driver.init()
+        async with config.authz.driver.get_client() as c:
+            perms = await list_all_permissions(c, user_id)
+            logging.info(f"Permissions for user {user_id}: {perms}")
+
+    asyncio.run(_list_permissions())
+
+
+# This command attempts to merge any outstanding permissions
+# from one user to another based on the users_merged_users table
+@auth.command("redo_permission_merges")
+def users_merge_permissions() -> None:
+    async def _users_merge_permissions() -> None:
+        await config.authz.driver.init()
+        async with config.db.driver.async_session() as session:
+            async with config.authz.driver.get_client() as c:
+                logger.info("Merging permissions for all users...")
+                async for row in get_merged_user_tuples(session):
+                    logging.info(
+                        f"Merging permissions for {row.merged_user_id} into {row.current_user_id}"
+                    )
+                    await merge_permissions(c, row.current_user_id, row.merged_user_id)
+
+    asyncio.run(_users_merge_permissions())
+
+
+# This command attempts to recover any missing permissions for a user
+# after a user(s) has/have been merged into said user. This command uses
+# fields in the database to infer which permissions the user should have
+@auth.command("add_missing_permissions")
+@click.argument("new_user_id", type=int)
+def add_missing_permissions(new_user_id: int) -> None:
+    async def _add_missing_permissions() -> None:
+        await config.authz.driver.init()
+        async with config.db.driver.async_session() as session:
+            async with config.authz.driver.get_client() as c:
+                logger.info(f"Adding missing permissions for user {new_user_id}...")
+                logger.info("Merging assistant permissions...")
+                await merge_missing_assistant_permissions(c, session, new_user_id)
+                logger.info("Merging thread permissions...")
+                await merge_missing_thread_permissions(c, session, new_user_id)
+                logger.info("Merging user file permissions...")
+                await merge_missing_user_file_permissions(c, session, new_user_id)
+                logger.info("Merging class file permissions...")
+                await merge_missing_class_file_permissions(c, session, new_user_id)
+                logger.info("Done!")
+
+    asyncio.run(_add_missing_permissions())
+
+
+# This command attempts to merge all permissions from old_user_id to new_user_id.
+# This command can be used if a user has been merged into another user
+# and some permissions were not transferred over, or the tuple was not added in users_merged_users.
+# In other words, it can be used with `old_user_id`s of users who have already been deleted.
+@auth.command("merge_users")
+@click.argument("new_user_id", type=int)
+@click.argument("old_user_id", type=int)
+def merge_users(new_user_id: int, old_user_id: int) -> None:
+    async def _merge_users() -> None:
+        await config.authz.driver.init()
+        async with config.db.driver.async_session() as session:
+            async with config.authz.driver.get_client() as c:
+                await merge(session, c, new_user_id, old_user_id)
+            await session.commit()
+
+    asyncio.run(_merge_users())
 
 
 def _load_alembic(alembic_config="alembic.ini") -> alembic.config.Config:

@@ -1,6 +1,7 @@
 import asyncio
 import json
-from sqlalchemy import delete, text, update
+from typing import AsyncGenerator
+from sqlalchemy import Select, and_, delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
@@ -14,10 +15,12 @@ from pingpong.models import (
     User,
     UserClassRole,
     UserInstitutionRole,
+    _get_upsert_stmt,
     user_thread_association,
     user_merge_association,
     File,
 )
+from pingpong.schemas import MergedUserTuple
 
 logger = logging.getLogger(__name__)
 
@@ -28,17 +31,51 @@ async def merge(
     new_user_id: int,
     old_user_id: int,
 ) -> "User":
-    await asyncio.gather(
-        merge_classes(session, new_user_id, old_user_id),
-        merge_institutions(session, new_user_id, old_user_id),
-        merge_assistants(session, new_user_id, old_user_id),
-        merge_threads(session, new_user_id, old_user_id),
-        merge_lms_users(session, new_user_id, old_user_id),
-        merge_external_logins(session, new_user_id, old_user_id),
-        merge_user_files(session, new_user_id, old_user_id),
-        merge_permissions(client, new_user_id, old_user_id),
-    )
+    await merge_db_operations(session, new_user_id, old_user_id)
+    await merge_permissions(client, new_user_id, old_user_id)
     return await merge_users(session, new_user_id, old_user_id)
+
+
+async def merge_db_operations(
+    session: AsyncSession,
+    new_user_id: int,
+    old_user_id: int,
+):
+    await merge_classes(session, new_user_id, old_user_id)
+    await merge_institutions(session, new_user_id, old_user_id)
+    await merge_assistants(session, new_user_id, old_user_id)
+    await merge_threads(session, new_user_id, old_user_id)
+    await merge_lms_users(session, new_user_id, old_user_id)
+    await merge_external_logins(session, new_user_id, old_user_id)
+    await merge_user_files(session, new_user_id, old_user_id)
+
+
+async def merge_missing_permissions(
+    session: AsyncSession,
+    client: OpenFgaAuthzClient,
+    stmt: Select,
+    obj_type: str,
+    rel: str,
+    new_user_id: int,
+) -> None:
+    result = await session.execute(stmt)
+    grants: list[Relation] = []
+    revokes: list[Relation] = []
+
+    async def process_row(row):
+        old_user_ids = await client.list_entities(f"{obj_type}:{row[0]}", rel, "user")
+
+        grants.extend([(f"user:{new_user_id}", rel, f"{obj_type}:{row[0]}")])
+        revokes.extend(
+            [
+                (f"user:{old_id}", rel, f"{obj_type}:{row[0]}")
+                for old_id in old_user_ids
+                if old_id != new_user_id
+            ]
+        )
+
+    await asyncio.gather(*(process_row(row) for row in result))
+    await client.write_safe(grant=grants, revoke=revokes)
 
 
 async def merge_classes(
@@ -95,6 +132,15 @@ async def merge_assistants(
     await session.execute(stmt)
 
 
+async def merge_missing_assistant_permissions(
+    client: OpenFgaAuthzClient, session: AsyncSession, new_user_id: int
+) -> None:
+    stmt = select(Assistant.id).where(Assistant.creator_id == new_user_id)
+    await merge_missing_permissions(
+        session, client, stmt, "assistant", "owner", new_user_id
+    )
+
+
 async def merge_threads(
     session: AsyncSession, new_user_id: int, old_user_id: int
 ) -> None:
@@ -104,6 +150,18 @@ async def merge_threads(
         .values(user_id=new_user_id)
     )
     await session.execute(stmt)
+
+
+async def merge_missing_thread_permissions(
+    client: OpenFgaAuthzClient, session: AsyncSession, new_user_id: int
+) -> None:
+    # Working assumption is that only one persion is associated with a thread, as we currently don't have multiparty threads
+    stmt = select(user_thread_association.c.thread_id).where(
+        user_thread_association.c.user_id == new_user_id
+    )
+    await merge_missing_permissions(
+        session, client, stmt, "thread", "party", new_user_id
+    )
 
 
 async def merge_lms_users(
@@ -148,6 +206,28 @@ async def merge_user_files(
     await session.execute(stmt)
 
 
+async def merge_missing_user_file_permissions(
+    client: OpenFgaAuthzClient, session: AsyncSession, new_user_id: int
+) -> None:
+    stmt = select(File.id).where(
+        and_(File.uploader_id == new_user_id, File.private.is_(True))
+    )
+    await merge_missing_permissions(
+        session, client, stmt, "user_file", "owner", new_user_id
+    )
+
+
+async def merge_missing_class_file_permissions(
+    client: OpenFgaAuthzClient, session: AsyncSession, new_user_id: int
+) -> None:
+    stmt = select(File.id).where(
+        and_(File.uploader_id == new_user_id, File.private.is_(False))
+    )
+    await merge_missing_permissions(
+        session, client, stmt, "class_file", "owner", new_user_id
+    )
+
+
 def get_types() -> list[str]:
     """Get a list of object types used in the authz model."""
     with open(config.authz.driver.model_config) as f:
@@ -180,14 +260,23 @@ async def list_all_permissions(
     return all_relations
 
 
+async def get_merged_user_tuples(
+    session: AsyncSession,
+) -> AsyncGenerator[MergedUserTuple, None]:
+    stmt = select(
+        user_merge_association.c.user_id, user_merge_association.c.merged_user_id
+    )
+    result = await session.execute(stmt)
+    for row in result:
+        yield MergedUserTuple(current_user_id=row[0], merged_user_id=row[1])
+
+
 async def merge_permissions(
     client: OpenFgaAuthzClient, new_user_id: int, old_user_id: int
 ) -> None:
     logging.info(f"Merging permissions for {old_user_id} into {new_user_id}")
     old_permissions = await list_all_permissions(client, old_user_id)
     new_permissions = [(f"user:{new_user_id}", r, o) for _, r, o in old_permissions]
-    logging.info(f"Revoking {old_permissions}")
-    logging.info(f"Granting {new_permissions}")
     await client.write_safe(grant=new_permissions, revoke=old_permissions)
 
 
@@ -196,33 +285,42 @@ async def merge_users(
 ) -> "User":
     old_user = await User.get_by_id(session, old_user_id)
     new_user = await User.get_by_id(session, new_user_id)
+    if not new_user:
+        raise ValueError(f"New user {new_user_id} not found.")
     logging.info(f"Merging user {old_user_id} into {new_user_id}")
-    logging.info(
-        f"Old user: {old_user.id}, {old_user.email}, {old_user.state}, {'Super admin' if old_user.super_admin else 'Not super admin'}"
-    )
-    match old_user.state:
-        case "verified":
-            new_user.state = (
-                "verified" if new_user.state != "banned" else new_user.state
-            )
-        case "banned":
-            new_user.state = "banned"
-        case _:
-            pass
+    if not old_user:
+        logging.warning(
+            f"Old user {old_user_id} not found, continuing with adding the merge tuple only."
+        )
+    if old_user:
+        match old_user.state:
+            case "verified":
+                new_user.state = (
+                    "verified" if new_user.state != "banned" else new_user.state
+                )
+            case "banned":
+                new_user.state = "banned"
+            case _:
+                pass
 
-    new_user.super_admin = new_user.super_admin or old_user.super_admin
-    stmt = (
-        update(user_merge_association)
-        .where(user_merge_association.c.user_id == old_user_id)
-        .values(user_id=new_user_id)
+        new_user.super_admin = new_user.super_admin or old_user.super_admin
+        update_merged_account_tuple_stmt = (
+            update(user_merge_association)
+            .where(user_merge_association.c.user_id == old_user_id)
+            .values(user_id=new_user_id)
+        )
+        await session.execute(update_merged_account_tuple_stmt)
+        delete_old_user_stmt = delete(User).where(User.id == old_user_id)
+        await session.execute(delete_old_user_stmt)
+    add_new_merge_tuple_stmt = (
+        _get_upsert_stmt(session)(user_merge_association)
+        .values(user_id=new_user_id, merged_user_id=old_user_id)
+        .on_conflict_do_nothing(
+            index_elements=["user_id", "merged_user_id"],
+        )
     )
-    await session.execute(stmt)
-    stmt_ = delete(User).where(User.id == old_user_id)
-    await session.execute(stmt_)
+    await session.execute(add_new_merge_tuple_stmt)
     session.add(new_user)
     await session.flush()
     await session.refresh(new_user)
-    logging.info(
-        f"New user: {new_user.id}, {new_user.email}, {new_user.state}, {'Super admin' if new_user.super_admin else 'Not super admin'}"
-    )
     return new_user

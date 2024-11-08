@@ -78,16 +78,29 @@ class OpenFgaAuthzClient(AuthzClient):
         return [int(user.object.id) for user in response.users]
 
     async def read(self, key: ReadRequestTupleKey) -> List[ClientTuple]:
-        response: ReadResponse = await self._cli.read(key)
+        client_tuples = []
+        continuation_token = None
 
-        client_tuples = [
-            ClientTuple(
-                user=tuple.key.user,
-                relation=tuple.key.relation,
-                object=tuple.key.object,
+        while True:
+            response: ReadResponse = await self._cli.read(
+                key, {"continuation_token": continuation_token}
             )
-            for tuple in response.tuples
-        ]
+
+            client_tuples.extend(
+                [
+                    ClientTuple(
+                        user=tuple.key.user,
+                        relation=tuple.key.relation,
+                        object=tuple.key.object,
+                    )
+                    for tuple in response.tuples
+                ]
+            )
+
+            if not response.continuation_token:
+                break
+
+            continuation_token = response.continuation_token
 
         return client_tuples
 
