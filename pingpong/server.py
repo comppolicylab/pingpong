@@ -2174,7 +2174,7 @@ async def send_message(
             )
 
         if data.file_search_file_ids:
-            if thread.vector_store_id:
+            if thread.vector_store_id is not None:
                 # Vector store already exists, update
                 await add_vector_store_files_to_db(
                     request.state.db,
@@ -2216,6 +2216,14 @@ async def send_message(
                 for id in data.vision_file_ids
             ]
 
+        try:
+            await openai_client.beta.threads.update(
+                thread.thread_id, tool_resources=tool_resources
+            )
+        except openai.BadRequestError as e:
+            raise HTTPException(400, e.message or "OpenAI rejected this request")
+
+        thread.updated = func.now()
         thread.last_activity = func.now()
         thread.user_message_ct += 1
         request.state.db.add(thread)
