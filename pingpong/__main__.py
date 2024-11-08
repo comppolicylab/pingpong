@@ -186,7 +186,7 @@ def add_missing_permissions(new_user_id: int) -> None:
 
 # This command attempts to merge all permissions from old_user_id to new_user_id.
 # This command can be used if a user has been merged into another user
-# and some permissions were not transferred over. In other words, 
+# and some permissions were not transferred over. In other words,
 # it can be used with old_user_id of users who have already been deleted.
 # In this case, only the permissions of the old_user_id will be merged,
 # and no database operations will be performed.
