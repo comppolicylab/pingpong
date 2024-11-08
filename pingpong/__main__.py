@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from pingpong.merge import (
     get_merged_user_tuples,
+    list_all_permissions,
     merge_missing_assistant_permissions,
     merge_missing_class_file_permissions,
     merge_missing_thread_permissions,
@@ -128,7 +129,19 @@ def login(email: str, redirect: str, super_user: bool) -> None:
     webbrowser.open(url)
 
 
-@auth.command("merge_permissions")
+@auth.command("list_permissions")
+@click.argument("user_id", type=int)
+def list_permissions(user_id: int) -> None:
+    async def _list_permissions() -> None:
+        await config.authz.driver.init()
+        async with config.authz.driver.get_client() as c:
+            perms = await list_all_permissions(c, user_id)
+            logging.info(f"Permissions for user {user_id}: {perms}")
+
+    asyncio.run(_list_permissions())
+
+
+@auth.command("merge_outstanding_permissions")
 def users_merge_permissions() -> None:
     async def _users_merge_permissions() -> None:
         await config.authz.driver.init()
