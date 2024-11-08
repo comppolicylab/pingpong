@@ -188,7 +188,11 @@ class AssistantFilesResponse(BaseModel):
 
 
 FileUploadPurpose = Union[
-    Literal["assistants"], Literal["vision"], Literal["multimodal"]
+    Literal["assistants"],
+    Literal["vision"],
+    Literal["fs_ci_multimodal"],
+    Literal["fs_multimodal"],
+    Literal["ci_multimodal"],
 ]
 
 

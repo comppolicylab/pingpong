@@ -1,4 +1,3 @@
-import asyncio
 import openai
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.exc import IntegrityError
@@ -81,59 +80,41 @@ async def handle_create_file(
             status_code=403, detail="File type not supported for File Search by OpenAI!"
         )
 
-    if purpose == "multimodal":
-        tasks: list[asyncio.Task[FileSchema]] = []
+    if "multimodal" in purpose:
+        new_v_file, new_f_file = None, None
         if _is_vision_supported(content_type):
-            tasks.append(
-                asyncio.create_task(
-                    handle_create_file(
-                        session,
-                        authz,
-                        oai_client,
-                        upload=upload,
-                        class_id=class_id,
-                        uploader_id=uploader_id,
-                        private=private,
-                        purpose="vision",
-                    ),
-                    name="vision_upload",
-                )
+            new_v_file = await handle_create_file(
+                session,
+                authz,
+                oai_client,
+                upload=upload,
+                class_id=class_id,
+                uploader_id=uploader_id,
+                private=private,
+                purpose="vision",
             )
 
         # There is a case where the file is vision supported but not file search or code interpreter supported
         # image/webp is an example of this case
-        if _is_fs_supported(content_type) or _is_ci_supported(content_type):
-            tasks.append(
-                asyncio.create_task(
-                    handle_create_file(
-                        session,
-                        authz,
-                        oai_client,
-                        upload=upload,
-                        class_id=class_id,
-                        uploader_id=uploader_id,
-                        private=private,
-                        purpose="assistants",
-                    ),
-                    name="assistants_upload",
+        if (_is_fs_supported(content_type) and "fs" in purpose) or (
+            _is_ci_supported(content_type) and "ci" in purpose
+        ):
+            try:
+                new_f_file = await handle_create_file(
+                    session,
+                    authz,
+                    oai_client,
+                    upload=upload,
+                    class_id=class_id,
+                    uploader_id=uploader_id,
+                    private=private,
+                    purpose="assistants",
                 )
-            )
-
-        await asyncio.gather(*tasks)
-        new_v_file, new_f_file = (
-            next(
-                (task.result() for task in tasks if task.get_name() == "vision_upload"),
-                None,
-            ),
-            next(
-                (
-                    task.result()
-                    for task in tasks
-                    if task.get_name() == "assistants_upload"
-                ),
-                None,
-            ),
-        )
+            except Exception as e:
+                if new_v_file:
+                    await oai_client.files.delete(new_v_file.vision_file_id)
+                    await authz.write(revoke=_file_grants(new_v_file))
+                raise e
 
         primary_file = new_f_file if new_f_file else new_v_file
 
@@ -151,10 +132,10 @@ async def handle_create_file(
             file_id=primary_file.file_id,
             vision_obj_id=new_v_file.id if new_v_file and new_f_file else None,
             file_search_file_id=primary_file.file_id
-            if _is_fs_supported(content_type)
+            if _is_fs_supported(content_type) and "fs" in purpose
             else None,
             code_interpreter_file_id=primary_file.file_id
-            if _is_ci_supported(content_type)
+            if _is_ci_supported(content_type) and "ci" in purpose
             else None,
             vision_file_id=new_v_file.file_id if new_v_file else None,
             class_id=primary_file.class_id,
@@ -164,6 +145,7 @@ async def handle_create_file(
             updated=primary_file.updated,
         )
 
+    await upload.seek(0)
     try:
         new_f = await oai_client.files.create(
             # NOTE(jnu): the client tries to infer the filename, which doesn't
@@ -217,6 +199,7 @@ async def handle_create_file(
         )
     except Exception as e:
         await oai_client.files.delete(new_f.id)
+        await authz.write(revoke=_file_grants(f))
         raise e
 
 

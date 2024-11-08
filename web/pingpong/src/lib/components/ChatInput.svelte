@@ -115,13 +115,17 @@
   $: uploading = $allFiles.some((f) => f.state === 'pending');
   let purpose: FileUploadPurpose | null = null;
   $: purpose =
-    (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles) && visionAcceptedFiles
-      ? 'multimodal'
-      : codeInterpreterAcceptedFiles || fileSearchAcceptedFiles
-        ? 'assistants'
-        : visionAcceptedFiles
-          ? 'vision'
-          : null;
+    codeInterpreterAcceptedFiles && fileSearchAcceptedFiles && visionAcceptedFiles
+      ? 'fs_ci_multimodal'
+      : codeInterpreterAcceptedFiles && visionAcceptedFiles
+        ? 'ci_multimodal'
+        : fileSearchAcceptedFiles && visionAcceptedFiles
+          ? 'fs_multimodal'
+          : codeInterpreterAcceptedFiles || fileSearchAcceptedFiles
+            ? 'assistants'
+            : visionAcceptedFiles
+              ? 'vision'
+              : null;
   $: codeInterpreterFiles = (codeInterpreterAcceptedFiles ? $allFiles : [])
     .filter((f) => f.state === 'success' && (f.response as ServerFile).code_interpreter_file_id)
     .map((f) => (f.response as ServerFile).file_id);
@@ -388,7 +392,12 @@
         >
           <div class="flex gap-2 flex-wrap px-2 py-0">
             {#each $allFiles as file}
-              <FilePlaceholder {mimeType} info={file} purpose="multimodal" on:delete={removeFile} />
+              <FilePlaceholder
+                {mimeType}
+                info={file}
+                purpose="fs_ci_multimodal"
+                on:delete={removeFile}
+              />
             {/each}
           </div>
         </div>
