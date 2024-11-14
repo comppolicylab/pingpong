@@ -466,8 +466,15 @@ class CanvasCourseClient(ABC):
         request_url = f"/api/v1/courses/{course_id}/users"
 
         async for result in self._request_all_pages(request_url):
-            return bool(result)
-
+            if not result:
+                return False
+            for user in result:
+                if not user.get(self.config.sso_target):
+                    raise CanvasException(
+                        code=403,
+                        detail="You do not have permission to access SIS information for this class. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
+                    )
+                return True
         return False
 
     async def verify_access(self, course_id: str) -> None:

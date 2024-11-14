@@ -51,7 +51,8 @@
     UserRemoveSolid,
     FileLinesOutline,
     ExclamationCircleOutline,
-    LockSolid
+    LockSolid,
+    CheckCircleOutline
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
@@ -429,9 +430,13 @@
   }, {});
   $: selectedClassName = classNameDict[selectedClass] || 'Select a class...';
 
-  const updateSelectedClass = (classValue: string) => {
+  const updateSelectedClass = async (classValue: string) => {
+    canvasClassVerified = false;
+    canvasClassBeingVerified = true;
+    canvasClassVerificationError = '';
     classSelectDropdownOpen = false;
     selectedClass = classValue;
+    await verifyCanvasClass();
   };
 
   const saveSelectedClass = async () => {
@@ -446,6 +451,24 @@
       invalidateAll();
       happyToast('Canvas class successfully linked!');
     }
+  };
+
+  let canvasClassVerified = false;
+  let canvasClassBeingVerified = false;
+  let canvasClassVerificationError = '';
+
+  const verifyCanvasClass = async () => {
+    canvasClassBeingVerified = true;
+    const result = await api.verifyCanvasClass(fetch, data.class.id, 'harvard', selectedClass);
+    const response = api.expandResponse(result);
+    if (response.error) {
+      canvasClassVerificationError =
+        response.error.detail ||
+        'There was an issue while trying to verify your access to the class roster. Try again later.';
+    } else {
+      canvasClassVerified = true;
+    }
+    canvasClassBeingVerified = false;
   };
 
   let syncingCanvasClass = false;
@@ -975,13 +998,44 @@
                     />
                   </DropdownContainer>
                   <div class="flex gap-2 items-center">
+                    {#if canvasClassBeingVerified}
+                      <Spinner color="yellow" class="w-6 h-6" />
+                      <Tooltip
+                        defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
+                        arrow={false}
+                        >We're verifying your access to the class roster. This shouldn't take long.</Tooltip
+                      >
+                    {:else if canvasClassVerified}
+                      <CheckCircleOutline class="w-6 h-6 text-amber-800" />
+                      <Tooltip
+                        defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
+                        arrow={false}>Your access to the class roster has been verified.</Tooltip
+                      >
+                    {:else if canvasClassVerificationError}
+                      <ExclamationCircleOutline class="w-6 h-6 text-amber-800" />
+                      <Tooltip
+                        defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
+                        arrow={false}>{canvasClassVerificationError}</Tooltip
+                      >
+                    {:else if !canvasClassVerified}
+                      <CheckCircleOutline class="w-6 h-6 text-amber-800 text-opacity-25" />
+                      <Tooltip
+                        defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
+                        arrow={false}
+                        >We'll verify your permissions to access the class roster. Select a class to
+                        begin.</Tooltip
+                      >
+                    {/if}
                     <Button
                       pill
                       size="xs"
                       class="shrink-0 max-h-fit border border-amber-900 bg-gradient-to-t from-amber-900 to-amber-800 text-white hover:from-amber-800 hover:to-amber-700"
                       on:click={saveSelectedClass}
                       on:touchstart={saveSelectedClass}
-                      disabled={loadingCanvasClasses || !selectedClass}
+                      disabled={loadingCanvasClasses ||
+                        !selectedClass ||
+                        canvasClassBeingVerified ||
+                        !canvasClassVerified}
                     >
                       Save</Button
                     >
@@ -989,13 +1043,22 @@
                       pill
                       size="xs"
                       class="shrink-0 max-h-fit border border-gray-400 bg-gradient-to-t from-gray-100 to-gray-100 text-gray-800 hover:from-gray-200 hover:to-gray-100"
+                      disabled={loadingCanvasClasses || canvasClassBeingVerified}
                       on:click={() => {
                         $loadedCanvasClasses = [];
                         selectedClass = '';
+                        canvasClassVerified = false;
+                        canvasClassBeingVerified = false;
+                        canvasClassVerificationError = '';
+                        classSelectDropdownOpen = false;
                       }}
                       on:touchstart={() => {
                         $loadedCanvasClasses = [];
                         selectedClass = '';
+                        canvasClassVerified = false;
+                        canvasClassBeingVerified = false;
+                        canvasClassVerificationError = '';
+                        classSelectDropdownOpen = false;
                       }}
                     >
                       Cancel</Button
@@ -1188,16 +1251,16 @@
                 <span class="text-lg font-medium">Important: Reconnect your Canvas account</span>
               </div>
               <p class="mt-2 text-sm">
-                We faced an issue when trying to connect to your Canvas account. Use the
-                reconnection button below to reauthorize Pingpong to access your Canvas account and
-                ensure uninterrupted syncing of your class roster.
+                We faced an issue when trying to get the class roster from your Canvas account. Use
+                the reconnection button below to reauthorize Pingpong to access your Canvas account
+                and ensure uninterrupted syncing of your class roster.
               </p>
               <p class="mt-2 mb-4 text-sm">
                 Last sync: {data.class.lms_last_synced
                   ? dayjs.utc(data.class.lms_last_synced).fromNow()
                   : 'never'}
               </p>
-              <div class="flex gap-2">
+              <div class="flex flex-row justify-between items-center">
                 <Button
                   pill
                   size="xs"
@@ -1207,7 +1270,23 @@
                 >
                   <RefreshOutline class="w-4 h-4 me-2" />Reconnect Canvas account</Button
                 >
+                <Button
+                  pill
+                  size="xs"
+                  class="border border-red-900 hover:bg-red-900 text-red-900 hover:bg-gradient-to-t hover:from-red-800 hover:to-red-700 hover:text-white"
+                  on:click={() => (disconnectCanvas = true)}
+                  on:touchstart={() => (disconnectCanvas = true)}
+                >
+                  <UserRemoveSolid class="w-4 h-4 me-2" />Disconnect Canvas account</Button
+                >
               </div>
+              <Modal bind:open={disconnectCanvas} size="sm" autoclose>
+                <CanvasDisconnectModal
+                  canvasCourseCode={data.class.lms_class?.course_code || ''}
+                  on:keep={() => removeCanvasConnection(true)}
+                  on:remove={() => removeCanvasConnection(false)}
+                />
+              </Modal>
             </div>
           </Alert>
         {:else if data.class.lms_status === 'error'}
