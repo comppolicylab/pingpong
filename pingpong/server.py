@@ -1079,6 +1079,8 @@ async def sync_canvas_class(
                 status_code=e.code, detail="Canvas returned an error: " + e.message
             )
         except (CanvasException, AddUserException) as e:
+            if e.code == 403:
+                await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
             logger.exception(
                 "sync_canvas_class: CanvasException or AddUserException occurred"
             )
