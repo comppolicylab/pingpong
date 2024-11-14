@@ -574,7 +574,7 @@ class CanvasCourseClient(ABC):
                     f"User {user['email']} does not have an SSO ID in the Canvas response. Marking class as having a sync error."
                 )
                 self.missing_sso_ids = True
-                continue
+                break
             yield CreateUserClassRole(
                 email=user["email"],
                 sso_id=user.get(self.config.sso_target),
