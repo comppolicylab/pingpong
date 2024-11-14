@@ -2196,6 +2196,25 @@ async def send_message(
                 thread.vector_store_id = vector_store_object_id
                 tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
 
+                existing_file_ids = [
+                    file_id
+                    async for file_id in models.Thread.get_file_ids_by_id(
+                        request.state.db, thread.id
+                    )
+                ]
+                tool_resources["code_interpreter"] = {"file_ids": existing_file_ids}
+
+                try:
+                    await openai_client.beta.threads.update(
+                        thread.thread_id, tool_resources=tool_resources
+                    )
+                except openai.BadRequestError as e:
+                    raise HTTPException(
+                        400, e.message or "OpenAI rejected this request"
+                    )
+
+                thread.updated = func.now()
+
         if data.code_interpreter_file_ids:
             await models.Thread.add_code_interpeter_files(
                 request.state.db, thread.id, data.code_interpreter_file_ids
