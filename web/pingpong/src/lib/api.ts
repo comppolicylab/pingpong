@@ -2043,6 +2043,16 @@ export const saveCanvasClass = async (
   return await POST<never, GenericStatus>(f, url);
 };
 
+export const verifyCanvasClass = async (
+  f: Fetcher,
+  classId: number,
+  tenant: string,
+  canvasClassId: string
+) => {
+  const url = `class/${classId}/canvas/${tenant}/classes/${canvasClassId}/verify`;
+  return await POST<never, GenericStatus>(f, url);
+};
+
 export const syncCanvasClass = async (f: Fetcher, classId: number, tenant: string) => {
   const url = `class/${classId}/canvas/${tenant}/sync`;
   return await POST<never, GenericStatus>(f, url);

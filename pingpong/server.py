@@ -952,6 +952,60 @@ async def get_canvas_classes(class_id: str, tenant: str, request: Request):
 
 
 @v1.post(
+    "/class/{class_id}/canvas/{tenant}/classes/{canvas_class_id}/verify",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def verify_canvas_class_permissions(
+    class_id: str, tenant: str, canvas_class_id: str, request: Request
+):
+    canvas_settings = get_canvas_config(tenant)
+    async with LightweightCanvasClient(
+        canvas_settings,
+        int(class_id),
+        request,
+    ) as client:
+        try:
+            await client.verify_access(canvas_class_id)
+            return {"status": "ok"}
+        except CanvasException as e:
+            logger.exception(
+                "verify_canvas_class_permissions: CanvasException occurred"
+            )
+            raise HTTPException(
+                status_code=e.code or 500,
+                detail=e.detail
+                or "We faced an error while verifying your access to this Canvas class.",
+            )
+        except CanvasWarning as e:
+            logger.warning(
+                "verify_canvas_class_permissions: CanvasWarning occurred: %s", e.detail
+            )
+            raise HTTPException(
+                status_code=e.code or 500,
+                detail=e.detail
+                or "We faced an error while verifying your access to this Canvas class.",
+            ) from e
+        except ClientResponseError as e:
+            # If we get a 401 error, mark the class as having a sync error.
+            # Otherwise, just display an error message.
+            if e.code == 401:
+                await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
+            logger.exception(
+                "verify_canvas_class_permissions: ClientResponseError occurred"
+            )
+            raise HTTPException(
+                status_code=e.code, detail="Canvas returned an error: " + e.message
+            )
+        except Exception:
+            logger.exception("verify_canvas_class_permissions: Exception occurred")
+            raise HTTPException(
+                status_code=500,
+                detail="We faced an internal error while verifying your access to this Canvas class.",
+            )
+
+
+@v1.post(
     "/class/{class_id}/canvas/{tenant}/classes/{canvas_class_id}",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
@@ -1025,6 +1079,8 @@ async def sync_canvas_class(
                 status_code=e.code, detail="Canvas returned an error: " + e.message
             )
         except (CanvasException, AddUserException) as e:
+            if e.code == 403:
+                await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
             logger.exception(
                 "sync_canvas_class: CanvasException or AddUserException occurred"
             )

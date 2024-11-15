@@ -466,8 +466,15 @@ class CanvasCourseClient(ABC):
         request_url = f"/api/v1/courses/{course_id}/users"
 
         async for result in self._request_all_pages(request_url):
-            return bool(result)
-
+            if not result:
+                return False
+            for user in result:
+                if self.config.sso_target and not user.get(self.config.sso_target):
+                    raise CanvasException(
+                        code=403,
+                        detail="You do not have permission to access SIS information for this class. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
+                    )
+                return True
         return False
 
     async def verify_access(self, course_id: str) -> None:
@@ -562,12 +569,12 @@ class CanvasCourseClient(ABC):
                 if enrollment["type"] in ["TeacherEnrollment", "TaEnrollment"]:
                     is_teacher = True
                     break
-            if not user.get(self.config.sso_target):
+            if self.config.sso_target and not user.get(self.config.sso_target):
                 logging.warning(
-                    f"User {user['email']} does not have an SSO ID in the Canvas response. Skipping."
+                    f"User {user['email']} does not have an SSO ID in the Canvas response. Marking class as having a sync error."
                 )
                 self.missing_sso_ids = True
-                continue
+                break
             yield CreateUserClassRole(
                 email=user["email"],
                 sso_id=user.get(self.config.sso_target),
@@ -625,8 +632,12 @@ class CanvasCourseClient(ABC):
             lms_tenant=self.config.tenant,
             lms_type=self.config.type,
             sso_tenant=self.config.sso_tenant,
-            missing_some_sso_ids=self.missing_sso_ids,
         )
+        if self.missing_sso_ids:
+            raise CanvasException(
+                code=403,
+                detail="Some users in the Canvas class do not have SIS information. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
+            )
         await self._update_user_roles()
         await Class.update_last_synced(self.db, self.class_id)
 
