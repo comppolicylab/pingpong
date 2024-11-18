@@ -316,7 +316,6 @@ async def login_sso_saml_acs(provider: str, request: Request):
         request.state.db, attrs.email, provider, attrs.identifier
     )
     if not user:
-        logging.info("login_sso_saml_acs: Creating new user %s", attrs.email)
         user = models.User(
             email=attrs.email,
         )

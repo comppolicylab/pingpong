@@ -274,7 +274,6 @@ async def get_merged_user_tuples(
 async def merge_permissions(
     client: OpenFgaAuthzClient, new_user_id: int, old_user_id: int
 ) -> None:
-    logging.info(f"Merging permissions for {old_user_id} into {new_user_id}")
     old_permissions = await list_all_permissions(client, old_user_id)
     new_permissions = [(f"user:{new_user_id}", r, o) for _, r, o in old_permissions]
     await client.write_safe(grant=new_permissions, revoke=old_permissions)
@@ -287,7 +286,6 @@ async def merge_users(
     new_user = await User.get_by_id(session, new_user_id)
     if not new_user:
         raise ValueError(f"New user {new_user_id} not found.")
-    logging.info(f"Merging user {old_user_id} into {new_user_id}")
     if not old_user:
         logging.warning(
             f"Old user {old_user_id} not found, continuing with adding the merge tuple only."
