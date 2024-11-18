@@ -32,8 +32,6 @@ from sqlalchemy.sql import func
 import pingpong.schemas as schemas
 import logging
 
-logger = logging.getLogger(__name__)
-
 
 def _get_upsert_stmt(session: AsyncSession):
     """Get the appropriate upsert statement for the current database."""
@@ -228,9 +226,6 @@ class ExternalLogin(Base):
             )
         )
         await session.execute(stmt)
-        logger.info(
-            f"External login created/updated: user_id: {user_id}, provider: {provider}, identifier: {identifier}"
-        )
 
     @classmethod
     async def accounts_to_merge(
