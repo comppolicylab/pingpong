@@ -317,14 +317,6 @@ class AddNewUsers(ABC):
                     )
                 )
                 continue
-            if not self.new_ucr.sso_tenant:
-                logging.warning(
-                    f"add_users_to_class: Warning for User {ucr.email}, SSO ID: {ucr.sso_id}: No SSO tenant provided."
-                )
-            if not ucr.sso_id:
-                logging.warning(
-                    f"add_users_to_class: Warning for User {ucr.email}, SSO tenant: {self.new_ucr.sso_tenant}: No SSO ID provided."
-                )
             user = await models.User.get_or_create_by_email_sso(
                 self.session,
                 ucr.email,
