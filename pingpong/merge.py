@@ -22,8 +22,6 @@ from pingpong.models import (
 )
 from pingpong.schemas import MergedUserTuple
 
-logger = logging.getLogger(__name__)
-
 
 async def merge(
     session: AsyncSession,
