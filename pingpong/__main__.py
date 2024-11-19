@@ -301,6 +301,13 @@ def db_set_version(version: str, alembic_config: str) -> None:
     alembic.command.stamp(al_cfg, version)
 
 
+# @db.command("migrate-oai-keys")
+# @click.argument("admin_key", type=str)
+# @click.argument("project_id", type=str)
+# @click.argument("new_api_key", type=str)
+# def migrate_oai_keys(admin_key: str, project_id: str, new_api_key: str) -> None:
+
+
 async def _lms_sync_all() -> None:
     await config.authz.driver.init()
     async with config.db.driver.async_session() as session:
