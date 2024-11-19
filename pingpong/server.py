@@ -1434,6 +1434,15 @@ async def update_class_api_key(
         await models.Class.update_api_key(
             request.state.db, int(class_id), update.api_key
         )
+        await request.state.authz.write_safe(
+            grant=[
+                (
+                    f"user:{request.state.session.user.id}",
+                    "can_view_api_key",
+                    f"class:{class_id}",
+                )
+            ]
+        )
     else:
         raise HTTPException(
             status_code=400,
