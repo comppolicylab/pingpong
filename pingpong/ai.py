@@ -120,13 +120,23 @@ async def generate_thread_name(
         return None
 
 
-async def validate_api_key(api_key: str) -> bool:
+async def validate_api_key(
+    api_key: str,
+    provider: Literal["azure", "openai"] = "openai",
+    azure_endpoint: str | None = None,
+    azure_api_version: str | None = None,
+) -> bool:
     """Validate an OpenAI API key.
 
     :param key: API key to validate
     :return: Whether the key is valid
     """
-    cli = get_openai_client(api_key)
+    cli = get_openai_client(
+        api_key,
+        provider=provider,
+        endpoint=azure_endpoint,
+        api_version=azure_api_version,
+    )
     try:
         await cli.models.list()
         return True
@@ -607,9 +617,9 @@ def replace_annotations_in_text(
 @functools.cache
 def get_openai_client(
     api_key: str,
-    provider: Union[Literal["azure"], Literal["openai"]] = "openai",
+    provider: Literal["azure", "openai"] = "openai",
     endpoint: str | None = None,
-    api_version: str | None = None,
+    api_version: str | None = "2024-10-01-preview",
 ) -> Union[openai.AsyncClient, openai.AsyncAzureOpenAI]:
     if not api_key:
         raise ValueError("API key is required")

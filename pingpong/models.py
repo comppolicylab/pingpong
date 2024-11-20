@@ -1018,6 +1018,18 @@ class LMSClass(Base):
             await session.execute(stmt_)
 
 
+class APIKey(Base):
+    __tablename__ = "api_keys"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider = Column(String, nullable=False)
+    key = Column(String, nullable=False)
+    classes = relationship("Class", back_populates="api_key_obj")
+    azure_endpoint = Column(String, nullable=True)
+    azure_api_version = Column(String, nullable=True)
+    available_as_default = Column(Boolean, default=False)
+
+
 class Class(Base):
     __tablename__ = "classes"
 
@@ -1031,6 +1043,8 @@ class Class(Base):
     )
     term = Column(String)
     api_key = Column(String, nullable=True)
+    api_key_id = Column(Integer, ForeignKey("api_keys.id"), nullable=True)
+    api_key_obj = relationship("APIKey", back_populates="classes", lazy="selectin")
     private = Column(Boolean, default=False)
     lms_status = Column(SQLEnum(schemas.LMSStatus), default=schemas.LMSStatus.NONE)
     lms_class_id = Column(Integer, ForeignKey("lms_classes.id"), nullable=True)
@@ -1098,15 +1112,44 @@ class Class(Base):
         return await session.scalar(stmt)
 
     @classmethod
-    async def get_api_key(cls, session: AsyncSession, id_: int) -> str | None:
+    async def get_api_key_str(cls, session: AsyncSession, id_: int) -> str | None:
         stmt = select(Class.api_key).where(Class.id == int(id_))
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_api_key_obj(cls, session: AsyncSession, id_: int) -> APIKey | None:
+        stmt = (
+            select(Class.api_key, Class.api_key_obj)
+            .options(joinedload(Class.api_key_obj))
+            .where(Class.id == int(id_))
+        )
+        result = await session.scalar(stmt)
+
+    @classmethod
     async def update_api_key(
-        cls, session: AsyncSession, id_: int, api_key: str
+        cls,
+        session: AsyncSession,
+        id_: int,
+        api_key: str,
+        provider: str,
+        azure_endpoint: str | None,
+        azure_api_version: str,
+        available_as_default: bool,
     ) -> None:
-        stmt = update(Class).where(Class.id == int(id_)).values(api_key=api_key)
+        stmt = (
+            update(Class)
+            .where(Class.id == int(id_))
+            .values(
+                api_key=api_key,
+                api_key_obj=APIKey(
+                    key=api_key,
+                    provider=provider,
+                    azure_endpoint=azure_endpoint,
+                    azure_api_version=azure_api_version,
+                    available_as_default=available_as_default,
+                ),
+            )
+        )
         await session.execute(stmt)
 
     @classmethod

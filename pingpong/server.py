@@ -3,7 +3,7 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Union
 from aiohttp import ClientResponseError
 import jwt
 import openai
@@ -97,7 +97,10 @@ def get_now_fn(req: Request) -> NowFn:
     return getattr(req.app.state, "now", utcnow)
 
 
-async def get_openai_client_for_class(request: Request) -> openai.AsyncClient:
+OpenAIClientType = Union[openai.AsyncClient, openai.AsyncAzureOpenAI]
+
+
+async def get_openai_client_for_class(request: Request) -> OpenAIClientType:
     """Get an OpenAI client for the class.
 
     Requires the class_id to be in the path parameters.
@@ -110,7 +113,7 @@ async def get_openai_client_for_class(request: Request) -> openai.AsyncClient:
 
 
 OpenAIClientDependency = Depends(get_openai_client_for_class)
-OpenAIClient = Annotated[openai.AsyncClient, OpenAIClientDependency]
+OpenAIClient = Annotated[OpenAIClientType, OpenAIClientDependency]
 
 
 @v1.middleware("http")
@@ -835,7 +838,7 @@ async def delete_class(class_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Group not found")
 
     if class_.api_key:
-        openai_client = get_openai_client(class_.api_key)
+        openai_client = await get_openai_client_for_class(request)
         # Delete all threads
         async for thread in models.Thread.get_ids_by_class_id(
             request.state.db, class_.id
