@@ -177,9 +177,7 @@
     </figure>
   </Card>
 
-  <h3 class="mt-8 ml-5 text-2xl font-extrabold">
-    FAQ for Instructors
-  </h3>
+  <h3 class="mt-8 ml-5 text-2xl font-extrabold">FAQ for Instructors</h3>
   <ol class="list-disc ml-7 font-light">
     <li class="my-2">
       <h4 class="text-lg font-semibold">
