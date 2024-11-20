@@ -59,9 +59,9 @@
     <figure
       class="flex flex-col md:col-span-2 justify-start items-start text-start bg-white text-gray-900 border-b rounded-t-lg border-gray-200 dark:bg-gray-800 dark:border-gray-700"
     >
-      <Heading tag="h3" class="mt-4 ml-5 mb-3" customSize="text-2xl font-extrabold"
-        >Quick Facts about PingPong Educational Access
-      </Heading>
+      <h3 class="mt-4 ml-5 mb-3 text-2xl font-extrabold">
+        Quick Facts about PingPong Educational Access
+      </h3>
     </figure>
     <figure
       class="flex flex-col justify-start items-start p-8 text-start bg-white text-gray-900 rounded-t-lg border-b border-gray-200 md:rounded-t-none md:rounded-tl-lg md:border-e dark:bg-gray-800 dark:border-gray-700"
@@ -177,9 +177,7 @@
     </figure>
   </Card>
 
-  <Heading tag="h3" class="mt-8 ml-5" customSize="text-2xl font-extrabold"
-    >FAQ for Instructors
-  </Heading>
+  <h3 class="mt-8 ml-5 text-2xl font-extrabold">FAQ for Instructors</h3>
   <ol class="list-disc ml-7 font-light">
     <li class="my-2">
       <h4 class="text-lg font-semibold">
