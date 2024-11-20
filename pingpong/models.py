@@ -1020,10 +1020,15 @@ class LMSClass(Base):
 
 class APIKey(Base):
     __tablename__ = "api_keys"
+    __table_args__ = (
+        UniqueConstraint(
+            "api_key", "provider", "azure_endpoint", name="_key_endpoint_provider_uc"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     provider = Column(String, nullable=False)
-    key = Column(String, nullable=False)
+    api_key = Column(String, nullable=False)
     classes = relationship("Class", back_populates="api_key_obj")
     azure_endpoint = Column(String, nullable=True)
     azure_api_version = Column(String, nullable=True)
@@ -1112,18 +1117,18 @@ class Class(Base):
         return await session.scalar(stmt)
 
     @classmethod
-    async def get_api_key_str(cls, session: AsyncSession, id_: int) -> str | None:
-        stmt = select(Class.api_key).where(Class.id == int(id_))
-        return await session.scalar(stmt)
-
-    @classmethod
-    async def get_api_key_obj(cls, session: AsyncSession, id_: int) -> APIKey | None:
+    async def get_api_key(
+        cls, session: AsyncSession, id_: int
+    ) -> schemas.APIKeyResponse:
         stmt = (
-            select(Class.api_key, Class.api_key_obj)
+            select(Class)
             .options(joinedload(Class.api_key_obj))
             .where(Class.id == int(id_))
         )
         result = await session.scalar(stmt)
+        return schemas.APIKeyResponse(
+            api_key=result.api_key, api_key_obj=result.api_key_obj
+        )
 
     @classmethod
     async def update_api_key(

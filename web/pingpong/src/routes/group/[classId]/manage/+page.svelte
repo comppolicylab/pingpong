@@ -27,7 +27,8 @@
     Spinner,
     CloseButton,
     Dropdown,
-    DropdownItem
+    DropdownItem,
+    Card
   } from 'flowbite-svelte';
   import BulkAddUsers from '$lib/components/BulkAddUsers.svelte';
   import CanvasLogo from '$lib/components/CanvasLogo.svelte';
@@ -65,6 +66,7 @@
   import PermissionsTable from '$lib/components/PermissionsTable.svelte';
   import CanvasDisconnectModal from '$lib/components/CanvasDisconnectModal.svelte';
   import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
+  import OpenAILogo from '$lib/components/OpenAILogo.svelte';
 
   /**
    * Application data.
@@ -841,8 +843,13 @@
               </div>
             </form>
           {:else}
-            <Label for="apiKey">API Key</Label>
-            <div class="w-full relative pt-2 pb-2">
+            <Label for="provider" class="text-sm mb-1">AI Provider</Label>
+            <div class="flex flex-row items-center gap-1.5 mb-4" id="provider">
+              <OpenAILogo size="5" />
+              <span class="text-sm font-normal">OpenAI</span>
+            </div>
+            <Label for="apiKey" class="text-sm mb-1">API Key</Label>
+            <div class="w-full relative pb-2">
               <ButtonGroup class="w-full">
                 <InputAddon>
                   <EyeSlashOutline class="w-6 h-6" />

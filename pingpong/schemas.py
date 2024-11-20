@@ -516,20 +516,6 @@ class Institutions(BaseModel):
         from_attributes = True
 
 
-class APIKey(BaseModel):
-    id: int
-    key: str
-    provider: str
-    azure_endpoint: str | None
-    azure_api_version: str | None
-    available_as_default: bool
-
-
-class APIKeyResponse(BaseModel):
-    api_key: str
-    api_key_obj: APIKey
-
-
 # Status documenting the state of the LMS sync.
 # NONE: The user has not authorized the app to sync with LMS.
 # AUTHORIZED: The user has authorized the app to sync with LMS.
@@ -699,7 +685,16 @@ class UpdateApiKey(BaseModel):
 
 
 class ApiKey(BaseModel):
-    api_key: str | None
+    api_key: str
+    provider: str | None = None
+    azure_endpoint: str | None = None
+    azure_api_version: str | None = None
+    available_as_default: bool | None = None
+
+
+class APIKeyResponse(BaseModel):
+    api_key: str
+    api_key_obj: ApiKey | None
 
 
 class AssistantModel(BaseModel):

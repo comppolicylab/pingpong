@@ -106,10 +106,18 @@ async def get_openai_client_for_class(request: Request) -> OpenAIClientType:
     Requires the class_id to be in the path parameters.
     """
     class_id = request.path_params["class_id"]
-    api_key = await models.Class.get_api_key(request.state.db, int(class_id))
-    if not api_key:
+    result = await models.Class.get_api_key(request.state.db, int(class_id))
+    if result.api_key_obj:
+        return get_openai_client(
+            result.api_key_obj.api_key,
+            provider=result.api_key_obj.provider,
+            endpoint=result.api_key_obj.azure_endpoint,
+            api_version=result.api_key_obj.azure_api_version,
+        )
+    elif result.api_key:
+        return get_openai_client(result.api_key)
+    else:
         raise HTTPException(status_code=401, detail="No API key for class")
-    return get_openai_client(api_key)
 
 
 OpenAIClientDependency = Depends(get_openai_client_for_class)
@@ -1460,9 +1468,14 @@ async def update_class_api_key(
     response_model=schemas.ApiKey,
 )
 async def get_class_api_key(class_id: str, request: Request):
-    api_key = await models.Class.get_api_key(request.state.db, int(class_id))
-    if not api_key:
+    result = await models.Class.get_api_key(request.state.db, int(class_id))
+    if result.api_key_obj:
+        api_key = result.api_key_obj.api_key
+    elif result.api_key:
+        api_key = result.api_key
+    else:
         return {"api_key": None}
+
     redacted_api_key = f"{api_key[:8]}{'*' * 20}{api_key[-4:]}"
     return {"api_key": redacted_api_key}
 

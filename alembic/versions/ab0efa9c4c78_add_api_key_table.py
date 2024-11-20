@@ -1,8 +1,8 @@
 """Add API Key table
 
-Revision ID: edbab3c47230
+Revision ID: ab0efa9c4c78
 Revises: 8c1d49d7fe53
-Create Date: 2024-11-20 17:04:59.412589
+Create Date: 2024-11-20 18:03:42.543636
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'edbab3c47230'
+revision: str = 'ab0efa9c4c78'
 down_revision: Union[str, None] = '8c1d49d7fe53'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -23,11 +23,12 @@ def upgrade() -> None:
     op.create_table('api_keys',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('provider', sa.String(), nullable=False),
-    sa.Column('key', sa.String(), nullable=False),
+    sa.Column('api_key', sa.String(), nullable=False),
     sa.Column('azure_endpoint', sa.String(), nullable=True),
     sa.Column('azure_api_version', sa.String(), nullable=True),
     sa.Column('available_as_default', sa.Boolean(), nullable=True),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('api_key', 'provider', 'azure_endpoint', name='_key_endpoint_provider_uc')
     )
     op.add_column('classes', sa.Column('api_key_id', sa.Integer(), nullable=True))
     op.create_foreign_key("classes_api_key_id", 'classes', 'api_keys', ['api_key_id'], ['id'])
