@@ -30,11 +30,11 @@
       math, economics, statistics and/or computer science, to participate in a randomized
       large-scale study in the <b>Spring 2025 semester</b>. Initial access to PingPong will be
       provided to half of the participating instructors, with access provided to all instructors in
-      the following semester. An <b>honorarium</b> will be provided to all participating instructors.</P
+      the following semester. An <b>honorarium of $1,000</b> will be provided to all participating instructors.</P
     >
     <P class="mt-4"
       >To participate, complete a short (5-question) survey to <b
-        >confirm your eligibility by November 25, 2024</b
+        >confirm your eligibility by December 16, 2024</b
       >:</P
     >
   </div>
@@ -174,4 +174,72 @@
       </figure>
     </div>
   </Card>
+
+  <Heading tag="h3" class="mt-8 ml-5" customSize="text-2xl font-extrabold"
+    >FAQ for Instructors
+  </Heading>
+  <ol class="list-disc ml-7 font-light">
+    <li class="my-2">
+      <h4 class="text-lg font-semibold">
+        Has this study received Institutional Review Board (IRB) approval?
+      </h4>
+      Yes, the study has been reviewed and received an exempt determination from the Harvard University-Area
+      IRB. If you need a copy of the approval letter or additional documentation, please contact us directly
+      at<a
+        href="mailto:pingpongedu@hks.harvard.edu"
+        rel="noopener noreferrer"
+        class="underline"
+        target="_blank">pingpongedu@hks.harvard.edu</a
+      >.
+    </li>
+    <li class="my-2">
+      <h4 class="text-lg font-semibold">
+        What does the study require from instructors and students?
+      </h4>
+      <ol class="list-disc ml-7 font-light">
+        <li class="my-2">
+          Instructors will integrate a brief baseline and end-of-semester assessment into their
+          courses. Our team will provide instructors with initial versions of these assessments,
+          which will assess general subject-matter knowledge. Instructors will have the option to
+          customize further for their specific classes, or administer as-is. These activities can be
+          completed in or outside class at the instructor's discretion.
+        </li>
+        <li class="my-2">
+          When completing the assessment, students will participate in an informed consent process
+          to decide whether their de-identified data can be used in the study. Data will be
+          anonymized and securely stored to protect student privacy. Students who do not consent to
+          study participation will still receive access to PingPong (see below for access timing
+          details).
+        </li>
+      </ol>
+    </li>
+    <li class="my-2">
+      <h4 class="text-lg font-semibold">How is student data used and protected?</h4>
+      Only de-identified data will be accessed by the research team. Instructors may choose to use identifiable
+      assessment data for course purposes, but student consent decisions are confidential and will not
+      affect their course participation or grades.
+    </li>
+    <li class="my-2">
+      <h4 class="text-lg font-semibold">
+        Will instructors and students receive free access to PingPong after the study?
+      </h4>
+      Yes, after the study concludes, all instructors and students—both those in the treatment group
+      and the control group—will receive free access for the following semester (Fall 2025). (During
+      the study, instructors and students in the treatment group will have free access to PingPong.)
+    </li>
+    <li class="my-2">
+      <h4 class="text-lg font-semibold">
+        Does the study accommodate both in-person and online courses?
+      </h4>
+      Yes, both in-person and online courses are eligible for participation. If you teach a mix of formats,
+      you can still participate.
+    </li>
+    <li class="my-2">
+      <h4 class="text-lg font-semibold">
+        Are dual credit courses offered with high schools eligible?
+      </h4>
+      Yes, dual credit courses may be eligible, but all student participants must be over 18 years old
+      and provide consent to participate in the study.
+    </li>
+  </ol>
 </div>
