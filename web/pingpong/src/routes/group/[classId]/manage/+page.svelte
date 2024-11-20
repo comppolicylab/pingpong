@@ -866,18 +866,16 @@
           {/if}
         </div>
 
-            {#if !hasApiKey}
-              <div class="flex flex-row justify-center">
-                <Button
-                  pill
-                  type="submit"
-                  disabled={$updatingApiKey}
-                  class="bg-orange text-white hover:bg-orange-dark mt-5">Save</Button
-                >
-              </div>
-            {/if}
-          </form>
-        </div>
+        {#if !hasApiKey}
+          <div class="flex flex-row justify-center">
+            <Button
+              pill
+              type="submit"
+              disabled={$updatingApiKey}
+              class="bg-orange text-white hover:bg-orange-dark mt-5">Save</Button
+            >
+          </div>
+        {/if}
       {/if}
 
       {#if lastRateLimitedAt}
