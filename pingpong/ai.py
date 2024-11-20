@@ -28,7 +28,7 @@ from openai.types.beta.threads.text_content_block import TextContentBlock
 from pingpong.now import NowFn, utcnow
 from pingpong.schemas import CodeInterpreterMessage, DownloadExport
 from pingpong.config import config
-from typing import Dict
+from typing import Dict, Literal, Union
 from sqlalchemy.ext.asyncio import AsyncSession
 from zoneinfo import ZoneInfo
 
@@ -605,5 +605,22 @@ def replace_annotations_in_text(
 
 
 @functools.cache
-def get_openai_client(api_key: str) -> openai.AsyncClient:
-    return openai.AsyncClient(api_key=api_key)
+def get_openai_client(
+    api_key: str,
+    provider: Union[Literal["azure"], Literal["openai"]],
+    endpoint: str | None,
+    api_version: str | None,
+) -> Union[openai.AsyncClient, openai.AsyncAzureOpenAI]:
+    if not api_key:
+        raise ValueError("API key is required")
+    match provider:
+        case "azure":
+            if not endpoint or not api_version:
+                raise ValueError("Azure tenant requires endpoint and api_version")
+            return openai.AsyncAzureOpenAI(
+                api_key=api_key, azure_endpoint=endpoint, api_version=api_version
+            )
+        case "openai":
+            return openai.AsyncClient(api_key=api_key)
+        case _:
+            raise ValueError(f"Unknown provider {provider}")
