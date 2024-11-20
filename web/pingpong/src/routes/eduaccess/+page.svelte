@@ -4,7 +4,7 @@
   import PingPongEduAccessCarousel from '$lib/components/PingPongEduAccessCarousel.svelte';
 </script>
 
-<div class="px-12 py-12 flex flex-col gap-4 about h-full overflow-y-auto">
+<div class="px-4 py-8 md:px-12 md:py-12 flex flex-col gap-4 about h-full overflow-y-auto">
   <div class="flex flex-col text-center min-w-full">
     <Heading tag="h2" class="mt-4 mb-2" customSize="text-4xl font-extrabold md:text-5xl lg:text-6xl"
       ><span
