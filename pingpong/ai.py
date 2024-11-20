@@ -607,9 +607,9 @@ def replace_annotations_in_text(
 @functools.cache
 def get_openai_client(
     api_key: str,
-    provider: Union[Literal["azure"], Literal["openai"]],
-    endpoint: str | None,
-    api_version: str | None,
+    provider: Union[Literal["azure"], Literal["openai"]] = "openai",
+    endpoint: str | None = None,
+    api_version: str | None = None,
 ) -> Union[openai.AsyncClient, openai.AsyncAzureOpenAI]:
     if not api_key:
         raise ValueError("API key is required")
