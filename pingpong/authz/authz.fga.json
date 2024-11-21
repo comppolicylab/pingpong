@@ -213,13 +213,22 @@
           }
         },
         "can_view_api_key": {
-          "tupleToUserset": {
-            "computedUserset": {
-              "relation": "admin"
-            },
-            "tupleset": {
-              "relation": "parent"
-            }
+          "union": {
+            "child": [
+              {
+                "this": {}
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "admin"
+                  },
+                  "tupleset": {
+                    "relation": "parent"
+                  }
+                }
+              }
+            ]
           }
         },
         "can_delete": {
@@ -349,7 +358,11 @@
             "directly_related_user_types": []
           },
           "can_view_api_key": {
-            "directly_related_user_types": []
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
           },
           "can_delete": {
             "directly_related_user_types": []
