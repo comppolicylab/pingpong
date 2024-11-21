@@ -57,6 +57,7 @@ from .auth import (
 from .authz import Relation
 from .config import config
 from .canvas import (
+    CanvasAccessException,
     CanvasException,
     CanvasWarning,
     LightweightCanvasClient,
@@ -976,6 +977,16 @@ async def verify_canvas_class_permissions(
                 detail=e.detail
                 or "We faced an error while verifying your access to this Canvas class.",
             )
+        except CanvasAccessException as e:
+            logger.warning(
+                "verify_canvas_class_permissions: CanvasAccessException occurred: %s",
+                e.detail,
+            )
+            raise HTTPException(
+                status_code=e.code or 403,
+                detail=e.detail
+                or "We faced an error while getting your Canvas classes.",
+            ) from e
         except CanvasWarning as e:
             logger.warning(
                 "verify_canvas_class_permissions: CanvasWarning occurred: %s", e.detail
@@ -1027,6 +1038,15 @@ async def update_canvas_class(
                 status_code=e.code or 500,
                 detail=e.detail or "We faced an error while setting your Canvas class.",
             )
+        except CanvasAccessException as e:
+            logger.warning(
+                "update_canvas_class: CanvasAccessException occurred: %s", e.detail
+            )
+            raise HTTPException(
+                status_code=e.code or 403,
+                detail=e.detail
+                or "We faced an error while getting your Canvas classes.",
+            ) from e
         except CanvasWarning as e:
             logger.warning("update_canvas_class: CanvasWarning occurred: %s", e.detail)
             raise HTTPException(

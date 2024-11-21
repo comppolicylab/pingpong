@@ -39,6 +39,12 @@ class CanvasException(Exception):
         self.detail = detail
 
 
+class CanvasAccessException(Exception):
+    def __init__(self, detail: str = "", code: int | None = None):
+        self.code = code
+        self.detail = detail
+
+
 class CanvasWarning(Exception):
     def __init__(self, detail: str = "", code: int | None = None):
         self.code = code
@@ -480,13 +486,13 @@ class CanvasCourseClient(ABC):
     async def verify_access(self, course_id: str) -> None:
         """Verify that the user has access to the course and the roster."""
         if not await self._in_teaching_staff(course_id):
-            raise CanvasException(
+            raise CanvasAccessException(
                 code=403,
                 detail="You are not an authorized teacher or TA in the Canvas class you are trying to access.",
             )
 
         if not await self._roster_access_check(course_id):
-            raise CanvasException(
+            raise CanvasAccessException(
                 code=403,
                 detail="You are not authorized to access the enrollment list for this Canvas class.",
             )
