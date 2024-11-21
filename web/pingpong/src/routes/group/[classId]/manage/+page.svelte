@@ -38,7 +38,6 @@
   import {
     PenOutline,
     CloudArrowUpOutline,
-    EyeOutline,
     EyeSlashOutline,
     LinkOutline,
     RefreshOutline,
@@ -177,8 +176,6 @@
 
   const blurred = writable(true);
   $: apiKey = data.apiKey || '';
-  $: apiKeyBlur =
-    apiKey.substring(0, 6) + '**************' + apiKey.substring(Math.max(6, apiKey.length - 6));
 
   let uploads = writable<FileUploadInfo[]>([]);
   const trashFiles = writable<number[]>([]);
@@ -824,10 +821,10 @@
       </div>
       {#if canViewApiKey}
         <div class="col-span-2">
-          <form on:submit={submitUpdateApiKey}>
-            <Label for="apiKey">API Key</Label>
-            <div class="w-full relative pt-2 pb-2" class:cursor-pointer={$blurred}>
-              {#if !hasApiKey}
+          {#if !hasApiKey}
+            <form on:submit={submitUpdateApiKey}>
+              <Label for="apiKey">API Key</Label>
+              <div class="w-full relative pt-2 pb-2" class:cursor-pointer={$blurred}>
                 <ButtonGroup class="w-full">
                   <InputAddon>
                     <PenOutline class="w-6 h-6" />
@@ -841,41 +838,7 @@
                     placeholder="Your API key here"
                   />
                 </ButtonGroup>
-              {:else}
-                <ButtonGroup class="w-full">
-                  <InputAddon>
-                    <button type="button" on:click={() => ($blurred = !$blurred)}>
-                      {#if !$blurred}
-                        <EyeOutline class="w-6 h-6" />
-                      {:else}
-                        <EyeSlashOutline class="w-6 h-6" />
-                      {/if}
-                    </button>
-                  </InputAddon>
-                  <Input
-                    id="apiKey"
-                    name="apiKey"
-                    label="API Key"
-                    autocomplete="off"
-                    class={$blurred ? 'cursor-pointer' : undefined}
-                    value={$blurred ? apiKeyBlur : apiKey}
-                    on:focus={() => ($blurred = false)}
-                    on:blur={() => ($blurred = true)}
-                    readonly
-                    placeholder="Your API key here"
-                  />
-                </ButtonGroup>
-              {/if}
-            </div>
-
-            {#if hasApiKey}
-              <Helper
-                >Note: Changing the API key will break all threads and assistants in the group, so
-                it is not currently supported.</Helper
-              >
-            {/if}
-
-            {#if !hasApiKey}
+              </div>
               <div class="flex flex-row justify-center">
                 <Button
                   pill
@@ -884,8 +847,31 @@
                   class="bg-orange text-white hover:bg-orange-dark mt-5">Save</Button
                 >
               </div>
-            {/if}
-          </form>
+            </form>
+          {:else}
+            <Label for="apiKey">API Key</Label>
+            <div class="w-full relative pt-2 pb-2">
+              <ButtonGroup class="w-full">
+                <InputAddon>
+                  <EyeSlashOutline class="w-6 h-6" />
+                </InputAddon>
+                <Input
+                  id="apiKey"
+                  name="apiKey"
+                  label="API Key"
+                  autocomplete="off"
+                  readonly={true}
+                  value={apiKey}
+                  placeholder="Your API key here"
+                />
+              </ButtonGroup>
+            </div>
+
+            <Helper
+              >Note: All your group's assistants, threads, and associated files are tied to your
+              group's API key, so it can't be changed.</Helper
+            >
+          {/if}
         </div>
       {/if}
 
