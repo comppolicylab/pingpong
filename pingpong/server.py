@@ -1428,22 +1428,52 @@ async def remove_user_from_class(class_id: str, user_id: str, request: Request):
 @v1.put(
     "/class/{class_id}/api_key",
     dependencies=[Depends(Authz("admin", "class:{class_id}"))],
-    response_model=schemas.ApiKey,
+    response_model=schemas.APIKeyResponse,
 )
 async def update_class_api_key(
     class_id: str, update: schemas.UpdateApiKey, request: Request
 ):
+    if not update.api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="API key must be provided to update the class API key.",
+        )
     existing_key = await models.Class.get_api_key(request.state.db, int(class_id))
-    if existing_key == update.api_key:
-        return {"api_key": existing_key}
-    elif not existing_key:
-        if not await validate_api_key(update.api_key):
+    if (
+        existing_key.api_key_obj
+        and existing_key.api_key_obj.api_key == update.api_key
+        and existing_key.api_key_obj.provider == update.provider
+        and existing_key.api_key_obj.azure_endpoint == update.azure_endpoint
+        and existing_key.api_key_obj.azure_api_version == update.azure_api_version
+    ):
+        return {"api_key": existing_key.api_key_obj}
+    if existing_key.api_key == update.api_key:
+        return {
+            "api_key": schemas.ApiKey(api_key=existing_key.api_key, provider="openai")
+        }
+    elif not existing_key.api_key_obj and not existing_key.api_key:
+        if not await validate_api_key(
+            update.api_key,
+            update.provider,
+            update.azure_endpoint,
+            update.azure_api_version,
+        ):
             raise HTTPException(
                 status_code=400,
-                detail="Invalid API key provided. Please try again.",
+                detail="Invalid API connection information provided. Please try again.",
             )
-        await models.Class.update_api_key(
-            request.state.db, int(class_id), update.api_key
+        api_key_obj = await models.Class.update_api_key(
+            request.state.db,
+            int(class_id),
+            update.api_key,
+            provider=update.provider,
+            azure_endpoint=update.azure_endpoint
+            if update.provider == "azure"
+            else None,
+            azure_api_version=update.azure_api_version
+            if update.provider == "azure"
+            else None,
+            available_as_default=False,
         )
         await request.state.authz.write_safe(
             grant=[
@@ -1454,12 +1484,12 @@ async def update_class_api_key(
                 )
             ]
         )
+        return {"api_key": api_key_obj}
     else:
         raise HTTPException(
             status_code=400,
             detail="API key already exists. Delete it first to create a new one.",
         )
-    return {"api_key": update.api_key}
 
 
 @v1.get(
@@ -1485,6 +1515,7 @@ async def get_class_api_key(class_id: str, request: Request):
         )
 
     return {"api_key": response}
+
 
 @v1.get(
     "/class/{class_id}/models",

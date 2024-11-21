@@ -687,29 +687,38 @@ export const deleteClass = async (f: Fetcher, classId: number) => {
  */
 export type ApiKey = {
   api_key: string;
-  provider: string;
-  azure_endpoint: string | null;
-  azure_api_version: string | null;
-  available_as_default: boolean;
+  provider?: string;
+  azure_endpoint?: string;
+  azure_api_version?: string;
+  available_as_default?: boolean;
 };
 
 export type ApiKeyResponse = {
-  api_key: ApiKey | null;
+  api_key?: ApiKey;
 };
 
 export type UpdateApiKeyRequest = {
   api_key: string;
   provider: string;
-  azure_endpoint: string | null;
-  azure_api_version: string | null;
+  azure_endpoint?: string;
+  azure_api_version?: string;
 };
 
 /**
  * Update the API key for a class.
  */
-export const updateApiKey = async (f: Fetcher, classId: number, apiKey: string) => {
+export const updateApiKey = async (
+  f: Fetcher,
+  classId: number,
+  provider: string,
+  apiKey: string,
+  endpoint: string | null
+) => {
   const url = `class/${classId}/api_key`;
-  return await PUT<UpdateApiKeyRequest, ApiKeyResponse>(f, url, { api_key: apiKey, provider: 'openai', azure_endpoint: null, azure_api_version: null,});
+  return await PUT<UpdateApiKeyRequest, ApiKeyResponse>(f, url, {
+    api_key: apiKey,
+    provider: 'openai'
+  });
 };
 
 /**

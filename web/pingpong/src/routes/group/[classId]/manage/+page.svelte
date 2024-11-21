@@ -28,7 +28,7 @@
     CloseButton,
     Dropdown,
     DropdownItem,
-    Card
+    Radio
   } from 'flowbite-svelte';
   import BulkAddUsers from '$lib/components/BulkAddUsers.svelte';
   import CanvasLogo from '$lib/components/CanvasLogo.svelte';
@@ -39,7 +39,6 @@
   import {
     PenOutline,
     CloudArrowUpOutline,
-    EyeSlashOutline,
     LinkOutline,
     RefreshOutline,
     ChevronDownOutline,
@@ -52,7 +51,8 @@
     FileLinesOutline,
     ExclamationCircleOutline,
     LockSolid,
-    CheckCircleOutline
+    CheckCircleOutline,
+    GlobeOutline
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
@@ -68,6 +68,7 @@
   import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
   import OpenAILogo from '$lib/components/OpenAILogo.svelte';
   import AzureLogo from '$lib/components/AzureLogo.svelte';
+  import OpenAiLogo from '$lib/components/OpenAILogo.svelte';
 
   /**
    * Application data.
@@ -177,8 +178,8 @@
       : dayjs(data.class.last_rate_limited_at).format('MMMM D, YYYY [at] h:mma')
     : null;
 
-  const blurred = writable(true);
   $: apiKey = data.apiKey || null;
+  let apiProvider = 'openai';
 
   let uploads = writable<FileUploadInfo[]>([]);
   const trashFiles = writable<number[]>([]);
@@ -200,7 +201,7 @@
       return aName.localeCompare(bName);
     }) as FileUploadInfo[];
 
-  $: hasApiKey = !!data?.class?.api_key;
+  $: hasApiKey = !!data?.apiKey?.api_key;
   $: canExportThreads = !!data?.grants?.isAdmin || !!data?.grants?.isTeacher;
   $: canEditClassInfo = !!data?.grants?.canEditInfo;
   $: canManageClassUsers = !!data?.grants?.canManageUsers;
@@ -327,12 +328,20 @@
 
     if (!d.apiKey) {
       $updatingApiKey = false;
-      sadToast('API key cannot be empty');
+      sadToast('Please provide an API key.');
+      return;
+    }
+
+    if (!d.endpoint && d.provider === 'azure') {
+      $updatingApiKey = false;
+      sadToast('Please provide your Azure deployment endpoint.');
       return;
     }
 
     const _apiKey = (d.apiKey as string | undefined) || '';
-    const result = await api.updateApiKey(fetch, data.class.id, _apiKey);
+    const _endpoint = (d.endpoint as string | undefined) || null;
+    const _provider = (d.provider as string | undefined) || 'openai';
+    const result = await api.updateApiKey(fetch, data.class.id, _provider, _apiKey, _endpoint);
 
     if (api.isErrorResponse(result)) {
       $updatingApiKey = false;
@@ -826,8 +835,52 @@
         <div class="col-span-2">
           {#if !hasApiKey}
             <form on:submit={submitUpdateApiKey}>
+              <Label for="provider">Choose your AI provider:</Label>
+              <Helper class="mb-3"
+                >Choose the AI provider you'd like to use for your group. You'll need an API key and
+                potentially additional details to set up the connection. <b
+                  >You can't change your selection later.</b
+                ></Helper
+              >
+              <div class="grid gap-4 w-full xl:w-2/3 md:grid-cols-2 mb-5">
+                <Radio name="provider" value="openai" bind:group={apiProvider} custom>
+                  <div
+                    class="inline-flex gap-4 items-center px-5 py-3 w-full text-gray-900 bg-white rounded-lg border border-gray-200 cursor-pointer peer-checked:border-red-600 peer-checked:text-red-600 hover:text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:bg-gray-800 dark:hover:bg-gray-700 font-normal peer-checked:font-medium min-w-fit"
+                  >
+                    <OpenAiLogo size="8" extraClass="shrink-0" />
+                    <div class="w-full text-base">OpenAI</div>
+                  </div>
+                </Radio>
+                <Radio name="provider" value="azure" bind:group={apiProvider} custom>
+                  <div
+                    class="inline-flex gap-4 items-center px-5 py-3 w-full text-gray-900 bg-white rounded-lg border border-gray-200 cursor-pointer peer-checked:border-red-600 peer-checked:text-red-600 hover:text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:bg-gray-800 dark:hover:bg-gray-700 font-normal peer-checked:font-medium"
+                  >
+                    <AzureLogo size="8" />
+                    <div class="w-full text-base">Azure</div>
+                  </div>
+                </Radio>
+              </div>
+              {#if apiProvider == 'azure'}
+                <Label for="endpoint">Deployment Endpoint</Label>
+                <div class="w-full relative pt-2 pb-2 mb-4">
+                  <ButtonGroup class="w-full">
+                    <InputAddon>
+                      <GlobeOutline class="w-6 h-6" />
+                    </InputAddon>
+                    <Input
+                      id="endpoint"
+                      name="endpoint"
+                      label="Deployment Endpoint"
+                      autocomplete="off"
+                      value={apiKey}
+                      placeholder="Your deployment endpoint here"
+                      defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right"
+                    />
+                  </ButtonGroup>
+                </div>
+              {/if}
               <Label for="apiKey">API Key</Label>
-              <div class="w-full relative pt-2 pb-2" class:cursor-pointer={$blurred}>
+              <div class="w-full relative pt-2 pb-2">
                 <ButtonGroup class="w-full">
                   <InputAddon>
                     <PenOutline class="w-6 h-6" />
@@ -843,52 +896,54 @@
                   />
                 </ButtonGroup>
               </div>
+              <div class="flex flex-row justify-center">
+                <Button
+                  pill
+                  type="submit"
+                  disabled={$updatingApiKey}
+                  class="bg-orange text-white hover:bg-orange-dark mt-5">Save</Button
+                >
+              </div>
             </form>
           {:else}
             <Label for="provider" class="text-sm mb-1">Provider</Label>
             <div class="flex flex-row items-center gap-1.5 mb-5" id="provider">
-            {#if apiKey?.provider=="openai"}
-              <OpenAILogo size="5" />
-              <span class="text-sm font-normal">OpenAI</span>
-            {:else if apiKey?.provider=="azure"}
-              <AzureLogo size="5" />
-              <span class="text-sm font-normal">Azure</span>
-            {:else if apiKey?.provider}
-              <span class="text-sm font-normal">{apiKey?.provider}</span>
-            {:else}
-              <span class="text-sm font-normal">Unknown</span>
-            {/if}
+              {#if apiKey?.provider == 'openai'}
+                <OpenAILogo size="5" />
+                <span class="text-sm font-normal">OpenAI</span>
+              {:else if apiKey?.provider == 'azure'}
+                <AzureLogo size="5" />
+                <span class="text-sm font-normal">Azure</span>
+              {:else if apiKey?.provider}
+                <span class="text-sm font-normal">{apiKey?.provider}</span>
+              {:else}
+                <span class="text-sm font-normal">Unknown</span>
+              {/if}
             </div>
-            {#if apiKey?.provider=="azure"}
-            <Label for="deploymentEndpoint" class="text-sm">Deployment Endpoint</Label>
-            <div class="w-full relative mb-4">
-              <span id="deploymentEndpoint" class="text-sm font-normal font-mono">{apiKey?.azure_endpoint || 'Unknown endpoint'}</span>
-            </div>
+            {#if apiKey?.provider == 'azure'}
+              <Label for="deploymentEndpoint" class="text-sm">Deployment Endpoint</Label>
+              <div class="w-full relative mb-4">
+                <span id="deploymentEndpoint" class="text-sm font-normal font-mono"
+                  >{apiKey?.azure_endpoint || 'Unknown endpoint'}</span
+                >
+              </div>
             {/if}
             <Label for="apiKey" class="text-sm">API Key</Label>
             <div class="w-full relative mb-1">
               <span id="apiKey" class="text-sm font-normal font-mono">{apiKey?.api_key}</span>
             </div>
-            <Helper
-              >All your group's assistants, threads, and associated files are tied to your group's
-              OpenAI API key, so it can't be changed.</Helper
-            >
-            <!-- <Helper
-              >Changing your Azure API key is not currently supported.</Helper
-            > -->
+            {#if apiKey?.provider == 'openai'}
+              <Helper
+                >All your group's assistants, threads, and associated files are tied to your group's
+                OpenAI API key, so it can't be changed.</Helper
+              >
+            {:else if apiKey?.provider == 'azure'}
+              <Helper>Changing your Azure API key is not currently supported.</Helper>
+            {:else}
+              <Helper>Your group's API key can't be changed</Helper>
+            {/if}
           {/if}
         </div>
-
-        {#if !hasApiKey}
-          <div class="flex flex-row justify-center">
-            <Button
-              pill
-              type="submit"
-              disabled={$updatingApiKey}
-              class="bg-orange text-white hover:bg-orange-dark mt-5">Save</Button
-            >
-          </div>
-        {/if}
       {/if}
 
       {#if lastRateLimitedAt}

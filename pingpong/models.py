@@ -1049,7 +1049,9 @@ class Class(Base):
     term = Column(String)
     api_key = Column(String, nullable=True)
     api_key_id = Column(Integer, ForeignKey("api_keys.id"), nullable=True)
-    api_key_obj = relationship("APIKey", back_populates="classes", lazy="selectin")
+    api_key_obj: Mapped["APIKey"] = relationship(
+        "APIKey", back_populates="classes", lazy="selectin"
+    )
     private = Column(Boolean, default=False)
     lms_status = Column(SQLEnum(schemas.LMSStatus), default=schemas.LMSStatus.NONE)
     lms_class_id = Column(Integer, ForeignKey("lms_classes.id"), nullable=True)
@@ -1127,7 +1129,16 @@ class Class(Base):
         )
         result = await session.scalar(stmt)
         return schemas.APIKeyModelResponse(
-            api_key=result.api_key, api_key_obj=result.api_key_obj
+            api_key=result.api_key,
+            api_key_obj={
+                "provider": result.api_key_obj.provider,
+                "api_key": result.api_key_obj.api_key,
+                "azure_endpoint": result.api_key_obj.azure_endpoint,
+                "azure_api_version": result.api_key_obj.azure_api_version,
+                "available_as_default": result.api_key_obj.available_as_default,
+            }
+            if result.api_key_obj
+            else None,
         )
 
     @classmethod
@@ -1138,24 +1149,34 @@ class Class(Base):
         api_key: str,
         provider: str,
         azure_endpoint: str | None,
-        azure_api_version: str,
+        azure_api_version: str | None,
         available_as_default: bool,
-    ) -> None:
+    ) -> "APIKey":
         stmt = (
-            update(Class)
-            .where(Class.id == int(id_))
+            _get_upsert_stmt(session)(APIKey)
             .values(
                 api_key=api_key,
-                api_key_obj=APIKey(
-                    key=api_key,
-                    provider=provider,
-                    azure_endpoint=azure_endpoint,
+                provider=provider,
+                azure_endpoint=azure_endpoint,
+                azure_api_version=azure_api_version,
+                available_as_default=available_as_default,
+            )
+            .on_conflict_do_update(
+                index_elements=["api_key", "provider", "azure_endpoint"],
+                set_=dict(
                     azure_api_version=azure_api_version,
                     available_as_default=available_as_default,
                 ),
             )
+            .returning(APIKey)
+        )
+        api_key_obj = await session.scalar(stmt)
+
+        stmt = (
+            update(Class).where(Class.id == int(id_)).values(api_key_id=api_key_obj.id)
         )
         await session.execute(stmt)
+        return api_key_obj
 
     @classmethod
     async def create(

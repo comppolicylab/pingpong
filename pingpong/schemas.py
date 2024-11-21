@@ -682,11 +682,14 @@ class UpdateClass(BaseModel):
 
 class UpdateApiKey(BaseModel):
     api_key: str
+    provider: Literal["openai", "azure"]
+    azure_endpoint: str | None = None
+    azure_api_version: str | None = None
 
 
 class ApiKey(BaseModel):
-    api_key: str | None = None
-    provider: str | None = None
+    api_key: str
+    provider: str
     azure_endpoint: str | None = None
     azure_api_version: str | None = None
     available_as_default: bool | None = None
@@ -699,6 +702,7 @@ class APIKeyResponse(BaseModel):
 class APIKeyModelResponse(BaseModel):
     api_key: str | None = None
     api_key_obj: ApiKey | None = None
+
 
 class AssistantModel(BaseModel):
     id: str

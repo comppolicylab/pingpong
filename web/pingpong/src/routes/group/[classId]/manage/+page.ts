@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as api from '$lib/api';
 import { error } from '@sveltejs/kit';
 import type { PageLoad } from './$types';
@@ -49,18 +48,19 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
     error(classDataResponse.$status, classDataResponse.error.detail || 'Unknown error');
   }
 
-  let api_key: api.ApiKey | null = null;
+  let api_key: api.ApiKey | undefined;
   if (grants.canViewApiKey) {
     const apiKeyResponse = api.expandResponse(await api.getApiKey(fetch, classId));
     if (apiKeyResponse.error) {
-      api_key = {'api_key': 'error fetching API key!'};
+      api_key = { api_key: 'error fetching API key!' };
+      console.error('Error fetching API key:', apiKeyResponse.error);
     } else {
       api_key = apiKeyResponse.data.api_key;
     }
   }
 
   return {
-    apiKey: api_key || null,
+    apiKey: api_key,
     grants,
     class: classDataResponse.data
   };

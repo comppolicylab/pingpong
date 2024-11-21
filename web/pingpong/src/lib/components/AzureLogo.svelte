@@ -5,7 +5,7 @@
   export let extraClass = '';
 </script>
 
-<div class="w-{size} {extraClass}">
+<div class="w-{size} {extraClass} shrink-0">
   <!-- eslint-disable-next-line svelte/no-at-html-tags -->
   {@html logo}
 </div>
