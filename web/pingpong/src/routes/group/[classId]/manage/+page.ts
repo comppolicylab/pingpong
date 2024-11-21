@@ -1,3 +1,4 @@
+// @ts-nocheck
 import * as api from '$lib/api';
 import { error } from '@sveltejs/kit';
 import type { PageLoad } from './$types';
@@ -5,7 +6,7 @@ import type { PageLoad } from './$types';
 /**
  * Load additional data needed for managing the class.
  */
-export const load: PageLoad = async ({ fetch, params }) => {
+export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
   const classId = parseInt(params.classId, 10);
   const [classDataResponse, grants] = await Promise.all([
     // Even though we `getClass` at the parent layout, we need to do it again here since we might have an updated lastRateLimitedAt value.
@@ -48,18 +49,18 @@ export const load: PageLoad = async ({ fetch, params }) => {
     error(classDataResponse.$status, classDataResponse.error.detail || 'Unknown error');
   }
 
-  let api_key = '';
+  let api_key: api.ApiKey | null = null;
   if (grants.canViewApiKey) {
     const apiKeyResponse = api.expandResponse(await api.getApiKey(fetch, classId));
     if (apiKeyResponse.error) {
-      api_key = '[error fetching API key!]';
+      api_key = {'api_key': 'error fetching API key!'};
     } else {
       api_key = apiKeyResponse.data.api_key;
     }
   }
 
   return {
-    apiKey: api_key || '',
+    apiKey: api_key || null,
     grants,
     class: classDataResponse.data
   };

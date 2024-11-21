@@ -14,7 +14,8 @@ const config = {
     },
     fontFamily: {
       sans: ['Inter', 'sans-serif'],
-      serif: ['STIX Two Text', 'serif']
+      serif: ['STIX Two Text', 'serif'],
+      mono: ['Fira Code', 'monospace']
     },
     extend: {
       borderRadius: {

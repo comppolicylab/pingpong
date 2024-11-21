@@ -1465,20 +1465,26 @@ async def update_class_api_key(
 @v1.get(
     "/class/{class_id}/api_key",
     dependencies=[Depends(Authz("can_view_api_key", "class:{class_id}"))],
-    response_model=schemas.ApiKey,
+    response_model=schemas.APIKeyResponse,
 )
 async def get_class_api_key(class_id: str, request: Request):
+    response = None
     result = await models.Class.get_api_key(request.state.db, int(class_id))
     if result.api_key_obj:
-        api_key = result.api_key_obj.api_key
+        api_key_obj = result.api_key_obj
+        response = schemas.ApiKey(
+            api_key=f"{api_key_obj.api_key[:8]}{'*' * 20}{api_key_obj.api_key[-4:]}",
+            provider=api_key_obj.provider,
+            azure_endpoint=api_key_obj.azure_endpoint,
+            azure_api_version=api_key_obj.azure_api_version,
+        )
     elif result.api_key:
-        api_key = result.api_key
-    else:
-        return {"api_key": None}
+        response = schemas.ApiKey(
+            api_key=f"{result.api_key[:8]}{'*' * 20}{result.api_key[-4:]}",
+            provider="openai",
+        )
 
-    redacted_api_key = f"{api_key[:8]}{'*' * 20}{api_key[-4:]}"
-    return {"api_key": redacted_api_key}
-
+    return {"api_key": response}
 
 @v1.get(
     "/class/{class_id}/models",

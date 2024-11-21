@@ -685,7 +685,7 @@ class UpdateApiKey(BaseModel):
 
 
 class ApiKey(BaseModel):
-    api_key: str
+    api_key: str | None = None
     provider: str | None = None
     azure_endpoint: str | None = None
     azure_api_version: str | None = None
@@ -693,9 +693,12 @@ class ApiKey(BaseModel):
 
 
 class APIKeyResponse(BaseModel):
-    api_key: str
-    api_key_obj: ApiKey | None
+    api_key: ApiKey | None = None
 
+
+class APIKeyModelResponse(BaseModel):
+    api_key: str | None = None
+    api_key_obj: ApiKey | None = None
 
 class AssistantModel(BaseModel):
     id: str

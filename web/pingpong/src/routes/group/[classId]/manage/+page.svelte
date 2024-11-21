@@ -67,6 +67,7 @@
   import CanvasDisconnectModal from '$lib/components/CanvasDisconnectModal.svelte';
   import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
   import OpenAILogo from '$lib/components/OpenAILogo.svelte';
+  import AzureLogo from '$lib/components/AzureLogo.svelte';
 
   /**
    * Application data.
@@ -177,7 +178,7 @@
     : null;
 
   const blurred = writable(true);
-  $: apiKey = data.apiKey || '';
+  $: apiKey = data.apiKey || null;
 
   let uploads = writable<FileUploadInfo[]>([]);
   const trashFiles = writable<number[]>([]);
@@ -819,7 +820,7 @@
         <Heading customSize="text-xl font-bold" tag="h3"
           ><Secondary class="text-3xl text-black font-normal">Billing</Secondary></Heading
         >
-        <Info>Information about your group's OpenAI credentials.</Info>
+        <Info>Information about your group's credentials.</Info>
       </div>
       {#if canViewApiKey}
         <div class="col-span-2">
@@ -838,38 +839,43 @@
                     autocomplete="off"
                     value={apiKey}
                     placeholder="Your API key here"
+                    defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right font-mono"
                   />
                 </ButtonGroup>
               </div>
             </form>
           {:else}
-            <Label for="provider" class="text-sm mb-1">AI Provider</Label>
-            <div class="flex flex-row items-center gap-1.5 mb-4" id="provider">
+            <Label for="provider" class="text-sm mb-1">Provider</Label>
+            <div class="flex flex-row items-center gap-1.5 mb-5" id="provider">
+            {#if apiKey?.provider=="openai"}
               <OpenAILogo size="5" />
               <span class="text-sm font-normal">OpenAI</span>
+            {:else if apiKey?.provider=="azure"}
+              <AzureLogo size="5" />
+              <span class="text-sm font-normal">Azure</span>
+            {:else if apiKey?.provider}
+              <span class="text-sm font-normal">{apiKey?.provider}</span>
+            {:else}
+              <span class="text-sm font-normal">Unknown</span>
+            {/if}
             </div>
-            <Label for="apiKey" class="text-sm mb-1">API Key</Label>
-            <div class="w-full relative pb-2">
-              <ButtonGroup class="w-full">
-                <InputAddon>
-                  <EyeSlashOutline class="w-6 h-6" />
-                </InputAddon>
-                <Input
-                  id="apiKey"
-                  name="apiKey"
-                  label="API Key"
-                  autocomplete="off"
-                  readonly={true}
-                  value={apiKey}
-                  placeholder="Your API key here"
-                />
-              </ButtonGroup>
+            {#if apiKey?.provider=="azure"}
+            <Label for="deploymentEndpoint" class="text-sm">Deployment Endpoint</Label>
+            <div class="w-full relative mb-4">
+              <span id="deploymentEndpoint" class="text-sm font-normal font-mono">{apiKey?.azure_endpoint || 'Unknown endpoint'}</span>
             </div>
-
+            {/if}
+            <Label for="apiKey" class="text-sm">API Key</Label>
+            <div class="w-full relative mb-1">
+              <span id="apiKey" class="text-sm font-normal font-mono">{apiKey?.api_key}</span>
+            </div>
             <Helper
-              >Note: All your group's assistants, threads, and associated files are tied to your
-              group's API key, so it can't be changed.</Helper
+              >All your group's assistants, threads, and associated files are tied to your group's
+              OpenAI API key, so it can't be changed.</Helper
             >
+            <!-- <Helper
+              >Changing your Azure API key is not currently supported.</Helper
+            > -->
           {/if}
         </div>
 

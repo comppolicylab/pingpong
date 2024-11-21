@@ -1119,14 +1119,14 @@ class Class(Base):
     @classmethod
     async def get_api_key(
         cls, session: AsyncSession, id_: int
-    ) -> schemas.APIKeyResponse:
+    ) -> schemas.APIKeyModelResponse:
         stmt = (
             select(Class)
             .options(joinedload(Class.api_key_obj))
             .where(Class.id == int(id_))
         )
         result = await session.scalar(stmt)
-        return schemas.APIKeyResponse(
+        return schemas.APIKeyModelResponse(
             api_key=result.api_key, api_key_obj=result.api_key_obj
         )
 
