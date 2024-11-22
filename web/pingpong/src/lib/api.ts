@@ -639,6 +639,7 @@ export type CreateClassRequest = {
   name: string;
   term: string;
   private?: boolean;
+  api_key_id: number | null;
   any_can_create_assistant?: boolean;
   any_can_publish_assistant?: boolean;
   any_can_publish_thread?: boolean;

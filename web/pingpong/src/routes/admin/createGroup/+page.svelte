@@ -61,7 +61,12 @@
       }
     }
 
-    const rawClass = await api.createClass(fetch, instId, { name, term });
+    let apiKeyId: number | null = parseInt(selectedBilling, 10);
+    if (apiKeyId === 0) {
+      apiKeyId = null;
+    }
+
+    const rawClass = await api.createClass(fetch, instId, { name, term, api_key_id: apiKeyId });
     const classResponse = api.expandResponse(rawClass);
     if (classResponse.error) {
       $loading = false;
