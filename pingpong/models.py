@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional, Union
 
-from sqlalchemy import Boolean, Column, Computed, DateTime, Float, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Float, UniqueConstraint
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
     ForeignKey,
@@ -31,8 +31,6 @@ from sqlalchemy.orm import (
 from sqlalchemy.sql import func
 import pingpong.schemas as schemas
 import logging
-
-logger = logging.getLogger(__name__)
 
 
 def _get_upsert_stmt(session: AsyncSession):
@@ -1022,28 +1020,23 @@ class LMSClass(Base):
 
 class APIKey(Base):
     __tablename__ = "api_keys"
+    __table_args__ = (
+        UniqueConstraint(
+            "api_key",
+            "provider",
+            name="_key_provider_uc",
+        ),
+        Index("api_key_available_as_default_idx", "available_as_default"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String, nullable=True)
     provider = Column(String, nullable=False)
     api_key = Column(String, nullable=False)
     classes = relationship("Class", back_populates="api_key_obj")
-    azure_endpoint = Column(String, nullable=True)
-    azure_api_version = Column(String, nullable=True)
+    endpoint = Column(String, nullable=True)
+    api_version = Column(String, nullable=True)
     available_as_default = Column(Boolean, default=False)
-    azure_endpoint_coalesced = Column(
-        String,
-        Computed("COALESCE(azure_endpoint, '')"),
-    )
-
-    __table_args__ = (
-        UniqueConstraint(
-            "api_key",
-            "provider",
-            "azure_endpoint_coalesced",
-            name="_key_endpoint_provider_uc",
-        ),
-    )
 
     @classmethod
     async def create_or_update(
@@ -1051,8 +1044,8 @@ class APIKey(Base):
         session: AsyncSession,
         api_key: str,
         provider: str,
-        azure_endpoint: str | None = None,
-        azure_api_version: str | None = None,
+        endpoint: str | None = None,
+        api_version: str | None = None,
         available_as_default: bool = False,
     ) -> "APIKey":
         stmt = (
@@ -1060,14 +1053,14 @@ class APIKey(Base):
             .values(
                 api_key=api_key,
                 provider=provider,
-                azure_endpoint=azure_endpoint,
-                azure_api_version=azure_api_version,
+                endpoint=endpoint,
+                api_version=api_version,
                 available_as_default=available_as_default,
             )
             .on_conflict_do_update(
-                constraint="_key_endpoint_provider_uc",
+                constraint="_key_provider_uc",
                 set_=dict(
-                    azure_api_version=azure_api_version,
+                    api_version=api_version,
                     available_as_default=APIKey.available_as_default
                     or available_as_default,
                 ),
@@ -1186,16 +1179,16 @@ class Class(Base):
         id_: int,
         api_key: str,
         provider: str,
-        azure_endpoint: str | None,
-        azure_api_version: str | None,
+        endpoint: str | None,
+        api_version: str | None,
         available_as_default: bool,
     ) -> "APIKey":
         api_key_obj = await APIKey.create_or_update(
             session,
             api_key=api_key,
             provider=provider,
-            azure_endpoint=azure_endpoint,
-            azure_api_version=azure_api_version,
+            endpoint=endpoint,
+            api_version=api_version,
             available_as_default=available_as_default,
         )
 
@@ -1209,7 +1202,6 @@ class Class(Base):
     async def create(
         cls, session: AsyncSession, inst_id: int, data: schemas.CreateClass
     ) -> "Class":
-        print(data.dict())
         class_ = Class(institution_id=inst_id, **data.dict())
         session.add(class_)
         await session.flush()

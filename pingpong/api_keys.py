@@ -19,13 +19,14 @@ async def transfer_api_keys(
 
     stmt = select(models.Class).where(
         and_(
-            models.Class.api_key_id is None,
-            models.Class.api_key is not None,
+            models.Class.api_key.isnot(None),
+            models.Class.api_key_id.is_(None),
         )
     )
     result = await session.execute(stmt)
     for row in result:
         class_ = row[0]
+        logging.info(f"Transferring API key for class: {class_.id}")
         api_key_obj = await models.APIKey.create_or_update(
             session=session,
             api_key=class_.api_key,
@@ -48,20 +49,12 @@ async def update_old_api_keys_by_redacted_api_key(
     )
 
     result = await session.execute(stmt)
-    classes = result.scalars().all()
 
-    if not classes:
-        logger.warning(
-            f"update_by_redacted_api_key: No class found for the provided redacted API key: {prefix}...{suffix}."
-        )
-        return
-    if len(classes) > 1:
-        raise ValueError(
-            f"Multiple classes found for the given provided API key: {prefix}...{suffix}. No updates performed."
-        )
+    for class_ in result.scalars().all():
+        logger.info(f"Updating API key {prefix}...{suffix} for class {class_.id}.")
+        class_.api_key = new_key
+        session.add(class_)
 
-    matched_class = classes
-    matched_class.api_key = new_key
     await session.flush()
 
 
@@ -80,17 +73,31 @@ async def update_new_api_keys_by_redacted_api_key(
     api_key_object = result.scalars().all()
 
     if not api_key_object:
-        logger.warning(
-            f"update_new_api_keys_by_redacted_api_key: No API key entry found for the provided redacted API key: {prefix}...{suffix}."
-        )
         return
     if len(api_key_object) > 1:
         raise ValueError(
             f"Multiple API key entries found for the given provided API key: {prefix}...{suffix}. No updates performed."
         )
 
-    matched_api_key_object = api_key_object[0]
-    matched_api_key_object.api_key = new_key
+    logger.info(f"Updating classes with API object key {prefix}...{suffix}.")
+
+    old_api_key_object = api_key_object[0]
+
+    new_api_object = await models.APIKey.create_or_update(
+        session=session,
+        api_key=new_key,
+        provider="openai",
+    )
+
+    stmt_ = select(models.Class).where(models.Class.api_key_id == old_api_key_object.id)
+    result_ = await session.execute(stmt_)
+    for class_ in result_.scalars().all():
+        logger.info(
+            f"Updating API object key {prefix}...{suffix} for class {class_.id}."
+        )
+        class_.api_key_id = new_api_object.id
+        session.add(class_)
+
     await session.flush()
 
 
