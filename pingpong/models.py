@@ -32,8 +32,6 @@ from sqlalchemy.sql import func
 import pingpong.schemas as schemas
 import logging
 
-logger = logging.getLogger(__name__)
-
 
 def _get_upsert_stmt(session: AsyncSession):
     """Get the appropriate upsert statement for the current database."""
