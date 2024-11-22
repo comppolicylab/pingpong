@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional, Union
 
-from sqlalchemy import Boolean, Column, DateTime, Float, UniqueConstraint, case
+from sqlalchemy import Boolean, Column, Computed, DateTime, Float, UniqueConstraint
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
     ForeignKey,
@@ -27,7 +27,6 @@ from sqlalchemy.orm import (
     selectinload,
     mapped_column,
     relationship,
-    declared_attr
 )
 from sqlalchemy.sql import func
 import pingpong.schemas as schemas
@@ -1029,17 +1028,20 @@ class APIKey(Base):
     azure_endpoint = Column(String, nullable=True)
     azure_api_version = Column(String, nullable=True)
     available_as_default = Column(Boolean, default=False)
+    azure_endpoint_coalesced = Column(
+        String,
+        Computed("COALESCE(azure_endpoint, '')"),
+    )
 
-    @declared_attr
-    def __table_args__(cls):
-        return (
-            UniqueConstraint(
-                "api_key", 
-                "provider", 
-                case([(cls.azure_endpoint.is_(None), "NULL")], else_=cls.azure_endpoint),
-                name="_key_endpoint_provider_uc"
-            ),
-        )
+    __table_args__ = (
+        UniqueConstraint(
+            "api_key",
+            "provider",
+            "azure_endpoint_coalesced",
+            name="_key_endpoint_provider_uc",
+        ),
+    )
+
 
 class Class(Base):
     __tablename__ = "classes"
@@ -1134,15 +1136,7 @@ class Class(Base):
         result = await session.scalar(stmt)
         return schemas.APIKeyModelResponse(
             api_key=result.api_key,
-            api_key_obj={
-                "provider": result.api_key_obj.provider,
-                "api_key": result.api_key_obj.api_key,
-                "azure_endpoint": result.api_key_obj.azure_endpoint,
-                "azure_api_version": result.api_key_obj.azure_api_version,
-                "available_as_default": result.api_key_obj.available_as_default,
-            }
-            if result.api_key_obj
-            else None,
+            api_key_obj=result.api_key_obj,
         )
 
     @classmethod
@@ -1166,10 +1160,11 @@ class Class(Base):
                 available_as_default=available_as_default,
             )
             .on_conflict_do_update(
-                index_elements=["api_key", "provider", "azure_endpoint"],
+                constraint="_key_endpoint_provider_uc",
                 set_=dict(
                     azure_api_version=azure_api_version,
-                    available_as_default=available_as_default,
+                    available_as_default=APIKey.available_as_default
+                    or available_as_default,
                 ),
             )
             .returning(APIKey)
