@@ -11,7 +11,7 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from pingpong.api_keys import transfer_api_keys
+from pingpong.api_keys import get_process_redacted_project_api_keys, transfer_api_keys
 from pingpong.merge import (
     get_merged_user_tuples,
     list_all_permissions,
@@ -311,6 +311,20 @@ def db_set_version(version: str, alembic_config: str) -> None:
     al_cfg = _load_alembic(alembic_config)
     # Run the Alembic upgrade command
     alembic.command.stamp(al_cfg, version)
+
+
+@db.command("migrate-oai-keys")
+@click.argument("admin_key", type=str)
+@click.argument("project_id", type=str)
+@click.argument("new_api_key", type=str)
+def migrate_oai_keys(admin_key: str, project_id: str, new_api_key: str) -> None:
+    async def _migrate_oai_keys() -> None:
+        async with config.db.driver.async_session() as session:
+            await get_process_redacted_project_api_keys(
+                session, admin_key, project_id, new_api_key
+            )
+
+    asyncio.run(_migrate_oai_keys())
 
 
 async def _lms_sync_all() -> None:
