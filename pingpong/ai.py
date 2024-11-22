@@ -28,7 +28,7 @@ from openai.types.beta.threads.text_content_block import TextContentBlock
 from pingpong.now import NowFn, utcnow
 from pingpong.schemas import CodeInterpreterMessage, DownloadExport
 from pingpong.config import config
-from typing import Dict, Literal, overload, Union
+from typing import Dict, Literal, overload
 from sqlalchemy.ext.asyncio import AsyncSession
 from zoneinfo import ZoneInfo
 
