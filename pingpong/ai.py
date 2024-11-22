@@ -619,15 +619,32 @@ def get_openai_client(
     api_key: str,
     provider: Literal["azure", "openai"] = "openai",
     endpoint: str | None = None,
-    api_version: str | None = "2024-10-01-preview",
+    api_version: str | None = None,
 ) -> Union[openai.AsyncClient, openai.AsyncAzureOpenAI]:
+    """Create an OpenAI client instance with the provided configuration.
+
+    This function creates either a standard OpenAI client or an Azure OpenAI client
+    depending on the provider parameter.
+
+    Args:
+        api_key: The API key for authentication
+        provider: The API provider - either "openai" or "azure"
+        endpoint: The Azure endpoint URL (required if provider is "azure")
+        api_version: The Azure API version (optional, defaults to "2024-10-01-preview" for Azure)
+
+    Returns:
+        An AsyncClient instance for OpenAI or an AsyncAzureOpenAI instance for Azure
+
+    Raises:
+        ValueError: If api_key is empty, if provider is unknown, or if endpoint is missing for Azure
+    """
     if not api_key:
         raise ValueError("API key is required")
     match provider:
         case "azure":
             _api_version = api_version or "2024-10-01-preview"
             if not endpoint:
-                raise ValueError("Azure tenant requires endpoint.")
+                raise ValueError("Azure client requires endpoint.")
             return openai.AsyncAzureOpenAI(
                 api_key=api_key, endpoint=endpoint, api_version=_api_version
             )
