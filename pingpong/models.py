@@ -1024,17 +1024,17 @@ class APIKey(Base):
         UniqueConstraint(
             "api_key",
             "provider",
-            "endpoint",
-            name="_key_endpoint_provider_uc",
+            name="_key_provider_uc",
         ),
         Index("api_key_available_as_default_idx", "available_as_default"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    name = Column(String, nullable=True)
     provider = Column(String, nullable=False)
     api_key = Column(String, nullable=False)
     classes = relationship("Class", back_populates="api_key_obj")
-    endpoint = Column(String, default="")
+    endpoint = Column(String, nullable=True)
     api_version = Column(String, nullable=True)
     available_as_default = Column(Boolean, default=False)
 
@@ -1058,7 +1058,7 @@ class APIKey(Base):
                 available_as_default=available_as_default,
             )
             .on_conflict_do_update(
-                constraint="_key_endpoint_provider_uc",
+                constraint="_key_provider_uc",
                 set_=dict(
                     api_version=api_version,
                     available_as_default=APIKey.available_as_default

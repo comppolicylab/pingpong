@@ -606,7 +606,7 @@ async def list_default_api_keys(request: Request):
                 redacted_key=f"{key.api_key[:8]}{'*' * 10}{key.api_key[-4:]}",
                 name=key.name,
                 provider=key.provider,
-                azure_endpoint=key.azure_endpoint,
+                endpoint=key.endpoint,
             )
             for key in default_api_keys
         ]
