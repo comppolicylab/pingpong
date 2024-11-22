@@ -630,7 +630,7 @@ def get_openai_client(
         api_key: The API key for authentication
         provider: The API provider - either "openai" or "azure"
         endpoint: The Azure endpoint URL (required if provider is "azure")
-        api_version: The Azure API version (optional, defaults to "2024-10-01-preview" for Azure)
+        api_version: The Azure API version (optional)
 
     Returns:
         An AsyncClient instance for OpenAI or an AsyncAzureOpenAI instance for Azure
