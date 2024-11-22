@@ -2,6 +2,7 @@ from sqlalchemy import and_, select
 import pingpong.models as models
 from sqlalchemy.ext.asyncio import AsyncSession
 
+
 async def transfer_api_keys(
     session: AsyncSession,
 ) -> None:
@@ -11,14 +12,11 @@ async def transfer_api_keys(
     Args:
         session (AsyncSession): SQLAlchemy session
     """
-    
-    stmt = (
-        select(models.Class)
-        .where(
-            and_(
-                models.Class.api_key_id is None,
-                models.Class.api_key is not None,
-            )
+
+    stmt = select(models.Class).where(
+        and_(
+            models.Class.api_key_id is None,
+            models.Class.api_key is not None,
         )
     )
     result = await session.execute(stmt)
@@ -31,5 +29,5 @@ async def transfer_api_keys(
         )
         class_.api_key_id = api_key_obj.id
         session.add(class_)
-    
+
     await session.commit()

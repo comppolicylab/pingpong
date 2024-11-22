@@ -297,7 +297,7 @@ def db_migrate(revision: str, downgrade: bool, alembic_config: str) -> None:
 def db_migrate_api_keys() -> None:
     async def _db_migrate_api_keys() -> None:
         async with config.db.driver.async_session() as session:
-            logger.info("Transferring API keys from Class to APIKey table...")
+            logger.info("Migrating API keys from Class to APIKey table...")
             await transfer_api_keys(session)
             logger.info("Done!")
 
