@@ -11,7 +11,11 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from pingpong.api_keys import get_process_redacted_project_api_keys, transfer_api_keys
+from pingpong.api_keys import (
+    get_process_redacted_project_api_keys,
+    set_as_default_api_key,
+    transfer_api_keys,
+)
 from pingpong.merge import (
     get_merged_user_tuples,
     list_all_permissions,
@@ -325,6 +329,17 @@ def migrate_oai_keys(admin_key: str, project_id: str, new_api_key: str) -> None:
             )
 
     asyncio.run(_migrate_oai_keys())
+
+
+@db.command("set-api-as-default")
+@click.argument("api_key", type=str)
+@click.argument("api_name", type=str)
+def set_api_as_default(api_key: str, api_name: str) -> None:
+    async def _set_api_as_default() -> None:
+        async with config.db.driver.async_session() as session:
+            await set_as_default_api_key(session, api_key, api_name)
+
+    asyncio.run(_set_api_as_default())
 
 
 async def _lms_sync_all() -> None:
