@@ -1207,7 +1207,6 @@ class Class(Base):
     async def create(
         cls, session: AsyncSession, inst_id: int, data: schemas.CreateClass
     ) -> "Class":
-        print(data.dict())
         class_ = Class(institution_id=inst_id, **data.dict())
         session.add(class_)
         await session.flush()
