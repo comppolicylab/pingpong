@@ -3,7 +3,7 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Union
 from aiohttp import ClientResponseError
 import jwt
 import openai
@@ -98,20 +98,41 @@ def get_now_fn(req: Request) -> NowFn:
     return getattr(req.app.state, "now", utcnow)
 
 
-async def get_openai_client_for_class(request: Request) -> openai.AsyncClient:
+OpenAIClientType = Union[openai.AsyncClient, openai.AsyncAzureOpenAI]
+
+
+async def get_openai_client_for_class(request: Request) -> OpenAIClientType:
     """Get an OpenAI client for the class.
 
     Requires the class_id to be in the path parameters.
     """
     class_id = request.path_params["class_id"]
-    api_key = await models.Class.get_api_key(request.state.db, int(class_id))
-    if not api_key:
+    result = await models.Class.get_api_key(request.state.db, int(class_id))
+    if result.api_key_obj:
+        if result.api_key_obj.provider == "openai":
+            return get_openai_client(
+                result.api_key_obj.api_key,
+                provider=result.api_key_obj.provider,  # type: ignore
+            )
+        elif result.api_key_obj.provider == "azure":
+            return get_openai_client(
+                result.api_key_obj.api_key,
+                provider=result.api_key_obj.provider,  # type: ignore
+                endpoint=result.api_key_obj.endpoint,
+                api_version=result.api_key_obj.api_version,
+            )
+        else:
+            raise HTTPException(
+                status_code=400, detail="Unknown API key provider for class"
+            )
+    elif result.api_key:
+        return get_openai_client(result.api_key)
+    else:
         raise HTTPException(status_code=401, detail="No API key for class")
-    return get_openai_client(api_key)
 
 
 OpenAIClientDependency = Depends(get_openai_client_for_class)
-OpenAIClient = Annotated[openai.AsyncClient, OpenAIClientDependency]
+OpenAIClient = Annotated[OpenAIClientType, OpenAIClientDependency]
 
 
 @v1.middleware("http")
@@ -836,7 +857,7 @@ async def delete_class(class_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Group not found")
 
     if class_.api_key:
-        openai_client = get_openai_client(class_.api_key)
+        openai_client = await get_openai_client_for_class(request)
         # Delete all threads
         async for thread in models.Thread.get_ids_by_class_id(
             request.state.db, class_.id
@@ -1437,22 +1458,48 @@ async def remove_user_from_class(class_id: str, user_id: str, request: Request):
 @v1.put(
     "/class/{class_id}/api_key",
     dependencies=[Depends(Authz("admin", "class:{class_id}"))],
-    response_model=schemas.ApiKey,
+    response_model=schemas.APIKeyResponse,
 )
 async def update_class_api_key(
     class_id: str, update: schemas.UpdateApiKey, request: Request
 ):
+    if not update.api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="API key must be provided to update the class API key.",
+        )
     existing_key = await models.Class.get_api_key(request.state.db, int(class_id))
-    if existing_key == update.api_key:
-        return {"api_key": existing_key}
-    elif not existing_key:
-        if not await validate_api_key(update.api_key):
+    if (
+        existing_key.api_key_obj
+        and existing_key.api_key_obj.api_key == update.api_key
+        and existing_key.api_key_obj.provider == update.provider
+        and existing_key.api_key_obj.endpoint == update.endpoint
+        and existing_key.api_key_obj.api_version == update.api_version
+    ):
+        return {"api_key": existing_key.api_key_obj}
+    if existing_key.api_key == update.api_key:
+        return {
+            "api_key": schemas.ApiKey(api_key=existing_key.api_key, provider="openai")
+        }
+    elif not existing_key.api_key_obj and not existing_key.api_key:
+        if not await validate_api_key(
+            update.api_key,
+            update.provider.value,
+            update.endpoint,
+            update.api_version,
+        ):
             raise HTTPException(
                 status_code=400,
-                detail="Invalid API key provided. Please try again.",
+                detail="Invalid API connection information provided. Please try again.",
             )
-        await models.Class.update_api_key(
-            request.state.db, int(class_id), update.api_key
+        api_key_obj = await models.Class.update_api_key(
+            request.state.db,
+            int(class_id),
+            update.api_key,
+            provider=update.provider,
+            endpoint=update.endpoint if update.provider == "azure" else None,
+            api_version=update.api_version if update.provider == "azure" else None,
+            available_as_default=False,
         )
         await request.state.authz.write_safe(
             grant=[
@@ -1463,25 +1510,37 @@ async def update_class_api_key(
                 )
             ]
         )
+        return {"api_key": api_key_obj}
     else:
         raise HTTPException(
             status_code=400,
             detail="API key already exists. Delete it first to create a new one.",
         )
-    return {"api_key": update.api_key}
 
 
 @v1.get(
     "/class/{class_id}/api_key",
     dependencies=[Depends(Authz("can_view_api_key", "class:{class_id}"))],
-    response_model=schemas.ApiKey,
+    response_model=schemas.APIKeyResponse,
 )
 async def get_class_api_key(class_id: str, request: Request):
-    api_key = await models.Class.get_api_key(request.state.db, int(class_id))
-    if not api_key:
-        return {"api_key": None}
-    redacted_api_key = f"{api_key[:8]}{'*' * 20}{api_key[-4:]}"
-    return {"api_key": redacted_api_key}
+    response = None
+    result = await models.Class.get_api_key(request.state.db, int(class_id))
+    if result.api_key_obj:
+        api_key_obj = result.api_key_obj
+        response = schemas.ApiKey(
+            api_key=f"{api_key_obj.api_key[:8]}{'*' * 20}{api_key_obj.api_key[-4:]}",
+            provider=api_key_obj.provider,
+            endpoint=api_key_obj.endpoint,
+            api_version=api_key_obj.api_version,
+        )
+    elif result.api_key:
+        response = schemas.ApiKey(
+            api_key=f"{result.api_key[:8]}{'*' * 20}{result.api_key[-4:]}",
+            provider="openai",
+        )
+
+    return {"api_key": response}
 
 
 @v1.get(

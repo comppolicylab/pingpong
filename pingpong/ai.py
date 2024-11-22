@@ -28,7 +28,7 @@ from openai.types.beta.threads.text_content_block import TextContentBlock
 from pingpong.now import NowFn, utcnow
 from pingpong.schemas import CodeInterpreterMessage, DownloadExport
 from pingpong.config import config
-from typing import Dict
+from typing import Dict, Literal, overload
 from sqlalchemy.ext.asyncio import AsyncSession
 from zoneinfo import ZoneInfo
 
@@ -120,13 +120,26 @@ async def generate_thread_name(
         return None
 
 
-async def validate_api_key(api_key: str) -> bool:
+async def validate_api_key(
+    api_key: str,
+    provider: Literal["azure", "openai"] = "openai",
+    endpoint: str | None = None,
+    api_version: str | None = None,
+) -> bool:
     """Validate an OpenAI API key.
 
     :param key: API key to validate
     :return: Whether the key is valid
     """
-    cli = get_openai_client(api_key)
+    if provider == "azure":
+        cli = get_openai_client(
+            api_key=api_key,
+            provider=provider,
+            endpoint=endpoint,
+            api_version=api_version,
+        )
+    elif provider == "openai":
+        cli = get_openai_client(api_key=api_key, provider=provider)
     try:
         await cli.models.list()
         return True
@@ -604,6 +617,58 @@ def replace_annotations_in_text(
     return updated_text
 
 
+@overload
+def get_openai_client(
+    api_key: str, provider: Literal["openai"] = "openai"
+) -> openai.AsyncClient: ...
+
+
+@overload
+def get_openai_client(
+    api_key: str, *, provider: Literal["azure"], endpoint: str | None
+) -> openai.AsyncAzureOpenAI: ...
+
+
+@overload
+def get_openai_client(
+    api_key: str,
+    *,
+    provider: Literal["azure"],
+    endpoint: str | None,
+    api_version: str | None,
+) -> openai.AsyncAzureOpenAI: ...
+
+
 @functools.cache
-def get_openai_client(api_key: str) -> openai.AsyncClient:
-    return openai.AsyncClient(api_key=api_key)
+def get_openai_client(api_key, provider="openai", endpoint=None, api_version=None):
+    """Create an OpenAI client instance with the provided configuration.
+
+    This function creates either a standard OpenAI client or an Azure OpenAI client
+    depending on the provider parameter.
+
+    Args:
+        api_key: The API key for authentication
+        provider: The API provider - either "openai" or "azure"
+        endpoint: The Azure endpoint URL (required if provider is "azure")
+        api_version: The Azure API version (optional)
+
+    Returns:
+        An AsyncClient instance for OpenAI or an AsyncAzureOpenAI instance for Azure
+
+    Raises:
+        ValueError: If api_key is empty, if provider is unknown, or if endpoint is missing for Azure
+    """
+    if not api_key:
+        raise ValueError("API key is required")
+    match provider:
+        case "azure":
+            _api_version = api_version or "2024-10-01-preview"
+            if not endpoint:
+                raise ValueError("Azure client requires endpoint.")
+            return openai.AsyncAzureOpenAI(
+                api_key=api_key, endpoint=endpoint, api_version=_api_version
+            )
+        case "openai":
+            return openai.AsyncClient(api_key=api_key)
+        case _:
+            raise ValueError(f"Unknown provider {provider}")
