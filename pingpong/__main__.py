@@ -11,6 +11,7 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from pingpong.api_keys import transfer_api_keys
 from pingpong.merge import (
     get_merged_user_tuples,
     list_all_permissions,
@@ -290,6 +291,17 @@ def db_migrate(revision: str, downgrade: bool, alembic_config: str) -> None:
     else:
         logger.info(f"Upgrading to revision {revision}")
         alembic.command.upgrade(al_cfg, revision)
+
+
+@db.command("migrate-api-keys")
+def db_migrate_api_keys() -> None:
+    async def _db_migrate_api_keys() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Transferring API keys from Class to APIKey table...")
+            await transfer_api_keys(session)
+            logger.info("Done!")
+
+    asyncio.run(_db_migrate_api_keys())
 
 
 @db.command("set-version")
