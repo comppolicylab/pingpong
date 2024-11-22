@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional, Union
 
-from sqlalchemy import Boolean, Column, DateTime, Float, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Float, UniqueConstraint, case
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
     ForeignKey,
@@ -27,6 +27,7 @@ from sqlalchemy.orm import (
     selectinload,
     mapped_column,
     relationship,
+    declared_attr
 )
 from sqlalchemy.sql import func
 import pingpong.schemas as schemas
@@ -1020,11 +1021,6 @@ class LMSClass(Base):
 
 class APIKey(Base):
     __tablename__ = "api_keys"
-    __table_args__ = (
-        UniqueConstraint(
-            "api_key", "provider", "azure_endpoint", name="_key_endpoint_provider_uc"
-        ),
-    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     provider = Column(String, nullable=False)
@@ -1034,6 +1030,16 @@ class APIKey(Base):
     azure_api_version = Column(String, nullable=True)
     available_as_default = Column(Boolean, default=False)
 
+    @declared_attr
+    def __table_args__(cls):
+        return (
+            UniqueConstraint(
+                "api_key", 
+                "provider", 
+                case([(cls.azure_endpoint.is_(None), "NULL")], else_=cls.azure_endpoint),
+                name="_key_endpoint_provider_uc"
+            ),
+        )
 
 class Class(Base):
     __tablename__ = "classes"
