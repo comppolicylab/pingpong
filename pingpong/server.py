@@ -112,12 +112,12 @@ async def get_openai_client_for_class(request: Request) -> OpenAIClientType:
         if result.api_key_obj.provider == "openai":
             return get_openai_client(
                 result.api_key_obj.api_key,
-                provider="openai",
+                provider=result.api_key_obj.provider,  # type: ignore
             )
         elif result.api_key_obj.provider == "azure":
             return get_openai_client(
                 result.api_key_obj.api_key,
-                provider="azure",
+                provider=result.api_key_obj.provider,  # type: ignore
                 endpoint=result.api_key_obj.endpoint,
                 api_version=result.api_key_obj.api_version,
             )
