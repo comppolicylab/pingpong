@@ -150,8 +150,8 @@
                       ? 'Azure'
                       : key.provider}
                 </div>
-                {#if key.azure_endpoint && !key.name}
-                  <div class="font-normal">Azure endpoint: {key.azure_endpoint}</div>
+                {#if key.endpoint && !key.name}
+                  <div class="font-normal">Azure endpoint: {key.endpoint}</div>
                 {/if}
                 {#if !key.name}
                   <div class="font-normal">API key: {key.redacted_key}</div>
