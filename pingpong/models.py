@@ -1020,6 +1020,15 @@ class LMSClass(Base):
 
 class APIKey(Base):
     __tablename__ = "api_keys"
+    __table_args__ = (
+        UniqueConstraint(
+            "api_key",
+            "provider",
+            "endpoint",
+            name="_key_endpoint_provider_uc",
+        ),
+        Index("api_key_available_as_default_idx", "available_as_default"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     provider = Column(String, nullable=False)
@@ -1028,15 +1037,6 @@ class APIKey(Base):
     endpoint = Column(String, default="")
     api_version = Column(String, nullable=True)
     available_as_default = Column(Boolean, default=False)
-
-    __table_args__ = (
-        UniqueConstraint(
-            "api_key",
-            "provider",
-            "endpoint",
-            name="_key_endpoint_provider_uc",
-        ),
-    )
 
     @classmethod
     async def create_or_update(
