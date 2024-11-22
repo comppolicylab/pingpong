@@ -680,11 +680,16 @@ class UpdateClass(BaseModel):
     any_can_upload_class_file: bool | None = None
 
 
+class AIProvider(StrEnum):
+    OPENAI = "openai"
+    AZURE = "azure"
+
+
 class UpdateApiKey(BaseModel):
     api_key: str
-    provider: Literal["openai", "azure"]
-    azure_endpoint: str | None = None
-    azure_api_version: str | None = None
+    provider: AIProvider
+    endpoint: str | None = None
+    api_version: str | None = None
 
     class Config:
         from_attributes = True
@@ -693,8 +698,8 @@ class UpdateApiKey(BaseModel):
 class ApiKey(BaseModel):
     api_key: str
     provider: str
-    azure_endpoint: str | None = None
-    azure_api_version: str | None = None
+    endpoint: str | None = None
+    api_version: str | None = None
     available_as_default: bool | None = None
 
     class Config:
