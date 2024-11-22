@@ -1048,9 +1048,9 @@ class APIKey(Base):
         session: AsyncSession,
         api_key: str,
         provider: str,
-        azure_endpoint: str | None,
-        azure_api_version: str | None,
-        available_as_default: bool,
+        azure_endpoint: str | None = None,
+        azure_api_version: str | None = None,
+        available_as_default: bool = False,
     ) -> "APIKey":
         stmt = (
             _get_upsert_stmt(session)(APIKey)
