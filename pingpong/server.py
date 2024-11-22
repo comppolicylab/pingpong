@@ -109,12 +109,22 @@ async def get_openai_client_for_class(request: Request) -> OpenAIClientType:
     class_id = request.path_params["class_id"]
     result = await models.Class.get_api_key(request.state.db, int(class_id))
     if result.api_key_obj:
-        return get_openai_client(
-            result.api_key_obj.api_key,
-            provider=result.api_key_obj.provider,
-            endpoint=result.api_key_obj.azure_endpoint,
-            api_version=result.api_key_obj.azure_api_version,
-        )
+        if result.api_key_obj.provider == "openai":
+            return get_openai_client(
+                result.api_key_obj.api_key,
+                provider=result.api_key_obj.provider,  # type: ignore
+            )
+        elif result.api_key_obj.provider == "azure":
+            return get_openai_client(
+                result.api_key_obj.api_key,
+                provider=result.api_key_obj.provider,  # type: ignore
+                endpoint=result.api_key_obj.endpoint,
+                api_version=result.api_key_obj.api_version,
+            )
+        else:
+            raise HTTPException(
+                status_code=400, detail="Unknown API key provider for class"
+            )
     elif result.api_key:
         return get_openai_client(result.api_key)
     else:
@@ -1485,8 +1495,8 @@ async def update_class_api_key(
         existing_key.api_key_obj
         and existing_key.api_key_obj.api_key == update.api_key
         and existing_key.api_key_obj.provider == update.provider
-        and existing_key.api_key_obj.azure_endpoint == update.azure_endpoint
-        and existing_key.api_key_obj.azure_api_version == update.azure_api_version
+        and existing_key.api_key_obj.endpoint == update.endpoint
+        and existing_key.api_key_obj.api_version == update.api_version
     ):
         return {"api_key": existing_key.api_key_obj}
     if existing_key.api_key == update.api_key:
@@ -1496,9 +1506,9 @@ async def update_class_api_key(
     elif not existing_key.api_key_obj and not existing_key.api_key:
         if not await validate_api_key(
             update.api_key,
-            update.provider,
-            update.azure_endpoint,
-            update.azure_api_version,
+            update.provider.value,
+            update.endpoint,
+            update.api_version,
         ):
             raise HTTPException(
                 status_code=400,
@@ -1509,12 +1519,8 @@ async def update_class_api_key(
             int(class_id),
             update.api_key,
             provider=update.provider,
-            azure_endpoint=update.azure_endpoint
-            if update.provider == "azure"
-            else None,
-            azure_api_version=update.azure_api_version
-            if update.provider == "azure"
-            else None,
+            endpoint=update.endpoint if update.provider == "azure" else None,
+            api_version=update.api_version if update.provider == "azure" else None,
             available_as_default=False,
         )
         await request.state.authz.write_safe(
@@ -1547,8 +1553,8 @@ async def get_class_api_key(class_id: str, request: Request):
         response = schemas.ApiKey(
             api_key=f"{api_key_obj.api_key[:8]}{'*' * 20}{api_key_obj.api_key[-4:]}",
             provider=api_key_obj.provider,
-            azure_endpoint=api_key_obj.azure_endpoint,
-            azure_api_version=api_key_obj.azure_api_version,
+            endpoint=api_key_obj.endpoint,
+            api_version=api_key_obj.api_version,
         )
     elif result.api_key:
         response = schemas.ApiKey(
