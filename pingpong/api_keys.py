@@ -19,13 +19,14 @@ async def transfer_api_keys(
 
     stmt = select(models.Class).where(
         and_(
-            models.Class.api_key_id is None,
-            models.Class.api_key is not None,
+            models.Class.api_key.isnot(None),
+            models.Class.api_key_id.is_(None),
         )
     )
     result = await session.execute(stmt)
     for row in result:
         class_ = row[0]
+        logging.info(f"Transferring API key for class: {class_.id}")
         api_key_obj = await models.APIKey.create_or_update(
             session=session,
             api_key=class_.api_key,
