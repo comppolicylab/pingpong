@@ -38,12 +38,9 @@ async def transfer_api_keys(
 
 
 async def update_old_api_keys_by_redacted_api_key(
-    cls, session: AsyncSession, redacted_key: str, new_key: str
+    session: AsyncSession, prefix: str, suffix: str, new_key: str
 ) -> None:
-    prefix = redacted_key.split("*", 1)[0]
-    suffix = redacted_key.rstrip("*").rsplit("*", 1)[-1]
-
-    stmt = select(cls).where(
+    stmt = select(models.Class).where(
         and_(
             models.Class.api_key.like(f"{prefix}%"),
             models.Class.api_key.like(f"%{suffix}"),
@@ -55,24 +52,23 @@ async def update_old_api_keys_by_redacted_api_key(
 
     if not classes:
         logger.warning(
-            f"update_by_redacted_api_key: No class found for the provided redacted API key: {redacted_key}."
+            f"update_by_redacted_api_key: No class found for the provided redacted API key: {prefix}...{suffix}."
         )
+        return
     if len(classes) > 1:
         raise ValueError(
-            f"Multiple classes found for the given provided API key: {redacted_key}. No updates performed."
+            f"Multiple classes found for the given provided API key: {prefix}...{suffix}. No updates performed."
         )
 
-    matched_class = classes[0]
+    matched_class = classes
     matched_class.api_key = new_key
     await session.flush()
 
-async def update_new_api_keys_by_redacted_api_key(
-    cls, session: AsyncSession, redacted_key: str, new_key: str
-) -> None:
-    prefix = redacted_key.split("*", 1)[0]
-    suffix = redacted_key.rstrip("*").rsplit("*", 1)[-1]
 
-    stmt = select(cls).where(
+async def update_new_api_keys_by_redacted_api_key(
+    session: AsyncSession, prefix: str, suffix: str, new_key: str
+) -> None:
+    stmt = select(models.APIKey).where(
         and_(
             models.APIKey.api_key.like(f"{prefix}%"),
             models.APIKey.api_key.like(f"%{suffix}"),
@@ -85,13 +81,65 @@ async def update_new_api_keys_by_redacted_api_key(
 
     if not api_key_object:
         logger.warning(
-            f"update_new_api_keys_by_redacted_api_key: No API key entry found for the provided redacted API key: {redacted_key}."
+            f"update_new_api_keys_by_redacted_api_key: No API key entry found for the provided redacted API key: {prefix}...{suffix}."
         )
+        return
     if len(api_key_object) > 1:
         raise ValueError(
-            f"Multiple API key entries found for the given provided API key: {redacted_key}. No updates performed."
+            f"Multiple API key entries found for the given provided API key: {prefix}...{suffix}. No updates performed."
         )
 
     matched_api_key_object = api_key_object[0]
     matched_api_key_object.api_key = new_key
     await session.flush()
+
+
+async def get_process_redacted_project_api_keys(
+    db_session: AsyncSession, admin_key: str, project_id: str, new_api_key: str
+) -> None:
+    """
+    Fetches and processes all redacted API keys for the specified project by iterating through all pages.
+    """
+    api_url = f"https://api.openai.com/v1/organization/projects/{project_id}/api_keys"
+    headers = {
+        "Authorization": f"Bearer {admin_key}",
+        "Content-Type": "application/json",
+    }
+
+    after = None  # For pagination
+
+    async with aiohttp.ClientSession() as session:
+        while True:
+            params = {"limit": 100}
+            if after:
+                params["after"] = after
+
+            async with session.get(api_url, headers=headers, params=params) as response:
+                if response.status != 200:
+                    raise Exception(
+                        f"Failed to fetch API keys: {response.status} - {await response.text()}"
+                    )
+
+                data = await response.json()
+
+                for item in data.get("data", []):
+                    redacted_key = item.get("redacted_value")
+                    if redacted_key:
+                        prefix = redacted_key.split("*", 1)[0]
+                        suffix = redacted_key.rstrip("*").rsplit("*", 1)[-1]
+                        if prefix and suffix:
+                            await update_old_api_keys_by_redacted_api_key(
+                                db_session, prefix, suffix, new_api_key
+                            )
+                            await update_new_api_keys_by_redacted_api_key(
+                                db_session, prefix, suffix, new_api_key
+                            )
+                        else:
+                            logger.warning(f"Invalid redacted API key: {redacted_key}")
+
+                if not data.get("has_more", False):
+                    break
+
+                after = data.get("last_id")
+
+    await db_session.commit()
