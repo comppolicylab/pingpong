@@ -145,7 +145,7 @@ async def get_process_redacted_project_api_keys(
     await db_session.commit()
 
 
-async def set_as_default_api_key(
+async def set_as_default_oai_api_key(
     session: AsyncSession, redacted_key: str, name: str
 ) -> None:
     prefix = redacted_key.split("*", 1)[0]
@@ -164,12 +164,46 @@ async def set_as_default_api_key(
 
     if not api_key_object:
         raise ValueError(
-            f"set_as_default_api_key: No API key entry found for the provided redacted API key: {prefix}...{suffix}."
+            f"set_as_default_oai_api_key: No API key entry found for the provided redacted API key: {prefix}...{suffix}."
         )
         return
     if len(api_key_object) > 1:
         raise ValueError(
-            f"set_as_default_api_key: Multiple API key entries found for the given provided API key: {prefix}...{suffix}. No updates performed."
+            f"set_as_default_oai_api_key: Multiple API key entries found for the given provided API key: {prefix}...{suffix}. No updates performed."
+        )
+
+    matched_api_key_object = api_key_object[0]
+    matched_api_key_object.available_as_default = True
+    matched_api_key_object.name = name
+    await session.commit()
+
+
+async def set_as_default_azure_api_key(
+    session: AsyncSession, redacted_key: str, endpoint: str, name: str
+) -> None:
+    prefix = redacted_key.split("*", 1)[0]
+    suffix = redacted_key.rstrip("*").rsplit("*", 1)[-1]
+
+    stmt = select(models.APIKey).where(
+        and_(
+            models.APIKey.api_key.like(f"{prefix}%"),
+            models.APIKey.api_key.like(f"%{suffix}"),
+            models.APIKey.provider == "azure",
+            models.APIKey.endpoint == endpoint,
+        )
+    )
+
+    result = await session.execute(stmt)
+    api_key_object = result.scalars().all()
+
+    if not api_key_object:
+        raise ValueError(
+            f"set_as_default_azure_api_key: No API key entry found for the provided redacted API key: {prefix}...{suffix}."
+        )
+        return
+    if len(api_key_object) > 1:
+        raise ValueError(
+            f"set_as_default_azure_api_key: Multiple API key entries found for the given provided API key: {prefix}...{suffix}. No updates performed."
         )
 
     matched_api_key_object = api_key_object[0]

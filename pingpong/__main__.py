@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from typing import Optional
 import webbrowser
 import click
 import alembic
@@ -13,7 +14,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from pingpong.api_keys import (
     get_process_redacted_project_api_keys,
-    set_as_default_api_key,
+    set_as_default_azure_api_key,
+    set_as_default_oai_api_key,
     transfer_api_keys,
 )
 from pingpong.merge import (
@@ -334,14 +336,37 @@ def migrate_oai_keys(admin_key: str, project_id: str, new_api_key: str) -> None:
 @db.command("set-api-as-default")
 @click.argument("api_key", type=str)
 @click.argument("api_name", type=str)
-def set_api_as_default(api_key: str, api_name: str) -> None:
+@click.option(
+    "--provider",
+    type=click.Choice(["openai", "azure"]),
+    default="openai",
+)
+@click.option(
+    "--azure-endpoint",
+    type=str,
+    required=False,
+)
+def set_api_as_default(
+    api_key: str, api_name: str, provider: str, azure_endpoint: Optional[str]
+) -> None:
     async def _set_api_as_default() -> None:
         async with config.db.driver.async_session() as session:
-            await set_as_default_api_key(session, api_key, api_name)
+            logger.info(f"Setting {api_name} as default API key...")
+            if provider == "openai":
+                await set_as_default_oai_api_key(session, api_key, api_name)
+            elif provider == "azure":
+                if not azure_endpoint:
+                    raise ValueError("Azure endpoint required for Azure API key")
+                await set_as_default_azure_api_key(
+                    session, api_key, api_name, azure_endpoint
+                )
+
+        logger.info("Done!")
 
     asyncio.run(_set_api_as_default())
 
 
+@db.command
 async def _lms_sync_all() -> None:
     await config.authz.driver.init()
     async with config.db.driver.async_session() as session:
