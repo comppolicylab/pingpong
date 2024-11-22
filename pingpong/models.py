@@ -1027,12 +1027,19 @@ class APIKey(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    name = Column(String, nullable=True)
     provider = Column(String, nullable=False)
     api_key = Column(String, nullable=False)
     classes = relationship("Class", back_populates="api_key_obj")
     azure_endpoint = Column(String, nullable=True)
     azure_api_version = Column(String, nullable=True)
     available_as_default = Column(Boolean, default=False)
+
+    @classmethod
+    async def get_all_default_keys(cls, session: AsyncSession) -> List["APIKey"]:
+        stmt = select(APIKey).where(APIKey.available_as_default.is_(True))
+        result = await session.execute(stmt)
+        return [row[0] for row in result]
 
 
 class Class(Base):
@@ -1128,15 +1135,7 @@ class Class(Base):
         result = await session.scalar(stmt)
         return schemas.APIKeyModelResponse(
             api_key=result.api_key,
-            api_key_obj={
-                "provider": result.api_key_obj.provider,
-                "api_key": result.api_key_obj.api_key,
-                "azure_endpoint": result.api_key_obj.azure_endpoint,
-                "azure_api_version": result.api_key_obj.azure_api_version,
-                "available_as_default": result.api_key_obj.available_as_default,
-            }
-            if result.api_key_obj
-            else None,
+            api_key_obj=result.api_key_obj,
         )
 
     @classmethod

@@ -582,6 +582,28 @@ async def auth(request: Request):
 
 
 @v1.get(
+    "/api_keys/default",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.DefaultAPIKeys,
+)
+async def list_default_api_keys(request: Request):
+    default_api_keys = await models.APIKey.get_all_default_keys(request.state.db)
+    print(default_api_keys)
+    return schemas.DefaultAPIKeys(
+        default_keys=[
+            schemas.DefaultAPIKey(
+                id=key.id,
+                redacted_key=f"{key.api_key[:8]}{'*' * 10}{key.api_key[-4:]}",
+                name=key.name,
+                provider=key.provider,
+                azure_endpoint=key.azure_endpoint,
+            )
+            for key in default_api_keys
+        ]
+    )
+
+
+@v1.get(
     "/institutions",
     dependencies=[Depends(LoggedIn())],
     response_model=schemas.Institutions,

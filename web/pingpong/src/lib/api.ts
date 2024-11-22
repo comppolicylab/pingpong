@@ -704,6 +704,26 @@ export type UpdateApiKeyRequest = {
   azure_api_version?: string;
 };
 
+export type DefaultAPIKey = {
+  id: number;
+  redacted_key: string;
+  name?: string;
+  provider: string;
+  azure_endpoint?: string;
+};
+
+export type DefaultAPIKeys = {
+  default_keys: DefaultAPIKey[];
+};
+
+/**
+ * Get the default API keys.
+ */
+export const getDefaultAPIKeys = async (f: Fetcher) => {
+  const url = 'api_keys/default';
+  return await GET<never, DefaultAPIKeys>(f, url);
+};
+
 /**
  * Update the API key for a class.
  */

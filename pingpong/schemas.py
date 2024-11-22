@@ -686,6 +686,9 @@ class UpdateApiKey(BaseModel):
     azure_endpoint: str | None = None
     azure_api_version: str | None = None
 
+    class Config:
+        from_attributes = True
+
 
 class ApiKey(BaseModel):
     api_key: str
@@ -693,6 +696,9 @@ class ApiKey(BaseModel):
     azure_endpoint: str | None = None
     azure_api_version: str | None = None
     available_as_default: bool | None = None
+
+    class Config:
+        from_attributes = True
 
 
 class APIKeyResponse(BaseModel):
@@ -702,6 +708,27 @@ class APIKeyResponse(BaseModel):
 class APIKeyModelResponse(BaseModel):
     api_key: str | None = None
     api_key_obj: ApiKey | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class DefaultAPIKey(BaseModel):
+    id: int
+    redacted_key: str
+    name: str | None = None
+    provider: str
+    azure_endpoint: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class DefaultAPIKeys(BaseModel):
+    default_keys: list[DefaultAPIKey]
+
+    class Config:
+        from_attributes = True
 
 
 class AssistantModel(BaseModel):
