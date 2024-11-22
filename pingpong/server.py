@@ -109,12 +109,22 @@ async def get_openai_client_for_class(request: Request) -> OpenAIClientType:
     class_id = request.path_params["class_id"]
     result = await models.Class.get_api_key(request.state.db, int(class_id))
     if result.api_key_obj:
-        return get_openai_client(
-            result.api_key_obj.api_key,
-            provider=result.api_key_obj.provider,
-            endpoint=result.api_key_obj.endpoint,
-            api_version=result.api_key_obj.api_version,
-        )
+        if result.api_key_obj.provider == "openai":
+            return get_openai_client(
+                result.api_key_obj.api_key,
+                provider="openai",
+            )
+        elif result.api_key_obj.provider == "azure":
+            return get_openai_client(
+                result.api_key_obj.api_key,
+                provider="azure",
+                endpoint=result.api_key_obj.endpoint,
+                api_version=result.api_key_obj.api_version,
+            )
+        else:
+            raise HTTPException(
+                status_code=400, detail="Unknown API key provider for class"
+            )
     elif result.api_key:
         return get_openai_client(result.api_key)
     else:

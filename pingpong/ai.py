@@ -28,7 +28,7 @@ from openai.types.beta.threads.text_content_block import TextContentBlock
 from pingpong.now import NowFn, utcnow
 from pingpong.schemas import CodeInterpreterMessage, DownloadExport
 from pingpong.config import config
-from typing import Dict, Literal, Union
+from typing import Dict, Literal, overload
 from sqlalchemy.ext.asyncio import AsyncSession
 from zoneinfo import ZoneInfo
 
@@ -131,12 +131,15 @@ async def validate_api_key(
     :param key: API key to validate
     :return: Whether the key is valid
     """
-    cli = get_openai_client(
-        api_key,
-        provider=provider,
-        endpoint=endpoint,
-        api_version=api_version,
-    )
+    if provider == "azure":
+        cli = get_openai_client(
+            api_key=api_key,
+            provider=provider,
+            endpoint=endpoint,
+            api_version=api_version,
+        )
+    elif provider == "openai":
+        cli = get_openai_client(api_key=api_key, provider=provider)
     try:
         await cli.models.list()
         return True
@@ -614,13 +617,30 @@ def replace_annotations_in_text(
     return updated_text
 
 
-@functools.cache
+@overload
+def get_openai_client(
+    api_key: str, provider: Literal["openai"] = "openai"
+) -> openai.AsyncClient: ...
+
+
+@overload
+def get_openai_client(
+    api_key: str, *, provider: Literal["azure"], endpoint: str | None
+) -> openai.AsyncAzureOpenAI: ...
+
+
+@overload
 def get_openai_client(
     api_key: str,
-    provider: Literal["azure", "openai"] = "openai",
-    endpoint: str | None = None,
-    api_version: str | None = None,
-) -> Union[openai.AsyncClient, openai.AsyncAzureOpenAI]:
+    *,
+    provider: Literal["azure"],
+    endpoint: str | None,
+    api_version: str | None,
+) -> openai.AsyncAzureOpenAI: ...
+
+
+@functools.cache
+def get_openai_client(api_key, provider="openai", endpoint=None, api_version=None):
     """Create an OpenAI client instance with the provided configuration.
 
     This function creates either a standard OpenAI client or an Azure OpenAI client
