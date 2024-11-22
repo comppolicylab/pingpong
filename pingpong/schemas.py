@@ -663,6 +663,7 @@ class Class(BaseModel):
 class CreateClass(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
     term: str = Field(..., min_length=1, max_length=100)
+    api_key_id: int | None = None
     private: bool = False
     any_can_create_assistant: bool = False
     any_can_publish_assistant: bool = False
@@ -716,6 +717,24 @@ class APIKeyResponse(BaseModel):
 class APIKeyModelResponse(BaseModel):
     api_key: str | None = None
     api_key_obj: ApiKey | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class DefaultAPIKey(BaseModel):
+    id: int
+    redacted_key: str
+    name: str | None = None
+    provider: str
+    endpoint: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class DefaultAPIKeys(BaseModel):
+    default_keys: list[DefaultAPIKey]
 
     class Config:
         from_attributes = True

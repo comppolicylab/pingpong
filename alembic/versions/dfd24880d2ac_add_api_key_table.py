@@ -30,9 +30,7 @@ def upgrade() -> None:
         sa.Column("api_version", sa.String(), nullable=True),
         sa.Column("available_as_default", sa.Boolean(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint(
-            "api_key", "provider", "endpoint", name="_key_endpoint_provider_uc"
-        ),
+        sa.UniqueConstraint("api_key", "provider", name="_key_provider_uc"),
     )
     op.create_index(
         "api_key_available_as_default_idx",

@@ -639,6 +639,7 @@ export type CreateClassRequest = {
   name: string;
   term: string;
   private?: boolean;
+  api_key_id: number | null;
   any_can_create_assistant?: boolean;
   any_can_publish_assistant?: boolean;
   any_can_publish_thread?: boolean;
@@ -702,6 +703,26 @@ export type UpdateApiKeyRequest = {
   provider: string;
   endpoint?: string;
   api_version?: string;
+};
+
+export type DefaultAPIKey = {
+  id: number;
+  redacted_key: string;
+  name?: string;
+  provider: string;
+  endpoint?: string;
+};
+
+export type DefaultAPIKeys = {
+  default_keys: DefaultAPIKey[];
+};
+
+/**
+ * Get the default API keys.
+ */
+export const getDefaultAPIKeys = async (f: Fetcher) => {
+  const url = 'api_keys/default';
+  return await GET<never, DefaultAPIKeys>(f, url);
 };
 
 /**
