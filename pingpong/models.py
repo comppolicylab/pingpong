@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional, Union
 
-from sqlalchemy import Boolean, Column, DateTime, Float, UniqueConstraint
+from sqlalchemy import Boolean, Column, Computed, DateTime, Float, UniqueConstraint
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
     ForeignKey,
@@ -1020,11 +1020,6 @@ class LMSClass(Base):
 
 class APIKey(Base):
     __tablename__ = "api_keys"
-    __table_args__ = (
-        UniqueConstraint(
-            "api_key", "provider", "azure_endpoint", name="_key_endpoint_provider_uc"
-        ),
-    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String, nullable=True)
@@ -1034,6 +1029,19 @@ class APIKey(Base):
     azure_endpoint = Column(String, nullable=True)
     azure_api_version = Column(String, nullable=True)
     available_as_default = Column(Boolean, default=False)
+    azure_endpoint_coalesced = Column(
+        String,
+        Computed("COALESCE(azure_endpoint, '')"),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "api_key",
+            "provider",
+            "azure_endpoint_coalesced",
+            name="_key_endpoint_provider_uc",
+        ),
+    )
 
     @classmethod
     async def get_all_default_keys(cls, session: AsyncSession) -> List["APIKey"]:
@@ -1159,10 +1167,11 @@ class Class(Base):
                 available_as_default=available_as_default,
             )
             .on_conflict_do_update(
-                index_elements=["api_key", "provider", "azure_endpoint"],
+                constraint="_key_endpoint_provider_uc",
                 set_=dict(
                     azure_api_version=azure_api_version,
-                    available_as_default=available_as_default,
+                    available_as_default=APIKey.available_as_default
+                    or available_as_default,
                 ),
             )
             .returning(APIKey)

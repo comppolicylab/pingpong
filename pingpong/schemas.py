@@ -689,6 +689,9 @@ class UpdateApiKey(BaseModel):
     class Config:
         from_attributes = True
 
+    class Config:
+        from_attributes = True
+
 
 class ApiKey(BaseModel):
     api_key: str
@@ -703,6 +706,9 @@ class ApiKey(BaseModel):
 
 class APIKeyResponse(BaseModel):
     api_key: ApiKey | None = None
+
+    class Config:
+        from_attributes = True
 
 
 class APIKeyModelResponse(BaseModel):
