@@ -1474,7 +1474,7 @@ async def update_class_api_key(
     elif not existing_key.api_key_obj and not existing_key.api_key:
         if not await validate_api_key(
             update.api_key,
-            update.provider,
+            update.provider.value,
             update.endpoint,
             update.api_version,
         ):

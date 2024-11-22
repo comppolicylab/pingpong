@@ -680,9 +680,14 @@ class UpdateClass(BaseModel):
     any_can_upload_class_file: bool | None = None
 
 
+class AIProvider(StrEnum):
+    OPENAI = "openai"
+    AZURE = "azure"
+
+
 class UpdateApiKey(BaseModel):
     api_key: str
-    provider: Literal["openai", "azure"]
+    provider: AIProvider
     endpoint: str | None = None
     api_version: str | None = None
 
