@@ -123,8 +123,8 @@ async def generate_thread_name(
 async def validate_api_key(
     api_key: str,
     provider: Literal["azure", "openai"] = "openai",
-    azure_endpoint: str | None = None,
-    azure_api_version: str | None = None,
+    endpoint: str | None = None,
+    api_version: str | None = None,
 ) -> bool:
     """Validate an OpenAI API key.
 
@@ -134,8 +134,8 @@ async def validate_api_key(
     cli = get_openai_client(
         api_key,
         provider=provider,
-        endpoint=azure_endpoint,
-        api_version=azure_api_version,
+        endpoint=endpoint,
+        api_version=api_version,
     )
     try:
         await cli.models.list()
@@ -625,10 +625,11 @@ def get_openai_client(
         raise ValueError("API key is required")
     match provider:
         case "azure":
-            if not endpoint or not api_version:
-                raise ValueError("Azure tenant requires endpoint and api_version")
+            _api_version = api_version or "2024-10-01-preview"
+            if not endpoint:
+                raise ValueError("Azure tenant requires endpoint.")
             return openai.AsyncAzureOpenAI(
-                api_key=api_key, azure_endpoint=endpoint, api_version=api_version
+                api_key=api_key, endpoint=endpoint, api_version=_api_version
             )
         case "openai":
             return openai.AsyncClient(api_key=api_key)

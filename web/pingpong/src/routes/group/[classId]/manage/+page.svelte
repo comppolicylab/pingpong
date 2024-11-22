@@ -924,7 +924,7 @@
               <Label for="deploymentEndpoint" class="text-sm">Deployment Endpoint</Label>
               <div class="w-full relative mb-4">
                 <span id="deploymentEndpoint" class="text-sm font-normal font-mono"
-                  >{apiKey?.azure_endpoint || 'Unknown endpoint'}</span
+                  >{apiKey?.endpoint || 'Unknown endpoint'}</span
                 >
               </div>
             {/if}

@@ -688,8 +688,8 @@ export const deleteClass = async (f: Fetcher, classId: number) => {
 export type ApiKey = {
   api_key: string;
   provider?: string;
-  azure_endpoint?: string;
-  azure_api_version?: string;
+  endpoint?: string;
+  api_version?: string;
   available_as_default?: boolean;
 };
 
@@ -700,8 +700,8 @@ export type ApiKeyResponse = {
 export type UpdateApiKeyRequest = {
   api_key: string;
   provider: string;
-  azure_endpoint?: string;
-  azure_api_version?: string;
+  endpoint?: string;
+  api_version?: string;
 };
 
 /**

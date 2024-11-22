@@ -26,22 +26,14 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("provider", sa.String(), nullable=False),
         sa.Column("api_key", sa.String(), nullable=False),
-        sa.Column("azure_endpoint", sa.String(), nullable=True),
-        sa.Column("azure_api_version", sa.String(), nullable=True),
+        sa.Column("endpoint", sa.String(), default=""),
+        sa.Column("api_version", sa.String(), nullable=True),
         sa.Column("available_as_default", sa.Boolean(), nullable=True),
-        sa.Column(
-            "azure_endpoint_coalesced",
-            sa.String(),
-            sa.Computed(
-                "COALESCE(azure_endpoint, '')",
-            ),
-            nullable=True,
-        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
             "api_key",
             "provider",
-            "azure_endpoint_coalesced",
+            "endpoint",
             name="_key_endpoint_provider_uc",
         ),
     )
