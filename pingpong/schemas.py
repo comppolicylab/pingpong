@@ -663,6 +663,7 @@ class Class(BaseModel):
 class CreateClass(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
     term: str = Field(..., min_length=1, max_length=100)
+    api_key_id: int | None = None
     private: bool = False
     any_can_create_assistant: bool = False
     any_can_publish_assistant: bool = False
@@ -682,10 +683,56 @@ class UpdateClass(BaseModel):
 
 class UpdateApiKey(BaseModel):
     api_key: str
+    provider: Literal["openai", "azure"]
+    azure_endpoint: str | None = None
+    azure_api_version: str | None = None
+
+    class Config:
+        from_attributes = True
 
 
 class ApiKey(BaseModel):
-    api_key: str | None
+    api_key: str
+    provider: str
+    azure_endpoint: str | None = None
+    azure_api_version: str | None = None
+    available_as_default: bool | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class APIKeyResponse(BaseModel):
+    api_key: ApiKey | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class APIKeyModelResponse(BaseModel):
+    api_key: str | None = None
+    api_key_obj: ApiKey | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class DefaultAPIKey(BaseModel):
+    id: int
+    redacted_key: str
+    name: str | None = None
+    provider: str
+    azure_endpoint: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class DefaultAPIKeys(BaseModel):
+    default_keys: list[DefaultAPIKey]
+
+    class Config:
+        from_attributes = True
 
 
 class AssistantModel(BaseModel):

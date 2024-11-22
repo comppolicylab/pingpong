@@ -3,7 +3,7 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Union
 from aiohttp import ClientResponseError
 import jwt
 import openai
@@ -57,6 +57,7 @@ from .auth import (
 from .authz import Relation
 from .config import config
 from .canvas import (
+    CanvasAccessException,
     CanvasException,
     CanvasWarning,
     LightweightCanvasClient,
@@ -97,20 +98,31 @@ def get_now_fn(req: Request) -> NowFn:
     return getattr(req.app.state, "now", utcnow)
 
 
-async def get_openai_client_for_class(request: Request) -> openai.AsyncClient:
+OpenAIClientType = Union[openai.AsyncClient, openai.AsyncAzureOpenAI]
+
+
+async def get_openai_client_for_class(request: Request) -> OpenAIClientType:
     """Get an OpenAI client for the class.
 
     Requires the class_id to be in the path parameters.
     """
     class_id = request.path_params["class_id"]
-    api_key = await models.Class.get_api_key(request.state.db, int(class_id))
-    if not api_key:
+    result = await models.Class.get_api_key(request.state.db, int(class_id))
+    if result.api_key_obj:
+        return get_openai_client(
+            result.api_key_obj.api_key,
+            provider=result.api_key_obj.provider,
+            endpoint=result.api_key_obj.azure_endpoint,
+            api_version=result.api_key_obj.azure_api_version,
+        )
+    elif result.api_key:
+        return get_openai_client(result.api_key)
+    else:
         raise HTTPException(status_code=401, detail="No API key for class")
-    return get_openai_client(api_key)
 
 
 OpenAIClientDependency = Depends(get_openai_client_for_class)
-OpenAIClient = Annotated[openai.AsyncClient, OpenAIClientDependency]
+OpenAIClient = Annotated[OpenAIClientType, OpenAIClientDependency]
 
 
 @v1.middleware("http")
@@ -570,6 +582,28 @@ async def auth(request: Request):
 
 
 @v1.get(
+    "/api_keys/default",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.DefaultAPIKeys,
+)
+async def list_default_api_keys(request: Request):
+    default_api_keys = await models.APIKey.get_all_default_keys(request.state.db)
+    print(default_api_keys)
+    return schemas.DefaultAPIKeys(
+        default_keys=[
+            schemas.DefaultAPIKey(
+                id=key.id,
+                redacted_key=f"{key.api_key[:8]}{'*' * 10}{key.api_key[-4:]}",
+                name=key.name,
+                provider=key.provider,
+                azure_endpoint=key.azure_endpoint,
+            )
+            for key in default_api_keys
+        ]
+    )
+
+
+@v1.get(
     "/institutions",
     dependencies=[Depends(LoggedIn())],
     response_model=schemas.Institutions,
@@ -835,7 +869,7 @@ async def delete_class(class_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Group not found")
 
     if class_.api_key:
-        openai_client = get_openai_client(class_.api_key)
+        openai_client = await get_openai_client_for_class(request)
         # Delete all threads
         async for thread in models.Thread.get_ids_by_class_id(
             request.state.db, class_.id
@@ -976,6 +1010,16 @@ async def verify_canvas_class_permissions(
                 detail=e.detail
                 or "We faced an error while verifying your access to this Canvas class.",
             )
+        except CanvasAccessException as e:
+            logger.warning(
+                "verify_canvas_class_permissions: CanvasAccessException occurred: %s",
+                e.detail,
+            )
+            raise HTTPException(
+                status_code=e.code or 403,
+                detail=e.detail
+                or "We faced an error while getting your Canvas classes.",
+            ) from e
         except CanvasWarning as e:
             logger.warning(
                 "verify_canvas_class_permissions: CanvasWarning occurred: %s", e.detail
@@ -1027,6 +1071,15 @@ async def update_canvas_class(
                 status_code=e.code or 500,
                 detail=e.detail or "We faced an error while setting your Canvas class.",
             )
+        except CanvasAccessException as e:
+            logger.warning(
+                "update_canvas_class: CanvasAccessException occurred: %s", e.detail
+            )
+            raise HTTPException(
+                status_code=e.code or 403,
+                detail=e.detail
+                or "We faced an error while getting your Canvas classes.",
+            ) from e
         except CanvasWarning as e:
             logger.warning("update_canvas_class: CanvasWarning occurred: %s", e.detail)
             raise HTTPException(
@@ -1417,39 +1470,93 @@ async def remove_user_from_class(class_id: str, user_id: str, request: Request):
 @v1.put(
     "/class/{class_id}/api_key",
     dependencies=[Depends(Authz("admin", "class:{class_id}"))],
-    response_model=schemas.ApiKey,
+    response_model=schemas.APIKeyResponse,
 )
 async def update_class_api_key(
     class_id: str, update: schemas.UpdateApiKey, request: Request
 ):
+    if not update.api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="API key must be provided to update the class API key.",
+        )
     existing_key = await models.Class.get_api_key(request.state.db, int(class_id))
-    if existing_key == update.api_key:
-        return {"api_key": existing_key}
-    elif not existing_key:
-        if not await validate_api_key(update.api_key):
+    if (
+        existing_key.api_key_obj
+        and existing_key.api_key_obj.api_key == update.api_key
+        and existing_key.api_key_obj.provider == update.provider
+        and existing_key.api_key_obj.azure_endpoint == update.azure_endpoint
+        and existing_key.api_key_obj.azure_api_version == update.azure_api_version
+    ):
+        return {"api_key": existing_key.api_key_obj}
+    if existing_key.api_key == update.api_key:
+        return {
+            "api_key": schemas.ApiKey(api_key=existing_key.api_key, provider="openai")
+        }
+    elif not existing_key.api_key_obj and not existing_key.api_key:
+        if not await validate_api_key(
+            update.api_key,
+            update.provider,
+            update.azure_endpoint,
+            update.azure_api_version,
+        ):
             raise HTTPException(
                 status_code=400,
-                detail="Invalid API key provided. Please try again.",
+                detail="Invalid API connection information provided. Please try again.",
             )
-        await models.Class.update_api_key(
-            request.state.db, int(class_id), update.api_key
+        api_key_obj = await models.Class.update_api_key(
+            request.state.db,
+            int(class_id),
+            update.api_key,
+            provider=update.provider,
+            azure_endpoint=update.azure_endpoint
+            if update.provider == "azure"
+            else None,
+            azure_api_version=update.azure_api_version
+            if update.provider == "azure"
+            else None,
+            available_as_default=False,
         )
+        await request.state.authz.write_safe(
+            grant=[
+                (
+                    f"user:{request.state.session.user.id}",
+                    "can_view_api_key",
+                    f"class:{class_id}",
+                )
+            ]
+        )
+        return {"api_key": api_key_obj}
     else:
         raise HTTPException(
             status_code=400,
             detail="API key already exists. Delete it first to create a new one.",
         )
-    return {"api_key": update.api_key}
 
 
 @v1.get(
     "/class/{class_id}/api_key",
     dependencies=[Depends(Authz("can_view_api_key", "class:{class_id}"))],
-    response_model=schemas.ApiKey,
+    response_model=schemas.APIKeyResponse,
 )
 async def get_class_api_key(class_id: str, request: Request):
-    api_key = await models.Class.get_api_key(request.state.db, int(class_id))
-    return {"api_key": api_key}
+    response = None
+    result = await models.Class.get_api_key(request.state.db, int(class_id))
+    if result.api_key_obj:
+        api_key_obj = result.api_key_obj
+        response = schemas.ApiKey(
+            api_key=f"{api_key_obj.api_key[:8]}{'*' * 20}{api_key_obj.api_key[-4:]}",
+            provider=api_key_obj.provider,
+            azure_endpoint=api_key_obj.azure_endpoint,
+            azure_api_version=api_key_obj.azure_api_version,
+        )
+    elif result.api_key:
+        response = schemas.ApiKey(
+            api_key=f"{result.api_key[:8]}{'*' * 20}{result.api_key[-4:]}",
+            provider="openai",
+        )
+
+    return {"api_key": response}
 
 
 @v1.get(

@@ -28,7 +28,7 @@ from openai.types.beta.threads.text_content_block import TextContentBlock
 from pingpong.now import NowFn, utcnow
 from pingpong.schemas import CodeInterpreterMessage, DownloadExport
 from pingpong.config import config
-from typing import Dict
+from typing import Dict, Literal, Union
 from sqlalchemy.ext.asyncio import AsyncSession
 from zoneinfo import ZoneInfo
 
@@ -120,13 +120,23 @@ async def generate_thread_name(
         return None
 
 
-async def validate_api_key(api_key: str) -> bool:
+async def validate_api_key(
+    api_key: str,
+    provider: Literal["azure", "openai"] = "openai",
+    azure_endpoint: str | None = None,
+    azure_api_version: str | None = None,
+) -> bool:
     """Validate an OpenAI API key.
 
     :param key: API key to validate
     :return: Whether the key is valid
     """
-    cli = get_openai_client(api_key)
+    cli = get_openai_client(
+        api_key,
+        provider=provider,
+        endpoint=azure_endpoint,
+        api_version=azure_api_version,
+    )
     try:
         await cli.models.list()
         return True
@@ -605,5 +615,22 @@ def replace_annotations_in_text(
 
 
 @functools.cache
-def get_openai_client(api_key: str) -> openai.AsyncClient:
-    return openai.AsyncClient(api_key=api_key)
+def get_openai_client(
+    api_key: str,
+    provider: Literal["azure", "openai"] = "openai",
+    endpoint: str | None = None,
+    api_version: str | None = "2024-10-01-preview",
+) -> Union[openai.AsyncClient, openai.AsyncAzureOpenAI]:
+    if not api_key:
+        raise ValueError("API key is required")
+    match provider:
+        case "azure":
+            if not endpoint or not api_version:
+                raise ValueError("Azure tenant requires endpoint and api_version")
+            return openai.AsyncAzureOpenAI(
+                api_key=api_key, azure_endpoint=endpoint, api_version=api_version
+            )
+        case "openai":
+            return openai.AsyncClient(api_key=api_key)
+        case _:
+            raise ValueError(f"Unknown provider {provider}")

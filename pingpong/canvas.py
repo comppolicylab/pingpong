@@ -39,6 +39,12 @@ class CanvasException(Exception):
         self.detail = detail
 
 
+class CanvasAccessException(Exception):
+    def __init__(self, detail: str = "", code: int | None = None):
+        self.code = code
+        self.detail = detail
+
+
 class CanvasWarning(Exception):
     def __init__(self, detail: str = "", code: int | None = None):
         self.code = code
@@ -480,13 +486,13 @@ class CanvasCourseClient(ABC):
     async def verify_access(self, course_id: str) -> None:
         """Verify that the user has access to the course and the roster."""
         if not await self._in_teaching_staff(course_id):
-            raise CanvasException(
+            raise CanvasAccessException(
                 code=403,
                 detail="You are not an authorized teacher or TA in the Canvas class you are trying to access.",
             )
 
         if not await self._roster_access_check(course_id):
-            raise CanvasException(
+            raise CanvasAccessException(
                 code=403,
                 detail="You are not authorized to access the enrollment list for this Canvas class.",
             )
@@ -618,6 +624,11 @@ class CanvasCourseClient(ABC):
         """Update the user roles for the class."""
         pass
 
+    @abstractmethod
+    def _raise_sync_error_if_manual(self) -> None:
+        """Raise an error if the sync is manual."""
+        pass
+
     async def sync_roster(self) -> None:
         """Sync the roster for the class."""
 
@@ -634,10 +645,9 @@ class CanvasCourseClient(ABC):
             sso_tenant=self.config.sso_tenant,
         )
         if self.missing_sso_ids:
-            raise CanvasException(
-                code=403,
-                detail="Some users in the Canvas class do not have SIS information. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
-            )
+            await Class.mark_lms_sync_error(self.db, self.class_id)
+            self._raise_sync_error_if_manual()
+
         await self._update_user_roles()
         await Class.update_last_synced(self.db, self.class_id)
 
@@ -681,6 +691,12 @@ class ManualCanvasClient(CanvasCourseClient):
             str(self.class_id), self.new_ucr, self.request, self.tasks
         ).add_new_users()
 
+    def _raise_sync_error_if_manual(self):
+        raise CanvasException(
+            code=403,
+            detail="Some users in the Canvas class do not have SIS information. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
+        )
+
 
 class LightweightCanvasClient(CanvasCourseClient):
     """A lightweight version of the Canvas client that does not support syncing or updating user roles."""
@@ -711,6 +727,9 @@ class LightweightCanvasClient(CanvasCourseClient):
             "LightweightCanvasClient does not support updating user roles."
         )
 
+    def _raise_sync_error_if_manual(self):
+        raise NotImplementedError("LightweightCanvasClient does not support syncing.")
+
 
 class ScriptCanvasClient(CanvasCourseClient):
     def __init__(
@@ -739,6 +758,9 @@ class ScriptCanvasClient(CanvasCourseClient):
         await AddNewUsersScript(
             str(self.class_id), self.user_id, self.db, self.client, self.new_ucr
         ).add_new_users()
+
+    def _raise_sync_error_if_manual(self):
+        pass
 
 
 async def canvas_sync_all(

@@ -639,6 +639,7 @@ export type CreateClassRequest = {
   name: string;
   term: string;
   private?: boolean;
+  api_key_id: number | null;
   any_can_create_assistant?: boolean;
   any_can_publish_assistant?: boolean;
   any_can_publish_thread?: boolean;
@@ -687,14 +688,58 @@ export const deleteClass = async (f: Fetcher, classId: number) => {
  */
 export type ApiKey = {
   api_key: string;
+  provider?: string;
+  azure_endpoint?: string;
+  azure_api_version?: string;
+  available_as_default?: boolean;
+};
+
+export type ApiKeyResponse = {
+  api_key?: ApiKey;
+};
+
+export type UpdateApiKeyRequest = {
+  api_key: string;
+  provider: string;
+  azure_endpoint?: string;
+  azure_api_version?: string;
+};
+
+export type DefaultAPIKey = {
+  id: number;
+  redacted_key: string;
+  name?: string;
+  provider: string;
+  azure_endpoint?: string;
+};
+
+export type DefaultAPIKeys = {
+  default_keys: DefaultAPIKey[];
+};
+
+/**
+ * Get the default API keys.
+ */
+export const getDefaultAPIKeys = async (f: Fetcher) => {
+  const url = 'api_keys/default';
+  return await GET<never, DefaultAPIKeys>(f, url);
 };
 
 /**
  * Update the API key for a class.
  */
-export const updateApiKey = async (f: Fetcher, classId: number, apiKey: string) => {
+export const updateApiKey = async (
+  f: Fetcher,
+  classId: number,
+  provider: string,
+  apiKey: string,
+  endpoint: string | null
+) => {
   const url = `class/${classId}/api_key`;
-  return await PUT<ApiKey, ApiKey>(f, url, { api_key: apiKey });
+  return await PUT<UpdateApiKeyRequest, ApiKeyResponse>(f, url, {
+    api_key: apiKey,
+    provider: 'openai'
+  });
 };
 
 /**
@@ -702,7 +747,7 @@ export const updateApiKey = async (f: Fetcher, classId: number, apiKey: string) 
  */
 export const getApiKey = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/api_key`;
-  return await GET<never, ApiKey>(f, url);
+  return await GET<never, ApiKeyResponse>(f, url);
 };
 
 /**
