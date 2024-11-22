@@ -1042,6 +1042,37 @@ class APIKey(Base):
         ),
     )
 
+    @classmethod
+    async def create_or_update(
+        cls,
+        session: AsyncSession,
+        api_key: str,
+        provider: str,
+        azure_endpoint: str | None,
+        azure_api_version: str | None,
+        available_as_default: bool,
+    ) -> "APIKey":
+        stmt = (
+            _get_upsert_stmt(session)(APIKey)
+            .values(
+                api_key=api_key,
+                provider=provider,
+                azure_endpoint=azure_endpoint,
+                azure_api_version=azure_api_version,
+                available_as_default=available_as_default,
+            )
+            .on_conflict_do_update(
+                constraint="_key_endpoint_provider_uc",
+                set_=dict(
+                    azure_api_version=azure_api_version,
+                    available_as_default=APIKey.available_as_default
+                    or available_as_default,
+                ),
+            )
+            .returning(APIKey)
+        )
+        return await session.scalar(stmt)
+
 
 class Class(Base):
     __tablename__ = "classes"
@@ -1150,26 +1181,14 @@ class Class(Base):
         azure_api_version: str | None,
         available_as_default: bool,
     ) -> "APIKey":
-        stmt = (
-            _get_upsert_stmt(session)(APIKey)
-            .values(
-                api_key=api_key,
-                provider=provider,
-                azure_endpoint=azure_endpoint,
-                azure_api_version=azure_api_version,
-                available_as_default=available_as_default,
-            )
-            .on_conflict_do_update(
-                constraint="_key_endpoint_provider_uc",
-                set_=dict(
-                    azure_api_version=azure_api_version,
-                    available_as_default=APIKey.available_as_default
-                    or available_as_default,
-                ),
-            )
-            .returning(APIKey)
+        api_key_obj = await APIKey.create_or_update(
+            session,
+            api_key=api_key,
+            provider=provider,
+            azure_endpoint=azure_endpoint,
+            azure_api_version=azure_api_version,
+            available_as_default=available_as_default,
         )
-        api_key_obj = await session.scalar(stmt)
 
         stmt = (
             update(Class).where(Class.id == int(id_)).values(api_key_id=api_key_obj.id)
