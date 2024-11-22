@@ -335,35 +335,33 @@ def migrate_oai_keys(admin_key: str, project_id: str, new_api_key: str) -> None:
 
 @db.command("set-api-as-default")
 @click.argument("api_key", type=str)
-@click.argument("api_name", type=str)
+@click.argument("key_name", type=str)
 @click.option(
     "--provider",
     type=click.Choice(["openai", "azure"]),
     default="openai",
 )
 @click.option(
-    "--azure-endpoint",
+    "--endpoint",
     type=str,
     required=False,
 )
-def set_api_as_default(
-    api_key: str, api_name: str, provider: str, azure_endpoint: Optional[str]
+def set_key_as_default(
+    api_key: str, key_name: str, provider: str, endpoint: Optional[str]
 ) -> None:
-    async def _set_api_as_default() -> None:
+    async def _set_key_as_default() -> None:
         async with config.db.driver.async_session() as session:
-            logger.info(f"Setting {api_name} as default API key...")
+            logger.info(f"Setting {key_name} as default API key...")
             if provider == "openai":
-                await set_as_default_oai_api_key(session, api_key, api_name)
+                await set_as_default_oai_api_key(session, api_key, key_name)
             elif provider == "azure":
-                if not azure_endpoint:
+                if not endpoint:
                     raise ValueError("Azure endpoint required for Azure API key")
-                await set_as_default_azure_api_key(
-                    session, api_key, api_name, azure_endpoint
-                )
+                await set_as_default_azure_api_key(session, api_key, key_name, endpoint)
 
         logger.info("Done!")
 
-    asyncio.run(_set_api_as_default())
+    asyncio.run(_set_key_as_default())
 
 
 @db.command
