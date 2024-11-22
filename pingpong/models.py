@@ -1049,9 +1049,7 @@ class Class(Base):
     term = Column(String)
     api_key = Column(String, nullable=True)
     api_key_id = Column(Integer, ForeignKey("api_keys.id"), nullable=True)
-    api_key_obj: Mapped["APIKey"] = relationship(
-        "APIKey", back_populates="classes", lazy="selectin"
-    )
+    api_key_obj = relationship("APIKey", back_populates="classes", lazy="selectin")
     private = Column(Boolean, default=False)
     lms_status = Column(SQLEnum(schemas.LMSStatus), default=schemas.LMSStatus.NONE)
     lms_class_id = Column(Integer, ForeignKey("lms_classes.id"), nullable=True)
