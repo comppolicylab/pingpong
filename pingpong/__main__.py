@@ -364,7 +364,6 @@ def set_key_as_default(
     asyncio.run(_set_key_as_default())
 
 
-@db.command
 async def _lms_sync_all() -> None:
     await config.authz.driver.init()
     async with config.db.driver.async_session() as session:
