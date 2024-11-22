@@ -1531,33 +1531,6 @@ class Class(Base):
         stmt = delete(Class).where(Class.id == self.id)
         await session.execute(stmt)
 
-    @classmethod
-    async def update_by_redacted_api_key(
-        cls, session: AsyncSession, redacted_key: str, new_key: str
-    ) -> None:
-        prefix = redacted_key.split("*", 1)[0]
-        suffix = redacted_key.rstrip("*").rsplit("*", 1)[-1]
-
-        stmt = select(cls).where(
-            and_(cls.api_key.like(f"{prefix}%"), cls.api_key.like(f"%{suffix}"))
-        )
-
-        result = await session.execute(stmt)
-        classes = result.scalars().all()
-
-        if not classes:
-            logger.warning(
-                f"update_by_redacted_api_key: No class found for the provided redacted API key: {redacted_key}."
-            )
-        if len(classes) > 1:
-            raise ValueError(
-                f"Multiple classes found for the given provided API key: {redacted_key}. No updates performed."
-            )
-
-        matched_class = classes[0]
-        matched_class.api_key = new_key
-        await session.flush()
-
 
 class CodeInterpreterCall(Base):
     __tablename__ = "code_interpreter_calls"
