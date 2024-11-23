@@ -135,6 +135,12 @@ OpenAIClientDependency = Depends(get_openai_client_for_class)
 OpenAIClient = Annotated[OpenAIClientType, OpenAIClientDependency]
 
 
+class UserNotFoundException(Exception):
+    def __init__(self, detail: str = "", user_id: str = ""):
+        self.user_id = user_id
+        self.detail = detail
+
+
 @v1.middleware("http")
 async def parse_session_token(request: Request, call_next):
     """Parse the session token from the cookie and add it to the request state."""
@@ -150,7 +156,10 @@ async def parse_session_token(request: Request, call_next):
             user_id = int(token.sub)
             user = await models.User.get_by_id(request.state.db, user_id)
             if not user:
-                raise ValueError("We couldn't locate your account.")
+                raise UserNotFoundException(
+                    "We couldn't locate your account. Please try logging in again.",
+                    token.sub,
+                )
             # Modify user state if necessary
             if user.state == schemas.UserState.UNVERIFIED:
                 await user.verify(request.state.db)
@@ -165,6 +174,12 @@ async def parse_session_token(request: Request, call_next):
         except TimeException as e:
             request.state.session = schemas.SessionState(
                 status=schemas.SessionStatus.INVALID,
+                error=e.detail,
+            )
+        except UserNotFoundException as e:
+            logger.warning(f"parse_session_token: User not found: {e.user_id}")
+            request.state.session = schemas.SessionState(
+                status=schemas.SessionStatus.ERROR,
                 error=e.detail,
             )
         except PyJWTError as e:
