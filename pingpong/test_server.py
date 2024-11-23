@@ -65,7 +65,7 @@ async def test_me_with_valid_token_but_missing_user(api, now):
     )
     assert response.status_code == 200
     assert response.json() == {
-        "error": "We couldn't locate your account.",
+        "error": "We couldn't locate your account. Please try logging in again.",
         "profile": None,
         "status": "error",
         "token": None,
