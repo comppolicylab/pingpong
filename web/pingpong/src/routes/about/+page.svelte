@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Select, Label, Input, Textarea, Heading, P, Button } from 'flowbite-svelte';
+  import { Select, Label, Input, Textarea, Heading, P, Button, Modal } from 'flowbite-svelte';
   import Sanitize from '$lib/components/Sanitize.svelte';
   import { writable } from 'svelte/store';
   import { happyToast, sadToast } from '$lib/toast.js';
@@ -21,7 +21,38 @@
   ];
 
   const loading = writable(false);
-  const submitForm = async (evt: SubmitEvent) => {
+  const modal = writable(false);
+  let contactInfoModal = false;
+
+  function waitForModalResponse(): Promise<boolean> {
+    return new Promise((resolve) => {
+      $modal = contactInfoModal;
+
+      const unsubscribe = modal.subscribe((isOpen) => {
+        if (!isOpen && contactInfoModal) {
+          unsubscribe();
+          contactInfoModal = false;
+          resolve(false);
+        }
+      });
+
+      handleModalConfirm = () => {
+        unsubscribe();
+        contactInfoModal = false;
+        $modal = false;
+        resolve(true);
+      };
+
+      handleModalCancel = () => {
+        unsubscribe();
+        contactInfoModal = false;
+        $modal = false;
+        resolve(false);
+      };
+    });
+  }
+
+  const handleSubmit = async (evt: SubmitEvent) => {
     evt.preventDefault();
     $loading = true;
 
@@ -32,11 +63,25 @@
     const message = d.message?.toString();
     if (!message) {
       $loading = false;
-      return sadToast('Message is required');
+      return sadToast('Please type a message before sending.');
+    }
+
+    const category = d.category?.toString();
+    if (!category) {
+      $loading = false;
+      return sadToast('Please select a feedback category.');
+    }
+
+    if (!d.email?.toString() && !d.name?.toString()) {
+      $loading = false;
+      contactInfoModal = true;
+      const shouldProceed = await waitForModalResponse();
+      if (!shouldProceed) return;
+      $loading = true;
     }
 
     const data = {
-      message: message,
+      message: d.message?.toString(),
       email: d.email?.toString(),
       name: d.name?.toString(),
       category: d.category?.toString()
@@ -44,14 +89,16 @@
 
     const result = await api.postSupportRequest(fetch, data);
     if (result.$status < 300) {
-      $loading = false;
       form.reset();
       happyToast('Your message has been sent, thanks for the feedback!');
     } else {
-      $loading = false;
       sadToast('There was an error sending your message, please try again later.');
     }
+    $loading = false;
   };
+
+  let handleModalConfirm: () => void;
+  let handleModalCancel: () => void;
 </script>
 
 <div class="flex flex-col gap-8 about h-full overflow-y-auto">
@@ -177,7 +224,7 @@
             </span>
           </div>
           <div class="mt-6">
-            <form on:submit={submitForm}>
+            <form on:submit={handleSubmit}>
               <div class="flex flex-col gap-4">
                 <div class="flex flex-col gap-2">
                   <Label for="name">Name (optional)</Label>
@@ -188,7 +235,7 @@
                   <Input type="email" name="email" id="email" placeholder="Your email" />
                 </div>
                 <div class="flex flex-col gap-2">
-                  <Label for="category">Category (optional)</Label>
+                  <Label for="category">Category</Label>
                   <Select name="category" items={categories} />
                 </div>
                 <div class="flex flex-col gap-2">
@@ -209,6 +256,30 @@
                     disabled={$loading}>Send</Button
                   >
                 </div>
+
+                <Modal bind:open={contactInfoModal} size="xs" autoclose>
+                  <div class="text-center px-2">
+                    <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
+                    <h3 class="mb-5 text-xl text-gray-900 dark:text-white font-bold">
+                      Send message without contact information?
+                    </h3>
+                    <p class="mb-5 text-sm text-gray-700 dark:text-gray-300">
+                      You chose not to include your contact information with the support message you
+                      are sending. We do not associate user information with support requests unless
+                      you provide it to us.
+                      <span class="font-bold"
+                        >If you would like us to contact you about your specific support issue,
+                        please include your contact information with your message.</span
+                      >
+                    </p>
+                    <div class="flex justify-center gap-4">
+                      <Button pill color="alternative" on:click={handleModalCancel}>Go back</Button>
+                      <Button pill outline color="red" on:click={handleModalConfirm}
+                        >Send without contact information</Button
+                      >
+                    </div>
+                  </div>
+                </Modal>
               </div>
             </form>
           </div>
