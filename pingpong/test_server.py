@@ -715,7 +715,6 @@ async def test_create_class(api, now, institution, valid_user_token, authz):
         "any_can_publish_assistant": False,
         "any_can_publish_thread": False,
         "any_can_upload_class_file": False,
-        "api_key": None,
         "created": response_data["created"],
         "updated": None,
         "institution": {
@@ -771,7 +770,6 @@ async def test_create_class_private(api, now, institution, valid_user_token, aut
         "any_can_publish_assistant": False,
         "any_can_publish_thread": False,
         "any_can_upload_class_file": False,
-        "api_key": None,
         "created": response_data["created"],
         "updated": None,
         "institution": {
