@@ -339,7 +339,7 @@
     }
 
     const _apiKey = (d.apiKey as string | undefined) || '';
-    const _endpoint = (d.endpoint as string | undefined) || null;
+    const _endpoint = d.endpoint as string | undefined;
     const _provider = (d.provider as string | undefined) || 'openai';
     const result = await api.updateApiKey(fetch, data.class.id, _provider, _apiKey, _endpoint);
 

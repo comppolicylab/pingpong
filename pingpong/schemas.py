@@ -643,7 +643,6 @@ class Class(BaseModel):
     institution: Institution | None = None
     created: datetime
     updated: datetime | None
-    api_key: SecretStr | None
     private: bool | None = None
     lms_user: LMSUser | None = None
     lms_status: LMSStatus | None = None
@@ -684,6 +683,10 @@ class UpdateClass(BaseModel):
 class AIProvider(StrEnum):
     OPENAI = "openai"
     AZURE = "azure"
+
+
+class APIKeyCheck(BaseModel):
+    has_api_key: bool
 
 
 class UpdateApiKey(BaseModel):
