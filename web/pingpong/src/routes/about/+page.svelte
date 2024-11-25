@@ -20,11 +20,39 @@
     { value: 'other', name: 'Other' }
   ];
 
-  let contactInfoModal = false;
-  let contactFormSubmitEvent: SubmitEvent | null = null;
-
   const loading = writable(false);
-  const checkFormBeforeSubmit = async (evt: SubmitEvent) => {
+  const modal = writable(false);
+  let contactInfoModal = false;
+
+  function waitForModalResponse(): Promise<boolean> {
+    return new Promise((resolve) => {
+      $modal = contactInfoModal;
+
+      const unsubscribe = modal.subscribe((isOpen) => {
+        if (!isOpen && contactInfoModal) {
+          unsubscribe();
+          contactInfoModal = false;
+          resolve(false);
+        }
+      });
+
+      handleModalConfirm = () => {
+        unsubscribe();
+        contactInfoModal = false;
+        $modal = false;
+        resolve(true);
+      };
+
+      handleModalCancel = () => {
+        unsubscribe();
+        contactInfoModal = false;
+        $modal = false;
+        resolve(false);
+      };
+    });
+  }
+
+  const handleSubmit = async (evt: SubmitEvent) => {
     evt.preventDefault();
     $loading = true;
 
@@ -45,23 +73,13 @@
     }
 
     if (!d.email?.toString() && !d.name?.toString()) {
-      contactInfoModal = true;
-      contactFormSubmitEvent = evt;
       $loading = false;
-      return;
+      contactInfoModal = true;
+      const shouldProceed = await waitForModalResponse();
+      if (!shouldProceed) return;
+      $loading = true;
     }
 
-    await submitForm(evt);
-  };
-
-  const submitForm = async (evt: SubmitEvent | null) => {
-    if (!evt) return;
-    evt.preventDefault();
-    $loading = true;
-
-    const form = evt.target as HTMLFormElement;
-    const formData = new FormData(form);
-    const d = Object.fromEntries(formData.entries());
     const data = {
       message: d.message?.toString(),
       email: d.email?.toString(),
@@ -71,15 +89,16 @@
 
     const result = await api.postSupportRequest(fetch, data);
     if (result.$status < 300) {
-      $loading = false;
       form.reset();
       happyToast('Your message has been sent, thanks for the feedback!');
     } else {
-      $loading = false;
       sadToast('There was an error sending your message, please try again later.');
     }
-    contactFormSubmitEvent = null;
+    $loading = false;
   };
+
+  let handleModalConfirm: () => void;
+  let handleModalCancel: () => void;
 </script>
 
 <div class="flex flex-col gap-8 about h-full overflow-y-auto">
@@ -205,7 +224,7 @@
             </span>
           </div>
           <div class="mt-6">
-            <form on:submit={checkFormBeforeSubmit}>
+            <form on:submit={handleSubmit}>
               <div class="flex flex-col gap-4">
                 <div class="flex flex-col gap-2">
                   <Label for="name">Name (optional)</Label>
@@ -254,14 +273,9 @@
                       >
                     </p>
                     <div class="flex justify-center gap-4">
-                      <Button pill color="alternative">Go back</Button>
-                      <Button
-                        pill
-                        outline
-                        color="red"
-                        on:click={() => {
-                          submitForm(contactFormSubmitEvent);
-                        }}>Send without contact information</Button
+                      <Button pill color="alternative" on:click={handleModalCancel}>Go back</Button>
+                      <Button pill outline color="red" on:click={handleModalConfirm}
+                        >Send without contact information</Button
                       >
                     </div>
                   </div>
