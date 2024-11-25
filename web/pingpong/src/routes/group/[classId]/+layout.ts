@@ -15,7 +15,8 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
     uploadInfoResponse,
     grants,
     modelsResponse,
-    teachersResponse
+    teachersResponse,
+    hasAPIKeyResponse
   ] = await Promise.all([
     api.getClass(fetch, classId).then(api.expandResponse),
     api.getAssistants(fetch, classId).then(api.expandResponse),
@@ -30,7 +31,8 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
       }
     }),
     api.getModels(fetch, classId).then(api.expandResponse),
-    api.getSupervisors(fetch, classId).then(api.expandResponse)
+    api.getSupervisors(fetch, classId).then(api.expandResponse),
+    api.hasAPIKey(fetch, classId).then(api.expandResponse)
   ]);
 
   if (classDataResponse.error) {
@@ -48,9 +50,10 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
 
   const supervisors = teachersResponse.error ? [] : teachersResponse.data.users;
 
+  const hasAPIKey = hasAPIKeyResponse.error ? false : hasAPIKeyResponse.data.has_api_key;
+
   return {
     hasAssistants: !!assistants && assistants.length > 0,
-    hasBilling: !!classDataResponse.data.api_key,
     class: classDataResponse.data,
     assistants,
     assistantCreators,
@@ -59,6 +62,7 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
     canManage: grants.canManage,
     isSupervisor: grants.isSupervisor,
     models,
+    hasAPIKey,
     supervisors
   };
 };

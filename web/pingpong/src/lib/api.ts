@@ -572,7 +572,6 @@ export type Class = {
   institution: Institution | null;
   created: string;
   updated: string | null;
-  api_key: string | null;
   private: boolean | null;
   lms_user: AppUser | null;
   lms_status: LMSStatus | null;
@@ -733,12 +732,13 @@ export const updateApiKey = async (
   classId: number,
   provider: string,
   apiKey: string,
-  endpoint: string | null
+  endpoint?: string
 ) => {
   const url = `class/${classId}/api_key`;
   return await PUT<UpdateApiKeyRequest, ApiKeyResponse>(f, url, {
     api_key: apiKey,
-    provider: 'openai'
+    provider: provider,
+    endpoint: endpoint
   });
 };
 
@@ -748,6 +748,19 @@ export const updateApiKey = async (
 export const getApiKey = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/api_key`;
   return await GET<never, ApiKeyResponse>(f, url);
+};
+
+/**
+ * Check if a class has an API key.
+ */
+
+export type ApiKeyCheck = {
+  has_api_key: boolean;
+};
+
+export const hasAPIKey = async (f: Fetcher, classId: number) => {
+  const url = `class/${classId}/api_key/check`;
+  return await GET<never, ApiKeyCheck>(f, url);
 };
 
 /**

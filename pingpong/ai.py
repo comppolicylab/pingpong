@@ -666,7 +666,7 @@ def get_openai_client(api_key, provider="openai", endpoint=None, api_version=Non
             if not endpoint:
                 raise ValueError("Azure client requires endpoint.")
             return openai.AsyncAzureOpenAI(
-                api_key=api_key, endpoint=endpoint, api_version=_api_version
+                api_key=api_key, azure_endpoint=endpoint, api_version=_api_version
             )
         case "openai":
             return openai.AsyncClient(api_key=api_key)

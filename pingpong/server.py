@@ -1492,6 +1492,20 @@ async def remove_user_from_class(class_id: str, user_id: str, request: Request):
     return {"status": "ok"}
 
 
+@v1.get(
+    "/class/{class_id}/api_key/check",
+    dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
+    response_model=schemas.APIKeyCheck,
+)
+async def check_class_api_key(class_id: str, request: Request):
+    result = await models.Class.get_api_key(request.state.db, int(class_id))
+    if result.api_key_obj:
+        return {"has_api_key": True}
+    elif result.api_key:
+        return {"has_api_key": True}
+    return {"has_api_key": False}
+
+
 @v1.put(
     "/class/{class_id}/api_key",
     dependencies=[Depends(Authz("admin", "class:{class_id}"))],
@@ -1724,8 +1738,8 @@ async def list_class_models(
     filtered = [
         {
             "id": m.id,
-            "created": datetime.fromtimestamp(m.created),
-            "owner": m.owned_by,
+            "created": datetime.fromtimestamp(m.created or 0),
+            "owner": m.owned_by or "",
             "name": known_models[m.id]["name"],
             "description": known_models[m.id]["description"],
             "is_latest": known_models[m.id]["is_latest"],

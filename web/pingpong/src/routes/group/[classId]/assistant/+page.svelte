@@ -14,7 +14,7 @@
 
   export let data;
 
-  $: hasApiKey = !!data?.class?.api_key;
+  $: hasApiKey = !!data?.hasAPIKey;
   $: creators = data?.assistantCreators || {};
   $: moderators = data?.supervisors || [];
   // "Course" assistants are endorsed by the class. Right now this means

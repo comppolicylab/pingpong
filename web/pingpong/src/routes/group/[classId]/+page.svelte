@@ -80,7 +80,7 @@
   $: assistant = data?.assistants[0] || {};
   $: assistantMeta = getAssistantMetadata(assistant);
   // Whether billing is set up for the class (which controls everything).
-  $: isConfigured = data?.hasAssistants && data?.hasBilling;
+  $: isConfigured = data?.hasAssistants && data?.hasAPIKey;
   $: parties = data.me.user?.id ? `${data.me.user.id}` : '';
   // The assistant ID from the URL.
   $: linkedAssistant = parseInt($page.url.searchParams.get('assistant') || '0', 10);
@@ -371,7 +371,7 @@
       <div class="text-center m-auto">
         {#if !data.hasAssistants}
           <h1 class="text-2xl font-bold">No assistants configured.</h1>
-        {:else if !data.hasBilling}
+        {:else if !data.hasAPIKey}
           <h1 class="text-2xl font-bold">No billing configured.</h1>
         {:else}
           <h1 class="text-2xl font-bold">Group is not configured.</h1>
