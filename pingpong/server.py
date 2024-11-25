@@ -1738,7 +1738,7 @@ async def list_class_models(
     filtered = [
         {
             "id": m.id,
-            "created": datetime.fromtimestamp(m.created or 0),
+            "created": datetime.fromtimestamp(m.created or m.created_at or 0),
             "owner": m.owned_by or "",
             "name": known_models[m.id]["name"],
             "description": known_models[m.id]["description"],
