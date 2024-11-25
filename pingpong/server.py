@@ -1651,6 +1651,16 @@ async def list_class_models(
             "supports_vision": False,
             "description": "The latest GPT-3.5 Turbo model. Choose the more capable GPT-4o Mini model instead.",
         },
+        # Azure model equivalent
+        "gpt-35-turbo": {
+            "name": "GPT-3.5 Turbo",
+            "sort_order": 4,
+            "is_new": False,
+            "highlight": False,
+            "is_latest": True,
+            "supports_vision": False,
+            "description": "The latest GPT-3.5 Turbo model. Choose the more capable GPT-4o Mini model instead.",
+        },
         "chatgpt-4o-latest": {
             "name": "chatgpt-4o-latest",
             "sort_order": 8,
@@ -1667,7 +1677,7 @@ async def list_class_models(
             "is_new": True,
             "highlight": False,
             "supports_vision": True,
-            "description": "Latest GPT-4o model snapshot. GPT-4o (Latest) points to gpt-4o-2024-05-13 and not this snapshot yet.",
+            "description": "Latest GPT-4o model snapshot. GPT-4o (Latest) points to this version.",
         },
         "gpt-4o-2024-05-13": {
             "name": "gpt-4o-2024-05-13",
@@ -1705,8 +1715,28 @@ async def list_class_models(
             "supports_vision": False,
             "description": 'GPT-4 Turbo preview model with a fix for "laziness," where the model doesn\'t complete a task.',
         },
+        # Azure model equivalent
+        "gpt-4-0125-Preview": {
+            "name": "gpt-4-0125-Preview",
+            "sort_order": 10,
+            "is_latest": False,
+            "is_new": False,
+            "highlight": False,
+            "supports_vision": False,
+            "description": 'GPT-4 Turbo preview model with a fix for "laziness," where the model doesn\'t complete a task.',
+        },
         "gpt-4-1106-preview": {
             "name": "gpt-4-1106-preview",
+            "sort_order": 11,
+            "is_latest": False,
+            "is_new": False,
+            "highlight": False,
+            "supports_vision": False,
+            "description": "GPT-4 Turbo preview model with improved instruction following, reproducible outputs, and more.",
+        },
+        # Azure model equivalent
+        "gpt-4-1106-Preview": {
+            "name": "gpt-4-1106-Preview",
             "sort_order": 11,
             "is_latest": False,
             "is_new": False,
@@ -1723,8 +1753,28 @@ async def list_class_models(
             "supports_vision": False,
             "description": "GPT-3.5 Turbo model with higher accuracy at responding in requested formats.",
         },
+        # Azure model equivalent
+        "gpt-35-turbo-0125": {
+            "name": "gpt-35-turbo-0125",
+            "sort_order": 12,
+            "is_latest": False,
+            "is_new": False,
+            "highlight": False,
+            "supports_vision": False,
+            "description": "GPT-3.5 Turbo model with higher accuracy at responding in requested formats.",
+        },
         "gpt-3.5-turbo-1106": {
             "name": "gpt-3.5-turbo-1106",
+            "sort_order": 13,
+            "is_latest": False,
+            "is_new": False,
+            "highlight": False,
+            "supports_vision": False,
+            "description": "GPT-3.5 Turbo model with improved instruction following, reproducible outputs, and more.",
+        },
+        # Azure model equivalent
+        "gpt-35-turbo-1106": {
+            "name": "gpt-35-turbo-1106",
             "sort_order": 13,
             "is_latest": False,
             "is_new": False,
@@ -2813,7 +2863,18 @@ async def create_assistant(
             tool_resources=tool_resources,
         )
     except openai.BadRequestError as e:
-        raise HTTPException(400, e.message or "OpenAI rejected this request")
+        raise HTTPException(
+            400, e.body.get("message") or e.message or "OpenAI rejected this request"
+        )
+    except openai.NotFoundError as e:
+        if e.code == "DeploymentNotFound":
+            raise HTTPException(
+                404,
+                f"Deployment <b>{req.model}</b> does not exist on Azure. Please make sure the <b>deployment name</b> matches the one in Azure. If you created the deployment within the last 5 minutes, please wait a moment and try again.",
+            )
+        raise HTTPException(
+            404, e.body.get("message") or e.message or "OpenAI rejected this request"
+        )
 
     try:
         # Delete private files uploaded but not attached to the assistant
@@ -2996,7 +3057,18 @@ async def update_assistant(
             assistant_id=asst.assistant_id, **openai_update
         )
     except openai.BadRequestError as e:
-        raise HTTPException(400, e.message or "OpenAI rejected this request")
+        raise HTTPException(
+            400, e.body.get("message") or e.message or "OpenAI rejected this request"
+        )
+    except openai.NotFoundError as e:
+        if e.code == "DeploymentNotFound":
+            raise HTTPException(
+                404,
+                f"Deployment <b>{req.model}</b> does not exist on Azure. Please make sure the <b>deployment name</b> matches the one in Azure. If you created the deployment within the last 5 minutes, please wait a moment and try again.",
+            )
+        raise HTTPException(
+            404, e.body.get("message") or e.message or "OpenAI rejected this request"
+        )
 
     try:
         # Delete any private files that were removed
