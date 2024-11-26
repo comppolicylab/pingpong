@@ -30,12 +30,14 @@ async def create_vector_store(
 
     try:
         new_vector_store = await openai_client.beta.vector_stores.create(
-            file_ids=file_search_file_ids if upload_to_oai else [],
             metadata={
                 "class_id": class_id,
             },
         )
-
+        if upload_to_oai:
+            await openai_client.beta.vector_stores.file_batches.create_and_poll(
+                new_vector_store.id, file_ids=file_search_file_ids
+            )
     except openai.BadRequestError as e:
         raise HTTPException(
             400, e.body.get("message") or e.message or "OpenAI rejected this request"
@@ -84,7 +86,7 @@ async def append_vector_store_files(
     )
 
     try:
-        await openai_client.beta.vector_stores.file_batches.create(
+        await openai_client.beta.vector_stores.file_batches.create_and_poll(
             vector_store_id, file_ids=file_search_file_ids
         )
     except openai.BadRequestError as e:
@@ -145,7 +147,7 @@ async def sync_vector_store_files(
 
     if file_ids_to_add:
         try:
-            await openai_client.beta.vector_stores.file_batches.create(
+            await openai_client.beta.vector_stores.file_batches.create_and_poll(
                 vector_store_id, file_ids=file_ids_to_add
             )
         except openai.BadRequestError as e:
