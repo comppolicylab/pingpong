@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional, Union
 
-from sqlalchemy import Boolean, Column, DateTime, Float, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Float, UniqueConstraint, or_
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
     ForeignKey,
@@ -1420,12 +1420,20 @@ class Class(Base):
 
     @classmethod
     async def get_all_to_sync(
-        cls, session: AsyncSession, lms_tenant: str, lms_type: schemas.LMSType
+        cls, session: AsyncSession, lms_tenant: str, lms_type: schemas.LMSType, sync_error_classes: bool = False
     ) -> AsyncGenerator["Class", None]:
         """
         For syncing CRON job: Get all classes with an active
         LMS-linked class under a specific tenant.
         """
+        lms_status_condition = (
+            or_(
+            Class.lms_status == schemas.LMSStatus.LINKED,
+            Class.lms_status == schemas.LMSStatus.ERROR,
+            )
+            if sync_error_classes
+            else Class.lms_status == schemas.LMSStatus.LINKED
+        )
         stmt = (
             select(Class)
             .outerjoin(Class.lms_class)
@@ -1437,9 +1445,9 @@ class Class(Base):
             .where(
                 and_(
                     Class.lms_class_id is not None,
-                    Class.lms_status == schemas.LMSStatus.LINKED,
                     LMSClass.lms_tenant == lms_tenant,
                     LMSClass.lms_type == lms_type,
+                    lms_status_condition,
                 )
             )
         )
