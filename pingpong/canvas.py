@@ -104,6 +104,7 @@ class CanvasCourseClient(ABC):
         class_id: int,
         user_id: int,
         nowfn: NowFn = utcnow,
+        sync_without_sso_ids: bool = False,
     ):
         self.config = canvas_backend_config
         self.db = db
@@ -111,6 +112,7 @@ class CanvasCourseClient(ABC):
         self.user_id = user_id
         self.nowfn = nowfn
         self.missing_sso_ids = False
+        self.sync_without_sso_ids = sync_without_sso_ids
 
     async def __aenter__(self):
         self.http_session = aiohttp.ClientSession()
@@ -646,7 +648,9 @@ class CanvasCourseClient(ABC):
         )
         if self.missing_sso_ids:
             await Class.mark_lms_sync_error(self.db, self.class_id)
-            self._raise_sync_error_if_manual()
+            if not self.sync_without_sso_ids:
+                self._raise_sync_error_if_manual()
+                return
 
         await self._update_user_roles()
         await Class.update_last_synced(self.db, self.class_id)
@@ -740,6 +744,7 @@ class ScriptCanvasClient(CanvasCourseClient):
         class_id: int,
         user_id: int,
         nowfn: Callable[[], datetime] = utcnow,
+        sync_without_sso_ids: bool = False,
     ):
         super().__init__(
             canvas_backend_config,
@@ -747,6 +752,7 @@ class ScriptCanvasClient(CanvasCourseClient):
             class_id,
             user_id,
             nowfn=nowfn,
+            sync_without_sso_ids=sync_without_sso_ids,
         )
         self.client = client
 
@@ -764,10 +770,17 @@ class ScriptCanvasClient(CanvasCourseClient):
 
 
 async def canvas_sync_all(
-    session: AsyncSession, authz_: OpenFgaAuthzClient, canvas_backend: CanvasSettings
+    session: AsyncSession,
+    authz_: OpenFgaAuthzClient,
+    canvas_backend: CanvasSettings,
+    sync_without_sso_ids: bool = False,
+    sync_classes_with_error_status: bool = False,
 ) -> None:
     async for class_ in Class.get_all_to_sync(
-        session, canvas_backend.tenant, LMSType(canvas_backend.type)
+        session,
+        canvas_backend.tenant,
+        LMSType(canvas_backend.type),
+        sync_classes_with_error_status=sync_classes_with_error_status,
     ):
         logger.info(f"Syncing class {class_.id}...")
         async with ScriptCanvasClient(
@@ -776,6 +789,7 @@ async def canvas_sync_all(
             authz_,
             class_.id,
             class_.lms_user_id,
+            sync_without_sso_ids=sync_without_sso_ids,
         ) as client:
             await client.sync_roster()
             await session.commit()
