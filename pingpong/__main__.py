@@ -364,7 +364,9 @@ def set_key_as_default(
     asyncio.run(_set_key_as_default())
 
 
-async def _lms_sync_all() -> None:
+async def _lms_sync_all(
+    sync_without_sso_ids: bool = False, sync_classes_with_error_status: bool = False
+) -> None:
     await config.authz.driver.init()
     async with config.db.driver.async_session() as session:
         async with config.authz.driver.get_client() as c:
@@ -374,17 +376,30 @@ async def _lms_sync_all() -> None:
                         logger.info(
                             f"Syncing all classes in {lms.tenant}'s {lms.type} instance..."
                         )
-                        await canvas_sync_all(session, c, lms)
+                        await canvas_sync_all(
+                            session,
+                            c,
+                            lms,
+                            sync_without_sso_ids=sync_without_sso_ids,
+                            sync_classes_with_error_status=sync_classes_with_error_status,
+                        )
                     case _:
                         raise NotImplementedError(f"Unsupported LMS type: {lms.type}")
 
 
 @lms.command("sync-all")
-def sync_all() -> None:
+@click.option("--sync-with-error", default=False, is_flag=True)
+@click.option("--sync-without-sso", default=False, is_flag=True)
+def sync_all(sync_with_error: bool, sync_without_sso: bool) -> None:
     """
     Sync all classes with a linked LMS class.
     """
-    asyncio.run(_lms_sync_all())
+    asyncio.run(
+        _lms_sync_all(
+            sync_classes_with_error_status=sync_with_error,
+            sync_without_sso_ids=sync_without_sso,
+        )
+    )
 
 
 @lms.command("sync-all-cron")

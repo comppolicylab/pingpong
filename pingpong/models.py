@@ -1420,7 +1420,11 @@ class Class(Base):
 
     @classmethod
     async def get_all_to_sync(
-        cls, session: AsyncSession, lms_tenant: str, lms_type: schemas.LMSType, sync_error_classes: bool = False
+        cls,
+        session: AsyncSession,
+        lms_tenant: str,
+        lms_type: schemas.LMSType,
+        sync_classes_with_error_status: bool = False,
     ) -> AsyncGenerator["Class", None]:
         """
         For syncing CRON job: Get all classes with an active
@@ -1428,10 +1432,10 @@ class Class(Base):
         """
         lms_status_condition = (
             or_(
-            Class.lms_status == schemas.LMSStatus.LINKED,
-            Class.lms_status == schemas.LMSStatus.ERROR,
+                Class.lms_status == schemas.LMSStatus.LINKED,
+                Class.lms_status == schemas.LMSStatus.ERROR,
             )
-            if sync_error_classes
+            if sync_classes_with_error_status
             else Class.lms_status == schemas.LMSStatus.LINKED
         )
         stmt = (

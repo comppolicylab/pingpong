@@ -770,10 +770,17 @@ class ScriptCanvasClient(CanvasCourseClient):
 
 
 async def canvas_sync_all(
-    session: AsyncSession, authz_: OpenFgaAuthzClient, canvas_backend: CanvasSettings, sync_without_sso_ids: bool = False, sync_error_classes: bool = False
+    session: AsyncSession,
+    authz_: OpenFgaAuthzClient,
+    canvas_backend: CanvasSettings,
+    sync_without_sso_ids: bool = False,
+    sync_classes_with_error_status: bool = False,
 ) -> None:
     async for class_ in Class.get_all_to_sync(
-        session, canvas_backend.tenant, LMSType(canvas_backend.type), sync_error_classes
+        session,
+        canvas_backend.tenant,
+        LMSType(canvas_backend.type),
+        sync_classes_with_error_status=sync_classes_with_error_status,
     ):
         logger.info(f"Syncing class {class_.id}...")
         async with ScriptCanvasClient(
