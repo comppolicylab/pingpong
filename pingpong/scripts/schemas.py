@@ -1,6 +1,20 @@
 from pyairtable.orm import Model, fields as F
 
-class ClassAirtableRequest(Model):
+from pingpong.scripts.vars import (
+    AIRTABLE_API_KEY,
+    AIRTABLE_BASE_ID,
+    AIRTABLE_TABLE_NAME,
+)
+
+if not AIRTABLE_BASE_ID or not AIRTABLE_API_KEY or not AIRTABLE_TABLE_NAME:
+    raise ValueError("Missing Airtable credentials in environment.")
+else:
+    _AIRTABLE_BASE_ID = AIRTABLE_BASE_ID
+    _AIRTABLE_API_KEY = AIRTABLE_API_KEY
+    _AIRTABLE_TABLE_NAME = AIRTABLE_TABLE_NAME
+
+
+class AirtableClassRequest(Model):
     status = F.SelectField("Status")
     status_notes = F.TextField("Status Notes")
     class_name = F.TextField("Class Name")
@@ -20,15 +34,6 @@ class ClassAirtableRequest(Model):
     publish = F.CheckboxField("Publish")
 
     class Meta:
-        table_name = None
-        base_id = None
-        api_key = None
-
-def create_request_model(base_id: str, table_name: str, api_key: str):
-    request_meta = type(
-        "Meta",
-        (),
-        {"base_id": base_id, "table_name": table_name, "api_key": api_key}
-    )
-    ClassAirtableRequest.Meta = request_meta
-    return ClassAirtableRequest
+        table_name: str = _AIRTABLE_TABLE_NAME
+        base_id: str = _AIRTABLE_BASE_ID
+        api_key: str = _AIRTABLE_API_KEY

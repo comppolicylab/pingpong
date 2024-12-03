@@ -28,6 +28,7 @@ from pingpong.merge import (
     merge_permissions,
     merge,
 )
+from pingpong.scripts.helpers import process_requests
 
 from .auth import encode_auth_token
 from .bg import get_server
@@ -53,6 +54,11 @@ def auth() -> None:
 
 @cli.group("lms")
 def lms() -> None:
+    pass
+
+
+@cli.group("local_scripts")
+def local_scripts() -> None:
     pass
 
 
@@ -437,6 +443,14 @@ def sync_all_cron(crontime: str, host: str, port: int) -> None:
     # Run the Uvicorn server in the background
     with server.run_in_thread():
         asyncio.run(_sync_all_cron())
+
+
+@local_scripts.command("create_classes")
+def list_local_scripts() -> None:
+    """
+    Create all classes that remain unprocessed.
+    """
+    asyncio.run(process_requests())
 
 
 if __name__ == "__main__":
