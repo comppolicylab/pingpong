@@ -388,6 +388,7 @@ class LMSType(Enum):
 
 
 class CreateUserResult(BaseModel):
+    id: int | None = None
     email: str
     display_name: str | None = None
     error: str | None = None

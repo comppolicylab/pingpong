@@ -382,12 +382,12 @@ class AddNewUsers(ABC):
             if enrollment:
                 await self._update_user_enrollment(enrollment, ucr.roles, ucr.sso_id)
                 results.append(
-                    schemas.CreateUserResult(email=ucr.email, display_name=display_name)
+                    schemas.CreateUserResult(id=enrollment.user_id, email=ucr.email, display_name=display_name)
                 )
             else:
                 await self._create_user_enrollment(user, ucr, invite_roles, ucr.sso_id)
                 results.append(
-                    schemas.CreateUserResult(email=ucr.email, display_name=display_name)
+                    schemas.CreateUserResult(id=user.id, email=ucr.email, display_name=display_name)
                 )
 
         # Send emails to new users in the background
