@@ -28,8 +28,3 @@ AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 AIRTABLE_TABLE_NAME = os.getenv("AIRTABLE_TABLE_NAME")
 PINGPONG_COOKIE = os.getenv("PINGPONG_COOKIE")
-
-if not AIRTABLE_BASE_ID or not AIRTABLE_API_KEY or not AIRTABLE_TABLE_NAME:
-    raise ValueError("Missing Airtable credentials in environment.")
-if not PINGPONG_COOKIE:
-    raise ValueError("Missing PingPong cookie in environment.")

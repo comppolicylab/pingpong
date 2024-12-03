@@ -87,7 +87,7 @@ async def add_moderator(
             f'Error adding teacher "{teacher.email}" to class "{class_.name}": {teacher.error}'
         )
 
-    print(f'Added teacher "{teacher.email}" to class "{class_.name}".')
+    logging.info(f'Added teacher "{teacher.email}" to class "{class_.name}".')
 
 
 async def add_assistant(
@@ -121,7 +121,7 @@ async def add_assistant(
     assistant = await server_requests.add_assistant_to_class(
         session, class_.id, assistant_data
     )
-    print(
+    logging.info(
         f'Assistant "{assistant.name}" ({assistant.id}) added to class "{class_.name}" ({class_.id}).'
     )
 

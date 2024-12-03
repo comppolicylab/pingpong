@@ -446,7 +446,7 @@ def sync_all_cron(crontime: str, host: str, port: int) -> None:
 
 
 @local_scripts.command("create_classes")
-def list_local_scripts() -> None:
+def create_classes() -> None:
     """
     Create all classes that remain unprocessed.
     """
