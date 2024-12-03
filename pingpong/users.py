@@ -382,10 +382,7 @@ class AddNewUsers(ABC):
             if enrollment:
                 await self._update_user_enrollment(enrollment, ucr.roles, ucr.sso_id)
                 results.append(
-                    schemas.CreateUserResult(
-                        email=ucr.email,
-                        display_name=display_name,
-                    )
+                    schemas.CreateUserResult(email=ucr.email, display_name=display_name)
                 )
             else:
                 await self._create_user_enrollment(user, ucr, invite_roles, ucr.sso_id)
