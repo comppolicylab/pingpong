@@ -8,6 +8,7 @@ import pingpong.scripts.server_requests as server_requests
 from pingpong.scripts.vars import (
     BILLING_PROVIDERS,
     PINGPONG_COOKIE,
+    PINGPONG_URL,
 )
 from pyairtable.formulas import match
 
@@ -18,12 +19,17 @@ if not PINGPONG_COOKIE:
 else:
     _PINGPONG_COOKIE = PINGPONG_COOKIE
 
+if not PINGPONG_URL:
+    raise ValueError("Missing PingPong URL in environment.")
+else:
+    _PINGPONG_URL = PINGPONG_URL
+
 
 async def get_or_create_institution(
     session, institution_name: str
 ) -> schemas.Institution:
     selected_institution = None
-    institutions = await server_requests.list_institutions(session)
+    institutions = await server_requests.list_institutions(session, _PINGPONG_URL)
     institution_names = {
         institution.name: institution for institution in institutions.institutions
     }
@@ -31,7 +37,7 @@ async def get_or_create_institution(
         selected_institution = institution_names[institution_name]
     else:
         selected_institution = await server_requests.create_institution(
-            session, schemas.CreateInstitution(name=institution_name)
+            session, schemas.CreateInstitution(name=institution_name), _PINGPONG_URL
         )
         logger.info(f'Institution "{institution_name}" did not exist, created.')
 
@@ -52,7 +58,9 @@ async def create_class(
         api_key_id=billing_configuration,
     )
 
-    class_ = await server_requests.create_class(session, institution.id, class_data)
+    class_ = await server_requests.create_class(
+        session, institution.id, class_data, _PINGPONG_URL
+    )
     logger.info(f'Class "{class_.name}" created in "{institution.name}".')
     return class_
 
@@ -71,7 +79,7 @@ async def add_moderator(
         ]
     )
     user_results = await server_requests.add_user_to_class(
-        session, class_.id, user_roles
+        session, class_.id, user_roles, _PINGPONG_URL
     )
     if len(user_results.results) > 1:
         raise Exception(
@@ -119,14 +127,14 @@ async def add_assistant(
     )
 
     assistant = await server_requests.add_assistant_to_class(
-        session, class_.id, assistant_data
+        session, class_.id, assistant_data, _PINGPONG_URL
     )
     logging.info(
         f'Assistant "{assistant.name}" ({assistant.id}) added to class "{class_.name}" ({class_.id}).'
     )
 
 
-async def process_requests() -> None:
+async def _process_airtable_class_requests() -> None:
     requests_to_process = scripts_schemas.AirtableClassRequest.all(
         formula=match({"Status": "Ready for Add"})
     )
