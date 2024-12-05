@@ -431,7 +431,7 @@ class AddNewUsersManual(AddNewUsers):
                 invite.user_id,
                 expiry=86_400 * 7,
                 nowfn=nowfn,
-                redirect=f"group/{self.class_id}",
+                redirect=f"/group/{self.class_id}",
             )
             self.tasks.add_task(
                 send_invite,
@@ -464,7 +464,7 @@ class AddNewUsersScript(AddNewUsers):
                 invite.user_id,
                 expiry=86_400 * 7,
                 nowfn=nowfn,
-                redirect=f"group/{self.class_id}",
+                redirect=f"/group/{self.class_id}",
             )
             send_invite(
                 config.email.sender,
