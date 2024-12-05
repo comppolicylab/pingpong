@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import functools
 import hashlib
@@ -293,6 +294,7 @@ async def run_thread(
     message: list[MessageContentPartParam],
     file_names: dict[str, str] = {},
     metadata: Dict[str, str | int] | None = None,
+    vector_store_id: str | None = None,
     file_search_file_ids: list[str] | None = None,
     code_interpreter_file_ids: list[str] | None = None,
 ):
@@ -323,6 +325,18 @@ async def run_thread(
                 metadata=metadata,
                 attachments=attachments,
             )
+
+            if file_search_file_ids:
+                if not vector_store_id:
+                    raise ValueError("Vector store ID is required for file search")
+                await asyncio.gather(
+                    *[
+                        cli.beta.vector_stores.files.poll(
+                            file_id=file_id, vector_store_id=vector_store_id
+                        )
+                        for file_id in file_search_file_ids
+                    ]
+                )
         handler = BufferedStreamHandler(file_names=file_names)
         async with cli.beta.threads.runs.stream(
             thread_id=thread_id,

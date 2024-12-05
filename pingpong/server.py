@@ -2350,6 +2350,13 @@ async def create_run(
         file_names = await models.Thread.get_file_search_files(
             request.state.db, thread.id
         )
+        vector_store_id = (
+            await models.VectorStore.get_vector_store_id_by_id(
+                request.state.db, thread.vector_store_id
+            )
+            if thread.vector_store_id
+            else None
+        )
         stream = run_thread(
             openai_client,
             class_id=class_id,
@@ -2357,6 +2364,7 @@ async def create_run(
             assistant_id=asst.assistant_id,
             message=[],
             file_names=file_names,
+            vector_store_id=vector_store_id,
         )
     except Exception as e:
         logger.exception("Error running thread")
@@ -2497,6 +2505,13 @@ async def send_message(
         file_names = await models.Thread.get_file_search_files(
             request.state.db, thread.id
         )
+        vector_store_id_ = (
+            await models.VectorStore.get_vector_store_id_by_id(
+                request.state.db, thread.vector_store_id
+            )
+            if thread.vector_store_id
+            else None
+        )
         # Create a generator that will stream chunks to the client.
         stream = run_thread(
             openai_client,
@@ -2508,6 +2523,7 @@ async def send_message(
             file_names=file_names,
             file_search_file_ids=data.file_search_file_ids,
             code_interpreter_file_ids=data.code_interpreter_file_ids,
+            vector_store_id=vector_store_id_,
         )
     except Exception:
         logger.exception("Error running thread")
