@@ -734,6 +734,7 @@ async def test_create_class(api, now, institution, valid_user_token, authz):
     }
     assert await authz.get_all_calls() == [
         ("grant", "institution:11", "parent", "class:1"),
+        ("grant", "user:123", "teacher", "class:1"),
         ("grant", "class:1#supervisor", "can_manage_threads", "class:1"),
         ("grant", "class:1#supervisor", "can_manage_assistants", "class:1"),
     ]
@@ -789,4 +790,5 @@ async def test_create_class_private(api, now, institution, valid_user_token, aut
     }
     assert await authz.get_all_calls() == [
         ("grant", "institution:11", "parent", "class:1"),
+        ("grant", "user:123", "teacher", "class:1"),
     ]
