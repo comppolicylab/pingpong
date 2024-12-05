@@ -36,6 +36,20 @@ from zoneinfo import ZoneInfo
 logger = logging.getLogger(__name__)
 
 
+def get_azure_model_deployment_name_equivalent(model_name: str) -> str:
+    """Get the equivalent model deployment name for Azure models.
+
+    :param model_name: Model name
+    :return: Equivalent model deployment name
+    """
+    match model_name:
+        case "gpt-4-turbo":
+            return "gpt-4-turbo-2024-04-09"
+        case "gpt-4-turbo-preview":
+            return "gpt-4-0125-Preview"
+    return model_name
+
+
 async def generate_name(
     cli: openai.AsyncClient, transcript: str, model: str = "gpt-4o-mini"
 ) -> ThreadName | None:
