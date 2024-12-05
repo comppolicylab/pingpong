@@ -57,6 +57,12 @@ locust = "^2.20.0"
 pytest-asyncio = "^0.23.5"
 tqdm = "^4.66.3"
 
+[tool.poetry.group.local-scripts]
+optional = true
+
+[tool.poetry.group.local-scripts.dependencies]
+pyairtable = "^3.0.0"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
