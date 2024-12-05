@@ -428,7 +428,10 @@ class AddNewUsersManual(AddNewUsers):
         nowfn = self.get_now_fn()
         for invite in self.invite_config.invites:
             magic_link = generate_auth_link(
-                invite.user_id, expiry=86_400 * 7, nowfn=nowfn
+                invite.user_id,
+                expiry=86_400 * 7,
+                nowfn=nowfn,
+                redirect=f"/group/{self.class_id}",
             )
             self.tasks.add_task(
                 send_invite,
@@ -458,7 +461,10 @@ class AddNewUsersScript(AddNewUsers):
         nowfn = self.get_now_fn()
         for invite in self.invite_config.invites:
             magic_link = generate_auth_link(
-                invite.user_id, expiry=86_400 * 7, nowfn=nowfn
+                invite.user_id,
+                expiry=86_400 * 7,
+                nowfn=nowfn,
+                redirect=f"/group/{self.class_id}",
             )
             send_invite(
                 config.email.sender,
