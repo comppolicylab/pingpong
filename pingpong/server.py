@@ -47,6 +47,7 @@ from .ai import (
     run_thread,
     validate_api_key,
     get_ci_messages_from_step,
+    get_azure_model_deployment_name_equivalent,
 )
 from .auth import (
     decode_auth_token,
@@ -1792,6 +1793,7 @@ async def list_class_models(
             "created": datetime.fromtimestamp(m.created or m.created_at or 0),
             "owner": m.owned_by or "",
             "name": known_models[m.id]["name"],
+            "sort_order": known_models[m.id]["sort_order"],
             "description": known_models[m.id]["description"],
             "is_latest": known_models[m.id]["is_latest"],
             "is_new": known_models[m.id]["is_new"],
@@ -1801,7 +1803,41 @@ async def list_class_models(
         for m in all_models.data
         if m.id in known_models.keys()
     ]
-    filtered.sort(key=lambda x: known_models[x["id"]]["sort_order"])
+    if isinstance(openai_client, openai.AsyncAzureOpenAI) and any(
+        m.id == "gpt-4-turbo-2024-04-09" for m in all_models.data
+    ):
+        filtered.append(
+            {
+                "id": "gpt-4-turbo",
+                "created": 0,
+                "owner": "",
+                "name": "GPT-4 Turbo",
+                "sort_order": 2,
+                "is_new": False,
+                "highlight": False,
+                "is_latest": True,
+                "supports_vision": True,
+                "description": "The latest GPT-4 Turbo model.",
+            }
+        )
+    if isinstance(openai_client, openai.AsyncAzureOpenAI) and any(
+        m.id == "gpt-4-0125-Preview" for m in all_models.data
+    ):
+        filtered.append(
+            {
+                "id": "gpt-4-turbo-preview",
+                "created": 0,
+                "owner": "",
+                "name": "GPT-4 Turbo preview",
+                "sort_order": 3,
+                "is_new": False,
+                "highlight": False,
+                "is_latest": True,
+                "supports_vision": False,
+                "description": "The latest GPT-4 Turbo preview model.",
+            }
+        )
+    filtered.sort(key=lambda x: x["sort_order"])
     return {"models": filtered}
 
 
@@ -2871,9 +2907,14 @@ async def create_assistant(
         tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
 
     try:
+        _model = (
+            get_azure_model_deployment_name_equivalent(req.model)
+            if isinstance(openai_client, openai.AsyncAzureOpenAI)
+            else req.model
+        )
         new_asst = await openai_client.beta.assistants.create(
             instructions=format_instructions(req.instructions, use_latex=req.use_latex),
-            model=req.model,
+            model=_model,
             tools=req.tools,
             temperature=req.temperature,
             metadata={"class_id": class_id, "creator_id": str(creator_id)},
@@ -2887,7 +2928,7 @@ async def create_assistant(
         if e.code == "DeploymentNotFound":
             raise HTTPException(
                 404,
-                f"Deployment <b>{req.model}</b> does not exist on Azure. Please make sure the <b>deployment name</b> matches the one in Azure. If you created the deployment within the last 5 minutes, please wait a moment and try again.",
+                f"Deployment <b>{_model}</b> does not exist on Azure. Please make sure the <b>deployment name</b> matches the one in Azure. If you created the deployment within the last 5 minutes, please wait a moment and try again.",
             )
         raise HTTPException(
             404, e.body.get("message") or e.message or "OpenAI rejected this request"
@@ -3031,8 +3072,14 @@ async def update_assistant(
         if not req.instructions:
             raise HTTPException(400, "Instructions cannot be empty.")
         asst.instructions = req.instructions
+    _model = None
     if req.model is not None:
-        openai_update["model"] = req.model
+        _model = (
+            get_azure_model_deployment_name_equivalent(req.model)
+            if isinstance(openai_client, openai.AsyncAzureOpenAI)
+            else req.model
+        )
+        openai_update["model"] = _model
         asst.model = req.model
     if req.description is not None:
         asst.description = req.description
@@ -3081,7 +3128,7 @@ async def update_assistant(
         if e.code == "DeploymentNotFound":
             raise HTTPException(
                 404,
-                f"Deployment <b>{req.model}</b> does not exist on Azure. Please make sure the <b>deployment name</b> matches the one in Azure. If you created the deployment within the last 5 minutes, please wait a moment and try again.",
+                f"Deployment <b>{_model}</b> does not exist on Azure. Please make sure the <b>deployment name</b> matches the one in Azure. If you created the deployment within the last 5 minutes, please wait a moment and try again.",
             )
         raise HTTPException(
             404, e.body.get("message") or e.message or "OpenAI rejected this request"
