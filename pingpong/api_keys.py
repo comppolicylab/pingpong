@@ -185,7 +185,10 @@ async def set_as_default_oai_api_key(
 
 
 async def set_as_default_azure_api_key(
-    session: AsyncSession, redacted_key: str, endpoint: str, name: str
+    session: AsyncSession,
+    redacted_key: str,
+    key_name: str,
+    endpoint: str,
 ) -> None:
     prefix = redacted_key.split("*", 1)[0]
     suffix = redacted_key.rstrip("*").rsplit("*", 1)[-1]
@@ -214,5 +217,5 @@ async def set_as_default_azure_api_key(
 
     matched_api_key_object = api_key_object[0]
     matched_api_key_object.available_as_default = True
-    matched_api_key_object.name = name
+    matched_api_key_object.name = key_name
     await session.commit()
