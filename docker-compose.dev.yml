@@ -8,15 +8,18 @@ services:
         node_env: development
 
   srv:
-    command: ["fastapi", "dev", "pingpong", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+    restart: no
+    command: ["fastapi", "run", "pingpong", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
     deploy:
       replicas: 1
 
   authz:
+    restart: always
     deploy:
       replicas: 1
 
   db:
+    restart: always
     platform: linux/amd64
     image: postgres:15.5
     container_name: pingpong-db
