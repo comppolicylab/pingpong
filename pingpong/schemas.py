@@ -238,6 +238,7 @@ class Assistant(BaseModel):
     temperature: float
     class_id: int
     creator_id: int
+    prevent_edits: bool = False
     use_latex: bool | None
     hide_prompt: bool | None
     published: datetime | None
@@ -261,6 +262,7 @@ class CreateAssistant(BaseModel):
     published: bool = False
     use_latex: bool = False
     hide_prompt: bool = False
+    prevent_edits: bool = False
     deleted_private_files: list[int] = []
 
 
@@ -276,6 +278,7 @@ class UpdateAssistant(BaseModel):
     published: bool | None = None
     use_latex: bool | None = None
     hide_prompt: bool | None = None
+    only_edit_published: bool | None = None
     deleted_private_files: list[int] = []
 
 

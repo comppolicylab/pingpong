@@ -2995,7 +2995,7 @@ async def update_assistant(
     revokes = list[Relation]()
 
     # Check additional permissions
-    if not asst.published and req.published:
+    if asst.published != (req.published or False):
         if not await request.state.authz.test(
             f"user:{request.state.session.user.id}",
             "can_publish",
@@ -3003,11 +3003,28 @@ async def update_assistant(
         ):
             raise HTTPException(
                 status_code=403,
-                detail="You are not allowed to publish assistants for this class.",
+                detail="You are not allowed to toggle the published status of assistants for this class.",
             )
 
     if not req.model_dump():
         return asst
+
+    if asst.prevent_edits:
+        if req.only_edit_published and req.published is not None:
+            asst.published = req.published
+            request.state.db.add(asst)
+            await request.state.db.flush()
+            await request.state.db.refresh(asst)
+            return asst
+        if not await request.state.authz.test(
+            f"user:{request.state.session.user.id}",
+            "admin",
+            f"class:{class_id}",
+        ):
+            raise HTTPException(
+                403,
+                "This assistant is locked and cannot be edited. Please create a new assistant if you need to make changes.",
+            )
 
     openai_update: dict[str, Any] = {}
     # Update the assistant
@@ -3149,6 +3166,34 @@ async def update_assistant(
 
     await request.state.authz.write_safe(grant=grants, revoke=revokes)
     return asst
+
+
+@v1.post(
+    "/class/{class_id}/assistant/{assistant_id}/prevent_edits",
+    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def prevent_assistant_edits(class_id: str, assistant_id: str, request: Request):
+    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    if not asst:
+        raise HTTPException(404, "Assistant not found.")
+    asst.prevent_edits = True
+    request.state.db.add(asst)
+    return {"status": "ok"}
+
+
+@v1.delete(
+    "/class/{class_id}/assistant/{assistant_id}/prevent_edits",
+    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def allow_assistant_edits(class_id: str, assistant_id: str, request: Request):
+    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    if not asst:
+        raise HTTPException(404, "Assistant not found.")
+    asst.prevent_edits = False
+    request.state.db.add(asst)
+    return {"status": "ok"}
 
 
 @v1.delete(

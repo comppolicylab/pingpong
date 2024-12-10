@@ -25,7 +25,8 @@
     ImageOutline,
     QuestionCircleSolid,
     ArrowUpRightFromSquareOutline,
-    CogOutline
+    CogOutline,
+    LockSolid
   } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
   import { writable, type Writable } from 'svelte/store';
@@ -43,6 +44,7 @@
   let deleteModal = false;
 
   $: assistant = data.assistant;
+  $: preventEdits = !!assistant?.prevent_edits;
   $: canPublish = data.grants.canPublishAssistants;
 
   let selectedFileSearchFiles = writable(
@@ -455,11 +457,13 @@
     <Heading tag="h2" class="text-3xl font-serif font-medium mb-6 text-blue-dark-40">
       {#if data.isCreating}
         New assistant
+      {:else if preventEdits}
+        View assistant
       {:else}
         Edit assistant
       {/if}
     </Heading>
-    {#if !data.isCreating}
+    {#if !data.isCreating && !preventEdits}
       <div class="flex items-start shrink-0">
         <Button
           pill
@@ -485,11 +489,22 @@
       </div>
     {/if}
   </div>
+  {#if preventEdits}
+    <div
+      class="flex col-span-2 items-center rounded-lg text-white bg-gradient-to-r from-gray-800 to-gray-600 border-gradient-to-r from-gray-800 to-gray-600 p-4 mb-4"
+    >
+      <LockSolid class="w-8 h-8 mr-3" />
+      <span>
+        This assistant is locked and cannot be edited. To make changes, create a new
+        assistant. You can still publish or unpublish this assistant if you have the necessary permissions. For more information, contact your Group's administrator.
+      </span>
+    </div>
+  {/if}
 
   <form on:submit={submitForm} bind:this={assistantForm}>
     <div class="mb-4">
       <Label class="pb-1" for="name">Name</Label>
-      <Input label="name" id="name" name="name" value={assistant?.name} />
+      <Input label="name" id="name" name="name" value={assistant?.name} disabled={preventEdits}/>
     </div>
     <div class="mb-4">
       <Label for="model">Model</Label>
@@ -510,6 +525,7 @@
           placeholder={selectedModelName}
           optionNodes={modelNodes}
           optionHeaders={modelHeaders}
+          disabled={preventEdits}
           bind:selectedOption={selectedModel}
           bind:dropdownOpen
         >
@@ -584,6 +600,7 @@
         id="description"
         name="description"
         value={assistant?.description}
+        disabled={preventEdits}
       />
     </div>
     <div class="col-span-2 mb-4">
@@ -597,12 +614,14 @@
         name="instructions"
         rows="6"
         value={assistant?.instructions}
+        disabled={preventEdits}
       />
     </div>
     <div class="col-span-2 mb-4">
       <Checkbox
         id="hide_prompt"
         name="hide_prompt"
+        disabled={preventEdits}
         checked={(assistant ? assistant.hide_prompt : false) || false}>Hide Prompt</Checkbox
       >
       <Helper
@@ -615,6 +634,7 @@
         label="use_latex"
         id="use_latex"
         name="use_latex"
+        disabled={preventEdits}
         checked={(assistant ? assistant.use_latex : true) || false}>Use LaTeX</Checkbox
       >
       <Helper>Enable LaTeX formatting for assistant responses.</Helper>
@@ -628,6 +648,7 @@
         id={fileSearchMetadata.value}
         name={fileSearchMetadata.value}
         checked={fileSearchToolSelect || false}
+        disabled={preventEdits}
         on:change={() => {
           fileSearchToolSelect = !fileSearchToolSelect;
         }}>{fileSearchMetadata.name}</Checkbox
@@ -638,6 +659,7 @@
       <Checkbox
         id={codeInterpreterMetadata.value}
         name={codeInterpreterMetadata.value}
+        disabled={preventEdits}
         checked={codeInterpreterToolSelect || false}
         on:change={() => {
           codeInterpreterToolSelect = !codeInterpreterToolSelect;
@@ -659,7 +681,7 @@
           name="selectedFileSearchFiles"
           items={fileSearchOptions}
           bind:value={selectedFileSearchFiles}
-          disabled={$loading || !handleUpload || uploadingFSPrivate}
+          disabled={$loading || !handleUpload || uploadingFSPrivate || preventEdits}
           privateFiles={allFSPrivateFiles}
           uploading={uploadingFSPrivate}
           upload={handleUpload}
@@ -691,7 +713,7 @@
           name="selectedCodeInterpreterFiles"
           items={codeInterpreterOptions}
           bind:value={selectedCodeInterpreterFiles}
-          disabled={$loading || !handleUpload || uploadingCIPrivate}
+          disabled={$loading || !handleUpload || uploadingCIPrivate || preventEdits}
           privateFiles={allCIPrivateFiles}
           uploading={uploadingCIPrivate}
           upload={handleUpload}
@@ -720,7 +742,7 @@
       >
       {#if !canPublish}
         <Helper
-          >Publishing assistants has been disabled for this group. Contact your admin if you need to
+          >You do not have permissions to change the published status of this assistant. Contact your administrator if you need to
           share this assistant.</Helper
         >
       {:else}

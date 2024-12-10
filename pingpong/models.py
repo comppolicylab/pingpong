@@ -849,6 +849,7 @@ class Assistant(Base):
     assistant_id = Column(String)
     use_latex = Column(Boolean)
     hide_prompt = Column(Boolean, default=False)
+    prevent_edits = Column(Boolean, server_default="false")
     tools = Column(String)
     model = Column(String)
     temperature = Column(Float, server_default="1.0")

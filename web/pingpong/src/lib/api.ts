@@ -925,6 +925,7 @@ export type Assistant = {
   published: string | null;
   use_latex: boolean | null;
   hide_prompt: boolean | null;
+  prevent_edits: boolean | null;
   endorsed: boolean | null;
   created: string;
   updated: string | null;
@@ -1011,6 +1012,7 @@ export type UpdateAssistantRequest = {
   code_interpreter_file_ids?: string[];
   file_search_file_ids?: string[];
   published?: boolean;
+  only_edit_published?: boolean;
   use_latex?: boolean;
   hide_prompt?: boolean;
   deleted_private_files?: number[];
