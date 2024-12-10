@@ -3023,6 +3023,7 @@ async def update_assistant(
             request.state.db.add(asst)
             await request.state.db.flush()
             await request.state.db.refresh(asst)
+            await request.state.authz.write_safe(grant=grants, revoke=revokes)
             return asst
         if not await request.state.authz.test(
             f"user:{request.state.session.user.id}",

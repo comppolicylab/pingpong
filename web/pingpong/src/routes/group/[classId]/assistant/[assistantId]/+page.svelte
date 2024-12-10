@@ -306,9 +306,13 @@
     }
 
     const params = {
-      name: preventEdits ? (assistant?.name || '') : body.name.toString(),
-      description: preventEdits ? (assistant?.description || '') : normalizeNewlines(body.description.toString()),
-      instructions: preventEdits ? (assistant?.instructions || '') : normalizeNewlines(body.instructions.toString()),
+      name: preventEdits ? assistant?.name || '' : body.name.toString(),
+      description: preventEdits
+        ? assistant?.description || ''
+        : normalizeNewlines(body.description.toString()),
+      instructions: preventEdits
+        ? assistant?.instructions || ''
+        : normalizeNewlines(body.instructions.toString()),
       model: selectedModel,
       tools,
       code_interpreter_file_ids: codeInterpreterToolSelect ? $selectedCodeInterpreterFiles : [],
