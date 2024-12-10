@@ -306,9 +306,9 @@
     }
 
     const params = {
-      name: body.name.toString(),
-      description: normalizeNewlines(body.description.toString()),
-      instructions: normalizeNewlines(body.instructions.toString()),
+      name: preventEdits ? (assistant?.name || '') : body.name.toString(),
+      description: preventEdits ? (assistant?.description || '') : normalizeNewlines(body.description.toString()),
+      instructions: preventEdits ? (assistant?.instructions || '') : normalizeNewlines(body.instructions.toString()),
       model: selectedModel,
       tools,
       code_interpreter_file_ids: codeInterpreterToolSelect ? $selectedCodeInterpreterFiles : [],
@@ -317,6 +317,7 @@
       published: body.published?.toString() === 'on',
       use_latex: body.use_latex?.toString() === 'on',
       hide_prompt: body.hide_prompt?.toString() === 'on',
+      only_edit_published: preventEdits,
       deleted_private_files: data.assistantId ? $trashPrivateFileIds : []
     };
     return params;
@@ -495,8 +496,9 @@
     >
       <LockSolid class="w-8 h-8 mr-3" />
       <span>
-        This assistant is locked and cannot be edited. To make changes, create a new
-        assistant. You can still publish or unpublish this assistant if you have the necessary permissions. For more information, contact your Group's administrator.
+        This assistant is locked and cannot be edited. To make changes, create a new assistant. You
+        can still publish or unpublish this assistant if you have the necessary permissions. For
+        more information, contact your Group's administrator.
       </span>
     </div>
   {/if}
@@ -504,7 +506,7 @@
   <form on:submit={submitForm} bind:this={assistantForm}>
     <div class="mb-4">
       <Label class="pb-1" for="name">Name</Label>
-      <Input label="name" id="name" name="name" value={assistant?.name} disabled={preventEdits}/>
+      <Input label="name" id="name" name="name" value={assistant?.name} disabled={preventEdits} />
     </div>
     <div class="mb-4">
       <Label for="model">Model</Label>
@@ -742,8 +744,8 @@
       >
       {#if !canPublish}
         <Helper
-          >You do not have permissions to change the published status of this assistant. Contact your administrator if you need to
-          share this assistant.</Helper
+          >You do not have permissions to change the published status of this assistant. Contact
+          your administrator if you need to share this assistant.</Helper
         >
       {:else}
         <Helper
@@ -778,6 +780,7 @@
             max="2"
             bind:value={temperatureValue}
             step="0.1"
+            disabled={preventEdits}
           />
           <div class="mt-2 flex flex-row justify-between">
             <p class="text-sm">More focused</p>

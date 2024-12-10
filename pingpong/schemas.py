@@ -262,7 +262,7 @@ class CreateAssistant(BaseModel):
     published: bool = False
     use_latex: bool = False
     hide_prompt: bool = False
-    prevent_edits: bool = False
+    only_edit_published: bool = False
     deleted_private_files: list[int] = []
 
 

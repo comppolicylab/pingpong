@@ -994,6 +994,7 @@ export type CreateAssistantRequest = {
   code_interpreter_file_ids: string[];
   file_search_file_ids: string[];
   published?: boolean;
+  only_edit_published?: boolean;
   use_latex?: boolean;
   hide_prompt?: boolean;
   deleted_private_files?: number[];

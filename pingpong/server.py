@@ -2888,6 +2888,8 @@ async def create_assistant(
         ):
             raise HTTPException(403, "You lack permission to publish an assistant.")
 
+    del req.only_edit_published
+
     tool_resources: ToolResources = {}
     vector_store_object_id = None
 
@@ -3011,7 +3013,13 @@ async def update_assistant(
 
     if asst.prevent_edits:
         if req.only_edit_published and req.published is not None:
-            asst.published = req.published
+            ptuple = (f"class:{class_id}#member", "can_view", f"assistant:{asst.id}")
+            if req.published:
+                asst.published = func.now()
+                grants.append(ptuple)
+            else:
+                asst.published = None
+                revokes.append(ptuple)
             request.state.db.add(asst)
             await request.state.db.flush()
             await request.state.db.refresh(asst)
