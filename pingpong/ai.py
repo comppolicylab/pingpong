@@ -486,11 +486,42 @@ def generate_user_hash(class_: models.Class, user: models.User) -> str:
     return hash_object.hexdigest().rstrip("=")[0:10]
 
 
+async def export_class_threads_anonymized(
+    cli: openai.AsyncClient,
+    class_id: str,
+    user_id: int,
+    nowfn: NowFn = utcnow,
+) -> None:
+    await export_class_threads(
+        cli=cli,
+        class_id=class_id,
+        user_id=user_id,
+        nowfn=nowfn,
+        include_user_emails=False,
+    )
+
+
+async def export_class_threads_with_emails(
+    cli: openai.AsyncClient,
+    class_id: str,
+    user_id: int,
+    nowfn: NowFn = utcnow,
+) -> None:
+    await export_class_threads(
+        cli=cli,
+        class_id=class_id,
+        user_id=user_id,
+        nowfn=nowfn,
+        include_user_emails=True,
+    )
+
+
 async def export_class_threads(
     cli: openai.AsyncClient,
     class_id: str,
     user_id: int,
     nowfn: NowFn = utcnow,
+    include_user_emails: bool = False,
 ) -> None:
     async with config.db.driver.async_session() as session:
         class_ = await models.Class.get_by_id(session, int(class_id))
@@ -503,9 +534,12 @@ async def export_class_threads(
 
         csv_buffer = io.StringIO()
         csvwriter = csv.writer(csv_buffer)
-        csvwriter.writerow(
+        header = ["User ID"]
+        if include_user_emails:
+            header.append("User Email")
+        header.extend(
             [
-                "User ID",
+                "Class Name",
                 "Assistant Name",
                 "Role",
                 "Thread ID",
@@ -513,6 +547,7 @@ async def export_class_threads(
                 "Content",
             ]
         )
+        csvwriter.writerow(header)
 
         async for thread in models.Thread.get_thread_by_class_id(
             session, class_id=int(class_id), desc=False
@@ -527,9 +562,17 @@ async def export_class_threads(
             ] or ["Unknown user"]
             user_hashes_str = ", ".join(user_hashes)
 
-            csvwriter.writerow(
+            user_emails_str = "REDACTED"
+            if include_user_emails:
+                user_emails = [user.email for user in thread.users] or ["Unknown email"]
+                user_emails_str = ", ".join(user_emails)
+
+            prompt_row = [user_hashes_str]
+            if include_user_emails:
+                prompt_row.append(user_emails_str)
+            prompt_row.extend(
                 [
-                    user_hashes_str,
+                    class_.name,
                     assistant_name,
                     "system_prompt",
                     thread.id,
@@ -541,6 +584,7 @@ async def export_class_threads(
                     else "Unknown Prompt (Deleted Assistant)",
                 ]
             )
+            csvwriter.writerow(prompt_row)
 
             after = None
             while True:
@@ -551,9 +595,14 @@ async def export_class_threads(
                 )
 
                 for message in messages.data:
-                    csvwriter.writerow(
+                    row = [user_hashes_str]
+
+                    if include_user_emails:
+                        row.append(user_emails_str)
+
+                    row.extend(
                         [
-                            user_hashes_str,
+                            class_.name,
                             assistant_name,
                             message.role,
                             thread.id,
@@ -563,6 +612,7 @@ async def export_class_threads(
                             process_message_content(message.content, file_names),
                         ]
                     )
+                    csvwriter.writerow(row)
 
                 if len(messages.data) == 0:
                     break

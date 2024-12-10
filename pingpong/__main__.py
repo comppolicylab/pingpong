@@ -12,6 +12,7 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from pingpong.ai import export_class_threads_with_emails, get_openai_client
 from pingpong.api_keys import (
     get_process_redacted_project_api_keys,
     set_as_default_azure_api_key,
@@ -28,6 +29,7 @@ from pingpong.merge import (
     merge_permissions,
     merge,
 )
+from pingpong.models import Class
 
 from .auth import encode_auth_token
 from .bg import get_server
@@ -53,6 +55,11 @@ def auth() -> None:
 
 @cli.group("lms")
 def lms() -> None:
+    pass
+
+
+@cli.group("export")
+def export() -> None:
     pass
 
 
@@ -437,6 +444,46 @@ def sync_all_cron(crontime: str, host: str, port: int) -> None:
     # Run the Uvicorn server in the background
     with server.run_in_thread():
         asyncio.run(_sync_all_cron())
+
+
+@export.command("export_threads_with_emails")
+@click.argument("class_id", type=int)
+@click.argument("user_email")
+def export_threads(class_id: int, user_email: str) -> None:
+    async def _export_threads() -> None:
+        async with config.db.driver.async_session() as session:
+            user = await User.get_by_email(session, user_email)
+            if not user:
+                raise ValueError(f"User with email {user_email} not found")
+
+            openai_client = None
+            result = await Class.get_api_key(session, class_id)
+            if result.api_key_obj:
+                if result.api_key_obj.provider == "openai":
+                    openai_client = get_openai_client(
+                        result.api_key_obj.api_key,
+                        provider=result.api_key_obj.provider,  # type: ignore
+                    )
+                elif result.api_key_obj.provider == "azure":
+                    openai_client = get_openai_client(
+                        result.api_key_obj.api_key,
+                        provider=result.api_key_obj.provider,  # type: ignore
+                        endpoint=result.api_key_obj.endpoint,
+                        api_version=result.api_key_obj.api_version,
+                    )
+                else:
+                    raise ValueError("Unknown API key provider for class")
+            elif result.api_key:
+                return get_openai_client(result.api_key)
+
+            if not openai_client:
+                raise ValueError("No OpenAI client found")
+
+            await export_class_threads_with_emails(
+                openai_client, str(class_id), user.id
+            )
+
+    asyncio.run(_export_threads())
 
 
 if __name__ == "__main__":

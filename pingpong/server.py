@@ -39,7 +39,7 @@ from .time import convert_seconds
 from .saml import get_saml2_client, get_saml2_settings, get_saml2_attrs
 
 from .ai import (
-    export_class_threads,
+    export_class_threads_anonymized,
     format_instructions,
     get_thread_conversation_name,
     get_initial_thread_conversation_name,
@@ -1957,7 +1957,7 @@ async def export_class(
             detail="Cannot export private classes",
         )
     tasks.add_task(
-        export_class_threads,
+        export_class_threads_anonymized,
         openai_client,
         class_id,
         request.state.session.user.id,
