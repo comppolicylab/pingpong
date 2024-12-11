@@ -2888,8 +2888,6 @@ async def create_assistant(
         ):
             raise HTTPException(403, "You lack permission to publish an assistant.")
 
-    del req.only_edit_published
-
     tool_resources: ToolResources = {}
     vector_store_object_id = None
 
@@ -2997,7 +2995,7 @@ async def update_assistant(
     revokes = list[Relation]()
 
     # Check additional permissions
-    if asst.published != (req.published or False):
+    if req.published and asst.published != req.published:
         if not await request.state.authz.test(
             f"user:{request.state.session.user.id}",
             "can_publish",
@@ -3011,20 +3009,7 @@ async def update_assistant(
     if not req.model_dump():
         return asst
 
-    if asst.prevent_edits:
-        if req.only_edit_published and req.published is not None:
-            ptuple = (f"class:{class_id}#member", "can_view", f"assistant:{asst.id}")
-            if req.published:
-                asst.published = func.now()
-                grants.append(ptuple)
-            else:
-                asst.published = None
-                revokes.append(ptuple)
-            request.state.db.add(asst)
-            await request.state.db.flush()
-            await request.state.db.refresh(asst)
-            await request.state.authz.write_safe(grant=grants, revoke=revokes)
-            return asst
+    if asst.locked:
         if not await request.state.authz.test(
             f"user:{request.state.session.user.id}",
             "admin",
@@ -3178,29 +3163,57 @@ async def update_assistant(
 
 
 @v1.post(
-    "/class/{class_id}/assistant/{assistant_id}/prevent_edits",
+    "/class/{class_id}/assistant/{assistant_id}/publish",
+    dependencies=[Depends(Authz("can_publish", "assistant:{assistant_id}"))],
+)
+async def publish_assistant(class_id: str, assistant_id: str, request: Request):
+    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    asst.published = func.now()
+    request.state.db.add(asst)
+    await request.state.authz.write_safe(
+        grant=[(f"class:{class_id}#member", "can_view", f"assistant:{assistant_id}")]
+    )
+    return {"status": "ok"}
+
+
+@v1.delete(
+    "/class/{class_id}/assistant/{assistant_id}/publish",
+    dependencies=[Depends(Authz("can_publish", "assistant:{assistant_id}"))],
+)
+async def unpublish_assistant(class_id: str, assistant_id: str, request: Request):
+    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    asst.published = None
+    request.state.db.add(asst)
+    await request.state.authz.write_safe(
+        revoke=[(f"class:{class_id}#member", "can_view", f"assistant:{assistant_id}")]
+    )
+    return {"status": "ok"}
+
+
+@v1.post(
+    "/class/{class_id}/assistant/{assistant_id}/lock",
     dependencies=[Depends(Authz("admin", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
-async def prevent_assistant_edits(class_id: str, assistant_id: str, request: Request):
+async def lock_assistant(class_id: str, assistant_id: str, request: Request):
     asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
     if not asst:
         raise HTTPException(404, "Assistant not found.")
-    asst.prevent_edits = True
+    asst.locked = True
     request.state.db.add(asst)
     return {"status": "ok"}
 
 
 @v1.delete(
-    "/class/{class_id}/assistant/{assistant_id}/prevent_edits",
+    "/class/{class_id}/assistant/{assistant_id}/lock",
     dependencies=[Depends(Authz("admin", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
-async def allow_assistant_edits(class_id: str, assistant_id: str, request: Request):
+async def unlock_assistant(class_id: str, assistant_id: str, request: Request):
     asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
     if not asst:
         raise HTTPException(404, "Assistant not found.")
-    asst.prevent_edits = False
+    asst.locked = False
     request.state.db.add(asst)
     return {"status": "ok"}
 

@@ -44,7 +44,7 @@
   let deleteModal = false;
 
   $: assistant = data.assistant;
-  $: preventEdits = !!assistant?.prevent_edits;
+  $: preventEdits = !!assistant?.locked;
   $: canPublish = data.grants.canPublishAssistants;
 
   let selectedFileSearchFiles = writable(
@@ -321,7 +321,6 @@
       published: body.published?.toString() === 'on',
       use_latex: body.use_latex?.toString() === 'on',
       hide_prompt: body.hide_prompt?.toString() === 'on',
-      only_edit_published: preventEdits,
       deleted_private_files: data.assistantId ? $trashPrivateFileIds : []
     };
     return params;
@@ -396,6 +395,27 @@
 
     const form = evt.target as HTMLFormElement;
     const params = parseFormData(form);
+
+    if (preventEdits && data.assistantId) {
+      const result = !params.published
+        ? await api.unpublishAssistant(fetch, data.class.id, data.assistantId)
+        : await api.publishAssistant(fetch, data.class.id, data.assistantId);
+      const expanded = api.expandResponse(result);
+
+      if (expanded.error) {
+        $loading = false;
+        sadToast(
+          `Could not update the assistant's publish status:\n${expanded.error.detail || 'Unknown error'}`
+        );
+        return;
+      } else {
+        $loading = false;
+        happyToast('Assistant saved.');
+        checkForChanges = false;
+        await goto(`/group/${data.class.id}/assistant`, { invalidateAll: true });
+        return;
+      }
+    }
 
     if (params.file_search_file_ids.length > fileSearchMetadata.max_count) {
       sadToast(`You can only select up to ${fileSearchMetadata.max_count} files for File Search.`);

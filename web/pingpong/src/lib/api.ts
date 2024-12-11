@@ -925,7 +925,7 @@ export type Assistant = {
   published: string | null;
   use_latex: boolean | null;
   hide_prompt: boolean | null;
-  prevent_edits: boolean | null;
+  locked: boolean | null;
   endorsed: boolean | null;
   created: string;
   updated: string | null;
@@ -994,7 +994,6 @@ export type CreateAssistantRequest = {
   code_interpreter_file_ids: string[];
   file_search_file_ids: string[];
   published?: boolean;
-  only_edit_published?: boolean;
   use_latex?: boolean;
   hide_prompt?: boolean;
   deleted_private_files?: number[];
@@ -1013,7 +1012,6 @@ export type UpdateAssistantRequest = {
   code_interpreter_file_ids?: string[];
   file_search_file_ids?: string[];
   published?: boolean;
-  only_edit_published?: boolean;
   use_latex?: boolean;
   hide_prompt?: boolean;
   deleted_private_files?: number[];
@@ -1042,6 +1040,22 @@ export const updateAssistant = async (
 ) => {
   const url = `class/${classId}/assistant/${assistantId}`;
   return await PUT<UpdateAssistantRequest, Assistant>(f, url, data);
+};
+
+/**
+ * Publish an assistant.
+ */
+export const publishAssistant = async (f: Fetcher, classId: number, assistantId: number) => {
+  const url = `class/${classId}/assistant/${assistantId}/publish`;
+  return await POST<never, GenericStatus>(f, url);
+};
+
+/**
+ * Unpublish an assistant.
+ */
+export const unpublishAssistant = async (f: Fetcher, classId: number, assistantId: number) => {
+  const url = `class/${classId}/assistant/${assistantId}/publish`;
+  return await DELETE<never, GenericStatus>(f, url);
 };
 
 /**
