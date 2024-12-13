@@ -2995,7 +2995,7 @@ async def update_assistant(
     revokes = list[Relation]()
 
     # Check additional permissions
-    if req.published and asst.published != req.published:
+    if req.published is not None and asst.published != req.published:
         if not await request.state.authz.test(
             f"user:{request.state.session.user.id}",
             "can_publish",
