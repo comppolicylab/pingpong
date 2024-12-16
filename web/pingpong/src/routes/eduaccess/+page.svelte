@@ -35,7 +35,7 @@
     <P class="mt-4"
       >To participate, complete a short (5-question) survey to <b
         >confirm your eligibility by December 16, 2024</b
-      >:</P
+      >. We will continue to consider applications received after December 16 on a rolling basis.</P
     >
   </div>
   <div
