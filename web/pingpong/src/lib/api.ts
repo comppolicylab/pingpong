@@ -925,6 +925,7 @@ export type Assistant = {
   published: string | null;
   use_latex: boolean | null;
   hide_prompt: boolean | null;
+  locked: boolean | null;
   endorsed: boolean | null;
   created: string;
   updated: string | null;
@@ -1039,6 +1040,22 @@ export const updateAssistant = async (
 ) => {
   const url = `class/${classId}/assistant/${assistantId}`;
   return await PUT<UpdateAssistantRequest, Assistant>(f, url, data);
+};
+
+/**
+ * Publish an assistant.
+ */
+export const publishAssistant = async (f: Fetcher, classId: number, assistantId: number) => {
+  const url = `class/${classId}/assistant/${assistantId}/publish`;
+  return await POST<never, GenericStatus>(f, url);
+};
+
+/**
+ * Unpublish an assistant.
+ */
+export const unpublishAssistant = async (f: Fetcher, classId: number, assistantId: number) => {
+  const url = `class/${classId}/assistant/${assistantId}/publish`;
+  return await DELETE<never, GenericStatus>(f, url);
 };
 
 /**

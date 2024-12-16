@@ -238,6 +238,7 @@ class Assistant(BaseModel):
     temperature: float
     class_id: int
     creator_id: int
+    locked: bool = False
     use_latex: bool | None
     hide_prompt: bool | None
     published: datetime | None
