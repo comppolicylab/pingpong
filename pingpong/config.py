@@ -13,7 +13,7 @@ from pydantic_settings import BaseSettings
 from pingpong.artifacts import LocalArtifactStore, S3ArtifactStore
 from .authz import OpenFgaAuthzDriver
 from .email import AzureEmailSender, GmailEmailSender, MockEmailSender, SmtpEmailSender
-from .support import DiscordSupportDriver
+from .support import SupportSettings, NoSupportSettings
 
 logger = logging.getLogger(__name__)
 
@@ -203,39 +203,6 @@ class InitSettings(BaseSettings):
     super_users: list[str] = Field([])
 
 
-class DiscordSettings(BaseSettings):
-    """Settings for getting help with Discord."""
-
-    type: Literal["discord"]
-    webhook: str
-    invite: str
-
-    def blurb(self) -> str:
-        return (
-            f'We run a <a href="{self.invite}" '
-            'rel="noopener noreferrer" target="_blank">'
-            "Discord server</a> where you can get help with PingPong."
-        )
-
-    @cached_property
-    def driver(self) -> DiscordSupportDriver:
-        return DiscordSupportDriver(self.webhook)
-
-
-class NoSupportSettings(BaseSettings):
-    type: Literal["none"]
-
-    def blurb(self) -> str:
-        return "We sadly cannot offer additional support for this app right now."
-
-    @cached_property
-    def driver(self) -> None:
-        return None
-
-
-SupportSettings = Union[DiscordSettings, NoSupportSettings]
-
-
 class UploadSettings(BaseSettings):
     """Settings for file uploads."""
 
@@ -246,7 +213,7 @@ class UploadSettings(BaseSettings):
 class S3StoreSettings(BaseSettings):
     """Settings for S3 storage."""
 
-    type: Literal["s3"]
+    type: Literal["s3"] = "s3"
     save_target: str
     download_link_expiration: int = Field(60 * 60, gt=0, le=86400)  # 1 hour
 
@@ -258,7 +225,7 @@ class S3StoreSettings(BaseSettings):
 class LocalStoreSettings(BaseSettings):
     """Settings for S3 storage."""
 
-    type: Literal["local"]
+    type: Literal["local"] = "local"
     save_target: str
     download_link_expiration: int = Field(60 * 60, gt=0, le=86400)  # 1 hour
 
@@ -278,7 +245,7 @@ class Config(BaseSettings):
     reload: int = Field(0)
     public_url: str = Field("http://localhost:8000")
     development: bool = Field(False, env="DEVELOPMENT")
-    artifact_store: ArtifactStoreSettings
+    artifact_store: ArtifactStoreSettings = LocalStoreSettings(save_target="uploads")
     db: DbSettings
     auth: AuthSettings
     authz: AuthzSettings
@@ -287,7 +254,7 @@ class Config(BaseSettings):
     sentry: SentrySettings = Field(SentrySettings())
     metrics: MetricsSettings = Field(MetricsSettings())
     init: InitSettings = Field(InitSettings())
-    support: SupportSettings = Field(NoSupportSettings(type="none"))
+    support: SupportSettings = Field(NoSupportSettings())
     upload: UploadSettings = Field(UploadSettings())
 
     def url(self, path: str | None) -> str:

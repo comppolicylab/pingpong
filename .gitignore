@@ -194,3 +194,6 @@ load_test_results_*
 # Saml
 saml/**/*.key
 saml/**/*.crt
+
+# Local artifact store
+uploads/
