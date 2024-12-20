@@ -3110,13 +3110,13 @@ cli = ["click (>=5.0)"]
 
 [[package]]
 name = "python-glowplug"
-version = "0.3.11"
+version = "0.3.12"
 description = "A collection of utilities for common DB maintenance operations in SQLAlchemy"
 optional = false
 python-versions = "<4.0,>=3.9"
 files = [
-    {file = "python_glowplug-0.3.11-py3-none-any.whl", hash = "sha256:79b03b2a5edebb94f1fbed47f7613142a3a679446f1af952f95087ec7796dd38"},
-    {file = "python_glowplug-0.3.11.tar.gz", hash = "sha256:456d37036a8a5c38b38ea97d2b0701039593e2069bfc9848f3ec98fd524a5fd2"},
+    {file = "python_glowplug-0.3.12-py3-none-any.whl", hash = "sha256:f27fa781e3e2cfcb4fac8bc2e3e02c5ba9065ae22e454bb354e3b0e153931312"},
+    {file = "python_glowplug-0.3.12.tar.gz", hash = "sha256:fb35cd0ad520c13d329588545b29f7015285d928ed8a7880eceb87961e0f92d1"},
 ]
 
 [package.dependencies]
@@ -4500,4 +4500,4 @@ testing = ["coverage (>=5.0.3)", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "e1d5f94ee5cefbd28d6e0dc18d0e9d05c5f1bf4c52cfa5cf15a6dfedef00ce59"
+content-hash = "e044eee8c4aa1ecb7ffee74f937cdaa2763bafd6ba687e3952cddd91baffc68c"
