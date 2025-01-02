@@ -111,6 +111,41 @@ def compute_assistant_prompt(
 
     if "None" in request.class_programming_languages:
         prompt = prompt.replace(assistant_template.prog_lang_sub_code[0], "")
+    elif "Any" in request.class_programming_languages:
+        programming_languages = request.class_programming_languages.copy()
+        programming_prompt = " " + assistant_template.prog_lang_any[0]
+        if "Python" in request.class_programming_languages:
+            programming_languages.remove("Python")
+        programming_languages.remove("Any")
+        if len(programming_languages) == 1:
+            extra_prompt = assistant_template.prog_lang_single_with_python[0]
+            extra_prompt = extra_prompt.replace(
+                assistant_template.prog_lang_code_single[0],
+                programming_languages[0],
+            )
+            programming_prompt = programming_prompt + " " + extra_prompt
+        elif len(programming_languages) > 1:
+            extra_prompt = assistant_template.prog_lang_multi_with_python[0]
+            extra_prompt = extra_prompt.replace(
+                assistant_template.prog_lang_code_multi_and[0],
+                (
+                    ", ".join(programming_languages[:-1])
+                    + ", and "
+                    + programming_languages[-1]
+                ),
+            )
+            extra_prompt = extra_prompt.replace(
+                assistant_template.prog_lang_code_multi_or[0],
+                (
+                    ", ".join(programming_languages[:-1])
+                    + ", or "
+                    + programming_languages[-1]
+                ),
+            )
+            programming_prompt = programming_prompt + " " + extra_prompt
+        prompt = prompt.replace(
+            assistant_template.prog_lang_sub_code[0], programming_prompt
+        )
     else:
         programming_languages = request.class_programming_languages.copy()
         programming_prompt = " "
@@ -145,7 +180,7 @@ def compute_assistant_prompt(
                 programming_prompt = programming_prompt + " " + extra_prompt
         else:
             if len(programming_languages) == 1:
-                extra_prompt = assistant_template.prog_lang_single_with_python[0]
+                extra_prompt = assistant_template.prog_lang_single_no_python[0]
                 extra_prompt = extra_prompt.replace(
                     assistant_template.prog_lang_code_single[0],
                     programming_languages[0],

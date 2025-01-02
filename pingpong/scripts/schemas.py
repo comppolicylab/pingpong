@@ -48,6 +48,7 @@ class AssistantTemplate(Model):
     prog_lang_python = F.LookupField[str](
         "Prog. Lang. Python — Extra (from Current Prompt)"
     )
+    prog_lang_any = F.LookupField[str]("Prog. Lang. Any — Extra (from Current Prompt)")
     prog_lang_single_no_python = F.LookupField[str](
         "Prog. Lang. Single — No Python (from Current Prompt)"
     )
