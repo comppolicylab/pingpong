@@ -1,32 +1,65 @@
 from pyairtable.orm import Model, fields as F
+from pydantic import BaseModel
 
 from pingpong.scripts.vars import (
     AIRTABLE_API_KEY,
     AIRTABLE_BASE_ID,
-    AIRTABLE_TABLE_NAME,
+    AIRTABLE_TABLE_NAME_CLASSES,
+    AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES,
+    AIRTABLE_TABLE_NAME_ASSISTANTS,
 )
 
-if not AIRTABLE_BASE_ID or not AIRTABLE_API_KEY or not AIRTABLE_TABLE_NAME:
+if (
+    not AIRTABLE_BASE_ID
+    or not AIRTABLE_API_KEY
+    or not AIRTABLE_TABLE_NAME_ASSISTANTS
+    or not AIRTABLE_TABLE_NAME_CLASSES
+    or not AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES
+):
     raise ValueError("Missing Airtable credentials in environment.")
 else:
     _AIRTABLE_BASE_ID = AIRTABLE_BASE_ID
     _AIRTABLE_API_KEY = AIRTABLE_API_KEY
-    _AIRTABLE_TABLE_NAME = AIRTABLE_TABLE_NAME
+    _AIRTABLE_TABLE_NAME_ASSISTANTS = AIRTABLE_TABLE_NAME_ASSISTANTS
+    _AIRTABLE_TABLE_NAME_CLASSES = AIRTABLE_TABLE_NAME_CLASSES
+    _AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES = AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES
 
 
-class AirtableClassRequest(Model):
-    status = F.SelectField("Status")
-    status_notes = F.TextField("Status Notes")
-    class_name = F.TextField("Class Name")
-    class_term = F.TextField("Class Term")
-    class_institution = F.TextField("Class Institution")
-    teacher_email = F.EmailField("Teacher Email")
-    billing_provider = F.SelectField("Billing Provider")
-    billing_api_key = F.TextField("Billing API Selection")
-    assistant_name = F.TextField("Assistant Name")
-    assistant_model = F.TextField("Assistant Model")
-    assistant_description = F.TextField("Assistant Description")
-    assistant_instructions = F.TextField("Assistant Instructions")
+class AssistantTemplate(Model):
+    version = F.NumberField("Version")
+    name = F.TextField("Assistant Name")
+    description = F.TextField("Assistant Description")
+    model_azure = F.SelectField("Assistant Model (Azure)")
+    model_oai = F.SelectField("Assistant Model (OAI)")
+    prompt_template = F.LookupField[str]("Main Prompt (from Current Prompt)")
+    course_name_code = F.LookupField[str]("Course Name Code (from Current Prompt)")
+    prog_lang_sub_code = F.LookupField[str](
+        "Prog. Lang. Substitute (from Current Prompt)"
+    )
+    prog_lang_code_single = F.LookupField[str](
+        "Prog. Lang. Code — Single (from Current Prompt)"
+    )
+    prog_lang_code_multi_and = F.LookupField[str](
+        "Prog. Lang. Code — Multi AND (from Current Prompt)"
+    )
+    prog_lang_code_multi_or = F.LookupField[str](
+        "Prog. Lang. Code — Multi OR (from Current Prompt)"
+    )
+    prog_lang_python = F.LookupField[str](
+        "Prog. Lang. Python — Extra (from Current Prompt)"
+    )
+    prog_lang_single_no_python = F.LookupField[str](
+        "Prog. Lang. Single — No Python (from Current Prompt)"
+    )
+    prog_lang_single_with_python = F.LookupField[str](
+        "Prog. Lang. Single — With Python (from Current Prompt)"
+    )
+    prog_lang_multi_no_python = F.LookupField[str](
+        "Prog. Lang. Multi — No Python (from Current Prompt)"
+    )
+    prog_lang_multi_with_python = F.LookupField[str](
+        "Prog. Lang. Multi — With Python (from Current Prompt)"
+    )
     hide_prompt = F.CheckboxField("Hide Prompt")
     use_latex = F.CheckboxField("Use LaTeX")
     file_search = F.CheckboxField("Enable File Search")
@@ -34,6 +67,56 @@ class AirtableClassRequest(Model):
     publish = F.CheckboxField("Publish")
 
     class Meta:
-        table_name: str = _AIRTABLE_TABLE_NAME
+        table_name: str = _AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES
         base_id: str = _AIRTABLE_BASE_ID
         api_key: str = _AIRTABLE_API_KEY
+
+
+class PingPongAssistant(Model):
+    pingpong_id = F.NumberField("ID")
+    template = F.SingleLinkField("Assistant Template", AssistantTemplate)
+
+    class Meta:
+        table_name: str = _AIRTABLE_TABLE_NAME_ASSISTANTS
+        base_id: str = _AIRTABLE_BASE_ID
+        api_key: str = _AIRTABLE_API_KEY
+
+
+class PingPongClass(Model):
+    status = F.SelectField("Status")
+    status_notes = F.TextField("Status Notes")
+    pingpong_id = F.NumberField("PingPong ID")
+    class_name = F.LookupField[str]("Class Name")
+    class_term = F.TextField("Class Term")
+    class_institution = F.TextField("Class Institution")
+    class_programming_languages = F.MultipleSelectField(
+        "Programming Languages (from Qualtrics Class)"
+    )
+    teacher_email = F.LookupField[F.EmailField]("Teacher Email")
+    billing_provider = F.SelectField("Billing Provider")
+    billing_api_key = F.TextField("Billing API Selection")
+    assistant_templates = F.LinkField("Assistant Templates", AssistantTemplate)
+    pingpong_assistants = F.LinkField("PingPong Assistants", PingPongAssistant)
+
+    class Meta:
+        table_name: str = _AIRTABLE_TABLE_NAME_CLASSES
+        base_id: str = _AIRTABLE_BASE_ID
+        api_key: str = _AIRTABLE_API_KEY
+
+
+class Tool(BaseModel):
+    type: str
+
+
+class CreateAssistant(BaseModel):
+    name: str
+    code_interpreter_file_ids: list[str] = []
+    file_search_file_ids: list[str] = []
+    instructions: str
+    description: str
+    model: str
+    temperature: float
+    tools: list[Tool]
+    published: bool
+    use_latex: bool
+    hide_prompt: bool
