@@ -76,7 +76,8 @@ async def add_moderator(
                 email=request.teacher_email[0],
                 roles=schemas.ClassUserRoles(admin=False, teacher=True, student=False),
             )
-        ]
+        ],
+        silent=True,
     )
     user_results = await server_requests.add_user_to_class(
         session, class_.id, user_roles, _PINGPONG_URL

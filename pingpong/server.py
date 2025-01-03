@@ -614,7 +614,6 @@ async def auth(request: Request):
 )
 async def list_default_api_keys(request: Request):
     default_api_keys = await models.APIKey.get_all_default_keys(request.state.db)
-    print(default_api_keys)
     return schemas.DefaultAPIKeys(
         default_keys=[
             schemas.DefaultAPIKey(
@@ -2905,18 +2904,12 @@ async def create_assistant(
 
     if req.code_interpreter_file_ids:
         tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
-    print(req.tools)
-    print(tool_resources)
-    print(req.instructions)
     try:
         _model = (
             get_azure_model_deployment_name_equivalent(req.model)
             if isinstance(openai_client, openai.AsyncAzureOpenAI)
             else req.model
         )
-        print(_model)
-        print({"class_id": class_id, "creator_id": str(creator_id)})
-        print(req.temperature)
         new_asst = await openai_client.beta.assistants.create(
             instructions=format_instructions(req.instructions, use_latex=req.use_latex),
             model=_model,
@@ -2926,7 +2919,6 @@ async def create_assistant(
             tool_resources=tool_resources,
         )
     except openai.BadRequestError as e:
-        print(e)
         raise HTTPException(
             400, e.body.get("message") or e.message or "OpenAI rejected this request"
         )
