@@ -7,6 +7,7 @@ from pingpong.scripts.vars import (
     AIRTABLE_TABLE_NAME_CLASSES,
     AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES,
     AIRTABLE_TABLE_NAME_ASSISTANTS,
+    AIRTABLE_TABLE_NAME_USER_RECORDS
 )
 
 if (
@@ -15,6 +16,7 @@ if (
     or not AIRTABLE_TABLE_NAME_ASSISTANTS
     or not AIRTABLE_TABLE_NAME_CLASSES
     or not AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES
+    or not AIRTABLE_TABLE_NAME_USER_RECORDS
 ):
     raise ValueError("Missing Airtable credentials in environment.")
 else:
@@ -23,6 +25,7 @@ else:
     _AIRTABLE_TABLE_NAME_ASSISTANTS = AIRTABLE_TABLE_NAME_ASSISTANTS
     _AIRTABLE_TABLE_NAME_CLASSES = AIRTABLE_TABLE_NAME_CLASSES
     _AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES = AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES
+    _AIRTABLE_TABLE_NAME_USER_RECORDS = AIRTABLE_TABLE_NAME_USER_RECORDS
 
 
 class AssistantTemplate(Model):
@@ -104,6 +107,15 @@ class PingPongClass(Model):
         base_id: str = _AIRTABLE_BASE_ID
         api_key: str = _AIRTABLE_API_KEY
 
+class UserRecord(Model):
+    user_email = F.LookupField[str]("User Email")    
+    class_id = F.LookupField[int]("PingPong ID (from Class)")
+
+    class Meta:
+        table_name: str = _AIRTABLE_TABLE_NAME_USER_RECORDS
+        base_id: str = _AIRTABLE_BASE_ID
+        api_key: str = _AIRTABLE_API_KEY
+
 
 class Tool(BaseModel):
     type: str
@@ -121,3 +133,4 @@ class CreateAssistant(BaseModel):
     published: bool
     use_latex: bool
     hide_prompt: bool
+
