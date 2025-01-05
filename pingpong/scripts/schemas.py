@@ -7,7 +7,7 @@ from pingpong.scripts.vars import (
     AIRTABLE_TABLE_NAME_CLASSES,
     AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES,
     AIRTABLE_TABLE_NAME_ASSISTANTS,
-    AIRTABLE_TABLE_NAME_USER_RECORDS
+    AIRTABLE_TABLE_NAME_USERCLASSROLES
 )
 
 if (
@@ -16,7 +16,7 @@ if (
     or not AIRTABLE_TABLE_NAME_ASSISTANTS
     or not AIRTABLE_TABLE_NAME_CLASSES
     or not AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES
-    or not AIRTABLE_TABLE_NAME_USER_RECORDS
+    or not AIRTABLE_TABLE_NAME_USERCLASSROLES
 ):
     raise ValueError("Missing Airtable credentials in environment.")
 else:
@@ -25,7 +25,7 @@ else:
     _AIRTABLE_TABLE_NAME_ASSISTANTS = AIRTABLE_TABLE_NAME_ASSISTANTS
     _AIRTABLE_TABLE_NAME_CLASSES = AIRTABLE_TABLE_NAME_CLASSES
     _AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES = AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES
-    _AIRTABLE_TABLE_NAME_USER_RECORDS = AIRTABLE_TABLE_NAME_USER_RECORDS
+    _AIRTABLE_TABLE_NAME_USERCLASSROLES = AIRTABLE_TABLE_NAME_USERCLASSROLES
 
 
 class AssistantTemplate(Model):
@@ -86,6 +86,17 @@ class PingPongAssistant(Model):
         api_key: str = _AIRTABLE_API_KEY
 
 
+class UserClassRole(Model):
+    email = F.LookupField[str]("Email (from User)")
+    class_id = F.LookupField[str]("PingPong ID (from Class)")
+    status = F.SelectField("Status")
+    status_notes = F.TextField("Status Notes")
+
+    class Meta:
+        table_name: str = _AIRTABLE_TABLE_NAME_USERCLASSROLES
+        base_id: str = _AIRTABLE_BASE_ID
+        api_key: str = _AIRTABLE_API_KEY
+
 class PingPongClass(Model):
     status = F.SelectField("Status")
     status_notes = F.TextField("Status Notes")
@@ -106,16 +117,6 @@ class PingPongClass(Model):
         table_name: str = _AIRTABLE_TABLE_NAME_CLASSES
         base_id: str = _AIRTABLE_BASE_ID
         api_key: str = _AIRTABLE_API_KEY
-
-class UserRecord(Model):
-    user_email = F.LookupField[str]("User Email")    
-    class_id = F.LookupField[int]("PingPong ID (from Class)")
-
-    class Meta:
-        table_name: str = _AIRTABLE_TABLE_NAME_USER_RECORDS
-        base_id: str = _AIRTABLE_BASE_ID
-        api_key: str = _AIRTABLE_API_KEY
-
 
 class Tool(BaseModel):
     type: str
