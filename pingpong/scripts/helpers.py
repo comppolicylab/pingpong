@@ -100,6 +100,40 @@ async def add_moderator(
         f'Added teacher "{teacher.email}" to class "{class_.name}" ({class_.id}).'
     )
 
+async def add_student(
+    session,
+    request: scripts_schemas.UserClassRole,
+    class_id: str,
+) -> None:
+    user_roles = schemas.CreateUserClassRoles(
+        roles=[
+            schemas.CreateUserClassRole(
+                email=request.email[0],
+                roles=schemas.ClassUserRoles(admin=False, teacher=False, student=True),
+            )
+        ],
+        silent=False,
+    )
+    user_results = await server_requests.add_user_to_class(
+        session, int(class_id), user_roles, _PINGPONG_URL
+    )
+    if len(user_results.results) > 1:
+        raise Exception(
+            "More than one user was added to the class. This is unexpected."
+        )
+    elif len(user_results.results) == 0:
+        raise Exception("No user was added to the class. This is unexpected.")
+    else:
+        student = user_results.results[0]
+
+    if student.error:
+        raise Exception(
+            f'Error adding student "{student.email}" to class {class_id}: {student.error}'
+        )
+
+    logger.debug(
+        f'Added student "{student.email}" to class {class_id}.'
+    )
 
 def compute_assistant_prompt(
     request: scripts_schemas.PingPongClass,
@@ -309,4 +343,23 @@ async def _process_airtable_class_requests() -> None:
                 request.status = "Error"
                 request.status_notes = str(e)
                 request.save()
+                continue
+
+
+async def process_students_to_add() -> None:
+    students_to_add = scripts_schemas.UserClassRole.all(
+        formula=match({"Status": "Add to Class"})
+    )
+
+    async with aiohttp.ClientSession(cookies={"session": _PINGPONG_COOKIE}) as session:
+        for student in students_to_add:
+            try:
+                await add_student(session, student, student.class_id[0])
+                student.status = "Added"
+                student.save()
+            except Exception as e:
+                logger.warning(f"Error processing student: {e}")
+                student.status = "Error"
+                student.status_notes = str(e)
+                student.save()
                 continue
