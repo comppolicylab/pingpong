@@ -36,7 +36,7 @@ def process_students_to_add() -> None:
 
 
 @cli.command("sync-all-cron")
-@click.option("--crontime", default="0 * * * *")
+@click.option("--crontime", default="*/15 * * * *")
 @click.option("--host", default="localhost")
 @click.option("--port", default=8001)
 def sync_all_cron(crontime: str, host: str, port: int) -> None:
