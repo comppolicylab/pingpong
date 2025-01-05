@@ -346,7 +346,7 @@ async def _process_airtable_class_requests() -> None:
                 continue
 
 
-async def process_students_to_add() -> None:
+async def _process_students_to_add() -> None:
     students_to_add = scripts_schemas.UserClassRole.all(
         formula=match({"Status": "Add to Class"})
     )
