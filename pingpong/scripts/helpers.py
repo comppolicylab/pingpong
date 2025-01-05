@@ -100,6 +100,7 @@ async def add_moderator(
         f'Added teacher "{teacher.email}" to class "{class_.name}" ({class_.id}).'
     )
 
+
 async def add_student(
     session,
     request: scripts_schemas.UserClassRole,
@@ -131,9 +132,8 @@ async def add_student(
             f'Error adding student "{student.email}" to class {class_id}: {student.error}'
         )
 
-    logger.debug(
-        f'Added student "{student.email}" to class {class_id}.'
-    )
+    logger.debug(f'Added student "{student.email}" to class {class_id}.')
+
 
 def compute_assistant_prompt(
     request: scripts_schemas.PingPongClass,

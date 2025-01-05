@@ -7,7 +7,7 @@ from pingpong.scripts.vars import (
     AIRTABLE_TABLE_NAME_CLASSES,
     AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES,
     AIRTABLE_TABLE_NAME_ASSISTANTS,
-    AIRTABLE_TABLE_NAME_USERCLASSROLES
+    AIRTABLE_TABLE_NAME_USERCLASSROLES,
 )
 
 if (
@@ -97,6 +97,7 @@ class UserClassRole(Model):
         base_id: str = _AIRTABLE_BASE_ID
         api_key: str = _AIRTABLE_API_KEY
 
+
 class PingPongClass(Model):
     status = F.SelectField("Status")
     status_notes = F.TextField("Status Notes")
@@ -118,6 +119,7 @@ class PingPongClass(Model):
         base_id: str = _AIRTABLE_BASE_ID
         api_key: str = _AIRTABLE_API_KEY
 
+
 class Tool(BaseModel):
     type: str
 
@@ -134,4 +136,3 @@ class CreateAssistant(BaseModel):
     published: bool
     use_latex: bool
     hide_prompt: bool
-
