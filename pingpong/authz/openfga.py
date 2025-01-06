@@ -271,6 +271,7 @@ class OpenFgaAuthzDriver(AuthzDriver):
         store: str,
         model_config: str,
         key: str | None = None,
+        verify_ssl: bool = True,
     ):
         cred: Credentials | None = None
         if key:
@@ -286,6 +287,10 @@ class OpenFgaAuthzDriver(AuthzDriver):
             api_host=host,
             credentials=cred,
         )
+        # NOTE(jnu): there is an undocumented parameter that allows self-signed certs. See:
+        # https://github.com/openfga/python-sdk/blob/13b1b0b6eb7e16b95abc6661c326796faba08f5c/openfga_sdk/rest.py#L67
+        self.config.verify_ssl = verify_ssl
+
         self.store = store
         self.model_config = model_config
 

@@ -28,6 +28,7 @@ class OpenFgaAuthzSettings(BaseSettings):
     store: str = Field("pingpong")
     cfg: str = Field("authz.json")
     key: str | None = Field(None)
+    verify_ssl: bool = Field(True)
 
     @cached_property
     def driver(self):
@@ -37,6 +38,7 @@ class OpenFgaAuthzSettings(BaseSettings):
             store=self.store,
             key=self.key,
             model_config=self.cfg,
+            verify_ssl=self.verify_ssl,
         )
 
 
