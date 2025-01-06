@@ -1,10 +1,9 @@
 import asyncio
-from datetime import datetime
+import click
 import logging
 
-import click
-import croniter
-
+from croniter import croniter
+from datetime import datetime
 from pingpong.bg import get_server
 from pingpong.scripts.helpers import (
     _process_airtable_class_requests,

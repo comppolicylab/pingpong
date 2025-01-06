@@ -1,0 +1,28 @@
+# Set up image based on Poetry / Python3.11
+
+FROM python:3.11.6-bookworm
+
+RUN apt-get update && apt-get install ca-certificates -y && update-ca-certificates
+
+ENV PYTHONFAULTHANDLER=1 \
+      PYTHONUNBUFFERED=1 \
+      PYTHONHASHSEED=random \
+      PIP_NO_CACHE_DIR=off \
+      PIP_DISABLE_PIP_VERSION_CHECK=on \
+      PIP_DEFAULT_TIMEOUT=100 \
+      POETRY_VIRTUALENVS_CREATE=false
+
+# Set up poetry
+RUN pip install poetry==1.5.1
+
+WORKDIR /code
+
+# Copy dependency manifests
+COPY poetry.lock pyproject.toml /code/
+
+# Install dependencies
+RUN poetry install --only main,local-scripts --no-interaction --no-ansi
+
+COPY . /code
+
+CMD ["poetry", "run", "python", "-m", "pingpong.scripts", "sync-all-cron", "--host", "0.0.0.0", "--port", "8001"]
