@@ -101,7 +101,7 @@ class UserClassRole(Model):
 class PingPongClass(Model):
     status = F.SelectField("Status")
     status_notes = F.TextField("Status Notes")
-    pingpong_id = F.NumberField("PingPong ID")
+    pingpong_id = F.TextField("PingPong ID")
     class_name = F.LookupField[str]("Class Name")
     class_term = F.TextField("Class Term")
     class_institution = F.TextField("Class Institution")

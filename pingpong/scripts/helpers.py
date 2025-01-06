@@ -335,7 +335,7 @@ async def _process_airtable_class_requests() -> None:
                             session, assistant_template, request, class_
                         )
                         request.pingpong_assistants.append(pingpong_assistant)
-                request.pingpong_id = class_.id
+                request.pingpong_id = str(class_.id)
                 request.status = "Added"
                 request.save()
             except Exception as e:
