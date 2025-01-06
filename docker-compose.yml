@@ -4,7 +4,10 @@ services:
 
   authz:
     platform: linux/amd64
-    image: openfga/openfga:v1.6.0
+    image: pingpong-authz:latest
+    build:
+      context: ./openfga
+      dockerfile: Dockerfile
     container_name: pingpong-authz
     command: [run]
     expose: [8080, 8081, 3003]
