@@ -78,7 +78,7 @@ key = "not actually a secret!"
 # Authorization service configuration (roles and permissions).
 
 type = "openfga"
-scheme = "http"
+scheme = "https"
 host = "localhost"
 store = "pingpong"
 cfg = "./pingpong/authz/authz.fga.json"
