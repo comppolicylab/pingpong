@@ -2904,6 +2904,7 @@ async def create_assistant(
 
     if req.code_interpreter_file_ids:
         tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
+
     try:
         _model = (
             get_azure_model_deployment_name_equivalent(req.model)
