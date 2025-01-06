@@ -39,6 +39,9 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml build srv
 docker compose -f docker-compose.yml -f docker-compose.dev.yml run srv poetry run python -m pingpong db init
 docker compose -f docker-compose.yml -f docker-compose.dev.yml run srv poetry run python -m pingpong db migrate
 
+# Build the scripts image
+docker compose -f docker-compose.yml -f docker-compose.dev.yml build scripts
+
 # Run the app
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up authz srv -d
 
