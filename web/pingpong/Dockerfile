@@ -28,10 +28,22 @@ RUN pnpm build -d
 # Production image is just nginx with assets copied in
 FROM nginx:1.27.0
 
+RUN apt-get update && apt-get install ca-certificates -y && update-ca-certificates
+
 ARG host=0.0.0.0
 ARG port=3000
+ARG ssl_port=3001
+
+RUN openssl req -trustout -x509 -newkey rsa:4096 -sha256 -nodes \
+    -keyout /etc/ssl/private/pingpong-self-signed.key \
+    -out /etc/ssl/certs/pingpong-self-signed.crt \
+    -days 3650 \
+    -subj "/C=US/ST=MA/L=Cambridge/O=Harvard Kennedy School/OU=CPL/CN=pingpong-web.private"
 
 ENV NGINX_LISTEN=$host:$port
+ENV NGINX_LISTEN_SSL=$host:$ssl_port
+ENV NGINX_SSL_CERT=/etc/ssl/certs/pingpong-self-signed.crt
+ENV NGINX_SSL_CERT_KEY=/etc/ssl/private/pingpong-self-signed.key
 
 COPY default.conf.template /etc/nginx/templates/
 COPY --from=buildweb /app/build /usr/share/nginx/html
