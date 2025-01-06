@@ -61,8 +61,8 @@ def sync_all_cron(crontime: str, host: str, port: int) -> None:
 
             # Run the sync task
             try:
-                await _process_airtable_class_requests()()
-                await _process_students_to_add()()
+                await _process_airtable_class_requests()
+                await _process_students_to_add()
                 logger.info(f"Sync completed successfully at {datetime.now()}")
             except Exception as e:
                 logger.error(f"Error during sync: {e}")
