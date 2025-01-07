@@ -203,9 +203,6 @@ user_thread_association = Table(
 
 class ExternalLogin(Base):
     __tablename__ = "external_logins"
-    __table_args__ = (
-        UniqueConstraint("user_id", "provider", name="_user_provider_uc"),
-    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -213,19 +210,45 @@ class ExternalLogin(Base):
     provider = Column(String, nullable=False)
     identifier = Column(String, nullable=False)
 
+    # Add an index to help with lookups
+    __table_args__ = (
+        Index('idx_user_provider', 'user_id', 'provider'),
+    )
+
     @classmethod
     async def create_or_update(
         cls, session: AsyncSession, user_id: int, provider: str, identifier: str
     ) -> None:
-        stmt = (
-            _get_upsert_stmt(session)(ExternalLogin)
-            .values(user_id=user_id, provider=provider, identifier=identifier)
-            .on_conflict_do_update(
-                index_elements=["user_id", "provider"],
-                set_=dict(identifier=identifier),
+        if provider == "email":
+            # For email provider, always create a new record
+            new_login = ExternalLogin(
+                user_id=user_id,
+                provider=provider,
+                identifier=identifier
             )
-        )
-        await session.execute(stmt)
+            session.add(new_login)
+        else:
+            # For other providers, first check if a record exists
+            stmt = select(ExternalLogin).where(
+                and_(
+                    ExternalLogin.user_id == user_id,
+                    ExternalLogin.provider == provider
+                )
+            )
+            existing = await session.scalar(stmt)
+            
+            if existing:
+                # Update existing record
+                existing.identifier = identifier
+                session.add(existing)
+            else:
+                # Create new record
+                new_login = ExternalLogin(
+                    user_id=user_id,
+                    provider=provider,
+                    identifier=identifier
+                )
+                session.add(new_login)
 
     @classmethod
     async def accounts_to_merge(
