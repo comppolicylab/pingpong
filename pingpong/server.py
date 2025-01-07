@@ -415,13 +415,18 @@ async def login_sso(provider: str, request: Request):
     response_model=schemas.GenericStatus,
 )
 async def add_email_to_user(data: schemas.AddEmailToUserRequest, request: Request):
-    user = await models.User.get_by_email_sso(
-        request.state.db, data.email, "email", data.email
+    old_user = await models.User.get_by_email_sso(
+        request.state.db, data.current_email, "email", data.current_email
     )
-    if not user:
+    new_user = await models.User.get_by_email_sso(
+        request.state.db, data.new_email, "email", data.new_email
+    )
+    if not old_user:
         raise HTTPException(status_code=404, detail="User not found")
+    if new_user:
+        raise HTTPException(status_code=409, detail="New email already in use")
     await models.ExternalLogin.create_or_update(
-        request.state.db, user.id, provider="email", identifier=data.email
+        request.state.db, old_user.id, provider="email", identifier=data.new_email
     )
     return {"status": "ok"}
 
