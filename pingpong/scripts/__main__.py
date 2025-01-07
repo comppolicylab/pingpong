@@ -34,17 +34,17 @@ def process_students_to_add() -> None:
     asyncio.run(_process_students_to_add())
 
 
-@cli.command("sync_all_cron")
+@cli.command("sync_pingpong_with_airtable")
 @click.option("--crontime", default="*/15 * * * *")
 @click.option("--host", default="localhost")
 @click.option("--port", default=8001)
-def sync_all_cron(crontime: str, host: str, port: int) -> None:
+def sync_pingpong_with_airtable(crontime: str, host: str, port: int) -> None:
     """
     Run the sync-all command in a background server.
     """
     server = get_server(host=host, port=port)
 
-    async def _sync_all_cron():
+    async def _sync_pingpong_with_airtable():
         async for _ in croner(crontime, logger=logger):
             try:
                 await _process_airtable_class_requests()
@@ -55,7 +55,7 @@ def sync_all_cron(crontime: str, host: str, port: int) -> None:
 
     # Run the Uvicorn server in the background
     with server.run_in_thread():
-        asyncio.run(_sync_all_cron())
+        asyncio.run(_sync_pingpong_with_airtable())
 
 
 if __name__ == "__main__":

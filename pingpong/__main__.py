@@ -7,7 +7,6 @@ import alembic
 import alembic.command
 import alembic.config
 
-from croniter import croniter
 from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -30,6 +29,7 @@ from pingpong.merge import (
     merge,
 )
 from pingpong.models import Class
+from pingpong.now import croner
 
 from .auth import encode_auth_token
 from .bg import get_server
@@ -420,21 +420,7 @@ def sync_all_cron(crontime: str, host: str, port: int) -> None:
     server = get_server(host=host, port=port)
 
     async def _sync_all_cron():
-        cron_iter = croniter(crontime, datetime.now())
-        while True:
-            # Calculate the next run time
-            # Note that this ensures that the next run time is always in the future
-            # so there are no overlaps in the sync tasks
-            next_run_time = cron_iter.get_next(datetime)
-            wait_time = (next_run_time - datetime.now()).total_seconds()
-            logger.info(
-                f"Next sync scheduled at: {next_run_time} (in {wait_time} seconds)"
-            )
-
-            # Wait asynchronously until the next run time
-            await asyncio.sleep(wait_time)
-
-            # Run the sync task
+        async for _ in croner(crontime, logger=logger):
             try:
                 await _lms_sync_all()
                 logger.info(f"Sync completed successfully at {datetime.now()}")
