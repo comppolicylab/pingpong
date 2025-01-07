@@ -219,15 +219,7 @@ class ExternalLogin(Base):
     async def create_or_update(
         cls, session: AsyncSession, user_id: int, provider: str, identifier: str
     ) -> None:
-        if provider == "email":
-            # For email provider, always create a new record
-            new_login = ExternalLogin(
-                user_id=user_id,
-                provider=provider,
-                identifier=identifier
-            )
-            session.add(new_login)
-        else:
+        if provider not in ["email"]:
             # For other providers, first check if a record exists
             stmt = select(ExternalLogin).where(
                 and_(
@@ -238,17 +230,24 @@ class ExternalLogin(Base):
             existing = await session.scalar(stmt)
             
             if existing:
-                # Update existing record
                 existing.identifier = identifier
                 session.add(existing)
             else:
-                # Create new record
                 new_login = ExternalLogin(
                     user_id=user_id,
                     provider=provider,
                     identifier=identifier
                 )
                 session.add(new_login)
+        else:
+            # For email provider, always create a new record
+            new_login = ExternalLogin(
+                user_id=user_id,
+                provider=provider,
+                identifier=identifier
+            )
+            session.add(new_login)
+
 
     @classmethod
     async def accounts_to_merge(
