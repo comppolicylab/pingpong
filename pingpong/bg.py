@@ -18,6 +18,12 @@ def root() -> None:
     return None
 
 
+@app.get("/health")
+async def health():
+    """Health check."""
+    return {"status": "ok"}
+
+
 class BackgroundServer(uvicorn.Server):
     """A uvicorn server that can be run in a background thread."""
 
