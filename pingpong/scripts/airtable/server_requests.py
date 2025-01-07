@@ -1,5 +1,5 @@
 import pingpong.schemas as schemas
-import pingpong.scripts.schemas as scripts_schemas
+import pingpong.scripts.airtable.schemas as scripts_schemas
 
 
 async def list_institutions(session, url: str) -> schemas.Institutions:

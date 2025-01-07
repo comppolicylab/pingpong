@@ -13,7 +13,7 @@ ENV PYTHONFAULTHANDLER=1 \
       POETRY_VIRTUALENVS_CREATE=false
 
 # Set up poetry
-RUN pip install poetry==1.5.1
+RUN pip install poetry==1.8.5
 
 WORKDIR /code
 

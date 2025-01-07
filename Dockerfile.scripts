@@ -13,7 +13,7 @@ ENV PYTHONFAULTHANDLER=1 \
       POETRY_VIRTUALENVS_CREATE=false
 
 # Set up poetry
-RUN pip install poetry==1.5.1
+RUN pip install poetry==1.8.5
 
 WORKDIR /code
 
@@ -25,4 +25,5 @@ RUN poetry install --only main,local-scripts --no-interaction --no-ansi
 
 COPY . /code
 
-CMD ["poetry", "run", "python", "-m", "pingpong.scripts", "sync-all-cron", "--host", "0.0.0.0", "--port", "8001"]
+ENTRYPOINT [ "python", "-m", "pingpong.scripts" ]
+CMD [ "--help" ]

@@ -2,10 +2,10 @@ import logging
 
 import aiohttp
 import pingpong.schemas as schemas
-import pingpong.scripts.schemas as scripts_schemas
-import pingpong.scripts.server_requests as server_requests
+import pingpong.scripts.airtable.schemas as scripts_schemas
+import pingpong.scripts.airtable.server_requests as server_requests
 
-from pingpong.scripts.vars import (
+from pingpong.scripts.airtable.vars import (
     BILLING_PROVIDERS,
     PINGPONG_COOKIE,
     PINGPONG_URL,

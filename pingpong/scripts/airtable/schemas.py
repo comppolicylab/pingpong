@@ -1,31 +1,16 @@
 from pyairtable.orm import Model, fields as F
 from pydantic import BaseModel
 
-from pingpong.scripts.vars import (
+from pingpong.scripts.airtable.vars import (
     AIRTABLE_API_KEY,
     AIRTABLE_BASE_ID,
-    AIRTABLE_TABLE_NAME_CLASSES,
-    AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES,
-    AIRTABLE_TABLE_NAME_ASSISTANTS,
-    AIRTABLE_TABLE_NAME_USERCLASSROLES,
 )
 
-if (
-    not AIRTABLE_BASE_ID
-    or not AIRTABLE_API_KEY
-    or not AIRTABLE_TABLE_NAME_ASSISTANTS
-    or not AIRTABLE_TABLE_NAME_CLASSES
-    or not AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES
-    or not AIRTABLE_TABLE_NAME_USERCLASSROLES
-):
+if not AIRTABLE_BASE_ID or not AIRTABLE_API_KEY:
     raise ValueError("Missing Airtable credentials in environment.")
 else:
     _AIRTABLE_BASE_ID = AIRTABLE_BASE_ID
     _AIRTABLE_API_KEY = AIRTABLE_API_KEY
-    _AIRTABLE_TABLE_NAME_ASSISTANTS = AIRTABLE_TABLE_NAME_ASSISTANTS
-    _AIRTABLE_TABLE_NAME_CLASSES = AIRTABLE_TABLE_NAME_CLASSES
-    _AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES = AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES
-    _AIRTABLE_TABLE_NAME_USERCLASSROLES = AIRTABLE_TABLE_NAME_USERCLASSROLES
 
 
 class AssistantTemplate(Model):
@@ -71,7 +56,7 @@ class AssistantTemplate(Model):
     publish = F.CheckboxField("Publish")
 
     class Meta:
-        table_name: str = _AIRTABLE_TABLE_NAME_ASSISTANT_TEMPLATES
+        table_name: str = "Assistant Templates"
         base_id: str = _AIRTABLE_BASE_ID
         api_key: str = _AIRTABLE_API_KEY
 
@@ -81,7 +66,7 @@ class PingPongAssistant(Model):
     template = F.SingleLinkField("Assistant Template", AssistantTemplate)
 
     class Meta:
-        table_name: str = _AIRTABLE_TABLE_NAME_ASSISTANTS
+        table_name: str = "PingPong Assistants"
         base_id: str = _AIRTABLE_BASE_ID
         api_key: str = _AIRTABLE_API_KEY
 
@@ -93,7 +78,7 @@ class UserClassRole(Model):
     status_notes = F.TextField("Status Notes")
 
     class Meta:
-        table_name: str = _AIRTABLE_TABLE_NAME_USERCLASSROLES
+        table_name: str = "PingPong UserRecords"
         base_id: str = _AIRTABLE_BASE_ID
         api_key: str = _AIRTABLE_API_KEY
 
@@ -115,7 +100,7 @@ class PingPongClass(Model):
     pingpong_assistants = F.LinkField("PingPong Assistants", PingPongAssistant)
 
     class Meta:
-        table_name: str = _AIRTABLE_TABLE_NAME_CLASSES
+        table_name: str = "PingPong Classes"
         base_id: str = _AIRTABLE_BASE_ID
         api_key: str = _AIRTABLE_API_KEY
 

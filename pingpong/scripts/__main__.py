@@ -2,10 +2,10 @@ import asyncio
 import click
 import logging
 
-from croniter import croniter
 from datetime import datetime
 from pingpong.bg import get_server
-from pingpong.scripts.helpers import (
+from pingpong.now import croner
+from pingpong.scripts.airtable.helpers import (
     _process_airtable_class_requests,
     _process_students_to_add,
 )
@@ -45,21 +45,7 @@ def sync_all_cron(crontime: str, host: str, port: int) -> None:
     server = get_server(host=host, port=port)
 
     async def _sync_all_cron():
-        cron_iter = croniter(crontime, datetime.now())
-        while True:
-            # Calculate the next run time
-            # Note that this ensures that the next run time is always in the future
-            # so there are no overlaps in the sync tasks
-            next_run_time = cron_iter.get_next(datetime)
-            wait_time = (next_run_time - datetime.now()).total_seconds()
-            logger.info(
-                f"Next sync scheduled at: {next_run_time} (in {wait_time} seconds)"
-            )
-
-            # Wait asynchronously until the next run time
-            await asyncio.sleep(wait_time)
-
-            # Run the sync task
+        async for _ in croner(crontime, logger=logger):
             try:
                 await _process_airtable_class_requests()
                 await _process_students_to_add()
