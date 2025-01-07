@@ -34,7 +34,7 @@ def process_students_to_add() -> None:
     asyncio.run(_process_students_to_add())
 
 
-@cli.command("sync-all-cron")
+@cli.command("sync_all_cron")
 @click.option("--crontime", default="*/15 * * * *")
 @click.option("--host", default="localhost")
 @click.option("--port", default=8001)
