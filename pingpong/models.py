@@ -211,9 +211,7 @@ class ExternalLogin(Base):
     identifier = Column(String, nullable=False)
 
     # Add an index to help with lookups
-    __table_args__ = (
-        Index('idx_user_provider', 'user_id', 'provider'),
-    )
+    __table_args__ = (Index("idx_user_provider", "user_id", "provider"),)
 
     @classmethod
     async def create_or_update(
@@ -223,31 +221,25 @@ class ExternalLogin(Base):
             # For other providers, first check if a record exists
             stmt = select(ExternalLogin).where(
                 and_(
-                    ExternalLogin.user_id == user_id,
-                    ExternalLogin.provider == provider
+                    ExternalLogin.user_id == user_id, ExternalLogin.provider == provider
                 )
             )
             existing = await session.scalar(stmt)
-            
+
             if existing:
                 existing.identifier = identifier
                 session.add(existing)
             else:
                 new_login = ExternalLogin(
-                    user_id=user_id,
-                    provider=provider,
-                    identifier=identifier
+                    user_id=user_id, provider=provider, identifier=identifier
                 )
                 session.add(new_login)
         else:
             # For email provider, always create a new record
             new_login = ExternalLogin(
-                user_id=user_id,
-                provider=provider,
-                identifier=identifier
+                user_id=user_id, provider=provider, identifier=identifier
             )
             session.add(new_login)
-
 
     @classmethod
     async def accounts_to_merge(

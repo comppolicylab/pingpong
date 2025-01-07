@@ -409,6 +409,23 @@ async def login_sso(provider: str, request: Request):
         )
 
 
+@v1.post(
+    "/user/add_email",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.GenericStatus,
+)
+async def add_email_to_user(data: schemas.AddEmailToUserRequest, request: Request):
+    user = await models.User.get_by_email_sso(
+        request.state.db, data.email, "email", data.email
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    await models.ExternalLogin.create_or_update(
+        request.state.db, user.id, provider="email", identifier=data.email
+    )
+    return {"status": "ok"}
+
+
 @v1.post("/login/magic", response_model=schemas.GenericStatus)
 async def login_magic(body: schemas.MagicLoginRequest, request: Request):
     """Provide a magic link to the auth endpoint."""
@@ -432,7 +449,7 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
     # Get the email from the request.
     email = body.email
     # Look up the user by email
-    user = await models.User.get_by_email(request.state.db, email)
+    user = await models.User.get_by_email_sso(request.state.db, email, "email", email)
     # Throw an error if the user does not exist.
     if not user:
         # In dev we can auto-create the user as a super-admin
