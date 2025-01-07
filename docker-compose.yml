@@ -76,7 +76,8 @@ services:
         target: /code/config.toml
         mode: 0400
     env_file:
-      - ./pingpong/scripts/airtable/.env.dev
+      - path: ./pingpong/scripts/airtable/.env.dev
+        required: false
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 5s
