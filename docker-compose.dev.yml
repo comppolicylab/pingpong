@@ -15,7 +15,7 @@ services:
 
   scripts:
     restart: no
-    command: [ "sync_all_cron", "--host", "0.0.0.0", "--port", "8001" ]
+    command: [ "sync_pingpong_with_airtable", "--host", "0.0.0.0", "--port", "8001" ]
     deploy:
       replicas: 1
 
