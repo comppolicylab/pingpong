@@ -67,6 +67,11 @@ class InspectAuthz(BaseModel):
     result: InspectAuthzResult
 
 
+class AddEmailToUserRequest(BaseModel):
+    current_email: str
+    new_email: str
+
+
 class MagicLoginRequest(BaseModel):
     email: str
     forward: str = "/"
