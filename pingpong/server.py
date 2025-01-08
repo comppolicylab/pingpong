@@ -417,14 +417,14 @@ async def login_sso(provider: str, request: Request):
 async def add_email_to_user(data: schemas.AddEmailToUserRequest, request: Request):
     _current_email = data.current_email.lower().strip()
     _new_email = data.new_email.lower().strip()
-    old_user = await models.User.get_by_email_sso(
+    user = await models.User.get_by_email_sso(
         request.state.db, _current_email, "email", _current_email
     )
-    if not old_user:
+    if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     await models.ExternalLogin.create_or_update(
-        request.state.db, old_user.id, provider="email", identifier=_new_email
+        request.state.db, user.id, provider="email", identifier=_new_email
     )
 
     return {"status": "ok"}
