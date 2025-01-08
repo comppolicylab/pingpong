@@ -39,8 +39,11 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml build srv
 docker compose -f docker-compose.yml -f docker-compose.dev.yml run srv poetry run python -m pingpong db init
 docker compose -f docker-compose.yml -f docker-compose.dev.yml run srv poetry run python -m pingpong db migrate
 
+# Build the scripts image
+docker compose -f docker-compose.yml -f docker-compose.dev.yml build scripts
+
 # Run the app
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up authz srv -d
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up authz srv scripts -d
 
 # Wait until the authz server is ready
 # The healthcheck command is `/usr/local/bin/grpc_health_probe -addr=authz:8081`

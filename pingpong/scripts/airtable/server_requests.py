@@ -1,4 +1,5 @@
 import pingpong.schemas as schemas
+import pingpong.scripts.airtable.schemas as scripts_schemas
 
 
 async def list_institutions(session, url: str) -> schemas.Institutions:
@@ -31,6 +32,17 @@ async def create_class(
         return schemas.Class(**response)
 
 
+async def lock_assistant(
+    session, class_id: int, assistant_id: int, url: str
+) -> schemas.GenericStatus:
+    async with session.post(
+        f"{url}/api/v1/class/{class_id}/assistant/{assistant_id}/lock",
+        raise_for_status=True,
+    ) as resp:
+        response = await resp.json()
+        return schemas.GenericStatus(**response)
+
+
 async def add_user_to_class(
     session, class_id: int, user_roles: schemas.CreateUserClassRoles, url: str
 ) -> schemas.CreateUserResults:
@@ -44,7 +56,7 @@ async def add_user_to_class(
 
 
 async def add_assistant_to_class(
-    session, class_id: int, assistant: schemas.CreateAssistant, url: str
+    session, class_id: int, assistant: scripts_schemas.CreateAssistant, url: str
 ) -> schemas.Assistant:
     async with session.post(
         f"{url}/api/v1/class/{class_id}/assistant",

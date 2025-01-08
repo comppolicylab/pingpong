@@ -614,7 +614,6 @@ async def auth(request: Request):
 )
 async def list_default_api_keys(request: Request):
     default_api_keys = await models.APIKey.get_all_default_keys(request.state.db)
-    print(default_api_keys)
     return schemas.DefaultAPIKeys(
         default_keys=[
             schemas.DefaultAPIKey(

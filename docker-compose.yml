@@ -51,7 +51,7 @@ services:
     image: pingpong-srv:latest
     build:
       context: ./
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.srv
     restart: always
     expose: [8000]
     ports: ["8000:8000"]
@@ -66,6 +66,27 @@ services:
       retries: 3
       start_period: 15s
 
+  scripts:
+    platform: linux/amd64
+    image: pingpong-scripts:latest
+    build:
+      context: ./
+      dockerfile: Dockerfile.scripts
+    restart: always
+    ports: ["8001:8001"]
+    secrets:
+      - source: app_config
+        target: /code/config.toml
+        mode: 0400
+    env_file:
+      - path: ./pingpong/scripts/airtable/.env.dev
+        required: false
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 # Use ephemeral volume in dev
 volumes:
