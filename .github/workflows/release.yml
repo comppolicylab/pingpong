@@ -114,13 +114,13 @@ jobs:
           docker push ${{ vars.PINGPONG_SRV_REGISTRY }}:${{ env.ENVIRONMENT }}
           echo "Built and pushed Server Image (${{ env.SRV_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
 
-      - name: Push server image for release
+      - name: Push scripts image for release
         env:
           ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
         if: ${{ env.SRV_IMAGE_STATUS == 'DOES_NOT_EXIST' }}
         run: |
           aws ecr get-login-password --region ${{ vars.AWS_REGION }} | docker login --username AWS --password-stdin ${{ vars.PINGPONG_REGISTRY_ENDPOINT }}
-          docker tag ${{ vars.PINGPONG_SCRIPTS_REGISTRY }}:${{ env.SRV_VERSION }} ${{ vars.PINGPONG_SRV_REGISTRY }}:${{ env.ENVIRONMENT }}
+          docker tag ${{ vars.PINGPONG_SCRIPTS_REGISTRY }}:${{ env.SRV_VERSION }} ${{ vars.PINGPONG_SCRIPTS_REGISTRY }}:${{ env.ENVIRONMENT }}
           docker push ${{ vars.PINGPONG_SCRIPTS_REGISTRY }}:${{ env.SRV_VERSION }}
           docker push ${{ vars.PINGPONG_SCRIPTS_REGISTRY }}:${{ env.ENVIRONMENT }}
           echo "Built and pushed Scripts Image (${{ env.SRV_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
