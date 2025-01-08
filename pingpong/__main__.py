@@ -409,17 +409,17 @@ def sync_all(sync_with_error: bool, sync_without_sso: bool) -> None:
     )
 
 
-@lms.command("sync-all-cron")
+@lms.command("sync_pingpong_with_lms")
 @click.option("--crontime", default="0 * * * *")
 @click.option("--host", default="localhost")
 @click.option("--port", default=8001)
-def sync_all_cron(crontime: str, host: str, port: int) -> None:
+def sync_pingpong_with_lms(crontime: str, host: str, port: int) -> None:
     """
     Run the sync-all command in a background server.
     """
     server = get_server(host=host, port=port)
 
-    async def _sync_all_cron():
+    async def _sync_pingpong_with_lms():
         async for _ in croner(crontime, logger=logger):
             try:
                 await _lms_sync_all()
@@ -429,7 +429,7 @@ def sync_all_cron(crontime: str, host: str, port: int) -> None:
 
     # Run the Uvicorn server in the background
     with server.run_in_thread():
-        asyncio.run(_sync_all_cron())
+        asyncio.run(_sync_pingpong_with_lms())
 
 
 @export.command("export_threads_with_emails")
