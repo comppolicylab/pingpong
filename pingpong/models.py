@@ -217,7 +217,7 @@ class ExternalLogin(Base):
     async def create_or_update(
         cls, session: AsyncSession, user_id: int, provider: str, identifier: str
     ) -> None:
-        if provider not in ["email"]:
+        if provider not in {"email"}:
             # For other providers, first check if a record exists
             stmt = select(ExternalLogin).where(
                 and_(
@@ -235,11 +235,27 @@ class ExternalLogin(Base):
                 )
                 session.add(new_login)
         else:
-            # For email provider, always create a new record
-            new_login = ExternalLogin(
-                user_id=user_id, provider=provider, identifier=identifier
+            # For email provider, always create a new record if it doesn't exist
+            # and it's not being used by another user. This allows multiple
+            # 'email' provider identifiers for the same user.
+            email_to_add = identifier.lower().strip()
+            conflicting_user = await User.get_by_email_sso(
+                session, identifier, "email", email_to_add
             )
-            session.add(new_login)
+            if conflicting_user and conflicting_user.id != user_id:
+                raise ValueError(
+                    f"Email '{email_to_add}' is already in use by another user."
+                )
+
+            # Do not add a duplicate record for the same user
+            stmt = (
+                _get_upsert_stmt(session)(ExternalLogin)
+                .values(user_id=user_id, provider=provider, identifier=email_to_add)
+                .on_conflict_do_nothing(
+                    index_elements=["user_id", "provider", "identifier"],
+                )
+            )
+            await session.execute(stmt)
 
     @classmethod
     async def accounts_to_merge(
