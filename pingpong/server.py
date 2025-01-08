@@ -21,7 +21,11 @@ from fastapi import (
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
 from pingpong.artifacts import ArtifactStoreError
-from pingpong.emails import revalidate_email_addresses, validate_email_addresses
+from pingpong.emails import (
+    parse_addresses,
+    revalidate_email_addresses,
+    validate_email_addresses,
+)
 from pingpong.stats import get_statistics
 from .animal_hash import process_threads, pseudonym, user_names
 from jwt.exceptions import PyJWTError
@@ -417,15 +421,58 @@ async def login_sso(provider: str, request: Request):
 async def add_email_to_user(data: schemas.AddEmailToUserRequest, request: Request):
     _current_email = data.current_email.lower().strip()
     _new_email = data.new_email.lower().strip()
+    email_verification = parse_addresses(f"{_current_email}, {_new_email}")
+
+    if not email_verification[0].valid:
+        raise HTTPException(status_code=400, detail="Invalid current email address.")
+    if not email_verification[1].valid:
+        raise HTTPException(status_code=400, detail="Invalid new email address.")
+
     user = await models.User.get_by_email_sso(
         request.state.db, _current_email, "email", _current_email
     )
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    await models.ExternalLogin.create_or_update(
-        request.state.db, user.id, provider="email", identifier=_new_email
-    )
+    try:
+        is_new_or_updated = await models.ExternalLogin.create_or_update(
+            request.state.db, user.id, provider="email", identifier=_new_email
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if is_new_or_updated:
+        nowfn = get_now_fn(request)
+        magic_link = generate_auth_link(
+            user.id,
+            expiry=86_400 * 7,
+            nowfn=nowfn,
+        )
+        message = message_template.substitute(
+            {
+                "title": "Your PingPong account was updated",
+                "subtitle": f"Per your request, we added <a href='mailto:{_new_email}'>{_new_email}</a> as a login email to your PingPong account. You can now use it along with your primary email address (<a href='mailto:{user.email}'>{user.email}</a>) to log in.</p><p>Click the button below to log in to PingPong. No password required. It&#8217;s secure and easy.",
+                "type": "login link",
+                "cta": "Login to PingPong",
+                "underline": "<strong>If you did not request this change, please contact us immediately at <a href='mailto:pingpong-help@hks.harvard.edu'>pingpong-help@hks.harvard.edu</a>.</strong>",
+                "expires": convert_seconds(86_400 * 7),
+                "link": magic_link,
+                "email": _new_email,
+                "legal_text": "because you requested an update to the login information of your PingPong account",
+            }
+        )
+
+        await config.email.sender.send(
+            _new_email,
+            "A login email was added to your PingPong account",
+            message,
+        )
+
+        await config.email.sender.send(
+            user.email,
+            "A login email was added to your PingPong account",
+            message,
+        )
 
     return {"status": "ok"}
 

@@ -211,12 +211,17 @@ class ExternalLogin(Base):
     identifier = Column(String, nullable=False)
 
     # Add an index to help with lookups
-    __table_args__ = (Index("idx_user_provider", "user_id", "provider"),)
+    __table_args__ = (
+        Index("idx_user_provider", "user_id", "provider"),
+        UniqueConstraint(
+            "user_id", "provider", "identifier", name="uq_user_provider_identifier"
+        ),
+    )
 
     @classmethod
     async def create_or_update(
         cls, session: AsyncSession, user_id: int, provider: str, identifier: str
-    ) -> None:
+    ) -> bool:
         if provider not in {"email"}:
             # For other providers, first check if a record exists
             stmt = select(ExternalLogin).where(
@@ -229,11 +234,13 @@ class ExternalLogin(Base):
             if existing:
                 existing.identifier = identifier
                 session.add(existing)
+                return True
             else:
                 new_login = ExternalLogin(
                     user_id=user_id, provider=provider, identifier=identifier
                 )
                 session.add(new_login)
+                return True
         else:
             # For email provider, always create a new record if it doesn't exist
             # and it's not being used by another user. This allows multiple
@@ -243,9 +250,7 @@ class ExternalLogin(Base):
                 session, identifier, "email", email_to_add
             )
             if conflicting_user and conflicting_user.id != user_id:
-                raise ValueError(
-                    f"Email '{email_to_add}' is already in use by another user."
-                )
+                raise ValueError(f"Email {email_to_add} is already in use.")
 
             # Do not add a duplicate record for the same user
             stmt = (
@@ -255,7 +260,8 @@ class ExternalLogin(Base):
                     index_elements=["user_id", "provider", "identifier"],
                 )
             )
-            await session.execute(stmt)
+            result = await session.execute(stmt)
+            return result.rowcount > 0
 
     @classmethod
     async def accounts_to_merge(
