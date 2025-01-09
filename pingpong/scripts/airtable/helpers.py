@@ -363,3 +363,28 @@ async def _process_students_to_add() -> None:
                 student.status_notes = str(e)
                 student.save()
                 continue
+
+
+async def _process_external_logins_to_add() -> None:
+    external_logins_to_add = scripts_schemas.ExternalLoginRequests.all(
+        formula=match({"Status": "Ready to Add"})
+    )
+
+    async with aiohttp.ClientSession(cookies={"session": _PINGPONG_COOKIE}) as session:
+        for request in external_logins_to_add:
+            try:
+                await server_requests.add_login_email(
+                    session,
+                    schemas.AddEmailToUserRequest(
+                        current_email=request.current_email, new_email=request.new_email
+                    ),
+                    _PINGPONG_URL,
+                )
+                request.status = "Added"
+                request.save()
+            except Exception as e:
+                logger.warning(f"Error processing external login: {e}")
+                request.status = "Error"
+                request.status_notes = str(e)
+                request.save()
+                continue

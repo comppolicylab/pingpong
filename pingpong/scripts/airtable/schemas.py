@@ -83,6 +83,18 @@ class UserClassRole(Model):
         api_key: str = _AIRTABLE_API_KEY
 
 
+class ExternalLoginRequests(Model):
+    current_email = F.EmailField("Primary Email")
+    new_email = F.EmailField("Login Email")
+    status = F.SelectField("Status")
+    status_notes = F.TextField("Status Notes")
+
+    class Meta:
+        table_name: str = "PingPong ExternalLogins"
+        base_id: str = _AIRTABLE_BASE_ID
+        api_key: str = _AIRTABLE_API_KEY
+
+
 class PingPongClass(Model):
     status = F.SelectField("Status")
     status_notes = F.TextField("Status Notes")

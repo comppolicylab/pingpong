@@ -8,6 +8,7 @@ from pingpong.now import croner
 from pingpong.scripts.airtable.helpers import (
     _process_airtable_class_requests,
     _process_students_to_add,
+    _process_external_logins_to_add,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,14 @@ def process_students_to_add() -> None:
     asyncio.run(_process_students_to_add())
 
 
+@cli.command("process_external_logins_to_add")
+def process_external_logins_to_add() -> None:
+    """
+    Process pending Airtable external login creation requests.
+    """
+    asyncio.run(_process_external_logins_to_add())
+
+
 @cli.command("sync_pingpong_with_airtable")
 @click.option("--crontime", default="*/15 * * * *")
 @click.option("--host", default="localhost")
@@ -49,6 +58,7 @@ def sync_pingpong_with_airtable(crontime: str, host: str, port: int) -> None:
             try:
                 await _process_airtable_class_requests()
                 await _process_students_to_add()
+                await _process_external_logins_to_add()
                 logger.info(f"Sync completed successfully at {datetime.now()}")
             except Exception as e:
                 logger.error(f"Error during sync: {e}")
