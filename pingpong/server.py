@@ -448,7 +448,7 @@ async def add_email_to_user(data: schemas.AddEmailToUserRequest, request: Reques
             expiry=86_400 * 7,
             nowfn=nowfn,
         )
-        message = message_template.substitute(
+        message_to_new = message_template.substitute(
             {
                 "title": "Your PingPong account was updated",
                 "subtitle": f"Per your request, we added <a href='mailto:{_new_email}'>{_new_email}</a> as a login email to your PingPong account. You can now use it along with your primary email address (<a href='mailto:{user.email}'>{user.email}</a>) to log in.</p><p>Click the button below to log in to PingPong. No password required. It&#8217;s secure and easy.",
@@ -462,16 +462,31 @@ async def add_email_to_user(data: schemas.AddEmailToUserRequest, request: Reques
             }
         )
 
+        message_to_current = message_template.substitute(
+            {
+                "title": "Your PingPong account was updated",
+                "subtitle": f"Per your request, we added <a href='mailto:{_new_email}'>{_new_email}</a> as a login email to your PingPong account. You can now use it along with your primary email address (<a href='mailto:{user.email}'>{user.email}</a>) to log in.</p><p>Click the button below to log in to PingPong. No password required. It&#8217;s secure and easy.",
+                "type": "login link",
+                "cta": "Login to PingPong",
+                "underline": "<strong>If you did not request this change, please contact us immediately at <a href='mailto:pingpong-help@hks.harvard.edu'>pingpong-help@hks.harvard.edu</a>.</strong>",
+                "expires": convert_seconds(86_400 * 7),
+                "link": magic_link,
+                "email": _current_email,
+                "legal_text": "because you requested an update to the login information of your PingPong account",
+            }
+        )
+
+
         await config.email.sender.send(
             _new_email,
             "A login email was added to your PingPong account",
-            message,
+            message_to_new,
         )
 
         await config.email.sender.send(
             user.email,
             "A login email was added to your PingPong account",
-            message,
+            message_to_current,
         )
 
     return {"status": "ok"}
