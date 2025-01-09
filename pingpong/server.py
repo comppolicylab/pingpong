@@ -476,7 +476,6 @@ async def add_email_to_user(data: schemas.AddEmailToUserRequest, request: Reques
             }
         )
 
-
         await config.email.sender.send(
             _new_email,
             "A login email was added to your PingPong account",

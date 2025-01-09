@@ -34,8 +34,9 @@ def process_students_to_add() -> None:
     """
     asyncio.run(_process_students_to_add())
 
-@cli.command("process_students_to_add")
-def process_students_to_add() -> None:
+
+@cli.command("process_external_logins_to_add")
+def process_external_logins_to_add() -> None:
     """
     Process pending Airtable external login creation requests.
     """

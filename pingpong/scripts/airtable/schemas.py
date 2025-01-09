@@ -94,6 +94,7 @@ class ExternalLoginRequests(Model):
         base_id: str = _AIRTABLE_BASE_ID
         api_key: str = _AIRTABLE_API_KEY
 
+
 class PingPongClass(Model):
     status = F.SelectField("Status")
     status_notes = F.TextField("Status Notes")

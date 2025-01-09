@@ -66,6 +66,7 @@ async def add_assistant_to_class(
         response = await resp.json()
         return schemas.Assistant(**response)
 
+
 async def add_login_email(
     session, emails: schemas.AddEmailToUserRequest, url: str
 ) -> schemas.GenericStatus:
