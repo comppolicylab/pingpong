@@ -974,7 +974,7 @@ async def delete_class(class_id: str, request: Request):
     if not class_:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    if class_.api_key:
+    if class_.api_key or class_.api_key_id:
         openai_client = await get_openai_client_for_class(request)
         # Delete all threads
         async for thread in models.Thread.get_ids_by_class_id(
