@@ -108,18 +108,7 @@ class UserClassRole(Base):
         )
         result = await session.scalar(stmt)
         if sso_tenant and sso_id:
-            stmt_ = (
-                _get_upsert_stmt(session)(ExternalLogin)
-                .values(user_id=user_id, provider=sso_tenant, identifier=sso_id)
-                .on_conflict_do_update(
-                    index_elements=["user_id", "provider"],
-                    set_=dict(
-                        provider=sso_tenant,
-                        identifier=sso_id,
-                    ),
-                )
-            )
-            await session.execute(stmt_)
+            await ExternalLogin.create_or_update(session, user_id, sso_tenant, sso_id)
         return result
 
     @classmethod
