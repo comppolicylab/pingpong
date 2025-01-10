@@ -219,10 +219,16 @@
         dirty = newValue === undefined ? false : newValue !== !!oldValue;
         break;
       case 'use_latex':
-        dirty = newValue === undefined ? false : newValue !== oldValue;
+        dirty =
+          newValue === undefined
+            ? false
+            : (preventEdits ? !!assistant?.use_latex : newValue) !== oldValue;
         break;
       case 'hide_prompt':
-        dirty = newValue === undefined ? false : newValue !== oldValue;
+        dirty =
+          newValue === undefined
+            ? false
+            : (preventEdits ? !!assistant?.hide_prompt : newValue) !== oldValue;
         break;
       case 'tools':
         dirty = !setsEqual(
