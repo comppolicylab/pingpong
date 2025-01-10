@@ -421,11 +421,9 @@ async def login_sso(provider: str, request: Request):
 async def add_email_to_user(data: schemas.AddEmailToUserRequest, request: Request):
     _current_email = data.current_email.lower().strip()
     _new_email = data.new_email.lower().strip()
-    email_verification = parse_addresses(f"{_current_email}, {_new_email}")
+    email_verification = parse_addresses(_new_email)
 
     if not email_verification[0].valid:
-        raise HTTPException(status_code=400, detail="Invalid current email address.")
-    if not email_verification[1].valid:
         raise HTTPException(status_code=400, detail="Invalid new email address.")
 
     user = await models.User.get_by_email_sso(
