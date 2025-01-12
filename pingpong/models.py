@@ -1757,7 +1757,6 @@ class Thread(Base):
         threads: List["Thread"] = []
         next_latest_time: datetime | None = before
         while len(threads) < n:
-            added_in_page = 0
             new_threads = [
                 t async for t in cls.get_all(session, limit=n, before=next_latest_time)
             ]
@@ -1773,7 +1772,6 @@ class Thread(Base):
                     next_latest_time = new_thread.last_activity
 
                 threads.append(new_thread)
-                added_in_page += 1
 
                 if len(threads) >= n:
                     break
