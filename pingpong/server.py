@@ -2268,20 +2268,62 @@ async def list_all_threads(
     current_latest_time: datetime | None = (
         datetime.fromisoformat(before) if before else None
     )
-    thread_ids = await request.state.authz.list(
+
+    # Normally we expect users either to be able to see a small number of threads.
+    # A few users have access to a large number of threads. Currently, these two
+    # cases require different query strategies.
+    #
+    # For low cardinality users, we can query the set of threads they can see from
+    # the authz server and then pull them from the database.
+    #
+    # For high cardinality users, it's much faster to pull all threads from the database
+    # and filter out the relative few they can't see.
+    expect_high_cardinality = await request.state.authz.test(
         f"user:{request.state.session.user.id}",
-        "can_view",
-        "thread",
+        "admin",
+        request.state.authz.root,
     )
-    logger.info("/threads: FGA Returned %s thread_ids", len(thread_ids))
-    threads = await models.Thread.get_n_by_id(
-        request.state.db,
-        thread_ids,
-        limit,
-        before=current_latest_time,
-        private=private,
-        class_id=class_id,
-    )
+
+    if expect_high_cardinality:
+        logger.info("Using high-cardinality strategy for all_threads query")
+
+        async def _batch_check_can_view(
+            threads: list[models.Thread],
+        ) -> list[models.Thread]:
+            allows = await request.state.authz.check(
+                [
+                    (
+                        f"user:{request.state.session.user.id}",
+                        "can_view",
+                        f"thread:{t.id}",
+                    )
+                    for t in threads
+                ]
+            )
+            return [t for t, allow in zip(threads, allows) if allow]
+
+        threads = await models.Thread.get_n(
+            request.state.db,
+            n=limit,
+            before=current_latest_time,
+            filter_batch=_batch_check_can_view,
+        )
+    else:
+        logger.info("Using low-cardinality strategy for all_threads query")
+        thread_ids = await request.state.authz.list(
+            f"user:{request.state.session.user.id}",
+            "can_view",
+            "thread",
+        )
+        logger.info("/threads: FGA Returned %s thread_ids", len(thread_ids))
+        threads = await models.Thread.get_n_by_id(
+            request.state.db,
+            thread_ids,
+            limit,
+            before=current_latest_time,
+            private=private,
+            class_id=class_id,
+        )
 
     return {"threads": process_threads(threads, request.state.session.user.id)}
 
