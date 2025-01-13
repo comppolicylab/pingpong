@@ -1757,9 +1757,13 @@ class Thread(Base):
         threads: List["Thread"] = []
         next_latest_time: datetime | None = before
         while len(threads) < n:
-            new_threads = [
-                t async for t in cls.get_all(session, limit=n, before=next_latest_time)
-            ]
+            new_threads = list["Thread"]()
+            async for new_thread in cls.get_all(
+                session, limit=n, before=next_latest_time
+            ):
+                if not next_latest_time or new_thread.last_activity < next_latest_time:
+                    next_latest_time = new_thread.last_activity
+                new_threads.append(new_thread)
 
             if not new_threads:
                 break
@@ -1768,9 +1772,6 @@ class Thread(Base):
                 new_threads = await filter_batch(new_threads)
 
             for new_thread in new_threads:
-                if not next_latest_time or new_thread.last_activity < next_latest_time:
-                    next_latest_time = new_thread.last_activity
-
                 threads.append(new_thread)
 
                 if len(threads) >= n:
