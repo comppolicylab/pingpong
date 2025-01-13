@@ -1,7 +1,7 @@
 import asyncio
 import json
 from datetime import datetime
-from typing import AsyncGenerator, List, Optional, Union
+from typing import AsyncGenerator, List, Optional, Union, Callable, Coroutine, Any
 
 from sqlalchemy import Boolean, Column, DateTime, Float, UniqueConstraint, or_
 from sqlalchemy import Enum as SQLEnum
@@ -16,6 +16,7 @@ from sqlalchemy import (
     select,
     update,
 )
+from sqlalchemy.sql.elements import BinaryExpression
 from sqlalchemy.dialects.postgresql import insert as postgres_upsert
 from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
 from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession
@@ -1743,6 +1744,41 @@ class Thread(Base):
             yield row.Thread
 
     @classmethod
+    async def get_n(
+        cls,
+        session: AsyncSession,
+        n: int = 10,
+        before: datetime | None = None,
+        filter_batch: Callable[[list["Thread"]], Coroutine[Any, Any, list["Thread"]]]
+        | None = None,
+    ) -> List["Thread"]:
+        if n < 1:
+            return []
+        threads: List["Thread"] = []
+        next_latest_time: datetime | None = before
+        while len(threads) < n:
+            new_threads = list["Thread"]()
+            async for new_thread in cls.get_all(
+                session, limit=n, before=next_latest_time
+            ):
+                if not next_latest_time or new_thread.last_activity < next_latest_time:
+                    next_latest_time = new_thread.last_activity
+                new_threads.append(new_thread)
+
+            if not new_threads:
+                break
+
+            if filter_batch:
+                new_threads = await filter_batch(new_threads)
+
+            for new_thread in new_threads:
+                threads.append(new_thread)
+
+                if len(threads) >= n:
+                    break
+        return threads
+
+    @classmethod
     async def get_n_by_id(
         cls,
         session: AsyncSession,
@@ -1785,27 +1821,46 @@ class Thread(Base):
         cls,
         session: AsyncSession,
         ids: list[int],
+        **kwargs,
+    ) -> AsyncGenerator["Thread", None]:
+        """Convenience wrapper around `Thread.get_all`.
+
+        See `Thread.get_all` for more information.
+        """
+        if not ids:
+            return
+
+        async for thread in cls.get_all(session, ids=ids, **kwargs):
+            yield thread
+
+    @classmethod
+    async def get_all(
+        cls,
+        session: AsyncSession,
+        ids: list[int] | None = None,
         limit: int = 10,
         before: datetime | None = None,
         class_id: int | None = None,
         private: bool | None = None,
     ) -> AsyncGenerator["Thread", None]:
-        """Get a number of threads by their IDs.
+        """Get a number of threads optionally filtered by some criteria.
 
         Might not return exactly the number of threads requested.
-        See `get_n_by_id` for a version that tries to guarantee `n` results
-        if possible.
         """
-        if not ids:
+        if ids is not None and not ids:
             return
 
-        condition = Thread.id.in_([int(id_) for id_ in ids])
+        conditions: list[BinaryExpression[bool]] = []
+        if ids:
+            conditions.append(Thread.id.in_([int(id_) for id_ in ids]))
         if before:
-            condition = and_(condition, Thread.last_activity < before)
+            conditions.append(Thread.last_activity < before)
         if class_id:
-            condition = and_(condition, Thread.class_id == int(class_id))
+            conditions.append(Thread.class_id == int(class_id))
         if private is not None:
-            condition = and_(condition, Thread.private == private)
+            conditions.append(Thread.private == private)
+
+        condition = and_(True, *conditions)
 
         stmt = (
             select(Thread)
