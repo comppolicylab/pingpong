@@ -2306,6 +2306,8 @@ async def list_all_threads(
             request.state.db,
             n=limit,
             before=current_latest_time,
+            class_id=class_id,
+            private=private,
             filter_batch=_batch_check_can_view,
         )
     else:
