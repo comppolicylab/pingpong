@@ -1751,6 +1751,7 @@ class Thread(Base):
         before: datetime | None = None,
         filter_batch: Callable[[list["Thread"]], Coroutine[Any, Any, list["Thread"]]]
         | None = None,
+        **kwargs,
     ) -> List["Thread"]:
         if n < 1:
             return []
@@ -1759,7 +1760,7 @@ class Thread(Base):
         while len(threads) < n:
             new_threads = list["Thread"]()
             async for new_thread in cls.get_all(
-                session, limit=n, before=next_latest_time
+                session, limit=n, before=next_latest_time, **kwargs
             ):
                 if not next_latest_time or new_thread.last_activity < next_latest_time:
                     next_latest_time = new_thread.last_activity
