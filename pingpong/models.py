@@ -1735,7 +1735,7 @@ class Thread(Base):
     ) -> AsyncGenerator["Thread", None]:
         conditions: list[BinaryExpression[bool]] = []
         if after:
-            conditions.append(Thread.last_activity >= after)
+            conditions.append(Thread.last_activity > after)
         conditions.append(Thread.assistant_id == assistant_id)
         stmt = select(Thread).where(and_(*conditions))
         result = await session.execute(stmt)
