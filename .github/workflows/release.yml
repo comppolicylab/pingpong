@@ -223,5 +223,4 @@ jobs:
           SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
         with:
           environment: production
-          finalize: false
           version: ${{ github.event.release.name }}
