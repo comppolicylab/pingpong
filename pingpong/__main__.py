@@ -496,7 +496,7 @@ def summarize(class_id: int) -> None:
                 else:
                     raise ValueError("Unknown API key provider for class")
             elif result.api_key:
-                return get_openai_client(result.api_key)
+                openai_client = get_openai_client(result.api_key)
 
             if not openai_client:
                 raise ValueError("No OpenAI client found")
