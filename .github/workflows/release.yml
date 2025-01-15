@@ -213,3 +213,15 @@ jobs:
           curl -X POST -H 'Content-Type: application/json' \
             --data "{\"text\": \"$MSG\", \"blocks\": [{\"type\":\"section\", \"text\": {\"type\": \"mrkdwn\", \"text\": \"$MSG\"}}, {\"type\":\"image\",\"image_url\":\"$GIF\", \"alt_text\":\"dog\", \"title\": {\"type\":\"plain_text\", \"text\": \"success cat\"}}]}" \
             $SLACK_WEBHOOK
+
+      - name: Create Sentry release
+        if: ${{ github.event.release.prerelease == false }}
+        uses: getsentry/action-release@v1
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+        with:
+          environment: production
+          finalize: false
+          version: ${{ github.event.release.name }}
