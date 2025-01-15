@@ -345,6 +345,36 @@ class ThreadName(BaseModel):
     can_generate: bool
 
 
+class AIRelevantThread(BaseModel):
+    thread_id: int
+    quote: str
+
+
+class AIQuestionSummary(BaseModel):
+    question: str
+    relevant_threads: list[AIRelevantThread]
+
+
+class AIAssistantSummary(BaseModel):
+    questions: list[AIQuestionSummary]
+
+
+class AssistantSummary(BaseModel):
+    assistant_id: int
+    questions: list[AIQuestionSummary]
+
+
+class AssistantSummaries(BaseModel):
+    class_id: int
+    assistant_summaries: list[AssistantSummary]
+
+
+class ThreadUserMessages(BaseModel):
+    id: int
+    thread_id: str
+    user_messages: list[str]
+
+
 class NewThreadMessage(BaseModel):
     message: str = Field(..., min_length=1)
     code_interpreter_file_ids: list[str] = Field([])

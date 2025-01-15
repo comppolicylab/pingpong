@@ -30,6 +30,7 @@ from pingpong.merge import (
 )
 from pingpong.models import Class
 from pingpong.now import croner
+from pingpong.summary import generate_assistant_summaries
 
 from .auth import encode_auth_token
 from .bg import get_server
@@ -470,6 +471,41 @@ def export_threads(class_id: int, user_email: str) -> None:
             )
 
     asyncio.run(_export_threads())
+
+
+@export.command("summarize")
+@click.argument("class_id", type=int)
+def summarize(class_id: int) -> None:
+    async def _summarize() -> None:
+        async with config.db.driver.async_session() as session:
+            openai_client = None
+            result = await Class.get_api_key(session, class_id)
+            if result.api_key_obj:
+                if result.api_key_obj.provider == "openai":
+                    openai_client = get_openai_client(
+                        result.api_key_obj.api_key,
+                        provider=result.api_key_obj.provider,  # type: ignore
+                    )
+                elif result.api_key_obj.provider == "azure":
+                    openai_client = get_openai_client(
+                        result.api_key_obj.api_key,
+                        provider=result.api_key_obj.provider,  # type: ignore
+                        endpoint=result.api_key_obj.endpoint,
+                        api_version=result.api_key_obj.api_version,
+                    )
+                else:
+                    raise ValueError("Unknown API key provider for class")
+            elif result.api_key:
+                return get_openai_client(result.api_key)
+
+            if not openai_client:
+                raise ValueError("No OpenAI client found")
+
+            result = await generate_assistant_summaries(openai_client, session, class_id)
+
+            print(result.model_dump_json(indent=4))
+
+    asyncio.run(_summarize())
 
 
 if __name__ == "__main__":
