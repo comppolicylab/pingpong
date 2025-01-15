@@ -501,7 +501,9 @@ def summarize(class_id: int) -> None:
             if not openai_client:
                 raise ValueError("No OpenAI client found")
 
-            result = await generate_assistant_summaries(openai_client, session, class_id)
+            result = await generate_assistant_summaries(
+                openai_client, session, class_id
+            )
 
             print(result.model_dump_json(indent=4))
 
