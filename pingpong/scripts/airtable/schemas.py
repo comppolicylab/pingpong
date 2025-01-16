@@ -97,6 +97,7 @@ class ExternalLoginRequests(Model):
 
 class PingPongClass(Model):
     status = F.SelectField("Status")
+    update_status = F.SelectField("Update Class Status")
     status_notes = F.TextField("Status Notes")
     pingpong_id = F.TextField("PingPong ID")
     class_name = F.LookupField[str]("Class Name")

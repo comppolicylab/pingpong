@@ -337,6 +337,7 @@ async def _process_airtable_class_requests() -> None:
                         request.pingpong_assistants.append(pingpong_assistant)
                 request.pingpong_id = str(class_.id)
                 request.status = "Added"
+                request.update_status = "Complete"
                 request.save()
             except Exception as e:
                 logger.warning(f"Error processing request: {e}")
