@@ -67,12 +67,22 @@ async def add_assistant_to_class(
         return schemas.Assistant(**response)
 
 
+async def get_user_by_email(session, email: str, url: str) -> schemas.User:
+    async with session.get(
+        f"{url}/api/v1/user",
+        params={"email": email},
+        raise_for_status=True,
+    ) as resp:
+        response = await resp.json()
+        return schemas.User(**response)
+
+
 async def add_login_email(
-    session, emails: schemas.AddEmailToUserRequest, url: str
+    session, user_id: int, new_email: str, url: str
 ) -> schemas.GenericStatus:
     async with session.post(
-        f"{url}/api/v1/user/add_email",
-        json=emails.model_dump(),
+        f"{url}/api/v1/user/{user_id}/email",
+        params={"email": new_email},
         raise_for_status=True,
     ) as resp:
         response = await resp.json()
