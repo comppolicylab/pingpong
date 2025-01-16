@@ -1733,11 +1733,9 @@ class Thread(Base):
     async def get_threads_by_assistant_id(
         cls, session: AsyncSession, assistant_id: int, after: datetime | None = None
     ) -> AsyncGenerator["Thread", None]:
-        conditions: list[BinaryExpression[bool]] = []
+        stmt = select(Thread).where(Thread.assistant_id == assistant_id)
         if after:
-            conditions.append(Thread.last_activity > after)
-        conditions.append(Thread.assistant_id == assistant_id)
-        stmt = select(Thread).where(and_(*conditions))
+            stmt = stmt.where(Thread.last_activity > after)
         result = await session.execute(stmt)
         for row in result:
             yield row.Thread

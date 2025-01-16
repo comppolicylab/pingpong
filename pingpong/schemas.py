@@ -375,6 +375,10 @@ class ThreadUserMessages(BaseModel):
     user_messages: list[str]
 
 
+class ThreadsToSummarize(BaseModel):
+    threads: list[ThreadUserMessages]
+
+
 class NewThreadMessage(BaseModel):
     message: str = Field(..., min_length=1)
     code_interpreter_file_ids: list[str] = Field([])

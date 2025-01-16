@@ -9,6 +9,7 @@ from pingpong.schemas import (
     AssistantSummary,
     AssistantSummaries,
     ThreadUserMessages,
+    ThreadsToSummarize,
 )
 
 
@@ -48,7 +49,7 @@ async def generate_assistant_summaries(
 
 
 async def get_thread_user_messages(
-    cli: openai.AsyncClient, thread_id: str
+    cli: openai.AsyncClient, thread_id: str, characters: int = 100
 ) -> list[str]:
     messages = await cli.beta.threads.messages.list(thread_id, limit=10, order="asc")
 
@@ -58,7 +59,7 @@ async def get_thread_user_messages(
             if message.role == "user":
                 if content.type == "text":
                     user_messages.append(
-                        f"{' '.join(content.text.value.split()[:100])}"
+                        f"{' '.join(content.text.value.split()[:characters])}"
                     )
                 if content.type in ["image_file", "image_url"]:
                     user_messages.append("User uploaded an image file")
@@ -66,27 +67,27 @@ async def get_thread_user_messages(
 
 
 summarization_prompt = """
-Extract key questions or ideas from a list of user queries in chatbot threads provided in the specified XML schema. If there are no valuable questions or threads for an assistant, do not return any results.
+Extract key questions or ideas from a list of user queries in chatbot threads provided in the specified JSON schema. If there are no valuable questions or threads for an assistant, do not return any results. Ensure that no single thread is quoted more than once for the same question.
 
 # Input Format
 
-The user threads will be provided in the following XML schema:
-
-```xml
-<thread>
-    <id>254</id>
-    <messages>
-        <message>User message 1</message>
-        <message>User message 2</message>
-    </messages>
-</thread>
+The user threads will be provided in the following JSON schema:
+```json
+{
+    "threads": [
+        {
+            "id": 122,
+            "user_messages": ["User message 1", "User message 2"]
+        },
+    ]
+}
 ```
 
 # Steps
 
 1. **Identify Key Questions/Ideas**: Examine the list of query threads to recognize recurring themes or questions that students have asked.
 
-2. **Select Representative Quotes**: For each identified question or idea, select up to three representative quotes from the messages that encapsulate the essence of the question or idea.
+2. **Select Representative Quotes**: For each identified question or idea, select up to three representative quotes from different threads that encapsulate the essence of the question or idea. Avoid using the same thread in more than one quote for the same question.
 
 3. **Gather Thread IDs**: Record the thread IDs associated with the selected quotes to track the context and source of each significant question or idea.
 
@@ -104,31 +105,9 @@ The output must be structured as a JSON object conforming to the provided respon
 - Each "question" should be concise, distinctly capturing the theme or query without extraneous detail.
 - Quotes should accurately capture the essence of the student's question or idea and relate directly to the question identified.
 - Adhere to class constraints: max 10 questions and max 3 threads per question to ensure the JSON remains valid.
+- Ensure that no single thread is quoted more than once for the same question.
 - Do not output any JSON if there are no valuable questions or threads.
 """
-
-
-def generate_thread_xml(thread_messages: list[ThreadUserMessages]) -> str:
-    """
-    Generate an XML string from a list of thread messages.
-
-    Format:
-    <thread>
-        <id>254</id>
-        <messages>
-            <message>User message 1</message>
-            <message>User message 2</message>
-        </messages>
-    </thread>
-    """
-
-    xml = ""
-    for thread in thread_messages:
-        xml += f"<thread><id>{thread.id}</id><messages>"
-        for message in thread.user_messages:
-            xml += f"<message>{message}</message>"
-        xml += "</messages></thread>\n"
-    return xml
 
 
 async def generate_thread_summary(
@@ -138,7 +117,12 @@ async def generate_thread_summary(
         model="gpt-4o",
         messages=[
             {"role": "system", "content": summarization_prompt},
-            {"role": "user", "content": generate_thread_xml(thread_messages)},
+            {
+                "role": "user",
+                "content": ThreadsToSummarize(threads=thread_messages).model_dump_json(
+                    exclude={"threads": {"__all__": {"thread_id"}}}
+                ),
+            },
         ],
         response_format=AIAssistantSummary,
     )
