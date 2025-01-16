@@ -414,7 +414,7 @@ async def login_sso(provider: str, request: Request):
 
 
 @v1.post(
-    "/user/add_email",
+    "/user/email",
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.GenericStatus,
 )
