@@ -4,7 +4,14 @@ from typing import Generic, Literal, TypeVar, Union, TypedDict
 
 from openai.types.beta.assistant_tool import AssistantTool as Tool
 from openai.types.beta.threads import Message as OpenAIMessage
-from pydantic import BaseModel, Field, SecretStr, computed_field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    SecretStr,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 from .gravatar import get_email_hash, get_gravatar_image
 
 
@@ -701,7 +708,7 @@ class UpdateApiKey(BaseModel):
     endpoint: str | None = None
     api_version: str | None = None
 
-    @field_validator('api_key', 'endpoint', 'api_version')
+    @field_validator("api_key", "endpoint", "api_version")
     @classmethod
     def strip_if_not_none(cls, v: str | None) -> str | None:
         if isinstance(v, str):
