@@ -1498,3 +1498,9 @@
     </div>
   {/if}
 </div>
+
+<style>
+  :global(input[type='radio']) {
+    display: none !important;
+  }
+</style>
