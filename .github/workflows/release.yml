@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout release code at tag commit
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Parse version tag
         run: |
@@ -92,7 +94,9 @@ jobs:
         if: ${{ env.SRV_IMAGE_STATUS == 'DOES_NOT_EXIST' }}
         run: |
           echo "Building Server Image with tag ${{ env.SRV_VERSION }}"
-          docker compose -f docker-compose.yml -f docker-compose.prod.yml build srv
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml build \
+            --build-arg SENTRY_RELEASE=${{ github.event.release.name }} \
+            srv
 
       - name: Build scripts image for release
         env:
@@ -215,13 +219,11 @@ jobs:
             $SLACK_WEBHOOK
 
       - name: Create Sentry release
-        if: ${{ github.event.release.prerelease == false }}
         uses: getsentry/action-release@v1
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ vars.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+          SENTRY_PROJECT: ${{ github.event.release.prerelease && vars.SENTRY_PROJECT_STAGE || vars.SENTRY_PROJECT_PROD }}
         with:
           environment: production
-          finalize: false
           version: ${{ github.event.release.name }}
