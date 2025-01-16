@@ -413,22 +413,62 @@ async def login_sso(provider: str, request: Request):
         )
 
 
+@v1.get(
+    "/user",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.User,
+)
+async def get_user_by_email(email: str, request: Request):
+    _email = email.lower().strip()
+    user = await models.User.get_by_email_sso(request.state.db, _email, "email", _email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+@v1.get(
+    "/user/{user_id}",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.User,
+)
+async def get_user(user_id: str, request: Request):
+    user = await models.User.get_by_id(request.state.db, int(user_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+@v1.get(
+    "/user/{user_id}/email",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.ExternalLogins,
+)
+async def get_secondary_emails(user_id: str, request: Request):
+    user = await models.User.get_by_id(request.state.db, int(user_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    external_logins = await models.ExternalLogin.get_secondary_emails_by_user_id(
+        request.state.db, user.id
+    )
+    return schemas.ExternalLogins(
+        external_logins=external_logins,
+        user_id=user.id,
+    )
+
+
 @v1.post(
-    "/user/email",
+    "/user/{user_id}/email",
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.GenericStatus,
 )
-async def add_email_to_user(data: schemas.AddEmailToUserRequest, request: Request):
-    _current_email = data.current_email.lower().strip()
-    _new_email = data.new_email.lower().strip()
+async def add_email_to_user(user_id: str, email: str, request: Request):
+    _new_email = email.lower().strip()
     email_verification = parse_addresses(_new_email)
 
     if not email_verification[0].valid:
         raise HTTPException(status_code=400, detail="Invalid new email address.")
 
-    user = await models.User.get_by_email_sso(
-        request.state.db, _current_email, "email", _current_email
-    )
+    user = await models.User.get_by_id(request.state.db, int(user_id))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -469,7 +509,7 @@ async def add_email_to_user(data: schemas.AddEmailToUserRequest, request: Reques
                 "underline": "<strong>If you did not request this change, please contact us immediately at <a href='mailto:pingpong-help@hks.harvard.edu'>pingpong-help@hks.harvard.edu</a>.</strong>",
                 "expires": convert_seconds(86_400 * 7),
                 "link": magic_link,
-                "email": _current_email,
+                "email": user.email,
                 "legal_text": "because you requested an update to the login information of your PingPong account",
             }
         )
@@ -485,6 +525,26 @@ async def add_email_to_user(data: schemas.AddEmailToUserRequest, request: Reques
             "A login email was added to your PingPong account",
             message_to_current,
         )
+
+    return {"status": "ok"}
+
+
+@v1.delete(
+    "/user/{user_id}/email",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.GenericStatus,
+)
+async def delete_email_from_user(user_id: str, email: str, request: Request):
+    user = await models.User.get_by_id(request.state.db, int(user_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    try:
+        await models.ExternalLogin.delete_secondary_email(
+            request.state.db, user.id, email=email
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
     return {"status": "ok"}
 
