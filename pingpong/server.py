@@ -43,11 +43,12 @@ from .time import convert_seconds
 from .saml import get_saml2_client, get_saml2_settings, get_saml2_attrs
 
 from .ai import (
+    GetOpenAIClientException,
     export_class_threads_anonymized,
     format_instructions,
+    get_openai_client_by_class_id,
     get_thread_conversation_name,
     get_initial_thread_conversation_name,
-    get_openai_client,
     run_thread,
     validate_api_key,
     get_ci_messages_from_step,
@@ -112,28 +113,10 @@ async def get_openai_client_for_class(request: Request) -> OpenAIClientType:
     Requires the class_id to be in the path parameters.
     """
     class_id = request.path_params["class_id"]
-    result = await models.Class.get_api_key(request.state.db, int(class_id))
-    if result.api_key_obj:
-        if result.api_key_obj.provider == "openai":
-            return get_openai_client(
-                result.api_key_obj.api_key,
-                provider=result.api_key_obj.provider,  # type: ignore
-            )
-        elif result.api_key_obj.provider == "azure":
-            return get_openai_client(
-                result.api_key_obj.api_key,
-                provider=result.api_key_obj.provider,  # type: ignore
-                endpoint=result.api_key_obj.endpoint,
-                api_version=result.api_key_obj.api_version,
-            )
-        else:
-            raise HTTPException(
-                status_code=400, detail="Unknown API key provider for class"
-            )
-    elif result.api_key:
-        return get_openai_client(result.api_key)
-    else:
-        raise HTTPException(status_code=401, detail="No API key for class")
+    try:
+        return await get_openai_client_by_class_id(request.state.db, int(class_id))
+    except GetOpenAIClientException as e:
+        raise HTTPException(status_code=e.code, detail=e.detail)
 
 
 OpenAIClientDependency = Depends(get_openai_client_for_class)

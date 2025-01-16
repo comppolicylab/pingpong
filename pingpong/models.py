@@ -1730,6 +1730,17 @@ class Thread(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_threads_by_assistant_id(
+        cls, session: AsyncSession, assistant_id: int, after: datetime | None = None
+    ) -> AsyncGenerator["Thread", None]:
+        stmt = select(Thread).where(Thread.assistant_id == assistant_id)
+        if after:
+            stmt = stmt.where(Thread.last_activity > after)
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.Thread
+
+    @classmethod
     async def get_id_by_thread_id(cls, session: AsyncSession, thread_id: str) -> int:
         stmt = select(Thread.id).where(Thread.thread_id == thread_id)
         return await session.scalar(stmt)

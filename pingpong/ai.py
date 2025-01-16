@@ -36,6 +36,39 @@ from zoneinfo import ZoneInfo
 logger = logging.getLogger(__name__)
 
 
+class GetOpenAIClientException(Exception):
+    def __init__(self, detail: str = "", code: int | None = None):
+        self.code = code
+        self.detail = detail
+
+
+async def get_openai_client_by_class_id(
+    session: AsyncSession, class_id: int
+) -> openai.AsyncClient:
+    result = await models.Class.get_api_key(session, class_id)
+    if result.api_key_obj:
+        if result.api_key_obj.provider == "openai":
+            return get_openai_client(
+                result.api_key_obj.api_key,
+                provider=result.api_key_obj.provider,  # type: ignore
+            )
+        elif result.api_key_obj.provider == "azure":
+            return get_openai_client(
+                result.api_key_obj.api_key,
+                provider=result.api_key_obj.provider,  # type: ignore
+                endpoint=result.api_key_obj.endpoint,
+                api_version=result.api_key_obj.api_version,
+            )
+        else:
+            raise GetOpenAIClientException(
+                code=400, detail="Unknown API key provider for class"
+            )
+    elif result.api_key:
+        return get_openai_client(result.api_key)
+    else:
+        raise GetOpenAIClientException(code=401, detail="No API key for class")
+
+
 def get_azure_model_deployment_name_equivalent(model_name: str) -> str:
     """Get the equivalent model deployment name for Azure models.
 

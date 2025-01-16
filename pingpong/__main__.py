@@ -7,11 +7,15 @@ import alembic
 import alembic.command
 import alembic.config
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from pingpong.ai import export_class_threads_with_emails, get_openai_client
+from pingpong.ai import (
+    GetOpenAIClientException,
+    export_class_threads_with_emails,
+    get_openai_client_by_class_id,
+)
 from pingpong.api_keys import (
     get_process_redacted_project_api_keys,
     set_as_default_azure_api_key,
@@ -28,8 +32,8 @@ from pingpong.merge import (
     merge_permissions,
     merge,
 )
-from pingpong.models import Class
-from pingpong.now import croner
+from pingpong.now import croner, utcnow
+from pingpong.summary import generate_assistant_summaries
 
 from .auth import encode_auth_token
 from .bg import get_server
@@ -442,34 +446,38 @@ def export_threads(class_id: int, user_email: str) -> None:
             if not user:
                 raise ValueError(f"User with email {user_email} not found")
 
-            openai_client = None
-            result = await Class.get_api_key(session, class_id)
-            if result.api_key_obj:
-                if result.api_key_obj.provider == "openai":
-                    openai_client = get_openai_client(
-                        result.api_key_obj.api_key,
-                        provider=result.api_key_obj.provider,  # type: ignore
-                    )
-                elif result.api_key_obj.provider == "azure":
-                    openai_client = get_openai_client(
-                        result.api_key_obj.api_key,
-                        provider=result.api_key_obj.provider,  # type: ignore
-                        endpoint=result.api_key_obj.endpoint,
-                        api_version=result.api_key_obj.api_version,
-                    )
-                else:
-                    raise ValueError("Unknown API key provider for class")
-            elif result.api_key:
-                return get_openai_client(result.api_key)
-
-            if not openai_client:
-                raise ValueError("No OpenAI client found")
+            try:
+                openai_client = await get_openai_client_by_class_id(session, class_id)
+            except GetOpenAIClientException as e:
+                raise ValueError(f"Error getting OpenAI client: {e.detail}")
 
             await export_class_threads_with_emails(
                 openai_client, str(class_id), user.id
             )
 
     asyncio.run(_export_threads())
+
+
+@export.command("summarize")
+@click.argument("class_id", type=int)
+@click.argument("days", type=int, default=7)
+def summarize(class_id: int, days: int) -> None:
+    async def _summarize() -> None:
+        async with config.db.driver.async_session() as session:
+            try:
+                openai_client = await get_openai_client_by_class_id(session, class_id)
+            except GetOpenAIClientException as e:
+                raise ValueError(f"Error getting OpenAI client: {e.detail}")
+
+            # Calculate date X days ago
+            after = utcnow() - timedelta(days=days)
+
+            result = await generate_assistant_summaries(
+                openai_client, session, class_id, after=after
+            )
+            logger.info(result.model_dump_json(indent=4))
+
+    asyncio.run(_summarize())
 
 
 if __name__ == "__main__":
