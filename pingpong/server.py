@@ -530,7 +530,7 @@ async def add_email_to_user(user_id: str, email: str, request: Request):
 
 
 @v1.delete(
-    "/user/{user_id}/email",
+    "/user/{user_id}/email/{email}",
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.GenericStatus,
 )
