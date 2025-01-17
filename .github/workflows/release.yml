@@ -35,6 +35,9 @@ jobs:
           fi
         shell: bash
 
+      - name: Extract release version
+        run: echo "VERSION_STRIPPED=$(echo ${{ github.event.release.name }} | sed 's/^v//')" >> $GITHUB_ENV
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@0e613a0980cbf65ed5b322eb7a1e075d28913a83
         with:
@@ -95,7 +98,7 @@ jobs:
         run: |
           echo "Building Server Image with tag ${{ env.SRV_VERSION }}"
           docker compose -f docker-compose.yml -f docker-compose.prod.yml build \
-            --build-arg SENTRY_RELEASE=${{ github.event.release.name }} \
+            --build-arg SENTRY_RELEASE=${{ env.VERSION_STRIPPED }} \
             srv
 
       - name: Build scripts image for release
@@ -226,4 +229,4 @@ jobs:
           SENTRY_PROJECT: ${{ github.event.release.prerelease && vars.SENTRY_PROJECT_STAGE || vars.SENTRY_PROJECT_PROD }}
         with:
           environment: production
-          version: ${{ github.event.release.name }}
+          version: ${{ env.VERSION_STRIPPED }}
