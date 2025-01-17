@@ -267,6 +267,36 @@ class ExternalLogin(Base):
         result = await session.execute(stmt_)
         return list(set(row[0] for row in result))
 
+    @classmethod
+    async def get_secondary_emails_by_user_id(
+        cls, session: AsyncSession, user_id: int
+    ) -> list["ExternalLogin"]:
+        stmt = select(ExternalLogin).where(
+            and_(
+                ExternalLogin.user_id == user_id,
+                ExternalLogin.provider == "email",
+            )
+        )
+        result = await session.execute(stmt)
+        return [row.ExternalLogin for row in result]
+
+    @classmethod
+    async def delete_secondary_email(
+        cls, session: AsyncSession, user_id: int, email: str
+    ) -> None:
+        result = await session.execute(
+            delete(ExternalLogin).where(
+                and_(
+                    ExternalLogin.user_id == user_id,
+                    ExternalLogin.provider == "email",
+                    ExternalLogin.identifier == email,
+                )
+            )
+        )
+        if result.rowcount == 0:
+            raise ValueError(f"No secondary email {email} found for user {user_id}")
+        return None
+
 
 user_merge_association = Table(
     "users_merged_users",

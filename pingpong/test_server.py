@@ -100,6 +100,7 @@ async def test_me_with_valid_user(api, user, now, valid_user_token):
             "email": "user_123@domain.test",
             "id": 123,
             "name": "user_123@domain.test",
+            "external_logins": [],
             "first_name": None,
             "last_name": None,
             "display_name": None,
