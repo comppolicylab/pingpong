@@ -389,3 +389,19 @@ async def _process_external_logins_to_add() -> None:
                 request.status_notes = str(e)
                 request.save()
                 continue
+
+
+async def _add_instructors_to_jira() -> None:
+    instructors_to_add = scripts_schemas.Instructor.all(
+        formula=match({"Added to Jira": False})
+    )
+
+    async with aiohttp.ClientSession() as session:
+        for instructor in instructors_to_add:
+            try:
+                # Add instructor to Jira
+                instructor.jira = True
+                instructor.save()
+            except Exception as e:
+                logger.warning(f"Error processing instructor: {e}")
+                continue

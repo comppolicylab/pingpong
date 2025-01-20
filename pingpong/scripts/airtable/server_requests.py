@@ -77,3 +77,13 @@ async def add_login_email(
     ) as resp:
         response = await resp.json()
         return schemas.GenericStatus(**response)
+
+async def add_instructor_to_jira(
+    session, instructor_id: int, url: str
+) -> schemas.GenericStatus:
+    async with session.post(
+        f"{url}/api/v1/instructor/{instructor_id}/jira",
+        raise_for_status=True,
+    ) as resp:
+        response = await resp.json()
+        return schemas.GenericStatus(**response)
