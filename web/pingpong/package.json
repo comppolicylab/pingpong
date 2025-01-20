@@ -51,7 +51,7 @@
     "flowbite-svelte-icons": "^1.6.1",
     "highlight.js": "^11.10.0",
     "isomorphic-dompurify": "^2.15.0",
-    "katex": "^0.16.11",
+    "katex": "^0.16.21",
     "marked": "^11.2.0",
     "marked-highlight": "^2.1.4",
     "svelte-copy": "^1.4.2"
