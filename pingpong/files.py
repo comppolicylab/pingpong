@@ -18,6 +18,12 @@ def _file_grants(file: File) -> list[Relation]:
     ]
 
 
+class FileNotFoundException(Exception):
+    def __init__(self, detail: str = "", code: int | None = None):
+        self.code = code
+        self.detail = detail
+
+
 async def handle_delete_file(
     session: AsyncSession,
     authz: AuthzClient,
@@ -37,6 +43,8 @@ async def handle_delete_file(
     """
     int_file_id = int(file_id)  # ensure just in case
     file = await File.get_by_id(session, int_file_id)
+    if not file:
+        raise FileNotFoundException(detail="File not found", code=404)
     remote_file_id = file.file_id
 
     try:

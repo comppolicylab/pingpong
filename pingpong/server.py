@@ -72,7 +72,12 @@ from .canvas import (
     get_canvas_config,
 )
 from .errors import sentry
-from .files import FILE_TYPES, handle_create_file, handle_delete_file
+from .files import (
+    FILE_TYPES,
+    FileNotFoundException,
+    handle_create_file,
+    handle_delete_file,
+)
 from .now import NowFn, utcnow
 from .permission import Authz, LoggedIn
 from .runs import get_placeholder_ci_calls
@@ -2928,9 +2933,13 @@ async def create_user_file(
 async def delete_file(
     class_id: str, file_id: str, request: Request, openai_client: OpenAIClient
 ):
-    return await handle_delete_file(
-        request.state.db, request.state.authz, openai_client, int(file_id)
-    )
+    try:
+        await handle_delete_file(
+            request.state.db, request.state.authz, openai_client, int(file_id)
+        )
+    except FileNotFoundException:
+        raise HTTPException(404, "File not found!")
+    return {"status": "ok"}
 
 
 @v1.delete(
@@ -2947,9 +2956,13 @@ async def delete_user_file(
     request: Request,
     openai_client: OpenAIClient,
 ):
-    return await handle_delete_file(
-        request.state.db, request.state.authz, openai_client, int(file_id)
-    )
+    try:
+        await handle_delete_file(
+            request.state.db, request.state.authz, openai_client, int(file_id)
+        )
+    except FileNotFoundException:
+        raise HTTPException(404, "File not found!")
+    return {"status": "ok"}
 
 
 @v1.get(
@@ -3103,9 +3116,14 @@ async def create_assistant(
     try:
         # Delete private files uploaded but not attached to the assistant
         for file_id in req.deleted_private_files:
-            await handle_delete_file(
-                request.state.db, request.state.authz, openai_client, int(file_id)
-            )
+            try:
+                await handle_delete_file(
+                    request.state.db, request.state.authz, openai_client, int(file_id)
+                )
+            except FileNotFoundException as e:
+                logger.error(
+                    "Error deleting file %s from assistant creation: %s", file_id, e
+                )
 
         del req.deleted_private_files
 
@@ -3309,14 +3327,15 @@ async def update_assistant(
 
     try:
         # Delete any private files that were removed
-        await asyncio.gather(
-            *[
-                handle_delete_file(
+        for file_id in req.deleted_private_files:
+            try:
+                await handle_delete_file(
                     request.state.db, request.state.authz, openai_client, int(file_id)
                 )
-                for file_id in req.deleted_private_files
-            ]
-        )
+            except FileNotFoundException as e:
+                logger.error(
+                    "Error deleting file %s from assistant creation: %s", file_id, e
+                )
     except Exception as e:
         raise HTTPException(500, f"Error removing private files: {e}")
 
