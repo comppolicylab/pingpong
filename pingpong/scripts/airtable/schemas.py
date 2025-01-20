@@ -146,6 +146,10 @@ class Instructor(Model):
         base_id: str = _AIRTABLE_BASE_ID
         api_key: str = _AIRTABLE_API_KEY
 
+class AddInstructorRequest(BaseModel):
+    email: str
+    display_name: str
+
 
 class Tool(BaseModel):
     type: str
