@@ -9,6 +9,8 @@ from pingpong.scripts.airtable.vars import (
     BILLING_PROVIDERS,
     PINGPONG_COOKIE,
     PINGPONG_URL,
+    JIRA_TOKEN,
+    JIRA_URL,
 )
 from pyairtable.formulas import match
 
@@ -23,6 +25,16 @@ if not PINGPONG_URL:
     raise ValueError("Missing PingPong URL in environment.")
 else:
     _PINGPONG_URL = PINGPONG_URL
+
+if not JIRA_URL:
+    raise ValueError("Missing Jira URL in environment.")
+else:
+    _JIRA_URL = JIRA_URL
+
+if not JIRA_TOKEN:
+    raise ValueError("Missing Jira token in environment.")
+else:
+    _JIRA_TOKEN = JIRA_TOKEN
 
 
 async def get_or_create_institution(
@@ -393,13 +405,30 @@ async def _process_external_logins_to_add() -> None:
 
 async def _add_instructors_to_jira() -> None:
     instructors_to_add = scripts_schemas.Instructor.all(
-        formula=match({"Added to Jira": False})
+        formula=match({"Added to Jira": False}), max_records=2
     )
 
     async with aiohttp.ClientSession() as session:
         for instructor in instructors_to_add:
             try:
                 # Add instructor to Jira
+                result = await server_requests.add_instructor_to_jira(
+                    session,
+                    scripts_schemas.AddInstructorRequest(
+                        email=f"evankassos1607+{instructor.email[0:2]}@gmail.com",
+                        displayName=f"{instructor.first_name} {instructor.last_name}",
+                    ),
+                    _JIRA_URL,
+                    _JIRA_TOKEN,
+                )
+                await server_requests.add_instructor_to_project(
+                    session,
+                    result.accountId,
+                    "1",
+                    _JIRA_URL,
+                    _JIRA_TOKEN,
+                )
+                instructor.jira_account_id = result.accountId
                 instructor.jira = True
                 instructor.save()
             except Exception as e:

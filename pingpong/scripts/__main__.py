@@ -6,6 +6,7 @@ from datetime import datetime
 from pingpong.bg import get_server
 from pingpong.now import croner
 from pingpong.scripts.airtable.helpers import (
+    _add_instructors_to_jira,
     _process_airtable_class_requests,
     _process_students_to_add,
     _process_external_logins_to_add,
@@ -41,6 +42,14 @@ def process_external_logins_to_add() -> None:
     Process pending Airtable external login creation requests.
     """
     asyncio.run(_process_external_logins_to_add())
+
+
+@cli.command("add_instructors_to_jira")
+def add_instructors_to_jira() -> None:
+    """
+    Add instructors to Jira.
+    """
+    asyncio.run(_add_instructors_to_jira())
 
 
 @cli.command("sync_pingpong_with_airtable")

@@ -78,13 +78,59 @@ async def add_login_email(
         response = await resp.json()
         return schemas.GenericStatus(**response)
 
+
 async def add_instructor_to_jira(
-    session, data: scripts_schemas.AddInstructorRequest, url: str
-) -> schemas.GenericStatus:
+    session, data: scripts_schemas.AddInstructorRequest, url: str, token: str
+) -> scripts_schemas.JiraCustomerResponse:
+    auth_header = f"Basic {token}"
     async with session.post(
         f"{url}/rest/servicedeskapi/customer",
         raise_for_status=True,
         json=data.model_dump(),
+        headers={
+            "Authorization": auth_header,
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-ExperimentalApi": "true",
+        },
     ) as resp:
         response = await resp.json()
-        
+        return scripts_schemas.JiraCustomerResponse(**response)
+
+
+async def add_instructor_to_project(
+    session, instructor_id: str, service_desk_id: str, url: str, token: str
+) -> None:
+    auth_header = f"Basic {token}"
+    async with session.post(
+        f"{url}/rest/servicedeskapi/servicedesk/{service_desk_id}/customer",
+        raise_for_status=True,
+        json={"accountIds": [instructor_id]},
+        headers={
+            "Authorization": auth_header,
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-ExperimentalApi": "true",
+        },
+    ) as resp:
+        if resp.status == 204:
+            return None
+
+
+async def add_instructor_field_to_jira(
+    session, field_name: str, field_values: list[str], url: str, token: str
+) -> scripts_schemas.JiraCustomerResponse:
+    auth_header = f"Basic {token}"
+    async with session.post(
+        f"https://api.atlassian.com/jsm/csm/cloudid/{url}/rest/servicedeskapi/servicedesk/{service_desk_id}/customer",
+        raise_for_status=True,
+        json={"accountIds": [instructor_id]},
+        headers={
+            "Authorization": auth_header,
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-ExperimentalApi": "opt-in",
+        },
+    ) as resp:
+        if resp.status == 204:
+            return None
