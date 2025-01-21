@@ -1,5 +1,6 @@
 import pingpong.scripts.jira.schemas as scripts_schemas
 
+
 async def add_instructor_to_jira(
     session, data: scripts_schemas.AddInstructorRequest, url: str, token: str
 ) -> scripts_schemas.JiraCustomerResponse:
@@ -39,8 +40,13 @@ async def add_instructor_to_project(
 
 
 async def add_instructor_field_to_jira(
-    session, instructor_id: str, field_name: str, field_values: list[str], cloudId: str, token: str
-) -> scripts_schemas.JiraCustomerResponse:
+    session,
+    instructor_id: str,
+    field_name: str,
+    field_values: list[str],
+    cloudId: str,
+    token: str,
+) -> None:
     auth_header = f"Basic {token}"
     async with session.put(
         f"https://api.atlassian.com/jsm/csm/cloudid/{cloudId}/api/v1/customer/{instructor_id}/details",
@@ -56,6 +62,7 @@ async def add_instructor_field_to_jira(
     ) as resp:
         if resp.status == 200:
             return None
+
 
 async def add_course_to_jira(
     session, course_name: str, cloudId: str, token: str
@@ -94,9 +101,15 @@ async def add_course_to_instructor(
         response = await resp.json()
         return response.get("id")
 
+
 async def add_entitlement_field_to_jira(
-    session, entitlement_id: str, field_name: str, field_values: list[str], cloudId: str, token: str
-) -> scripts_schemas.JiraCustomerResponse:
+    session,
+    entitlement_id: str,
+    field_name: str,
+    field_values: list[str],
+    cloudId: str,
+    token: str,
+) -> None:
     auth_header = f"Basic {token}"
     async with session.put(
         f"https://api.atlassian.com/jsm/csm/cloudid/{cloudId}/api/v1/entitlement/{entitlement_id}/details",

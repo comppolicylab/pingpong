@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 def cli() -> None:
     pass
 
+
 @cli.command("sync_pingpong_with_airtable")
 @click.option("--crontime", default="*/15 * * * *")
 @click.option("--host", default="localhost")

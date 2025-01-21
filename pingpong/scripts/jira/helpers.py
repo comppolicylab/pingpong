@@ -4,12 +4,7 @@ import aiohttp
 import pingpong.scripts.jira.schemas as scripts_schemas
 import pingpong.scripts.jira.server_requests as server_requests
 
-from pingpong.scripts.jira.vars import (
-    PINGPONG_URL,
-    JIRA_TOKEN,
-    JIRA_URL,
-    JIRA_CLOUD_ID
-)
+from pingpong.scripts.jira.vars import PINGPONG_URL, JIRA_TOKEN, JIRA_URL, JIRA_CLOUD_ID
 from pyairtable.formulas import match
 
 logger = logging.getLogger(__name__)
@@ -60,6 +55,7 @@ async def _add_instructors_to_jira() -> None:
                 logger.warning(f"Error processing instructor: {e}")
                 continue
 
+
 async def _add_instructors_to_project() -> None:
     instructors_to_add = scripts_schemas.Instructor.all(
         formula=match({"Added to Jira Project": False})
@@ -81,6 +77,7 @@ async def _add_instructors_to_project() -> None:
             except Exception as e:
                 logger.warning(f"Error processing instructor: {e}")
                 continue
+
 
 async def _add_fields_to_instructors() -> None:
     instructors_to_add = scripts_schemas.Instructor.all(
@@ -145,9 +142,16 @@ async def _add_fields_to_instructors() -> None:
                 logger.warning(f"Error processing instructor: {e}")
                 continue
 
+
 async def _add_course_to_jira() -> None:
     classes_to_add = scripts_schemas.AirtableClass.all(
-        formula=(match({"Added to Jira": False}) & (match({"Status": "Added — Control"}) | match({"Status": "Added — Treatment"})))
+        formula=(
+            match({"Added to Jira": False})
+            & (
+                match({"Status": "Added — Control"})
+                | match({"Status": "Added — Treatment"})
+            )
+        )
     )
 
     async with aiohttp.ClientSession() as session:
@@ -166,6 +170,7 @@ async def _add_course_to_jira() -> None:
             except Exception as e:
                 logger.warning(f"Error processing class: {e}")
                 continue
+
 
 async def _add_course_to_instructor() -> None:
     classes_to_add = scripts_schemas.AirtableClass.all(
@@ -190,9 +195,14 @@ async def _add_course_to_instructor() -> None:
                 logger.warning(f"Error processing class: {e}")
                 continue
 
+
 async def _add_fields_to_entitlements() -> None:
     classes_to_add = scripts_schemas.AirtableClass.all(
-        formula=(match({"Added to Jira": True}) & match({"Added Entitlement": True}) & match({"Added Entitlement Fields": False}))
+        formula=(
+            match({"Added to Jira": True})
+            & match({"Added Entitlement": True})
+            & match({"Added Entitlement Fields": False})
+        )
     )
 
     async with aiohttp.ClientSession() as session:
@@ -219,7 +229,11 @@ async def _add_fields_to_entitlements() -> None:
                     session,
                     class_.jira_entitlement,
                     "PingPong Class ID",
-                    [class_.pingpong_class_id[0] if len(class_.pingpong_class_id) > 0 else ""],
+                    [
+                        class_.pingpong_class_id[0]
+                        if len(class_.pingpong_class_id) > 0
+                        else ""
+                    ],
                     _JIRA_CLOUD_ID,
                     _JIRA_TOKEN,
                 )
@@ -267,7 +281,11 @@ async def _add_fields_to_entitlements() -> None:
                     session,
                     class_.jira_entitlement,
                     "PingPong Class URL",
-                    [f"{_PINGPONG_URL}/group/{class_.pingpong_class_id[0]}/manage" if len(class_.pingpong_class_id) > 0 else ""],
+                    [
+                        f"{_PINGPONG_URL}/group/{class_.pingpong_class_id[0]}/manage"
+                        if len(class_.pingpong_class_id) > 0
+                        else ""
+                    ],
                     _JIRA_CLOUD_ID,
                     _JIRA_TOKEN,
                 )
