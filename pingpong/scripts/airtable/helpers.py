@@ -9,8 +9,6 @@ from pingpong.scripts.airtable.vars import (
     BILLING_PROVIDERS,
     PINGPONG_COOKIE,
     PINGPONG_URL,
-    JIRA_TOKEN,
-    JIRA_URL,
 )
 from pyairtable.formulas import match
 
@@ -25,16 +23,6 @@ if not PINGPONG_URL:
     raise ValueError("Missing PingPong URL in environment.")
 else:
     _PINGPONG_URL = PINGPONG_URL
-
-if not JIRA_URL:
-    raise ValueError("Missing Jira URL in environment.")
-else:
-    _JIRA_URL = JIRA_URL
-
-if not JIRA_TOKEN:
-    raise ValueError("Missing Jira token in environment.")
-else:
-    _JIRA_TOKEN = JIRA_TOKEN
 
 
 async def get_or_create_institution(
