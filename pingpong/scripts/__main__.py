@@ -19,30 +19,6 @@ def cli() -> None:
     pass
 
 
-@cli.command("process_airtable_class_requests")
-def process_airtable_class_requests() -> None:
-    """
-    Process pending Airtable class creation requests.
-    """
-    asyncio.run(_process_airtable_class_requests())
-
-
-@cli.command("process_students_to_add")
-def process_students_to_add() -> None:
-    """
-    Process pending Airtable student creation requests.
-    """
-    asyncio.run(_process_students_to_add())
-
-
-@cli.command("process_external_logins_to_add")
-def process_external_logins_to_add() -> None:
-    """
-    Process pending Airtable external login creation requests.
-    """
-    asyncio.run(_process_external_logins_to_add())
-
-
 @cli.command("sync_pingpong_with_airtable")
 @click.option("--crontime", default="*/15 * * * *")
 @click.option("--host", default="localhost")
