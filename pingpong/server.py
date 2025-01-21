@@ -2463,23 +2463,44 @@ async def create_thread(
             messageContent.append({"type": "image_file", "image_file": {"file_id": id}})
             for id in req.vision_file_ids
         ]
-    thread, parties, thread_name = await asyncio.gather(
-        openai_client.beta.threads.create(
-            messages=[
-                {
-                    "metadata": {"user_id": str(request.state.session.user.id)},
-                    "role": "user",
-                    "content": messageContent,
-                    "attachments": attachments,
-                }
-            ],
-            tool_resources=tool_resources,
-        ),
-        models.User.get_all_by_id(request.state.db, req.parties),
-        get_initial_thread_conversation_name(
-            openai_client, request.state.db, req.message, req.vision_file_ids, class_id
-        ),
-    )
+    try:
+        thread, parties, thread_name = await asyncio.gather(
+            openai_client.beta.threads.create(
+                messages=[
+                    {
+                        "metadata": {"user_id": str(request.state.session.user.id)},
+                        "role": "user",
+                        "content": messageContent,
+                        "attachments": attachments,
+                    }
+                ],
+                tool_resources=tool_resources,
+            ),
+            models.User.get_all_by_id(request.state.db, req.parties),
+            get_initial_thread_conversation_name(
+                openai_client,
+                request.state.db,
+                req.message,
+                req.vision_file_ids,
+                class_id,
+            ),
+        )
+    except openai.InternalServerError as e:
+        logger.error("Error creating thread: %s", e.body.get("message") or e.message)
+        if vector_store_id:
+            await openai_client.beta.vector_stores.delete(vector_store_id)
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI was unable to process your request. If the issue persists, check PingPong's status page for updates.",
+        )
+    except openai.APIError as e:
+        logger.error("Error creating thread: %s", e.body.get("message") or e.message)
+        if vector_store_id:
+            await openai_client.beta.vector_stores.delete(vector_store_id)
+        raise HTTPException(
+            status_code=400,
+            detail="Something went wrong while creating the thread. Please try again later.",
+        )
 
     tools_export = req.model_dump(include={"tools_available"})
 
@@ -2508,19 +2529,6 @@ async def create_thread(
         await request.state.authz.write(grant=grants)
 
         return result
-    except openai.APIError as e:
-        logger.error("Error creating thread: %s", e.body.get("message") or e.message)
-        if vector_store_id:
-            await openai_client.beta.vector_stores.delete(vector_store_id)
-        if result:
-            # Delete users-threads mapping
-            for user in result.users:
-                result.users.remove(user)
-            await result.delete(request.state.db)
-        raise HTTPException(
-            status_code=400,
-            detail="Error creating thread",
-        )
     except Exception as e:
         logger.error("Error creating thread: %s", e)
         if vector_store_id:

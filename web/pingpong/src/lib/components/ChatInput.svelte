@@ -286,17 +286,13 @@
       code_interpreter_file_ids,
       vision_file_ids,
       message,
-      callback: (
-        success: boolean,
-        _errorMessage: string | null = null,
-        message_sent: boolean = true
-      ) => {
-        if (success) {
+      callback: (params: CallbackParams) => {
+        if (params.success) {
           return;
         }
-        if (!message_sent) {
+        if (!params.message_sent) {
           errorMessage =
-            _errorMessage ||
+            params.errorMessage ||
             'We faced an error while trying to send your message. Please try again.';
           $allFiles = tempFiles;
           ref.value = message;
@@ -304,7 +300,7 @@
           fixHeight(realRef);
         }
         errorMessage =
-          _errorMessage ||
+          params.errorMessage ||
           'We faced an error while generating a response to your message. Your message was successfully sent. Please try again by sending a new message.';
       }
     });

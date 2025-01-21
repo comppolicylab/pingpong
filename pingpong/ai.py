@@ -447,7 +447,7 @@ async def run_thread(
                 yield (
                     orjson.dumps(
                         {
-                            "type": "rate_limit_error",
+                            "type": "presend_error",
                             "detail": "OpenAI was unable to process your request. If the issue persists, check PingPong's status page for updates.",
                         }
                     )
