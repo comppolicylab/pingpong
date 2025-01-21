@@ -654,7 +654,7 @@ class File(Base):
         result = await session.execute(stmt)
 
         deleted_rows = result.fetchall()
-        deleted_files = [row[0].file_id for row in deleted_rows]
+        deleted_files = [row[0] for row in deleted_rows]
         deleted_obj_ids = {row[0].id for row in deleted_rows}
         missing_ids = list(set(ids) - deleted_obj_ids)
 
