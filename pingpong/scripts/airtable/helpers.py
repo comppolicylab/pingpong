@@ -401,36 +401,3 @@ async def _process_external_logins_to_add() -> None:
                 request.status_notes = str(e)
                 request.save()
                 continue
-
-
-async def _add_instructors_to_jira() -> None:
-    instructors_to_add = scripts_schemas.Instructor.all(
-        formula=match({"Added to Jira": False}), max_records=2
-    )
-
-    async with aiohttp.ClientSession() as session:
-        for instructor in instructors_to_add:
-            try:
-                # Add instructor to Jira
-                result = await server_requests.add_instructor_to_jira(
-                    session,
-                    scripts_schemas.AddInstructorRequest(
-                        email=f"evankassos1607+{instructor.email[0:2]}@gmail.com",
-                        displayName=f"{instructor.first_name} {instructor.last_name}",
-                    ),
-                    _JIRA_URL,
-                    _JIRA_TOKEN,
-                )
-                await server_requests.add_instructor_to_project(
-                    session,
-                    result.accountId,
-                    "1",
-                    _JIRA_URL,
-                    _JIRA_TOKEN,
-                )
-                instructor.jira_account_id = result.accountId
-                instructor.jira = True
-                instructor.save()
-            except Exception as e:
-                logger.warning(f"Error processing instructor: {e}")
-                continue

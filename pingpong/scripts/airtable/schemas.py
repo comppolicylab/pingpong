@@ -118,47 +118,6 @@ class PingPongClass(Model):
         api_key: str = _AIRTABLE_API_KEY
 
 
-class AirtableClass(Model):
-    name = F.TextField("Name")
-    start_date = F.DateField("Start Date")
-    end_date = F.DateField("End Date")
-    student_count = F.NumberField("Student Count")
-    randomization = F.TextField("Randomization Result (Text)")
-    pingpong_class_id = F.LookupField[int]("PingPong ID (from PingPong Class Record)")
-    student_survey_url = F.UrlField("Student Survey Link")
-    jira = F.CheckboxField("Added to Jira")
-    jira_account_id = F.TextField("Jira ProductId")
-
-    class Meta:
-        table_name: str = "Airtable Classes"
-        base_id: str = _AIRTABLE_BASE_ID
-        api_key: str = _AIRTABLE_API_KEY
-
-
-class Instructor(Model):
-    first_name = F.TextField("First Name")
-    last_name = F.TextField("Last Name")
-    email = F.EmailField("Email")
-    classes = F.LinkField("Classes", AirtableClass)
-    deadline_url = F.UrlField("Deadline Survey URL")
-    jira = F.CheckboxField("Added to Jira")
-    jira_account_id = F.TextField("Jira AccountId")
-
-    class Meta:
-        table_name: str = "Instructors"
-        base_id: str = _AIRTABLE_BASE_ID
-        api_key: str = _AIRTABLE_API_KEY
-
-
-class AddInstructorRequest(BaseModel):
-    email: str
-    displayName: str
-
-
-class JiraCustomerResponse(BaseModel):
-    accountId: str
-
-
 class Tool(BaseModel):
     type: str
 
