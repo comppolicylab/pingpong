@@ -1,4 +1,6 @@
+import asyncio
 import openai
+import logging
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +9,8 @@ from .authz import AuthzClient, Relation
 from .models import File
 from .schemas import FileTypeInfo, GenericStatus, FileUploadPurpose
 from .schemas import File as FileSchema
+
+logger = logging.getLogger(__name__)
 
 
 def _file_grants(file: File) -> list[Relation]:
@@ -19,9 +23,7 @@ def _file_grants(file: File) -> list[Relation]:
 
 
 class FileNotFoundException(Exception):
-    def __init__(self, detail: str = "", code: int | None = None):
-        self.code = code
-        self.detail = detail
+    pass
 
 
 async def handle_delete_file(
@@ -44,7 +46,7 @@ async def handle_delete_file(
     int_file_id = int(file_id)  # ensure just in case
     file = await File.get_by_id(session, int_file_id)
     if not file:
-        raise FileNotFoundException(detail="File not found", code=404)
+        raise FileNotFoundException()
     remote_file_id = file.file_id
 
     try:
@@ -56,6 +58,51 @@ async def handle_delete_file(
             detail=f"{file.name} is in use. Remove it from all assistants before deleting!",
         )
     await oai_client.files.delete(remote_file_id)
+    return GenericStatus(status="ok")
+
+
+async def handle_delete_files(
+    session: AsyncSession,
+    authz: AuthzClient,
+    oai_client: openai.AsyncClient,
+    file_ids: list[int],
+) -> GenericStatus:
+    """Handle file deletion for multiple files.
+
+    Args:
+        session (AsyncSession): Database session
+        authz (AuthzClient): Authorization client
+        oai_client (openai.AsyncClient): OpenAI API client
+        file_ids (list[int]): File IDs to delete
+
+    Returns:
+        GenericStatus: Status of the operation
+    """
+    try:
+        deleted_files, missing_ids = await File.delete_multiple(session, file_ids)
+        revoked_grants = []
+        for file in deleted_files:
+            revoked_grants.extend(_file_grants(file))
+        await authz.write(revoke=revoked_grants)
+
+        if missing_ids:
+            logger.warning(
+                f"Could not find the following files for deletion: {missing_ids}"
+            )
+    except IntegrityError:
+        raise HTTPException(
+            status_code=403,
+            detail="One or more files are still in use. Ensure that files aren't used by other assistants before deleting!",
+        )
+
+    delete_tasks = [oai_client.files.delete(file.file_id) for file in deleted_files]
+    results = await asyncio.gather(*delete_tasks, return_exceptions=True)
+    for file, result in zip(deleted_files, results):
+        if isinstance(result, openai.NotFoundError):
+            logger.warning(f"Could not find file {file.file_id} for deletion, ignored.")
+        elif isinstance(result, Exception):
+            raise result
+
     return GenericStatus(status="ok")
 
 

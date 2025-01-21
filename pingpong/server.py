@@ -77,6 +77,7 @@ from .files import (
     FileNotFoundException,
     handle_create_file,
     handle_delete_file,
+    handle_delete_files,
 )
 from .now import NowFn, utcnow
 from .permission import Authz, LoggedIn
@@ -3115,15 +3116,12 @@ async def create_assistant(
 
     try:
         # Delete private files uploaded but not attached to the assistant
-        for file_id in req.deleted_private_files:
-            try:
-                await handle_delete_file(
-                    request.state.db, request.state.authz, openai_client, int(file_id)
-                )
-            except FileNotFoundException as e:
-                logger.error(
-                    "Error deleting file %s from assistant creation: %s", file_id, e
-                )
+        await handle_delete_files(
+            request.state.db,
+            request.state.authz,
+            openai_client,
+            req.deleted_private_files,
+        )
 
         del req.deleted_private_files
 
@@ -3327,15 +3325,12 @@ async def update_assistant(
 
     try:
         # Delete any private files that were removed
-        for file_id in req.deleted_private_files:
-            try:
-                await handle_delete_file(
-                    request.state.db, request.state.authz, openai_client, int(file_id)
-                )
-            except FileNotFoundException as e:
-                logger.error(
-                    "Error deleting file %s from assistant creation: %s", file_id, e
-                )
+        await handle_delete_files(
+            request.state.db,
+            request.state.authz,
+            openai_client,
+            req.deleted_private_files,
+        )
     except Exception as e:
         raise HTTPException(500, f"Error removing private files: {e}")
 
