@@ -644,6 +644,23 @@ class File(Base):
         await session.execute(stmt)
 
     @classmethod
+    async def delete_multiple(
+        cls, session: AsyncSession, ids: list[int]
+    ) -> tuple[list["File"], list[int]]:
+        if not ids:
+            return [], []
+
+        stmt = delete(File).where(File.id.in_(ids)).returning(File)
+        result = await session.execute(stmt)
+
+        deleted_rows = result.fetchall()
+        deleted_files = [row[0] for row in deleted_rows]
+        deleted_obj_ids = {row[0].id for row in deleted_rows}
+        missing_ids = list(set(ids) - deleted_obj_ids)
+
+        return deleted_files, missing_ids
+
+    @classmethod
     async def delete_by_file_id(cls, session: AsyncSession, file_id: str) -> None:
         stmt = delete(File).where(File.file_id == file_id)
         await session.execute(stmt)
