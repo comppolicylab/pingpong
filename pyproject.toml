@@ -1,8 +1,8 @@
 [tool.poetry]
 name = "pingpong"
-version = "0.1.0"
-description = ""
-authors = ["Joe Nudell <jnudell@hks.harvard.edu>"]
+version = "3.2.1"
+description = "A software platform carefully designed for AI-driven learning."
+authors = ["Joe Nudell <jnudell@hks.harvard.edu>", "Evangelos Kassos <github@evangeloskassos.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
