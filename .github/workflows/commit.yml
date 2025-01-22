@@ -50,10 +50,12 @@ jobs:
               try:
                   # Get all tags pointing to the HEAD~n commit
                   tags = subprocess.check_output(['git', 'tag', '--points-at', f'HEAD~{n}'], stderr=subprocess.DEVNULL).decode().strip().split('\n')
+                  print(f'Checking tags on commit HEAD~{n}: {tags}')
 
                   # Filter tags that match our versioning format
                   pattern = r'\d+\-srv\d+-web\d+'
                   matching_tags = [tag for tag in tags if re.match(pattern, tag)]
+                  print(f'Matching versioning tags on commit HEAD~{n}: {matching_tags}')
                   if not matching_tags:
                       print(f'No versioning tags found on commit HEAD~{n}')
                       return get_last_tag(n + 1)
