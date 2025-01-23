@@ -370,28 +370,43 @@ class ThreadName(BaseModel):
     can_generate: bool
 
 
-class AIRelevantThread(BaseModel):
-    thread_id: int
-    quote: str
-
-
 class AIQuestionSummary(BaseModel):
     question: str
-    relevant_threads: list[AIRelevantThread]
+    relevant_threads: list[int]
+
+
+class AIAssistantSummaryOutput(BaseModel):
+    questions: list[AIQuestionSummary]
 
 
 class AIAssistantSummary(BaseModel):
+    assistant_name: str
     questions: list[AIQuestionSummary]
+
+
+class QuestionSummary(BaseModel):
+    question: str
+    relevant_thread_urls: list[str]
 
 
 class AssistantSummary(BaseModel):
-    assistant_id: int
-    questions: list[AIQuestionSummary]
+    assistant_name: str
+    questions: list[QuestionSummary]
 
 
-class AssistantSummaries(BaseModel):
+class ClassSummary(BaseModel):
     class_id: int
+    class_name: str
     assistant_summaries: list[AssistantSummary]
+
+
+class ClassSummaryExport(BaseModel):
+    link: str
+    first_name: str
+    email: str
+    summary_html: str
+    class_name: str
+    time_since: str
 
 
 class ThreadUserMessages(BaseModel):
