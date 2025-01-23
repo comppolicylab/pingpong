@@ -1414,10 +1414,10 @@ async def remove_canvas_connection(
 async def summarize_assistants(
     class_id: str,
     email: str,
-    days: int,
     request: Request,
     tasks: BackgroundTasks,
     openai_client: OpenAIClient,
+    days: int = 7,
 ):
     class_ = await models.Class.get_by_id(request.state.db, int(class_id))
     if not class_:
