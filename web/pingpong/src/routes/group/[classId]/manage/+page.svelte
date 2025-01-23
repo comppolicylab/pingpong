@@ -52,7 +52,8 @@
     ExclamationCircleOutline,
     LockSolid,
     CheckCircleOutline,
-    GlobeOutline
+    GlobeOutline,
+    EyeSlashOutline
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
@@ -180,6 +181,8 @@
 
   $: apiKey = data.apiKey || null;
   let apiProvider = 'openai';
+
+  $: subscriptionInfo = data.subscription || null;
 
   let uploads = writable<FileUploadInfo[]>([]);
   const trashFiles = writable<number[]>([]);
@@ -552,6 +555,39 @@
     }
   };
 
+  const unsubscribeFromSummaries = async () => {
+    const result = await api.unsubscribeFromSummary(fetch, data.class.id);
+    const response = api.expandResponse(result);
+    if (response.error) {
+      sadToast(response.error.detail || 'An unknown error occurred');
+    } else {
+      happyToast(
+        "Successfully unsubscribed from Activity Summaries. You won't receive any more emails."
+      );
+    }
+  };
+
+  const subscribeToSummaries = async () => {
+    const result = await api.subscribeToSummary(fetch, data.class.id);
+    const response = api.expandResponse(result);
+    if (response.error) {
+      sadToast(response.error.detail || 'An unknown error occurred');
+    } else {
+      happyToast(
+        'Successfully subscribed to Activity Summaries. You will receive an email every week.'
+      );
+    }
+  };
+
+  const handleSubscriptionChange = async (event: Event) => {
+    const target = event.target as HTMLInputElement;
+    if (target.checked) {
+      await subscribeToSummaries();
+    } else {
+      await unsubscribeFromSummaries();
+    }
+  };
+
   // The HTMLElement refs of the canvas class options.
   let classNodes: { [key: string]: HTMLElement } = {};
   // Clean up state on navigation. Invalidate data so that any changes
@@ -823,6 +859,43 @@
     </form>
   {/if}
 
+  {#if subscriptionInfo}
+    <div class="grid md:grid-cols-3 gap-x-6 gap-y-8 pt-6">
+      <div>
+        <Heading customSize="text-xl font-bold" tag="h3"
+          ><Secondary class="text-3xl text-black font-normal">Activity Summaries</Secondary
+          ></Heading
+        >
+        <Info>Information about your subscription to this group's Activity Summaries.</Info>
+      </div>
+      <div class="flex flex-col col-span-2 gap-5">
+        {#if makePrivate}
+          <div
+            class="flex col-span-2 items-center rounded-lg text-sm text-white bg-gradient-to-r from-gray-800 to-gray-600 border-gradient-to-r from-gray-800 to-gray-600 p-4"
+          >
+            <EyeSlashOutline class="w-8 h-8 mr-3" strokeWidth="1" />
+            <span> Activity Summaries are not available for private groups. </span>
+          </div>
+        {/if}
+        <div>
+          <Label for="subscribe">Sign up for Activity Summaries</Label>
+          <Helper for="subscribe" color={makePrivate ? 'disabled' : 'gray'}
+            >PingPong will gather all thread activity in your group and send an AI-generated summary
+            with relevant thread links to all Moderators at the end of each week. You can change
+            your selection at any time.
+          </Helper>
+          <Checkbox
+            id="subscribe"
+            color="blue"
+            class="mt-3"
+            checked={data.subscription?.subscribed && !makePrivate}
+            disabled={makePrivate}
+            on:change={handleSubscriptionChange}>Send me weekly Activity Summaries</Checkbox
+          >
+        </div>
+      </div>
+    </div>
+  {/if}
   {#if canViewApiKey || lastRateLimitedAt}
     <div class="grid md:grid-cols-3 gap-x-6 gap-y-8 pt-6">
       <div>

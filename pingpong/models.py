@@ -66,6 +66,8 @@ class UserClassRole(Base):
     lms_type = Column(SQLEnum(schemas.LMSType), nullable=True)
     user = relationship("User", back_populates="classes")
     class_ = relationship("Class", back_populates="users")
+    subscribed_to_summaries = Column(Boolean, server_default="true")
+    last_summary_sent_at = Column(DateTime(timezone=True), nullable=True)
 
     @classmethod
     async def get(
@@ -78,6 +80,89 @@ class UserClassRole(Base):
             )
         )
         return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_user_ids(
+        cls,
+        session: AsyncSession,
+        user_ids: List[int],
+        class_id: int,
+        subscribed_only: bool | None = None,
+        sent_before: datetime | None = None,
+    ) -> List["UserClassRole"]:
+        conditions = [
+            UserClassRole.user_id.in_(user_ids),
+            UserClassRole.class_id == class_id,
+        ]
+        if subscribed_only:
+            conditions.append(UserClassRole.subscribed_to_summaries.is_(True))
+        if sent_before:
+            conditions.append(UserClassRole.last_summary_sent_at <= sent_before)
+
+        stmt = (
+            select(UserClassRole)
+            .options(joinedload(UserClassRole.user))
+            .where(and_(*conditions))
+        )
+        result = await session.execute(stmt)
+        return [row.UserClassRole for row in result]
+
+    @classmethod
+    async def is_subscribed_to_summaries(
+        cls, session: AsyncSession, user_id: int, class_id: int
+    ) -> bool:
+        stmt = select(UserClassRole.subscribed_to_summaries).where(
+            and_(UserClassRole.user_id == user_id, UserClassRole.class_id == class_id)
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def subscribe_to_summaries(
+        cls, session: AsyncSession, user_id: int, class_id: int
+    ):
+        stmt = (
+            update(UserClassRole)
+            .where(
+                and_(
+                    UserClassRole.user_id == user_id, UserClassRole.class_id == class_id
+                )
+            )
+            .values(subscribed_to_summaries=True)
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def unsubscribe_from_summaries(
+        cls, session: AsyncSession, user_id: int, class_id: int
+    ):
+        stmt = (
+            update(UserClassRole)
+            .where(
+                and_(
+                    UserClassRole.user_id == user_id, UserClassRole.class_id == class_id
+                )
+            )
+            .values(subscribed_to_summaries=False)
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def update_last_summary_sent(
+        cls, session: AsyncSession, user_id: int, class_id: int
+    ):
+        """Update the timestamp of when the last summarization message was sent to a user."""
+
+        # There is no PK for this table, so we need to use the user_id and class_id to identify the row to update
+        stmt = (
+            update(UserClassRole)
+            .where(
+                and_(
+                    UserClassRole.user_id == user_id, UserClassRole.class_id == class_id
+                )
+            )
+            .values(last_summary_sent_at=func.now())
+        )
+        await session.execute(stmt)
 
     @classmethod
     async def create(
@@ -1201,6 +1286,7 @@ class Class(Base):
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
     last_rate_limited_at = Column(DateTime(timezone=True), nullable=True)
+    last_summary_sent_at = Column(DateTime(timezone=True), nullable=True)
 
     @classmethod
     async def get_members(
@@ -1504,6 +1590,20 @@ class Class(Base):
         await session.execute(stmt)
 
     @classmethod
+    async def update_last_summary_sent(
+        cls,
+        session: AsyncSession,
+        class_id: int,
+    ) -> None:
+        """Update the timestamp of when summarizations were last sent."""
+        stmt = (
+            update(Class)
+            .where(Class.id == class_id)
+            .values(last_summary_sent_at=func.now(), updated=Class.updated)
+        )
+        await session.execute(stmt)
+
+    @classmethod
     async def get_all_to_sync(
         cls,
         session: AsyncSession,
@@ -1614,6 +1714,20 @@ class Class(Base):
             .values(last_rate_limited_at=func.now())
         )
         await session.execute(stmt)
+
+    @classmethod
+    async def get_all_classes_to_summarize(
+        cls, session: AsyncSession, before: datetime | None = None
+    ) -> AsyncGenerator["Class", None]:
+        """Get all classes that need summarization."""
+        condition = Class.private.is_(False)
+        if before:
+            condition = and_(condition, Class.last_summary_sent_at < before)
+        stmt = select(Class).where(condition)
+        result = await session.execute(stmt)
+
+        for row in result:
+            yield row.Class
 
     async def delete(self, session: AsyncSession) -> None:
         self.institution = None

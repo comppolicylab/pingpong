@@ -683,6 +683,35 @@ export const deleteClass = async (f: Fetcher, classId: number) => {
 };
 
 /**
+ * Information about a summary subscription.
+ */
+
+export type SummarySubscription = {
+  subscribed: boolean;
+};
+
+/**
+ * Get the summary subscription status for a class.
+ */
+export const getSummarySubscription = async (f: Fetcher, classId: number) => {
+  return await GET<never, SummarySubscription>(f, `class/${classId}/summarize/subscription`);
+};
+
+/**
+ * Subscribe to the class summary.
+ */
+export const subscribeToSummary = async (f: Fetcher, classId: number) => {
+  return await POST<never, GenericStatus>(f, `class/${classId}/summarize/subscription`);
+};
+
+/**
+ * Unsubscribe from the class summary.
+ */
+export const unsubscribeFromSummary = async (f: Fetcher, classId: number) => {
+  return await DELETE<never, GenericStatus>(f, `class/${classId}/summarize/subscription`);
+};
+
+/**
  * Api key from the server.
  */
 export type ApiKey = {

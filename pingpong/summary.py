@@ -1,5 +1,7 @@
 import openai
+import logging
 from pingpong.auth import generate_auth_link
+from .authz import AuthzClient
 from pingpong.config import config
 from pingpong.invite import send_summary
 import pingpong.models as models
@@ -19,25 +21,103 @@ from pingpong.schemas import (
     TopicSummary,
 )
 
+logger = logging.getLogger(__name__)
 
-async def export_class_summary_task(
+
+async def send_class_summary_for_class_task(
+    cli: openai.AsyncClient,
+    class_id: int,
+    after: datetime,
+    nowfn: NowFn = utcnow,
+    summary_type: str | None = None,
+    summary_email_header: str | None = None,
+) -> None:
+    await config.authz.driver.init()
+    async with config.authz.driver.get_client() as c:
+        async with config.db.driver.async_session() as session:
+            await send_class_summary_for_class(
+                cli,
+                session,
+                c,
+                class_id,
+                after,
+                nowfn,
+                summary_type,
+                summary_email_header,
+            )
+
+
+async def send_class_summary_for_class(
+    cli: openai.AsyncClient,
+    session: AsyncSession,
+    authz: AuthzClient,
+    class_id: int,
+    after: datetime,
+    nowfn: NowFn = utcnow,
+    summary_type: str | None = None,
+    summary_email_header: str | None = None,
+) -> None:
+    class_ = await models.Class.get_by_id(session, class_id)
+
+    if not class_:
+        raise ValueError(f"Group with ID {class_id} not found.")
+
+    if class_.private:
+        raise ValueError(
+            f"Group with ID {class_id} is private. Activity Summaries are not available for private groups."
+        )
+
+    user_ids = await authz.list_entities(
+        f"class:{class_id}",
+        "can_receive_summaries",
+        "user",
+    )
+
+    await send_class_summary_to_class_users(
+        cli,
+        session,
+        class_id,
+        user_ids,
+        after,
+        nowfn,
+        summary_type,
+        summary_email_header,
+        subscribed_only=True,
+        sent_before=class_.last_summary_sent_at,
+    )
+
+
+async def send_class_summary_to_user_task(
     cli: openai.AsyncClient,
     class_id: int,
     user_id: int,
     after: datetime,
     nowfn: NowFn = utcnow,
+    summary_type: str | None = None,
+    summary_email_header: str | None = None,
 ) -> None:
     async with config.db.driver.async_session() as session:
-        await export_class_summary(cli, session, class_id, user_id, after, nowfn)
+        await send_class_summary_to_user(
+            cli,
+            session,
+            class_id,
+            user_id,
+            after,
+            nowfn,
+            summary_type,
+            summary_email_header,
+        )
 
 
-async def export_class_summary(
+async def send_class_summary_to_user(
     cli: openai.AsyncClient,
     session: AsyncSession,
     class_id: int,
     user_id: int,
     after: datetime,
     nowfn: NowFn = utcnow,
+    summary_type: str | None = None,
+    summary_email_header: str | None = None,
 ) -> None:
     class_ = await models.Class.get_by_id(session, class_id)
     if not class_:
@@ -47,38 +127,135 @@ async def export_class_summary(
     if not user:
         raise ValueError(f"User with ID {user_id} not found")
 
-    ai_assistant_summaries = await generate_assistant_summaries(
-        cli, session, class_.id, after
+    summary_html = await generate_class_summary(
+        cli, session, class_.id, class_.name, after
     )
-    if not ai_assistant_summaries:
+    if not summary_html:
         return
 
-    class_summary = convert_to_class_summary(
-        class_.id, class_.name, ai_assistant_summaries
-    )
-    summary_html = generate_summary_html_from_assistant_summaries(
-        class_summary.assistant_summaries
+    await send_class_summary(
+        summary_html,
+        class_.name,
+        class_.id,
+        user.id,
+        user.first_name or user.display_name or "Moderator",
+        user.email,
+        after,
+        nowfn,
+        summary_type,
+        summary_email_header,
     )
 
+
+async def send_class_summary_to_class_users(
+    cli: openai.AsyncClient,
+    session: AsyncSession,
+    class_id: int,
+    user_ids: list[int],
+    after: datetime,
+    nowfn: NowFn = utcnow,
+    summary_type: str | None = None,
+    summary_email_header: str | None = None,
+    subscribed_only: bool | None = None,
+    sent_before: datetime | None = None,
+) -> None:
+    class_ = await models.Class.get_by_id(session, class_id)
+    if not class_:
+        raise ValueError(f"Class with ID {class_id} not found")
+
+    summary_html = await generate_class_summary(
+        cli, session, class_.id, class_.name, after
+    )
+    if not summary_html:
+        return
+
+    user_roles = await models.UserClassRole.get_by_user_ids(
+        session, user_ids, class_id, subscribed_only, sent_before
+    )
+
+    for ucr in user_roles:
+        try:
+            await send_class_summary(
+                summary_html,
+                class_.name,
+                class_.id,
+                ucr.user_id,
+                ucr.user.first_name or ucr.user.display_name or "Moderator",
+                ucr.user.email,
+                after,
+                nowfn,
+                summary_type,
+                summary_email_header,
+            )
+
+            await models.UserClassRole.update_last_summary_sent(
+                session, ucr.user_id, class_id
+            )
+
+            # Commit for every user so we don't lose progress if we hit an error
+            session.commit()
+
+        except Exception as e:
+            logger.error(f"Failed to send summary to user {ucr.user_id}: {e}")
+
+    # Update last summary sent for all users
+    await models.Class.update_last_summary_sent(session, class_id)
+
+
+async def send_class_summary(
+    summary_html: str,
+    class_name: str,
+    class_id: int,
+    user_id: int,
+    user_name: str,
+    user_email: str,
+    after: datetime,
+    nowfn: NowFn = utcnow,
+    summary_type: str | None = None,
+    summary_email_header: str | None = None,
+) -> None:
     magic_link = generate_auth_link(
-        user.id,
+        user_id,
         expiry=86_400 * 7,
         nowfn=nowfn,
-        redirect=f"/group/{class_.id}/manage",
+        redirect=f"/group/{class_id}/manage",
     )
 
     days_before_today = (nowfn() - after).days
 
     export_options = ClassSummaryExport(
-        class_name=class_.name,
+        class_name=class_name,
         summary_html=summary_html,
         link=magic_link,
-        first_name=user.first_name or user.display_name or "Moderator",
-        email=user.email,
+        first_name=user_name,
+        email=user_email,
         time_since=f"the last {days_before_today} days",
+        summary_type=summary_type,
+        title=summary_email_header,
     )
 
     await send_summary(config.email.sender, export_options)
+
+
+async def generate_class_summary(
+    cli: openai.AsyncClient,
+    session: AsyncSession,
+    class_id: int,
+    class_name: str,
+    after: datetime,
+) -> str | None:
+    ai_assistant_summaries = await generate_assistant_summaries(
+        cli, session, class_id, after
+    )
+    if not ai_assistant_summaries:
+        return None
+
+    class_summary = convert_to_class_summary(
+        class_id, class_name, ai_assistant_summaries
+    )
+    return generate_summary_html_from_assistant_summaries(
+        class_summary.assistant_summaries
+    )
 
 
 async def generate_assistant_summaries(
@@ -142,7 +319,9 @@ def convert_to_class_summary(
             ]
             topics.append(
                 TopicSummary(
-                    topic=f"{topic_summary.topic.topic_label}: {topic_summary.topic.challenge} {topic_summary.topic.confusion_example or ''}",
+                    topic_label=topic_summary.topic.topic_label,
+                    challenge=topic_summary.topic.challenge,
+                    confusion_example=topic_summary.topic.confusion_example,
                     relevant_thread_urls=relevant_thread_urls,
                 )
             )
@@ -262,7 +441,7 @@ def generate_summary_html_from_assistant_summaries(
             """
             for item in summary.topics:
                 summary_html += f"""
-                <li>{item.topic}</li>
+                <li><b>{item.topic_label}</b>: {item.challenge} {item.confusion_example or ''}</li>
                 """
                 if item.relevant_thread_urls:
                     summary_html += """

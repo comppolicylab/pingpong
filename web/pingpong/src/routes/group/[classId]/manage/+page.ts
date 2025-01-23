@@ -40,7 +40,12 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
       canViewApiKey: { target_type: 'class', target_id: classId, relation: 'can_view_api_key' },
       canViewUsers: { target_type: 'class', target_id: classId, relation: 'can_view_users' },
       canDelete: { target_type: 'class', target_id: classId, relation: 'can_delete' },
-      canManageUsers: { target_type: 'class', target_id: classId, relation: 'can_manage_users' }
+      canManageUsers: { target_type: 'class', target_id: classId, relation: 'can_manage_users' },
+      canReceiveSummaries: {
+        target_type: 'class',
+        target_id: classId,
+        relation: 'can_receive_summaries'
+      }
     })
   ]);
 
@@ -59,9 +64,22 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
     }
   }
 
+  let subscription: api.SummarySubscription | undefined;
+  if (grants.canReceiveSummaries) {
+    const summarySubscriptionResponse = api.expandResponse(
+      await api.getSummarySubscription(fetch, classId)
+    );
+    if (summarySubscriptionResponse.error) {
+      console.error('Error fetching summary subscription:', summarySubscriptionResponse.error);
+    } else {
+      subscription = summarySubscriptionResponse.data;
+    }
+  }
+
   return {
     apiKey: api_key,
     grants,
-    class: classDataResponse.data
+    class: classDataResponse.data,
+    subscription: subscription
   };
 };

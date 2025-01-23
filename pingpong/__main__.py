@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Optional
+from typing import Callable, Dict, Optional
 import webbrowser
 import click
 import alembic
@@ -8,6 +8,7 @@ import alembic.command
 import alembic.config
 
 from datetime import datetime, timedelta
+from flask import json
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -33,13 +34,13 @@ from pingpong.merge import (
     merge,
 )
 from pingpong.now import croner, utcnow
-from pingpong.summary import export_class_summary
+from pingpong.summary import send_class_summary_for_class
 
 from .auth import encode_auth_token
 from .bg import get_server
 from .canvas import canvas_sync_all
 from .config import config
-from .models import Base, User
+from .models import Base, User, Class
 from .authz.admin_migration import remove_class_admin_perms
 
 from sqlalchemy import inspect
@@ -64,6 +65,11 @@ def lms() -> None:
 
 @cli.group("export")
 def export() -> None:
+    pass
+
+
+@cli.group("schedule")
+def schedule() -> None:
     pass
 
 
@@ -458,30 +464,131 @@ def export_threads(class_id: int, user_email: str) -> None:
     asyncio.run(_export_threads())
 
 
-@export.command("summarize")
-@click.argument("class_id", type=int)
-@click.argument("email")
-@click.argument("days", type=int, default=7)
-def summarize(class_id: int, email: str, days: int) -> None:
-    async def _summarize() -> None:
-        async with config.db.driver.async_session() as session:
-            user = await User.get_by_email_sso(session, email, "email", email)
-            if not user:
-                raise ValueError(f"User with email {email} not found")
+async def _send_activity_summaries(
+    days: int = 7, before: datetime | None = None
+) -> None:
+    async with config.db.driver.async_session() as session:
+        async with config.authz.driver.get_client() as c:
+            async for class_ in Class.get_all_classes_to_summarize(session, before):
+                try:
+                    openai_client = await get_openai_client_by_class_id(
+                        session, class_.id
+                    )
+                    after = utcnow() - timedelta(days=days)
+                    await send_class_summary_for_class(
+                        openai_client,
+                        session,
+                        c,
+                        class_.id,
+                        after,
+                        summary_type="weekly summary",
+                        summary_email_header="Your weekly summary is in.",
+                    )
+                except GetOpenAIClientException as e:
+                    logger.error(f"Error getting OpenAI client: {e.detail}")
+                    continue
+                except Exception as e:
+                    logger.error(f"Error sending class summary: {e}")
+                    continue
 
+
+@export.command("batch_send_activity_summaries")
+@click.option("--crontime", default="0 15 * * 0")
+@click.option("--host", default="localhost")
+@click.option("--port", default=8001)
+@click.option("--days", default=7)
+def batch_send_activity_summaries(
+    crontime: str, host: str, port: int, days: int
+) -> None:
+    """
+    Run the batch_send_activity_summaries command in a background server.
+    """
+    server = get_server(host=host, port=port)
+
+    async def _batch_send_activity_summaries():
+        before = None
+        async for _ in croner(crontime, logger=logger):
             try:
-                openai_client = await get_openai_client_by_class_id(session, class_id)
-            except GetOpenAIClientException as e:
-                raise ValueError(f"Error getting OpenAI client: {e.detail}")
+                await _send_activity_summaries(days, before)
+                logger.info(f"Activities sent successfully at {datetime.now()}")
+                before = utcnow()
+            except Exception as e:
+                logger.error(f"Error during sync: {e}")
 
-            # Calculate date X days ago
-            after = utcnow() - timedelta(days=days)
+    # Run the Uvicorn server in the background
+    with server.run_in_thread():
+        asyncio.run(_batch_send_activity_summaries())
 
-            await export_class_summary(
-                openai_client, session, class_id, user.id, after=after
-            )
 
-    asyncio.run(_summarize())
+# Map of available functions
+FUNCTIONS_MAP: Dict[str, Callable] = {
+    "batch_send_activity_summaries": lambda days, before=None: _send_activity_summaries(
+        days, before
+    ),
+    "sync_pingpong_with_lms": _lms_sync_all,
+}
+
+
+@schedule.command("run_dynamic_tasks")
+@click.option("--host", default="localhost")
+@click.option("--port", default=8001)
+@click.option(
+    "--tasks",
+    multiple=True,
+    help=(
+        "Tasks to schedule in the format "
+        "'function_name:cron_schedule:arguments'. "
+        "Arguments should be a JSON string. Multiple tasks can be passed."
+    ),
+)
+def run_dynamic_tasks_with_args(host: str, port: int, tasks: list[str]) -> None:
+    """
+    Dynamically run tasks with arguments based on provided function names and their cron schedules.
+    """
+    server = get_server(host=host, port=port)
+
+    async def _execute_task(function_name: str, cron_schedule: str, args: dict):
+        """
+        Execute a given task based on its name, cron schedule, and provided arguments.
+        """
+        if function_name not in FUNCTIONS_MAP:
+            logger.error(f"Function '{function_name}' is not recognized.")
+            return
+
+        func = FUNCTIONS_MAP[function_name]
+        async for _ in croner(cron_schedule):
+            try:
+                await func(**args)
+                logger.info(
+                    f"Task '{function_name}' completed successfully at {datetime.now()}"
+                )
+            except Exception as e:
+                logger.error(f"Error in task '{function_name}': {e}")
+
+    async def _parse_tasks():
+        task_coroutines = []
+        for task in tasks:
+            try:
+                parts = task.split(":", 2)
+                if len(parts) != 3:
+                    raise ValueError(
+                        f"Invalid task format: '{task}'. Expected 'function_name:cron_schedule:arguments'."
+                    )
+
+                function_name, cron_schedule, args_json = parts
+                args = json.loads(args_json)
+                task_coroutines.append(
+                    _execute_task(function_name, cron_schedule, args)
+                )
+            except Exception as e:
+                raise ValueError(f"Failed to parse task '{task}': {e}")
+
+        # Run all tasks concurrently
+        await asyncio.gather(*task_coroutines)
+
+    # Run the Uvicorn server in the background
+    with server.run_in_thread():
+        asyncio.run(_parse_tasks())
 
 
 if __name__ == "__main__":
