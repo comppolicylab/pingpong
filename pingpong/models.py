@@ -969,10 +969,21 @@ class Assistant(Base):
     async def async_get_by_class_id(
         cls, session: AsyncSession, class_id: int
     ) -> AsyncGenerator[int, None]:
-        stmt = select(Assistant).where(Assistant.class_id == int(class_id))
+        stmt = select(Assistant.id).where(Assistant.class_id == int(class_id))
         result = await session.execute(stmt)
         for row in result:
-            yield row.Assistant.id
+            yield row.id
+
+    @classmethod
+    async def async_get_id_name_by_class_id(
+        cls, session: AsyncSession, class_id: int
+    ) -> AsyncGenerator[tuple[int, str], None]:
+        stmt = select(Assistant.id, Assistant.name).where(
+            Assistant.class_id == int(class_id)
+        )
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.id, row.name
 
     @classmethod
     async def get_all_by_id(

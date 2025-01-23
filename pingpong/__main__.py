@@ -33,7 +33,7 @@ from pingpong.merge import (
     merge,
 )
 from pingpong.now import croner, utcnow
-from pingpong.summary import generate_assistant_summaries
+from pingpong.summary import export_class_summary
 
 from .auth import encode_auth_token
 from .bg import get_server
@@ -460,10 +460,15 @@ def export_threads(class_id: int, user_email: str) -> None:
 
 @export.command("summarize")
 @click.argument("class_id", type=int)
+@click.argument("email")
 @click.argument("days", type=int, default=7)
-def summarize(class_id: int, days: int) -> None:
+def summarize(class_id: int, email: str, days: int) -> None:
     async def _summarize() -> None:
         async with config.db.driver.async_session() as session:
+            user = await User.get_by_email_sso(session, email, "email", email)
+            if not user:
+                raise ValueError(f"User with email {email} not found")
+
             try:
                 openai_client = await get_openai_client_by_class_id(session, class_id)
             except GetOpenAIClientException as e:
@@ -472,10 +477,9 @@ def summarize(class_id: int, days: int) -> None:
             # Calculate date X days ago
             after = utcnow() - timedelta(days=days)
 
-            result = await generate_assistant_summaries(
-                openai_client, session, class_id, after=after
+            await export_class_summary(
+                openai_client, session, class_id, user.id, after=after
             )
-            logger.info(result.model_dump_json(indent=4))
 
     asyncio.run(_summarize())
 

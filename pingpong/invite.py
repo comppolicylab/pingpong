@@ -1,6 +1,7 @@
 from .email import EmailSender
-from .schemas import CreateInvite, DownloadExport
+from .schemas import ClassSummaryExport, CreateInvite, DownloadExport
 from .template import email_template as message_template
+from .template import summary_template
 from .time import convert_seconds
 
 
@@ -60,6 +61,26 @@ async def send_export_download(
             "link": invite.link,
             "email": invite.email,
             "legal_text": "because you requested a data export from PingPong",
+        }
+    )
+
+    await sender.send(invite.email, subject, message)
+
+
+async def send_summary(
+    sender: EmailSender,
+    invite: ClassSummaryExport,
+):
+    subject = f"Your weekly summary for {invite.class_name}"
+
+    message = summary_template.substitute(
+        {
+            "name": invite.first_name,
+            "courseName": invite.class_name,
+            "summary": invite.summary_html,
+            "link": invite.link,
+            "time": invite.time_since,
+            "legal_text": f"you are a Moderator in {invite.class_name}. You can change your notification settings on the Manage Group page on PingPong",
         }
     )
 
