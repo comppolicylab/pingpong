@@ -115,6 +115,7 @@ jobs:
               return f"{new_build}-srv{new_srv}-web{new_web}", new_srv, new_web
 
           try:
+              subprocess.run(['git', 'fetch', '--tags'], check=True)
               changed_files = os.environ['CHANGED_FILES_STRING'].split(" ")
               web_update = any('web/' in file for file in changed_files)
               server_update = any(file.startswith(('pingpong/', 'saml/', 'alembic/')) or file in ['poetry.lock', 'pyproject.toml'] for file in changed_files)
