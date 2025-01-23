@@ -170,10 +170,16 @@ async def get_thread_user_messages(
 
 
 summarization_prompt = """
-Extract key topics from a list of user queries in chatbot threads provided in the specified JSON schema. If there are no valuable topics or threads for an assistant, do not return any results. Ensure that no single thread ID is listed more than once for the same topic.
+Identify the 2-3 most common topics or issues from a list of user questions that members are struggling with. Prioritize the most frequent topics first.
+
+1. **Label the Topic**: Provide a clear, concise label (2-4 words) for each identified topic or issue.
+2. **Specify the Challenge**: Clearly identify the specific aspect of the topic that members find challenging.
+3. **Example of Confusion**: If possible, include a concrete example of member confusion to illustrate the issue.
+4. **Report Patterns**: Only report patterns that appear in at least 2 different questions without inferring additional issues.
+
+Present each issue in the order of frequency, with the most frequent first. Use language that an instructor can easily understand.
 
 # Input Format
-
 The user threads will be provided in the following JSON schema:
 ```json
 {
@@ -186,27 +192,22 @@ The user threads will be provided in the following JSON schema:
 }
 ```
 
-# Steps
-
-1. **Identify Key Topics**: Examine the list of query threads to recognize recurring themes or topics that users discussed.
-
-2. **Gather Thread IDs**: Record the thread IDs of threads that contribute to each significant topic identified.
-
-3. **Organize and Limit**: Structure the findings into a list of thread IDs. Return a maximum of 5 thread IDs per topic.
-
-4. **Check for Results**: Ensure there are threads with valuable topics before returning results. If no such threads or topics exist, return nothing.
-
 # Output Format
+For each identified topic, use the format: `[Topic Label]: [Specific challenge members face]. [Optional: Brief example of confusion]`
 
-The output must be a list of integer thread IDs. If no valuable topics or threads are found, return an empty array.
+Example Topics:
+- **Matrix Multiplication Rules**: Members struggle with determining valid matrix dimensions for multiplication. Example: Confusion about why 3x4 and 3x2 matrices can't be multiplied.
+- **Null Space Concept**: Difficulty understanding what the null space represents and how to find it. Multiple questions focus on basic definition and computation.
+- **Vector Space Foundations**: Confusion about distinguishing between different vector spaces, particularly column space vs null space.
+
+# Steps
+1. **Identify Topics**: Review the list of member questions to identify recurring topics or issues.
+2. **Determine Frequency**: Ensure each topic appears in at least two different questions to be considered significant.
+3. **Draft Responses**: For each topic, draft a response using the detailed format above, including examples where applicable.
 
 # Notes
-
-- Ensure each entry in the output accurately reflects the threads associated with the recognized user topics.
-- Each list of thread IDs should distinctly capture the source threads of each theme or topic without extraneous detail.
-- Adhere to constraints: max 5 thread IDs per recognized topic.
-- Ensure that no single thread ID is listed more than once for the same topic.
-- Do not output any JSON if there are no valuable topics or threads.
+- Only consider patterns that appear directly in the questions without making assumptions.
+- Ensure clarity and specificity in labeling and explaining challenges encountered by members.
 """
 
 
