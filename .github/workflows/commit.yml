@@ -49,8 +49,25 @@ jobs:
                   raise ValueError('No versioning tags found on the last 10 commits')
               try:
                   # Get all tags pointing to the HEAD~n commit
-                  tags = subprocess.check_output(['git', 'tag', '--points-at', f'HEAD~{n}'], stderr=subprocess.DEVNULL).decode().strip().split('\n')
-                  print(f'Checking tags on commit HEAD~{n}: {tags}')
+                  tags = []
+                  try:
+                      # Get the shorthand Git SHA of HEAD~{n}
+                      sha_output = subprocess.check_output(
+                          ['git', 'rev-parse', '--short', f'HEAD~{n}'],
+                          stderr=subprocess.DEVNULL
+                      )
+                      sha = sha_output.decode().strip()
+                      print(f"Shorthand Git SHA of HEAD~{n}: {sha}")
+                      output = subprocess.check_output(
+                          ['git', 'tag', '--points-at', f'HEAD~{n}'],
+                          stderr=subprocess.DEVNULL
+                      )
+                      decoded_output = output.decode().strip()
+                      print("Raw Output:", decoded_output)  # Print the raw decoded output
+                      tags = decoded_output.split('\n')  # Split the output into a list of tags
+                      print("Tags List:", tags)  # Print the list of tags
+                  except subprocess.CalledProcessError as e:
+                      print(f"Error occurred: {e}")
 
                   # Filter tags that match our versioning format
                   pattern = r'\d+\-srv\d+-web\d+'
