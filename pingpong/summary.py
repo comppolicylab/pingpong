@@ -20,6 +20,17 @@ from pingpong.schemas import (
 )
 
 
+async def export_class_summary_task(
+    cli: openai.AsyncClient,
+    class_id: int,
+    user_id: int,
+    after: datetime,
+    nowfn: NowFn = utcnow,
+) -> None:
+    async with config.db.driver.async_session() as session:
+        await export_class_summary(cli, session, class_id, user_id, after, nowfn)
+
+
 async def export_class_summary(
     cli: openai.AsyncClient,
     session: AsyncSession,
