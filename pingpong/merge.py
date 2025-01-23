@@ -176,21 +176,22 @@ async def merge_lms_users(
 async def merge_external_logins(
     session: AsyncSession, new_user_id: int, old_user_id: int
 ) -> None:
-    stmt = select(ExternalLogin).where(ExternalLogin.user_id == old_user_id)
-    old_logins = await session.scalars(stmt)
+    delete_stmt = (
+        delete(ExternalLogin)
+        .where(ExternalLogin.user_id == old_user_id)
+        .returning(ExternalLogin.provider, ExternalLogin.identifier)
+    )
+    result = await session.execute(delete_stmt)
+    old_logins = result.fetchall()
 
-    for old_login in old_logins:
+    for provider, identifier in old_logins:
         # Use the create_or_update method to migrate each login to the new user
         await ExternalLogin.create_or_update(
             session,
             user_id=new_user_id,
-            provider=old_login.provider,
-            identifier=old_login.identifier,
+            provider=provider,
+            identifier=identifier,
         )
-
-    # Remove all external logins associated with the old user
-    delete_stmt = delete(ExternalLogin).where(ExternalLogin.user_id == old_user_id)
-    await session.execute(delete_stmt)
 
 
 async def merge_user_files(

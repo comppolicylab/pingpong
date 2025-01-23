@@ -19,6 +19,7 @@ from fastapi import (
     Header,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from pydantic import PositiveInt
 
 from pingpong.artifacts import ArtifactStoreError
 from pingpong.emails import (
@@ -535,6 +536,18 @@ async def delete_email_from_user(user_id: str, email: str, request: Request):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+    return {"status": "ok"}
+
+
+@v1.post(
+    "/user/merge",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.GenericStatus,
+)
+async def merge_users(
+    old_user_id: PositiveInt, new_user_id: PositiveInt, request: Request
+):
+    await merge(request.state.db, request.state.authz, new_user_id, old_user_id)
     return {"status": "ok"}
 
 
