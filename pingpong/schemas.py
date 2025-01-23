@@ -370,28 +370,34 @@ class ThreadName(BaseModel):
     can_generate: bool
 
 
-class AIQuestionSummary(BaseModel):
-    question: str
+class AITopic(BaseModel):
+    topic_label: str
+    challenge: str
+    confusion_example: str | None
+
+
+class AITopicSummary(BaseModel):
+    topic: AITopic
     relevant_threads: list[int]
 
 
 class AIAssistantSummaryOutput(BaseModel):
-    questions: list[AIQuestionSummary]
+    topics: list[AITopicSummary]
 
 
 class AIAssistantSummary(BaseModel):
     assistant_name: str
-    questions: list[AIQuestionSummary]
+    topics: list[AITopicSummary]
 
 
-class QuestionSummary(BaseModel):
-    question: str
+class TopicSummary(BaseModel):
+    topic: str
     relevant_thread_urls: list[str]
 
 
 class AssistantSummary(BaseModel):
     assistant_name: str
-    questions: list[QuestionSummary]
+    topics: list[TopicSummary]
 
 
 class ClassSummary(BaseModel):

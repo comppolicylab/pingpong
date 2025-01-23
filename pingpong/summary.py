@@ -14,9 +14,9 @@ from pingpong.schemas import (
     AssistantSummary,
     ClassSummary,
     ClassSummaryExport,
-    QuestionSummary,
     ThreadUserMessages,
     ThreadsToSummarize,
+    TopicSummary,
 )
 
 
@@ -101,11 +101,11 @@ async def generate_assistant_summaries(
             summaries.append(
                 AIAssistantSummary(
                     assistant_name=name,
-                    questions=assistant_summary.questions if assistant_summary else [],
+                    topics=assistant_summary.topics if assistant_summary else [],
                 )
             )
         else:
-            summaries.append(AIAssistantSummary(assistant_name=name, questions=[]))
+            summaries.append(AIAssistantSummary(assistant_name=name, topics=[]))
 
     if not current_period_contains_threads:
         return None
@@ -122,16 +122,16 @@ def convert_to_class_summary(
     assistant_summaries = []
 
     for ai_assistant_summary in ai_assistant_summaries:
-        # Convert AIQuestionSummary to QuestionSummary
-        questions = []
-        for question_summary in ai_assistant_summary.questions:
+        # Convert AITopicSummary to TopicSummary
+        topics = []
+        for topic_summary in ai_assistant_summary.topics:
             relevant_thread_urls = [
                 convert_thread_id_to_url(thread_id, class_id)
-                for thread_id in question_summary.relevant_threads
+                for thread_id in topic_summary.relevant_threads
             ]
-            questions.append(
-                QuestionSummary(
-                    question=question_summary.question,
+            topics.append(
+                TopicSummary(
+                    topic=f"{topic_summary.topic.topic_label}: {topic_summary.topic.challenge} {topic_summary.topic.confusion_example or ''}",
                     relevant_thread_urls=relevant_thread_urls,
                 )
             )
@@ -139,7 +139,7 @@ def convert_to_class_summary(
         # Build AssistantSummary
         assistant_summaries.append(
             AssistantSummary(
-                assistant_name=ai_assistant_summary.assistant_name, questions=questions
+                assistant_name=ai_assistant_summary.assistant_name, topics=topics
             )
         )
 
@@ -170,14 +170,14 @@ async def get_thread_user_messages(
 
 
 summarization_prompt = """
-Identify the 2-3 most common topics or issues from a list of user questions that members are struggling with. Prioritize the most frequent topics first.
+Analyze user questions to identify 2-3 common topics or issues members struggle with. Prioritize frequent topics and return results without exceeding 5 relevant threads. If there are no valuable topics or threads, do not return any results. Ensure that no single thread ID is listed more than once for the same topic.
 
 1. **Label the Topic**: Provide a clear, concise label (2-4 words) for each identified topic or issue.
 2. **Specify the Challenge**: Clearly identify the specific aspect of the topic that members find challenging.
-3. **Example of Confusion**: If possible, include a concrete example of member confusion to illustrate the issue.
-4. **Report Patterns**: Only report patterns that appear in at least 2 different questions without inferring additional issues.
+3. **Example of Confusion**: Include a summarized example of member confusion without quotes, or return None if no real confusion is evident.
+4. **Report Patterns**: Only report patterns appearing in at least 2 different questions without inferring additional issues.
 
-Present each issue in the order of frequency, with the most frequent first. Use language that an instructor can easily understand.
+Present each issue by frequency, with the most frequent first, using language an instructor can understand.
 
 # Input Format
 The user threads will be provided in the following JSON schema:
@@ -192,22 +192,25 @@ The user threads will be provided in the following JSON schema:
 }
 ```
 
-# Output Format
-For each identified topic, use the format: `[Topic Label]: [Specific challenge members face]. [Optional: Brief example of confusion]`
-
-Example Topics:
-- **Matrix Multiplication Rules**: Members struggle with determining valid matrix dimensions for multiplication. Example: Confusion about why 3x4 and 3x2 matrices can't be multiplied.
-- **Null Space Concept**: Difficulty understanding what the null space represents and how to find it. Multiple questions focus on basic definition and computation.
-- **Vector Space Foundations**: Confusion about distinguishing between different vector spaces, particularly column space vs null space.
+# Example Topics
+{"topic_label": "Matrix Multiplication Rules", "challenge": "Members struggle with determining valid matrix dimensions for multiplication.", "confusion_example" : "Summarized confusion about matrix dimension compatibility."}
+{"topic_label": "Vector Space Foundations", "challenge": "Confusion about distinguishing between different vector spaces, particularly column space vs null space.", "confusion_example" : "None"}
+{"topic_label": "Matrix Multiplication Rules", "challenge": "Difficulty understanding what the null space represents and how to find it.", "confusion_example" : "Summarized confusion on basic definition and computation."}
 
 # Steps
 1. **Identify Topics**: Review the list of member questions to identify recurring topics or issues.
 2. **Determine Frequency**: Ensure each topic appears in at least two different questions to be considered significant.
 3. **Draft Responses**: For each topic, draft a response using the detailed format above, including examples where applicable.
 
+# Output Format
+Return up to 5 relevant threads, presenting topics and challenges with concise summarization. Exclude direct quotes in confusion examples.
+
 # Notes
 - Only consider patterns that appear directly in the questions without making assumptions.
 - Ensure clarity and specificity in labeling and explaining challenges encountered by members.
+- No single thread ID should be listed more than once for the same topic.
+- Return None in the absence of real confusion examples.
+- Do not output any JSON if there are no valuable topics or threads.
 """
 
 
@@ -242,13 +245,13 @@ def generate_summary_html_from_assistant_summaries(
             <div class="summary-tab">{summary.assistant_name}</div>
             <div class="summary-box">
          """
-        if summary.questions:
+        if summary.topics:
             summary_html += """
                <ul>
             """
-            for item in summary.questions:
+            for item in summary.topics:
                 summary_html += f"""
-                <li>{item.question}</li>
+                <li>{item.topic}</li>
                 """
                 if item.relevant_thread_urls:
                     summary_html += """
