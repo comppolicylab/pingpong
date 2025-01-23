@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated, Any, Union
 from aiohttp import ClientResponseError
 import jwt
@@ -28,6 +28,7 @@ from pingpong.emails import (
     validate_email_addresses,
 )
 from pingpong.stats import get_statistics
+from pingpong.summary import export_class_summary_task
 from .animal_hash import process_threads, pseudonym, user_names
 from jwt.exceptions import PyJWTError
 from openai.types.beta.assistant_create_params import ToolResources
@@ -1402,6 +1403,44 @@ async def remove_canvas_connection(
                 detail="We faced an internal error while removing your account.",
             )
 
+    return {"status": "ok"}
+
+
+@v1.get(
+    "/class/{class_id}/summarize",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.GenericStatus,
+)
+async def summarize_assistants(
+    class_id: str,
+    email: str,
+    request: Request,
+    tasks: BackgroundTasks,
+    openai_client: OpenAIClient,
+    days: int = 7,
+):
+    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    if not class_:
+        raise HTTPException(status_code=404, detail="Group not found")
+    if class_.private:
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot create assistant summaries for a private class",
+        )
+    user = await models.User.get_by_email_sso(request.state.db, email, "email", email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Calculate date X days ago
+    after = utcnow() - timedelta(days=days)
+
+    tasks.add_task(
+        export_class_summary_task,
+        openai_client,
+        int(class_id),
+        user.id,
+        after,
+    )
     return {"status": "ok"}
 
 
