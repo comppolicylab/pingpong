@@ -492,13 +492,11 @@ async def _send_activity_summaries(
                 await session.refresh(task)
 
             no_errors = True
-            before = task.last_completed
             if (
                 force_send_cron
                 and task.force_rerun_at
                 and task.force_rerun_at <= utcnow()
             ):
-                before = task.force_rerun_at
                 ts = utcnow()
                 next_forced_run = _get_next_run_time(force_send_cron, ts)
                 task.last_completed = task.force_rerun_at
@@ -508,7 +506,7 @@ async def _send_activity_summaries(
                 await session.refresh(task)
 
             async for class_ in Class.get_all_classes_to_summarize(
-                session, before=before
+                session, before=task.last_completed
             ):
                 try:
                     logger.info(f"Sending summary for class {class_.id}...")
