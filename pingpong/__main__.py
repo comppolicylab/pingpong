@@ -572,14 +572,6 @@ def batch_send_activity_summaries(
         asyncio.run(_batch_send_activity_summaries())
 
 
-async def test_func(mg: str):
-    print("Hello", mg)
-
-
-async def test_func2(mg: str | None = None):
-    print("World")
-
-
 FUNCTIONS_MAP: Dict[str, Callable] = {
     "batch_send_activity_summaries": _send_activity_summaries,
     "sync_pingpong_with_lms": _lms_sync_all,
