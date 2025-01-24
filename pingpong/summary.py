@@ -173,6 +173,7 @@ async def send_class_summary_to_class_users(
         session, user_ids, class_id, subscribed_only, sent_before
     )
 
+    no_errors = True
     for ucr in user_roles:
         try:
             await send_class_summary(
@@ -197,9 +198,12 @@ async def send_class_summary_to_class_users(
 
         except Exception as e:
             logger.error(f"Failed to send summary to user {ucr.user_id}: {e}")
+            no_errors = False
+            continue
 
-    # Update last summary sent for all users
-    await models.Class.update_last_summary_sent(session, class_id)
+    if no_errors:
+        # Update last summary sent for all users
+        await models.Class.update_last_summary_sent(session, class_id)
 
 
 async def send_class_summary(

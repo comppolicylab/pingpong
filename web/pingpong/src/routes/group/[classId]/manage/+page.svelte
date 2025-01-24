@@ -70,6 +70,7 @@
   import OpenAILogo from '$lib/components/OpenAILogo.svelte';
   import AzureLogo from '$lib/components/AzureLogo.svelte';
   import OpenAiLogo from '$lib/components/OpenAILogo.svelte';
+  import DropdownBadge from '$lib/components/DropdownBadge.svelte';
 
   /**
    * Application data.
@@ -863,49 +864,56 @@
           on:change={submitParentForm}
           disabled={$updatingClass}
         />
-
-        {#if makePrivate}
-          <div></div>
-          <div
-            class="flex col-span-2 items-center rounded-lg text-sm text-white bg-gradient-to-r from-gray-800 to-gray-600 border-gradient-to-r from-gray-800 to-gray-600 p-4"
-          >
-            <LockSolid class="w-8 h-8 mr-3" />
-            <span>
-              Unpublished threads and assistants are private in your group. <span
-                class="font-semibold">This setting cannot be changed.</span
-              >
-            </span>
-          </div>
-        {/if}
         <div></div>
 
-        <div class="col-span-2">
+        <div class="col-span-2 flex flex-col gap-3">
+          {#if makePrivate}
+            <div
+              class="flex col-span-2 items-center rounded-lg text-sm text-white bg-gradient-to-r from-gray-800 to-gray-600 border-gradient-to-r from-gray-800 to-gray-600 px-4 py-3"
+            >
+              <LockSolid class="w-8 h-8 mr-3" />
+              <span>
+                Unpublished threads and assistants are private in your group. <span
+                  class="font-semibold">This setting cannot be changed.</span
+                >
+              </span>
+            </div>
+          {/if}
           <PermissionsTable {permissions} />
         </div>
       </div>
     </form>
   {/if}
 
-  {#if subscriptionInfo}
+  {#if subscriptionInfo && hasApiKey}
     <div bind:this={summaryElement} class="grid md:grid-cols-3 gap-x-6 gap-y-8 pt-6">
       <div>
         <Heading customSize="text-xl font-bold" tag="h3"
           ><Secondary class="text-3xl text-black font-normal">Activity Summaries</Secondary
           ></Heading
         >
-        <Info>Information about your subscription to this group's Activity Summaries.</Info>
+        <Info>Manage your subscription to this group's Activity Summaries.</Info>
       </div>
       <div class="flex flex-col col-span-2 gap-5">
         {#if makePrivate}
           <div
-            class="flex col-span-2 items-center rounded-lg text-sm text-white bg-gradient-to-r from-gray-800 to-gray-600 border-gradient-to-r from-gray-800 to-gray-600 p-4"
+            class="flex col-span-2 items-center rounded-lg text-sm text-white bg-gradient-to-r from-gray-800 to-gray-600 border-gradient-to-r from-gray-800 to-gray-600 px-4 py-2"
           >
             <EyeSlashOutline class="w-8 h-8 mr-3" strokeWidth="1" />
-            <span> Activity Summaries are not available for private groups. </span>
+            <span> Activity Summaries are unavailable for private groups. </span>
           </div>
         {/if}
         <div>
-          <Label for="subscribe">Sign up for Activity Summaries</Label>
+          <div class="flex flex-row gap-2 mb-1 items-center">
+            <DropdownBadge
+              extraClasses={makePrivate
+                ? 'border-gray-400 from-gray-50 to-gray-100 text-gray-400 items-center'
+                : 'border-blue-400 from-blue-50 to-blue-100 text-blue-700 items-center'}
+              ><span slot="name">New</span></DropdownBadge
+            ><Label for="subscribe" color={makePrivate ? 'disabled' : 'gray'}
+              >Sign up for Activity Summaries</Label
+            >
+          </div>
           <Helper for="subscribe" color={makePrivate ? 'disabled' : 'gray'}
             >PingPong will gather all thread activity in your group and send an AI-generated summary
             with relevant thread links to all Moderators at the end of each week. You can change
@@ -914,7 +922,7 @@
           <Checkbox
             id="subscribe"
             color="blue"
-            class="mt-3"
+            class="mt-3 {makePrivate ? 'text-gray-400' : ''}"
             checked={data.subscription?.subscribed && !makePrivate}
             disabled={makePrivate}
             on:change={handleSubscriptionChange}>Send me weekly Activity Summaries</Checkbox
