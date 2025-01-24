@@ -368,7 +368,7 @@ Analyze user questions to identify 2-3 common topics or issues members struggle 
 
 1. **Label the Topic**: Provide a clear, concise label (2-4 words) for each identified topic or issue.
 2. **Specify the Challenge**: Clearly identify the specific aspect of the topic that members find challenging.
-3. **Example of Confusion**: Include a summarized example of member confusion without quotes, or return None if there are no good examples.
+3. **Example of Confusion**: Include a summarized example of member confusion without quotes, or return no confusion_example if there are no good examples.
 4. **Report Patterns**: Only report patterns appearing in at least 2 different threads without inferring additional issues.
 
 Present each issue by frequency, with the most frequent first, using language an instructor can understand.
@@ -403,7 +403,7 @@ Return up to 5 relevant threads, presenting topics and challenges with concise s
 - Only consider patterns that appear directly in the questions without making assumptions.
 - Ensure clarity and specificity in labeling and explaining challenges encountered by members.
 - No single thread ID should be listed more than once for the same topic.
-- Return None in the absence of real confusion examples.
+- Return no confusion_example in the absence of real confusion examples.
 - Do not output any JSON if there are no valuable topics or threads.
 """
 
