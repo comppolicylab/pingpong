@@ -484,6 +484,7 @@ async def _send_activity_summaries(
                         summary_type="weekly summary",
                         summary_email_header="Your weekly summary is in.",
                     )
+                    session.commit()
                 except GetOpenAIClientException as e:
                     logger.error(f"Error getting OpenAI client: {e.detail}")
                     continue
