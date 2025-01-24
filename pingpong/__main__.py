@@ -520,12 +520,17 @@ def batch_send_activity_summaries(
         asyncio.run(_batch_send_activity_summaries())
 
 
-# Map of available functions
+async def _test_function(mg: str) -> None:
+    print("Test function called: ", mg)
+    await asyncio.sleep(10)
+    print("Test function completed")
+
+
 FUNCTIONS_MAP: Dict[str, Callable] = {
-    "batch_send_activity_summaries": lambda days, before=None: _send_activity_summaries(
-        days, before
+    "batch_send_activity_summaries": lambda last_run, days: _send_activity_summaries(
+        days, before=last_run
     ),
-    "sync_pingpong_with_lms": _lms_sync_all,
+    "sync_pingpong_with_lms": lambda _: _lms_sync_all(),
 }
 
 
@@ -556,12 +561,14 @@ def run_dynamic_tasks_with_args(host: str, port: int, tasks: list[str]) -> None:
             return
 
         func = FUNCTIONS_MAP[function_name]
+        last_run = None
         async for _ in croner(cron_schedule):
             try:
-                await func(**args)
+                await func(last_run, **args)
                 logger.info(
                     f"Task '{function_name}' completed successfully at {datetime.now()}"
                 )
+                last_run = utcnow()
             except Exception as e:
                 logger.error(f"Error in task '{function_name}': {e}")
 
