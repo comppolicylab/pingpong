@@ -63,23 +63,6 @@ class CronTask(Base):
         stmt = select(CronTask).where(CronTask.function == function)
         return await session.scalar(stmt)
 
-    @classmethod
-    async def update_last_completed(cls, session: AsyncSession, id: int) -> None:
-        stmt = (
-            update(CronTask).where(CronTask.id == id).values(last_completed=func.now())
-        )
-        await session.execute(stmt)
-
-    @classmethod
-    async def update_force_rerun_at(cls, session: AsyncSession, id: int, dt: datetime):
-        stmt = update(CronTask).where(CronTask.id == id).values(force_rerun_at=dt)
-        await session.execute(stmt)
-
-    @classmethod
-    async def delete(cls, session: AsyncSession, function: str) -> None:
-        stmt = delete(CronTask).where(CronTask.function == function)
-        await session.execute(stmt)
-
 
 class UserClassRole(Base):
     __tablename__ = "users_classes"
@@ -174,24 +157,6 @@ class UserClassRole(Base):
                 )
             )
             .values(subscribed_to_summaries=False)
-        )
-        await session.execute(stmt)
-
-    @classmethod
-    async def update_last_summary_sent(
-        cls, session: AsyncSession, user_id: int, class_id: int
-    ):
-        """Update the timestamp of when the last summarization message was sent to a user."""
-
-        # There is no PK for this table, so we need to use the user_id and class_id to identify the row to update
-        stmt = (
-            update(UserClassRole)
-            .where(
-                and_(
-                    UserClassRole.user_id == user_id, UserClassRole.class_id == class_id
-                )
-            )
-            .values(last_summary_sent_at=func.now())
         )
         await session.execute(stmt)
 
@@ -1617,20 +1582,6 @@ class Class(Base):
             update(Class)
             .where(Class.id == class_id)
             .values(lms_last_synced=func.now(), updated=Class.updated)
-        )
-        await session.execute(stmt)
-
-    @classmethod
-    async def update_last_summary_sent(
-        cls,
-        session: AsyncSession,
-        class_id: int,
-    ) -> None:
-        """Update the timestamp of when summarizations were last sent."""
-        stmt = (
-            update(Class)
-            .where(Class.id == class_id)
-            .values(last_summary_sent_at=func.now(), updated=Class.updated)
         )
         await session.execute(stmt)
 

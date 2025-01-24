@@ -470,6 +470,10 @@ async def _send_activity_summaries(
 ) -> None:
     """
     Send activity summaries for all classes that have not been summarized in the last `days` days.
+
+    Args:
+        days: Number of days to look back for classes that have not been summarized.
+        force_send_cron: A cron schedule to force send summaries to all users at a specific time, no matter previous failures.
     """
     await config.authz.driver.init()
     async with config.db.driver.async_session() as session:
@@ -497,8 +501,11 @@ async def _send_activity_summaries(
                 before = task.force_rerun_at
                 ts = utcnow()
                 next_forced_run = _get_next_run_time(force_send_cron, ts)
-                await CronTask.update_force_rerun_at(session, task.id, next_forced_run)
+                task.last_completed = task.force_rerun_at
+                task.force_rerun_at = next_forced_run
+                session.add(task)
                 await session.commit()
+                await session.refresh(task)
 
             async for class_ in Class.get_all_classes_to_summarize(
                 session, before=before
@@ -530,7 +537,8 @@ async def _send_activity_summaries(
                     continue
 
             if no_errors:
-                await CronTask.update_last_completed(session, task.id)
+                task.last_completed = utcnow()
+                session.add(task)
             await session.commit()
 
 

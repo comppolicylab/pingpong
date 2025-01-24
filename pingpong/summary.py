@@ -189,11 +189,10 @@ async def send_class_summary_to_class_users(
                 summary_email_header,
             )
 
-            await models.UserClassRole.update_last_summary_sent(
-                session, ucr.user_id, class_id
-            )
+            ucr.last_summary_sent_at = nowfn()
 
             # Commit for every user so we don't lose progress if we hit an error
+            await session.add(ucr)
             await session.commit()
 
         except Exception as e:
@@ -203,7 +202,9 @@ async def send_class_summary_to_class_users(
 
     if no_errors:
         # Update last summary sent for all users
-        await models.Class.update_last_summary_sent(session, class_id)
+        class_.last_summary_sent_at = nowfn()
+        await session.add(class_)
+        await session.commit()
 
 
 async def send_class_summary(
