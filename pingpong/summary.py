@@ -193,7 +193,7 @@ async def send_class_summary_to_class_users(
             )
 
             # Commit for every user so we don't lose progress if we hit an error
-            session.commit()
+            await session.commit()
 
         except Exception as e:
             logger.error(f"Failed to send summary to user {ucr.user_id}: {e}")
@@ -218,7 +218,7 @@ async def send_class_summary(
         user_id,
         expiry=86_400 * 7,
         nowfn=nowfn,
-        redirect=f"/group/{class_id}/manage",
+        redirect=f"/group/{class_id}/manage#summary",
     )
 
     days_before_today = (nowfn() - after).days

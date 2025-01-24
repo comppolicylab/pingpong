@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { writable } from 'svelte/store';
-  import type { Writable } from 'svelte/store';
+  import { getContext, onMount } from 'svelte';
+  import { get, writable } from 'svelte/store';
+  import type { Readable, Writable } from 'svelte/store';
   import dayjs from '$lib/time';
   import * as api from '$lib/api';
   import type {
@@ -105,11 +105,37 @@
     );
   }
 
+  let summaryElement: HTMLElement;
+  let manageContainer: HTMLElement;
+
+  // Get the headerHeight store from context
+  const headerHeightStore: Readable<number> = getContext('headerHeightStore');
+  let headerHeight: number;
+  headerHeightStore.subscribe((value) => {
+    headerHeight = value;
+  });
+
   onMount(() => {
     const errorCode = $page.url.searchParams.get('error_code');
     if (errorCode) {
       const errorMessage = getErrorMessage(parseInt(errorCode) || 0);
       sadToast(errorMessage);
+    }
+
+    // If URL contains #summary, scroll the manageContainer to the summaryElement
+    const waitForHeaderHeight = () => {
+      if (headerHeight > 0) {
+        manageContainer.scrollTo({
+          top: summaryElement.offsetTop - headerHeight,
+          behavior: 'smooth'
+        });
+      } else {
+        requestAnimationFrame(waitForHeaderHeight);
+      }
+    };
+
+    if ($page.url.hash === '#summary') {
+      waitForHeaderHeight();
     }
 
     // Show an error if the form failed
@@ -658,6 +684,7 @@
 
 <div
   class="container p-12 space-y-12 divide-y-3 divide-blue-dark-40 dark:divide-gray-700 overflow-y-auto w-full flex flex-col justify-between h-[calc(100%-5rem)]"
+  bind:this={manageContainer}
 >
   <div class="flex flex-row justify-between">
     <Heading tag="h2" class="text-3xl font-serif font-medium text-blue-dark-40"
@@ -860,7 +887,7 @@
   {/if}
 
   {#if subscriptionInfo}
-    <div class="grid md:grid-cols-3 gap-x-6 gap-y-8 pt-6">
+    <div bind:this={summaryElement} class="grid md:grid-cols-3 gap-x-6 gap-y-8 pt-6">
       <div>
         <Heading customSize="text-xl font-bold" tag="h3"
           ><Secondary class="text-3xl text-black font-normal">Activity Summaries</Secondary

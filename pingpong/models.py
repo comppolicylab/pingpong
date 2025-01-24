@@ -50,6 +50,31 @@ class Base(AsyncAttrs, DeclarativeBase):
     pass
 
 
+class CronTask(Base):
+    __tablename__ = "cron_tasks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    function = Column(String)
+    last_completed = Column(DateTime(timezone=True), nullable=True)
+
+    @classmethod
+    async def get_by_function(cls, session: AsyncSession, function: str) -> "CronTask":
+        stmt = select(CronTask).where(CronTask.function == function)
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def update_last_completed(cls, session: AsyncSession, id: int) -> None:
+        stmt = (
+            update(CronTask).where(CronTask.id == id).values(last_completed=func.now())
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def delete(cls, session: AsyncSession, function: str) -> None:
+        stmt = delete(CronTask).where(CronTask.function == function)
+        await session.execute(stmt)
+
+
 class UserClassRole(Base):
     __tablename__ = "users_classes"
     __table_args__ = (UniqueConstraint("user_id", "class_id", name="_user_class_uc"),)
@@ -1722,7 +1747,13 @@ class Class(Base):
         """Get all classes that need summarization."""
         condition = Class.private.is_(False)
         if before:
-            condition = and_(condition, Class.last_summary_sent_at < before)
+            condition = and_(
+                condition,
+                or_(
+                    Class.last_summary_sent_at < before,
+                    Class.last_summary_sent_at.is_(None),
+                ),
+            )
         stmt = select(Class).where(condition)
         result = await session.execute(stmt)
 

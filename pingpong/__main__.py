@@ -40,7 +40,7 @@ from .auth import encode_auth_token
 from .bg import get_server
 from .canvas import canvas_sync_all
 from .config import config
-from .models import Base, User, Class
+from .models import Base, CronTask, User, Class
 from .authz.admin_migration import remove_class_admin_perms
 
 from sqlalchemy import inspect
@@ -464,13 +464,31 @@ def export_threads(class_id: int, user_email: str) -> None:
     asyncio.run(_export_threads())
 
 
-async def _send_activity_summaries(
-    days: int = 7, before: datetime | None = None
-) -> None:
+async def _send_activity_summaries(days: int = 7) -> None:
+    """
+    Send activity summaries for all classes that have not been summarized in the last `days` days.
+    """
+    await config.authz.driver.init()
     async with config.db.driver.async_session() as session:
         async with config.authz.driver.get_client() as c:
-            async for class_ in Class.get_all_classes_to_summarize(session, before):
+            task = await CronTask.get_by_function(session, "send_activity_summaries")
+            if not task:
+                task = CronTask(function="send_activity_summaries")
+                session.add(task)
+                await session.commit()
+                await session.refresh(task)
+
+            no_errors = True
+            async for class_ in Class.get_all_classes_to_summarize(
+                session, before=task.last_completed
+            ):
                 try:
+                    if not class_.api_key and not class_.api_key_id:
+                        logger.info(
+                            f"Skipping class {class_.id} because it has no API key."
+                        )
+                        continue
+                    logger.info(f"Sending summary for class {class_.id}...")
                     openai_client = await get_openai_client_by_class_id(
                         session, class_.id
                     )
@@ -484,13 +502,21 @@ async def _send_activity_summaries(
                         summary_type="weekly summary",
                         summary_email_header="Your weekly summary is in.",
                     )
-                    session.commit()
+                    await session.commit()
+
                 except GetOpenAIClientException as e:
                     logger.error(f"Error getting OpenAI client: {e.detail}")
+                    no_errors = False
                     continue
                 except Exception as e:
                     logger.error(f"Error sending class summary: {e}")
+                    no_errors = False
                     continue
+
+            if no_errors:
+                print(f"NO ERRORS: {datetime.now()}")
+                await CronTask.update_last_completed(session, task.id)
+            await session.commit()
 
 
 @export.command("batch_send_activity_summaries")
@@ -521,17 +547,9 @@ def batch_send_activity_summaries(
         asyncio.run(_batch_send_activity_summaries())
 
 
-async def _test_function(mg: str) -> None:
-    print("Test function called: ", mg)
-    await asyncio.sleep(10)
-    print("Test function completed")
-
-
 FUNCTIONS_MAP: Dict[str, Callable] = {
-    "batch_send_activity_summaries": lambda last_run, days: _send_activity_summaries(
-        days, before=last_run
-    ),
-    "sync_pingpong_with_lms": lambda _: _lms_sync_all(),
+    "batch_send_activity_summaries": lambda days: _send_activity_summaries(days),
+    "sync_pingpong_with_lms": _lms_sync_all,
 }
 
 
@@ -562,14 +580,12 @@ def run_dynamic_tasks_with_args(host: str, port: int, tasks: list[str]) -> None:
             return
 
         func = FUNCTIONS_MAP[function_name]
-        last_run = None
         async for _ in croner(cron_schedule):
             try:
-                await func(last_run, **args)
+                await func(**args)
                 logger.info(
                     f"Task '{function_name}' completed successfully at {datetime.now()}"
                 )
-                last_run = utcnow()
             except Exception as e:
                 logger.error(f"Error in task '{function_name}': {e}")
 
