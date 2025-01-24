@@ -56,6 +56,7 @@ async def send_class_summary_for_class(
     nowfn: NowFn = utcnow,
     summary_type: str | None = None,
     summary_email_header: str | None = None,
+    sent_before: datetime | None = None,
 ) -> None:
     class_ = await models.Class.get_by_id(session, class_id)
 
@@ -83,7 +84,7 @@ async def send_class_summary_for_class(
         summary_type,
         summary_email_header,
         subscribed_only=True,
-        sent_before=class_.last_summary_sent_at,
+        sent_before=sent_before or class_.last_summary_sent_at,
     )
 
 

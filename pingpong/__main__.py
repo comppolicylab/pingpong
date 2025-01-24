@@ -492,10 +492,9 @@ async def _send_activity_summaries(
                 await session.refresh(task)
 
             no_errors = True
-            if (
-                force_send_cron
-                and task.force_rerun_at
-                and task.force_rerun_at <= utcnow()
+            if force_send_cron and (
+                (task.force_rerun_at and task.force_rerun_at <= utcnow())
+                or (task.force_rerun_at is None)
             ):
                 ts = utcnow()
                 next_forced_run = _get_next_run_time(force_send_cron, ts)
@@ -522,6 +521,11 @@ async def _send_activity_summaries(
                         after,
                         summary_type="weekly summary",
                         summary_email_header="Your weekly summary is in.",
+                        sent_before=task.last_completed
+                        if task.last_completed
+                        and class_.last_summary_sent_at
+                        and task.last_completed > class_.last_summary_sent_at
+                        else None,
                     )
                     await session.commit()
 
