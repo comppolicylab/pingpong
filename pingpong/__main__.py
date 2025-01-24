@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import sys
 from typing import Callable, Dict, Optional
 import webbrowser
 import click
@@ -33,7 +34,7 @@ from pingpong.merge import (
     merge_permissions,
     merge,
 )
-from pingpong.now import croner, utcnow
+from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.summary import send_class_summary_for_class
 
 from .auth import encode_auth_token
@@ -464,7 +465,9 @@ def export_threads(class_id: int, user_email: str) -> None:
     asyncio.run(_export_threads())
 
 
-async def _send_activity_summaries(days: int = 7) -> None:
+async def _send_activity_summaries(
+    days: int = 7, force_send_cron: str | None = None
+) -> None:
     """
     Send activity summaries for all classes that have not been summarized in the last `days` days.
     """
@@ -473,14 +476,32 @@ async def _send_activity_summaries(days: int = 7) -> None:
         async with config.authz.driver.get_client() as c:
             task = await CronTask.get_by_function(session, "send_activity_summaries")
             if not task:
-                task = CronTask(function="send_activity_summaries")
+                next_forced_run = None
+                if force_send_cron:
+                    ts = utcnow()
+                    next_forced_run = _get_next_run_time(force_send_cron, ts)
+                task = CronTask(
+                    function="send_activity_summaries", force_rerun_at=next_forced_run
+                )
                 session.add(task)
                 await session.commit()
                 await session.refresh(task)
 
             no_errors = True
+            before = task.last_completed
+            if (
+                force_send_cron
+                and task.force_rerun_at
+                and task.force_rerun_at <= utcnow()
+            ):
+                before = task.force_rerun_at
+                ts = utcnow()
+                next_forced_run = _get_next_run_time(force_send_cron, ts)
+                await CronTask.update_force_rerun_at(session, task.id, next_forced_run)
+                await session.commit()
+
             async for class_ in Class.get_all_classes_to_summarize(
-                session, before=task.last_completed
+                session, before=before
             ):
                 try:
                     logger.info(f"Sending summary for class {class_.id}...")
@@ -509,7 +530,6 @@ async def _send_activity_summaries(days: int = 7) -> None:
                     continue
 
             if no_errors:
-                print(f"NO ERRORS: {datetime.now()}")
                 await CronTask.update_last_completed(session, task.id)
             await session.commit()
 
@@ -542,8 +562,16 @@ def batch_send_activity_summaries(
         asyncio.run(_batch_send_activity_summaries())
 
 
+async def test_func(mg: str):
+    print("Hello", mg)
+
+
+async def test_func2(mg: str | None = None):
+    print("World")
+
+
 FUNCTIONS_MAP: Dict[str, Callable] = {
-    "batch_send_activity_summaries": lambda days: _send_activity_summaries(days),
+    "batch_send_activity_summaries": _send_activity_summaries,
     "sync_pingpong_with_lms": _lms_sync_all,
 }
 
@@ -572,7 +600,7 @@ def run_dynamic_tasks_with_args(host: str, port: int, tasks: list[str]) -> None:
         """
         if function_name not in FUNCTIONS_MAP:
             logger.error(f"Function '{function_name}' is not recognized.")
-            return
+            sys.exit(1)
 
         func = FUNCTIONS_MAP[function_name]
         async for _ in croner(cron_schedule):

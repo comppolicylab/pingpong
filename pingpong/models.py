@@ -56,6 +56,7 @@ class CronTask(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     function = Column(String)
     last_completed = Column(DateTime(timezone=True), nullable=True)
+    force_rerun_at = Column(DateTime(timezone=True), nullable=True)
 
     @classmethod
     async def get_by_function(cls, session: AsyncSession, function: str) -> "CronTask":
@@ -67,6 +68,11 @@ class CronTask(Base):
         stmt = (
             update(CronTask).where(CronTask.id == id).values(last_completed=func.now())
         )
+        await session.execute(stmt)
+
+    @classmethod
+    async def update_force_rerun_at(cls, session: AsyncSession, id: int, dt: datetime):
+        stmt = update(CronTask).where(CronTask.id == id).values(force_rerun_at=dt)
         await session.execute(stmt)
 
     @classmethod

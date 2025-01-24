@@ -26,6 +26,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("function", sa.String(), nullable=True),
         sa.Column("last_completed", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("force_rerun_at", sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint("id"),
     )
     op.add_column(
