@@ -483,11 +483,6 @@ async def _send_activity_summaries(days: int = 7) -> None:
                 session, before=task.last_completed
             ):
                 try:
-                    if not class_.api_key and not class_.api_key_id:
-                        logger.info(
-                            f"Skipping class {class_.id} because it has no API key."
-                        )
-                        continue
                     logger.info(f"Sending summary for class {class_.id}...")
                     openai_client = await get_openai_client_by_class_id(
                         session, class_.id

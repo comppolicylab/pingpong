@@ -1745,16 +1745,21 @@ class Class(Base):
         cls, session: AsyncSession, before: datetime | None = None
     ) -> AsyncGenerator["Class", None]:
         """Get all classes that need summarization."""
-        condition = Class.private.is_(False)
+        conditions = [
+            Class.private.is_(False),
+            or_(
+                Class.api_key_id.isnot(None),
+                Class.api_key.isnot(None),
+            ),
+        ]
         if before:
-            condition = and_(
-                condition,
+            conditions.append(
                 or_(
                     Class.last_summary_sent_at < before,
                     Class.last_summary_sent_at.is_(None),
                 ),
             )
-        stmt = select(Class).where(condition)
+        stmt = select(Class).where(and_(*conditions))
         result = await session.execute(stmt)
 
         for row in result:
