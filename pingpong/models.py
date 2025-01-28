@@ -145,7 +145,12 @@ class UserClassRole(Base):
         if subscribed_only:
             conditions.append(UserClassRole.subscribed_to_summaries.is_(True))
         if sent_before:
-            conditions.append(UserClassRole.last_summary_sent_at <= sent_before)
+            conditions.append(
+                or_(
+                    UserClassRole.last_summary_sent_at.is_(None),
+                    UserClassRole.last_summary_sent_at < sent_before,
+                )
+            )
 
         stmt = (
             select(UserClassRole)
@@ -191,6 +196,24 @@ class UserClassRole(Base):
                 )
             )
             .values(subscribed_to_summaries=False)
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def unsubscribe_from_all_summaries(cls, session: AsyncSession, user_id: int):
+        stmt = (
+            update(UserClassRole)
+            .where(UserClassRole.user_id == user_id)
+            .values(subscribed_to_summaries=False)
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def subscribe_to_all_summaries(cls, session: AsyncSession, user_id: int):
+        stmt = (
+            update(UserClassRole)
+            .where(UserClassRole.user_id == user_id)
+            .values(subscribed_to_summaries=True)
         )
         await session.execute(stmt)
 

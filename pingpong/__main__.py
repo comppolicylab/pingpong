@@ -41,7 +41,7 @@ from .auth import encode_auth_token
 from .bg import get_server
 from .canvas import canvas_sync_all
 from .config import config
-from .models import Base, ScheduledJob, PeriodicTask, User, Class
+from .models import Base, ScheduledJob, PeriodicTask, User, Class, UserClassRole
 from .authz.admin_migration import remove_class_admin_perms
 
 from sqlalchemy import inspect
@@ -326,6 +326,40 @@ def db_migrate_api_keys() -> None:
             logger.info("Done!")
 
     asyncio.run(_db_migrate_api_keys())
+
+
+@db.command("remove_all_user_summary_subscriptions")
+@click.argument("email", type=str)
+def db_remove_all_user_summary_subscriptions(email: str) -> None:
+    async def _db_remove_all_user_summary_subscriptions() -> None:
+        async with config.db.driver.async_session() as session:
+            user = await User.get_by_email_sso(session, email, "email", email)
+            if not user:
+                raise ValueError(f"User with email {email} not found")
+
+            logger.info(f"Removing all user summary subscriptions for {email}...")
+            await UserClassRole.unsubscribe_from_all_summaries(session, user.id)
+            await session.commit()
+            logger.info("Done!")
+
+    asyncio.run(_db_remove_all_user_summary_subscriptions())
+
+
+@db.command("restore_all_user_summary_subscriptions")
+@click.argument("email", type=str)
+def db_restore_all_user_summary_subscriptions(email: str) -> None:
+    async def _db_restore_all_user_summary_subscriptions() -> None:
+        async with config.db.driver.async_session() as session:
+            user = await User.get_by_email_sso(session, email, "email", email)
+            if not user:
+                raise ValueError(f"User with email {email} not found")
+
+            logger.info(f"Restoring all user summary subscriptions for {email}...")
+            await UserClassRole.subscribe_to_all_summaries(session, user.id)
+            await session.commit()
+            logger.info("Done!")
+
+    asyncio.run(_db_restore_all_user_summary_subscriptions())
 
 
 @db.command("set-version")

@@ -176,6 +176,9 @@ async def send_class_summary_to_class_users(
         session, user_ids, class_id, subscribed_only, sent_before
     )
 
+    for ucr in user_roles:
+        print(ucr.user_id, ucr.user.email, ucr.last_summary_sent_at)
+
     no_errors = True
     for ucr in user_roles:
         try:
