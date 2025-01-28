@@ -219,8 +219,8 @@
       <div class="flex flex-col gap-4">
         <P>
           PingPong will gather all thread activity in a Group and email an AI-generated summary with
-          relevant thread links to all Moderators at the end of each week. You will receive an email
-          Activity Summary for each class you are subscribed to.
+          relevant thread links to all Moderators at the end of each week. You will receive an
+          Activity Summary for each Group you are subscribed to.
         </P>
         <Table>
           <TableHead class="bg-blue-light-40 p-1 text-blue-dark-50 tracking-wide rounded-2xl">
