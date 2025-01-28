@@ -4,12 +4,12 @@ import sys
 from typing import Callable, Dict, Optional
 import webbrowser
 import click
+import json
 import alembic
 import alembic.command
 import alembic.config
 
 from datetime import datetime, timedelta
-from flask import json
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
