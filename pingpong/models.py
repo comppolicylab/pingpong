@@ -170,6 +170,38 @@ class UserClassRole(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_activity_summary_subscriptions(
+        cls, session: AsyncSession, user_id: int, class_ids: List[int]
+    ) -> schemas.ActivitySummarySubscriptions:
+        stmt = (
+            select(
+                UserClassRole.class_id,
+                Class.name,
+                UserClassRole.subscribed_to_summaries,
+                UserClassRole.last_summary_sent_at,
+            )
+            .join(Class, Class.id == UserClassRole.class_id)
+            .where(
+                and_(
+                    UserClassRole.user_id == user_id,
+                    UserClassRole.class_id.in_(class_ids),
+                    Class.private.is_(False),
+                )
+            )
+        )
+        result = await session.execute(stmt)
+        subscriptions = [
+            schemas.ActivitySummarySubscription(
+                class_id=row[0],
+                class_name=row[1],
+                subscribed=row[2],
+                last_email_sent=row[3],
+            )
+            for row in result
+        ]
+        return schemas.ActivitySummarySubscriptions(subscriptions=subscriptions)
+
+    @classmethod
     async def subscribe_to_summaries(
         cls, session: AsyncSession, user_id: int, class_id: int
     ):

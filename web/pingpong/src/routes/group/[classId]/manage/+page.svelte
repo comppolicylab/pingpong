@@ -53,7 +53,8 @@
     LockSolid,
     CheckCircleOutline,
     GlobeOutline,
-    EyeSlashOutline
+    EyeSlashOutline,
+    ArrowRightOutline
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
@@ -892,7 +893,14 @@
           ><Secondary class="text-3xl text-black font-normal">Activity Summaries</Secondary
           ></Heading
         >
-        <Info>Manage your subscription to this group's Activity Summaries.</Info>
+        <div class="flex flex-col gap-2">
+          <Info>Manage your subscription to this group's Activity Summaries.</Info>
+          <a
+            href="/profile"
+            class="text-xs text-gray-600 shrink-0 flex flex-row gap-1 items-center justify-center font-light bg-white rounded-full p-1 px-3 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all max-w-max border border-gray-400 hover:border-blue-dark-40"
+            >Manage All Subscriptions <ArrowRightOutline size="md" class="inline-block" /></a
+          >
+        </div>
       </div>
       <div class="flex flex-col col-span-2 gap-5">
         {#if makePrivate}

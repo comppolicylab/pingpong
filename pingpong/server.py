@@ -3660,6 +3660,78 @@ async def update_me(request: Request, update: schemas.UpdateUserInfo):
 
 
 @v1.get(
+    "/me/activity_summaries",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.ActivitySummarySubscriptions,
+)
+async def get_activity_summaries(request: Request):
+    """Get the user's activity summaries."""
+
+    # Get all groups the user is a moderator of
+    moderator_class_ids = await request.state.authz.list(
+        f"user:{request.state.session.user.id}",
+        "teacher",
+        "class",
+    )
+
+    return await models.UserClassRole.get_activity_summary_subscriptions(
+        request.state.db, request.state.session.user.id, moderator_class_ids
+    )
+
+
+@v1.post(
+    "/me/activity_summaries",
+    dependencies=[Depends(LoggedIn())],
+)
+async def subscribe_to_all_summaries(
+    request: Request,
+):
+    """Subscribe to all activity summaries."""
+    moderator_classes = await request.state.authz.list(
+        f"user:{request.state.session.user.id}",
+        "teacher",
+        "class",
+    )
+
+    if not moderator_classes:
+        raise HTTPException(
+            403,
+            "You must be a Moderator in at least one class to subscribe to activity summaries.",
+        )
+
+    await models.UserClassRole.subscribe_to_all_summaries(
+        request.state.db, request.state.session.user.id
+    )
+    return {"status": "ok"}
+
+
+@v1.delete(
+    "/me/activity_summaries",
+    dependencies=[Depends(LoggedIn())],
+)
+async def unsubscribe_from_all_summaries(
+    request: Request,
+):
+    """Unsubscribe from all activity summaries."""
+    moderator_classes = await request.state.authz.list(
+        f"user:{request.state.session.user.id}",
+        "teacher",
+        "class",
+    )
+
+    if not moderator_classes:
+        raise HTTPException(
+            403,
+            "You must be a Moderator in at least one class to subscribe to activity summaries.",
+        )
+
+    await models.UserClassRole.unsubscribe_from_all_summaries(
+        request.state.db, request.state.session.user.id
+    )
+    return {"status": "ok"}
+
+
+@v1.get(
     "/me/grants/list",
     dependencies=[Depends(LoggedIn())],
     response_model=schemas.GrantsList,
