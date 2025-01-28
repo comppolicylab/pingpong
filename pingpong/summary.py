@@ -1,5 +1,7 @@
 import openai
+import logging
 from pingpong.auth import generate_auth_link
+from .authz import AuthzClient
 from pingpong.config import config
 from pingpong.invite import send_summary
 import pingpong.models as models
@@ -19,25 +21,104 @@ from pingpong.schemas import (
     TopicSummary,
 )
 
+logger = logging.getLogger(__name__)
 
-async def export_class_summary_task(
+
+async def send_class_summary_for_class_task(
+    cli: openai.AsyncClient,
+    class_id: int,
+    after: datetime,
+    nowfn: NowFn = utcnow,
+    summary_type: str | None = None,
+    summary_email_header: str | None = None,
+) -> None:
+    await config.authz.driver.init()
+    async with config.authz.driver.get_client() as c:
+        async with config.db.driver.async_session() as session:
+            await send_class_summary_for_class(
+                cli,
+                session,
+                c,
+                class_id,
+                after,
+                nowfn,
+                summary_type,
+                summary_email_header,
+            )
+
+
+async def send_class_summary_for_class(
+    cli: openai.AsyncClient,
+    session: AsyncSession,
+    authz: AuthzClient,
+    class_id: int,
+    after: datetime,
+    nowfn: NowFn = utcnow,
+    summary_type: str | None = None,
+    summary_email_header: str | None = None,
+    sent_before: datetime | None = None,
+) -> None:
+    class_ = await models.Class.get_by_id(session, class_id)
+
+    if not class_:
+        raise ValueError(f"Group with ID {class_id} not found.")
+
+    if class_.private:
+        raise ValueError(
+            f"Group with ID {class_id} is private. Activity Summaries are not available for private groups."
+        )
+
+    user_ids = await authz.list_entities(
+        f"class:{class_id}",
+        "can_receive_summaries",
+        "user",
+    )
+
+    await send_class_summary_to_class_users(
+        cli,
+        session,
+        class_id,
+        user_ids,
+        after,
+        nowfn,
+        summary_type,
+        summary_email_header,
+        subscribed_only=True,
+        sent_before=sent_before or class_.last_summary_sent_at,
+    )
+
+
+async def send_class_summary_to_user_task(
     cli: openai.AsyncClient,
     class_id: int,
     user_id: int,
     after: datetime,
     nowfn: NowFn = utcnow,
+    summary_type: str | None = None,
+    summary_email_header: str | None = None,
 ) -> None:
     async with config.db.driver.async_session() as session:
-        await export_class_summary(cli, session, class_id, user_id, after, nowfn)
+        await send_class_summary_to_user(
+            cli,
+            session,
+            class_id,
+            user_id,
+            after,
+            nowfn,
+            summary_type,
+            summary_email_header,
+        )
 
 
-async def export_class_summary(
+async def send_class_summary_to_user(
     cli: openai.AsyncClient,
     session: AsyncSession,
     class_id: int,
     user_id: int,
     after: datetime,
     nowfn: NowFn = utcnow,
+    summary_type: str | None = None,
+    summary_email_header: str | None = None,
 ) -> None:
     class_ = await models.Class.get_by_id(session, class_id)
     if not class_:
@@ -47,38 +128,142 @@ async def export_class_summary(
     if not user:
         raise ValueError(f"User with ID {user_id} not found")
 
-    ai_assistant_summaries = await generate_assistant_summaries(
-        cli, session, class_.id, after
+    summary_html = await generate_class_summary(
+        cli, session, class_.id, class_.name, after
     )
-    if not ai_assistant_summaries:
+    if not summary_html:
         return
 
-    class_summary = convert_to_class_summary(
-        class_.id, class_.name, ai_assistant_summaries
-    )
-    summary_html = generate_summary_html_from_assistant_summaries(
-        class_summary.assistant_summaries
+    await send_class_summary(
+        summary_html,
+        class_.name,
+        class_.id,
+        user.id,
+        user.first_name or user.display_name or "Moderator",
+        user.email,
+        after,
+        nowfn,
+        summary_type,
+        summary_email_header,
     )
 
+
+async def send_class_summary_to_class_users(
+    cli: openai.AsyncClient,
+    session: AsyncSession,
+    class_id: int,
+    user_ids: list[int],
+    after: datetime,
+    nowfn: NowFn = utcnow,
+    summary_type: str | None = None,
+    summary_email_header: str | None = None,
+    subscribed_only: bool | None = None,
+    sent_before: datetime | None = None,
+) -> None:
+    class_ = await models.Class.get_by_id(session, class_id)
+    if not class_:
+        raise ValueError(f"Class with ID {class_id} not found")
+
+    summary_html = await generate_class_summary(
+        cli, session, class_.id, class_.name, after
+    )
+    if not summary_html:
+        class_.last_summary_sent_at = nowfn()
+        await session.commit()
+        return
+
+    user_roles = await models.UserClassRole.get_by_user_ids(
+        session, user_ids, class_id, subscribed_only, sent_before
+    )
+
+    no_errors = True
+    for ucr in user_roles:
+        try:
+            await send_class_summary(
+                summary_html,
+                class_.name,
+                class_.id,
+                ucr.user_id,
+                ucr.user.first_name or ucr.user.display_name or "Moderator",
+                ucr.user.email,
+                after,
+                nowfn,
+                summary_type,
+                summary_email_header,
+            )
+
+            ucr.last_summary_sent_at = nowfn()
+
+            # Commit for every user so we don't lose progress if we hit an error
+            await session.commit()
+
+        except Exception as e:
+            logger.error(
+                f"Failed to send summary to user {ucr.user_id}: {e}", exc_info=True
+            )
+            no_errors = False
+            continue
+
+    if no_errors:
+        # Update last summary sent for all users
+        class_.last_summary_sent_at = nowfn()
+        await session.commit()
+
+
+async def send_class_summary(
+    summary_html: str,
+    class_name: str,
+    class_id: int,
+    user_id: int,
+    user_name: str,
+    user_email: str,
+    after: datetime,
+    nowfn: NowFn = utcnow,
+    summary_type: str | None = None,
+    summary_email_header: str | None = None,
+) -> None:
     magic_link = generate_auth_link(
-        user.id,
+        user_id,
         expiry=86_400 * 7,
         nowfn=nowfn,
-        redirect=f"/group/{class_.id}/manage",
+        redirect=f"/group/{class_id}/manage#summary",
     )
 
     days_before_today = (nowfn() - after).days
 
     export_options = ClassSummaryExport(
-        class_name=class_.name,
+        class_name=class_name,
         summary_html=summary_html,
         link=magic_link,
-        first_name=user.first_name or user.display_name or "Moderator",
-        email=user.email,
+        first_name=user_name,
+        email=user_email,
         time_since=f"the last {days_before_today} days",
+        summary_type=summary_type,
+        title=summary_email_header,
     )
 
     await send_summary(config.email.sender, export_options)
+
+
+async def generate_class_summary(
+    cli: openai.AsyncClient,
+    session: AsyncSession,
+    class_id: int,
+    class_name: str,
+    after: datetime,
+) -> str | None:
+    ai_assistant_summaries = await generate_assistant_summaries(
+        cli, session, class_id, after
+    )
+    if not ai_assistant_summaries:
+        return None
+
+    class_summary = convert_to_class_summary(
+        class_id, class_name, ai_assistant_summaries
+    )
+    return generate_summary_html_from_assistant_summaries(
+        class_summary.assistant_summaries
+    )
 
 
 async def generate_assistant_summaries(
@@ -142,7 +327,9 @@ def convert_to_class_summary(
             ]
             topics.append(
                 TopicSummary(
-                    topic=f"{topic_summary.topic.topic_label}: {topic_summary.topic.challenge} {topic_summary.topic.confusion_example or ''}",
+                    topic_label=topic_summary.topic.topic_label,
+                    challenge=topic_summary.topic.challenge,
+                    confusion_example=topic_summary.topic.confusion_example,
                     relevant_thread_urls=relevant_thread_urls,
                 )
             )
@@ -181,11 +368,11 @@ async def get_thread_user_messages(
 
 
 summarization_prompt = """
-Analyze user questions to identify 2-3 common topics or issues members struggle with. Prioritize frequent topics and return results without exceeding 5 relevant threads. If there are no valuable topics or threads, do not return any results. Ensure that no single thread ID is listed more than once for the same topic.
+Analyze user questions to identify 2-3 common topics members ask about. Prioritize frequent topics and return results without exceeding 5 relevant threads. If there are no valuable topics or threads, do not return any results. Ensure that no single thread ID is listed more than once for the same topic.
 
 1. **Label the Topic**: Provide a clear, concise label (2-4 words) for each identified topic or issue.
-2. **Specify the Challenge**: Clearly identify the specific aspect of the topic that members find challenging.
-3. **Example of Confusion**: Include a summarized example of member confusion without quotes, or return None if there are no good examples.
+2. **Specify the Challenge**: Clearly identify the specific aspect of the topic that members are inquiring about.
+3. **Example of Confusion**: Include a summarized example of member confusion without quotes, or return no confusion_example if there are no good examples.
 4. **Report Patterns**: Only report patterns appearing in at least 2 different threads without inferring additional issues.
 
 Present each issue by frequency, with the most frequent first, using language an instructor can understand.
@@ -220,7 +407,7 @@ Return up to 5 relevant threads, presenting topics and challenges with concise s
 - Only consider patterns that appear directly in the questions without making assumptions.
 - Ensure clarity and specificity in labeling and explaining challenges encountered by members.
 - No single thread ID should be listed more than once for the same topic.
-- Return None in the absence of real confusion examples.
+- Return no confusion_example in the absence of real confusion examples.
 - Do not output any JSON if there are no valuable topics or threads.
 """
 
@@ -262,7 +449,7 @@ def generate_summary_html_from_assistant_summaries(
             """
             for item in summary.topics:
                 summary_html += f"""
-                <li>{item.topic}</li>
+                <li><b>{item.topic_label}</b>: {item.challenge} {item.confusion_example or ''}</li>
                 """
                 if item.relevant_thread_urls:
                     summary_html += """

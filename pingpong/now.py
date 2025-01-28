@@ -195,12 +195,18 @@ async def croner(
     sched: str,
     now: NowFn = utcnow,
     logger: logging.Logger = logging.getLogger(__name__),
+    task_name: str | None = None,
 ):
     """Iterate over the given cron schedule."""
     while True:
         ts = now()
         next_run = _get_next_run_time(sched, ts)
-        wait = (next_run - now()).total_seconds()  # Fix: Call now() here
-        logger.info(f"Next job scheduled at: {next_run} (in {wait} seconds)")
+        wait = (next_run - now()).total_seconds()
+        if task_name:
+            logger.info(
+                f"Next run for {task_name} scheduled at: {next_run} (in {wait} seconds)"
+            )
+        else:
+            logger.info(f"Next job scheduled at: {next_run} (in {wait} seconds)")
         await asyncio.sleep(wait)
         yield next_run

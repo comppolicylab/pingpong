@@ -806,7 +806,7 @@ summary_template = Template("""
       <div>
       <div class="mobile mobile-bg" style="width: 0; max-height: 0; overflow: hidden; display: none;"">
          <div class="m-gutter">
-            <h1 class="m-title" style="margin-top: 50px; margin-bottom: 30px; font-weight: 600; font-size: 40px; line-height:42px;letter-spacing:-1px;border-bottom:0; font-family: STIX Two Text, serif; font-weight:700;">Your weekly summary is in.</h1>
+            <h1 class="m-title" style="margin-top: 50px; margin-bottom: 30px; font-weight: 600; font-size: 40px; line-height:42px;letter-spacing:-1px;border-bottom:0; font-family: STIX Two Text, serif; font-weight:700;">$title</h1>
          </div>
       </div>
       <div class="mobile mobile-bg" style="width: 0; max-height: 0; overflow: hidden; display: none;">
@@ -882,7 +882,7 @@ summary_template = Template("""
                      <tbody>
                         <tr>
                            <td align="" style="padding-top:50px;padding-bottom:25px">
-                              <p style="font-family: STIX Two Text, serif;color:#111111; font-weight:700;font-size:40px;line-height:44px;letter-spacing:-1px;border-bottom:0;">Your weekly summary is in.</p>
+                              <p style="font-family: STIX Two Text, serif;color:#111111; font-weight:700;font-size:40px;line-height:44px;letter-spacing:-1px;border-bottom:0;">$title</p>
                            </td>
                         </tr>
                      </tbody>

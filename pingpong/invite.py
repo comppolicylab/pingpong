@@ -71,7 +71,9 @@ async def send_summary(
     sender: EmailSender,
     invite: ClassSummaryExport,
 ):
-    subject = f"Your weekly summary for {invite.class_name}"
+    subject = (
+        f"Your {invite.summary_type or 'activity summary'} for {invite.class_name}"
+    )
 
     message = summary_template.substitute(
         {
@@ -79,6 +81,7 @@ async def send_summary(
             "courseName": invite.class_name,
             "summary": invite.summary_html,
             "link": invite.link,
+            "title": invite.title or "Your group's activity summary is here.",
             "time": invite.time_since,
             "legal_text": f"you are a Moderator in {invite.class_name}. You can change your notification settings on the Manage Group page on PingPong",
         }

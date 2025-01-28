@@ -28,7 +28,7 @@ from pingpong.emails import (
     validate_email_addresses,
 )
 from pingpong.stats import get_statistics
-from pingpong.summary import export_class_summary_task
+from pingpong.summary import send_class_summary_to_user_task
 from .animal_hash import process_threads, pseudonym, user_names
 from jwt.exceptions import PyJWTError
 from openai.types.beta.assistant_create_params import ToolResources
@@ -1411,7 +1411,7 @@ async def remove_canvas_connection(
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.GenericStatus,
 )
-async def summarize_assistants(
+async def request_class_summary(
     class_id: str,
     email: str,
     request: Request,
@@ -1435,11 +1435,61 @@ async def summarize_assistants(
     after = utcnow() - timedelta(days=days)
 
     tasks.add_task(
-        export_class_summary_task,
+        send_class_summary_to_user_task,
         openai_client,
         int(class_id),
         user.id,
         after,
+    )
+    return {"status": "ok"}
+
+
+@v1.get(
+    "/class/{class_id}/summarize/subscription",
+    dependencies=[Depends(Authz("can_receive_summaries", "class:{class_id}"))],
+    response_model=schemas.SummarySubscriptionResult,
+)
+async def get_class_summary_subscription(class_id: str, request: Request):
+    subscribed = await models.UserClassRole.is_subscribed_to_summaries(
+        request.state.db, request.state.session.user.id, int(class_id)
+    )
+    return {"subscribed": subscribed}
+
+
+@v1.post(
+    "/class/{class_id}/summarize/subscription",
+    dependencies=[Depends(Authz("can_receive_summaries", "class:{class_id}"))],
+)
+async def subscribe_to_class_summary(class_id: str, request: Request):
+    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    if not class_:
+        raise HTTPException(status_code=404, detail="Group not found")
+    if class_.private:
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot subscribe to Activity Summaries for a private class",
+        )
+    await models.UserClassRole.subscribe_to_summaries(
+        request.state.db, request.state.session.user.id, int(class_id)
+    )
+    return {"status": "ok"}
+
+
+@v1.delete(
+    "/class/{class_id}/summarize/subscription",
+    dependencies=[Depends(Authz("can_receive_summaries", "class:{class_id}"))],
+)
+async def unsubscribe_from_class_summary(class_id: str, request: Request):
+    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    if not class_:
+        raise HTTPException(status_code=404, detail="Group not found")
+    if class_.private:
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot subscribe to Activity Summaries for a private class",
+        )
+    await models.UserClassRole.unsubscribe_from_summaries(
+        request.state.db, request.state.session.user.id, int(class_id)
     )
     return {"status": "ok"}
 
@@ -2125,7 +2175,7 @@ async def get_ci_messages(
     dependencies=[Depends(Authz("supervisor", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
-async def export_class(
+async def export_class_threads(
     class_id: str, request: Request, tasks: BackgroundTasks, openai_client: OpenAIClient
 ):
     class_ = await models.Class.get_by_id(request.state.db, int(class_id))

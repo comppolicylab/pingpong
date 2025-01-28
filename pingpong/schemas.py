@@ -391,7 +391,9 @@ class AIAssistantSummary(BaseModel):
 
 
 class TopicSummary(BaseModel):
-    topic: str
+    topic_label: str
+    challenge: str
+    confusion_example: str | None
     relevant_thread_urls: list[str]
 
 
@@ -408,11 +410,17 @@ class ClassSummary(BaseModel):
 
 class ClassSummaryExport(BaseModel):
     link: str
+    summary_type: str | None
+    title: str | None
     first_name: str
     email: str
     summary_html: str
     class_name: str
     time_since: str
+
+
+class SummarySubscriptionResult(BaseModel):
+    subscribed: bool
 
 
 class ThreadUserMessages(BaseModel):
