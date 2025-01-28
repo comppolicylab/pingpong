@@ -893,7 +893,7 @@
           ><Secondary class="text-3xl text-black font-normal">Activity Summaries</Secondary
           ></Heading
         >
-        <div class="flex flex-col gap-3">
+        <div class="flex flex-col gap-2">
           <Info>Manage your subscription to this group's Activity Summaries.</Info>
           <a
             href="/profile"
