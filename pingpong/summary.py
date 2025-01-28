@@ -368,10 +368,10 @@ async def get_thread_user_messages(
 
 
 summarization_prompt = """
-Analyze user questions to identify 2-3 common topics or issues members struggle with. Prioritize frequent topics and return results without exceeding 5 relevant threads. If there are no valuable topics or threads, do not return any results. Ensure that no single thread ID is listed more than once for the same topic.
+Analyze user questions to identify 2-3 common topics members ask about. Prioritize frequent topics and return results without exceeding 5 relevant threads. If there are no valuable topics or threads, do not return any results. Ensure that no single thread ID is listed more than once for the same topic.
 
 1. **Label the Topic**: Provide a clear, concise label (2-4 words) for each identified topic or issue.
-2. **Specify the Challenge**: Clearly identify the specific aspect of the topic that members find challenging.
+2. **Specify the Challenge**: Clearly identify the specific aspect of the topic that members are inquiring about.
 3. **Example of Confusion**: Include a summarized example of member confusion without quotes, or return no confusion_example if there are no good examples.
 4. **Report Patterns**: Only report patterns appearing in at least 2 different threads without inferring additional issues.
 
