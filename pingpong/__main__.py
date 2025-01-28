@@ -586,7 +586,7 @@ async def _send_activity_summaries(
 
 FUNCTIONS_MAP: Dict[str, Callable] = {
     "batch_send_activity_summaries": _send_activity_summaries,
-    "sync_pingpong_with_lms": _lms_sync_all,
+    "sync_pingpong_with_lms": lambda _, **kwargs: _lms_sync_all(**kwargs),
 }
 
 
@@ -619,7 +619,7 @@ def run_dynamic_tasks_with_args(host: str, port: int, tasks: list[str]) -> None:
             sys.exit(1)
 
         func = FUNCTIONS_MAP[function_name]
-        async for _ in croner(cron_schedule):
+        async for _ in croner(cron_schedule, task_name=task_name):
             try:
                 await func(task_name, **args)
                 logger.info(
