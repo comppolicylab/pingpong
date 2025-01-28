@@ -52,7 +52,7 @@
         >Make a new assistant</Heading
       >
       <div class="bg-gold rounded-2xl p-8 mb-12 justify-between gap-12 items-start lg:flex">
-        <p class="mb-4 font-light">
+        <p class="font-light">
           Build your own AI chatbot for this group. You can customize it with specific knowledge,
           personality, and parameters to serve as a digital assistant for this group.
         </p>
