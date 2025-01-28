@@ -683,6 +683,30 @@ export const deleteClass = async (f: Fetcher, classId: number) => {
 };
 
 /**
+ * Activity summary subscription info.
+ */
+export type ActivitySummarySubscription = {
+  class_id: number;
+  class_name: string;
+  subscribed: boolean;
+  last_email_sent: string | null;
+};
+
+/**
+ * List of activity summary subscriptions.
+ */
+export type ActivitySummarySubscriptions = {
+  subscriptions: ActivitySummarySubscription[];
+};
+
+/**
+ * Get all activity summary subscriptions.
+ */
+export const getActivitySummaries = async (f: Fetcher) => {
+  return await GET<never, ActivitySummarySubscriptions>(f, 'me/activity_summaries');
+};
+
+/**
  * Information about a summary subscription.
  */
 
@@ -709,6 +733,20 @@ export const subscribeToSummary = async (f: Fetcher, classId: number) => {
  */
 export const unsubscribeFromSummary = async (f: Fetcher, classId: number) => {
   return await DELETE<never, GenericStatus>(f, `class/${classId}/summarize/subscription`);
+};
+
+/**
+ * Subscribe to all activity summaries.
+ */
+export const subscribeToAllSummaries = async (f: Fetcher) => {
+  return await POST<never, GenericStatus>(f, 'me/activity_summaries');
+};
+
+/**
+ * Unsubscribe from all activity summaries.
+ */
+export const unsubscribeFromAllSummaries = async (f: Fetcher) => {
+  return await DELETE<never, GenericStatus>(f, 'me/activity_summaries');
 };
 
 /**

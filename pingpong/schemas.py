@@ -370,6 +370,17 @@ class ThreadName(BaseModel):
     can_generate: bool
 
 
+class ActivitySummarySubscription(BaseModel):
+    class_id: int
+    class_name: str
+    subscribed: bool
+    last_email_sent: datetime | None
+
+
+class ActivitySummarySubscriptions(BaseModel):
+    subscriptions: list[ActivitySummarySubscription]
+
+
 class AITopic(BaseModel):
     topic_label: str
     challenge: str

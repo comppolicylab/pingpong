@@ -3,9 +3,9 @@ import { toast } from '@zerodevx/svelte-toast';
 /**
  * Show an error message as a toast.
  */
-export const sadToast = (message: string) => {
+export const sadToast = (message: string, duration: number = 5000) => {
   toast.push(message, {
-    duration: 5000,
+    duration: duration,
     theme: {
       // Error color
       '--toastBackground': '#FFBA89',
@@ -19,9 +19,9 @@ export const sadToast = (message: string) => {
 /**
  * Show a success message as a toast.
  */
-export const happyToast = (message: string) => {
+export const happyToast = (message: string, duration: number = 2000) => {
   toast.push(message, {
-    duration: 2000,
+    duration: duration,
     theme: {
       // Success color
       '--toastBackground': '#B4F9E9',
