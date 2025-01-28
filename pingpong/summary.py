@@ -168,6 +168,8 @@ async def send_class_summary_to_class_users(
         cli, session, class_.id, class_.name, after
     )
     if not summary_html:
+        class_.last_summary_sent_at = nowfn()
+        await session.commit()
         return
 
     user_roles = await models.UserClassRole.get_by_user_ids(
@@ -193,18 +195,18 @@ async def send_class_summary_to_class_users(
             ucr.last_summary_sent_at = nowfn()
 
             # Commit for every user so we don't lose progress if we hit an error
-            await session.add(ucr)
             await session.commit()
 
         except Exception as e:
-            logger.error(f"Failed to send summary to user {ucr.user_id}: {e}")
+            logger.error(
+                f"Failed to send summary to user {ucr.user_id}: {e}", exc_info=True
+            )
             no_errors = False
             continue
 
     if no_errors:
         # Update last summary sent for all users
         class_.last_summary_sent_at = nowfn()
-        await session.add(class_)
         await session.commit()
 
 

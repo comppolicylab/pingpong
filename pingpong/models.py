@@ -50,17 +50,51 @@ class Base(AsyncAttrs, DeclarativeBase):
     pass
 
 
-class CronTask(Base):
-    __tablename__ = "cron_tasks"
+class PeriodicTask(Base):
+    __tablename__ = "periodic_tasks"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    function = Column(String)
-    last_completed = Column(DateTime(timezone=True), nullable=True)
-    force_rerun_at = Column(DateTime(timezone=True), nullable=True)
+    task_name = Column(String)
+    scheduled_jobs = relationship(
+        "ScheduledJob", back_populates="task", lazy="selectin"
+    )
+
+    __table_args__ = (Index("idx_task_name", "task_name", unique=True),)
 
     @classmethod
-    async def get_by_function(cls, session: AsyncSession, function: str) -> "CronTask":
-        stmt = select(CronTask).where(CronTask.function == function)
+    async def get_by_task_name(
+        cls, session: AsyncSession, task_name: str
+    ) -> "PeriodicTask":
+        stmt = select(PeriodicTask).where(PeriodicTask.task_name == task_name)
+        return await session.scalar(stmt)
+
+
+class ScheduledJob(Base):
+    __tablename__ = "scheduled_jobs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[int] = mapped_column(
+        ForeignKey("periodic_tasks.id", ondelete="cascade"), nullable=False
+    )
+    task = relationship(
+        "PeriodicTask", back_populates="scheduled_jobs", lazy="selectin"
+    )
+    scheduled_at = Column(DateTime(timezone=True), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (Index("idx_task_id", "task_id"),)
+
+    @classmethod
+    async def get_latest_by_task_id(
+        cls, session: AsyncSession, task_id: int
+    ) -> "ScheduledJob":
+        stmt = (
+            select(ScheduledJob)
+            .where(ScheduledJob.task_id == task_id)
+            .order_by(ScheduledJob.scheduled_at.desc())
+            .limit(1)
+        )
         return await session.scalar(stmt)
 
 

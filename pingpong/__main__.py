@@ -41,7 +41,7 @@ from .auth import encode_auth_token
 from .bg import get_server
 from .canvas import canvas_sync_all
 from .config import config
-from .models import Base, CronTask, User, Class
+from .models import Base, ScheduledJob, PeriodicTask, User, Class
 from .authz.admin_migration import remove_class_admin_perms
 
 from sqlalchemy import inspect
@@ -466,46 +466,56 @@ def export_threads(class_id: int, user_email: str) -> None:
 
 
 async def _send_activity_summaries(
-    days: int = 7, force_send_cron: str | None = None
+    task_name: str,
+    expiration_cron: str | None = None,
+    days: int = 7,
 ) -> None:
     """
     Send activity summaries for all classes that have not been summarized in the last `days` days.
 
     Args:
+        task_name: The name of the task.
         days: Number of days to look back for classes that have not been summarized.
-        force_send_cron: A cron schedule to force send summaries to all users at a specific time, no matter previous failures.
+        expiration_cron: A cron schedule to force send summaries to all users at a specific time, no matter previous failures.
     """
     await config.authz.driver.init()
     async with config.db.driver.async_session() as session:
         async with config.authz.driver.get_client() as c:
-            task = await CronTask.get_by_function(session, "send_activity_summaries")
+            task = await PeriodicTask.get_by_task_name(session, task_name)
             if not task:
-                next_forced_run = None
-                if force_send_cron:
-                    ts = utcnow()
-                    next_forced_run = _get_next_run_time(force_send_cron, ts)
-                task = CronTask(
-                    function="send_activity_summaries", force_rerun_at=next_forced_run
-                )
+                logger.info(f"Creating new periodic task {task_name}...")
+                task = PeriodicTask(task_name=task_name)
                 session.add(task)
                 await session.commit()
                 await session.refresh(task)
+
+            job = await ScheduledJob.get_latest_by_task_id(session, task.id)
+
+            if not job or (
+                expiration_cron and job.expires_at and job.expires_at < utcnow()
+            ):
+                logger.info(f"Creating new scheduled job for task {task_name}...")
+                expires_at = None
+                if expiration_cron:
+                    ts = utcnow()
+                    expires_at = _get_next_run_time(expiration_cron, ts)
+                job = ScheduledJob(
+                    task_id=task.id, scheduled_at=utcnow(), expires_at=expires_at
+                )
+                session.add(job)
+                await session.commit()
+                await session.refresh(job)
+
+            if job.completed_at:
+                logger.info(
+                    f"Scheduled job {job.id} for task {task_name} already completed."
+                )
+                return
 
             no_errors = True
-            if force_send_cron and (
-                (task.force_rerun_at and task.force_rerun_at <= utcnow())
-                or (task.force_rerun_at is None)
-            ):
-                ts = utcnow()
-                next_forced_run = _get_next_run_time(force_send_cron, ts)
-                task.last_completed = task.force_rerun_at
-                task.force_rerun_at = next_forced_run
-                session.add(task)
-                await session.commit()
-                await session.refresh(task)
 
             async for class_ in Class.get_all_classes_to_summarize(
-                session, before=task.last_completed
+                session, before=job.scheduled_at
             ):
                 try:
                     logger.info(f"Sending summary for class {class_.id}...")
@@ -521,11 +531,7 @@ async def _send_activity_summaries(
                         after,
                         summary_type="weekly summary",
                         summary_email_header="Your weekly summary is in.",
-                        sent_before=task.last_completed
-                        if task.last_completed
-                        and class_.last_summary_sent_at
-                        and task.last_completed > class_.last_summary_sent_at
-                        else None,
+                        sent_before=job.scheduled_at,
                     )
                     await session.commit()
 
@@ -539,37 +545,9 @@ async def _send_activity_summaries(
                     continue
 
             if no_errors:
-                task.last_completed = utcnow()
-                session.add(task)
+                logger.info("All summaries sent successfully.")
+                job.completed_at = utcnow()
             await session.commit()
-
-
-@export.command("batch_send_activity_summaries")
-@click.option("--crontime", default="0 15 * * 0")
-@click.option("--host", default="localhost")
-@click.option("--port", default=8001)
-@click.option("--days", default=7)
-def batch_send_activity_summaries(
-    crontime: str, host: str, port: int, days: int
-) -> None:
-    """
-    Run the batch_send_activity_summaries command in a background server.
-    """
-    server = get_server(host=host, port=port)
-
-    async def _batch_send_activity_summaries():
-        before = None
-        async for _ in croner(crontime, logger=logger):
-            try:
-                await _send_activity_summaries(days, before)
-                logger.info(f"Activities sent successfully at {datetime.now()}")
-                before = utcnow()
-            except Exception as e:
-                logger.error(f"Error during sync: {e}")
-
-    # Run the Uvicorn server in the background
-    with server.run_in_thread():
-        asyncio.run(_batch_send_activity_summaries())
 
 
 FUNCTIONS_MAP: Dict[str, Callable] = {
@@ -578,7 +556,7 @@ FUNCTIONS_MAP: Dict[str, Callable] = {
 }
 
 
-@schedule.command("run_dynamic_tasks")
+@schedule.command("schedule_tasks")
 @click.option("--host", default="localhost")
 @click.option("--port", default=8001)
 @click.option(
@@ -586,17 +564,19 @@ FUNCTIONS_MAP: Dict[str, Callable] = {
     multiple=True,
     help=(
         "Tasks to schedule in the format "
-        "'function_name:cron_schedule:arguments'. "
+        "'task_name:function_name:cron_schedule:arguments'. "
         "Arguments should be a JSON string. Multiple tasks can be passed."
     ),
 )
 def run_dynamic_tasks_with_args(host: str, port: int, tasks: list[str]) -> None:
     """
-    Dynamically run tasks with arguments based on provided function names and their cron schedules.
+    Dynamically run tasks with arguments based on provided task names, function names, and their cron schedules.
     """
     server = get_server(host=host, port=port)
 
-    async def _execute_task(function_name: str, cron_schedule: str, args: dict):
+    async def _execute_task(
+        task_name: str, function_name: str, cron_schedule: str, args: dict
+    ):
         """
         Execute a given task based on its name, cron schedule, and provided arguments.
         """
@@ -607,27 +587,32 @@ def run_dynamic_tasks_with_args(host: str, port: int, tasks: list[str]) -> None:
         func = FUNCTIONS_MAP[function_name]
         async for _ in croner(cron_schedule):
             try:
-                await func(**args)
+                await func(task_name, **args)
                 logger.info(
-                    f"Task '{function_name}' completed successfully at {datetime.now()}"
+                    f"Task '{task_name}' (calling {function_name}) completed successfully at {datetime.now()}"
                 )
             except Exception as e:
-                logger.error(f"Error in task '{function_name}': {e}")
+                logger.error(f"Error in task '{task_name}' ({function_name}): {e}")
 
     async def _parse_tasks():
         task_coroutines = []
+        task_names = set()
         for task in tasks:
             try:
-                parts = task.split(":", 2)
-                if len(parts) != 3:
+                parts = task.split(":", 3)
+                if len(parts) != 4:
                     raise ValueError(
-                        f"Invalid task format: '{task}'. Expected 'function_name:cron_schedule:arguments'."
+                        f"Invalid task format: '{task}'. Expected 'task_name:function_name:cron_schedule:arguments'."
                     )
 
-                function_name, cron_schedule, args_json = parts
+                task_name, function_name, cron_schedule, args_json = parts
+                if task_name in task_names:
+                    raise ValueError(f"Duplicate task name found: '{task_name}'")
+                task_names.add(task_name)
+
                 args = json.loads(args_json)
                 task_coroutines.append(
-                    _execute_task(function_name, cron_schedule, args)
+                    _execute_task(task_name, function_name, cron_schedule, args)
                 )
             except Exception as e:
                 raise ValueError(f"Failed to parse task '{task}': {e}")
