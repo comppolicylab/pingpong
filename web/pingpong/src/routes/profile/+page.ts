@@ -6,7 +6,9 @@ export const load: PageLoad = async ({ fetch }) => {
 
   let subscriptions: api.ActivitySummarySubscription[] = [];
   if (subscriptionsResponse.data) {
-    subscriptions = subscriptionsResponse.data.subscriptions;
+    subscriptions = subscriptionsResponse.data.subscriptions.sort((a, b) =>
+      a.class_name.localeCompare(b.class_name)
+    );
   }
 
   return {

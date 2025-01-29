@@ -14,11 +14,12 @@
     TableHead,
     P,
     Toggle,
-    Button
+    Button,
+    Tooltip
   } from 'flowbite-svelte';
   import dayjs from 'dayjs';
   import * as api from '$lib/api';
-  import { BellActiveAltSolid, TrashBinSolid } from 'flowbite-svelte-icons';
+  import { BellActiveAltSolid, QuestionCircleOutline, TrashBinSolid } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { invalidateAll } from '$app/navigation';
 
@@ -67,8 +68,8 @@
       sadToast(response.error.detail || 'An unknown error occurred');
     } else {
       happyToast(`Successfully unsubscribed from <b>${className}</b> Activity Summaries.`, 5000);
-      invalidateAll();
     }
+    invalidateAll();
   };
 
   const unsubscribeFromAllSummaries = async () => {
@@ -78,8 +79,8 @@
       sadToast(response.error.detail || 'An unknown error occurred');
     } else {
       happyToast(`Successfully unsubscribed from all Activity Summaries.`, 5000);
-      invalidateAll();
     }
+    invalidateAll();
   };
 
   const subscribeToAllSummaries = async () => {
@@ -89,8 +90,8 @@
       sadToast(response.error.detail || 'An unknown error occurred');
     } else {
       happyToast(`Successfully subscribed to all Activity Summaries.`, 5000);
-      invalidateAll();
     }
+    invalidateAll();
   };
 
   const subscribeToSummaries = async (classId: number, className: string) => {
@@ -100,8 +101,8 @@
       sadToast(response.error.detail || 'An unknown error occurred');
     } else {
       happyToast(`Successfully subscribed to <b>${className}</b> Activity Summaries.`, 5000);
-      invalidateAll();
     }
+    invalidateAll();
   };
 
   const handleSubscriptionChange = async (event: Event, classId: number, className: string) => {
@@ -220,34 +221,104 @@
         <P>
           PingPong will gather all thread activity in a Group and email an AI-generated summary with
           relevant thread links to all Moderators at the end of each week. You will receive an
-          Activity Summary for each Group you are subscribed to.
+          Activity Summary for each Group you are subscribed to. <b
+            >You won't receive Activity Summaries for Groups with no activity.</b
+          >
         </P>
         <Table>
           <TableHead class="bg-blue-light-40 p-1 text-blue-dark-50 tracking-wide rounded-2xl">
-            <TableHeadCell>Class Name</TableHeadCell>
-            <TableHeadCell>Last Activity Summary Sent At</TableHeadCell>
-            <TableHeadCell>Receive Activity Summaries</TableHeadCell>
+            <TableHeadCell class="w-1/3">Class Name</TableHeadCell>
+            <TableHeadCell class="w-1/3">Last Activity Summary Sent At</TableHeadCell>
+            <TableHeadCell class="w-1/4">Receive Activity Summaries</TableHeadCell>
           </TableHead>
           <TableBody>
             {#each activitySubscription as subscription}
               <TableBodyRow>
-                <TableBodyCell class="font-light">{subscription.class_name}</TableBodyCell>
-                <TableBodyCell class="font-light"
-                  >{subscription.last_email_sent
-                    ? dayjs(subscription.last_email_sent).toString()
-                    : 'Never'}</TableBodyCell
+                <TableBodyCell class="font-light text-wrap">{subscription.class_name}</TableBodyCell
                 >
+                <TableBodyCell class="font-light"
+                  >{#if subscription.class_private}
+                    <div class="flex flex-row gap-2 justify-between items-center">
+                      <span class="text-xs uppercase font-medium text-gray-500"
+                        >Ineligible: Private Group</span
+                      >
+                      <div>
+                        <QuestionCircleOutline color="gray" />
+                        <Tooltip
+                          type="custom"
+                          arrow={false}
+                          class="flex flex-row overflow-y-auto bg-gray-900 z-10 max-w-xs py-2 px-3 text-sm text-wrap font-light text-white"
+                        >
+                          <div class="whitespace-normal">
+                            <p>Activity Summaries are unavailable for private groups.</p>
+                          </div>
+                        </Tooltip>
+                      </div>
+                    </div>
+                  {:else if subscription.last_summary_empty}
+                    <div class="flex flex-row gap-2 justify-between items-center">
+                      <span class="text-wrap"
+                        >{subscription.last_email_sent
+                          ? dayjs(subscription.last_email_sent).toString()
+                          : 'Never'}</span
+                      >
+                      <div>
+                        <QuestionCircleOutline color="gray" />
+                        <Tooltip
+                          type="custom"
+                          arrow={false}
+                          class="flex flex-row overflow-y-auto bg-gray-900 z-10 max-w-xs py-2 px-3 text-sm text-wrap font-light text-white"
+                        >
+                          <div class="whitespace-normal">
+                            <p>
+                              We didn't send an Activity Summary for this Group last time because
+                              there was no recent activity.
+                            </p>
+                          </div>
+                        </Tooltip>
+                      </div>
+                    </div>
+                  {:else if !subscription.class_has_api_key}
+                    <div class="flex flex-row gap-2 justify-between items-center">
+                      <span class="text-xs uppercase font-medium text-gray-500"
+                        >Ineligible: No Billing Information</span
+                      >
+                      <div>
+                        <QuestionCircleOutline color="gray" />
+                        <Tooltip
+                          type="custom"
+                          arrow={false}
+                          class="flex flex-row overflow-y-auto bg-gray-900 z-10 max-w-xs py-2 px-3 text-sm text-wrap font-light text-white"
+                        >
+                          <div class="whitespace-normal">
+                            <p>
+                              Activity Summaries are unavailable for Groups with no billing
+                              information. Add a billing method and an Assistant to enable Activity
+                              Summaries.
+                            </p>
+                          </div>
+                        </Tooltip>
+                      </div>
+                    </div>
+                  {:else}
+                    {subscription.last_email_sent
+                      ? dayjs(subscription.last_email_sent).toString()
+                      : 'Never'}
+                  {/if}
+                </TableBodyCell>
                 <TableBodyCell>
-                  <Toggle
-                    color="blue"
-                    checked={subscription.subscribed}
-                    on:change={(event) =>
-                      handleSubscriptionChange(
-                        event,
-                        subscription.class_id,
-                        subscription.class_name
-                      )}
-                  />
+                  {#if !subscription.class_private && subscription.class_has_api_key}
+                    <Toggle
+                      color="blue"
+                      checked={subscription.subscribed}
+                      on:change={(event) =>
+                        handleSubscriptionChange(
+                          event,
+                          subscription.class_id,
+                          subscription.class_name
+                        )}
+                    />
+                  {/if}
                 </TableBodyCell>
               </TableBodyRow>
             {/each}

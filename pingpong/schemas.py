@@ -377,8 +377,11 @@ class ActivitySummaryOpts(BaseModel):
 class ActivitySummarySubscription(BaseModel):
     class_id: int
     class_name: str
+    class_private: bool
+    class_has_api_key: bool
     subscribed: bool
     last_email_sent: datetime | None
+    last_summary_empty: bool
 
 
 class ActivitySummarySubscriptions(BaseModel):
