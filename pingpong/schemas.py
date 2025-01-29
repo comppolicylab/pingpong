@@ -403,6 +403,7 @@ class AIAssistantSummaryOutput(BaseModel):
 class AIAssistantSummary(BaseModel):
     assistant_name: str
     topics: list[AITopicSummary]
+    has_threads: bool
 
 
 class TopicSummary(BaseModel):
@@ -415,6 +416,7 @@ class TopicSummary(BaseModel):
 class AssistantSummary(BaseModel):
     assistant_name: str
     topics: list[TopicSummary]
+    has_threads: bool
 
 
 class ClassSummary(BaseModel):

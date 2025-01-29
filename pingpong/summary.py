@@ -303,10 +303,13 @@ async def generate_assistant_summaries(
                 AIAssistantSummary(
                     assistant_name=name,
                     topics=assistant_summary.topics if assistant_summary else [],
+                    has_threads=True,
                 )
             )
         else:
-            summaries.append(AIAssistantSummary(assistant_name=name, topics=[]))
+            summaries.append(
+                AIAssistantSummary(assistant_name=name, topics=[], has_threads=False)
+            )
 
     if not current_period_contains_threads and not summarize_even_if_no_threads:
         return None
@@ -342,7 +345,9 @@ def convert_to_class_summary(
         # Build AssistantSummary
         assistant_summaries.append(
             AssistantSummary(
-                assistant_name=ai_assistant_summary.assistant_name, topics=topics
+                assistant_name=ai_assistant_summary.assistant_name,
+                topics=topics,
+                has_threads=ai_assistant_summary.has_threads,
             )
         )
 
@@ -373,7 +378,7 @@ async def get_thread_user_messages(
 
 
 summarization_prompt = """
-Analyze user questions to identify 2-3 common topics members ask about. Prioritize frequent topics and return results without exceeding 5 relevant threads. If there are no valuable topics or threads, do not return any results. Ensure that no single thread ID is listed more than once for the same topic.
+Analyze user questions to identify 2-3 common topics members ask about. Prioritize frequent topics and return results without exceeding 5 relevant threads. IF THERE ARE NO VALUABLE TOPICS OR THREADS, DO NOT RETURN ANY RESULTS. Ensure that no single thread ID is listed more than once for the same topic.
 
 1. **Label the Topic**: Provide a clear, concise label (2-4 words) for each identified topic or issue.
 2. **Specify the Challenge**: Clearly identify the specific aspect of the topic that members are inquiring about.
@@ -469,10 +474,15 @@ def generate_summary_html_from_assistant_summaries(
             summary_html += """
                </ul>
             """
+        elif not summary.topics and summary.has_threads:
+            summary_html += """
+               <p><i>No noteworthy topics or conversations.</i></p>
+            """
         else:
             summary_html += """
                <p><i>No activity.</i></p>
             """
+
         summary_html += """
             </div>
          </div>
