@@ -1406,18 +1406,17 @@ async def remove_canvas_connection(
     return {"status": "ok"}
 
 
-@v1.get(
+@v1.post(
     "/class/{class_id}/summarize",
-    dependencies=[Depends(Authz("admin"))],
+    dependencies=[Depends(Authz("can_receive_summaries", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
 async def request_class_summary(
     class_id: str,
-    email: str,
     request: Request,
     tasks: BackgroundTasks,
     openai_client: OpenAIClient,
-    days: int = 7,
+    opts: schemas.ActivitySummaryOpts,
 ):
     class_ = await models.Class.get_by_id(request.state.db, int(class_id))
     if not class_:
@@ -1427,12 +1426,12 @@ async def request_class_summary(
             status_code=403,
             detail="Cannot create assistant summaries for a private class",
         )
-    user = await models.User.get_by_email_sso(request.state.db, email, "email", email)
+    user = await models.User.get_by_id(request.state.db, request.state.session.user.id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     # Calculate date X days ago
-    after = utcnow() - timedelta(days=days)
+    after = utcnow() - timedelta(days=opts.days or 7)
 
     tasks.add_task(
         send_class_summary_to_user_task,
@@ -1440,6 +1439,7 @@ async def request_class_summary(
         int(class_id),
         user.id,
         after,
+        summarize_even_if_no_threads=True,
     )
     return {"status": "ok"}
 

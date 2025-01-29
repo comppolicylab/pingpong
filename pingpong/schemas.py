@@ -370,6 +370,10 @@ class ThreadName(BaseModel):
     can_generate: bool
 
 
+class ActivitySummaryOpts(BaseModel):
+    days: int | None = 7
+
+
 class ActivitySummarySubscription(BaseModel):
     class_id: int
     class_name: str

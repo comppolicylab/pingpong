@@ -718,35 +718,57 @@ export type SummarySubscription = {
  * Get the summary subscription status for a class.
  */
 export const getSummarySubscription = async (f: Fetcher, classId: number) => {
-  return await GET<never, SummarySubscription>(f, `class/${classId}/summarize/subscription`);
+  const url = `class/${classId}/summarize/subscription`;
+  return await GET<never, SummarySubscription>(f, url);
 };
 
 /**
  * Subscribe to the class summary.
  */
 export const subscribeToSummary = async (f: Fetcher, classId: number) => {
-  return await POST<never, GenericStatus>(f, `class/${classId}/summarize/subscription`);
+  const url = `class/${classId}/summarize/subscription`;
+  return await POST<never, GenericStatus>(f, url);
 };
 
 /**
  * Unsubscribe from the class summary.
  */
 export const unsubscribeFromSummary = async (f: Fetcher, classId: number) => {
-  return await DELETE<never, GenericStatus>(f, `class/${classId}/summarize/subscription`);
+  const url = `class/${classId}/summarize/subscription`;
+  return await DELETE<never, GenericStatus>(f, url);
 };
 
 /**
  * Subscribe to all activity summaries.
  */
 export const subscribeToAllSummaries = async (f: Fetcher) => {
-  return await POST<never, GenericStatus>(f, 'me/activity_summaries');
+  const url = 'me/activity_summaries';
+  return await POST<never, GenericStatus>(f, url);
 };
 
 /**
  * Unsubscribe from all activity summaries.
  */
 export const unsubscribeFromAllSummaries = async (f: Fetcher) => {
-  return await DELETE<never, GenericStatus>(f, 'me/activity_summaries');
+  const url = 'me/activity_summaries';
+  return await DELETE<never, GenericStatus>(f, url);
+};
+
+/**
+ *  Information about an Activity Summary Request.
+ *
+ */
+export type ActivitySummaryRequestOpts = {
+  days: number;
+};
+
+export const requestActivitySummary = async (
+  f: Fetcher,
+  classId: number,
+  data: ActivitySummaryRequestOpts
+) => {
+  const url = `class/${classId}/summarize`;
+  return await POST<ActivitySummaryRequestOpts, GenericStatus>(f, url, data);
 };
 
 /**
@@ -1504,7 +1526,7 @@ export const removeClassUser = async (f: Fetcher, classId: number, userId: numbe
 };
 
 /**
- * Remove a user from a class.
+ * Export class threads.
  */
 export const exportThreads = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/export`;
