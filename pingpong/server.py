@@ -1467,7 +1467,12 @@ async def subscribe_to_class_summary(class_id: str, request: Request):
     if class_.private:
         raise HTTPException(
             status_code=403,
-            detail="Cannot subscribe to Activity Summaries for a private class",
+            detail="Cannot subscribe to Activity Summaries for a private group.",
+        )
+    if not class_.api_key_id and not class_.api_key:
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot subscribe to Activity Summaries for a group with no billing information.",
         )
     await models.UserClassRole.subscribe_to_summaries(
         request.state.db, request.state.session.user.id, int(class_id)
@@ -1486,7 +1491,12 @@ async def unsubscribe_from_class_summary(class_id: str, request: Request):
     if class_.private:
         raise HTTPException(
             status_code=403,
-            detail="Cannot subscribe to Activity Summaries for a private class",
+            detail="Cannot subscribe to Activity Summaries for a private group.",
+        )
+    if not class_.api_key_id and not class_.api_key:
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot subscribe to Activity Summaries for a group with no billing information.",
         )
     await models.UserClassRole.unsubscribe_from_summaries(
         request.state.db, request.state.session.user.id, int(class_id)

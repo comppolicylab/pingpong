@@ -172,6 +172,9 @@ async def send_class_summary_to_class_users(
     )
     if not summary_html:
         class_.last_summary_sent_at = nowfn()
+        await models.UserClassRole.mark_as_last_summary_empty(
+            session, user_ids, class_id, subscribed_only, sent_before
+        )
         await session.commit()
         return
 
@@ -196,6 +199,7 @@ async def send_class_summary_to_class_users(
             )
 
             ucr.last_summary_sent_at = nowfn()
+            ucr.last_summary_empty = False
 
             # Commit for every user so we don't lose progress if we hit an error
             await session.commit()

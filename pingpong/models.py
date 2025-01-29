@@ -116,6 +116,7 @@ class UserClassRole(Base):
     class_ = relationship("Class", back_populates="users")
     subscribed_to_summaries = Column(Boolean, server_default="true")
     last_summary_sent_at = Column(DateTime(timezone=True), nullable=True)
+    last_summary_empty = Column(Boolean, server_default="false")
 
     @classmethod
     async def get(
@@ -161,6 +162,36 @@ class UserClassRole(Base):
         return [row.UserClassRole for row in result]
 
     @classmethod
+    async def mark_as_last_summary_empty(
+        cls,
+        session: AsyncSession,
+        user_ids: List[int],
+        class_id: int,
+        subscribed_only: bool | None = None,
+        sent_before: datetime | None = None,
+    ):
+        conditions = [
+            UserClassRole.user_id.in_(user_ids),
+            UserClassRole.class_id == class_id,
+        ]
+        if subscribed_only:
+            conditions.append(UserClassRole.subscribed_to_summaries.is_(True))
+        if sent_before:
+            conditions.append(
+                or_(
+                    UserClassRole.last_summary_sent_at.is_(None),
+                    UserClassRole.last_summary_sent_at < sent_before,
+                )
+            )
+
+        stmt = (
+            update(UserClassRole)
+            .where(and_(*conditions))
+            .values(last_summary_empty=True)
+        )
+        await session.execute(stmt)
+
+    @classmethod
     async def is_subscribed_to_summaries(
         cls, session: AsyncSession, user_id: int, class_id: int
     ) -> bool:
@@ -177,15 +208,20 @@ class UserClassRole(Base):
             select(
                 UserClassRole.class_id,
                 Class.name,
+                Class.private,
                 UserClassRole.subscribed_to_summaries,
                 UserClassRole.last_summary_sent_at,
+                UserClassRole.last_summary_empty,
+                or_(
+                    Class.api_key.isnot(None),
+                    Class.api_key_id.isnot(None),
+                ).label("class_has_api_key"),
             )
             .join(Class, Class.id == UserClassRole.class_id)
             .where(
                 and_(
                     UserClassRole.user_id == user_id,
                     UserClassRole.class_id.in_(class_ids),
-                    Class.private.is_(False),
                 )
             )
         )
@@ -194,8 +230,11 @@ class UserClassRole(Base):
             schemas.ActivitySummarySubscription(
                 class_id=row[0],
                 class_name=row[1],
-                subscribed=row[2],
-                last_email_sent=row[3],
+                class_private=row[2],
+                class_has_api_key=row[6],
+                subscribed=row[3],
+                last_email_sent=row[4],
+                last_summary_empty=row[5],
             )
             for row in result
         ]

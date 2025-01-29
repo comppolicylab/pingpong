@@ -688,8 +688,11 @@ export const deleteClass = async (f: Fetcher, classId: number) => {
 export type ActivitySummarySubscription = {
   class_id: number;
   class_name: string;
+  class_private: boolean;
+  class_has_api_key: boolean;
   subscribed: boolean;
   last_email_sent: string | null;
+  last_summary_empty: boolean;
 };
 
 /**
