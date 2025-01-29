@@ -96,6 +96,7 @@ async def send_class_summary_to_user_task(
     nowfn: NowFn = utcnow,
     summary_type: str | None = None,
     summary_email_header: str | None = None,
+    summarize_even_if_no_threads: bool = False,
 ) -> None:
     async with config.db.driver.async_session() as session:
         await send_class_summary_to_user(
@@ -107,6 +108,7 @@ async def send_class_summary_to_user_task(
             nowfn,
             summary_type,
             summary_email_header,
+            summarize_even_if_no_threads,
         )
 
 
@@ -119,6 +121,7 @@ async def send_class_summary_to_user(
     nowfn: NowFn = utcnow,
     summary_type: str | None = None,
     summary_email_header: str | None = None,
+    summarize_even_if_no_threads: bool = False,
 ) -> None:
     class_ = await models.Class.get_by_id(session, class_id)
     if not class_:
@@ -129,7 +132,7 @@ async def send_class_summary_to_user(
         raise ValueError(f"User with ID {user_id} not found")
 
     summary_html = await generate_class_summary(
-        cli, session, class_.id, class_.name, after
+        cli, session, class_.id, class_.name, after, summarize_even_if_no_threads
     )
     if not summary_html:
         return
@@ -251,9 +254,10 @@ async def generate_class_summary(
     class_id: int,
     class_name: str,
     after: datetime,
+    summarize_even_if_no_threads: bool = False,
 ) -> str | None:
     ai_assistant_summaries = await generate_assistant_summaries(
-        cli, session, class_id, after
+        cli, session, class_id, after, summarize_even_if_no_threads
     )
     if not ai_assistant_summaries:
         return None
@@ -271,6 +275,7 @@ async def generate_assistant_summaries(
     session: AsyncSession,
     class_id: int,
     after: datetime,
+    summarize_even_if_no_threads: bool = False,
 ) -> list[AIAssistantSummary] | None:
     summaries = list[AIAssistantSummary]()
     current_period_contains_threads = False
@@ -303,7 +308,7 @@ async def generate_assistant_summaries(
         else:
             summaries.append(AIAssistantSummary(assistant_name=name, topics=[]))
 
-    if not current_period_contains_threads:
+    if not current_period_contains_threads and not summarize_even_if_no_threads:
         return None
     return summaries
 

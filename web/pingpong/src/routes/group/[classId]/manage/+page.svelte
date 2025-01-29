@@ -54,7 +54,9 @@
     CheckCircleOutline,
     GlobeOutline,
     EyeSlashOutline,
-    ArrowRightOutline
+    ArrowRightOutline,
+    RectangleListOutline,
+    EnvelopeOpenSolid
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
@@ -189,6 +191,9 @@
   };
   let deleteModal = false;
   let exportThreadsModal = false;
+  let customSummaryModal = false;
+  let defaultDaysToSummarize = 7;
+  let daysToSummarize = defaultDaysToSummarize;
   let usersModalOpen = false;
   let anyCanPublishThread = data?.class.any_can_publish_thread || false;
   let presignedUrlExpiration = data?.class.download_link_expiration || null;
@@ -572,6 +577,22 @@
     }
   };
 
+  const requestSummary = async () => {
+    const result = await api.requestActivitySummary(fetch, data.class.id, {
+      days: daysToSummarize
+    });
+    const response = api.expandResponse(result);
+    if (response.error) {
+      sadToast(response.error.detail || 'An unknown error occurred');
+    } else {
+      happyToast(
+        "We've started creating your Activity Summary. You'll receive an email when it's ready.",
+        5000
+      );
+    }
+    daysToSummarize = defaultDaysToSummarize;
+  };
+
   const reconnectCanvasAccount = async () => {
     const result = await api.removeCanvasConnection(fetch, data.class.id, 'harvard', true);
     const response = api.expandResponse(result);
@@ -911,16 +932,64 @@
             <span> Activity Summaries are unavailable for private groups. </span>
           </div>
         {/if}
-        <div>
-          <div class="flex flex-row gap-2 mb-1 items-center">
-            <DropdownBadge
-              extraClasses={makePrivate
-                ? 'border-gray-400 from-gray-50 to-gray-100 text-gray-400 items-center'
-                : 'border-blue-400 from-blue-50 to-blue-100 text-blue-700 items-center'}
-              ><span slot="name">New</span></DropdownBadge
-            ><Label for="subscribe" color={makePrivate ? 'disabled' : 'gray'}
-              >Sign up for Activity Summaries</Label
-            >
+        <div class="flex flex-col gap-2">
+          <div class="flex flex-row items-end justify-between flex-wrap gap-y-2">
+            <div class="flex flex-row gap-2 items-center shrink-0">
+              <DropdownBadge
+                extraClasses={makePrivate
+                  ? 'border-gray-400 from-gray-50 to-gray-100 text-gray-400 items-center'
+                  : 'border-blue-400 from-blue-50 to-blue-100 text-blue-700 items-center'}
+              >
+                <span slot="name">New</span>
+              </DropdownBadge>
+              <Label for="subscribe" color={makePrivate ? 'disabled' : 'gray'}>
+                Sign up for Activity Summaries
+              </Label>
+            </div>
+            {#if !makePrivate}
+              <Button
+                pill
+                size="sm"
+                class="text-xs border-blue-dark-40 text-blue-dark-40 shrink-0 flex flex-row gap-1.5 items-center justify-center bg-white rounded-full p-1 px-3 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all max-w-max border"
+                on:touchstart={() => (customSummaryModal = true)}
+                on:click={() => (customSummaryModal = true)}
+              >
+                <RectangleListOutline />
+                <div>Request an Activity Summary</div>
+              </Button>
+            {/if}
+            <Modal bind:open={customSummaryModal} size="xs" autoclose>
+              <div class="flex flex-col text-center px-2 gap-4 items-center">
+                <EnvelopeOpenSolid class="mx-auto text-slate-500 w-12 h-12" />
+                <h3 class="text-xl text-gray-900 dark:text-white font-bold">
+                  Let's set up your Activity Summary
+                </h3>
+                <p class="text-sm text-gray-700 dark:text-gray-300">
+                  Select the number of days you'd like to summarize. Depending on the number of
+                  threads in your group, creating an Activity Summary may take a while. You'll
+                  receive an email with your Activity Summary.
+                </p>
+                <div class="flex flex-col gap-1 w-full items-center">
+                  <Label for="days">Number of days to summarize</Label>
+                  <Input
+                    type="number"
+                    id="days"
+                    bind:value={daysToSummarize}
+                    name="days"
+                    placeholder="7"
+                    class="w-1/3"
+                  />
+                </div>
+                <div class="flex justify-center gap-4">
+                  <Button pill color="alternative" on:click={() => (customSummaryModal = false)}
+                    >Cancel</Button
+                  >
+                  <Button pill outline color="blue" on:click={requestSummary}
+                    >Request Summary</Button
+                  >
+                </div>
+              </div>
+            </Modal>
           </div>
           <Helper for="subscribe" color={makePrivate ? 'disabled' : 'gray'}
             >PingPong will gather all thread activity in your group and send an AI-generated summary
@@ -930,7 +999,7 @@
           <Checkbox
             id="subscribe"
             color="blue"
-            class="mt-3 {makePrivate ? 'text-gray-400' : ''}"
+            class={makePrivate ? 'text-gray-400' : ''}
             checked={data.subscription?.subscribed && !makePrivate}
             disabled={makePrivate}
             on:change={handleSubscriptionChange}>Send me weekly Activity Summaries</Checkbox
