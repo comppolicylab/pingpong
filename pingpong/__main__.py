@@ -626,7 +626,9 @@ def run_dynamic_tasks_with_args(host: str, port: int, tasks: list[str]) -> None:
                     f"Task '{task_name}' (calling {function_name}) completed successfully at {datetime.now()}"
                 )
             except Exception as e:
-                logger.error(f"Error in task '{task_name}' ({function_name}): {e}")
+                logger.error(
+                    f"Error in task '{task_name}' ({function_name}): {e}", exc_info=True
+                )
 
     async def _parse_tasks():
         task_coroutines = []
