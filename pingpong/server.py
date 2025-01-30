@@ -1392,12 +1392,36 @@ async def remove_canvas_connection(
     keep_users: bool = True,
 ):
     canvas_settings = get_canvas_config(tenant)
-
     async with LightweightCanvasClient(
         canvas_settings, int(class_id), request
     ) as client:
         try:
             await client.log_out()
+        except ClientResponseError as e:
+            logger.exception("delete_canvas_permissions: ClientResponseError occurred")
+            raise HTTPException(
+                status_code=e.code,
+                detail="Canvas returned an error when removing your account: "
+                + e.message,
+            )
+        except CanvasInvalidTokenException:
+            logger.warning(
+                "delete_canvas_permissions: CanvasInvalidTokenException occurred"
+            )
+        except CanvasException as e:
+            logger.exception("delete_canvas_permissions: CanvasException occurred")
+            raise HTTPException(
+                status_code=e.code or 500,
+                detail="We faced an error while removing your account: " + e.detail,
+            )
+        except Exception:
+            logger.exception("delete_canvas_permissions: Exception occurred")
+            raise HTTPException(
+                status_code=500,
+                detail="We faced an internal error while removing your account.",
+            )
+
+        try:
             userIds = await models.Class.remove_lms_sync(
                 request.state.db,
                 int(class_id),
@@ -1407,31 +1431,11 @@ async def remove_canvas_connection(
                 keep_users=keep_users,
             )
             await delete_canvas_permissions(request.state.authz, userIds, class_id)
-
-        except ClientResponseError as e:
-            logger.exception("delete_canvas_permissions: ClientResponseError occurred")
-            raise HTTPException(
-                status_code=e.code,
-                detail="Canvas returned an error when removing your account: "
-                + e.message,
+            logger.info(
+                f"Canvas account removed from PingPong class {class_id} by user {request.state.session.user.id}."
             )
-        except CanvasException as e:
-            logger.exception("delete_canvas_permissions: CanvasException occurred")
-            raise HTTPException(
-                status_code=e.code or 500,
-                detail="We faced an error while removing your account: " + e.detail,
-            )
-        except CanvasWarning as e:
-            logger.warning(
-                "delete_canvas_permissions: CanvasWarning occurred: %s", e.detail
-            )
-            raise HTTPException(
-                status_code=e.code or 500,
-                detail=e.detail
-                or "We faced an error while getting your Canvas classes.",
-            ) from e
         except Exception:
-            logger.exception("delete_canvas_permissions: Exception occurred")
+            logger.exception("remove_canvas_connection: Exception occurred")
             raise HTTPException(
                 status_code=500,
                 detail="We faced an internal error while removing your account.",
