@@ -1406,7 +1406,8 @@ async def remove_canvas_connection(
             )
         except CanvasInvalidTokenException:
             logger.warning(
-                "delete_canvas_permissions: CanvasInvalidTokenException occurred"
+                "delete_canvas_permissions: CanvasInvalidTokenException occurred",
+                exc_info=True,
             )
         except CanvasException as e:
             logger.exception("delete_canvas_permissions: CanvasException occurred")
@@ -2406,7 +2407,7 @@ async def get_last_run(
                 last_run.id, thread_id=thread.thread_id
             )
         except openai.APIConnectionError as e:
-            logger.error("Error connecting to OpenAI: %s", e)
+            logger.exception("Error connecting to OpenAI: %s", e)
             # Continue polling
 
     return {"thread": thread, "run": last_run}
@@ -2642,7 +2643,9 @@ async def create_thread(
             ),
         )
     except openai.InternalServerError as e:
-        logger.error("Error creating thread: %s", e.body.get("message") or e.message)
+        logger.exception(
+            "Error creating thread: %s", e.body.get("message") or e.message
+        )
         if vector_store_id:
             await openai_client.beta.vector_stores.delete(vector_store_id)
         raise HTTPException(
@@ -2650,7 +2653,9 @@ async def create_thread(
             detail="OpenAI was unable to process your request. If the issue persists, check PingPong's status page for updates.",
         )
     except openai.APIError as e:
-        logger.error("Error creating thread: %s", e.body.get("message") or e.message)
+        logger.exception(
+            "Error creating thread: %s", e.body.get("message") or e.message
+        )
         if vector_store_id:
             await openai_client.beta.vector_stores.delete(vector_store_id)
         raise HTTPException(
@@ -2686,7 +2691,7 @@ async def create_thread(
 
         return result
     except Exception as e:
-        logger.error("Error creating thread: %s", e)
+        logger.exception("Error creating thread: %s", e)
         if vector_store_id:
             await openai_client.beta.vector_stores.delete(vector_store_id)
         await openai_client.beta.threads.delete(thread.id)

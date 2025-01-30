@@ -830,13 +830,13 @@ async def canvas_sync_all(
                 await client.sync_roster()
                 await session.commit()
         except CanvasInvalidTokenException:
-            logger.error(
+            logger.exception(
                 f"Canvas access token for class {class_.id} is invalid. Marking class as having a sync error."
             )
             await Class.mark_lms_sync_error(session, class_.id)
             await session.commit()
         except Exception as e:
-            logger.error(f"Error syncing class {class_.id}: {e}")
+            logger.exception(f"Error syncing class {class_.id}: {e}")
 
             if session.in_transaction():
                 await session.rollback()

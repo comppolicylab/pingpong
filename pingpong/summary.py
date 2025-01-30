@@ -205,9 +205,7 @@ async def send_class_summary_to_class_users(
             await session.commit()
 
         except Exception as e:
-            logger.error(
-                f"Failed to send summary to user {ucr.user_id}: {e}", exc_info=True
-            )
+            logger.exception(f"Failed to send summary to user {ucr.user_id}: {e}")
             no_errors = False
             continue
 
