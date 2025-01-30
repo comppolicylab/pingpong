@@ -817,26 +817,22 @@ async def canvas_sync_all(
         sync_classes_with_error_status=sync_classes_with_error_status,
     ):
         logger.info(f"Syncing class {class_.id}...")
-
-        try:
-            async with ScriptCanvasClient(
-                canvas_backend,
-                session,
-                authz_,
-                class_.id,
-                class_.lms_user_id,
-                sync_without_sso_ids=sync_without_sso_ids,
-            ) as client:
-                await client.sync_roster()
-                await session.commit()
-        except CanvasInvalidTokenException:
-            logger.exception(
-                f"Canvas access token for class {class_.id} is invalid. Marking class as having a sync error."
-            )
-            await Class.mark_lms_sync_error(session, class_.id)
-            await session.commit()
-        except Exception as e:
-            logger.exception(f"Error syncing class {class_.id}: {e}")
-
-            if session.in_transaction():
-                await session.rollback()
+        async with session.begin_nested() as session_:
+            try:
+                async with ScriptCanvasClient(
+                    canvas_backend,
+                    session,
+                    authz_,
+                    class_.id,
+                    class_.lms_user_id,
+                    sync_without_sso_ids=sync_without_sso_ids,
+                ) as client:
+                    await client.sync_roster()
+            except CanvasInvalidTokenException:
+                logger.exception(
+                    f"Canvas access token for class {class_.id} is invalid. Marking class as having a sync error."
+                )
+                await Class.mark_lms_sync_error(session, class_.id)
+            except Exception as e:
+                logger.exception(f"Error syncing class {class_.id}: {e}")
+                await session_.rollback()
