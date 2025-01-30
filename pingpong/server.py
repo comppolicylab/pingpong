@@ -830,10 +830,13 @@ async def create_class(
 ):
     new_class = await models.Class.create(request.state.db, int(institution_id), create)
 
+    user = await models.User.get_by_id(request.state.db, request.state.session.user.id)
+
     # Create an entry for the creator as the owner
     ucr = models.UserClassRole(
         user_id=request.state.session.user.id,
         class_id=new_class.id,
+        subscribed_to_summaries=not user.dna_as_create,
     )
     request.state.db.add(ucr)
 
@@ -3737,6 +3740,62 @@ async def unsubscribe_from_all_summaries(
 
     await models.UserClassRole.unsubscribe_from_all_summaries(
         request.state.db, request.state.session.user.id
+    )
+    return {"status": "ok"}
+
+
+@v1.post(
+    "/me/activity_summaries/create",
+    dependencies=[Depends(LoggedIn())],
+)
+async def enable_dna_as_create(
+    request: Request,
+):
+    """Enable DNA as create."""
+    await models.User.update_dna_as_create(
+        request.state.db, request.state.session.user.id, True
+    )
+    return {"status": "ok"}
+
+
+@v1.delete(
+    "/me/activity_summaries/create",
+    dependencies=[Depends(LoggedIn())],
+)
+async def disable_dna_as_create(
+    request: Request,
+):
+    """Disable DNA as create."""
+    await models.User.update_dna_as_create(
+        request.state.db, request.state.session.user.id, False
+    )
+    return {"status": "ok"}
+
+
+@v1.post(
+    "/me/activity_summaries/join",
+    dependencies=[Depends(LoggedIn())],
+)
+async def enable_dna_as_join(
+    request: Request,
+):
+    """Enable DNA as join."""
+    await models.User.update_dna_as_join(
+        request.state.db, request.state.session.user.id, True
+    )
+    return {"status": "ok"}
+
+
+@v1.delete(
+    "/me/activity_summaries/join",
+    dependencies=[Depends(LoggedIn())],
+)
+async def disable_dna_as_join(
+    request: Request,
+):
+    """Disable DNA as join."""
+    await models.User.update_dna_as_join(
+        request.state.db, request.state.session.user.id, False
     )
     return {"status": "ok"}
 
