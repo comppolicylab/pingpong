@@ -116,6 +116,7 @@ class CanvasCourseClient(ABC):
         self.user_id = user_id
         self.nowfn = nowfn
         self.missing_sso_ids = False
+        self.missing_user_information = False
         self.sync_without_sso_ids = sync_without_sso_ids
 
     async def __aenter__(self):
@@ -500,6 +501,19 @@ class CanvasCourseClient(ABC):
                         code=403,
                         detail="You do not have permission to access SIS information for this class. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
                     )
+                if not user.get("email") or not (
+                    user.get("enrollments") and len(user["enrollments"]) > 0
+                ):
+                    raise CanvasException(
+                        code=403,
+                        detail="You do not have permission to access email or enrollment information for this class. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
+                    )
+                if not user.get("enrollments"):
+                    raise CanvasException(
+                        code=403,
+                        detail="You do not have permission to access enrollment information for this class. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
+                    )
+
                 return True
         return False
 
@@ -590,11 +604,17 @@ class CanvasCourseClient(ABC):
         """
 
         for user in data:
-            is_teacher = False
-            for enrollment in user["enrollments"]:
-                if enrollment["type"] in ["TeacherEnrollment", "TaEnrollment"]:
-                    is_teacher = True
-                    break
+            # Check that the user has email and enrollment information
+            if not user.get("email") or not (
+                user.get("enrollments") and len(user["enrollments"]) > 0
+            ):
+                logging.warning(
+                    f"User {user['id']} does not have an email or enrollment information in the Canvas response. Marking class as having a sync error."
+                )
+                self.missing_user_information = True
+                break
+
+            # Check that the user has an SSO ID if required
             if self.config.sso_target and not user.get(self.config.sso_target):
                 logging.warning(
                     f"User {user['email']} does not have an SSO ID in the Canvas response. Marking class as having a sync error."
@@ -602,6 +622,15 @@ class CanvasCourseClient(ABC):
                 self.missing_sso_ids = True
                 if not self.sync_without_sso_ids:
                     break
+
+            # Calculate user permissions
+            is_teacher = False
+            for enrollment in user["enrollments"]:
+                if enrollment["type"] in ["TeacherEnrollment", "TaEnrollment"]:
+                    is_teacher = True
+                    break
+
+            # Create UserClassRole object for the user
             yield CreateUserClassRole(
                 email=user["email"],
                 sso_id=user.get(self.config.sso_target),
@@ -665,9 +694,9 @@ class CanvasCourseClient(ABC):
             lms_type=self.config.type,
             sso_tenant=self.config.sso_tenant,
         )
-        if self.missing_sso_ids:
+        if self.missing_sso_ids or self.missing_user_information:
             await Class.mark_lms_sync_error(self.db, self.class_id)
-            if not self.sync_without_sso_ids:
+            if not self.sync_without_sso_ids or self.missing_user_information:
                 self._raise_sync_error_if_manual()
                 return
 
@@ -717,7 +746,7 @@ class ManualCanvasClient(CanvasCourseClient):
     def _raise_sync_error_if_manual(self):
         raise CanvasException(
             code=403,
-            detail="Some users in the Canvas class do not have SIS information. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
+            detail="Some users in the Canvas class do not have email, enrollment, or SIS information. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
         )
 
 
