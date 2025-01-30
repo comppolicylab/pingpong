@@ -34,8 +34,11 @@
   export let data;
 
   $: activitySubscription = data.subscriptions || [];
-  $: allSubscribed = activitySubscription.every((sub) => sub.subscribed);
-  $: noneSubscribed = activitySubscription.every((sub) => !sub.subscribed);
+  $: eligibleSubscriptions = activitySubscription.filter(
+    (sub) => !sub.class_private && sub.class_has_api_key
+  );
+  $: allSubscribed = eligibleSubscriptions.every((sub) => sub.subscribed);
+  $: noneSubscribed = eligibleSubscriptions.every((sub) => !sub.subscribed);
   $: dnaAcCreate = !!data.subscriptionOpts.dna_as_create || false;
   $: dnaAcJoin = !!data.subscriptionOpts.dna_as_join || false;
 
