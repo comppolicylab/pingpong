@@ -15,11 +15,19 @@
     P,
     Toggle,
     Button,
-    Tooltip
+    Tooltip,
+    Accordion,
+    AccordionItem,
+    Checkbox
   } from 'flowbite-svelte';
   import dayjs from 'dayjs';
   import * as api from '$lib/api';
-  import { BellActiveAltSolid, QuestionCircleOutline, TrashBinSolid } from 'flowbite-svelte-icons';
+  import {
+    BellActiveAltSolid,
+    CogOutline,
+    QuestionCircleOutline,
+    TrashBinSolid
+  } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { invalidateAll } from '$app/navigation';
 
@@ -28,6 +36,8 @@
   $: activitySubscription = data.subscriptions || [];
   $: allSubscribed = activitySubscription.every((sub) => sub.subscribed);
   $: noneSubscribed = activitySubscription.every((sub) => !sub.subscribed);
+  $: dnaAcCreate = !!data.subscriptionOpts.dna_as_create || false;
+  $: dnaAcJoin = !!data.subscriptionOpts.dna_as_join || false;
 
   const inputState = {
     first_name: {
@@ -111,6 +121,44 @@
       await subscribeToSummaries(classId, className);
     } else {
       await unsubscribeFromSummaries(classId, className);
+    }
+  };
+
+  const handleDoNotAddWhenIJoinChange = async (event: Event) => {
+    const target = event.target as HTMLInputElement;
+    let result;
+    if (target.checked) {
+      result = await api.subscribeToAllSummariesAtJoin(fetch);
+    } else {
+      result = await api.unsubscribeFromAllSummariesAtJoin(fetch);
+    }
+    if (result) {
+      const response = api.expandResponse(result);
+      if (response.error) {
+        sadToast(response.error.detail || 'An unknown error occurred');
+        invalidateAll();
+      } else {
+        happyToast(`Successfully changed your Activity Summaries preferences.`, 3000);
+      }
+    }
+  };
+
+  const handleDoNotAddWhenICreateChange = async (event: Event) => {
+    const target = event.target as HTMLInputElement;
+    let result;
+    if (target.checked) {
+      result = await api.subscribeToAllSummariesAtCreate(fetch);
+    } else {
+      result = await api.unsubscribeFromAllSummariesAtCreate(fetch);
+    }
+    if (result) {
+      const response = api.expandResponse(result);
+      if (response.error) {
+        sadToast(response.error.detail || 'An unknown error occurred');
+        invalidateAll();
+      } else {
+        happyToast(`Successfully changed your Activity Summaries preferences.`, 3000);
+      }
     }
   };
 </script>
@@ -324,6 +372,43 @@
             {/each}
           </TableBody>
         </Table>
+      </div>
+      <div class="w-8/9 my-5">
+        <Accordion>
+          <AccordionItem
+            class="px-6 py-4 flex items-center justify-between w-full font-medium text-left group-first:rounded-t-none border-gray-200 dark:border-gray-700"
+          >
+            <span slot="header"
+              ><div class="flex-row flex items-center space-x-2 py-0">
+                <div><CogOutline size="md" strokeWidth="2" /></div>
+                <div class="text-sm">Advanced Options</div>
+              </div></span
+            >
+            <div class="flex flex-col gap-2 px-1">
+              <P class="text-base text-gray-600"
+                >Manage additional settings about your Activity Summary subscriptions. These
+                settings will apply for new Groups you create or join.</P
+              >
+
+              <Checkbox
+                id="dnaAcCreate"
+                class="text-base font-normal"
+                color="blue"
+                checked={dnaAcCreate}
+                on:change={handleDoNotAddWhenICreateChange}
+                ><b>Do not add</b>&nbsp;an Activity Subscription for new groups I create.</Checkbox
+              >
+              <Checkbox
+                id="dnaAcJoin"
+                class="text-base font-normal"
+                color="blue"
+                checked={dnaAcJoin}
+                on:change={handleDoNotAddWhenIJoinChange}
+                ><b>Do not add</b>&nbsp;an Activity Subscription for new groups I join.</Checkbox
+              >
+            </div>
+          </AccordionItem>
+        </Accordion>
       </div>
     {/if}
   </div>

@@ -384,8 +384,14 @@ class ActivitySummarySubscription(BaseModel):
     last_summary_empty: bool
 
 
+class ActivitySummarySubscriptionAdvancedOpts(BaseModel):
+    dna_as_create: bool
+    dna_as_join: bool
+
+
 class ActivitySummarySubscriptions(BaseModel):
     subscriptions: list[ActivitySummarySubscription]
+    advanced_opts: ActivitySummarySubscriptionAdvancedOpts
 
 
 class AITopic(BaseModel):

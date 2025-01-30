@@ -695,11 +695,17 @@ export type ActivitySummarySubscription = {
   last_summary_empty: boolean;
 };
 
+export type ActivitySummarySubscriptionAdvancedOpts = {
+  dna_as_join: boolean;
+  dna_as_create: boolean;
+};
+
 /**
  * List of activity summary subscriptions.
  */
 export type ActivitySummarySubscriptions = {
   subscriptions: ActivitySummarySubscription[];
+  advanced_opts: ActivitySummarySubscriptionAdvancedOpts;
 };
 
 /**
@@ -754,6 +760,38 @@ export const subscribeToAllSummaries = async (f: Fetcher) => {
  */
 export const unsubscribeFromAllSummaries = async (f: Fetcher) => {
   const url = 'me/activity_summaries';
+  return await DELETE<never, GenericStatus>(f, url);
+};
+
+/**
+ * Subscribe to all activity summaries when I create a group.
+ */
+export const subscribeToAllSummariesAtCreate = async (f: Fetcher) => {
+  const url = 'me/activity_summaries/create';
+  return await POST<never, GenericStatus>(f, url);
+};
+
+/**
+ * Unsubscribe from all activity summaries.
+ */
+export const unsubscribeFromAllSummariesAtCreate = async (f: Fetcher) => {
+  const url = 'me/activity_summaries/create';
+  return await DELETE<never, GenericStatus>(f, url);
+};
+
+/**
+ * Subscribe to all activity summaries when I join a group.
+ */
+export const subscribeToAllSummariesAtJoin = async (f: Fetcher) => {
+  const url = 'me/activity_summaries/join';
+  return await POST<never, GenericStatus>(f, url);
+};
+
+/**
+ * Unsubscribe from all activity summaries.
+ */
+export const unsubscribeFromAllSummariesAtJoin = async (f: Fetcher) => {
+  const url = 'me/activity_summaries/join';
   return await DELETE<never, GenericStatus>(f, url);
 };
 

@@ -216,8 +216,11 @@ class UserClassRole(Base):
                     Class.api_key.isnot(None),
                     Class.api_key_id.isnot(None),
                 ).label("class_has_api_key"),
+                User.dna_as_create,
+                User.dna_as_join,
             )
             .join(Class, Class.id == UserClassRole.class_id)
+            .join(User, User.id == UserClassRole.user_id)
             .where(
                 and_(
                     UserClassRole.user_id == user_id,
@@ -226,19 +229,34 @@ class UserClassRole(Base):
             )
         )
         result = await session.execute(stmt)
+        rows = result.mappings().all()
+
+        if not rows:
+            return schemas.ActivitySummarySubscriptions(
+                subscriptions=[],
+                advanced_opts=schemas.ActivitySummarySubscriptionAdvancedOpts(
+                    dna_as_create=False, dna_as_join=False
+                ),
+            )
         subscriptions = [
             schemas.ActivitySummarySubscription(
-                class_id=row[0],
-                class_name=row[1],
-                class_private=row[2],
-                class_has_api_key=row[6],
-                subscribed=row[3],
-                last_email_sent=row[4],
-                last_summary_empty=row[5],
+                class_id=row["class_id"],
+                class_name=row["name"],
+                class_private=row["private"],
+                class_has_api_key=row["class_has_api_key"],
+                subscribed=row["subscribed_to_summaries"],
+                last_email_sent=row["last_summary_sent_at"],
+                last_summary_empty=row["last_summary_empty"],
             )
-            for row in result
+            for row in rows
         ]
-        return schemas.ActivitySummarySubscriptions(subscriptions=subscriptions)
+        opts = schemas.ActivitySummarySubscriptionAdvancedOpts(
+            dna_as_create=rows[0]["dna_as_create"],
+            dna_as_join=rows[0]["dna_as_join"],
+        )
+        return schemas.ActivitySummarySubscriptions(
+            subscriptions=subscriptions, advanced_opts=opts
+        )
 
     @classmethod
     async def subscribe_to_summaries(
@@ -298,6 +316,7 @@ class UserClassRole(Base):
         lms_type: schemas.LMSType | None = None,
         sso_tenant: str | None = None,
         sso_id: str | None = None,
+        subscribed_to_summaries: bool = True,
     ) -> "UserClassRole":
         stmt = (
             _get_upsert_stmt(session)(UserClassRole)
@@ -306,12 +325,16 @@ class UserClassRole(Base):
                 class_id=int(class_id),
                 lms_tenant=lms_tenant,
                 lms_type=lms_type,
+                subscribed_to_summaries=subscribed_to_summaries,
             )
             .on_conflict_do_update(
                 index_elements=[UserClassRole.user_id, UserClassRole.class_id],
                 set_=dict(
                     lms_tenant=lms_tenant,
                     lms_type=lms_type,
+                    subscribed_to_summaries=(
+                        subscribed_to_summaries or UserClassRole.subscribed_to_summaries
+                    ),
                 ),
             )
             .returning(UserClassRole)
@@ -551,6 +574,10 @@ class User(Base):
     )
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
+    # Do Not Add - Activity Summaries - Groups I Join
+    dna_as_join = Column(Boolean, server_default="false")
+    # Do Not Add - Activity Summaries - Groups I Create
+    dna_as_create = Column(Boolean, server_default="false")
 
     async def verify(self, session: AsyncSession) -> None:
         self.state = schemas.UserState.VERIFIED
@@ -564,6 +591,20 @@ class User(Base):
         stmt = update(User).where(User.id == int(user_id)).values(**data_dict)
         await session.execute(stmt)
         return await User.get_by_id(session, user_id)
+
+    @classmethod
+    async def update_dna_as_create(
+        cls, session: AsyncSession, user_id: int, value: bool
+    ) -> None:
+        stmt = update(User).where(User.id == user_id).values(dna_as_create=value)
+        await session.execute(stmt)
+
+    @classmethod
+    async def update_dna_as_join(
+        cls, session: AsyncSession, user_id: int, value: bool
+    ) -> None:
+        stmt = update(User).where(User.id == user_id).values(dna_as_join=value)
+        await session.execute(stmt)
 
     @classmethod
     async def get_by_email(cls, session: AsyncSession, email: str) -> "User":

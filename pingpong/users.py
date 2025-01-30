@@ -230,6 +230,7 @@ class AddNewUsers(ABC):
             self.new_ucr.lms_type,
             self.new_ucr.sso_tenant,
             sso_id,
+            subscribed_to_summaries=not user.dna_as_join,
         )
 
         self.new_roles.append(
