@@ -777,25 +777,25 @@ async def canvas_sync_all(
     sync_without_sso_ids: bool = False,
     sync_classes_with_error_status: bool = False,
 ) -> None:
-    async with session.begin():
-        async for class_ in Class.get_all_to_sync(
-            session,
-            canvas_backend.tenant,
-            LMSType(canvas_backend.type),
-            sync_classes_with_error_status=sync_classes_with_error_status,
-        ):
-            logger.info(f"Syncing class {class_.id}...")
+    async for class_ in Class.get_all_to_sync(
+        session,
+        canvas_backend.tenant,
+        LMSType(canvas_backend.type),
+        sync_classes_with_error_status=sync_classes_with_error_status,
+    ):
+        logger.info(f"Syncing class {class_.id}...")
 
-            async with session.begin_nested():
-                try:
-                    async with ScriptCanvasClient(
-                        canvas_backend,
-                        session,
-                        authz_,
-                        class_.id,
-                        class_.lms_user_id,
-                        sync_without_sso_ids=sync_without_sso_ids,
-                    ) as client:
-                        await client.sync_roster()
-                except Exception as e:
-                    logger.error(f"Error syncing class {class_.id}: {e}")
+        async with session.begin_nested() as session_:
+            try:
+                async with ScriptCanvasClient(
+                    canvas_backend,
+                    session_,
+                    authz_,
+                    class_.id,
+                    class_.lms_user_id,
+                    sync_without_sso_ids=sync_without_sso_ids,
+                ) as client:
+                    await client.sync_roster()
+            except Exception as e:
+                logger.error(f"Error syncing class {class_.id}: {e}")
+                await session_.rollback()
