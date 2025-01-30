@@ -698,7 +698,7 @@ class CanvasCourseClient(ABC):
             await Class.mark_lms_sync_error(self.db, self.class_id)
             if not self.sync_without_sso_ids or self.missing_user_information:
                 self._raise_sync_error_if_manual()
-                return
+            return
 
         await self._update_user_roles()
         await Class.update_last_synced(self.db, self.class_id)
