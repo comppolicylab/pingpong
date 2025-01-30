@@ -784,18 +784,18 @@ async def canvas_sync_all(
         sync_classes_with_error_status=sync_classes_with_error_status,
     ):
         logger.info(f"Syncing class {class_.id}...")
-        try:
-            async with ScriptCanvasClient(
-                canvas_backend,
-                session,
-                authz_,
-                class_.id,
-                class_.lms_user_id,
-                sync_without_sso_ids=sync_without_sso_ids,
-            ) as client:
-                await client.sync_roster()
-                await session.commit()
-        except Exception as e:
-            logger.error(f"Error syncing class {class_.id}: {e}")
-            await session.rollback()
-            continue
+
+        async with session.begin_nested() as session_:
+            try:
+                async with ScriptCanvasClient(
+                    canvas_backend,
+                    session_,
+                    authz_,
+                    class_.id,
+                    class_.lms_user_id,
+                    sync_without_sso_ids=sync_without_sso_ids,
+                ) as client:
+                    await client.sync_roster()
+            except Exception as e:
+                logger.error(f"Error syncing class {class_.id}: {e}")
+                await session_.rollback()
