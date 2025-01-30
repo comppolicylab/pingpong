@@ -224,11 +224,16 @@ class CanvasCourseClient(ABC):
             force_refresh=retry_attempt > 0, log_out=True
         )
         params = {"access_token": access_token}
-        await self.http_session.delete(
-            self.config.url("/login/oauth2/token"),
-            data=params,
-            raise_for_status=True,
-        )
+        try:
+            await self.http_session.delete(
+                self.config.url("/login/oauth2/token"),
+                data=params,
+                raise_for_status=True,
+            )
+        except aiohttp.ClientResponseError as e:
+            if e.status != 400:
+                # If the token doesn't exist, the API will return a 400 error, which we can ignore
+                raise e
         logger.info(
             f"Canvas access token deleted for class {self.class_id} by user {self.user_id}"
         )
