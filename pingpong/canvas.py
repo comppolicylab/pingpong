@@ -836,3 +836,6 @@ async def canvas_sync_all(
             except Exception as e:
                 logger.exception(f"Error syncing class {class_.id}: {e}")
                 await session_.rollback()
+
+    # Finally, commit all changes
+    await session.commit()
