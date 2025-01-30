@@ -45,6 +45,10 @@ class CanvasAccessException(Exception):
         self.detail = detail
 
 
+class CanvasInvalidTokenException(Exception):
+    pass
+
+
 class CanvasWarning(Exception):
     def __init__(self, detail: str = "", code: int | None = None):
         self.code = code
@@ -206,17 +210,22 @@ class CanvasCourseClient(ABC):
     async def _request_access_token(
         self, params: CanvasInitialAccessTokenRequest | CanvasRefreshAccessTokenRequest
     ) -> CanvasAccessToken:
-        async with self.http_session.post(
-            self.config.url("/login/oauth2/token"),
-            data=params.__dict__,
-            raise_for_status=True,
-        ) as resp:
-            response = await resp.json()
-            return CanvasAccessToken(
-                access_token=response["access_token"],
-                refresh_token=response.get("refresh_token", ""),
-                expires_in=int(response["expires_in"]),
-            )
+        try:
+            async with self.http_session.post(
+                self.config.url("/login/oauth2/token"),
+                data=params.__dict__,
+                raise_for_status=True,
+            ) as resp:
+                response = await resp.json()
+                return CanvasAccessToken(
+                    access_token=response["access_token"],
+                    refresh_token=response.get("refresh_token", ""),
+                    expires_in=int(response["expires_in"]),
+                )
+        except aiohttp.ClientResponseError as e:
+            if e.status == 400:
+                raise CanvasInvalidTokenException
+            raise e
 
     @with_retry(max_retries=3)
     async def log_out(self, retry_attempt: int = 0) -> None:
@@ -231,9 +240,13 @@ class CanvasCourseClient(ABC):
                 raise_for_status=True,
             )
         except aiohttp.ClientResponseError as e:
-            if e.status != 400:
+            if e.status == 400:
                 # If the token doesn't exist, the API will return a 400 error, which we can ignore
-                raise e
+                logger.warning(
+                    f"Canvas access token for class {self.class_id} was not found in Canvas."
+                )
+                return
+            raise e
         logger.info(
             f"Canvas access token deleted for class {self.class_id} by user {self.user_id}"
         )
