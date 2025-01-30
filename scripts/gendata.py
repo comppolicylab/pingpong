@@ -76,7 +76,7 @@ async def _create_threads(n: int, class_id: int, assistant_id: int, parties: lis
                 await _create_thread(db, authz, class_id, assistant_id, parties)
                 await db.commit()
             except Exception as e:
-                logger.error(f"Error creating thread: {e}")
+                logger.exception(f"Error creating thread: {e}")
                 await db.rollback()
                 raise e
 

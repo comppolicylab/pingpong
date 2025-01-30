@@ -470,7 +470,7 @@ def sync_pingpong_with_lms(crontime: str, host: str, port: int) -> None:
                 await _lms_sync_all()
                 logger.info(f"Sync completed successfully at {datetime.now()}")
             except Exception as e:
-                logger.error(f"Error during sync: {e}")
+                logger.exception(f"Error during sync: {e}")
 
     # Run the Uvicorn server in the background
     with server.run_in_thread():
@@ -570,11 +570,11 @@ async def _send_activity_summaries(
                     await session.commit()
 
                 except GetOpenAIClientException as e:
-                    logger.error(f"Error getting OpenAI client: {e.detail}")
+                    logger.exception(f"Error getting OpenAI client: {e.detail}")
                     no_errors = False
                     continue
                 except Exception as e:
-                    logger.error(f"Error sending class summary: {e}")
+                    logger.exception(f"Error sending class summary: {e}")
                     no_errors = False
                     continue
 
@@ -615,7 +615,7 @@ def run_dynamic_tasks_with_args(host: str, port: int, tasks: list[str]) -> None:
         Execute a given task based on its name, cron schedule, and provided arguments.
         """
         if function_name not in FUNCTIONS_MAP:
-            logger.error(f"Function '{function_name}' is not recognized.")
+            logger.exception(f"Function '{function_name}' is not recognized.")
             sys.exit(1)
 
         func = FUNCTIONS_MAP[function_name]
@@ -626,9 +626,7 @@ def run_dynamic_tasks_with_args(host: str, port: int, tasks: list[str]) -> None:
                     f"Task '{task_name}' (calling {function_name}) completed successfully at {datetime.now()}"
                 )
             except Exception as e:
-                logger.error(
-                    f"Error in task '{task_name}' ({function_name}): {e}", exc_info=True
-                )
+                logger.exception(f"Error in task '{task_name}' ({function_name}): {e}")
 
     async def _parse_tasks():
         task_coroutines = []

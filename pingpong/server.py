@@ -67,6 +67,7 @@ from .config import config
 from .canvas import (
     CanvasAccessException,
     CanvasException,
+    CanvasInvalidTokenException,
     CanvasWarning,
     LightweightCanvasClient,
     ManualCanvasClient,
@@ -1134,6 +1135,13 @@ async def get_canvas_classes(class_id: str, tenant: str, request: Request):
             raise HTTPException(
                 status_code=e.code, detail="Canvas returned an error: " + e.message
             ) from e
+        except CanvasInvalidTokenException:
+            await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
+            logger.exception("get_canvas_classes: CanvasInvalidTokenException occurred")
+            raise HTTPException(
+                status_code=401,
+                detail="Your Canvas token is invalid. Please reconnect to Canvas. If the problem persists, please contact us.",
+            )
         except CanvasException as e:
             logger.exception("get_canvas_classes: CanvasException occurred")
             raise HTTPException(
@@ -1212,6 +1220,15 @@ async def verify_canvas_class_permissions(
             raise HTTPException(
                 status_code=e.code, detail="Canvas returned an error: " + e.message
             )
+        except CanvasInvalidTokenException:
+            await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
+            logger.exception(
+                "verify_canvas_class_permissions: CanvasInvalidTokenException occurred"
+            )
+            raise HTTPException(
+                status_code=401,
+                detail="Your Canvas token is invalid. Please reconnect to Canvas. If the problem persists, please contact us.",
+            )
         except Exception:
             logger.exception("verify_canvas_class_permissions: Exception occurred")
             raise HTTPException(
@@ -1267,6 +1284,13 @@ async def update_canvas_class(
             raise HTTPException(
                 status_code=e.code, detail="Canvas returned an error: " + e.message
             )
+        except CanvasInvalidTokenException:
+            await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
+            logger.exception("sync_canvas_class: CanvasInvalidTokenException occurred")
+            raise HTTPException(
+                status_code=401,
+                detail="Your Canvas token is invalid. Please reconnect to Canvas. If the problem persists, please contact us.",
+            )
         except Exception:
             logger.exception("update_canvas_class: Exception occurred")
             raise HTTPException(
@@ -1318,6 +1342,13 @@ async def sync_canvas_class(
                 status_code=e.code or 500,
                 detail=e.detail or "We faced an error while syncing with Canvas.",
             )
+        except CanvasInvalidTokenException:
+            await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
+            logger.exception("sync_canvas_class: CanvasInvalidTokenException occurred")
+            raise HTTPException(
+                status_code=401,
+                detail="Your Canvas token is invalid. Please reconnect to Canvas. If the problem persists, please contact us.",
+            )
         except Exception:
             logger.exception("sync_canvas_class: Exception occurred")
             raise HTTPException(
@@ -1361,12 +1392,37 @@ async def remove_canvas_connection(
     keep_users: bool = True,
 ):
     canvas_settings = get_canvas_config(tenant)
-
     async with LightweightCanvasClient(
         canvas_settings, int(class_id), request
     ) as client:
         try:
             await client.log_out()
+        except ClientResponseError as e:
+            logger.exception("delete_canvas_permissions: ClientResponseError occurred")
+            raise HTTPException(
+                status_code=e.code,
+                detail="Canvas returned an error when removing your account: "
+                + e.message,
+            )
+        except CanvasInvalidTokenException:
+            logger.warning(
+                "delete_canvas_permissions: CanvasInvalidTokenException occurred",
+                exc_info=True,
+            )
+        except CanvasException as e:
+            logger.exception("delete_canvas_permissions: CanvasException occurred")
+            raise HTTPException(
+                status_code=e.code or 500,
+                detail="We faced an error while removing your account: " + e.detail,
+            )
+        except Exception:
+            logger.exception("delete_canvas_permissions: Exception occurred")
+            raise HTTPException(
+                status_code=500,
+                detail="We faced an internal error while removing your account.",
+            )
+
+        try:
             userIds = await models.Class.remove_lms_sync(
                 request.state.db,
                 int(class_id),
@@ -1376,31 +1432,11 @@ async def remove_canvas_connection(
                 keep_users=keep_users,
             )
             await delete_canvas_permissions(request.state.authz, userIds, class_id)
-
-        except ClientResponseError as e:
-            logger.exception("delete_canvas_permissions: ClientResponseError occurred")
-            raise HTTPException(
-                status_code=e.code,
-                detail="Canvas returned an error when removing your account: "
-                + e.message,
+            logger.info(
+                f"Canvas account removed from PingPong class {class_id} by user {request.state.session.user.id}."
             )
-        except CanvasException as e:
-            logger.exception("delete_canvas_permissions: CanvasException occurred")
-            raise HTTPException(
-                status_code=e.code or 500,
-                detail="We faced an error while removing your account: " + e.detail,
-            )
-        except CanvasWarning as e:
-            logger.warning(
-                "delete_canvas_permissions: CanvasWarning occurred: %s", e.detail
-            )
-            raise HTTPException(
-                status_code=e.code or 500,
-                detail=e.detail
-                or "We faced an error while getting your Canvas classes.",
-            ) from e
         except Exception:
-            logger.exception("delete_canvas_permissions: Exception occurred")
+            logger.exception("remove_canvas_connection: Exception occurred")
             raise HTTPException(
                 status_code=500,
                 detail="We faced an internal error while removing your account.",
@@ -2371,7 +2407,7 @@ async def get_last_run(
                 last_run.id, thread_id=thread.thread_id
             )
         except openai.APIConnectionError as e:
-            logger.error("Error connecting to OpenAI: %s", e)
+            logger.exception("Error connecting to OpenAI: %s", e)
             # Continue polling
 
     return {"thread": thread, "run": last_run}
@@ -2607,7 +2643,9 @@ async def create_thread(
             ),
         )
     except openai.InternalServerError as e:
-        logger.error("Error creating thread: %s", e.body.get("message") or e.message)
+        logger.exception(
+            "Error creating thread: %s", e.body.get("message") or e.message
+        )
         if vector_store_id:
             await openai_client.beta.vector_stores.delete(vector_store_id)
         raise HTTPException(
@@ -2615,7 +2653,9 @@ async def create_thread(
             detail="OpenAI was unable to process your request. If the issue persists, check PingPong's status page for updates.",
         )
     except openai.APIError as e:
-        logger.error("Error creating thread: %s", e.body.get("message") or e.message)
+        logger.exception(
+            "Error creating thread: %s", e.body.get("message") or e.message
+        )
         if vector_store_id:
             await openai_client.beta.vector_stores.delete(vector_store_id)
         raise HTTPException(
@@ -2651,7 +2691,7 @@ async def create_thread(
 
         return result
     except Exception as e:
-        logger.error("Error creating thread: %s", e)
+        logger.exception("Error creating thread: %s", e)
         if vector_store_id:
             await openai_client.beta.vector_stores.delete(vector_store_id)
         await openai_client.beta.threads.delete(thread.id)

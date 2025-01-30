@@ -55,7 +55,7 @@ class S3ArtifactStore(BaseArtifactStore):
                 async for chunk in s3_object["Body"].iter_chunks(chunk_size=chunk_size):
                     yield chunk
             except ClientError as e:
-                logger.error(f"Error streaming file {name}: {e}")
+                logger.exception(f"Error streaming file {name}: {e}")
                 raise ArtifactStoreError(
                     code=500, detail=f"Error downloading thread export: {str(e)}"
                 )
@@ -90,5 +90,5 @@ class LocalArtifactStore(BaseArtifactStore):
                 while chunk := f.read(chunk_size):
                     yield chunk
         except Exception as e:
-            logger.error(f"Error streaming file {name}: {e}")
+            logger.exception(f"Error streaming file {name}: {e}")
             raise ArtifactStoreError(code=500, detail=f"Error reading file: {str(e)}")

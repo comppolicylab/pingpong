@@ -37,7 +37,7 @@ def sync_pingpong_with_airtable(crontime: str, host: str, port: int) -> None:
                 await _process_external_logins_to_add()
                 logger.info(f"Sync completed successfully at {datetime.now()}")
             except Exception as e:
-                logger.error(f"Error during sync: {e}")
+                logger.exception(f"Error during sync: {e}")
 
     # Run the Uvicorn server in the background
     with server.run_in_thread():

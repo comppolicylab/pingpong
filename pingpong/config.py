@@ -296,7 +296,7 @@ def _load_config() -> Config:
     try:
         return Config.model_validate(tomllib.loads(_raw_cfg))
     except Exception as e:
-        logger.error(f"Error loading config: {e}")
+        logger.exception(f"Error loading config: {e}")
         raise
 
 
