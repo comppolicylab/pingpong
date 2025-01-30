@@ -211,43 +211,29 @@ class CanvasCourseClient(ABC):
     async def _request_access_token(
         self, params: CanvasInitialAccessTokenRequest | CanvasRefreshAccessTokenRequest
     ) -> CanvasAccessToken:
-        try:
-            async with self.http_session.post(
-                self.config.url("/login/oauth2/token"),
-                data=params.__dict__,
-                raise_for_status=True,
-            ) as resp:
-                response = await resp.json()
-                return CanvasAccessToken(
-                    access_token=response["access_token"],
-                    refresh_token=response.get("refresh_token", ""),
-                    expires_in=int(response["expires_in"]),
-                )
-        except aiohttp.ClientResponseError as e:
-            if e.status == 400:
-                raise CanvasInvalidTokenException
-            raise e
+        async with self.http_session.post(
+            self.config.url("/login/oauth2/token"),
+            data=params.__dict__,
+            raise_for_status=True,
+        ) as resp:
+            response = await resp.json()
+            return CanvasAccessToken(
+                access_token=response["access_token"],
+                refresh_token=response.get("refresh_token", ""),
+                expires_in=int(response["expires_in"]),
+            )
 
-    @with_retry(max_retries=3)
+    @with_retry(max_retries=3, raise_custom_errors={400: CanvasInvalidTokenException()})
     async def log_out(self, retry_attempt: int = 0) -> None:
         access_token = await self._get_access_token(
             force_refresh=retry_attempt > 0, log_out=True
         )
         params = {"access_token": access_token}
-        try:
-            await self.http_session.delete(
-                self.config.url("/login/oauth2/token"),
-                data=params,
-                raise_for_status=True,
-            )
-        except aiohttp.ClientResponseError as e:
-            if e.status == 400:
-                # If the token doesn't exist, the API will return a 400 error, which we can ignore
-                logger.warning(
-                    f"Canvas access token for class {self.class_id} was not found in Canvas."
-                )
-                return
-            raise e
+        await self.http_session.delete(
+            self.config.url("/login/oauth2/token"),
+            data=params,
+            raise_for_status=True,
+        )
         logger.info(
             f"Canvas access token deleted for class {self.class_id} by user {self.user_id}"
         )
@@ -271,7 +257,7 @@ class CanvasCourseClient(ABC):
             next_page=next_page,
         )
 
-    @with_retry(max_retries=3)
+    @with_retry(max_retries=3, raise_custom_errors={400: CanvasInvalidTokenException()})
     async def _make_authed_request_post(
         self,
         path: str,
@@ -292,7 +278,7 @@ class CanvasCourseClient(ABC):
         ) as resp:
             return await self.create_response(resp)
 
-    @with_retry(max_retries=3)
+    @with_retry(max_retries=3, raise_custom_errors={400: CanvasInvalidTokenException()})
     async def _make_authed_request_get(
         self,
         path: str,

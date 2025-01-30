@@ -1137,7 +1137,7 @@ async def get_canvas_classes(class_id: str, tenant: str, request: Request):
             ) from e
         except CanvasInvalidTokenException:
             await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
-            logger.exception("sync_canvas_class: CanvasInvalidTokenException occurred")
+            logger.exception("get_canvas_classes: CanvasInvalidTokenException occurred")
             raise HTTPException(
                 status_code=401,
                 detail="Your Canvas token is invalid. Please reconnect to Canvas. If the problem persists, please contact us.",
@@ -1222,7 +1222,9 @@ async def verify_canvas_class_permissions(
             )
         except CanvasInvalidTokenException:
             await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
-            logger.exception("sync_canvas_class: CanvasInvalidTokenException occurred")
+            logger.exception(
+                "verify_canvas_class_permissions: CanvasInvalidTokenException occurred"
+            )
             raise HTTPException(
                 status_code=401,
                 detail="Your Canvas token is invalid. Please reconnect to Canvas. If the problem persists, please contact us.",
