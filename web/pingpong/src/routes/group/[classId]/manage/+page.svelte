@@ -552,15 +552,19 @@
     }
   };
 
+  let removingCanvasConnection = false;
   const removeCanvasConnection = async (keep: boolean) => {
+    removingCanvasConnection = true;
     const result = await api.removeCanvasConnection(fetch, data.class.id, 'harvard', keep);
     const response = api.expandResponse(result);
     if (response.error) {
       editDropdownOpen = false;
+      removingCanvasConnection = false;
       invalidateAll();
-      sadToast(response.error.detail || 'An unknown error occurred');
+      sadToast(response.error.detail || 'An unknown error occurred', 5000);
     } else {
       editDropdownOpen = false;
+      removingCanvasConnection = false;
       invalidateAll();
       timesAdded++;
       happyToast('Canvas class connection removed successfully!');
@@ -1322,11 +1326,16 @@
                       pill
                       size="xs"
                       class="border border-amber-900 hover:bg-amber-900 text-amber-900 hover:bg-gradient-to-t hover:from-amber-800 hover:to-amber-700 hover:text-white"
-                      disabled={syncingCanvasClass || $updatingApiKey}
+                      disabled={removingCanvasConnection || syncingCanvasClass || $updatingApiKey}
                       on:click={() => removeCanvasConnection(false)}
                       on:touchstart={() => removeCanvasConnection(false)}
                     >
-                      <UserRemoveSolid class="w-4 h-4 me-2" />Disconnect Canvas account</Button
+                      {#if removingCanvasConnection}<Spinner
+                          color="custom"
+                          customColor="fill-amber-900"
+                          class="w-4 h-4 me-2"
+                        />{:else}<UserRemoveSolid class="w-4 h-4 me-2" />{/if}Disconnect Canvas
+                      account</Button
                     >
                   </div>
                 {/if}
@@ -1354,10 +1363,15 @@
                   pill
                   size="xs"
                   class="border border-amber-900 hover:bg-amber-900 text-amber-900 hover:bg-gradient-to-t hover:from-amber-800 hover:to-amber-700 hover:text-white"
+                  disabled={removingCanvasConnection}
                   on:click={() => removeCanvasConnection(false)}
                   on:touchstart={() => removeCanvasConnection(false)}
                 >
-                  <UserRemoveSolid class="w-4 h-4 me-2" />Disconnect Canvas account</Button
+                  {#if removingCanvasConnection}<Spinner
+                      color="custom"
+                      customColor="fill-amber-900"
+                      class="w-4 h-4 me-2"
+                    />{:else}<UserRemoveSolid class="w-4 h-4 me-2" />{/if}Disconnect Canvas account</Button
                 >
               </div>
             </div>
@@ -1414,7 +1428,11 @@
                   <DropdownItem on:click={() => (disconnectCanvas = true)}
                     ><div class="flex flex-row gap-3 items-center">
                       <div class="border bg-green-800 border-green-800 text-white rounded-full">
-                        <UserRemoveSolid class="w-4 h-4 m-2" />
+                        {#if removingCanvasConnection}<Spinner
+                            color="custom"
+                            customColor="fill-green-800"
+                            class="w-4 h-4 me-2"
+                          />{:else}<UserRemoveSolid class="w-4 h-4 me-2" />{/if}
                       </div>
                       Disconnect Canvas account
                     </div></DropdownItem
@@ -1468,10 +1486,15 @@
                   pill
                   size="xs"
                   class="border border-green-900 hover:bg-green-900 text-green-900 hover:bg-gradient-to-t hover:from-green-800 hover:to-green-700 hover:text-white"
+                  disabled={removingCanvasConnection}
                   on:click={() => (disconnectCanvas = true)}
                   on:touchstart={() => (disconnectCanvas = true)}
                 >
-                  <UserRemoveSolid class="w-4 h-4 me-2" />Disconnect Canvas account</Button
+                  {#if removingCanvasConnection}<Spinner
+                      color="custom"
+                      customColor="fill-green-900"
+                      class="w-4 h-4 me-2"
+                    />{:else}<UserRemoveSolid class="w-4 h-4 me-2" />{/if}Disconnect Canvas account</Button
                 >
               </div>
               <Modal bind:open={disconnectCanvas} size="sm" autoclose>
@@ -1505,6 +1528,7 @@
                   pill
                   size="xs"
                   class="border border-red-900 bg-gradient-to-t from-red-800 to-red-700 text-white hover:from-red-700 hover:to-red-600"
+                  disabled={removingCanvasConnection}
                   on:click={reconnectCanvasAccount}
                   on:touchstart={reconnectCanvasAccount}
                 >
@@ -1514,10 +1538,15 @@
                   pill
                   size="xs"
                   class="border border-red-900 hover:bg-red-900 text-red-900 hover:bg-gradient-to-t hover:from-red-800 hover:to-red-700 hover:text-white"
+                  disabled={removingCanvasConnection}
                   on:click={() => (disconnectCanvas = true)}
                   on:touchstart={() => (disconnectCanvas = true)}
                 >
-                  <UserRemoveSolid class="w-4 h-4 me-2" />Disconnect Canvas account</Button
+                  {#if removingCanvasConnection}<Spinner
+                      color="custom"
+                      customColor="fill-red-900"
+                      class="w-4 h-4 me-2"
+                    />{:else}<UserRemoveSolid class="w-4 h-4 me-2" />{/if}Disconnect Canvas account</Button
                 >
               </div>
               <Modal bind:open={disconnectCanvas} size="sm" autoclose>
@@ -1562,10 +1591,15 @@
                   pill
                   size="xs"
                   class="border border-green-900 hover:bg-green-900 text-green-900 hover:bg-gradient-to-t hover:from-green-800 hover:to-green-700 hover:text-white"
+                  disabled={removingCanvasConnection}
                   on:click={() => (disconnectCanvas = true)}
                   on:touchstart={() => (disconnectCanvas = true)}
                 >
-                  <UserRemoveSolid class="w-4 h-4 me-2" />Disconnect Canvas account</Button
+                  {#if removingCanvasConnection}<Spinner
+                      color="custom"
+                      customColor="fill-green-900"
+                      class="w-4 h-4 me-2"
+                    />{:else}<UserRemoveSolid class="w-4 h-4 me-2" />{/if}Disconnect Canvas account</Button
                 >
               </div>
               <Modal bind:open={disconnectCanvas} size="sm" autoclose>

@@ -1365,25 +1365,12 @@ async def remove_canvas_connection(
     async with LightweightCanvasClient(
         canvas_settings, int(class_id), request
     ) as client:
+        hasClientError = False
         try:
             await client.log_out()
-            userIds = await models.Class.remove_lms_sync(
-                request.state.db,
-                int(class_id),
-                canvas_settings.tenant,
-                schemas.LMSType(canvas_settings.type),
-                kill_connection=True,
-                keep_users=keep_users,
-            )
-            await delete_canvas_permissions(request.state.authz, userIds, class_id)
-
-        except ClientResponseError as e:
+        except ClientResponseError:
             logger.exception("delete_canvas_permissions: ClientResponseError occurred")
-            raise HTTPException(
-                status_code=e.code,
-                detail="Canvas returned an error when removing your account: "
-                + e.message,
-            )
+            hasClientError = True
         except CanvasException as e:
             logger.exception("delete_canvas_permissions: CanvasException occurred")
             raise HTTPException(
@@ -1404,6 +1391,29 @@ async def remove_canvas_connection(
             raise HTTPException(
                 status_code=500,
                 detail="We faced an internal error while removing your account.",
+            )
+
+        try:
+            userIds = await models.Class.remove_lms_sync(
+                request.state.db,
+                int(class_id),
+                canvas_settings.tenant,
+                schemas.LMSType(canvas_settings.type),
+                kill_connection=True,
+                keep_users=keep_users,
+            )
+            await delete_canvas_permissions(request.state.authz, userIds, class_id)
+        except Exception:
+            logger.exception("remove_canvas_connection: Exception occurred")
+            raise HTTPException(
+                status_code=500,
+                detail="We faced an internal error while removing your account.",
+            )
+
+        if hasClientError:
+            raise HTTPException(
+                status_code=500,
+                detail=f"We have removed your Canvas account from PingPong, but faced an error while logging out of Canvas. You can manually remove your token under {canvas_settings.url('/profile/settings')}.",
             )
 
     return {"status": "ok"}
