@@ -6,12 +6,6 @@
     Label,
     Helper,
     Spinner,
-    Table,
-    TableBody,
-    TableBodyCell,
-    TableBodyRow,
-    TableHeadCell,
-    TableHead,
     P,
     Toggle,
     Button,
@@ -225,21 +219,87 @@
       </div>
 
       <div>
-        <div class="mb-5">
-          <Heading tag="h3" class="font-serif text-xl">Email</Heading>
+        <div>
+          <Heading tag="h3" class="flex flex-row gap-2"
+            ><span class="font-serif text-xl">Primary Email</span>
+            <div>
+              <QuestionCircleOutline color="gray" />
+              <Tooltip
+                type="custom"
+                arrow={false}
+                class="flex flex-row overflow-y-auto bg-gray-900 z-10 max-w-xs py-2 px-3 text-sm text-wrap font-light text-white"
+              >
+                <div class="normal-case whitespace-normal">
+                  <p>Changing your primary email address is not currently supported.</p>
+                </div>
+              </Tooltip>
+            </div></Heading
+          >
           <p>{data.me.user?.email || 'Unknown'}</p>
         </div>
-
-        <div class="mb-5">
-          <Heading tag="h3" class="font-serif text-xl">State</Heading>
-          <p>{data.me.user?.state || 'Unknown'}</p>
-        </div>
-
-        <div class="">
-          <Heading tag="h3" class="font-serif text-xl">Account created</Heading>
-          <p>{data.me.user?.created ? dayjs(data.me.user.created).toString() : 'Unknown'}</p>
-        </div>
       </div>
+    </div>
+
+    <div class="flex flex-row flex-wrap justify-between mt-12 items-center gap-y-4">
+      <Heading
+        tag="h2"
+        class="text-3xl font-serif font-medium text-dark-blue-40 shrink-0 max-w-max mr-5"
+        >External Logins</Heading
+      >
+      <P>
+        PingPong supports log in and user syncing functionality with a number of External Login
+        Providers. Some External Logins might offer additional options for logging in to PingPong or
+        joining a Group.
+      </P>
+      {#if data.me.user?.external_logins}
+        <div class="w-full mt-4">
+          <div class="bg-gray-100 rounded-2xl p-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {#each data.me.user?.external_logins as login}
+                <div class="flex flex-col bg-white rounded-xl p-4 shadow-sm">
+                  <div class="flex items-center gap-3 mb-2">
+                    {#if login.provider_obj.icon}
+                      <img
+                        class="w-8 h-8 object-contain"
+                        src={login.provider_obj.icon}
+                        alt={login.provider_obj.display_name || login.provider_obj.name}
+                      />
+                    {:else}
+                      <div class="w-8 h-8 bg-gray-200 rounded-lg flex items-center justify-center">
+                        <span class="text-sm font-medium">
+                          {(login.provider_obj.display_name || login.provider_obj.name).charAt(0)}
+                        </span>
+                      </div>
+                    {/if}
+                    <div class="flex items-center gap-2">
+                      <span class="font-medium">
+                        {login.provider_obj.display_name || login.provider_obj.name}
+                      </span>
+                      {#if login.provider_obj.description}
+                        <div class="relative">
+                          <QuestionCircleOutline color="gray" />
+                          <Tooltip
+                            type="custom"
+                            arrow={false}
+                            class="flex flex-row bg-gray-900 w-64 z-10 py-2 px-3 text-sm text-wrap font-light text-white"
+                          >
+                            <div class="normal-case whitespace-normal">
+                              <p>{login.provider_obj.description}</p>
+                            </div>
+                          </Tooltip>
+                        </div>
+                      {/if}
+                    </div>
+                  </div>
+                  <div class="font-mono text-sm text-gray-600 break-all">
+                    {login.identifier}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          </div>
+        </div>
+      {/if}
     </div>
 
     {#if activitySubscription.length > 0}
@@ -276,89 +336,96 @@
             >You won't receive Activity Summaries for Groups with no activity.</b
           >
         </P>
-        <Table>
-          <TableHead class="bg-blue-light-40 p-1 text-blue-dark-50 tracking-wide rounded-2xl">
-            <TableHeadCell class="w-1/3">Class Name</TableHeadCell>
-            <TableHeadCell class="w-1/3">Last Activity Summary Sent At</TableHeadCell>
-            <TableHeadCell class="w-1/4">Receive Activity Summaries</TableHeadCell>
-          </TableHead>
-          <TableBody>
+        <div class="bg-gray-100 rounded-2xl p-6">
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {#each activitySubscription as subscription}
-              <TableBodyRow>
-                <TableBodyCell class="font-light text-wrap">{subscription.class_name}</TableBodyCell
-                >
-                <TableBodyCell class="font-light"
-                  >{#if subscription.class_private}
-                    <div class="flex flex-row gap-2 justify-between items-center">
-                      <span class="text-xs uppercase font-medium text-gray-500"
-                        >Ineligible: Private Group</span
-                      >
-                      <div>
-                        <QuestionCircleOutline color="gray" />
-                        <Tooltip
-                          type="custom"
-                          arrow={false}
-                          class="flex flex-row overflow-y-auto bg-gray-900 z-10 max-w-xs py-2 px-3 text-sm text-wrap font-light text-white"
+              <div class="bg-white rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                <div class="flex flex-col gap-2 mb-4">
+                  <div class="font-medium text-lg text-blue-dark-40">{subscription.class_name}</div>
+                  <div class="text-sm text-gray-600">
+                    {#if subscription.class_private}
+                      <div class="flex flex-row gap-2 justify-between items-center">
+                        <span class="text-xs uppercase font-medium text-gray-500"
+                          >Ineligible: Private Group</span
                         >
-                          <div class="whitespace-normal">
-                            <p>Activity Summaries are unavailable for private groups.</p>
-                          </div>
-                        </Tooltip>
+                        <div>
+                          <QuestionCircleOutline color="gray" />
+                          <Tooltip
+                            type="custom"
+                            arrow={false}
+                            class="flex flex-row overflow-y-auto bg-gray-900 z-10 max-w-xs py-2 px-3 text-sm text-wrap font-light text-white"
+                          >
+                            <div class="whitespace-normal">
+                              <p>Activity Summaries are unavailable for private groups.</p>
+                            </div>
+                          </Tooltip>
+                        </div>
                       </div>
-                    </div>
-                  {:else if subscription.last_summary_empty}
-                    <div class="flex flex-row gap-2 justify-between items-center">
-                      <span class="text-wrap"
-                        >{subscription.last_email_sent
-                          ? dayjs(subscription.last_email_sent).toString()
-                          : 'Never'}</span
-                      >
-                      <div>
-                        <QuestionCircleOutline color="gray" />
-                        <Tooltip
-                          type="custom"
-                          arrow={false}
-                          class="flex flex-row overflow-y-auto bg-gray-900 z-10 max-w-xs py-2 px-3 text-sm text-wrap font-light text-white"
+                    {:else if subscription.last_summary_empty}
+                      <div class="flex flex-col gap-1">
+                        <span class="text-xs uppercase font-medium text-gray-500">Last summary</span
                         >
-                          <div class="whitespace-normal">
-                            <p>
-                              We didn't send an Activity Summary for this Group last time because
-                              there was no recent activity.
-                            </p>
+                        <div class="flex flex-row gap-1 items-center">
+                          <span class="text-gray-700"
+                            >{subscription.last_email_sent
+                              ? dayjs(subscription.last_email_sent).toString()
+                              : 'Never'}</span
+                          >
+                          <div>
+                            <QuestionCircleOutline color="gray" />
+                            <Tooltip
+                              type="custom"
+                              arrow={false}
+                              class="flex flex-row overflow-y-auto bg-gray-900 z-10 max-w-xs py-2 px-3 text-sm text-wrap font-light text-white"
+                            >
+                              <div class="whitespace-normal">
+                                <p>
+                                  We didn't send an Activity Summary for this Group last time
+                                  because there was no recent activity.
+                                </p>
+                              </div>
+                            </Tooltip>
                           </div>
-                        </Tooltip>
+                        </div>
                       </div>
-                    </div>
-                  {:else if !subscription.class_has_api_key}
-                    <div class="flex flex-row gap-2 justify-between items-center">
-                      <span class="text-xs uppercase font-medium text-gray-500"
-                        >Ineligible: No Billing Information</span
-                      >
-                      <div>
-                        <QuestionCircleOutline color="gray" />
-                        <Tooltip
-                          type="custom"
-                          arrow={false}
-                          class="flex flex-row overflow-y-auto bg-gray-900 z-10 max-w-xs py-2 px-3 text-sm text-wrap font-light text-white"
+                    {:else if !subscription.class_has_api_key}
+                      <div class="flex flex-row gap-2 justify-between items-center">
+                        <span class="text-xs uppercase font-medium text-gray-500"
+                          >Ineligible: No Billing Information</span
                         >
-                          <div class="whitespace-normal">
-                            <p>
-                              Activity Summaries are unavailable for Groups with no billing
-                              information. Add a billing method and an Assistant to enable Activity
-                              Summaries.
-                            </p>
-                          </div>
-                        </Tooltip>
+                        <div>
+                          <QuestionCircleOutline color="gray" />
+                          <Tooltip
+                            type="custom"
+                            arrow={false}
+                            class="flex flex-row overflow-y-auto bg-gray-900 z-10 max-w-xs py-2 px-3 text-sm text-wrap font-light text-white"
+                          >
+                            <div class="whitespace-normal">
+                              <p>
+                                Activity Summaries are unavailable for Groups with no billing
+                                information. Add a billing method and an Assistant to enable
+                                Activity Summaries.
+                              </p>
+                            </div>
+                          </Tooltip>
+                        </div>
                       </div>
-                    </div>
-                  {:else}
-                    {subscription.last_email_sent
-                      ? dayjs(subscription.last_email_sent).toString()
-                      : 'Never'}
-                  {/if}
-                </TableBodyCell>
-                <TableBodyCell>
-                  {#if !subscription.class_private && subscription.class_has_api_key}
+                    {:else}
+                      <div class="flex flex-col gap-1">
+                        <span class="text-xs uppercase font-medium text-gray-500">Last summary</span
+                        >
+                        <span class="text-gray-700"
+                          >{subscription.last_email_sent
+                            ? dayjs(subscription.last_email_sent).toString()
+                            : 'Never'}</span
+                        >
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+                {#if !subscription.class_private && subscription.class_has_api_key}
+                  <div class="flex items-center justify-between">
+                    <span class="text-sm text-gray-600">Receive summaries</span>
                     <Toggle
                       color="blue"
                       checked={subscription.subscribed}
@@ -369,12 +436,12 @@
                           subscription.class_name
                         )}
                     />
-                  {/if}
-                </TableBodyCell>
-              </TableBodyRow>
+                  </div>
+                {/if}
+              </div>
             {/each}
-          </TableBody>
-        </Table>
+          </div>
+        </div>
       </div>
       <div class="w-8/9 my-5">
         <Accordion>
@@ -387,28 +454,32 @@
                 <div class="text-sm">Advanced Options</div>
               </div></span
             >
-            <div class="flex flex-col gap-2 px-1">
+            <div class="flex flex-col gap-4 px-1">
               <P class="text-base text-gray-600"
                 >Manage additional settings about your Activity Summary subscriptions. These
                 settings will apply for new Groups you create or join.</P
               >
 
-              <Checkbox
-                id="dnaAcCreate"
-                class="text-base font-normal"
-                color="blue"
-                checked={dnaAcCreate}
-                on:change={handleDoNotAddWhenICreateChange}
-                ><b>Do not add</b>&nbsp;an Activity Subscription for new groups I create.</Checkbox
-              >
-              <Checkbox
-                id="dnaAcJoin"
-                class="text-base font-normal"
-                color="blue"
-                checked={dnaAcJoin}
-                on:change={handleDoNotAddWhenIJoinChange}
-                ><b>Do not add</b>&nbsp;an Activity Subscription for new groups I join.</Checkbox
-              >
+              <div class="bg-gray-100 rounded-xl p-4">
+                <div class="flex flex-col gap-3">
+                  <Checkbox
+                    id="dnaAcCreate"
+                    class="text-base font-normal"
+                    color="blue"
+                    checked={dnaAcCreate}
+                    on:change={handleDoNotAddWhenICreateChange}
+                    ><b>Do not add</b>&nbsp;an Activity Subscription for new groups I create.</Checkbox
+                  >
+                  <Checkbox
+                    id="dnaAcJoin"
+                    class="text-base font-normal"
+                    color="blue"
+                    checked={dnaAcJoin}
+                    on:change={handleDoNotAddWhenIJoinChange}
+                    ><b>Do not add</b>&nbsp;an Activity Subscription for new groups I join.</Checkbox
+                  >
+                </div>
+              </div>
             </div>
           </AccordionItem>
         </Accordion>

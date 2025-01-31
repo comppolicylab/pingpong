@@ -428,6 +428,7 @@ class ExternalLoginProvider(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String, nullable=False)
+    display_name = Column(String, nullable=True)
     description = Column(String, nullable=True)
     icon = Column(String, nullable=True)
     external_logins: Mapped[List["ExternalLogin"]] = relationship(
@@ -442,21 +443,37 @@ class ExternalLoginProvider(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_by_id(
+        cls, session: AsyncSession, id_: int
+    ) -> "ExternalLoginProvider":
+        stmt = select(ExternalLoginProvider).where(ExternalLoginProvider.id == id_)
+        return await session.scalar(stmt)
+
+    @classmethod
     async def get_or_create_by_name(
         cls,
         session: AsyncSession,
         name: str,
+        display_name: str | None = None,
         description: str | None = None,
         icon: str | None = None,
     ) -> "ExternalLoginProvider":
         existing = await cls.get_by_name(session, name)
         if existing:
             return existing
-        provider = ExternalLoginProvider(name=name, description=description, icon=icon)
+        provider = ExternalLoginProvider(
+            name=name, description=description, display_name=display_name, icon=icon
+        )
         session.add(provider)
         await session.flush()
         await session.refresh(provider)
         return provider
+
+    @classmethod
+    async def get_all(cls, session: AsyncSession) -> list["ExternalLoginProvider"]:
+        stmt = select(ExternalLoginProvider)
+        result = await session.execute(stmt)
+        return [row.ExternalLoginProvider for row in result]
 
 
 class ExternalLogin(Base):

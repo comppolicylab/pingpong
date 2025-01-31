@@ -318,6 +318,28 @@ export type UserClassRoles = {
 };
 
 /**
+ * External Login Provider Information
+ */
+export type ExternalLoginProvider = {
+  id: number;
+  name: string;
+  display_name: string | null;
+  description: string | null;
+  icon: string | null;
+};
+
+export type ExternalLoginProviders = {
+  providers: ExternalLoginProvider[];
+};
+
+export type ExternalLogin = {
+  id: number;
+  provider: string;
+  identifier: string;
+  provider_obj: ExternalLoginProvider;
+};
+
+/**
  * User information.
  */
 export type AppUser = {
@@ -365,6 +387,8 @@ export type AppUser = {
    * Last update to user account.
    */
   updated: string | null;
+
+  external_logins: ExternalLogin[];
 };
 
 /**
@@ -810,6 +834,31 @@ export const requestActivitySummary = async (
 ) => {
   const url = `class/${classId}/summarize`;
   return await POST<ActivitySummaryRequestOpts, GenericStatus>(f, url, data);
+};
+
+/**
+ * Get all external login providers.
+ */
+export const getExternalLoginProviders = async (f: Fetcher) => {
+  return await GET<never, ExternalLoginProviders>(f, 'admin/providers');
+};
+
+export type ExternalLoginProviderUpdateRequest = {
+  display_name: string | null;
+  description: string | null;
+  icon: string | null;
+};
+
+/**
+ * Update an external login provider.
+ */
+export const updateExternalLoginProvider = async (
+  f: Fetcher,
+  providerId: number,
+  data: ExternalLoginProviderUpdateRequest
+) => {
+  const url = `admin/providers/${providerId}`;
+  return await PUT<ExternalLoginProviderUpdateRequest, GenericStatus>(f, url, data);
 };
 
 /**
