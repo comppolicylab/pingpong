@@ -3911,6 +3911,40 @@ async def get_grants(query: schemas.GrantsQuery, request: Request):
 
 
 @v1.get(
+    "/admin/providers",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.ExternalLoginProviders,
+)
+async def get_external_login_providers(request: Request):
+    """Get the external login providers."""
+    providers = await models.ExternalLoginProvider.get_all(request.state.db)
+    return {"providers": providers}
+
+
+@v1.put(
+    "/admin/providers/{provider_id}",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.GenericStatus,
+)
+async def update_external_login_provider(
+    provider_id: str,
+    req: schemas.UpdateExternalLoginProvider,
+    request: Request,
+):
+    """Update an external login provider."""
+    provider = await models.ExternalLoginProvider.get_by_id(
+        request.state.db, int(provider_id)
+    )
+    if not provider:
+        raise HTTPException(404, "Provider not found.")
+    provider.description = req.description
+    provider.display_name = req.display_name
+    request.state.db.add(provider)
+    await request.state.db.flush()
+    return {"status": "ok"}
+
+
+@v1.get(
     "/support",
     response_model=schemas.Support,
 )

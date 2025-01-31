@@ -41,7 +41,15 @@ from .auth import encode_auth_token
 from .bg import get_server
 from .canvas import canvas_sync_all
 from .config import config
-from .models import Base, ScheduledJob, PeriodicTask, User, Class, UserClassRole
+from .models import (
+    Base,
+    ExternalLogin,
+    ScheduledJob,
+    PeriodicTask,
+    User,
+    Class,
+    UserClassRole,
+)
 from .authz.admin_migration import remove_class_admin_perms
 
 from sqlalchemy import inspect
@@ -414,6 +422,33 @@ def set_key_as_default(
         logger.info("Done!")
 
     asyncio.run(_set_key_as_default())
+
+
+@db.command("migrate_external_providers")
+def migrate_external_providers() -> None:
+    async def _migrate_external_providers() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Migrating external providers...")
+            for provider_name in await ExternalLogin.get_all_providers(session):
+                await ExternalLogin.migrate_provider_by_name(session, provider_name)
+                await session.commit()
+            logger.info("Done!")
+
+    asyncio.run(_migrate_external_providers())
+
+
+@db.command("check_for_missing_providers")
+def check_for_missing_providers() -> None:
+    async def _check_for_missing_providers() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Checking for missing external providers...")
+            async for record in ExternalLogin.missing_provider_ids(session):
+                logger.info(
+                    f"Missing provider_id for record {record.id}, {record.provider}, {record.identifier}"
+                )
+            logger.info("Done!")
+
+    asyncio.run(_check_for_missing_providers())
 
 
 async def _lms_sync_all(

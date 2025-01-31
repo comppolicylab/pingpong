@@ -117,6 +117,11 @@
             </div>
           </div>
         {/if}
+        <Hr />
+        <Button
+          class="bg-orange text-white rounded-full hover:bg-orange-dark"
+          href="/admin/providers">Manage External Login Providers</Button
+        >
       </div>
     </div>
 

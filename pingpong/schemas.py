@@ -153,10 +153,36 @@ class MergedUserTuple(BaseModel):
     merged_user_id: int
 
 
+class ExternalLoginProvider(BaseModel):
+    id: int
+    name: str
+    display_name: str | None
+    description: str | None
+
+    class Config:
+        from_attributes = True
+
+
+class ExternalLoginProviders(BaseModel):
+    providers: list[ExternalLoginProvider]
+
+    class Config:
+        from_attributes = True
+
+
+class UpdateExternalLoginProvider(BaseModel):
+    display_name: str | None
+    description: str | None
+
+    class Config:
+        from_attributes = True
+
+
 class ExternalLogin(BaseModel):
     id: int
     provider: str
     identifier: str
+    provider_obj: ExternalLoginProvider
 
     class Config:
         from_attributes = True
@@ -165,9 +191,6 @@ class ExternalLogin(BaseModel):
 class ExternalLogins(BaseModel):
     user_id: int
     external_logins: list[ExternalLogin]
-
-    class Config:
-        from_attributes = True
 
 
 class User(BaseModel, UserNameMixin):
