@@ -2245,8 +2245,8 @@ async def export_class_threads(
     return {"status": "ok"}
 
 
-@v1.post(
-    "/class/multiple/export",
+@v1.get(
+    "/admin/export/threads",
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.GenericStatus,
 )
