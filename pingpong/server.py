@@ -2245,7 +2245,7 @@ async def export_class_threads(
     return {"status": "ok"}
 
 
-@v1.get(
+@v1.post(
     "/class/multiple/export",
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.GenericStatus,
@@ -2254,11 +2254,9 @@ async def export_class_threads_multiple_classes(
     data: schemas.MultipleClassThreadExportRequest,
     request: Request,
     tasks: BackgroundTasks,
-    openai_client: OpenAIClient,
 ):
     tasks.add_task(
         export_threads_multiple_classes,
-        openai_client,
         data.class_ids,
         request.state.session.user.id,
         False,

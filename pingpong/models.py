@@ -1620,14 +1620,23 @@ class Class(Base):
 
     @classmethod
     async def get_by_ids(
-        cls, session: AsyncSession, ids: List[int], exclude_private: bool = False
+        cls,
+        session: AsyncSession,
+        ids: List[int],
+        exclude_private: bool = False,
+        with_api_key: bool = False,
     ) -> AsyncGenerator["Class", None]:
         if not ids:
             return
-        condition = Class.id.in_(ids)
+
+        conditions = [Class.id.in_(ids)]
         if exclude_private:
-            condition = and_(condition, Class.private.is_(False))
-        stmt = select(Class).where(condition)
+            conditions.append(Class.private.is_(False))
+        if with_api_key:
+            conditions.append(
+                or_(Class.api_key_id.isnot(None), Class.api_key.isnot(None))
+            )
+        stmt = select(Class).where(and_(*conditions))
         result = await session.execute(stmt)
         for row in result:
             yield row.Class

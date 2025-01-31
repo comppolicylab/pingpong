@@ -550,7 +550,6 @@ async def export_class_threads_with_emails(
 
 
 async def export_threads_multiple_classes(
-    cli: openai.AsyncClient,
     class_ids: list[int],
     requestor_id: int,
     include_user_emails: bool = False,
@@ -563,7 +562,6 @@ async def export_threads_multiple_classes(
         requestor = await models.User.get_by_id(session, requestor_id)
         if not requestor:
             raise ValueError(f"User with ID {requestor_id} not found")
-
         # Get details about the users we should filter by
         user_ids = None
         if include_only_user_ids:
@@ -596,8 +594,9 @@ async def export_threads_multiple_classes(
 
         class_id = None
         async for class_ in models.Class.get_by_ids(
-            session, class_ids, exclude_private=True
+            session, ids=class_ids, exclude_private=True, with_api_key=True
         ):
+            cli = await get_openai_client_by_class_id(session, class_.id)
             class_id = class_.id
             async for thread in models.Thread.get_thread_by_class_id(
                 session,
@@ -708,7 +707,7 @@ async def export_threads_multiple_classes(
         )
 
         export_opts = DownloadExport(
-            class_name=class_.name,
+            class_name="multiple classes",
             email=requestor.email,
             link=download_link,
         )
