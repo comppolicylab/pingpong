@@ -595,7 +595,9 @@ async def export_threads_multiple_classes(
         csvwriter.writerow(header)
 
         class_id = None
-        async for class_ in models.Class.get_by_ids(session, class_ids):
+        async for class_ in models.Class.get_by_ids(
+            session, class_ids, exclude_private=True
+        ):
             class_id = class_.id
             async for thread in models.Thread.get_thread_by_class_id(
                 session,

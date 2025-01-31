@@ -1620,11 +1620,14 @@ class Class(Base):
 
     @classmethod
     async def get_by_ids(
-        cls, session: AsyncSession, ids: List[int]
+        cls, session: AsyncSession, ids: List[int], exclude_private: bool = False
     ) -> AsyncGenerator["Class", None]:
         if not ids:
             return
-        stmt = select(Class).where(Class.id.in_(ids))
+        condition = Class.id.in_(ids)
+        if exclude_private:
+            condition = and_(condition, Class.private.is_(False))
+        stmt = select(Class).where(condition)
         result = await session.execute(stmt)
         for row in result:
             yield row.Class
