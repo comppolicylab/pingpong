@@ -423,20 +423,69 @@ user_thread_association = Table(
 )
 
 
+class ExternalLoginProvider(Base):
+    __tablename__ = "external_login_providers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    icon = Column(String, nullable=True)
+    external_logins: Mapped[List["ExternalLogin"]] = relationship(
+        "ExternalLogin", back_populates="provider_obj", lazy="selectin"
+    )
+
+    @classmethod
+    async def get_by_name(
+        cls, session: AsyncSession, name: str
+    ) -> "ExternalLoginProvider":
+        stmt = select(ExternalLoginProvider).where(ExternalLoginProvider.name == name)
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_or_create_by_name(
+        cls,
+        session: AsyncSession,
+        name: str,
+        description: str | None = None,
+        icon: str | None = None,
+    ) -> "ExternalLoginProvider":
+        existing = await cls.get_by_name(session, name)
+        if existing:
+            return existing
+        provider = ExternalLoginProvider(name=name, description=description, icon=icon)
+        session.add(provider)
+        await session.flush()
+        await session.refresh(provider)
+        return provider
+
+
 class ExternalLogin(Base):
     __tablename__ = "external_logins"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     user = relationship("User", back_populates="external_logins")
+    provider_id = Column(
+        Integer, ForeignKey("external_login_providers.id"), nullable=True
+    )
+    provider_obj = relationship(
+        "ExternalLoginProvider", back_populates="external_logins", lazy="selectin"
+    )
     provider = Column(String, nullable=False)
     identifier = Column(String, nullable=False)
 
     # Add an index to help with lookups
     __table_args__ = (
         Index("idx_user_provider", "user_id", "provider"),
+        Index("idx_user_provider_id", "user_id", "provider_id"),
         UniqueConstraint(
             "user_id", "provider", "identifier", name="uq_user_provider_identifier"
+        ),
+        UniqueConstraint(
+            "user_id",
+            "provider_id",
+            "identifier",
+            name="uq_user_provider_id_identifier",
         ),
     )
 
@@ -444,11 +493,16 @@ class ExternalLogin(Base):
     async def create_or_update(
         cls, session: AsyncSession, user_id: int, provider: str, identifier: str
     ) -> bool:
+        provider_ = await ExternalLoginProvider.get_or_create_by_name(session, provider)
         if provider not in {"email"}:
             # For other providers, first check if a record exists
             stmt = select(ExternalLogin).where(
                 and_(
-                    ExternalLogin.user_id == user_id, ExternalLogin.provider == provider
+                    ExternalLogin.user_id == user_id,
+                    or_(
+                        ExternalLogin.provider == provider,
+                        ExternalLogin.provider_id == provider_.id,
+                    ),
                 )
             )
             existing = await session.scalar(stmt)
@@ -459,7 +513,10 @@ class ExternalLogin(Base):
                 return True
             else:
                 new_login = ExternalLogin(
-                    user_id=user_id, provider=provider, identifier=identifier
+                    user_id=user_id,
+                    provider=provider,
+                    identifier=identifier,
+                    provider_id=provider_.id,
                 )
                 session.add(new_login)
                 return True
@@ -477,9 +534,18 @@ class ExternalLogin(Base):
             # Do not add a duplicate record for the same user
             stmt = (
                 _get_upsert_stmt(session)(ExternalLogin)
-                .values(user_id=user_id, provider=provider, identifier=email_to_add)
-                .on_conflict_do_nothing(
-                    index_elements=["user_id", "provider", "identifier"],
+                .values(
+                    user_id=user_id,
+                    provider=provider,
+                    provider_id=provider_.id,
+                    identifier=email_to_add,
+                )
+                .on_conflict_do_update(
+                    index_elements=[
+                        ["user_id", "provider", "identifier"],
+                        ["user_id", "provider_", "identifier"],
+                    ],
+                    set_=dict(provider_id=provider_.id, provider=provider),
                 )
             )
             result = await session.execute(stmt)
@@ -489,11 +555,18 @@ class ExternalLogin(Base):
     async def accounts_to_merge(
         cls, session: AsyncSession, user_id: int, provider: str, identifier: str
     ) -> list[int]:
-        stmt_ = select(ExternalLogin.user_id).where(
-            and_(
-                ExternalLogin.provider == provider,
-                ExternalLogin.identifier == identifier,
-                ExternalLogin.user_id != user_id,
+        stmt_ = (
+            select(ExternalLogin.user_id)
+            .join(ExternalLoginProvider)
+            .where(
+                and_(
+                    or_(
+                        ExternalLogin.provider == provider,
+                        ExternalLoginProvider.name == provider,
+                    ),
+                    ExternalLogin.identifier == identifier,
+                    ExternalLogin.user_id != user_id,
+                )
             )
         )
         result = await session.execute(stmt_)
@@ -503,10 +576,17 @@ class ExternalLogin(Base):
     async def get_secondary_emails_by_user_id(
         cls, session: AsyncSession, user_id: int
     ) -> list["ExternalLogin"]:
-        stmt = select(ExternalLogin).where(
-            and_(
-                ExternalLogin.user_id == user_id,
-                ExternalLogin.provider == "email",
+        stmt = (
+            select(ExternalLogin)
+            .join(ExternalLoginProvider)
+            .where(
+                and_(
+                    ExternalLogin.user_id == user_id,
+                    or_(
+                        ExternalLogin.provider == "email",
+                        ExternalLoginProvider.name == "email",
+                    ),
+                )
             )
         )
         result = await session.execute(stmt)
@@ -517,10 +597,15 @@ class ExternalLogin(Base):
         cls, session: AsyncSession, user_id: int, email: str
     ) -> None:
         result = await session.execute(
-            delete(ExternalLogin).where(
+            delete(ExternalLogin)
+            .join(ExternalLoginProvider)
+            .where(
                 and_(
                     ExternalLogin.user_id == user_id,
-                    ExternalLogin.provider == "email",
+                    or_(
+                        ExternalLogin.provider == "email",
+                        ExternalLoginProvider.name == "email",
+                    ),
                     ExternalLogin.identifier == email,
                 )
             )
@@ -528,6 +613,34 @@ class ExternalLogin(Base):
         if result.rowcount == 0:
             raise ValueError(f"No secondary email {email} found for user {user_id}")
         return None
+
+    @classmethod
+    async def get_all_providers(cls, session: AsyncSession) -> list[str]:
+        stmt = select(ExternalLogin.provider).distinct()
+        result = await session.execute(stmt)
+        return [row[0] for row in result]
+
+    @classmethod
+    async def migrate_provider_by_name(
+        cls, session: AsyncSession, provider: str
+    ) -> None:
+        provider_ = await ExternalLoginProvider.get_or_create_by_name(session, provider)
+        stmt = (
+            update(ExternalLogin)
+            .where(
+                ExternalLogin.provider == provider, ExternalLogin.provider_id.is_(None)
+            )
+            .values(provider_id=provider_.id)
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def missing_provider_ids(
+        cls, session: AsyncSession
+    ) -> AsyncGenerator["ExternalLogin", None]:
+        stmt = select(ExternalLogin).where(ExternalLogin.provider_id.is_(None))
+        for row in await session.execute(stmt):
+            yield row.ExternalLogin
 
 
 user_merge_association = Table(
@@ -630,9 +743,13 @@ class User(Base):
         stmt_by_sso = (
             select(User)
             .join(ExternalLogin)
+            .join(ExternalLoginProvider)
             .where(
                 and_(
-                    ExternalLogin.provider == provider,
+                    or_(
+                        ExternalLogin.provider == provider,
+                        ExternalLoginProvider.name == provider,
+                    ),
                     ExternalLogin.identifier == identifier,
                 )
             )
@@ -691,11 +808,18 @@ class User(Base):
 
         # User does not exist, create a new user
         if provider and identifier:
+            provider_ = await ExternalLoginProvider.get_or_create_by_name(
+                session, provider
+            )
             user = User(
                 email=email,
                 state=initial_state,
                 external_logins=[
-                    ExternalLogin(provider=provider, identifier=identifier)
+                    ExternalLogin(
+                        provider=provider,
+                        identifier=identifier,
+                        provider_id=provider_.id,
+                    )
                 ],
                 display_name=display_name,
             )
@@ -769,12 +893,16 @@ class User(Base):
         stmt = (
             select(User.id)
             .outerjoin(ExternalLogin)
+            .join(ExternalLoginProvider)
             .where(
                 or_(
                     func.lower(User.email).in_(lower_emails),
                     and_(
                         func.lower(ExternalLogin.identifier).in_(lower_emails),
-                        ExternalLogin.provider == "email",
+                        or_(
+                            ExternalLogin.provider == "email",
+                            ExternalLoginProvider.name == "email",
+                        ),
                     ),
                 )
             )
