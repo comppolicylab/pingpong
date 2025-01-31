@@ -566,6 +566,12 @@ class DownloadExport(BaseModel):
     class_name: str
 
 
+class MultipleClassThreadExportRequest(BaseModel):
+    class_ids: list[int]
+    user_emails: list[str] | None = None
+    user_ids: list[int] | None = None
+
+
 class CreateUserInviteConfig(BaseModel):
     invites: list[CreateInvite] = []
     formatted_roles: dict[str, str] = {}

@@ -549,6 +549,174 @@ async def export_class_threads_with_emails(
     )
 
 
+async def export_threads_multiple_classes(
+    cli: openai.AsyncClient,
+    class_ids: list[int],
+    requestor_id: int,
+    include_user_emails: bool = False,
+    include_only_user_ids: list[int] | None = None,
+    include_only_user_emails: list[str] | None = None,
+    nowfn: NowFn = utcnow,
+) -> None:
+    async with config.db.driver.async_session() as session:
+        # Get details about the person we should send the export to
+        requestor = await models.User.get_by_id(session, requestor_id)
+        if not requestor:
+            raise ValueError(f"User with ID {requestor_id} not found")
+
+        # Get details about the users we should filter by
+        user_ids = None
+        if include_only_user_ids:
+            user_ids = include_only_user_ids
+        if include_only_user_emails:
+            include_only_user_emails = list(
+                set(email.lower() for email in include_only_user_emails)
+            )
+            user_ids = await models.User.get_by_emails_check_external_logins(
+                session, include_only_user_emails
+            )
+
+        # Set up the CSV writer
+        csv_buffer = io.StringIO()
+        csvwriter = csv.writer(csv_buffer)
+        header = ["User ID"]
+        if include_user_emails:
+            header.append("User Email")
+        header.extend(
+            [
+                "Class Name",
+                "Assistant Name",
+                "Role",
+                "Thread ID",
+                "Created At",
+                "Content",
+            ]
+        )
+        csvwriter.writerow(header)
+
+        class_id = None
+        async for class_ in models.Class.get_by_ids(session, class_ids):
+            class_id = class_.id
+            async for thread in models.Thread.get_thread_by_class_id(
+                session,
+                class_id=int(class_.id),
+                desc=False,
+                include_only_user_ids=user_ids,
+            ):
+                (
+                    assistant,
+                    file_names,
+                ) = await models.Thread.get_file_search_files_assistant(
+                    session, thread.id
+                )
+                assistant_name = assistant.name if assistant else "Deleted Assistant"
+
+                user_hashes = [
+                    generate_user_hash(class_, user) for user in thread.users
+                ] or ["Unknown user"]
+                user_hashes_str = ", ".join(user_hashes)
+
+                user_emails_str = "REDACTED"
+                if include_user_emails:
+                    user_emails = [user.email for user in thread.users] or [
+                        "Unknown email"
+                    ]
+                    user_emails_str = ", ".join(user_emails)
+
+                prompt_row = [user_hashes_str]
+                if include_user_emails:
+                    prompt_row.append(user_emails_str)
+                prompt_row.extend(
+                    [
+                        class_.name,
+                        assistant_name,
+                        "system_prompt",
+                        thread.id,
+                        thread.created.astimezone(ZoneInfo("America/New_York"))
+                        .replace(microsecond=0)
+                        .isoformat(),
+                        thread.assistant.instructions
+                        if thread.assistant
+                        else "Unknown Prompt (Deleted Assistant)",
+                    ]
+                )
+                csvwriter.writerow(prompt_row)
+
+                after = None
+                while True:
+                    messages = await cli.beta.threads.messages.list(
+                        thread_id=thread.thread_id,
+                        after=after,
+                        order="asc",
+                    )
+
+                    for message in messages.data:
+                        row = [user_hashes_str]
+
+                        if include_user_emails:
+                            row.append(user_emails_str)
+
+                        row.extend(
+                            [
+                                class_.name,
+                                assistant_name,
+                                message.role,
+                                thread.id,
+                                datetime.fromtimestamp(
+                                    message.created_at, tz=timezone.utc
+                                )
+                                .astimezone(ZoneInfo("America/New_York"))
+                                .isoformat(),
+                                process_message_content(message.content, file_names),
+                            ]
+                        )
+                        csvwriter.writerow(row)
+
+                    if len(messages.data) == 0:
+                        break
+                    after = messages.data[-1].id
+
+        if not class_id:
+            logger.warning(f"Found no classes with IDs {class_ids}")
+            return
+
+        csv_buffer.seek(0)
+
+        file_name = (
+            f"thread_export_multiple_{requestor_id}_{datetime.now().isoformat()}.csv"
+        )
+        await config.artifact_store.store.put(
+            file_name, csv_buffer, "text/csv;charset=utf-8"
+        )
+        csv_buffer.close()
+
+        tok = encode_auth_token(
+            sub=json.dumps(
+                {
+                    "user_id": requestor_id,
+                    "download_name": file_name,
+                }
+            ),
+            expiry=config.artifact_store.download_link_expiration,
+            nowfn=nowfn,
+        )
+
+        download_link = config.url(
+            f"/api/v1/class/{class_id}/export/download?token={tok}"
+        )
+
+        export_opts = DownloadExport(
+            class_name=class_.name,
+            email=requestor.email,
+            link=download_link,
+        )
+        await send_export_download(
+            config.email.sender,
+            export_opts,
+            expires=config.artifact_store.download_link_expiration,
+        )
+
+
 async def export_class_threads(
     cli: openai.AsyncClient,
     class_id: str,
