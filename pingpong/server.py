@@ -47,6 +47,7 @@ from .saml import get_saml2_client, get_saml2_settings, get_saml2_attrs
 from .ai import (
     GetOpenAIClientException,
     export_class_threads_anonymized,
+    export_threads_multiple_classes,
     format_instructions,
     get_openai_client_by_class_id,
     get_thread_conversation_name,
@@ -2240,6 +2241,27 @@ async def export_class_threads(
         openai_client,
         class_id,
         request.state.session.user.id,
+    )
+    return {"status": "ok"}
+
+
+@v1.post(
+    "/class/multiple/export",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.GenericStatus,
+)
+async def export_class_threads_multiple_classes(
+    data: schemas.MultipleClassThreadExportRequest,
+    request: Request,
+    tasks: BackgroundTasks,
+):
+    tasks.add_task(
+        export_threads_multiple_classes,
+        data.class_ids,
+        request.state.session.user.id,
+        False,
+        data.user_ids,
+        data.user_emails,
     )
     return {"status": "ok"}
 

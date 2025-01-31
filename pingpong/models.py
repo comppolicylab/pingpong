@@ -759,6 +759,29 @@ class User(Base):
             return result[0] or f"{result[1]} {result[2]}" or None
         return None
 
+    @classmethod
+    async def get_by_emails_check_external_logins(
+        cls, session: AsyncSession, emails: List[str]
+    ) -> List[int]:
+        if not emails:
+            return []
+        lower_emails = [email.lower() for email in emails]
+        stmt = (
+            select(User.id)
+            .outerjoin(ExternalLogin)
+            .where(
+                or_(
+                    func.lower(User.email).in_(lower_emails),
+                    and_(
+                        func.lower(ExternalLogin.identifier).in_(lower_emails),
+                        ExternalLogin.provider == "email",
+                    ),
+                )
+            )
+        )
+        result = await session.execute(stmt)
+        return [row[0] for row in result]
+
 
 class Institution(Base):
     __tablename__ = "institutions"
@@ -1596,6 +1619,29 @@ class Class(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_by_ids(
+        cls,
+        session: AsyncSession,
+        ids: List[int],
+        exclude_private: bool = False,
+        with_api_key: bool = False,
+    ) -> AsyncGenerator["Class", None]:
+        if not ids:
+            return
+
+        conditions = [Class.id.in_(ids)]
+        if exclude_private:
+            conditions.append(Class.private.is_(False))
+        if with_api_key:
+            conditions.append(
+                or_(Class.api_key_id.isnot(None), Class.api_key.isnot(None))
+            )
+        stmt = select(Class).where(and_(*conditions))
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.Class
+
+    @classmethod
     async def get_all_by_id(
         cls, session: AsyncSession, ids: list[int]
     ) -> list["Class"]:
@@ -2247,7 +2293,13 @@ class Thread(Base):
         session: AsyncSession,
         class_id: int,
         desc: bool = True,
+        include_only_user_ids: list[int] | None = None,
     ) -> AsyncGenerator["Thread", None]:
+        condition = Thread.class_id == int(class_id)
+        if include_only_user_ids:
+            condition = and_(
+                condition, Thread.users.any(User.id.in_(include_only_user_ids))
+            )
         stmt = (
             select(Thread)
             .outerjoin(Thread.users)
@@ -2255,7 +2307,7 @@ class Thread(Base):
                 selectinload(Thread.users).load_only(User.id, User.created),
             )
             .order_by(Thread.updated.desc() if desc else Thread.updated.asc())
-            .where(Thread.class_id == int(class_id))
+            .where(condition)
         )
         result = await session.execute(stmt)
         for row in result:
