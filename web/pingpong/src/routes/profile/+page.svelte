@@ -281,19 +281,6 @@
               {#each sortedLogins as login}
                 <div class="flex flex-col bg-white rounded-xl p-4 shadow-sm">
                   <div class="flex items-center gap-3 mb-2">
-                    {#if login.provider_obj.icon}
-                      <img
-                        class="w-8 h-8 object-contain"
-                        src={login.provider_obj.icon}
-                        alt={login.provider_obj.display_name || login.provider_obj.name}
-                      />
-                    {:else}
-                      <div class="w-8 h-8 bg-gray-200 rounded-lg flex items-center justify-center">
-                        <span class="text-sm font-medium">
-                          {(login.provider_obj.display_name || login.provider_obj.name).charAt(0)}
-                        </span>
-                      </div>
-                    {/if}
                     <div class="flex items-center gap-2">
                       <span class="font-medium">
                         {login.provider_obj.display_name || login.provider_obj.name}
@@ -326,7 +313,7 @@
     </div>
 
     {#if activitySubscription.length > 0}
-      <div class="flex flex-row flex-wrap justify-between mt-12 mb-4 items-center gap-y-4">
+      <div class="flex flex-row flex-wrap justify-between mt-14 mb-4 items-center gap-y-4">
         <Heading
           tag="h2"
           class="text-3xl font-serif font-medium text-dark-blue-40 shrink-0 max-w-max mr-5"

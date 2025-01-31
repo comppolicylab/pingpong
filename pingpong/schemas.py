@@ -158,7 +158,6 @@ class ExternalLoginProvider(BaseModel):
     name: str
     display_name: str | None
     description: str | None
-    icon: str | None
 
     class Config:
         from_attributes = True
@@ -174,7 +173,6 @@ class ExternalLoginProviders(BaseModel):
 class UpdateExternalLoginProvider(BaseModel):
     display_name: str | None
     description: str | None
-    icon: str | None
 
     class Config:
         from_attributes = True

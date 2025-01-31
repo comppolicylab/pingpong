@@ -325,7 +325,6 @@ export type ExternalLoginProvider = {
   name: string;
   display_name: string | null;
   description: string | null;
-  icon: string | null;
 };
 
 export type ExternalLoginProviders = {
@@ -846,7 +845,6 @@ export const getExternalLoginProviders = async (f: Fetcher) => {
 export type ExternalLoginProviderUpdateRequest = {
   display_name: string | null;
   description: string | null;
-  icon: string | null;
 };
 
 /**

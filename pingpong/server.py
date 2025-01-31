@@ -3937,7 +3937,6 @@ async def update_external_login_provider(
     )
     if not provider:
         raise HTTPException(404, "Provider not found.")
-    provider.icon = req.icon
     provider.description = req.description
     provider.display_name = req.display_name
     request.state.db.add(provider)
