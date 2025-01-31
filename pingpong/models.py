@@ -558,10 +558,7 @@ class ExternalLogin(Base):
                     identifier=email_to_add,
                 )
                 .on_conflict_do_update(
-                    index_elements=[
-                        ["user_id", "provider", "identifier"],
-                        ["user_id", "provider_", "identifier"],
-                    ],
+                    index_elements=["user_id", "provider", "identifier"],
                     set_=dict(provider_id=provider_.id, provider=provider),
                 )
             )

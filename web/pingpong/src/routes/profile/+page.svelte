@@ -35,7 +35,17 @@
   $: noneSubscribed = eligibleSubscriptions.every((sub) => !sub.subscribed);
   $: dnaAcCreate = !!data.subscriptionOpts.dna_as_create || false;
   $: dnaAcJoin = !!data.subscriptionOpts.dna_as_join || false;
+  $: sortedLogins =
+    data.me.user?.external_logins?.sort((a: api.ExternalLogin, b: api.ExternalLogin) => {
+      const nameA = a.provider_obj.display_name ?? a.provider_obj.name;
+      const nameB = b.provider_obj.display_name ?? b.provider_obj.name;
 
+      if (nameA !== nameB) {
+        return nameA.localeCompare(nameB);
+      }
+
+      return a.identifier.localeCompare(b.identifier);
+    }) || [];
   const inputState = {
     first_name: {
       loading: false,
@@ -264,11 +274,11 @@
         Providers. Some External Logins might offer additional options for logging in to PingPong or
         joining a Group.
       </P>
-      {#if data.me.user?.external_logins}
+      {#if sortedLogins}
         <div class="w-full">
           <div class="bg-gray-100 rounded-2xl p-6">
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {#each data.me.user?.external_logins as login}
+              {#each sortedLogins as login}
                 <div class="flex flex-col bg-white rounded-xl p-4 shadow-sm">
                   <div class="flex items-center gap-3 mb-2">
                     {#if login.provider_obj.icon}
