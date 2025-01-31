@@ -167,92 +167,105 @@
     </h2>
   </PageHeader>
   <div class="h-full w-full overflow-y-auto p-12">
-    <Heading tag="h2" class="text-3xl font-serif mb-4 font-medium text-dark-blue-40"
-      >Personal Information</Heading
-    >
-    <div class="bg-gray-100 rounded-2xl p-8 gap-5 items-start flex flex-col">
-      <div class="flex flex-row gap-12 flex-wrap">
-        <div>
-          <Label
-            class="mb-1 font-serif text-xl font-bold"
-            for="firstName"
-            color={inputState.first_name.error ? 'red' : undefined}>First Name</Label
-          >
-          <Input
-            name="firstName"
-            color={inputState.first_name.error ? 'red' : undefined}
-            value={data.me.user?.first_name}
-            on:change={saveField('first_name')}
-          >
-            <div slot="right" class={inputState.first_name.loading ? '' : 'hidden'}>
-              <Spinner size="4" color="green" />
-            </div>
-          </Input>
-          {#if inputState.first_name.error}
-            <Helper color="red" class="mt-2">
-              <p>{inputState.first_name.error}</p>
-            </Helper>
-          {/if}
-        </div>
-        <div>
-          <Label
-            class="mb-1 font-serif text-xl font-bold"
-            for="lastName"
-            color={inputState.last_name.error ? 'red' : undefined}>Last Name</Label
-          >
-          <Input
-            name="lastName"
-            color={inputState.last_name.error ? 'red' : undefined}
-            value={data.me.user?.last_name}
-            on:change={saveField('last_name')}
-          >
-            <div slot="right" class={inputState.last_name.loading ? '' : 'hidden'}>
-              <Spinner size="4" color="green" />
-            </div>
-          </Input>
-          {#if inputState.last_name.error}
-            <Helper color="red" class="mt-2">
-              <p>{inputState.last_name.error}</p>
-            </Helper>
-          {/if}
-        </div>
-      </div>
+    <div class="flex flex-row flex-wrap justify-between mb-4 items-center gap-y-4">
+      <Heading
+        tag="h2"
+        class="text-3xl font-serif font-medium text-dark-blue-40 shrink-0 max-w-max mr-5"
+        >Personal Information</Heading
+      >
+    </div>
+    <div class="flex flex-col gap-4">
+      <P>
+        Manage your personal information used across PingPong. This information helps identify you
+        to other users and moderators.
+      </P>
+      <div class="bg-gray-100 rounded-2xl p-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="bg-white rounded-xl p-4 shadow-sm">
+            <Label
+              class="mb-2 font-medium text-md"
+              for="firstName"
+              color={inputState.first_name.error ? 'red' : undefined}>First Name</Label
+            >
+            <Input
+              name="firstName"
+              color={inputState.first_name.error ? 'red' : 'base'}
+              value={data.me.user?.first_name}
+              on:change={saveField('first_name')}
+            >
+              <div slot="right" class={inputState.first_name.loading ? '' : 'hidden'}>
+                <Spinner size="4" color="green" />
+              </div>
+            </Input>
+            {#if inputState.first_name.error}
+              <Helper color="red" class="mt-2">
+                <p>{inputState.first_name.error}</p>
+              </Helper>
+            {/if}
+          </div>
 
-      <div>
-        <div>
-          <Heading tag="h3" class="flex flex-row gap-2"
-            ><span class="font-serif text-xl">Primary Email</span>
-            <div>
-              <QuestionCircleOutline color="gray" />
-              <Tooltip
-                type="custom"
-                arrow={false}
-                class="flex flex-row overflow-y-auto bg-gray-900 z-10 max-w-xs py-2 px-3 text-sm text-wrap font-light text-white"
-              >
-                <div class="normal-case whitespace-normal">
-                  <p>Changing your primary email address is not currently supported.</p>
+          <div class="bg-white rounded-xl p-4 shadow-sm">
+            <Label
+              class="mb-2 font-medium text-md"
+              for="lastName"
+              color={inputState.last_name.error ? 'red' : undefined}>Last Name</Label
+            >
+            <Input
+              name="lastName"
+              color={inputState.last_name.error ? 'red' : 'base'}
+              value={data.me.user?.last_name}
+              on:change={saveField('last_name')}
+            >
+              <div slot="right" class={inputState.last_name.loading ? '' : 'hidden'}>
+                <Spinner size="4" color="green" />
+              </div>
+            </Input>
+            {#if inputState.last_name.error}
+              <Helper color="red" class="mt-2">
+                <p>{inputState.last_name.error}</p>
+              </Helper>
+            {/if}
+          </div>
+
+          <div class="bg-white rounded-xl p-4 shadow-sm">
+            <div class="flex flex-col gap-2">
+              <div class="flex flex-row gap-2 items-center">
+                <span class="font-medium">Primary Email</span>
+                <div>
+                  <QuestionCircleOutline color="gray" />
+                  <Tooltip
+                    type="custom"
+                    arrow={false}
+                    class="flex flex-row overflow-y-auto bg-gray-900 z-10 max-w-xs py-2 px-3 text-sm text-wrap font-light text-white"
+                  >
+                    <div class="normal-case whitespace-normal">
+                      <p>Changing your primary email address is not currently supported.</p>
+                    </div>
+                  </Tooltip>
                 </div>
-              </Tooltip>
-            </div></Heading
-          >
-          <p>{data.me.user?.email || 'Unknown'}</p>
+              </div>
+              <p class="text-gray-600">{data.me.user?.email || 'Unknown'}</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
 
-    <div class="flex flex-row flex-wrap justify-between mt-12 items-center gap-y-4">
+    <div class="flex flex-row flex-wrap justify-between mt-12 mb-4 items-center gap-y-4">
       <Heading
         tag="h2"
         class="text-3xl font-serif font-medium text-dark-blue-40 shrink-0 max-w-max mr-5"
         >External Logins</Heading
       >
+    </div>
+    <div class="flex flex-col gap-4">
       <P>
         PingPong supports log in and user syncing functionality with a number of External Login
         Providers. Some External Logins might offer additional options for logging in to PingPong or
         joining a Group.
       </P>
       {#if data.me.user?.external_logins}
-        <div class="w-full mt-4">
+        <div class="w-full">
           <div class="bg-gray-100 rounded-2xl p-6">
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {#each data.me.user?.external_logins as login}
