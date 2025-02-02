@@ -358,7 +358,6 @@
           {@const roleInfo = getRoleInfoForUser(user)}
           {@const noPermissions = !checkUserEditPermissions(roleInfo.primary)}
           {@const currentUser = isCurrentUser(user)}
-          {@const userIsSupervisor = user.roles.teacher || user.roles.admin}
           {@const userIsAdmin = user.roles.admin}
           <TableBodyRow>
             <TableBodyCell {tdClass}
