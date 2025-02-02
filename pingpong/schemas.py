@@ -288,7 +288,8 @@ class Assistant(BaseModel):
     description: str | None
     tools: str
     model: str
-    temperature: float
+    temperature: float | None
+    reasoning_effort: int | None
     class_id: int
     creator_id: int
     locked: bool = False
@@ -310,7 +311,8 @@ class CreateAssistant(BaseModel):
     instructions: str = Field(..., min_length=3)
     description: str
     model: str = Field(..., min_length=3)
-    temperature: float = Field(1.0, ge=0.0, le=2.0)
+    temperature: float | None = Field(None, ge=0.0, le=2.0)
+    reasoning_effort: int | None = Field(None, ge=0, le=2)
     tools: list[Tool]
     published: bool = False
     use_latex: bool = False
@@ -326,6 +328,7 @@ class UpdateAssistant(BaseModel):
     description: str | None = None
     model: str | None = Field(None, min_length=3)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
+    reasoning_effort: int | None = Field(None, ge=0, le=2)
     tools: list[Tool] | None = None
     published: bool | None = None
     use_latex: bool | None = None
@@ -909,6 +912,10 @@ class AssistantModel(BaseModel):
     is_new: bool
     highlight: bool
     supports_vision: bool
+    supports_file_search: bool
+    supports_code_interpreter: bool
+    supports_temperature: bool
+    supports_reasoning: bool
 
 
 class AssistantModelDict(TypedDict):
@@ -918,6 +925,10 @@ class AssistantModelDict(TypedDict):
     is_new: bool
     highlight: bool
     supports_vision: bool
+    supports_file_search: bool
+    supports_code_interpreter: bool
+    supports_temperature: bool
+    supports_reasoning: bool
     description: str
 
 

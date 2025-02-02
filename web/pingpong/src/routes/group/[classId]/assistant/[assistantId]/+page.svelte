@@ -124,6 +124,22 @@
   $: supportVisionModels = (data.models.filter((model) => model.supports_vision) || []).map(
     (model) => model.id
   );
+  $: supportFileSearchModels = (
+    data.models.filter((model) => model.supports_file_search) || []
+  ).map((model) => model.id);
+  $: supportsFileSearch = supportFileSearchModels.includes(selectedModel);
+  $: supportCodeInterpreterModels = (
+    data.models.filter((model) => model.supports_code_interpreter) || []
+  ).map((model) => model.id);
+  $: supportsCodeInterpreter = supportCodeInterpreterModels.includes(selectedModel);
+  $: supportTemperatureModels = (
+    data.models.filter((model) => model.supports_temperature) || []
+  ).map((model) => model.id);
+  $: supportsTemperature = supportTemperatureModels.includes(selectedModel);
+  $: supportReasoningModels = (data.models.filter((model) => model.supports_reasoning) || []).map(
+    (model) => model.id
+  );
+  $: supportsReasoning = supportReasoningModels.includes(selectedModel);
   $: supportsVision = supportVisionModels.includes(selectedModel);
   $: allowVisionUpload = true;
   $: asstFSFiles = [...data.files, ...allFSPrivateFiles];
@@ -166,8 +182,32 @@
   };
 
   let temperatureValue: number;
-  $: if (assistant?.temperature !== undefined && temperatureValue === undefined) {
+  $: if (
+    assistant?.temperature !== undefined &&
+    assistant?.temperature &&
+    temperatureValue === undefined
+  ) {
     temperatureValue = assistant.temperature;
+  }
+  let reasoningEffortValue: number;
+  $: if (
+    assistant?.reasoning_effort !== undefined &&
+    assistant?.reasoning_effort &&
+    reasoningEffortValue === undefined
+  ) {
+    reasoningEffortValue = assistant.reasoning_effort;
+  }
+  $: if (
+    temperatureValue === undefined &&
+    (data.isCreating || assistant?.temperature === undefined || !assistant?.temperature)
+  ) {
+    temperatureValue = 1;
+  }
+  $: if (
+    reasoningEffortValue === undefined &&
+    (data.isCreating || assistant?.reasoning_effort === undefined || !assistant?.reasoning_effort)
+  ) {
+    reasoningEffortValue = 1;
   }
 
   let dropdownOpen = false;
@@ -213,6 +253,9 @@
         dirty = newValue !== oldValue;
         break;
       case 'temperature':
+        dirty = newValue !== oldValue;
+        break;
+      case 'reasoning_effort':
         dirty = newValue !== oldValue;
         break;
       case 'published':
@@ -264,7 +307,9 @@
           'published',
           'use_latex',
           'hide_prompt',
-          'tools'
+          'tools',
+          'temperature',
+          'reasoning_effort'
         ]
       : ['name', 'description', 'instructions'];
 
@@ -304,13 +349,17 @@
     const body = Object.fromEntries(formData.entries());
 
     const tools: api.Tool[] = [];
-    if (fileSearchToolSelect) {
+    const fileSearchCodeInterpreterUnusedFiles: number[] = [];
+    if (fileSearchToolSelect && supportsFileSearch) {
       tools.push({ type: 'file_search' });
+    } else {
+      fileSearchCodeInterpreterUnusedFiles.push(...allFSPrivateFiles.map((f) => f.id));
     }
-    if (codeInterpreterToolSelect) {
+    if (codeInterpreterToolSelect && supportsCodeInterpreter) {
       tools.push({ type: 'code_interpreter' });
+    } else {
+      fileSearchCodeInterpreterUnusedFiles.push(...allCIPrivateFiles.map((f) => f.id));
     }
-
     const params = {
       name: preventEdits ? assistant?.name || '' : body.name.toString(),
       description: preventEdits
@@ -321,13 +370,16 @@
         : normalizeNewlines(body.instructions.toString()),
       model: selectedModel,
       tools,
-      code_interpreter_file_ids: codeInterpreterToolSelect ? $selectedCodeInterpreterFiles : [],
-      file_search_file_ids: fileSearchToolSelect ? $selectedFileSearchFiles : [],
-      temperature: temperatureValue,
+      code_interpreter_file_ids:
+        supportsCodeInterpreter && codeInterpreterToolSelect ? $selectedCodeInterpreterFiles : [],
+      file_search_file_ids:
+        supportsFileSearch && fileSearchToolSelect ? $selectedFileSearchFiles : [],
+      temperature: supportsTemperature ? temperatureValue : null,
+      reasoning_effort: supportsReasoning ? reasoningEffortValue : null,
       published: body.published?.toString() === 'on',
       use_latex: body.use_latex?.toString() === 'on',
       hide_prompt: body.hide_prompt?.toString() === 'on',
-      deleted_private_files: data.assistantId ? $trashPrivateFileIds : []
+      deleted_private_files: [...$trashPrivateFileIds, ...fileSearchCodeInterpreterUnusedFiles]
     };
     return params;
   };
@@ -354,11 +406,7 @@
    */
   const deleteAssistant = async (evt: CustomEvent) => {
     evt.preventDefault();
-    const private_files = [
-      ...data.selectedCodeInterpreterFiles.filter((f) => f.private),
-      ...privateFSSessionFiles,
-      ...privateCISessionFiles
-    ].map((f) => f.id);
+    const private_files = [...allFSPrivateFiles, ...allCIPrivateFiles].map((f) => f.id);
 
     // Show loading message if there are more than 10 files attached
     if ($selectedFileSearchFiles.length + private_files.length >= 10 || private_files.length >= 5) {
@@ -397,6 +445,7 @@
    */
   const submitForm = async (evt: SubmitEvent) => {
     evt.preventDefault();
+    $loadingMessage = 'Saving assistant...';
     $loading = true;
 
     const form = evt.target as HTMLFormElement;
@@ -410,12 +459,14 @@
 
       if (expanded.error) {
         $loading = false;
+        $loadingMessage = '';
         sadToast(
           `Could not update the assistant's publish status:\n${expanded.error.detail || 'Unknown error'}`
         );
         return;
       } else {
         $loading = false;
+        $loadingMessage = '';
         happyToast('Assistant saved.');
         checkForChanges = false;
         await goto(`/group/${data.class.id}/assistant`, { invalidateAll: true });
@@ -426,6 +477,7 @@
     if (params.file_search_file_ids.length > fileSearchMetadata.max_count) {
       sadToast(`You can only select up to ${fileSearchMetadata.max_count} files for File Search.`);
       $loading = false;
+      $loadingMessage = '';
       return;
     }
 
@@ -434,6 +486,7 @@
         `You can only select up to ${codeInterpreterMetadata.max_count} files for Code Interpreter.`
       );
       $loading = false;
+      $loadingMessage = '';
       return;
     }
 
@@ -444,9 +497,11 @@
 
     if (expanded.error) {
       $loading = false;
+      $loadingMessage = '';
       sadToast(`Could not save your response:\n${expanded.error.detail || 'Unknown error'}`);
     } else {
       $loading = false;
+      $loadingMessage = '';
       happyToast('Assistant saved');
       checkForChanges = false;
       await goto(`/group/${data.class.id}/assistant`, { invalidateAll: true });
@@ -458,8 +513,8 @@
     return api.uploadUserFile(data.class.id, data.me.user!.id, f, { onProgress });
   };
 
-  beforeNavigate((nav) => {
-    if (!assistantForm) {
+  beforeNavigate(async (nav) => {
+    if (!assistantForm || !nav.to) {
       return;
     }
 
@@ -479,6 +534,26 @@
           return;
         }
       }
+
+      // Cancel the automatic navigation so we can handle file deletion first
+      nav.cancel();
+
+      // Delete any private files that were uploaded but not saved.
+      const filesToDelete = [...$privateUploadFSFileInfo, ...$privateUploadCIFileInfo]
+        .filter((f) => f.state === 'success')
+        .map((f) => f.response as ServerFile);
+
+      if (filesToDelete.length) {
+        $loadingMessage = 'Cleaning up files you uploaded...';
+        $loading = true;
+        await deletePrivateFiles(filesToDelete.map((f) => f.id));
+        $loading = false;
+        $loadingMessage = '';
+      }
+
+      // Now manually navigate to the intended destination
+      checkForChanges = false;
+      goto(nav.to.url);
     }
   });
 </script>
@@ -675,32 +750,62 @@
       <Label for="tools">Tools</Label>
       <Helper>Select tools available to the assistant when generating a response.</Helper>
     </div>
+    {#if !supportsFileSearch}
+      <div class="col-span-2 mb-2">
+        <div class="flex flex-row items-center gap-x-2">
+          <Badge
+            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-red-400 from-rose-100 to-rose-200 text-rose-800 shrink-0"
+            ><CloseOutline size="sm" />
+            <div>No File Search capabilities</div>
+          </Badge>
+          <Helper
+            >This model does not support File Search capabilities. To use File Search, select a
+            different model.</Helper
+          >
+        </div>
+      </div>
+    {:else}
+      <div class="col-span-2 mb-4">
+        <Checkbox
+          id={fileSearchMetadata.value}
+          name={fileSearchMetadata.value}
+          checked={supportsFileSearch && (fileSearchToolSelect || false)}
+          disabled={!supportsFileSearch || preventEdits}
+          on:change={() => {
+            fileSearchToolSelect = !fileSearchToolSelect;
+          }}>{fileSearchMetadata.name}</Checkbox
+        >
+        <Helper>{fileSearchMetadata.description}</Helper>
+      </div>
+    {/if}
     <div class="col-span-2 mb-4">
-      <Checkbox
-        id={fileSearchMetadata.value}
-        name={fileSearchMetadata.value}
-        checked={fileSearchToolSelect || false}
-        disabled={preventEdits}
-        on:change={() => {
-          fileSearchToolSelect = !fileSearchToolSelect;
-        }}>{fileSearchMetadata.name}</Checkbox
-      >
-      <Helper>{fileSearchMetadata.description}</Helper>
-    </div>
-    <div class="col-span-2 mb-4">
-      <Checkbox
-        id={codeInterpreterMetadata.value}
-        name={codeInterpreterMetadata.value}
-        disabled={preventEdits}
-        checked={codeInterpreterToolSelect || false}
-        on:change={() => {
-          codeInterpreterToolSelect = !codeInterpreterToolSelect;
-        }}>{codeInterpreterMetadata.name}</Checkbox
-      >
-      <Helper>{codeInterpreterMetadata.description}</Helper>
+      {#if !supportsCodeInterpreter}
+        <div class="flex flex-row items-center gap-x-2">
+          <Badge
+            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-red-400 from-rose-100 to-rose-200 text-rose-800 shrink-0"
+            ><CloseOutline size="sm" />
+            <div>No Code Interpreter capabilities</div>
+          </Badge>
+          <Helper
+            >This model does not support Code Interpreter capabilities. To use Code Interpreter,
+            select a different model.</Helper
+          >
+        </div>
+      {:else}
+        <Checkbox
+          id={codeInterpreterMetadata.value}
+          name={codeInterpreterMetadata.value}
+          disabled={preventEdits || !supportsCodeInterpreter}
+          checked={supportsCodeInterpreter && (codeInterpreterToolSelect || false)}
+          on:change={() => {
+            codeInterpreterToolSelect = !codeInterpreterToolSelect;
+          }}>{codeInterpreterMetadata.name}</Checkbox
+        >
+        <Helper>{codeInterpreterMetadata.description}</Helper>
+      {/if}
     </div>
 
-    {#if fileSearchToolSelect}
+    {#if fileSearchToolSelect && supportsFileSearch}
       <div class="col-span-2 mb-4">
         <Label for="selectedFileSearchFiles">{fileSearchMetadata.name} Files</Label>
         <Helper class="pb-1"
@@ -713,7 +818,11 @@
           name="selectedFileSearchFiles"
           items={fileSearchOptions}
           bind:value={selectedFileSearchFiles}
-          disabled={$loading || !handleUpload || uploadingFSPrivate || preventEdits}
+          disabled={$loading ||
+            !handleUpload ||
+            uploadingFSPrivate ||
+            preventEdits ||
+            !supportsFileSearch}
           privateFiles={allFSPrivateFiles}
           uploading={uploadingFSPrivate}
           upload={handleUpload}
@@ -732,7 +841,7 @@
       </div>
     {/if}
 
-    {#if codeInterpreterToolSelect}
+    {#if codeInterpreterToolSelect && supportsCodeInterpreter}
       <div class="col-span-2 mb-4">
         <Label for="selectedCodeInterpreterFiles">{codeInterpreterMetadata.name} Files</Label>
         <Helper class="pb-1"
@@ -745,7 +854,11 @@
           name="selectedCodeInterpreterFiles"
           items={codeInterpreterOptions}
           bind:value={selectedCodeInterpreterFiles}
-          disabled={$loading || !handleUpload || uploadingCIPrivate || preventEdits}
+          disabled={$loading ||
+            !handleUpload ||
+            uploadingCIPrivate ||
+            preventEdits ||
+            !supportsCodeInterpreter}
           privateFiles={allCIPrivateFiles}
           uploading={uploadingCIPrivate}
           upload={handleUpload}
@@ -794,29 +907,59 @@
               <div class="font-light text-sm">Advanced Settings</div>
             </div></span
           >
-          <Label for="temperature">Temperature</Label>
-          <Helper class="pb-1"
-            >Select the model's "temperature," a setting from 0 to 2 that controls how creative or
-            predictable the assistant's responses are. For reliable, focused answers, choose a
-            temperature closer to 0.2. For more varied or creative responses, try a setting closer
-            to 1. Avoid setting the temperature much above 1 unless you need very experimental
-            responses, as it may lead to less predictable and more random answers. You can change
-            this setting anytime.</Helper
-          >
-          <Range
-            id="temperature"
-            name="temperature"
-            min="0"
-            max="2"
-            bind:value={temperatureValue}
-            step="0.1"
-            disabled={preventEdits}
-          />
-          <div class="mt-2 flex flex-row justify-between">
-            <p class="text-sm">More focused</p>
-            <p class="text-sm">Temperature: {temperatureValue}</p>
-            <p class="text-sm">More creative</p>
-          </div>
+          {#if supportsTemperature}
+            <Label for="temperature">Temperature</Label>
+            <Helper class="pb-1"
+              >Select the model's "temperature," a setting from 0 to 2 that controls how creative or
+              predictable the assistant's responses are. For reliable, focused answers, choose a
+              temperature closer to 0.2. For more varied or creative responses, try a setting closer
+              to 1. Avoid setting the temperature much above 1 unless you need very experimental
+              responses, as it may lead to less predictable and more random answers. You can change
+              this setting anytime.</Helper
+            >
+            <Range
+              id="temperature"
+              name="temperature"
+              min="0"
+              max="2"
+              bind:value={temperatureValue}
+              step="0.1"
+              disabled={preventEdits}
+            />
+            <div class="mt-2 flex flex-row justify-between">
+              <p class="text-sm">More focused</p>
+              <p class="text-sm">Temperature: {temperatureValue}</p>
+              <p class="text-sm">More creative</p>
+            </div>
+          {/if}
+          {#if supportsReasoning}
+            <Label for="reasoning-effort">Reasoning effort</Label>
+            <Helper class="pb-1"
+              >Select your desired reasoning effort, which gives the model guidance on how much time
+              it should spend "reasoning" before creating a response to the prompt. You can specify
+              one of <span class="font-mono">low</span>, <span class="font-mono">medium</span>, or
+              <span class="font-mono">high</span>
+              for this setting, where <span class="font-mono">low</span> will favor speed, and
+              <span class="font-mono">high</span>
+              will favor more complete reasoning at the cost of slower responses. The default value is
+              <span class="font-mono">medium</span>, which is a balance between speed and reasoning
+              accuracy. You can change this setting anytime.</Helper
+            >
+            <Range
+              id="reasoning-effort"
+              name="reasoning-effort"
+              min="0"
+              max="2"
+              bind:value={reasoningEffortValue}
+              step="1"
+              disabled={preventEdits}
+            />
+            <div class="mt-2 flex flex-row justify-between">
+              <p class="text-sm">low</p>
+              <p class="text-sm">medium {reasoningEffortValue}</p>
+              <p class="text-sm">high</p>
+            </div>
+          {/if}
         </AccordionItem>
       </Accordion>
     </div>

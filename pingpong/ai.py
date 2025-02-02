@@ -42,6 +42,13 @@ class GetOpenAIClientException(Exception):
         self.detail = detail
 
 
+REASONING_EFFORT_MAP = {
+    0: "low",
+    1: "medium",
+    2: "high",
+}
+
+
 async def get_openai_client_by_class_id(
     session: AsyncSession, class_id: int
 ) -> openai.AsyncClient:
