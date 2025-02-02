@@ -101,6 +101,17 @@ async def add_moderator(
     )
 
 
+async def remove_self_from_class(
+    session,
+    class_id: int,
+) -> None:
+    user = await server_requests.get_me(session, _PINGPONG_URL)
+    await server_requests.delete_user_from_class(
+        session, class_id, user.id, _PINGPONG_URL
+    )
+    logger.debug(f'Removed {user.email} from class "{class_id}".')
+
+
 async def add_student(
     session,
     request: scripts_schemas.UserClassRole,
@@ -329,6 +340,7 @@ async def _process_airtable_class_requests() -> None:
                 )
                 class_ = await create_class(session, request, institution)
                 await add_moderator(session, request, class_)
+                await remove_self_from_class(session, class_.id)
                 if request.assistant_templates:
                     for assistant_template in request.assistant_templates:
                         pingpong_assistant = await add_assistant(
@@ -390,4 +402,20 @@ async def _process_external_logins_to_add() -> None:
                 request.status = "Error"
                 request.status_notes = str(e)
                 request.save()
+                continue
+
+
+async def _process_remove_self_from_classes() -> None:
+    classes_to_remove_self = scripts_schemas.PingPongClass.all(
+        formula=match({"Remove Admin": False})
+    )
+
+    async with aiohttp.ClientSession(cookies={"session": _PINGPONG_COOKIE}) as session:
+        for class_ in classes_to_remove_self:
+            try:
+                await remove_self_from_class(session, int(class_.pingpong_id))
+                class_.remove_admin = True
+                class_.save()
+            except Exception as e:
+                logger.warning(f"Error processing class: {e}")
                 continue
