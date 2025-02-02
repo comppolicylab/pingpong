@@ -105,7 +105,6 @@
   $: startIdx = Math.min(total, Math.max(0, (page - 1) * pageSize + 1));
   // The index of the last user on the current page.
   $: endIdx = Math.min(startIdx + pageSize - 1, total);
-  $: moreThanOneModerator = users.filter((u) => u.roles.teacher || u.roles.admin).length > 1;
 
   /**
    * Fetch users from the server based on component state.
@@ -369,7 +368,7 @@
               </div></TableBodyCell
             >
             <TableBodyCell {tdClass}>
-              {#if noPermissions || user.lms_type || (userIsSupervisor && !moreThanOneModerator) || (currentUser && !userIsAdmin)}
+              {#if noPermissions || user.lms_type || (currentUser && !userIsAdmin)}
                 <div class="flex flex-row justify-between">
                   <div class="flex flex-col">
                     <div>{roleInfo.label}</div>
@@ -396,11 +395,7 @@
                           ? `You do not have enough permissions to change ${roleInfo.label} user roles.`
                           : currentUser && !userIsAdmin
                             ? 'You cannot change your own user role.'
-                            : currentUser
-                              ? "You cannot change your own user role when you're the only Moderator."
-                              : !moreThanOneModerator
-                                ? 'You cannot change the role of the last Moderator.'
-                                : 'You cannot edit roles for imported users. Please make changes in Canvas.'}
+                            : 'You cannot edit roles for imported users. Please make changes in Canvas.'}
                       </div>
                     </Tooltip>
                   </div>
@@ -453,7 +448,7 @@
               </div>
             </TableBodyCell>
             <TableBodyCell {tdClass}>
-              {#if !((!moreThanOneModerator && userIsSupervisor) || user.lms_type || noPermissions || (currentUser && !userIsAdmin))}
+              {#if !(user.lms_type || noPermissions || (currentUser && !userIsAdmin))}
                 <form on:submit={submitRemoveUser}>
                   <input type="hidden" name="user_id" value={user.id} />
                   <Button on:click={deleteUser}><TrashBinOutline color="red" /></Button>
