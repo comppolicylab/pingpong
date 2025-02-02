@@ -404,7 +404,7 @@ The user threads will be provided in the following JSON schema:
 
 # Example Topics
 {"topic_label": "Matrix Multiplication Rules", "challenge": "Members struggle with determining valid matrix dimensions for multiplication.", "confusion_example" : "Summarized confusion about matrix dimension compatibility."}
-{"topic_label": "Vector Space Foundations", "challenge": "Confusion about distinguishing between different vector spaces, particularly column space vs null space.", "confusion_example" : "None"}
+{"topic_label": "Vector Space Foundations", "challenge": "Confusion about distinguishing between different vector spaces, particularly column space vs null space.", "confusion_example" : None}
 {"topic_label": "Matrix Multiplication Rules", "challenge": "Difficulty understanding what the null space represents and how to find it.", "confusion_example" : "Summarized confusion on basic definition and computation."}
 
 # Steps
