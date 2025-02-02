@@ -3453,11 +3453,13 @@ async def create_assistant(
 
         reasoning_effort = (
             REASONING_EFFORT_MAP.get(req.reasoning_effort)
-            if req.reasoning_effort
+            if req.reasoning_effort is not None
             else None
         )
         reasoning_extra_body = (
-            {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
+            {"reasoning_effort": reasoning_effort}
+            if reasoning_effort is not None
+            else {}
         )
 
         new_asst = await openai_client.beta.assistants.create(
@@ -3660,7 +3662,7 @@ async def update_assistant(
     if "reasoning_effort" in req.model_fields_set:
         reasoning_effort = (
             REASONING_EFFORT_MAP.get(req.reasoning_effort)
-            if req.reasoning_effort
+            if req.reasoning_effort is not None
             else None
         )
         reasoning_extra_body: dict[str, Optional[str]] = (

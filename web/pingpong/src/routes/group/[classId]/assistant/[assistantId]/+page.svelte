@@ -184,7 +184,7 @@
   let temperatureValue: number;
   $: if (
     assistant?.temperature !== undefined &&
-    assistant?.temperature &&
+    assistant?.temperature !== null &&
     temperatureValue === undefined
   ) {
     temperatureValue = assistant.temperature;
@@ -192,20 +192,22 @@
   let reasoningEffortValue: number;
   $: if (
     assistant?.reasoning_effort !== undefined &&
-    assistant?.reasoning_effort &&
+    assistant?.reasoning_effort !== null &&
     reasoningEffortValue === undefined
   ) {
     reasoningEffortValue = assistant.reasoning_effort;
   }
   $: if (
     temperatureValue === undefined &&
-    (data.isCreating || assistant?.temperature === undefined || !assistant?.temperature)
+    (data.isCreating || assistant?.temperature === undefined || assistant?.temperature === null)
   ) {
     temperatureValue = 1;
   }
   $: if (
     reasoningEffortValue === undefined &&
-    (data.isCreating || assistant?.reasoning_effort === undefined || !assistant?.reasoning_effort)
+    (data.isCreating ||
+      assistant?.reasoning_effort === undefined ||
+      assistant?.reasoning_effort === null)
   ) {
     reasoningEffortValue = 1;
   }
@@ -956,7 +958,7 @@
             />
             <div class="mt-2 flex flex-row justify-between">
               <p class="text-sm">low</p>
-              <p class="text-sm">medium {reasoningEffortValue}</p>
+              <p class="text-sm">medium</p>
               <p class="text-sm">high</p>
             </div>
           {/if}
