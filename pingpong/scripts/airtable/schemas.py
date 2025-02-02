@@ -111,6 +111,7 @@ class PingPongClass(Model):
     billing_api_key = F.TextField("Billing API Selection")
     assistant_templates = F.LinkField("Assistant Templates", AssistantTemplate)
     pingpong_assistants = F.LinkField("PingPong Assistants", PingPongAssistant)
+    remove_admin = F.CheckboxField("Remove Admin")
 
     class Meta:
         table_name: str = "PingPong Classes"

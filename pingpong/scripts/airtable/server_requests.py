@@ -87,3 +87,23 @@ async def add_login_email(
     ) as resp:
         response = await resp.json()
         return schemas.GenericStatus(**response)
+
+
+async def delete_user_from_class(
+    session, class_id: int, user_id: int, url: str
+) -> schemas.GenericStatus:
+    async with session.delete(
+        f"{url}/api/v1/class/{class_id}/user/{user_id}",
+        raise_for_status=True,
+    ) as resp:
+        response = await resp.json()
+        return schemas.GenericStatus(**response)
+
+
+async def get_me(session, url: str) -> schemas.User:
+    async with session.get(
+        f"{url}/api/v1/me",
+        raise_for_status=True,
+    ) as resp:
+        response = await resp.json()
+        return schemas.User(**response["user"])
