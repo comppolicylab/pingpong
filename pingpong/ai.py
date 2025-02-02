@@ -949,7 +949,7 @@ def get_openai_client(api_key, provider="openai", endpoint=None, api_version=Non
         raise ValueError("API key is required")
     match provider:
         case "azure":
-            _api_version = api_version or "2024-10-01-preview"
+            _api_version = api_version or "2025-01-01-preview"
             if not endpoint:
                 raise ValueError("Azure client requires endpoint.")
             return openai.AsyncAzureOpenAI(
