@@ -310,7 +310,7 @@ class CreateAssistant(BaseModel):
     file_search_file_ids: list[str] | None = None
     instructions: str = Field(..., min_length=3)
     description: str
-    model: str = Field(..., min_length=3)
+    model: str = Field(..., min_length=2)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=0, le=2)
     tools: list[Tool]
@@ -326,7 +326,7 @@ class UpdateAssistant(BaseModel):
     file_search_file_ids: list[str] | None = None
     instructions: str | None = Field(None, min_length=3)
     description: str | None = None
-    model: str | None = Field(None, min_length=3)
+    model: str | None = Field(None, min_length=2)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=0, le=2)
     tools: list[Tool] | None = None
