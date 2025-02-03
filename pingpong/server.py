@@ -3668,7 +3668,9 @@ async def update_assistant(
         reasoning_extra_body: dict[str, Optional[str]] = (
             {"reasoning_effort": reasoning_effort}
             if reasoning_effort
-            else ({"reasoning_effort": None} if asst.reasoning_effort else {})
+            else (
+                {"reasoning_effort": None} if asst.reasoning_effort is not None else {}
+            )
         )
         openai_update["extra_body"] = reasoning_extra_body
         asst.reasoning_effort = req.reasoning_effort
