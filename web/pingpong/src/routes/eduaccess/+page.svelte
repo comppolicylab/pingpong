@@ -28,15 +28,16 @@
     <P class="mt-4"
       >We are seeking instructors at <b>two- and four-year colleges</b>, especially those teaching
       math, economics, statistics and/or computer science, to participate in a randomized
-      large-scale study in the <b>Spring 2025 semester</b>. Initial access to PingPong will be
-      provided to half of the participating instructors, with access provided to all instructors in
-      the following semester. An <b>honorarium of $1,000</b> will be provided to all participating instructors.</P
+      large-scale study. Initial access to PingPong will be provided to half of the participating
+      instructors, with access provided to all instructors in the following semester. An
+      <b>honorarium of $1,000</b> will be provided to all participating instructors.</P
     >
     <P class="mt-4"
-      >To participate, complete a short (5-question) survey to <b
-        >confirm your eligibility by December 16, 2024</b
-      >. We will continue to consider applications received after December 16 on a rolling basis.</P
-    >
+      >The study is underway for the spring 2025 semester and we are <b
+        >now considering applications for summer and fall 2025 courses</b
+      >. To participate, complete a short (5-question) survey to <b>confirm your eligibility</b>.
+      Our team will be in touch in late spring 2025 to confirm summer course participation.
+    </P>
   </div>
   <div
     class="justify-center items-center space-y-4 sm:flex sm:space-y-0 sm:space-x-4 rtl:space-x-reverse"
