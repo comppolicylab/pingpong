@@ -423,17 +423,6 @@ user_thread_association = Table(
 )
 
 
-user_agreement_external_login_association = Table(
-    "user_agreements_external_logins",
-    Base.metadata,
-    Column("agreement_id", Integer, ForeignKey("user_agreements.id")),
-    Column("provider_id", Integer, ForeignKey("external_login_providers.id")),
-    Index(
-        "user_agreement_external_login_idx", "agreement_id", "provider_id", unique=True
-    ),
-)
-
-
 class ExternalLoginProvider(Base):
     __tablename__ = "external_login_providers"
 
