@@ -423,6 +423,77 @@ user_thread_association = Table(
 )
 
 
+user_agreement_external_login_association = Table(
+    "user_agreements_external_logins",
+    Base.metadata,
+    Column("agreement_id", Integer, ForeignKey("user_agreements.id")),
+    Column("provider_id", Integer, ForeignKey("external_login_providers.id")),
+    Index(
+        "user_agreement_external_login_idx", "agreement_id", "provider_id", unique=True
+    ),
+)
+
+
+class UserAgreementCategory(Base):
+    __tablename__ = "user_agreement_categories"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name = Column(String, nullable=False)
+    show_all = Column(Boolean, default=False)
+    agreements = relationship(
+        "UserAgreement", back_populates="category", lazy="selectin"
+    )
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
+
+
+class UserAgreement(Base):
+    __tablename__ = "user_agreements"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name = Column(String, nullable=False)
+    text = Column(String, nullable=False)
+    link = Column(String, nullable=True)
+    active = Column(Boolean, default=False)
+    category_id: Mapped[int] = mapped_column(
+        ForeignKey("user_agreement_categories.id", ondelete="cascade"), nullable=False
+    )
+    category = relationship(
+        "UserAgreementCategory", back_populates="agreements", lazy="selectin"
+    )
+    version = Column(Integer, nullable=False)
+    display_after = Column(DateTime(timezone=True), nullable=True)
+    always_display = Column(Boolean, default=False)
+    apply_to_all = Column(Boolean, default=False)
+    limit_to_providers = relationship(
+        "ExternalLoginProvider",
+        secondary=user_agreement_external_login_association,
+        back_populates="user_agreements",
+    )
+    acceptances = relationship(
+        "UserAgreementAcceptance", back_populates="agreement", lazy="selectin"
+    )
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
+
+
+class UserAgreementAcceptance(Base):
+    __tablename__ = "user_agreement_acceptances"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="cascade"), nullable=False
+    )
+    user = relationship("User", back_populates="agreements", lazy="selectin")
+    agreement_id: Mapped[int] = mapped_column(
+        ForeignKey("user_agreements.id", ondelete="cascade"), nullable=False
+    )
+    accepted_at = Column(DateTime(timezone=True), nullable=False)
+    agreement = relationship(
+        "UserAgreement", back_populates="acceptances", lazy="selectin"
+    )
+
+
 class ExternalLoginProvider(Base):
     __tablename__ = "external_login_providers"
 
@@ -433,6 +504,11 @@ class ExternalLoginProvider(Base):
     icon = Column(String, nullable=True)
     external_logins: Mapped[List["ExternalLogin"]] = relationship(
         "ExternalLogin", back_populates="provider_obj", lazy="selectin"
+    )
+    user_agreements: Mapped[List["UserAgreement"]] = relationship(
+        "UserAgreement",
+        secondary=user_agreement_external_login_association,
+        back_populates="limit_to_providers",
     )
 
     @classmethod
@@ -705,6 +781,9 @@ class User(Base):
     dna_as_join = Column(Boolean, server_default="false")
     # Do Not Add - Activity Summaries - Groups I Create
     dna_as_create = Column(Boolean, server_default="false")
+    agreements = relationship(
+        "UserAgreementAcceptance", back_populates="user", lazy="selectin"
+    )
 
     async def verify(self, session: AsyncSession) -> None:
         self.state = schemas.UserState.VERIFIED
