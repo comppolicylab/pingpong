@@ -147,8 +147,9 @@ async def add_student(
 
 
 def compute_assistant_prompt(
-    request: scripts_schemas.PingPongClass,
-    assistant_template: scripts_schemas.AssistantTemplate,
+    request: scripts_schemas.PingPongClass | scripts_schemas.PingPongClassNonStudy,
+    assistant_template: scripts_schemas.AssistantTemplate
+    | scripts_schemas.AssistantTemplateNonStudy,
 ) -> str:
     prompt = assistant_template.prompt_template[0]
     prompt = prompt.replace(
@@ -259,8 +260,9 @@ def compute_assistant_prompt(
 
 
 def compute_model_name(
-    request: scripts_schemas.PingPongClass,
-    assistant_template: scripts_schemas.AssistantTemplate,
+    request: scripts_schemas.PingPongClass | scripts_schemas.PingPongClassNonStudy,
+    assistant_template: scripts_schemas.AssistantTemplate
+    | scripts_schemas.AssistantTemplateNonStudy,
 ) -> str:
     if request.billing_provider == "Azure":
         return assistant_template.model_azure
@@ -271,7 +273,8 @@ def compute_model_name(
 
 async def lock_assistant(
     session,
-    assistant: scripts_schemas.PingPongAssistant,
+    assistant: scripts_schemas.PingPongAssistant
+    | scripts_schemas.PingPongAssistantNonStudy,
     class_: schemas.Class,
 ) -> None:
     await server_requests.lock_assistant(
@@ -327,6 +330,53 @@ async def add_assistant(
     return pingpong_assistant
 
 
+async def add_assistant_non_study(
+    session,
+    assistant_template: scripts_schemas.AssistantTemplateNonStudy,
+    request: scripts_schemas.PingPongClassNonStudy,
+    class_: schemas.Class,
+) -> scripts_schemas.PingPongAssistantNonStudy:
+    billing_configuration = BILLING_PROVIDERS.get(request.billing_api_key, None)
+    if not billing_configuration:
+        raise Exception("No billing configuration found class, so can't add assistant.")
+    assistant_tools = []
+    if assistant_template.file_search:
+        assistant_tools.append({"type": "file_search"})
+    if assistant_template.code_interpreter:
+        assistant_tools.append({"type": "code_interpreter"})
+
+    assistant_data = scripts_schemas.CreateAssistant(
+        name=assistant_template.name,
+        code_interpreter_file_ids=[],
+        file_search_file_ids=[],
+        instructions=compute_assistant_prompt(request, assistant_template),
+        description=assistant_template.description,
+        model=compute_model_name(request, assistant_template),
+        temperature=1.0,
+        tools=assistant_tools,
+        published=assistant_template.publish,
+        use_latex=assistant_template.use_latex,
+        hide_prompt=assistant_template.hide_prompt,
+    )
+
+    assistant = await server_requests.add_assistant_to_class(
+        session, class_.id, assistant_data, _PINGPONG_URL
+    )
+    pingpong_assistant = scripts_schemas.PingPongAssistantNonStudy(
+        pingpong_id=assistant.id, template=assistant_template
+    )
+    pingpong_assistant.save()
+
+    logger.debug(
+        f'Assistant "{assistant.name}" ({assistant.id}) added to class "{class_.name}" ({class_.id}).'
+    )
+
+    await lock_assistant(session, pingpong_assistant, class_)
+    logger.debug(f'Assistant "{assistant.name}" ({assistant.id}) successfully locked.')
+
+    return pingpong_assistant
+
+
 async def _process_airtable_class_requests() -> None:
     requests_to_process = scripts_schemas.PingPongClass.all(
         formula=match({"Status": "Ready for Add"})
@@ -350,9 +400,66 @@ async def _process_airtable_class_requests() -> None:
                 request.pingpong_id = str(class_.id)
                 request.status = "Added"
                 request.update_status = "Complete"
+                request.remove_admin = True
                 request.save()
             except Exception as e:
                 logger.warning(f"Error processing request: {e}")
+                request.status = "Error"
+                request.status_notes = str(e)
+                request.save()
+                continue
+
+
+async def _process_airtable_nonstudy_class_requests() -> None:
+    requests_to_process = scripts_schemas.PingPongClassNonStudy.all(
+        formula=match({"Status": "Ready for Add"})
+    )
+
+    async with aiohttp.ClientSession(cookies={"session": _PINGPONG_COOKIE}) as session:
+        for request in requests_to_process:
+            try:
+                institution = await get_or_create_institution(
+                    session, request.class_institution
+                )
+                class_ = await create_class(session, request, institution)
+                await add_moderator(session, request, class_)
+                if request.assistant_templates:
+                    for assistant_template in request.assistant_templates:
+                        pingpong_assistant = await add_assistant_non_study(
+                            session, assistant_template, request, class_
+                        )
+                        request.pingpong_assistants.append(pingpong_assistant)
+                await remove_self_from_class(session, class_.id)
+                request.pingpong_id = str(class_.id)
+                request.status = "Added"
+                request.update_status = "Complete"
+                request.remove_admin = True
+                request.save()
+                formula = (
+                    scripts_schemas.ExternalLoginRequestsNonStudy.current_email.eq(
+                        request.teacher_email[0]
+                    )
+                    & scripts_schemas.ExternalLoginRequestsNonStudy.new_email.eq(
+                        request.teacher_personal_email[0]
+                    )
+                )
+                external_logins = scripts_schemas.ExternalLoginRequestsNonStudy.all(
+                    formula=formula
+                )
+                if not external_logins:
+                    external_login = scripts_schemas.ExternalLoginRequestsNonStudy(
+                        current_email=request.teacher_email[0],
+                        new_email=request.teacher_personal_email[0],
+                        status="Ready to Add",
+                        instructor=[
+                            scripts_schemas.InstructorNonStudy.from_id(
+                                request.teacher_id[0]
+                            )
+                        ],
+                    )
+                    external_login.save()
+            except Exception as e:
+                logger.warning(f"Error processing request: {e}", exc_info=True)
                 request.status = "Error"
                 request.status_notes = str(e)
                 request.save()
@@ -380,6 +487,33 @@ async def _process_students_to_add() -> None:
 
 async def _process_external_logins_to_add() -> None:
     external_logins_to_add = scripts_schemas.ExternalLoginRequests.all(
+        formula=match({"Status": "Ready to Add"})
+    )
+
+    async with aiohttp.ClientSession(cookies={"session": _PINGPONG_COOKIE}) as session:
+        for request in external_logins_to_add:
+            try:
+                user = await server_requests.get_user_by_email(
+                    session, request.current_email, _PINGPONG_URL
+                )
+                await server_requests.add_login_email(
+                    session,
+                    user.id,
+                    request.new_email,
+                    _PINGPONG_URL,
+                )
+                request.status = "Added"
+                request.save()
+            except Exception as e:
+                logger.warning(f"Error processing external login: {e}")
+                request.status = "Error"
+                request.status_notes = str(e)
+                request.save()
+                continue
+
+
+async def _process_external_logins_to_add_non_study() -> None:
+    external_logins_to_add = scripts_schemas.ExternalLoginRequestsNonStudy.all(
         formula=match({"Status": "Ready to Add"})
     )
 
