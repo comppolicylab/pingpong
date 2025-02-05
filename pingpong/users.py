@@ -43,13 +43,40 @@ class CheckUserPermissionException(Exception):
 
 
 async def check_permissions(request: Request, uid: int, cid: int):
-    # CHECK 1: Is the requesting user trying to edit themselves?
-    if uid == request.state.session.user.id:
-        raise CheckUserPermissionException(
-            code=403, detail="You cannot manage your own user role."
-        )
+    supervisor_permission_ids = await request.state.authz.list_entities(
+        f"class:{cid}",
+        "supervisor",
+        "user",
+    )
+    supervisors = await models.User.get_all_by_id_if_in_class(
+        request.state.db, supervisor_permission_ids, cid
+    )
+    supervisor_ids = [s.id for s in supervisors]
 
-    # CHECK 2: Does requesting user have enough permissions to edit this type of user?
+    # CHECK 1: Is the requesting user trying to edit themselves?
+    # Check that the user is an admin.
+    # Check that there is at least one more moderator in the group
+    if uid == request.state.session.user.id:
+        if not await request.state.authz.test(f"user:{uid}", "admin", f"class:{cid}"):
+            raise CheckUserPermissionException(
+                code=403, detail="You cannot change your role in the Group."
+            )
+
+        if len(supervisor_ids) < 2 and uid in supervisor_ids:
+            raise CheckUserPermissionException(
+                code=403,
+                detail="You cannot change your role when you're the only Moderator in the Group.",
+            )
+
+    # CHECK 2: Are we trying to edit the only supervisor in the group?
+    # Check that there is at least one more moderator in the group
+    if uid in supervisor_ids:
+        if len(supervisor_ids) < 2:
+            raise CheckUserPermissionException(
+                code=403, detail="You cannot remove the only Moderator in the Group."
+            )
+
+    # CHECK 3: Does requesting user have enough permissions to edit this type of user?
     # Query to find the current permissions for the requester and the user being modified.
     me_ent = f"user:{request.state.session.user.id}"
     them_ent = f"user:{uid}"
@@ -91,11 +118,11 @@ async def check_permissions(request: Request, uid: int, cid: int):
 
     existing = await models.UserClassRole.get(request.state.db, uid, cid)
 
-    # CHECK 3: Is the user being edited a member of this group?
+    # CHECK 4: Is the user being edited a member of this group?
     if not existing:
         raise CheckUserPermissionException(code=404, detail="User not found in group.")
 
-    # CHECK 4: Is the user imported from an LMS?
+    # CHECK 5: Is the user imported from an LMS?
     if existing.lms_tenant:
         raise CheckUserPermissionException(
             code=403,
@@ -166,7 +193,7 @@ class AddNewUsers(ABC):
 
         return invite_config
 
-    async def _check_permissions(self, ucr: schemas.UserClassRole) -> Optional[str]:
+    def _check_permissions(self, ucr: schemas.UserClassRole) -> Optional[str]:
         if not self.is_admin and ucr.roles.admin:
             logger.info("add_users_to_class: AddUserException occurred")
             return "Lacking permission to add Administrators."
@@ -295,7 +322,7 @@ class AddNewUsers(ABC):
 
         results: list[schemas.CreateUserResult] = []
         for ucr in self.new_ucr.roles:
-            error = await self._check_permissions(ucr)
+            error = self._check_permissions(ucr)
             if error:
                 logger.info("add_users_to_class: AddUserException occurred")
                 results.append(
@@ -341,14 +368,25 @@ class AddNewUsers(ABC):
                 # We don't want an LMS sync to change the roles of the user who initiated it
                 if self.new_ucr.lms_tenant:
                     continue
-                # If the user is an admin, they can't demote themselves
-                else:
+                # An admin cannot add themselves as a student
+                if self.is_admin and ucr.roles.student:
                     logger.info("add_users_to_class: AddUserException occurred")
                     results.append(
                         schemas.CreateUserResult(
                             email=ucr.email,
                             display_name=display_name,
-                            error="You cannot change your own role.",
+                            error="You cannot add yourself as a Member in the Group. Add yourself as a Moderator.",
+                        )
+                    )
+                    continue
+                # A teacher cannot downgrade themselves to a student
+                if self.is_supervisor and ucr.roles.student:
+                    logger.info("add_users_to_class: AddUserException occurred")
+                    results.append(
+                        schemas.CreateUserResult(
+                            email=ucr.email,
+                            display_name=display_name,
+                            error="You cannot downgrade yourself to a Member in the Group.",
                         )
                     )
                     continue

@@ -42,6 +42,13 @@ class GetOpenAIClientException(Exception):
         self.detail = detail
 
 
+REASONING_EFFORT_MAP = {
+    0: "low",
+    1: "medium",
+    2: "high",
+}
+
+
 async def get_openai_client_by_class_id(
     session: AsyncSession, class_id: int
 ) -> openai.AsyncClient:
@@ -942,7 +949,7 @@ def get_openai_client(api_key, provider="openai", endpoint=None, api_version=Non
         raise ValueError("API key is required")
     match provider:
         case "azure":
-            _api_version = api_version or "2024-10-01-preview"
+            _api_version = api_version or "2025-01-01-preview"
             if not endpoint:
                 raise ValueError("Azure client requires endpoint.")
             return openai.AsyncAzureOpenAI(

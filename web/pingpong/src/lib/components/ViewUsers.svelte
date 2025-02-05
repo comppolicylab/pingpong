@@ -270,6 +270,21 @@
       showErrorAndForceCurrentDataRefresh(`Failed to update user role: ${detail}`);
     } else {
       happyToast(action);
+      // Update the user role in the local data
+      // Mark all other roles as false
+      users = users.map((u) => {
+        if (u.id === userId) {
+          u.roles = {
+            admin: u.roles.admin,
+            teacher: false,
+            student: false
+          };
+          if (role) {
+            u.roles[role] = true;
+          }
+        }
+        return u;
+      });
     }
   };
 
@@ -343,6 +358,7 @@
           {@const roleInfo = getRoleInfoForUser(user)}
           {@const noPermissions = !checkUserEditPermissions(roleInfo.primary)}
           {@const currentUser = isCurrentUser(user)}
+          {@const userIsAdmin = user.roles.admin}
           <TableBodyRow>
             <TableBodyCell {tdClass}
               ><div class="flex flex-col">
@@ -351,7 +367,7 @@
               </div></TableBodyCell
             >
             <TableBodyCell {tdClass}>
-              {#if noPermissions || currentUser || user.lms_type}
+              {#if noPermissions || user.lms_type || (currentUser && !userIsAdmin)}
                 <div class="flex flex-row justify-between">
                   <div class="flex flex-col">
                     <div>{roleInfo.label}</div>
@@ -376,7 +392,7 @@
                         <span class="font-medium">Role Change Not Allowed:</span>{' '}
                         {noPermissions
                           ? `You do not have enough permissions to change ${roleInfo.label} user roles.`
-                          : currentUser
+                          : currentUser && !userIsAdmin
                             ? 'You cannot change your own user role.'
                             : 'You cannot edit roles for imported users. Please make changes in Canvas.'}
                       </div>
@@ -396,13 +412,14 @@
                 </form>
                 {#if !roleInfo.primary && roleInfo.other.length === 0}
                   <div class="text-xs whitespace-normal font-light text-pretty text-gray-500 mt-2">
-                    * This user is not assigned to any role currently.
+                    * This user is not assigned to any role. They <span class="font-medium"
+                      >do not</span
+                    > have access to the group.
                   </div>
                 {:else if roleInfo.other.length > 0}
                   <div class="text-xs whitespace-normal font-light text-pretty text-gray-500 mt-2">
-                    * This user is also assigned to the following roles: <span class="font-medium"
-                      >{roleInfo.otherLabels.join(', ')}</span
-                    >
+                    * {currentUser ? 'You are' : 'This user is'} also assigned to the following roles:
+                    <span class="font-medium">{roleInfo.otherLabels.join(', ')}</span>
                   </div>
                 {/if}
               {/if}
@@ -430,7 +447,7 @@
               </div>
             </TableBodyCell>
             <TableBodyCell {tdClass}>
-              {#if !(currentUser || user.lms_type || noPermissions)}
+              {#if !(user.lms_type || noPermissions || (currentUser && !userIsAdmin))}
                 <form on:submit={submitRemoveUser}>
                   <input type="hidden" name="user_id" value={user.id} />
                   <Button on:click={deleteUser}><TrashBinOutline color="red" /></Button>

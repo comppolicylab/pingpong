@@ -458,7 +458,7 @@
 
             <TableBodyCell class="px-3 py-1">
               {#if tuple.error}
-                <span class="text-light text-red-700">{tuple.error}</span>
+                <span class="text-light text-red-700 text-wrap">{tuple.error}</span>
               {:else}
                 <CheckOutline class="w-6 h-6 text-green-600" />
               {/if}
