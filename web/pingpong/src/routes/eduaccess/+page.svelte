@@ -133,10 +133,6 @@
           Administer a short (15 minute) online assessment for students at the end of the semester,
           as a part of your course's required assignments.
         </li>
-        <li class="my-2">
-          Optional: Work with our team to design the assessments and customize PingPong to your
-          class.
-        </li>
       </ol>
     </figure>
     <figure
@@ -166,8 +162,8 @@
           class="underline"
           target="_blank">this short (5-question) survey</a
         >
-        to indicate your interest. Our team will follow up to confirm eligibility by the end of the Fall
-        2024 semester.<br /><br />For further questions, please contact
+        to indicate your interest. Our team will follow up in late spring 2025 to confirm eligibility
+        for summer 2025 courses.<br /><br />For further questions, please contact
         <a
           href="mailto:pingpongedu@hks.harvard.edu"
           rel="noopener noreferrer"
@@ -202,9 +198,8 @@
         <li class="my-2">
           Instructors will integrate a brief baseline and end-of-semester assessment into their
           courses. Our team will provide instructors with initial versions of these assessments,
-          which will assess general subject-matter knowledge. Instructors will have the option to
-          customize further for their specific classes, or administer as-is. These activities can be
-          completed in or outside class at the instructor's discretion.
+          which will assess general subject-matter knowledge. These activities can be completed in
+          or outside class at the instructor's discretion.
         </li>
         <li class="my-2">
           When completing the assessment, students will participate in an informed consent process
@@ -226,8 +221,8 @@
         Will instructors and students receive free access to PingPong after the study?
       </h4>
       Yes, after the study concludes, all instructors and students—both those in the treatment group
-      and the control group—will receive free access for the following semester (Fall 2025). (During
-      the study, instructors and students in the treatment group will have free access to PingPong.)
+      and the control group—will receive free access for the following semester. (During the study, instructors
+      and students in the treatment group will have free access to PingPong.)
     </li>
     <li class="my-2">
       <h4 class="text-lg font-semibold">
