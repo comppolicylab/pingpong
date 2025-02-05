@@ -213,6 +213,8 @@ async def begin_db_session(request: Request, call_next):
         request.state.db = db
         try:
             result = await call_next(request)
+            if not result.status_code or result.status_code >= 400:
+                await db.rollback()
             await db.commit()
             return result
         except Exception as e:
@@ -3699,6 +3701,7 @@ async def update_assistant(
     )
 
     try:
+        raise Exception("Test error")
         await openai_client.beta.assistants.update(
             assistant_id=asst.assistant_id, **openai_update
         )
@@ -3709,6 +3712,8 @@ async def update_assistant(
         raise HTTPException(
             400, e.body.get("message") or e.message or "OpenAI rejected this request"
         )
+    except Exception as e:
+        raise HTTPException(404, f"Error updating assistant: {e}")
     except openai.NotFoundError as e:
         if e.code == "DeploymentNotFound":
             raise HTTPException(
