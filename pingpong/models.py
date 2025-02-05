@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional, Union, Callable, Coroutine, Any
 
-from sqlalchemy import Boolean, Column, DateTime, Float, UniqueConstraint, or_
+from sqlalchemy import Boolean, Column, DateTime, Float, UniqueConstraint, not_, or_
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
     ForeignKey,
@@ -446,14 +446,30 @@ class UserAgreementCategory(Base):
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
+    @classmethod
+    async def create(
+        cls, session: AsyncSession, name: str, show_all: bool = False
+    ) -> "UserAgreementCategory":
+        category = UserAgreementCategory(name=name, show_all=show_all)
+        session.add(category)
+        await session.flush()
+        await session.refresh(category)
+        return category
+
+    @classmethod
+    async def get_by_name(
+        cls, session: AsyncSession, name: str
+    ) -> "UserAgreementCategory":
+        stmt = select(UserAgreementCategory).where(UserAgreementCategory.name == name)
+        return await session.scalar(stmt)
+
 
 class UserAgreement(Base):
     __tablename__ = "user_agreements"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String, nullable=False)
-    text = Column(String, nullable=False)
-    link = Column(String, nullable=True)
+    code = Column(String, nullable=False)
     active = Column(Boolean, default=False)
     category_id: Mapped[int] = mapped_column(
         ForeignKey("user_agreement_categories.id", ondelete="cascade"), nullable=False
@@ -461,8 +477,7 @@ class UserAgreement(Base):
     category = relationship(
         "UserAgreementCategory", back_populates="agreements", lazy="selectin"
     )
-    version = Column(Integer, nullable=False)
-    display_after = Column(DateTime(timezone=True), nullable=True)
+    effective_date = Column(DateTime(timezone=True), nullable=False)
     always_display = Column(Boolean, default=False)
     apply_to_all = Column(Boolean, default=False)
     limit_to_providers = relationship(
@@ -475,6 +490,68 @@ class UserAgreement(Base):
     )
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
+
+    @classmethod
+    async def get_pending_user_agreement(
+        cls, session: AsyncSession, user_id: int
+    ) -> "UserAgreement":
+        stmt = (
+            select(UserAgreement)
+            .join(UserAgreementCategory)
+            .where(
+                and_(
+                    UserAgreement.active.is_(True),
+                    or_(
+                        UserAgreementCategory.show_all.is_(True),
+                        UserAgreement.always_display.is_(True),
+                        not_(
+                            UserAgreement.acceptances.any(
+                                UserAgreementAcceptance.user_id == user_id
+                            )
+                        ),
+                    ),
+                    or_(
+                        UserAgreement.apply_to_all.is_(True),
+                        UserAgreement.limit_to_providers.any(
+                            ExternalLoginProvider.external_logins.any(
+                                ExternalLogin.user_id == user_id
+                            )
+                        ),
+                    ),
+                    or_(
+                        UserAgreement.effective_date <= datetime.utcnow(),
+                        UserAgreement.effective_date.is_(None),
+                    ),
+                )
+            )
+            .order_by(UserAgreement.always_display.desc(), UserAgreement.effective_date)
+        )
+
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        name: str,
+        code: str,
+        category_id: int,
+        effective_date: datetime,
+        always_display: bool = False,
+        apply_to_all: bool = False,
+    ) -> "UserAgreement":
+        agreement = UserAgreement(
+            name=name,
+            code=code,
+            category_id=category_id,
+            effective_date=effective_date,
+            always_display=always_display,
+            apply_to_all=apply_to_all,
+        )
+        session.add(agreement)
+        await session.flush()
+        await session.refresh(agreement)
+        return agreement
 
 
 class UserAgreementAcceptance(Base):

@@ -32,7 +32,7 @@
       sadToast(`Failed to profile information: ${expanded.error.detail}`);
     } else {
       happyToast('Profile information saved');
-      // Get `forward` parametr from URL
+      // Get `forward` parameter from URL
       const destination = $page.url.searchParams.get('forward') || '/';
       await goto(destination, { invalidateAll: true });
     }
