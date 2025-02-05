@@ -3701,7 +3701,6 @@ async def update_assistant(
     )
 
     try:
-        raise Exception("Test error")
         await openai_client.beta.assistants.update(
             assistant_id=asst.assistant_id, **openai_update
         )
@@ -3712,8 +3711,6 @@ async def update_assistant(
         raise HTTPException(
             400, e.body.get("message") or e.message or "OpenAI rejected this request"
         )
-    except Exception as e:
-        raise HTTPException(404, f"Error updating assistant: {e}")
     except openai.NotFoundError as e:
         if e.code == "DeploymentNotFound":
             raise HTTPException(
