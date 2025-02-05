@@ -213,7 +213,8 @@ async def begin_db_session(request: Request, call_next):
         request.state.db = db
         try:
             result = await call_next(request)
-            if not result.status_code or result.status_code >= 400:
+            status_code = getattr(result, "status_code", 0)
+            if not status_code or status_code >= 400:
                 await db.rollback()
             await db.commit()
             return result
