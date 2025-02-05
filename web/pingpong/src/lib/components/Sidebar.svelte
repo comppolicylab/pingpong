@@ -33,7 +33,7 @@
   import * as api from '$lib/api';
   import type { LayoutData } from '../../routes/$types';
   import { appMenuOpen } from '$lib/stores/general';
-  import { afterNavigate } from '$app/navigation';
+  import { afterNavigate, goto } from '$app/navigation';
 
   export let data: LayoutData;
 
@@ -66,6 +66,10 @@
   afterNavigate(() => {
     togglePanel(false);
   });
+
+  const logout = async () => {
+    await goto('/logout');
+  };
 </script>
 
 <Sidebar
@@ -226,7 +230,7 @@
     <span>Privacy Policy</span>
   </DropdownItem>
   <DropdownDivider />
-  <DropdownItem href="/logout" class="flex space-x-4 items-center">
+  <DropdownItem on:click={logout} class="flex space-x-4 items-center">
     <ArrowRightToBracketOutline size="sm" />
     <span>Logout</span>
   </DropdownItem>

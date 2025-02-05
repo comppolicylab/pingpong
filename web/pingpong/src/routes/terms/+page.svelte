@@ -37,7 +37,6 @@
     </header>
     <div class="px-12 py-8 bg-white">
       <div class="flex flex-col gap-4">
-        {@html terms}
         <div class="flex-row gap-4 text-center flex justify-end mt-4">
           <Button
             class="text-blue-dark-40 bg-white border border-blue-dark-40 rounded-full hover:bg-blue-dark-40 hover:text-white"

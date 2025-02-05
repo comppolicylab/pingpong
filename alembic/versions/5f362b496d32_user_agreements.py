@@ -1,7 +1,7 @@
 """User Agreements
 
 Revision ID: 5f362b496d32
-Revises: debb9c126ef6
+Revises: b26bb2fb8a1b
 Create Date: 2025-02-04 20:24:38.563183
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '5f362b496d32'
-down_revision: Union[str, None] = 'debb9c126ef6'
+down_revision: Union[str, None] = 'b26bb2fb8a1b'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -34,7 +34,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 
   const authed = me.data.status === 'valid';
   const needsOnboarding = !!me.data?.user && (!me.data.user.first_name || !me.data.user.last_name);
-  const needsAgreements = true;
+  const needsAgreements = false; // TODO: Implement this.
   let doNotShowSidebar = false;
 
   // If the page is public, don't redirect to the login page.
