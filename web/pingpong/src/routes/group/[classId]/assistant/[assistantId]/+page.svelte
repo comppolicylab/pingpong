@@ -27,7 +27,8 @@
     ArrowUpRightFromSquareOutline,
     CogOutline,
     LockSolid,
-    InfoCircleOutline
+    BanOutline,
+    FileImageOutline
   } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
   import { writable, type Writable } from 'svelte/store';
@@ -639,11 +640,14 @@
       >
       {#if supportsVision && visionSupportOverride === false}
         <div
-          class="flex flex-row items-start p-4 py-2 mb-2 text-yellow-800 border border-yellow-300 rounded-lg bg-yellow-50"
+          class="flex flex-row items-center gap-4 p-4 py-2 mb-2 text-amber-800 border border-amber-400 rounded-lg bg-amber-50"
         >
-          <InfoCircleOutline class="w-6 h-6 mr-3 mt-1" />
+          <div class="flex items-center justify-center relative h-8 w-12">
+            <BanOutline class="text-amber-600 w-12 h-12 z-10 absolute" strokeWidth="1.5" />
+            <FileImageOutline class="text-stone-400 w-8 h-8" strokeWidth="1" />
+          </div>
           <div class="flex flex-col">
-            <span class="text-sm">Heads up!</span>
+            <span class="text-sm font-semibold">Vision capabilities are currently unavailable</span>
             <span class="text-xs"
               >Your AI Provider doesn't support Vision capabilities for this model. We are working
               on adding Vision support. You can still use supported image files with Code
