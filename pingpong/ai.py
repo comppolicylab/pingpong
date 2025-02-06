@@ -18,6 +18,7 @@ from openai.types.beta.assistant_stream_event import (
     ThreadRunStepFailed,
     ThreadRunFailed,
 )
+from openai._exceptions import APIError
 from openai.types.beta.threads import ImageFile, MessageContentPartParam
 from openai.types.beta.threads.annotation import FileCitationAnnotation
 from openai.types.beta.threads.image_file_content_block import ImageFileContentBlock
@@ -34,6 +35,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
+
+
+def get_details_from_api_error(e: APIError, custom_fallback: str | None = None) -> str:
+    fallback = custom_fallback or "OpenAI was unable to process your request."
+    if hasattr(e, "body") and isinstance(e.body, dict):
+        message = e.body.get("message")
+        if message:
+            return message
+    if hasattr(e, "message") and e.message:
+        return e.message
+    return fallback
 
 
 class GetOpenAIClientException(Exception):
@@ -120,8 +132,8 @@ async def generate_name(
         return response.choices[0].message.parsed
     except openai.RateLimitError as e:
         raise e
-    except openai.APIError as e:
-        logger.exception(f"Error generating name, {e}")
+    except openai.APIError:
+        logger.exception("Error generating thread name.")
         return None
 
 
@@ -455,7 +467,7 @@ async def run_thread(
                     orjson.dumps(
                         {
                             "type": "presend_error",
-                            "detail": "OpenAI was unable to process your request. If the issue persists, check PingPong's status page for updates.",
+                            "detail": "OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
                         }
                     )
                     + b"\n"
@@ -472,8 +484,8 @@ async def run_thread(
                         {
                             "type": "presend_error",
                             "detail": "OpenAI was unable to process your request. "
-                            + str(
-                                openai_error.body.get("message") or openai_error.message
+                            + get_details_from_api_error(
+                                openai_error, "Please try again later."
                             ),
                         }
                     )
