@@ -613,7 +613,7 @@
   <form on:submit={submitForm} bind:this={assistantForm}>
     <div class="mb-4">
       <Label class="pb-1" for="name">Name</Label>
-      <Input label="name" id="name" name="name" value={assistant?.name} disabled={preventEdits} />
+      <Input id="name" name="name" value={assistant?.name} disabled={preventEdits} />
     </div>
     <div class="mb-4">
       <Label for="model">Model</Label>
@@ -705,10 +705,9 @@
         prompt, but <strong>is</strong> shown to users.</Helper
       >
       <Textarea
-        label="description"
         id="description"
         name="description"
-        value={assistant?.description}
+        value={assistant?.description || ''}
         disabled={preventEdits}
       />
     </div>
@@ -718,10 +717,9 @@
         >This is the prompt the language model will use to generate responses.</Helper
       >
       <Textarea
-        label="instructions"
         id="instructions"
         name="instructions"
-        rows="6"
+        rows={6}
         value={assistant?.instructions}
         disabled={preventEdits}
       />
@@ -740,7 +738,6 @@
     </div>
     <div class="col-span-2 mb-4">
       <Checkbox
-        label="use_latex"
         id="use_latex"
         name="use_latex"
         disabled={preventEdits}
@@ -881,7 +878,6 @@
 
     <div class="col-span-2 mb-4">
       <Checkbox
-        label="published"
         id="published"
         disabled={!canPublish && !assistant?.published}
         name="published"
@@ -902,7 +898,7 @@
 
     <div class="leading-6 w-full">
       <Accordion flush>
-        <AccordionItem class="py-2">
+        <AccordionItem defaultClass="py-2">
           <span slot="header"
             ><div class="flex-row flex items-center space-x-2 py-0">
               <div><CogOutline size="md" strokeWidth="1" /></div>
