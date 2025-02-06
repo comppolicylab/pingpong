@@ -101,6 +101,12 @@
     );
     supportsVision = supportVisionModels.includes(assistant.model);
   }
+  let visionSupportOverride: boolean | undefined;
+  $: {
+    visionSupportOverride = data.models.find(
+      (model) => model.id === assistant.model
+    )?.vision_support_override;
+  }
   $: allowVisionUpload = true;
   let showModerators = false;
 
@@ -314,6 +320,7 @@
                 vision: true
               })
             : null}
+          {visionSupportOverride}
           fileSearchAcceptedFiles={supportsFileSearch
             ? data.uploadInfo.fileTypes({
                 file_search: true,
