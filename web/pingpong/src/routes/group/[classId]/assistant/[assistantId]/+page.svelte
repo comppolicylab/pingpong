@@ -26,7 +26,8 @@
     QuestionCircleSolid,
     ArrowUpRightFromSquareOutline,
     CogOutline,
-    LockSolid
+    LockSolid,
+    InfoCircleOutline
   } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
   import { writable, type Writable } from 'svelte/store';
@@ -102,7 +103,9 @@
     value: model.id,
     name: model.name,
     description: model.description,
-    supports_vision: model.supports_vision,
+    supports_vision:
+      model.supports_vision &&
+      (model.vision_support_override === undefined || model.vision_support_override),
     is_new: model.is_new,
     highlight: model.highlight
   }));
@@ -116,7 +119,9 @@
       value: model.id,
       name: model.name,
       description: model.description,
-      supports_vision: model.supports_vision,
+      supports_vision:
+        model.supports_vision &&
+        (model.vision_support_override === undefined || model.vision_support_override),
       is_new: model.is_new,
       highlight: model.highlight
     })
@@ -141,6 +146,10 @@
   );
   $: supportsReasoning = supportReasoningModels.includes(selectedModel);
   $: supportsVision = supportVisionModels.includes(selectedModel);
+  $: visionSupportOverride = data.models.find(
+    (model) => model.id === selectedModel
+  )?.vision_support_override;
+  $: finalVisionSupport = visionSupportOverride ?? supportsVision;
   $: allowVisionUpload = true;
   $: asstFSFiles = [...data.files, ...allFSPrivateFiles];
   $: asstCIFiles = [...data.files, ...allCIPrivateFiles];
@@ -628,6 +637,21 @@
           class="underline">OpenAI's Documentation</a
         > for detailed descriptions of model capabilities.</Helper
       >
+      {#if supportsVision && visionSupportOverride === false}
+        <div
+          class="flex flex-row items-start p-4 py-2 mb-2 text-yellow-800 border border-yellow-300 rounded-lg bg-yellow-50"
+        >
+          <InfoCircleOutline class="w-6 h-6 mr-3 mt-1" />
+          <div class="flex flex-col">
+            <span class="text-sm">Heads up!</span>
+            <span class="text-xs"
+              >Your AI Provider doesn't support Vision capabilities for this model. We are working
+              on adding Vision support. You can still use supported image files with Code
+              Interpreter.</span
+            >
+          </div>
+        </div>
+      {/if}
       <div class="flex flex-row gap-2">
         <DropdownContainer
           footer
@@ -685,12 +709,14 @@
         </DropdownContainer>
         {#if allowVisionUpload}
           <Badge
-            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case {supportsVision
+            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case {finalVisionSupport
               ? 'bg-gradient-to-b border-green-400 from-emerald-100 to-emerald-200 text-green-800'
               : 'border-gray-100 bg-gray-50 text-gray-600'}"
-            >{#if supportsVision}<ImageOutline size="sm" />{:else}<CloseOutline size="sm" />{/if}
+            >{#if finalVisionSupport}<ImageOutline size="sm" />{:else}<CloseOutline
+                size="sm"
+              />{/if}
             <div class="flex flex-col">
-              <div>{supportsVision ? 'Vision' : 'No Vision'}</div>
+              <div>{finalVisionSupport ? 'Vision' : 'No Vision'}</div>
               <div>capabilities</div>
             </div></Badge
           >

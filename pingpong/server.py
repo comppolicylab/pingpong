@@ -1883,7 +1883,7 @@ async def get_class_api_key(class_id: str, request: Request):
 
 @v1.get(
     "/class/{class_id}/models",
-    dependencies=[Depends(Authz("can_create_assistants", "class:{class_id}"))],
+    dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
     response_model=schemas.AssistantModels,
 )
 async def list_class_models(
@@ -2311,8 +2311,18 @@ async def list_class_models(
     ):
         filtered = [m for m in filtered if m["id"] != "o1-2024-12-17"]
 
+    # Vision is not supported in Azure, set vision_support_override to False
+    if isinstance(openai_client, openai.AsyncAzureOpenAI):
+        for model in filtered:
+            model["vision_support_override"] = (
+                False if model["supports_vision"] else None
+            )
+
     filtered.sort(key=lambda x: x["sort_order"])
-    return {"models": filtered}
+
+    return {
+        "models": filtered,
+    }
 
 
 @v1.get(

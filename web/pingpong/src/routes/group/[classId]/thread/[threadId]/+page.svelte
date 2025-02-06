@@ -107,6 +107,12 @@
     );
     supportsVision = supportVisionModels.includes(data.threadModel);
   }
+  let visionSupportOverride: boolean | undefined;
+  $: {
+    visionSupportOverride = data.models.find(
+      (model) => model.id === data.threadModel
+    )?.vision_support_override;
+  }
   $: submitting = threadMgr.submitting;
   $: waiting = threadMgr.waiting;
   $: loading = threadMgr.loading;
@@ -477,6 +483,7 @@
           {visionAcceptedFiles}
           {fileSearchAcceptedFiles}
           {codeInterpreterAcceptedFiles}
+          {visionSupportOverride}
           {assistantDeleted}
           {canViewAssistant}
           canSubmit={canSubmit && !assistantDeleted && canViewAssistant}

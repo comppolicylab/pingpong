@@ -912,6 +912,7 @@ class AssistantModel(BaseModel):
     is_new: bool
     highlight: bool
     supports_vision: bool
+    vision_support_override: bool | None = None
     supports_file_search: bool
     supports_code_interpreter: bool
     supports_temperature: bool
