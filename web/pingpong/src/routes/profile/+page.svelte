@@ -456,7 +456,7 @@
       <div class="w-8/9 my-5">
         <Accordion>
           <AccordionItem
-            class="px-6 py-4 flex items-center justify-between w-full font-medium text-left group-first:rounded-t-none border-gray-200 dark:border-gray-700"
+            defaultClass="px-6 py-4 flex items-center justify-between w-full font-medium text-left group-first:rounded-t-none border-gray-200 dark:border-gray-700"
           >
             <span slot="header"
               ><div class="flex-row flex items-center space-x-2 py-0">

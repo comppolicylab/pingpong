@@ -91,7 +91,6 @@
     {@const image_lte = { src: image.src, alt: image.alt }}
     <Thumbnail
       {...image_lte}
-      {forward}
       {selected}
       class="h-24 rounded-md shadow-xl hover:outline hover:outline-orange-dark"
       activeClass="outline outline-orange"

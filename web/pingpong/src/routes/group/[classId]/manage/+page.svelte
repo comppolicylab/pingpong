@@ -810,7 +810,6 @@
         <div>
           <Label for="name">Name</Label>
           <Input
-            label="Name"
             id="name"
             name="name"
             value={data.class.name}
@@ -822,7 +821,6 @@
         <div>
           <Label for="term">Session</Label>
           <Input
-            label="Session"
             id="term"
             name="term"
             value={data.class.term}
@@ -911,7 +909,7 @@
     </form>
   {/if}
 
-  {#if subscriptionInfo && hasApiKey}
+  {#if subscriptionInfo && data?.hasAPIKey}
     <div bind:this={summaryElement} class="grid md:grid-cols-3 gap-x-6 gap-y-8 pt-6">
       <div>
         <Heading customSize="text-xl font-bold" tag="h3"
@@ -995,7 +993,7 @@
               </div>
             </Modal>
           </div>
-          <Helper for="subscribe" color={makePrivate ? 'disabled' : 'gray'}
+          <Helper color={makePrivate ? 'disabled' : 'gray'}
             >PingPong will gather all thread activity in your group and send an AI-generated summary
             with relevant thread links to all Moderators at the end of each week. You can change
             your selection at any time.
@@ -1059,7 +1057,6 @@
                     <Input
                       id="endpoint"
                       name="endpoint"
-                      label="Deployment Endpoint"
                       autocomplete="off"
                       value={apiKey}
                       placeholder="Your deployment endpoint here"
@@ -1077,7 +1074,6 @@
                   <Input
                     id="apiKey"
                     name="apiKey"
-                    label="API Key"
                     autocomplete="off"
                     value={apiKey}
                     placeholder="Your API key here"
