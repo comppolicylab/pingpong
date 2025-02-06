@@ -259,16 +259,6 @@ async def log_request(request: Request, call_next):
             )
 
 
-@v1.middleware("http")
-async def health_check_filter_middleware(request: Request, call_next):
-    response = await call_next(request)
-    if request.url.path == "/health":
-        logging.getLogger("uvicorn.access").disabled = True
-    else:
-        logging.getLogger("uvicorn.access").disabled = False
-    return response
-
-
 @v1.get("/config", dependencies=[Depends(Authz("admin"))])
 def get_config(request: Request):
     d = config.dict()
