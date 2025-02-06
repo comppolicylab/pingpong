@@ -478,7 +478,15 @@ class CanvasCourseClient(ABC):
         # https://canvas.instructure.com/doc/api/users.html#User
         request_url = f"/api/v1/courses/{course_id}/users"
 
-        async for result in self._request_all_pages(request_url):
+        # Request Parameters:
+        # - include[]:
+        #   - term: Optional information to include with each Course.
+        #           When term is given, the information for the enrollment
+        #           term for each course is returned.
+
+        params = {"include[]": ["enrollments"]}
+
+        async for result in self._request_all_pages(request_url, params=params):
             if not result:
                 return False
             for user in result:
