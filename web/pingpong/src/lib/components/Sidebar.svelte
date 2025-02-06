@@ -102,13 +102,12 @@
                   currentAssistantId ? `?assistant=${currentAssistantId}` : ''
                 }`
               : '/'}
-        disabled={onNewChatPage}
         label={nonAuthed ? 'Login' : 'Start a new chat'}
         class={`flex flex-row-reverse justify-between pr-4 text-white rounded-full ${
           onNewChatPage
             ? 'bg-blue-dark-40 hover:bg-blue-dark-40 cursor-default text-blue-dark-30 select-none'
             : 'bg-orange hover:bg-orange-dark'
-        }`}
+        } ${onNewChatPage ? 'disabled' : ''}`}
       >
         <svelte:fragment slot="icon">
           {#if nonAuthed}

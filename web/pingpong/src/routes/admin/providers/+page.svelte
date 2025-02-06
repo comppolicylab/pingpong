@@ -129,8 +129,8 @@
         id="description"
         name="description"
         placeholder="Your SSO identifier when logging in through Acme..."
-        rows="3"
-        value={providerToEdit?.description}
+        rows={3}
+        value={providerToEdit?.description ?? ''}
       />
     </Label>
     <div class="flex justify-center">

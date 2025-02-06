@@ -156,7 +156,7 @@
     <Helper helperClass="text-sm font-normal text-gray-500 dark:text-gray-300"
       >Enter email addresses separated by commas or newlines.</Helper
     >
-    <Textarea class="mt-2 mb-4" id="emails" name="emails" rows="4" value={emailString} />
+    <Textarea class="mt-2 mb-4" id="emails" name="emails" rows={4} value={emailString} />
 
     <div class="flex items-center justify-between">
       <Label defaultClass="text-md font-normal rtl:text-right font-medium block" for="role"

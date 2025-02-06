@@ -241,11 +241,11 @@
                 <div class="flex flex-col gap-2">
                   <Label for="message">Message (max 500 characters)</Label>
                   <Textarea
-                    maxlength="500"
+                    maxlength={500}
                     name="message"
                     id="message"
                     placeholder="Your message"
-                    rows="5"
+                    rows={5}
                   />
                 </div>
                 <div class="flex flex-col gap-2 mx-auto">
