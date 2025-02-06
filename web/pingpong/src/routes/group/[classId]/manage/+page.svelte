@@ -911,7 +911,7 @@
     </form>
   {/if}
 
-  {#if subscriptionInfo && hasApiKey}
+  {#if subscriptionInfo && data?.hasAPIKey}
     <div bind:this={summaryElement} class="grid md:grid-cols-3 gap-x-6 gap-y-8 pt-6">
       <div>
         <Heading customSize="text-xl font-bold" tag="h3"
