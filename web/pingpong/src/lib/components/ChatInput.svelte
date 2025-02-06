@@ -32,6 +32,7 @@
   import { sadToast } from '$lib/toast';
   import type { FileUploadPurpose } from '$lib/api';
   import { ArrowUpOutline, CloseOutline, ExclamationCircleOutline } from 'flowbite-svelte-icons';
+  import Sanitize from '$lib/components/Sanitize.svelte';
 
   const dispatcher = createEventDispatcher();
 
@@ -409,7 +410,7 @@
                 <ExclamationCircleOutline />
                 <div>
                   <div class="text-sm">
-                    {combinedErrorMessage}
+                    <Sanitize html={combinedErrorMessage} />
                   </div>
                 </div>
               </div>

@@ -165,7 +165,7 @@
       $loading = false;
       form.callback({
         success: false,
-        errorMessage: `Failed to create thread. Error: ${errorMessage(e)}`,
+        errorMessage: `Failed to create thread. Error: ${errorMessage(e, "Something went wrong while creating your conversation. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.")}`,
         message_sent: false
       });
     }

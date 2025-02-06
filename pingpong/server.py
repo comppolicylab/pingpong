@@ -57,6 +57,7 @@ from .ai import (
     validate_api_key,
     get_ci_messages_from_step,
     get_azure_model_deployment_name_equivalent,
+    get_details_from_api_error,
 )
 from .auth import (
     decode_auth_token,
@@ -1889,7 +1890,24 @@ async def list_class_models(
     class_id: str, request: Request, openai_client: OpenAIClient
 ):
     """List available models for the class assistants."""
-    all_models = await openai_client.models.list()
+    try:
+        all_models = await openai_client.models.list()
+    except openai.AuthenticationError as e:
+        raise HTTPException(
+            status_code=401,
+            detail="We couldn't fetch your available models: "
+            + get_details_from_api_error(
+                e, "OpenAI was unable to authenticate your request."
+            ),
+        )
+    except openai.APIError as e:
+        raise HTTPException(
+            status_code=500,
+            detail="We couldn't fetch your available models: "
+            + get_details_from_api_error(
+                e, "OpenAI was unable to process your request."
+            ),
+        )
     known_models: dict[str, schemas.AssistantModelDict] = {
         # ----------------- Latest Models -----------------
         #
@@ -2818,6 +2836,7 @@ async def create_thread(
             messageContent.append({"type": "image_file", "image_file": {"file_id": id}})
             for id in req.vision_file_ids
         ]
+    thread = None
     try:
         thread, parties, thread_name = await asyncio.gather(
             openai_client.beta.threads.create(
@@ -2840,29 +2859,36 @@ async def create_thread(
                 class_id,
             ),
         )
-    except openai.InternalServerError as e:
-        logger.exception(
-            "Error creating thread: %s", e.body.get("message") or e.message
-        )
+    except openai.InternalServerError:
+        logger.exception("Error creating thread")
         if vector_store_id:
             await openai_client.beta.vector_stores.delete(vector_store_id)
+        if thread:
+            await openai_client.beta.threads.delete(thread.id)
         raise HTTPException(
             status_code=503,
-            detail="OpenAI was unable to process your request. If the issue persists, check PingPong's status page for updates.",
+            detail="OpenAI is experiencing issues so we can't create your conversation right now. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
         )
-    except openai.APIError as e:
-        logger.exception(
-            "Error creating thread: %s", e.body.get("message") or e.message
-        )
+    except (openai.APIError, Exception):
+        logger.exception("Error creating thread")
         if vector_store_id:
             await openai_client.beta.vector_stores.delete(vector_store_id)
+        if thread:
+            await openai_client.beta.threads.delete(thread.id)
         raise HTTPException(
             status_code=400,
-            detail="Something went wrong while creating the thread. Please try again later.",
+            detail="Something went wrong while creating your conversation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
         )
 
     tools_export = req.model_dump(include={"tools_available"})
 
+    if not thread:
+        if vector_store_id:
+            await openai_client.beta.vector_stores.delete(vector_store_id)
+        raise HTTPException(
+            status_code=500,
+            detail="We faced an error while creating your conversation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+        )
     new_thread = {
         "name": thread_name,
         "class_id": int(class_id),
@@ -3035,7 +3061,8 @@ async def send_message(
                     )
                 except openai.BadRequestError as e:
                     raise HTTPException(
-                        400, e.message or "OpenAI rejected this request"
+                        400,
+                        get_details_from_api_error(e, "OpenAI rejected this request"),
                     )
 
                 thread.updated = func.now()
@@ -3156,7 +3183,9 @@ async def remove_file_from_thread(
     except openai.NotFoundError:
         pass
     except openai.BadRequestError as e:
-        raise HTTPException(400, e.message or "OpenAI rejected this request")
+        raise HTTPException(
+            400, get_details_from_api_error(e, "OpenAI rejected this request")
+        )
 
     return {"status": "ok"}
 
@@ -3225,7 +3254,9 @@ async def delete_thread(
     except openai.NotFoundError:
         pass
     except openai.BadRequestError as e:
-        raise HTTPException(400, e.message or "OpenAI rejected this request")
+        raise HTTPException(
+            400, get_details_from_api_error(e, "OpenAI rejected this request")
+        )
 
     # clean up grants
     await request.state.authz.write_safe(revoke=revokes)
@@ -3476,7 +3507,7 @@ async def create_assistant(
         )
     except openai.BadRequestError as e:
         raise HTTPException(
-            400, e.body.get("message") or e.message or "OpenAI rejected this request"
+            400, get_details_from_api_error(e, "OpenAI rejected this request")
         )
     except openai.NotFoundError as e:
         if e.code == "DeploymentNotFound":
@@ -3485,7 +3516,7 @@ async def create_assistant(
                 f"Deployment <b>{_model}</b> does not exist on Azure. Please make sure the <b>deployment name</b> matches the one in Azure. If you created the deployment within the last 5 minutes, please wait a moment and try again.",
             )
         raise HTTPException(
-            404, e.body.get("message") or e.message or "OpenAI rejected this request"
+            404, get_details_from_api_error(e, "OpenAI rejected this request")
         )
 
     try:
@@ -3710,7 +3741,7 @@ async def update_assistant(
             await delete_vector_store_oai(openai_client, vector_store_id_to_delete)
     except openai.BadRequestError as e:
         raise HTTPException(
-            400, e.body.get("message") or e.message or "OpenAI rejected this request"
+            400, get_details_from_api_error(e, "OpenAI rejected this request")
         )
     except openai.NotFoundError as e:
         if e.code == "DeploymentNotFound":
@@ -3719,7 +3750,7 @@ async def update_assistant(
                 f"Deployment <b>{_model}</b> does not exist on Azure. Please make sure the <b>deployment name</b> matches the one in Azure. If you created the deployment within the last 5 minutes, please wait a moment and try again.",
             )
         raise HTTPException(
-            404, e.body.get("message") or e.message or "OpenAI rejected this request"
+            404, get_details_from_api_error(e, "OpenAI rejected this request")
         )
 
     try:
@@ -3853,7 +3884,9 @@ async def delete_assistant(
     except openai.NotFoundError:
         pass
     except openai.BadRequestError as e:
-        raise HTTPException(400, e.message or "OpenAI rejected this request")
+        raise HTTPException(
+            400, get_details_from_api_error(e, "OpenAI rejected this request")
+        )
 
     # clean up grants
     await request.state.authz.write_safe(revoke=revokes)

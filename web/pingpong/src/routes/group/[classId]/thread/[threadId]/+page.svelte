@@ -201,7 +201,9 @@
         content.step_id
       );
     } catch (e) {
-      sadToast(`Failed to load code interpreter results. Error: ${errorMessage(e)}`);
+      sadToast(
+        `Failed to load code interpreter results. Error: ${errorMessage(e, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
+      );
     }
   };
 
@@ -226,7 +228,7 @@
     } catch (e) {
       callback({
         success: false,
-        errorMessage: `Failed to send message. Error: ${errorMessage(e)}`,
+        errorMessage: `Failed to send message. Error: ${errorMessage(e, "Something went wrong while sending your message. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.")}`,
         message_sent: false
       });
     }
@@ -276,7 +278,9 @@
       }
       invalidateAll();
     } catch (e) {
-      sadToast(`Failed to ${verb} thread. Error: ${errorMessage(e)}`);
+      sadToast(
+        `Failed to ${verb} thread. Error: ${errorMessage(e, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
+      );
     }
   };
 
@@ -295,7 +299,9 @@
       happyToast('Thread deleted.');
       await goto(`/group/${classId}`, { invalidateAll: true });
     } catch (e) {
-      sadToast(`Failed to delete thread. Error: ${errorMessage(e)}`);
+      sadToast(
+        `Failed to delete thread. Error: ${errorMessage(e, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
+      );
     }
   };
 
