@@ -2836,6 +2836,7 @@ async def create_thread(
             messageContent.append({"type": "image_file", "image_file": {"file_id": id}})
             for id in req.vision_file_ids
         ]
+    thread = None
     try:
         thread, parties, thread_name = await asyncio.gather(
             openai_client.beta.threads.create(
@@ -2868,7 +2869,7 @@ async def create_thread(
             status_code=503,
             detail="OpenAI is experiencing issues so we can't create your conversation right now. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
         )
-    except openai.APIError:
+    except (openai.APIError, Exception):
         logger.exception("Error creating thread")
         if vector_store_id:
             await openai_client.beta.vector_stores.delete(vector_store_id)
@@ -2878,19 +2879,16 @@ async def create_thread(
             status_code=400,
             detail="Something went wrong while creating your conversation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
         )
-    except Exception:
-        logger.exception("Error creating thread")
-        if vector_store_id:
-            await openai_client.beta.vector_stores.delete(vector_store_id)
-        if thread:
-            await openai_client.beta.threads.delete(thread.id)
-        raise HTTPException(
-            status_code=500,
-            detail="Something went wrong while creating your conversation. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
-        )
 
     tools_export = req.model_dump(include={"tools_available"})
 
+    if not thread:
+        if vector_store_id:
+            await openai_client.beta.vector_stores.delete(vector_store_id)
+        raise HTTPException(
+            status_code=500,
+            detail="We faced an error while creating your conversation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+        )
     new_thread = {
         "name": thread_name,
         "class_id": int(class_id),
