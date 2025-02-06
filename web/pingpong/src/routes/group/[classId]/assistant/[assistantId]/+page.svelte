@@ -926,68 +926,77 @@
       {/if}
     </div>
 
-    <div class="leading-6 w-full">
-      <Accordion flush>
-        <AccordionItem defaultClass="py-2">
+    <div class="w-8/9 my-5">
+      <Accordion>
+        <AccordionItem
+          paddingDefault="px-5 py-3"
+          defaultClass="px-6 py-4 flex items-center justify-between w-full font-medium text-left rounded border-gray-200 dark:border-gray-700"
+          activeClass="rounded-b-none"
+          borderOpenClass="rounded-b-lg border-s border-e"
+        >
           <span slot="header"
             ><div class="flex-row flex items-center space-x-2 py-0">
-              <div><CogOutline size="md" strokeWidth="1" /></div>
-              <div class="font-light text-sm">Advanced Settings</div>
+              <div><CogOutline size="md" strokeWidth="2" /></div>
+              <div class="text-sm">Advanced Options</div>
             </div></span
           >
-          {#if supportsTemperature}
-            <Label for="temperature">Temperature</Label>
-            <Helper class="pb-1"
-              >Select the model's "temperature," a setting from 0 to 2 that controls how creative or
-              predictable the assistant's responses are. For reliable, focused answers, choose a
-              temperature closer to 0.2. For more varied or creative responses, try a setting closer
-              to 1. Avoid setting the temperature much above 1 unless you need very experimental
-              responses, as it may lead to less predictable and more random answers. You can change
-              this setting anytime.</Helper
-            >
-            <Range
-              id="temperature"
-              name="temperature"
-              min="0"
-              max="2"
-              bind:value={temperatureValue}
-              step="0.1"
-              disabled={preventEdits}
-            />
-            <div class="mt-2 flex flex-row justify-between">
-              <p class="text-sm">More focused</p>
-              <p class="text-sm">Temperature: {temperatureValue}</p>
-              <p class="text-sm">More creative</p>
-            </div>
-          {/if}
-          {#if supportsReasoning}
-            <Label for="reasoning-effort">Reasoning effort</Label>
-            <Helper class="pb-1"
-              >Select your desired reasoning effort, which gives the model guidance on how much time
-              it should spend "reasoning" before creating a response to the prompt. You can specify
-              one of <span class="font-mono">low</span>, <span class="font-mono">medium</span>, or
-              <span class="font-mono">high</span>
-              for this setting, where <span class="font-mono">low</span> will favor speed, and
-              <span class="font-mono">high</span>
-              will favor more complete reasoning at the cost of slower responses. The default value is
-              <span class="font-mono">medium</span>, which is a balance between speed and reasoning
-              accuracy. You can change this setting anytime.</Helper
-            >
-            <Range
-              id="reasoning-effort"
-              name="reasoning-effort"
-              min="0"
-              max="2"
-              bind:value={reasoningEffortValue}
-              step="1"
-              disabled={preventEdits}
-            />
-            <div class="mt-2 flex flex-row justify-between">
-              <p class="text-sm">low</p>
-              <p class="text-sm">medium</p>
-              <p class="text-sm">high</p>
-            </div>
-          {/if}
+          <div class="flex flex-col gap-4 px-1">
+            {#if supportsTemperature}
+              <Label for="temperature">Temperature</Label>
+              <Helper class="pb-1"
+                >Select the model's "temperature," a setting from 0 to 2 that controls how creative
+                or predictable the assistant's responses are. For reliable, focused answers, choose
+                a temperature closer to 0.2. For more varied or creative responses, try a setting
+                closer to 1. Avoid setting the temperature much above 1 unless you need very
+                experimental responses, as it may lead to less predictable and more random answers.
+                You can change this setting anytime.</Helper
+              >
+              <Range
+                id="temperature"
+                name="temperature"
+                min="0"
+                max="2"
+                bind:value={temperatureValue}
+                step="0.1"
+                disabled={preventEdits}
+              />
+              <div class="mt-2 flex flex-row justify-between">
+                <p class="text-sm">More focused</p>
+                <p class="text-sm">Temperature: {temperatureValue}</p>
+                <p class="text-sm">More creative</p>
+              </div>
+            {/if}
+            {#if supportsReasoning}
+              <Label for="reasoning-effort">Reasoning effort</Label>
+              <Helper class="pb-1"
+                >Select your desired reasoning effort, which gives the model guidance on how much
+                time it should spend "reasoning" before creating a response to the prompt. You can
+                specify one of <span class="font-mono">low</span>,
+                <span class="font-mono">medium</span>, or
+                <span class="font-mono">high</span>
+                for this setting, where <span class="font-mono">low</span> will favor speed, and
+                <span class="font-mono">high</span>
+                will favor more complete reasoning at the cost of slower responses. The default value
+                is
+                <span class="font-mono">medium</span>, which is a balance between speed and
+                reasoning accuracy. You can change this setting anytime.</Helper
+              >
+              <Range
+                id="reasoning-effort"
+                name="reasoning-effort"
+                min="0"
+                max="2"
+                bind:value={reasoningEffortValue}
+                step="1"
+                disabled={preventEdits}
+              />
+              <div class="mt-2 flex flex-row justify-between">
+                <p class="text-sm">low</p>
+                <p class="text-sm">medium</p>
+                <p class="text-sm">high</p>
+              </div>
+            {/if}
+          </div>
         </AccordionItem>
       </Accordion>
     </div>
