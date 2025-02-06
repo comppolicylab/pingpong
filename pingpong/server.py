@@ -2307,9 +2307,7 @@ async def list_class_models(
         "o3-mini-2025-01-31",
     ]
 
-    if isinstance(openai_client, openai.AsyncAzureOpenAI) and any(
-        m.id == "gpt-4o-2024-08-06" for m in all_models.data
-    ):
+    if isinstance(openai_client, openai.AsyncAzureOpenAI):
         filtered = [m for m in filtered if m["id"] not in AZURE_UNAVAILABLE_MODELS]
 
     # Vision is not supported in Azure, set vision_support_override to False
