@@ -1927,7 +1927,7 @@ async def list_class_models(
         #     "description": "Reasoning model designed to solve hard problems across domains. Limited capabilities.",
         # },
         "o3-mini": {
-            "name": "o3-mini",
+            "name": "o3 mini",
             "sort_order": 2,
             "is_new": True,
             "highlight": False,
@@ -2102,7 +2102,7 @@ async def list_class_models(
             "name": "gpt-4o-mini-2024-07-18",
             "sort_order": 10,
             "is_latest": False,
-            "is_new": True,
+            "is_new": False,
             "highlight": False,
             "supports_vision": True,
             "supports_file_search": True,
@@ -2299,17 +2299,16 @@ async def list_class_models(
                 "description": "The latest GPT-4 Turbo preview model.",
             }
         )
-    # gpt-4o-2024-11-20 is not available when using Azure
-    if isinstance(openai_client, openai.AsyncAzureOpenAI) and any(
-        m.id == "gpt-4o-2024-08-06" for m in all_models.data
-    ):
-        filtered = [m for m in filtered if m["id"] != "gpt-4o-2024-11-20"]
 
-    # o1-2024-12-17 is not available when using Azure
-    if isinstance(openai_client, openai.AsyncAzureOpenAI) and any(
-        m.id == "o1-2024-12-17" for m in all_models.data
-    ):
-        filtered = [m for m in filtered if m["id"] != "o1-2024-12-17"]
+    AZURE_UNAVAILABLE_MODELS = [
+        "gpt-4o-2024-11-20",
+        "o1-2024-12-17",
+        "o3-mini",
+        "o3-mini-2025-01-31",
+    ]
+
+    if isinstance(openai_client, openai.AsyncAzureOpenAI):
+        filtered = [m for m in filtered if m["id"] not in AZURE_UNAVAILABLE_MODELS]
 
     # Vision is not supported in Azure, set vision_support_override to False
     if isinstance(openai_client, openai.AsyncAzureOpenAI):
