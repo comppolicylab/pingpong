@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { invalidateAll } from '$app/navigation';
+  import { goto, invalidateAll } from '$app/navigation';
   import * as api from '$lib/api';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import PingPongLogo from '$lib/components/PingPongLogo.svelte';
@@ -8,11 +8,10 @@
   import { loading } from '$lib/stores/general';
   import { happyToast, sadToast } from '$lib/toast';
   import dayjs from 'dayjs';
-  import { Button, ButtonGroup, Checkbox, Datepicker, Heading, Hr, Input, Label, Modal, P, Radio, Select, Textarea } from 'flowbite-svelte';
+  import { Button, ButtonGroup, Checkbox, Datepicker, Heading, Helper, Hr, Input, Label, Modal, P, Radio, Select, Textarea } from 'flowbite-svelte';
   import { ArrowRightOutline, PlusOutline } from 'flowbite-svelte-icons';
   import { onMount } from 'svelte';
   export let data;
-  $: externalProviders = data.externalProviders;
 
   let editModalOpen = false;
   let providerToEdit: api.ExternalLoginProvider | null = null;
@@ -27,39 +26,80 @@
 
   const handleSubmit = async (event: Event) => {
     event.preventDefault();
-    if (!providerToEdit) return;
+    $loading = true;
 
-    const formData = new FormData(event.target as HTMLFormElement);
-    const updatedProvider = {
-      display_name: formData.get('display_name') as string,
-      description: formData.get('description') as string
-    };
+    const form = event.target as HTMLFormElement;
+    const formData = new FormData(form);
+    const d = Object.fromEntries(formData.entries());
 
-    const result = await api.updateExternalLoginProvider(fetch, providerToEdit.id, updatedProvider);
-    const response = api.expandResponse(result);
-    if (response.error) {
-      sadToast(response.error.detail || 'An unknown error occurred');
-    } else {
-      happyToast(`Provider updated successfully.`);
-      providerToEdit = null;
-      invalidateAll();
-      editModalOpen = false;
+    const name = d.name?.toString();
+    if (!name) {
+      $loading = false;
+      return sadToast('Name is required');
     }
+
+    let categoryId = parseInt(d.category?.toString(), 10);
+    if (!categoryId) {
+      const newCategory = d.newCategory?.toString();
+      const showAll = d.newCategoryShowAll?.toString() === 'on';
+      if (!newCategory) {
+        $loading = false;
+        return sadToast('Category is required');
+      }
+      const rawCategory = await api.createUserAgreementCategory(fetch, { name: newCategory, show_all: showAll });
+      const categoryResponse = api.expandResponse(rawCategory);
+      if (categoryResponse.error) {
+        $loading = false;
+        return sadToast(categoryResponse.error.detail || 'Unknown error creating category');
+      }
+      categoryId = categoryResponse.data.id;
+
+      if (!categoryId) {
+        $loading = false;
+        return sadToast('Category is required');
+      }
+    }
+
+    if (!effectiveDate) {
+      $loading = false;
+      return sadToast('Date is required');
+    }
+
+    const alwaysDisplay = d.always_display?.toString() === 'on';
+    const targetGroup = d.targetGroup?.toString();
+    const code = d.code?.toString();
+    
+    const rawAgreement = await api.createUserAgreement(fetch, {
+      name,
+      category_id: categoryId,
+      effective_date: dayjs(effectiveDate).toISOString(),
+      always_display: alwaysDisplay,
+      apply_to_all: targetGroup === '1',
+      code,
+      limit_to_providers: [],
+    });
+    const agreementResponse = api.expandResponse(rawAgreement);
+    if (agreementResponse.error) {
+      $loading = false;
+      return sadToast(agreementResponse.error.detail || 'Unknown error creating agreement');
+    }
+    $loading = false;
+    happyToast('Agreement created');
+    await invalidateAll();
+    form.reset();
+    await goto(`/admin/terms`);
   };
-  let institutions: api.Institution[] = [
-    { id: 1, name: 'Institution 1', description: null, created: '2022-01-01T00:00:00Z', updated: '2022-01-01T00:00:00Z', logo: null },
-    { id: 2, name: 'Institution 2', description: null, created: '2022-01-01T00:00:00Z', updated: '2022-01-01T00:00:00Z', logo: null },
-    { id: 3, name: 'Institution 3', description: null, created: '2022-01-01T00:00:00Z', updated: '2022-01-01T00:00:00Z', logo: null },
-    { id: 4, name: 'Institution 4', description: null, created: '2022-01-01T00:00:00Z', updated: '2022-01-01T00:00:00Z', logo: null },
-    { id: 5, name: 'Institution 5', description: null, created: '2022-01-01T00:00:00Z', updated: '2022-01-01T00:00:00Z', logo: null }
-  ];
-  let selectedInst = '';
-  let colors = "text-purple-500";
-  let selectedValue = 1;
-  let selectedColor = "";
 
   import MMMM from '$lib/components/CustomModal.svelte';
   let showModal = false;
+
+  $: categories = data.categories;
+  $: externalProviders = data.externalProviders;
+
+  let selectedCategory = '';
+  let selectedTargetGroupValue = '1';
+  let code = '';
+  let effectiveDate: Date | null = null;
 </script>
 
 <div class="relative h-full w-full flex flex-col">
@@ -85,59 +125,74 @@
         >Create User Agreement</Heading
       >
     </div>
-    <form class="flex flex-col gap-4">
+    <form class="flex flex-col gap-4" on:submit={handleSubmit}>
       <div>
         <Label for="name" class="mb-1">Agreement Name</Label>
+        <Helper class="mb-2">This name will be used to identify user agreements on the Admin Page and will not be displayed to users.</Helper>
         <Input type="text" name="name" id="name" disabled={$loading} />
       </div>
       <div>
         <Label for="category" class="mb-1">Agreement Type</Label>
-        <Select name="institution" id="institution" bind:value={selectedInst} disabled={$loading}>
-          {#each institutions as inst}
+        <Helper class="mb-2">Use Agreement Types to change how different user agreements may interact together.</Helper>
+        <Select name="category" id="category" bind:value={selectedCategory} disabled={$loading} placeholder="Select an agreement type...">
+          {#each categories as inst}
             <option value={inst.id}>{inst.name}</option>
           {/each}
             <option disabled>──────────</option>
             <option value="0">+ Create new</option>
         </Select>
-        {#if selectedInst === '0'}
-          <div class="pt-4">
-            <Label for="newInstitution">New Type</Label>
-            <Input type="text" name="newInstitution" id="new-inst" />
+        {#if selectedCategory === '0'}
+          <div class="pt-4 flex flex-row gap-5">
+            <div class="flex flex-col gap-2 w-1/3">
+              <Label for="newCategory">Agreement Type Name</Label>
+              <Input type="text" name="newCategory" id="newCategory" />
+            </div>
+            <div class="flex flex-col">
+              <Label for="newCategoryShowAll" class="mb-1">Display Options</Label>
+              <Helper class="mb-2">By default, users will only be required to read and agree to the latest version of each agreement type.</Helper>
+              <Checkbox
+                id="newCategoryShowAll"
+                name="newCategoryShowAll"
+                >Require users to read and agree to every user agreement of this type.</Checkbox
+              >
+            </div>
           </div>
         {/if}
       </div>
       <div>
-        <Label for="date">Effective Date</Label>
-        <Datepicker disabled={$loading} color="blue"/>
+        <Label for="date" class="mb-1">Effective Date</Label>
+        <Helper class="mb-2">This date will be used to determine when the user agreement starts being displayed to users.</Helper>
+        <Datepicker bind:value={effectiveDate} disabled={$loading} color="blue"/>
       </div>
       <div>
-        <Label for="always_display">Display</Label>
+        <Label for="always_display" class="mb-1">Display Options</Label>
         <Checkbox
             id="always_display"
             name="always_display"
             disabled={$loading}
-            >Require all every user to agree to this agreement.</Checkbox
+            >Require every user to agree to this agreement, even if they are newer agreements in this agreement type.</Checkbox
           >
       </div>
       <div>
-      <Label for="options">Options</Label>
-      <div class="flex flex-col gap-4">
-        <Radio name="example1" value="1" bind:group={selectedValue}>Display to all users</Radio>
-        <Radio name="example1" value="2" bind:group={selectedValue}>Only display to users of certain providers</Radio>
-      </div>  
+      <Label for="options" class="mb-1">Target Group</Label>
+      <Helper class="mb-2">Choose whether to show this agreement to all users or display to specific user groups.</Helper>
+      <div class="flex flex-col gap-2">
+        <Radio name="targetGroup" value="1" bind:group={selectedTargetGroupValue}>Display to all PingPong users.</Radio>
+        <Radio name="targetGroup" value="2" bind:group={selectedTargetGroupValue}>Only display to users of specific External Login Providers.</Radio>
+      </div>
       </div>
       <div>
-        <Label for="description" class="mb-1">Description</Label>
-        <Textarea name="description" id="description" bind:value={selectedColor} class="font-mono" disabled={$loading} />
+        <Label for="code" class="mb-1">Code</Label>
+        <Textarea name="code" id="code" bind:value={code} class="font-mono" disabled={$loading} />
       </div>
+      <Hr class="mt-8" />
+      <div class="flex flex-row justify-end gap-4 mt-8">
+        <ButtonGroup>
+          <Button color="blue" type="submit">Create</Button>
+          <Button color="light" type="button">Cancel</Button>
+        </ButtonGroup>
+      </div>  
     </form>
-    <Hr class="mt-8" />
-    <div class="flex flex-row justify-end gap-4 mt-8">
-      <ButtonGroup>
-        <Button color="blue" type="submit">Create</Button>
-        <Button color="light" type="button">Cancel</Button>
-      </ButtonGroup>
-    </div>
     <button on:click={() => (showModal = true)} class="bg-green-500 text-white p-2 rounded">
       Open Modal
     </button>
@@ -151,7 +206,7 @@
       </header>
       <div class="px-12 py-8 bg-white">
         <div class="flex flex-col gap-4">
-          <SanitizeFlowbite html={selectedColor} />
+          <SanitizeFlowbite html={code} />
           <div class="flex-row gap-4 text-center flex justify-end mt-4">
             <Button
               class="text-blue-dark-40 bg-white border border-blue-dark-40 rounded-full hover:bg-blue-dark-40 hover:text-white"
@@ -167,7 +222,7 @@
       </div>
     </div>
   </div>
-</div>    
+</div>
   </div>
   </div>
 </div>

@@ -457,11 +457,52 @@ class UserAgreementCategory(Base):
         return category
 
     @classmethod
+    async def get_or_create(
+        cls, session: AsyncSession, schema: schemas.CreateUserAgreementCategoryRequest
+    ) -> "UserAgreementCategory":
+        existing = await cls.get_by_name(session, schema.name)
+        if existing:
+            existing.show_all = schema.show_all
+            session.add(existing)
+            await session.flush()
+            await session.refresh(existing)
+            return existing
+
+        category = UserAgreementCategory(name=schema.name, show_all=schema.show_all)
+        session.add(category)
+        await session.flush()
+        await session.refresh(category)
+        return category
+
+    @classmethod
     async def get_by_name(
         cls, session: AsyncSession, name: str
     ) -> "UserAgreementCategory":
         stmt = select(UserAgreementCategory).where(UserAgreementCategory.name == name)
         return await session.scalar(stmt)
+    
+    @classmethod    
+    async def get_all(cls, session: AsyncSession) -> list["UserAgreementCategory"]:
+        stmt = select(UserAgreementCategory)
+        result = await session.execute(stmt)
+        return [row.UserAgreementCategory for row in result]
+    
+    @classmethod
+    async def update(
+        cls,
+        session: AsyncSession,
+        id_: int,
+        data: schemas.UpdateUserAgreementCategoryRequest,
+    ) -> "UserAgreementCategory":
+        data_dict = data.model_dump(exclude_none=True)
+        stmt = (
+            update(UserAgreementCategory)
+            .where(UserAgreementCategory.id == id_)
+            .values(**data_dict)
+            .returning(UserAgreementCategory)
+        )
+        result = await session.scalar(stmt)
+        return result
 
 
 class UserAgreement(Base):
@@ -492,11 +533,18 @@ class UserAgreement(Base):
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     @classmethod
-    async def get_pending_user_agreement(
+    async def get_by_id(cls, session: AsyncSession, id_: int) -> "UserAgreement":
+        stmt = select(UserAgreement).where(
+            and_(UserAgreement.id == id_, UserAgreement.active.is_(True))
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_pending_user_agreement_id(
         cls, session: AsyncSession, user_id: int
-    ) -> "UserAgreement":
+    ) -> int:
         stmt = (
-            select(UserAgreement)
+            select(UserAgreement.id)
             .join(UserAgreementCategory)
             .where(
                 and_(
@@ -533,25 +581,50 @@ class UserAgreement(Base):
     async def create(
         cls,
         session: AsyncSession,
-        name: str,
-        code: str,
-        category_id: int,
-        effective_date: datetime,
-        always_display: bool = False,
-        apply_to_all: bool = False,
+        schema: schemas.CreateUserAgreementRequest,
     ) -> "UserAgreement":
         agreement = UserAgreement(
-            name=name,
-            code=code,
-            category_id=category_id,
-            effective_date=effective_date,
-            always_display=always_display,
-            apply_to_all=apply_to_all,
+            **schema.model_dump(exclude_none=True),
         )
         session.add(agreement)
         await session.flush()
         await session.refresh(agreement)
         return agreement
+
+    @classmethod
+    async def accept_agreement(
+        cls,
+        session: AsyncSession,
+        user_id: int,
+        agreement_id: int,
+    ) -> "UserAgreementAcceptance":
+        acceptance = UserAgreementAcceptance(
+            user_id=user_id, agreement_id=agreement_id, accepted_at=datetime.utcnow()
+        )
+        session.add(acceptance)
+        await session.flush()
+        await session.refresh(acceptance)
+        return acceptance
+
+    @classmethod
+    async def get_all(cls, session: AsyncSession) -> list["UserAgreement"]:
+        stmt = select(UserAgreement)
+        result = await session.execute(stmt)
+        return [row.UserAgreement for row in result]
+
+    @classmethod
+    async def update(
+        cls, session: AsyncSession, id_: int, data: schemas.UpdateUserAgreementRequest
+    ) -> "UserAgreement":
+        data_dict = data.model_dump(exclude_none=True)
+        stmt = (
+            update(UserAgreement)
+            .where(UserAgreement.id == id_)
+            .values(**data_dict)
+            .returning(UserAgreement)
+        )
+        result = await session.scalar(stmt)
+        return result
 
 
 class UserAgreementAcceptance(Base):
@@ -569,6 +642,34 @@ class UserAgreementAcceptance(Base):
     agreement = relationship(
         "UserAgreement", back_populates="acceptances", lazy="selectin"
     )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "agreement_id", name="_user_agreement_uc"),
+    )
+
+    @classmethod
+    async def accept_agreement(
+        cls,
+        session: AsyncSession,
+        user_id: int,
+        agreement_id: int,
+        accepted_at: datetime,
+    ) -> "UserAgreementAcceptance":
+        stmt = (
+            _get_upsert_stmt(session)(UserAgreementAcceptance)
+            .values(
+                user_id=user_id,
+                agreement_id=agreement_id,
+                accepted_at=accepted_at,
+            )
+            .on_conflict_do_update(
+                index_elements=["user_id", "agreement_id"],
+                set_=dict(accepted_at=accepted_at),
+            )
+            .returning(UserAgreementAcceptance)
+        )
+        result = await session.scalar(stmt)
+        return result
 
 
 class ExternalLoginProvider(Base):

@@ -2,12 +2,18 @@ import type { PageLoad } from './$types';
 import * as api from '$lib/api';
 
 export const load: PageLoad = async ({ fetch }) => {
-  const externalProviders = await api.getExternalLoginProviders(fetch).then(api.expandResponse);
+  const userAgreements = await api.getUserAgreements(fetch).then(api.expandResponse);
 
-  const sortedProviders = externalProviders.error
+  const sortedAgreements = userAgreements.error
     ? []
-    : externalProviders.data.providers.sort((a, b) => a.name.localeCompare(b.name));
+    : userAgreements.data.agreements.sort((a, b) => {
+        if (a.category.id === b.category.id) {
+          return new Date(a.effective_date).getTime() - new Date(b.effective_date).getTime();
+        }
+        return a.category.id - b.category.id;
+      });
+      console.log(sortedAgreements);
   return {
-    externalProviders: sortedProviders
+    agreements: sortedAgreements,
   };
 };

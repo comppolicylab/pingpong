@@ -163,12 +163,18 @@ async def parse_session_token(request: Request, call_next):
             if user.state == schemas.UserState.UNVERIFIED:
                 await user.verify(request.state.db)
 
+            # Check if there is pending user agreement
+            agreement_id = await models.UserAgreement.get_pending_user_agreement_id(
+                request.state.db, user.id
+            )
+
             request.state.session = schemas.SessionState(
                 token=token,
                 status=schemas.SessionStatus.VALID,
                 error=None,
                 user=user,
                 profile=schemas.Profile.from_email(user.email),
+                pending_term_id=agreement_id,
             )
         except TimeException as e:
             request.state.session = schemas.SessionState(
@@ -4122,6 +4128,147 @@ async def get_grants(query: schemas.GrantsQuery, request: Request):
             for i in range(len(query.grants))
         ],
     }
+
+
+@v1.get(
+    "/me/terms/{agreement_id}",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.UserAgreementDisplay,
+)
+async def get_user_agreement(
+    agreement_id: str,
+    request: Request,
+):
+    """Get the user agreement."""
+    agreement = await models.UserAgreement.get_by_id(
+        request.state.db, int(agreement_id)
+    )
+    if not agreement:
+        raise HTTPException(404, "Agreement not found.")
+    return agreement
+
+
+@v1.post(
+    "/me/terms/{agreement_id}",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.GenericStatus,
+)
+async def accept_user_agreement(agreement_id: str, request: Request):
+    """Accept the user agreement."""
+    acceptance = await models.UserAgreementAcceptance.accept_agreement(
+        request.state.db,
+        request.state.session.user.id,
+        int(agreement_id),
+        accepted_at=get_now_fn(request)(),
+    )
+    if not acceptance:
+        raise HTTPException(404, "Agreement not found.")
+
+    return {"status": "ok"}
+
+
+@v1.get(
+    "/admin/terms",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.UserAgreementsInfo,
+)
+async def list_user_agreements(request: Request):
+    """Get the user agreements."""
+    agreements = await models.UserAgreement.get_all(request.state.db)
+    return {"agreements": agreements}
+
+
+@v1.post(
+    "/admin/terms",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.GenericStatus,
+)
+async def create_user_agreement(
+    req: schemas.CreateUserAgreementRequest,
+    request: Request,
+):
+    """Create a user agreement."""
+    await models.UserAgreement.create(request.state.db, req)
+    return {"status": "ok"}
+
+
+@v1.get(
+    "/admin/terms/categories",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.UserAgreementCategories,
+)
+async def list_user_agreement_categories(request: Request):
+    """Get the user agreement categories."""
+    categories = await models.UserAgreementCategory.get_all(request.state.db)
+    return {"categories": categories}
+
+
+@v1.post(
+    "/admin/terms/categories",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.UserAgreementCategory,
+)
+async def create_user_agreement_category(
+    req: schemas.CreateUserAgreementCategoryRequest,
+    request: Request,
+):
+    """Create a user agreement category."""
+    category = await models.UserAgreementCategory.get_or_create(request.state.db, req)
+    return category
+
+@v1.put(
+    "/admin/terms/categories/{category_id}",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.GenericStatus,
+)
+async def update_user_agreement_category(
+    category_id: str,
+    req: schemas.UpdateUserAgreementCategoryRequest,
+    request: Request,
+):
+    """Update a user agreement category."""
+    category = await models.UserAgreementCategory.update(
+        request.state.db, int(category_id), req
+    )
+    if not category:
+        raise HTTPException(404, "Category not found.")
+    return {"status": "ok"}
+
+@v1.get(
+    "/admin/terms/{agreement_id}",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.UserAgreementDetail,
+)
+async def get_user_agreement_detail(
+    agreement_id: str,
+    request: Request,
+):
+    """Get the user agreement."""
+    agreement = await models.UserAgreement.get_by_id(
+        request.state.db, int(agreement_id)
+    )
+    if not agreement:
+        raise HTTPException(404, "Agreement not found.")
+    return agreement
+
+
+@v1.put(
+    "/admin/terms/{agreement_id}",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.GenericStatus,
+)
+async def update_user_agreement(
+    agreement_id: str,
+    req: schemas.UpdateUserAgreementRequest,
+    request: Request,
+):
+    """Update the user agreement."""
+    agreement = await models.UserAgreement.update(
+        request.state.db, int(agreement_id), req
+    )
+    if not agreement:
+        raise HTTPException(404, "Agreement not found.")
+    return {"status": "ok"}
 
 
 @v1.get(

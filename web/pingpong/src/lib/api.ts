@@ -2524,3 +2524,125 @@ export const updateUserInfo = async (f: Fetcher, data: ExtraUserInfo) => {
   const url = `me`;
   return await PUT<ExtraUserInfo, AppUser>(f, url, data);
 };
+
+/**
+ * Information about a user agreement.
+ */
+
+export type UserAgreementDisplay = {
+  id: number;
+  code: string;
+};
+
+export type UserAgreementCategory = {
+  id: number;
+  name: string;
+  show_all: boolean;
+};
+
+export type UserAgreementCategories = {
+  categories: UserAgreementCategory[];
+};
+
+export type UserAgreementInfo = {
+  id: number;
+  name: string;
+  active: boolean;
+  category: UserAgreementCategory;
+  effective_date: string;
+  always_display: boolean;
+  apply_to_all: boolean;
+  limit_to_providers: ExternalLoginProvider[];
+}
+
+export type UserAgreementsInfo = {
+  agreements: UserAgreementInfo[];
+};
+
+export type UserAgreementDetail = {
+  id: number;
+  name: string;
+  code: string;
+  active: boolean;
+  category: UserAgreementCategory;
+  effective_date: string;
+  always_display: boolean;
+  apply_to_all: boolean;
+  limit_to_providers: ExternalLoginProvider[];
+};
+
+export type UserAgreementsDetail = {
+  agreements: UserAgreementDetail;
+}
+
+export type CreateUserAgreementCategoryRequest = {
+  name: string;
+  show_all: boolean;
+};
+
+export type CreateUserAgreementRequest = {
+  name: string;
+  code: string;
+  category_id: number;
+  effective_date: string;
+  always_display: boolean;
+  apply_to_all: boolean;
+  limit_to_providers: number[];
+};
+
+export type UpdateUserAgreementRequest = {
+  name?: string;
+  code?: string;
+  active?: boolean;
+  category_id?: number;
+  effective_date?: string;
+  always_display?: boolean;
+  apply_to_all?: boolean;
+  limit_to_providers?: number[];
+};
+
+
+export const getUserAgreement = async (f: Fetcher, agreement_id: number) => {
+  const url = `me/terms/${agreement_id}`;
+  return await GET<never, UserAgreementDisplay>(f, url);
+}
+
+export const acceptUserAgreement = async (f: Fetcher, agreement_id: number) => {
+  const url = `me/terms/${agreement_id}`;
+  return await POST<never, GenericStatus>(f, url);
+}
+
+export const getUserAgreements = async (f: Fetcher) => {
+  const url = `admin/terms`;
+  return await GET<never, UserAgreementsInfo>(f, url);
+}
+
+export const getUserAgreementCategories = async (f: Fetcher) => {
+  const url = `admin/terms/categories`;
+  return await GET<never, UserAgreementCategories>(f, url);
+}
+
+export const createUserAgreementCategory = async (f: Fetcher, data: CreateUserAgreementCategoryRequest) => {
+  const url = `admin/terms/categories`;
+  return await POST<CreateUserAgreementCategoryRequest, UserAgreementCategory>(f, url, data);
+}
+
+export const updateUserAgreementCategory = async (f: Fetcher, category_id: number, data: CreateUserAgreementCategoryRequest) => {
+  const url = `admin/terms/categories/${category_id}`;
+  return await PUT<CreateUserAgreementCategoryRequest, never>(f, url, data);
+};
+
+export const createUserAgreement = async (f: Fetcher, data: CreateUserAgreementRequest) => {
+  const url = `admin/terms`;
+  return await POST<CreateUserAgreementRequest, UserAgreementDetail>(f, url, data);
+}
+
+export const getUserAgreementDetail = async (f: Fetcher, agreement_id: number) => {
+  const url = `admin/terms/${agreement_id}`;
+  return await GET<never, UserAgreementsDetail>(f, url);
+}
+
+export const updateUserAgreement = async (f: Fetcher, agreement_id: number, data: UpdateUserAgreementRequest) => {
+  const url = `admin/terms/${agreement_id}`;
+  return await PUT<UpdateUserAgreementRequest, UserAgreementDetail>(f, url, data);
+}

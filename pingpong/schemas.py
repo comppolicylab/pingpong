@@ -1099,6 +1099,7 @@ class SessionState(BaseModel):
     token: SessionToken | None = None
     user: User | None = None
     profile: Profile | None = None
+    pending_term_id: int | None = None
 
 
 class Support(BaseModel):
@@ -1154,3 +1155,99 @@ class GrantsList(BaseModel):
     target_type: str
     relation: str
     target_ids: list[int]
+
+
+class UserAgreementDisplay(BaseModel):
+    id: int
+    code: str
+
+    class Config:
+        from_attributes = True
+
+
+class UserAgreementCategory(BaseModel):
+    id: int
+    name: str
+    show_all: bool
+
+    class Config:
+        from_attributes = True
+
+
+class UserAgreementCategories(BaseModel):
+    categories: list[UserAgreementCategory]
+
+    class Config:
+        from_attributes = True
+
+
+class UserAgreementInfo(BaseModel):
+    id: int
+    name: str
+    active: bool
+    category: UserAgreementCategory
+    effective_date: datetime
+    always_display: bool
+    apply_to_all: bool
+
+    class Config:
+        from_attributes = True
+
+
+class UserAgreementDetail(BaseModel):
+    id: int
+    name: str
+    code: str
+    active: bool
+    category: UserAgreementCategory
+    effective_date: datetime
+    always_display: bool
+    apply_to_all: bool
+    limit_to_providers: list[ExternalLoginProvider]
+
+    class Config:
+        from_attributes = True
+
+
+class UserAgreementsInfo(BaseModel):
+    agreements: list[UserAgreementInfo]
+
+    class Config:
+        from_attributes = True
+
+
+class UserAgreementsDetail(BaseModel):
+    agreements: list[UserAgreementDetail]
+
+    class Config:
+        from_attributes = True
+
+
+class CreateUserAgreementCategoryRequest(BaseModel):
+    name: str
+    show_all: bool
+
+
+class UpdateUserAgreementRequest(BaseModel):
+    name: str | None = None
+    code: str | None = None 
+    active: bool | None = None 
+    category_id: int | None = None 
+    effective_date: datetime | None = None 
+    always_display: bool | None = None 
+    apply_to_all: bool | None = None 
+    limit_to_providers: list[int] | None = None
+
+
+class CreateUserAgreementRequest(BaseModel):
+    name: str
+    code: str
+    category_id: int
+    effective_date: datetime
+    always_display: bool
+    apply_to_all: bool
+    limit_to_providers: list[int]
+
+class UpdateUserAgreementCategoryRequest(BaseModel):
+    name: str | None = None
+    show_all: bool | None = None

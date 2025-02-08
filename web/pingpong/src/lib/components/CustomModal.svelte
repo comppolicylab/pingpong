@@ -1,14 +1,14 @@
 <script lang="ts">
     export let isOpen: boolean;
     export let onClose: () => void;
-  
+
     const handleClose = (e: MouseEvent) => {
       if ((e.target as HTMLElement).id === "modal-overlay") {
         onClose();
       }
     };
   </script>
-  
+
   {#if isOpen}
     <div
       id="modal-overlay"
