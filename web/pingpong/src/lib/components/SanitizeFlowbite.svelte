@@ -23,7 +23,6 @@
   $: {
     if (typeof html === 'string') {
       sanitized = DOMPurify.sanitize(html, { ADD_TAGS: flowbiteSvelteTags, ADD_ATTR: ['customsize'] });
-      console.log(DOMPurify.removed);
     } else {
       sanitized = '';
       html.then((content) => {

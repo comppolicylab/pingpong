@@ -12,7 +12,6 @@ export const load: PageLoad = async ({ fetch }) => {
         }
         return a.category.id - b.category.id;
       });
-      console.log(sortedAgreements);
   return {
     agreements: sortedAgreements,
   };
