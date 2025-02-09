@@ -45,6 +45,7 @@ class ModelStatisticsResponse(BaseModel):
 class AssistantModelInfo(BaseModel):
     class_id: int
     assistant_id: int
+    last_edited_at: datetime
 
 
 class AssistantModelInfoResponse(BaseModel):

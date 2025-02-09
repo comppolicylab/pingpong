@@ -937,7 +937,14 @@ async def get_models_stats(request: Request):
 )
 async def get_model_assistants(model_name: str, request: Request):
     assistants = await models.Assistant.get_by_model(request.state.db, model_name)
-    stats = [{"assistant_id": a.id, "class_id": a.class_id} for a in assistants]
+    stats = [
+        {
+            "assistant_id": a.id,
+            "class_id": a.class_id,
+            "last_edited_at": a.updated or a.created,
+        }
+        for a in assistants
+    ]
     return schemas.AssistantModelInfoResponse(assistants=stats, model=model_name)
 
 
