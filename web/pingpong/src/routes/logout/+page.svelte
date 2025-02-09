@@ -12,9 +12,7 @@
       <div class="text-4xl text-center font-serif font-bold mb-2 text-blue-dark-50">
         We're logging you out...
       </div>
-      <div class="text-lg text-center">
-        Please wait a moment.
-      </div>  
+      <div class="text-lg text-center">Please wait a moment.</div>
     </div>
   </div>
 </div>
