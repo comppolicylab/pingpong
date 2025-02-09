@@ -49,11 +49,6 @@ from .models import (
     User,
     Class,
     UserClassRole,
-    UserAgreement,
-    UserAgreementCategory,
-    ExternalLoginProvider,
-    _get_upsert_stmt,
-    user_agreement_external_login_association,
 )
 from .authz.admin_migration import remove_class_admin_perms
 
@@ -84,11 +79,6 @@ def export() -> None:
 
 @cli.group("schedule")
 def schedule() -> None:
-    pass
-
-
-@cli.group("agreements")
-def agreements() -> None:
     pass
 
 
@@ -702,119 +692,6 @@ def run_dynamic_tasks_with_args(host: str, port: int, tasks: list[str]) -> None:
     # Run the Uvicorn server in the background
     with server.run_in_thread():
         asyncio.run(_parse_tasks())
-
-
-@agreements.command("create_user_agreement_category")
-@click.argument("name")
-def create_user_agreement_category(name: str) -> None:
-    async def _create_user_agreement_category() -> None:
-        async with config.db.driver.async_session() as session:
-            category = await UserAgreementCategory.get_by_name(session, name)
-            if category:
-                logger.info(f"User agreement category '{name}' already exists.")
-                return
-
-            category = UserAgreementCategory(name=name)
-            session.add(category)
-            await session.commit()
-            await session.refresh(category)
-            logger.info(
-                f"User agreement category '{name}' created with ID {category.id}"
-            )
-
-    asyncio.run(_create_user_agreement_category())
-
-
-@agreements.command("create_user_agreement")
-@click.argument("name")
-@click.argument("category_name")
-@click.argument("code")
-@click.argument("effective_date", type=click.DateTime())
-@click.option("--always_display", is_flag=True)
-@click.option("--apply_to_all", is_flag=True)
-@click.option("--active", is_flag=True)
-@click.option("--providers", multiple=True)
-def create_user_agreement(
-    name: str,
-    category_name: str,
-    code: str,
-    effective_date: datetime,
-    always_display: bool,
-    apply_to_all: bool,
-    providers: list[str],
-    active: bool,
-) -> None:
-    async def _create_user_agreement() -> None:
-        async with config.db.driver.async_session() as session:
-            category = await UserAgreementCategory.get_by_name(session, category_name)
-            if not category:
-                raise ValueError(f"User agreement category '{category_name}' not found")
-
-            if apply_to_all and providers:
-                raise ValueError(
-                    "Cannot apply to all providers and limit to specific providers"
-                )
-
-            # Find the provider IDs for the given provider names
-            provider_ids = []
-            for provider_name in providers:
-                provider = await ExternalLoginProvider.get_by_name(
-                    session, provider_name
-                )
-                if not provider:
-                    raise ValueError(f"Provider '{provider_name}' not found")
-                provider_ids.append(provider.id)
-
-            agreement = UserAgreement(
-                name=name,
-                category_id=category.id,
-                code=code,
-                effective_date=effective_date,
-                always_display=always_display,
-                apply_to_all=apply_to_all,
-                active=active,
-            )
-            session.add(agreement)
-            await session.commit()
-            await session.refresh(agreement)
-
-            if provider_ids:
-                # Add the provider IDs to the user_agreement_external_login_association table
-                provider_agreement_pairs = [
-                    (agreement.id, provider_id) for provider_id in provider_ids
-                ]
-                stmt = (
-                    _get_upsert_stmt(session)(user_agreement_external_login_association)
-                    .values(provider_agreement_pairs)
-                    .on_conflict_do_nothing(
-                        index_elements=["agreement_id", "provider_id"],
-                    )
-                )
-                await session.execute(stmt)
-                await session.commit()
-            logger.info(f"User agreement '{name}' created with ID {agreement.id}")
-
-    asyncio.run(_create_user_agreement())
-
-
-@agreements.command("get_pending_user_agreement")
-@click.argument("email")
-def get_pending_user_agreement(email: str) -> None:
-    async def _get_pending_user_agreement() -> None:
-        async with config.db.driver.async_session() as session:
-            user = await User.get_by_email(session, email)
-            if not user:
-                raise ValueError(f"User with email '{email}' not found")
-
-            agreement = await UserAgreement.get_pending_user_agreement(session, user.id)
-            if not agreement:
-                logger.info(f"No pending user agreement found for user '{email}'")
-                return
-
-            logger.info(f"Pending user agreement found for user '{email}':")
-            logger.info(agreement.__dict__)
-
-    asyncio.run(_get_pending_user_agreement())
 
 
 if __name__ == "__main__":

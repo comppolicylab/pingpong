@@ -165,7 +165,7 @@ async def parse_session_token(request: Request, call_next):
 
             # Check if there is pending user agreement
             agreement_id = await models.UserAgreement.get_pending_user_agreement_id(
-                request.state.db, user.id
+                request.state.db, user.id, current_time=get_now_fn(request)()
             )
 
             request.state.session = schemas.SessionState(

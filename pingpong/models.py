@@ -558,7 +558,7 @@ class UserAgreement(Base):
 
     @classmethod
     async def get_pending_user_agreement_id(
-        cls, session: AsyncSession, user_id: int
+        cls, session: AsyncSession, user_id: int, current_time: datetime
     ) -> int:
         UA = aliased(UserAgreement)
         UAA = aliased(UserAgreementAcceptance)
@@ -689,6 +689,10 @@ class UserAgreementAcceptance(Base):
                 user_id=user_id,
                 agreement_id=agreement_id,
                 accepted_at=accepted_at,
+            )
+            .on_conflict_do_update(
+                index_elements=["user_id", "agreement_id"],
+                set_=dict(accepted_at=accepted_at),
             )
             .returning(UserAgreementAcceptance)
         )
