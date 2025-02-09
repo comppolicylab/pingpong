@@ -920,6 +920,35 @@ async def get_stats(request: Request):
 
 
 @v1.get(
+    "/stats/models",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.ModelStatisticsResponse,
+)
+async def get_models_stats(request: Request):
+    counts = await models.Assistant.get_count_by_model(request.state.db)
+    stats = [{"model": k, "assistant_count": v} for (k, v) in counts]
+    return schemas.ModelStatisticsResponse(statistics=stats)
+
+
+@v1.get(
+    "/stats/models/{model_name}/assistants",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.AssistantModelInfoResponse,
+)
+async def get_model_assistants(model_name: str, request: Request):
+    assistants = await models.Assistant.get_by_model(request.state.db, model_name)
+    stats = [
+        {
+            "assistant_id": a.id,
+            "class_id": a.class_id,
+            "last_edited_at": a.updated or a.created,
+        }
+        for a in assistants
+    ]
+    return schemas.AssistantModelInfoResponse(assistants=stats, model=model_name)
+
+
+@v1.get(
     "/classes",
     dependencies=[Depends(LoggedIn())],
     response_model=schemas.Classes,
