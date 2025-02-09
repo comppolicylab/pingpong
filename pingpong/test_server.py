@@ -12,6 +12,7 @@ async def test_me_without_token(api):
         "error": None,
         "profile": None,
         "status": "missing",
+        "pending_term_id": None,
         "token": None,
         "user": None,
     }
@@ -28,6 +29,7 @@ async def test_me_with_expired_token(api, now):
     assert response.json() == {
         "error": "Token expired",
         "profile": None,
+        "pending_term_id": None,
         "status": "invalid",
         "token": None,
         "user": None,
@@ -52,6 +54,7 @@ async def test_me_with_invalid_token(api):
         "profile": None,
         "status": "invalid",
         "token": None,
+        "pending_term_id": None,
         "user": None,
     }
 
@@ -68,6 +71,7 @@ async def test_me_with_valid_token_but_missing_user(api, now):
         "error": "We couldn't locate your account. Please try logging in again.",
         "profile": None,
         "status": "error",
+        "pending_term_id": None,
         "token": None,
         "user": None,
     }
@@ -108,6 +112,7 @@ async def test_me_with_valid_user(api, user, now, valid_user_token):
             "state": "verified",
             "updated": None,
         },
+        "pending_term_id": None,
     }
 
 
