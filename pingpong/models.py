@@ -3,7 +3,16 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional, Union, Callable, Coroutine, Any
 
-from sqlalchemy import Boolean, Column, DateTime, Float, UniqueConstraint, not_, or_
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    UniqueConstraint,
+    not_,
+    or_,
+    union_all,
+)
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
     ForeignKey,
@@ -447,6 +456,8 @@ class UserAgreementCategory(Base):
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
+    __table_args__ = ( Index("ix_user_agreement_categories_name", "name"),)
+
     @classmethod
     async def create(
         cls, session: AsyncSession, name: str, show_all: bool = False
@@ -515,6 +526,11 @@ class UserAgreementCategory(Base):
 
 class UserAgreement(Base):
     __tablename__ = "user_agreements"
+    __table_args__ = (
+        Index("ix_user_agreements_category_id", "category_id"),
+        Index("ix_user_agreements_effective_date", "effective_date"),
+        Index("ix_user_agreements_active", "active"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String, nullable=False)
@@ -560,55 +576,149 @@ class UserAgreement(Base):
     async def get_pending_user_agreement_id(
         cls, session: AsyncSession, user_id: int, current_time: datetime
     ) -> int:
+        """
+        For each category:
+        - If any mandatory (UserAgreement.always_display=TRUE, UserAgreementCategory.show_all=TRUE) agreements exist, pick the earliest effective_date among them.
+        - Otherwise, pick the single newest (effective_date DESC) date-based agreement (always_display=FALSE).
+        Then among all categories' chosen entries, pick the one with the earliest effective_date overall.
+        """
+
+        # ----------------------------------------------------------------
+        # Common rules for mandatory and date-based categories/agreements:
+        # ----------------------------------------------------------------
+
+        # Must be active
+        # Must not have been accepted by this user
+        # Must be in effect now (or no effective_date set)
+        # Must not be overshadowed by a newer agreement in the same category
+
         UA = aliased(UserAgreement)
         UAA = aliased(UserAgreementAcceptance)
 
-        stmt = (
-            select(UserAgreement.id)
-            .join(UserAgreementCategory)
+        common_filters = [
+            UserAgreement.active.is_(True),
+            not_(
+                UserAgreement.acceptances.any(
+                    UserAgreementAcceptance.user_id == user_id
+                )
+            ),
+            or_(
+                UserAgreement.effective_date <= current_time,
+                UserAgreement.effective_date.is_(None),
+            ),
+            not_(
+                select(UAA.id)
+                .join(UA, UAA.agreement)
+                .where(
+                    and_(
+                        UAA.user_id == user_id,
+                        UA.category_id == UserAgreement.category_id,
+                        UA.effective_date > UserAgreement.effective_date,
+                    )
+                )
+                .exists()
+            ),
+            # Must apply_to_all or be limited to an ExternalLoginProvider that
+            # this user has
+            or_(
+                UserAgreement.apply_to_all.is_(True),
+                UserAgreement.limit_to_providers.any(
+                    ExternalLoginProvider.external_logins.any(
+                        ExternalLogin.user_id == user_id
+                    )
+                ),
+            ),
+        ]
+
+        # ----------------------------------------------------------------
+        #  Subquery #1: mandatory_agreements
+        #  For categories that have at least one mandatory item,
+        #  we want the earliest date among them.
+        # ----------------------------------------------------------------
+        mandatory_agreements_stmt = (
+            select(
+                UserAgreement.id.label("ua_id"),
+                UserAgreement.category_id.label("cat_id"),
+                func.row_number()
+                .over(
+                    partition_by=UserAgreement.category_id,
+                    order_by=UserAgreement.effective_date.asc().nulls_first(),
+                )
+                .label("category_rank"),
+            )
+            .join(UserAgreementCategory, UserAgreement.category)
             .where(
                 and_(
-                    UserAgreement.active.is_(True),
+                    *common_filters,
                     or_(
-                        UserAgreementCategory.show_all.is_(True),
                         UserAgreement.always_display.is_(True),
-                        # The user has not accepted a newer agreement
-                        not_(
-                            select(UAA.id)
-                            .join(UA, UAA.agreement)
-                            .where(
-                                and_(
-                                    UAA.user_id == user_id,
-                                    UA.category_id == UserAgreementCategory.id,
-                                    UA.effective_date > UserAgreement.effective_date,
-                                )
-                            )
-                            .exists()
-                        ),
-                    ),
-                    not_(
-                        UserAgreement.acceptances.any(
-                            UserAgreementAcceptance.user_id == user_id
-                        )
-                    ),
-                    or_(
-                        UserAgreement.apply_to_all.is_(True),
-                        UserAgreement.limit_to_providers.any(
-                            ExternalLoginProvider.external_logins.any(
-                                ExternalLogin.user_id == user_id
-                            )
-                        ),
-                    ),
-                    or_(
-                        UserAgreement.effective_date <= datetime.utcnow(),
-                        UserAgreement.effective_date.is_(None),
+                        UserAgreementCategory.show_all.is_(True),
                     ),
                 )
             )
-            .order_by(UserAgreement.effective_date)
         )
 
-        return await session.scalar(stmt)
+        mandatory_agreements = (
+            select(
+                mandatory_agreements_stmt.c.ua_id, mandatory_agreements_stmt.c.cat_id
+            )
+            .where(mandatory_agreements_stmt.c.category_rank == 1)
+        )
+
+        # ----------------------------------------------------------------
+        # Subquery #2: date_based_agreements
+        # For the categories that do NOT have mandatory agreements,
+        # we want the single newest date-based agreement.
+        # ----------------------------------------------------------------
+        date_based_agreements_stmt = (
+            select(
+                UserAgreement.id.label("ua_id"),
+                UserAgreement.category_id.label("cat_id"),
+                func.row_number()
+                .over(
+                    partition_by=UserAgreement.category_id,
+                    order_by=UserAgreement.effective_date.desc().nulls_last(),
+                )
+                .label("category_rank"),
+            )
+            .join(UserAgreementCategory, UserAgreement.category)
+            .where(
+                and_(
+                    *common_filters,
+                    UserAgreement.always_display.is_(False),
+                    UserAgreementCategory.show_all.is_(False),
+                )
+            )
+        )
+
+        date_based_agreements = (
+            select(
+                date_based_agreements_stmt.c.ua_id, date_based_agreements_stmt.c.cat_id
+            )
+            .where(
+                and_(date_based_agreements_stmt.c.category_rank == 1),
+                not_(
+                    date_based_agreements_stmt.c.cat_id.in_(
+                        select(mandatory_agreements.c.cat_id)
+                    )
+                ),
+            )
+        )
+
+        # ----------------------------------------------------------------
+        #  Final query: get the earliest effective_date from the union of
+        #  the two subqueries
+        # ----------------------------------------------------------------
+        all_agreements = mandatory_agreements.union_all(date_based_agreements).subquery("all_agreements")
+
+        stmt = (
+            select(UserAgreement.id)
+            .join(all_agreements, all_agreements.c.ua_id == UserAgreement.id)
+            .order_by(UserAgreement.effective_date.asc().nulls_first())
+            .limit(1)
+        )
+        result = await session.scalar(stmt)
+        return result
 
     @classmethod
     async def create(
@@ -673,6 +783,7 @@ class UserAgreementAcceptance(Base):
 
     __table_args__ = (
         UniqueConstraint("user_id", "agreement_id", name="_user_agreement_uc"),
+        Index("ix_user_agreement_acceptances_agreement_id", "agreement_id"),
     )
 
     @classmethod
@@ -702,6 +813,9 @@ class UserAgreementAcceptance(Base):
 
 class ExternalLoginProvider(Base):
     __tablename__ = "external_login_providers"
+    __table_args__ = (
+        Index("ix_external_login_providers_name", "name"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String, nullable=False)

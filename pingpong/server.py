@@ -164,9 +164,12 @@ async def parse_session_token(request: Request, call_next):
                 await user.verify(request.state.db)
 
             # Check if there is pending user agreement
+            start_time = time.monotonic()
             agreement_id = await models.UserAgreement.get_pending_user_agreement_id(
                 request.state.db, user.id, current_time=get_now_fn(request)()
             )
+            duration = time.monotonic() - start_time
+            logger.info(f"Time taken to get pending user agreement ID: {duration:.4f} seconds")
 
             request.state.session = schemas.SessionState(
                 token=token,
