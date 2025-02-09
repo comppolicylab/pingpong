@@ -177,8 +177,10 @@
     }
   };
 
+  let assistantDropdownOpen = false;
   // Set the new assistant selection.
   const selectAi = async (asst: Assistant) => {
+    assistantDropdownOpen = false;
     await goto(`/group/${data.class.id}/?assistant=${asst.id}`);
   };
 
@@ -203,7 +205,7 @@
             >{assistant.name} <ChevronDownOutline class="w-3 h-3 ms-2" /></Button
           >
 
-          <Dropdown class="max-h-60 overflow-y-auto w-60">
+          <Dropdown class="max-h-60 overflow-y-auto w-60" bind:open={assistantDropdownOpen}>
             <!-- Show course assistants first -->
             {#each courseAssistants as asst}
               <DropdownItem
