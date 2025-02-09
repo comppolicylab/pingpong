@@ -170,8 +170,6 @@ async def parse_session_token(request: Request, call_next):
             agreement_id = await models.UserAgreement.get_pending_user_agreement_id(
                 request.state.db, user.id, current_time=get_now_fn(request)()
             )
-            if agreement_id:
-                request.state.session.pending_term_id = agreement_id
 
             request.state.session = schemas.SessionState(
                 token=token,
@@ -179,7 +177,7 @@ async def parse_session_token(request: Request, call_next):
                 error=None,
                 user=user,
                 profile=schemas.Profile.from_email(user.email),
-                pending_term_id=None,
+                pending_term_id=agreement_id,
             )
 
         except TimeException as e:
