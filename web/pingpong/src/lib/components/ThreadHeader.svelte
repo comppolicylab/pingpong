@@ -12,8 +12,10 @@
 
   $: sortedClasses = classes.sort((a: api.Class, b: api.Class) => a.name.localeCompare(b.name));
   let searchTerm = '';
-  $: filteredClasses = sortedClasses.filter((class_) => class_.name.toLowerCase().indexOf(searchTerm?.toLowerCase()) !== -1);
-  
+  $: filteredClasses = sortedClasses.filter(
+    (class_) => class_.name.toLowerCase().indexOf(searchTerm?.toLowerCase()) !== -1
+  );
+
   let classDropdownOpen = false;
   const goToClass = async (clsId: number) => {
     classDropdownOpen = false;
@@ -33,13 +35,12 @@
     >
     <Dropdown class="w-64 overflow-y-auto py-1 min-h-0 max-h-[400px]" bind:open={classDropdownOpen}>
       <div slot="header" class="w-64 p-3">
-        <Search size="md" bind:value={searchTerm}/>
+        <Search size="md" bind:value={searchTerm} />
       </div>
       {#each filteredClasses as cls}
         <DropdownItem
           class="flex items-center text-base font-semibold gap-4 py-4 text-sm tracking-wide font-medium uppercase hover:bg-blue-light-50"
-          on:click={() => goToClass(cls.id)}
-          >{cls.name}</DropdownItem
+          on:click={() => goToClass(cls.id)}>{cls.name}</DropdownItem
         >
       {/each}
     </Dropdown>
