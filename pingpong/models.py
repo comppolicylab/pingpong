@@ -11,7 +11,6 @@ from sqlalchemy import (
     UniqueConstraint,
     not_,
     or_,
-    union_all,
 )
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
@@ -456,7 +455,7 @@ class UserAgreementCategory(Base):
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
-    __table_args__ = ( Index("ix_user_agreement_categories_name", "name"),)
+    __table_args__ = (Index("ix_user_agreement_categories_name", "name"),)
 
     @classmethod
     async def create(
@@ -658,12 +657,9 @@ class UserAgreement(Base):
             )
         )
 
-        mandatory_agreements = (
-            select(
-                mandatory_agreements_stmt.c.ua_id, mandatory_agreements_stmt.c.cat_id
-            )
-            .where(mandatory_agreements_stmt.c.category_rank == 1)
-        )
+        mandatory_agreements = select(
+            mandatory_agreements_stmt.c.ua_id, mandatory_agreements_stmt.c.cat_id
+        ).where(mandatory_agreements_stmt.c.category_rank == 1)
 
         # ----------------------------------------------------------------
         # Subquery #2: date_based_agreements
@@ -691,25 +687,24 @@ class UserAgreement(Base):
             )
         )
 
-        date_based_agreements = (
-            select(
-                date_based_agreements_stmt.c.ua_id, date_based_agreements_stmt.c.cat_id
-            )
-            .where(
-                and_(date_based_agreements_stmt.c.category_rank == 1),
-                not_(
-                    date_based_agreements_stmt.c.cat_id.in_(
-                        select(mandatory_agreements.c.cat_id)
-                    )
-                ),
-            )
+        date_based_agreements = select(
+            date_based_agreements_stmt.c.ua_id, date_based_agreements_stmt.c.cat_id
+        ).where(
+            and_(date_based_agreements_stmt.c.category_rank == 1),
+            not_(
+                date_based_agreements_stmt.c.cat_id.in_(
+                    select(mandatory_agreements.c.cat_id)
+                )
+            ),
         )
 
         # ----------------------------------------------------------------
         #  Final query: get the earliest effective_date from the union of
         #  the two subqueries
         # ----------------------------------------------------------------
-        all_agreements = mandatory_agreements.union_all(date_based_agreements).subquery("all_agreements")
+        all_agreements = mandatory_agreements.union_all(date_based_agreements).subquery(
+            "all_agreements"
+        )
 
         stmt = (
             select(UserAgreement.id)
@@ -813,9 +808,7 @@ class UserAgreementAcceptance(Base):
 
 class ExternalLoginProvider(Base):
     __tablename__ = "external_login_providers"
-    __table_args__ = (
-        Index("ix_external_login_providers_name", "name"),
-    )
+    __table_args__ = (Index("ix_external_login_providers_name", "name"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String, nullable=False)

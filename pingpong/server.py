@@ -169,7 +169,9 @@ async def parse_session_token(request: Request, call_next):
                 request.state.db, user.id, current_time=get_now_fn(request)()
             )
             duration = time.monotonic() - start_time
-            logger.info(f"Time taken to get pending user agreement ID: {duration:.4f} seconds")
+            logger.info(
+                f"Time taken to get pending user agreement ID: {duration:.4f} seconds"
+            )
 
             request.state.session = schemas.SessionState(
                 token=token,
