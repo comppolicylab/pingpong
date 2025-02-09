@@ -33,7 +33,8 @@
   import * as api from '$lib/api';
   import type { LayoutData } from '../../routes/$types';
   import { appMenuOpen } from '$lib/stores/general';
-  import { afterNavigate } from '$app/navigation';
+  import { afterNavigate, goto } from '$app/navigation';
+  import { onMount } from 'svelte';
 
   export let data: LayoutData;
 
@@ -62,9 +63,33 @@
     }
   };
 
+  type Placement = 'top-end' | 'right-start';
+  let placement: Placement = 'top-end';
+  function updatePlacement() {
+    if (window.innerWidth >= 1024) {
+      // lg breakpoint
+      placement = 'right-start';
+    } else {
+      placement = 'top-end';
+    }
+  }
+
   // Close the menu when navigating.
   afterNavigate(() => {
     togglePanel(false);
+    dropdownOpen = false;
+  });
+
+  let dropdownOpen = false;
+  const goToPage = async (destination: string) => {
+    dropdownOpen = false;
+    await goto(destination);
+  };
+
+  onMount(() => {
+    updatePlacement();
+    window.addEventListener('resize', updatePlacement);
+    return () => window.removeEventListener('resize', updatePlacement);
   });
 </script>
 
@@ -204,28 +229,34 @@
   </SidebarWrapper>
 </Sidebar>
 
-<Dropdown class="w-40" placement="right" triggeredBy=".user">
+<Dropdown
+  bind:open={dropdownOpen}
+  class="w-40"
+  classContainer="overflow-hidden"
+  {placement}
+  triggeredBy=".user"
+>
   {#if $page.data.admin.showAdminPage}
-    <DropdownItem href="/admin" class="flex space-x-4 items-center">
+    <DropdownItem on:click={() => goToPage('/admin')} class="flex space-x-4 items-center">
       <CogOutline size="sm" />
       <span>Admin</span>
     </DropdownItem>
     <DropdownDivider />
   {/if}
-  <DropdownItem href="/profile" class="flex space-x-4 items-center">
+  <DropdownItem on:click={() => goToPage('/profile')} class="flex space-x-4 items-center">
     <UserSettingsOutline size="sm" />
     <span>Profile</span>
   </DropdownItem>
-  <DropdownItem href="/about" class="flex space-x-4 items-center">
+  <DropdownItem on:click={() => goToPage('/about')} class="flex space-x-4 items-center">
     <QuestionCircleOutline size="sm" />
     <span>About</span>
   </DropdownItem>
-  <DropdownItem href="/privacy-policy" class="flex space-x-4 items-center">
+  <DropdownItem on:click={() => goToPage('/privacy-policy')} class="flex space-x-4 items-center">
     <FileLinesOutline size="sm" />
     <span>Privacy Policy</span>
   </DropdownItem>
   <DropdownDivider />
-  <DropdownItem href="/logout" class="flex space-x-4 items-center">
+  <DropdownItem on:click={() => goToPage('/logout')} class="flex space-x-4 items-center">
     <ArrowRightToBracketOutline size="sm" />
     <span>Logout</span>
   </DropdownItem>
