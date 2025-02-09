@@ -1230,12 +1230,12 @@ class CreateUserAgreementCategoryRequest(BaseModel):
 
 class UpdateUserAgreementRequest(BaseModel):
     name: str | None = None
-    code: str | None = None 
-    active: bool | None = None 
-    category_id: int | None = None 
-    effective_date: datetime | None = None 
-    always_display: bool | None = None 
-    apply_to_all: bool | None = None 
+    code: str | None = None
+    active: bool | None = None
+    category_id: int | None = None
+    effective_date: datetime | None = None
+    always_display: bool | None = None
+    apply_to_all: bool | None = None
     limit_to_providers: list[int] | None = None
 
 
@@ -1247,6 +1247,7 @@ class CreateUserAgreementRequest(BaseModel):
     always_display: bool
     apply_to_all: bool
     limit_to_providers: list[int]
+
 
 class UpdateUserAgreementCategoryRequest(BaseModel):
     name: str | None = None

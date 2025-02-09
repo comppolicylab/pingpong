@@ -11,9 +11,9 @@ export const load: LayoutLoad = async ({ fetch }) => {
   const sortedCategories = categories.error
     ? []
     : categories.data.categories.sort((a, b) => a.name.localeCompare(b.name));
-  
+
   return {
     externalProviders: sortedProviders,
-    categories: sortedCategories,
+    categories: sortedCategories
   };
 };

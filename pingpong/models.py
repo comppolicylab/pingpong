@@ -28,6 +28,7 @@ from sqlalchemy.orm import (
     selectinload,
     mapped_column,
     relationship,
+    aliased,
 )
 from sqlalchemy.sql import func
 import pingpong.schemas as schemas
@@ -480,13 +481,20 @@ class UserAgreementCategory(Base):
     ) -> "UserAgreementCategory":
         stmt = select(UserAgreementCategory).where(UserAgreementCategory.name == name)
         return await session.scalar(stmt)
-    
-    @classmethod    
+
+    @classmethod
+    async def get_by_id(
+        cls, session: AsyncSession, id_: int
+    ) -> "UserAgreementCategory":
+        stmt = select(UserAgreementCategory).where(UserAgreementCategory.id == id_)
+        return await session.scalar(stmt)
+
+    @classmethod
     async def get_all(cls, session: AsyncSession) -> list["UserAgreementCategory"]:
         stmt = select(UserAgreementCategory)
         result = await session.execute(stmt)
         return [row.UserAgreementCategory for row in result]
-    
+
     @classmethod
     async def update(
         cls,
@@ -533,16 +541,28 @@ class UserAgreement(Base):
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     @classmethod
-    async def get_by_id(cls, session: AsyncSession, id_: int) -> "UserAgreement":
-        stmt = select(UserAgreement).where(
-            and_(UserAgreement.id == id_, UserAgreement.active.is_(True))
+    async def get_by_id_with_providers(
+        cls, session: AsyncSession, id_: int
+    ) -> "UserAgreement":
+        stmt = (
+            select(UserAgreement)
+            .options(joinedload(UserAgreement.limit_to_providers))
+            .where(UserAgreement.id == id_)
         )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id(cls, session: AsyncSession, id_: int) -> "UserAgreement":
+        stmt = select(UserAgreement).where(UserAgreement.id == id_)
         return await session.scalar(stmt)
 
     @classmethod
     async def get_pending_user_agreement_id(
         cls, session: AsyncSession, user_id: int
     ) -> int:
+        UA = aliased(UserAgreement)
+        UAA = aliased(UserAgreementAcceptance)
+
         stmt = (
             select(UserAgreement.id)
             .join(UserAgreementCategory)
@@ -552,11 +572,24 @@ class UserAgreement(Base):
                     or_(
                         UserAgreementCategory.show_all.is_(True),
                         UserAgreement.always_display.is_(True),
+                        # The user has not accepted a newer agreement
                         not_(
-                            UserAgreement.acceptances.any(
-                                UserAgreementAcceptance.user_id == user_id
+                            select(UAA.id)
+                            .join(UA, UAA.agreement)
+                            .where(
+                                and_(
+                                    UAA.user_id == user_id,
+                                    UA.category_id == UserAgreementCategory.id,
+                                    UA.effective_date > UserAgreement.effective_date,
+                                )
                             )
+                            .exists()
                         ),
+                    ),
+                    not_(
+                        UserAgreement.acceptances.any(
+                            UserAgreementAcceptance.user_id == user_id
+                        )
                     ),
                     or_(
                         UserAgreement.apply_to_all.is_(True),
@@ -572,7 +605,7 @@ class UserAgreement(Base):
                     ),
                 )
             )
-            .order_by(UserAgreement.always_display.desc(), UserAgreement.effective_date)
+            .order_by(UserAgreement.effective_date)
         )
 
         return await session.scalar(stmt)
@@ -592,21 +625,6 @@ class UserAgreement(Base):
         return agreement
 
     @classmethod
-    async def accept_agreement(
-        cls,
-        session: AsyncSession,
-        user_id: int,
-        agreement_id: int,
-    ) -> "UserAgreementAcceptance":
-        acceptance = UserAgreementAcceptance(
-            user_id=user_id, agreement_id=agreement_id, accepted_at=datetime.utcnow()
-        )
-        session.add(acceptance)
-        await session.flush()
-        await session.refresh(acceptance)
-        return acceptance
-
-    @classmethod
     async def get_all(cls, session: AsyncSession) -> list["UserAgreement"]:
         stmt = select(UserAgreement)
         result = await session.execute(stmt)
@@ -617,14 +635,24 @@ class UserAgreement(Base):
         cls, session: AsyncSession, id_: int, data: schemas.UpdateUserAgreementRequest
     ) -> "UserAgreement":
         data_dict = data.model_dump(exclude_none=True)
+        provider_ids = data_dict.pop("limit_to_providers", None)
+
         stmt = (
             update(UserAgreement)
             .where(UserAgreement.id == id_)
             .values(**data_dict)
             .returning(UserAgreement)
         )
-        result = await session.scalar(stmt)
-        return result
+        agreement = await session.scalar(stmt)
+
+        if provider_ids:
+            providers_ = await ExternalLoginProvider.get_by_ids(session, provider_ids)
+            agreement.limit_to_providers = providers_
+
+        await session.flush()
+        await session.refresh(agreement)
+
+        return agreement
 
 
 class UserAgreementAcceptance(Base):
@@ -662,10 +690,6 @@ class UserAgreementAcceptance(Base):
                 agreement_id=agreement_id,
                 accepted_at=accepted_at,
             )
-            .on_conflict_do_update(
-                index_elements=["user_id", "agreement_id"],
-                set_=dict(accepted_at=accepted_at),
-            )
             .returning(UserAgreementAcceptance)
         )
         result = await session.scalar(stmt)
@@ -702,6 +726,14 @@ class ExternalLoginProvider(Base):
     ) -> "ExternalLoginProvider":
         stmt = select(ExternalLoginProvider).where(ExternalLoginProvider.id == id_)
         return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_ids(
+        cls, session: AsyncSession, ids: list[int]
+    ) -> list["ExternalLoginProvider"]:
+        stmt = select(ExternalLoginProvider).where(ExternalLoginProvider.id.in_(ids))
+        result = await session.execute(stmt)
+        return [row.ExternalLoginProvider for row in result]
 
     @classmethod
     async def get_or_create_by_name(

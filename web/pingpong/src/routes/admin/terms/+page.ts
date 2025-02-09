@@ -13,6 +13,6 @@ export const load: PageLoad = async ({ fetch }) => {
         return a.category.id - b.category.id;
       });
   return {
-    agreements: sortedAgreements,
+    agreements: sortedAgreements
   };
 };

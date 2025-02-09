@@ -4216,6 +4216,7 @@ async def create_user_agreement_category(
     category = await models.UserAgreementCategory.get_or_create(request.state.db, req)
     return category
 
+
 @v1.put(
     "/admin/terms/categories/{category_id}",
     dependencies=[Depends(Authz("admin"))],
@@ -4234,6 +4235,7 @@ async def update_user_agreement_category(
         raise HTTPException(404, "Category not found.")
     return {"status": "ok"}
 
+
 @v1.get(
     "/admin/terms/{agreement_id}",
     dependencies=[Depends(Authz("admin"))],
@@ -4244,7 +4246,7 @@ async def get_user_agreement_detail(
     request: Request,
 ):
     """Get the user agreement."""
-    agreement = await models.UserAgreement.get_by_id(
+    agreement = await models.UserAgreement.get_by_id_with_providers(
         request.state.db, int(agreement_id)
     )
     if not agreement:
@@ -4263,11 +4265,59 @@ async def update_user_agreement(
     request: Request,
 ):
     """Update the user agreement."""
-    agreement = await models.UserAgreement.update(
-        request.state.db, int(agreement_id), req
+    agreement = await models.UserAgreement.get_by_id_with_providers(
+        request.state.db, int(agreement_id)
     )
     if not agreement:
         raise HTTPException(404, "Agreement not found.")
+
+    if req.category_id is not None:
+        category = await models.UserAgreementCategory.get_by_id(
+            request.state.db, int(req.category_id)
+        )
+        if not category:
+            raise HTTPException(404, "Category not found.")
+        agreement.category_id = category.id
+
+    if req.name is not None:
+        agreement.name = req.name
+
+    if req.active is not None:
+        agreement.active = req.active
+
+    if req.effective_date is not None:
+        agreement.effective_date = req.effective_date
+
+    if req.always_display is not None:
+        agreement.always_display = req.always_display
+
+    current_apply_to_all = agreement.apply_to_all
+    if req.apply_to_all is not None:
+        current_apply_to_all = req.apply_to_all
+        agreement.apply_to_all = req.apply_to_all
+
+        if req.apply_to_all:
+            agreement.limit_to_providers = []
+
+    if req.limit_to_providers is not None:
+        if current_apply_to_all and req.limit_to_providers != []:
+            raise HTTPException(
+                400,
+                "Cannot limit user agreement to specific users when Display to All is selected.",
+            )
+
+        providers = await models.ExternalLoginProvider.get_by_ids(
+            request.state.db, req.limit_to_providers
+        )
+        if len(providers) != len(req.limit_to_providers):
+            raise HTTPException(404, "Some providers not found.")
+        agreement.limit_to_providers = providers
+
+    if req.code is not None:
+        agreement.code = req.code
+
+    request.state.db.add(agreement)
+    await request.state.db.flush()
     return {"status": "ok"}
 
 
