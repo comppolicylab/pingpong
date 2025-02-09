@@ -1106,10 +1106,6 @@ class User(Base):
         "UserAgreementAcceptance", back_populates="user", lazy="selectin"
     )
 
-    async def verify(self, session: AsyncSession) -> None:
-        self.state = schemas.UserState.VERIFIED
-        session.add(self)
-
     @classmethod
     async def update_info(
         self, session: AsyncSession, user_id: int, data: schemas.UpdateUserInfo
