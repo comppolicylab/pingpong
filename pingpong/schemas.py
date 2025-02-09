@@ -33,6 +33,25 @@ class StatisticsResponse(BaseModel):
     statistics: Statistics
 
 
+class ModelStatistics(BaseModel):
+    model: str
+    assistant_count: int
+
+
+class ModelStatisticsResponse(BaseModel):
+    statistics: list[ModelStatistics]
+
+
+class AssistantModelInfo(BaseModel):
+    class_id: int
+    assistant_id: int
+
+
+class AssistantModelInfoResponse(BaseModel):
+    model: str
+    assistants: list[AssistantModelInfo]
+
+
 class GenericStatus(BaseModel):
     status: str
 

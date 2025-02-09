@@ -1462,6 +1462,20 @@ class Assistant(Base):
         stmt = delete(Assistant).where(Assistant.id == int(id_))
         await session.execute(stmt)
 
+    @classmethod
+    async def get_count_by_model(cls, session: AsyncSession) -> list[tuple[str, int]]:
+        stmt = select(Assistant.model, func.count(Assistant.id)).group_by(
+            Assistant.model
+        )
+        result = await session.execute(stmt)
+        return result.all()
+
+    @classmethod
+    async def get_by_model(cls, session: AsyncSession, model: str) -> List["Assistant"]:
+        stmt = select(Assistant.id, Assistant.class_id).where(Assistant.model == model)
+        result = await session.execute(stmt)
+        return result.all()
+
 
 class LMSClass(Base):
     __tablename__ = "lms_classes"
