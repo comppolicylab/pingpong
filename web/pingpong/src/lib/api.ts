@@ -954,6 +954,7 @@ export type AssistantModel = {
   is_new: boolean;
   highlight: boolean;
   supports_vision: boolean;
+  vision_support_override?: boolean;
   supports_file_search: boolean;
   supports_code_interpreter: boolean;
   supports_temperature: boolean;

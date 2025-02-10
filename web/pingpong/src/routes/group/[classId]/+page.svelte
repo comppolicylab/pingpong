@@ -101,6 +101,12 @@
     );
     supportsVision = supportVisionModels.includes(assistant.model);
   }
+  let visionSupportOverride: boolean | undefined;
+  $: {
+    visionSupportOverride = data.models.find(
+      (model) => model.id === assistant.model
+    )?.vision_support_override;
+  }
   $: allowVisionUpload = true;
   let showModerators = false;
 
@@ -165,14 +171,16 @@
       $loading = false;
       form.callback({
         success: false,
-        errorMessage: `Failed to create thread. Error: ${errorMessage(e)}`,
+        errorMessage: `Failed to create thread. Error: ${errorMessage(e, "Something went wrong while creating your conversation. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.")}`,
         message_sent: false
       });
     }
   };
 
+  let assistantDropdownOpen = false;
   // Set the new assistant selection.
   const selectAi = async (asst: Assistant) => {
+    assistantDropdownOpen = false;
     await goto(`/group/${data.class.id}/?assistant=${asst.id}`);
   };
 
@@ -197,7 +205,7 @@
             >{assistant.name} <ChevronDownOutline class="w-3 h-3 ms-2" /></Button
           >
 
-          <Dropdown class="max-h-60 overflow-y-auto w-60">
+          <Dropdown class="max-h-60 overflow-y-auto w-60" bind:open={assistantDropdownOpen}>
             <!-- Show course assistants first -->
             {#each courseAssistants as asst}
               <DropdownItem
@@ -314,6 +322,7 @@
                 vision: true
               })
             : null}
+          {visionSupportOverride}
           fileSearchAcceptedFiles={supportsFileSearch
             ? data.uploadInfo.fileTypes({
                 file_search: true,

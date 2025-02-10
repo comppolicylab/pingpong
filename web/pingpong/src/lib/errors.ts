@@ -7,15 +7,16 @@
 import { isValidationError, isErrorResponse } from '$lib/api';
 
 export const errorMessage = (error: unknown, fallback: string = 'unknown error'): string => {
+  console.error(error);
   if (!error) {
     return fallback;
   } else if (error instanceof Error) {
-    return error.message || `${error}` || fallback;
+    return error.message || fallback;
   } else if (isErrorResponse(error)) {
-    return error.detail || `${error}` || fallback;
+    return error.detail || fallback;
   } else if (isValidationError(error)) {
     if (!error.detail) {
-      return `${error}` || fallback;
+      return fallback;
     } else {
       return error.detail
         .map((error) => {

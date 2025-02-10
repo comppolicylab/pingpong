@@ -1,6 +1,7 @@
 import openai
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from .ai import get_details_from_api_error
 from .schemas import VectorStoreDeleteResponse, VectorStoreType
 
 import pingpong.models as models
@@ -40,7 +41,7 @@ async def create_vector_store(
             )
     except openai.BadRequestError as e:
         raise HTTPException(
-            400, e.body.get("message") or e.message or "OpenAI rejected this request"
+            400, get_details_from_api_error(e, "OpenAI rejected this request")
         )
 
     try:
@@ -91,7 +92,7 @@ async def append_vector_store_files(
         )
     except openai.BadRequestError as e:
         raise HTTPException(
-            400, e.body.get("message") or e.message or "OpenAI rejected this request"
+            400, get_details_from_api_error(e, "OpenAI rejected this request")
         )
 
     return vector_store_id
@@ -151,7 +152,9 @@ async def sync_vector_store_files(
                 vector_store_id, file_ids=file_ids_to_add
             )
         except openai.BadRequestError as e:
-            raise HTTPException(400, e.message or "OpenAI rejected this request")
+            raise HTTPException(
+                400, get_details_from_api_error(e, "OpenAI rejected this request")
+            )
 
     for file_id in file_ids_to_remove:
         try:
@@ -162,7 +165,9 @@ async def sync_vector_store_files(
         except openai.NotFoundError:
             pass
         except openai.BadRequestError as e:
-            raise HTTPException(400, e.message or "OpenAI rejected this request")
+            raise HTTPException(
+                400, get_details_from_api_error(e, "OpenAI rejected this request")
+            )
     return vector_store_id
 
 
@@ -254,5 +259,5 @@ async def delete_vector_store_oai(
         pass
     except openai.BadRequestError as e:
         raise HTTPException(
-            400, e.body.get("message") or e.message or "OpenAI rejected this request"
+            400, get_details_from_api_error(e, "OpenAI rejected this request")
         )

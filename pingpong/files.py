@@ -5,6 +5,7 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .ai import get_details_from_api_error
 from .authz import AuthzClient, Relation
 from .models import File
 from .schemas import FileTypeInfo, GenericStatus, FileUploadPurpose
@@ -214,9 +215,7 @@ async def handle_create_file(
     except openai.BadRequestError as e:
         raise HTTPException(
             status_code=400,
-            detail=e.response.json()
-            .get("error", {})
-            .get("message", "OpenAI rejected this request"),
+            detail=get_details_from_api_error(e, "OpenAI rejected this request."),
         )
 
     data = {

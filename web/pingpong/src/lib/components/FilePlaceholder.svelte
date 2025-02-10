@@ -66,7 +66,7 @@
       <FileSolid class="w-6 h-6 text-green-500" />
     {:else}
       <ExclamationCircleOutline class="w-6 h-6 text-red-500" />
-      <Tooltip>{error}</Tooltip>
+      <Tooltip>Upload Error: {typeof error === 'string' ? error : error.detail}</Tooltip>
     {/if}
   </div>
   <div class="flex flex-col p-2">

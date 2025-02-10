@@ -11,6 +11,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 from pingpong.artifacts import LocalArtifactStore, S3ArtifactStore
+from pingpong.log_filters import IgnoreHealthEndpoint
 from .authz import OpenFgaAuthzDriver
 from .email import AzureEmailSender, GmailEmailSender, MockEmailSender, SmtpEmailSender
 from .support import SupportSettings, NoSupportSettings
@@ -312,5 +313,6 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
     logging.WARNING
 )
+logging.getLogger("uvicorn.access").addFilter(IgnoreHealthEndpoint())
 if config.log_level != "DEBUG":
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)

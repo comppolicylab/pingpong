@@ -18,7 +18,7 @@
   import { createEventDispatcher } from 'svelte';
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
-  import { Button, Popover } from 'flowbite-svelte';
+  import { Button, Heading, Modal, Popover } from 'flowbite-svelte';
   import { page } from '$app/stores';
   import type {
     MimeTypeLookupFn,
@@ -31,7 +31,15 @@
   import FileUpload from '$lib/components/FileUpload.svelte';
   import { sadToast } from '$lib/toast';
   import type { FileUploadPurpose } from '$lib/api';
-  import { ArrowUpOutline, CloseOutline, ExclamationCircleOutline } from 'flowbite-svelte-icons';
+  import {
+    ArrowUpOutline,
+    BanOutline,
+    CloseOutline,
+    ExclamationCircleOutline,
+    FileImageOutline,
+    QuestionCircleOutline
+  } from 'flowbite-svelte-icons';
+  import Sanitize from '$lib/components/Sanitize.svelte';
 
   const dispatcher = createEventDispatcher();
 
@@ -82,10 +90,22 @@
    */
   export let codeInterpreterAcceptedFiles: string | null = null;
   export let codeInterpreterAttachmentCount = 0;
+
   /**
+   * (Based on model capabilities)
    * Files to accept for Vision. If null, vision capabilities are disabled.
    */
   export let visionAcceptedFiles: string | null = null;
+  /**
+   * Whether the specific AI Provider supports Vision for this model.
+   */
+  export let visionSupportOverride: boolean | undefined = undefined;
+  /**
+   * (Based on model capabilities AND AI Provider capabilities)
+   * Files to accept for Vision. If null, vision capabilities are disabled.
+   */
+  let finalVisionAcceptedFiles = visionSupportOverride === false ? null : visionAcceptedFiles;
+  let visionOverrideModalOpen = false;
   /**
    * Max upload size.
    */
@@ -115,15 +135,15 @@
   $: uploading = $allFiles.some((f) => f.state === 'pending');
   let purpose: FileUploadPurpose | null = null;
   $: purpose =
-    codeInterpreterAcceptedFiles && fileSearchAcceptedFiles && visionAcceptedFiles
+    codeInterpreterAcceptedFiles && fileSearchAcceptedFiles && finalVisionAcceptedFiles
       ? 'fs_ci_multimodal'
-      : codeInterpreterAcceptedFiles && visionAcceptedFiles
+      : codeInterpreterAcceptedFiles && finalVisionAcceptedFiles
         ? 'ci_multimodal'
-        : fileSearchAcceptedFiles && visionAcceptedFiles
+        : fileSearchAcceptedFiles && finalVisionAcceptedFiles
           ? 'fs_multimodal'
           : codeInterpreterAcceptedFiles || fileSearchAcceptedFiles
             ? 'assistants'
-            : visionAcceptedFiles
+            : finalVisionAcceptedFiles
               ? 'vision'
               : null;
   $: codeInterpreterFiles = (codeInterpreterAcceptedFiles ? $allFiles : [])
@@ -139,7 +159,7 @@
   let threadCodeInterpreterMaxCount = 20;
   let threadFileSearchMaxCount = 20;
 
-  $: visionFiles = (visionAcceptedFiles ? $allFiles : [])
+  $: visionFiles = (finalVisionAcceptedFiles ? $allFiles : [])
     .filter((f) => f.state === 'success' && (f.response as ServerFile).vision_file_id)
     .map((f) => (f.response as ServerFile).vision_file_id);
 
@@ -166,7 +186,7 @@
   $: codeInterpreterStringToExclude = !tooManyCodeInterpreterFiles
     ? ''
     : (codeInterpreterAcceptedFiles ?? '');
-  $: visionStringToExclude = !tooManyVisionFiles ? '' : (visionAcceptedFiles ?? '');
+  $: visionStringToExclude = !tooManyVisionFiles ? '' : (finalVisionAcceptedFiles ?? '');
   $: currentFileSearchAcceptedFiles = Array.from(
     new Set(
       (tooManyFileSearchFiles ? '' : (fileSearchAcceptedFiles ?? ''))
@@ -191,7 +211,7 @@
   ).join(',');
   $: currentVisionAcceptedFiles = Array.from(
     new Set(
-      (tooManyVisionFiles ? '' : (visionAcceptedFiles ?? ''))
+      (tooManyVisionFiles ? '' : (finalVisionAcceptedFiles ?? ''))
         .split(',')
         .filter(
           (file) =>
@@ -264,7 +284,7 @@
     const file_search_file_ids = (fileSearchAcceptedFiles ? fileSearchFileIds : '')
       ? fileSearchFileIds.split(',')
       : [];
-    const vision_file_ids = (visionAcceptedFiles ? visionFileIds : '')
+    const vision_file_ids = (finalVisionAcceptedFiles ? visionFileIds : '')
       ? visionFileIds.split(',')
       : [];
 
@@ -409,7 +429,7 @@
                 <ExclamationCircleOutline />
                 <div>
                   <div class="text-sm">
-                    {combinedErrorMessage}
+                    <Sanitize html={combinedErrorMessage} />
                   </div>
                 </div>
               </div>
@@ -462,7 +482,7 @@
             type="multimodal"
             {fileSearchAcceptedFiles}
             {codeInterpreterAcceptedFiles}
-            {visionAcceptedFiles}
+            visionAcceptedFiles={finalVisionAcceptedFiles}
             documentMaxCount={10}
             visionMaxCount={10}
             currentDocumentCount={attachments.filter(
@@ -478,12 +498,23 @@
             on:error={(e) => sadToast(e.detail.message)}
             on:change={handleFilesChange}
           />
-          {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || visionAcceptedFiles) && !(tooManyAttachments || tooManyVisionFiles) && !(loading || disabled || !upload) && !tooManyFileSearchFiles && !tooManyCodeInterpreterFiles}
-            <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
-              >Upload files to thread<br />Documents: {Math.max(
-                currentFileSearchFileCount,
-                currentCodeInterpreterFileCount
-              )}/20</Popover
+          {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || finalVisionAcceptedFiles) && !(tooManyAttachments || tooManyVisionFiles) && !(loading || disabled || !upload) && !tooManyFileSearchFiles && !tooManyCodeInterpreterFiles}
+            <Popover defaultClass="w-52" arrow={false}
+              ><div class="flex flex-col h-fit align-center">
+                <Button
+                  on:click={() => (visionOverrideModalOpen = true)}
+                  class="flex flex-row justify-between items-center bg-amber-700 rounded-t-md rounded-b-none py-2 px-3"
+                  ><span class="uppercase text-xs font-medium text-white leading-none"
+                    >No Vision capabilities</span
+                  >
+                  <QuestionCircleOutline color="white" /></Button
+                ><span class="py-2 px-3 text-sm"
+                  >Upload files to thread<br />Documents: {Math.max(
+                    currentFileSearchFileCount,
+                    currentCodeInterpreterFileCount
+                  )}/20</span
+                >
+              </div></Popover
             >
           {:else if tooManyFileSearchFiles || tooManyCodeInterpreterFiles}
             <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
@@ -522,3 +553,33 @@
     </div>
   </div>
 </div>
+
+<Modal
+  classHeader="text-gray-700"
+  class="text-gray-700"
+  bind:open={visionOverrideModalOpen}
+  autoclose
+  outsideclose
+>
+  <div class="flex flex-col gap-5 p-4">
+    <div class="flex flex-col items-center gap-0">
+      <div class="flex items-center justify-center relative h-40">
+        <BanOutline class="text-amber-600 w-40 h-40 z-10 absolute" strokeWidth="1.5" />
+        <FileImageOutline class="text-stone-400 opacity-75 w-24 h-24" strokeWidth="1" />
+      </div>
+      <Heading tag="h2" class="text-xl font-semibold text-center"
+        >Vision capabilities are currently unavailable</Heading
+      >
+    </div>
+    <div class="flex flex-col gap-1">
+      <div class="text-md text-wrap">
+        Your group's AI Provider does not support Vision capabilities for this AI model. Assistants
+        will not be able to "see" and process images you upload.
+      </div>
+      <div class="text-md text-wrap">
+        We are working on adding Vision support for your AI Provider. In the meantime, you can still
+        upload and use supported image files with Code Interpreter.
+      </div>
+    </div>
+  </div>
+</Modal>
