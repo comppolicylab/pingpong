@@ -940,8 +940,11 @@ async def get_model_assistants(model_name: str, request: Request):
     stats = [
         {
             "assistant_id": a.id,
+            "assistant_name": a.name,
             "class_id": a.class_id,
-            "last_edited_at": a.updated or a.created,
+            "class_name": a.class_name,
+            "last_edited": a.updated or a.created,
+            "last_user_activity": a.last_activity,
         }
         for a in assistants
     ]

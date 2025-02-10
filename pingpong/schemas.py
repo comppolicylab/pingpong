@@ -44,8 +44,11 @@ class ModelStatisticsResponse(BaseModel):
 
 class AssistantModelInfo(BaseModel):
     class_id: int
+    class_name: str
     assistant_id: int
-    last_edited_at: datetime
+    assistant_name: str
+    last_edited: datetime
+    last_user_activity: datetime | None
 
 
 class AssistantModelInfoResponse(BaseModel):

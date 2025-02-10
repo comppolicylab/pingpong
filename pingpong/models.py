@@ -1472,9 +1472,27 @@ class Assistant(Base):
 
     @classmethod
     async def get_by_model(cls, session: AsyncSession, model: str) -> List["Assistant"]:
-        stmt = select(
-            Assistant.id, Assistant.class_id, Assistant.updated, Assistant.created
-        ).where(Assistant.model == model)
+        stmt = (
+            select(
+                Assistant.id,
+                Assistant.name,
+                Assistant.class_id,
+                Assistant.updated,
+                Assistant.created,
+                func.max(Thread.last_activity).label("last_activity"),
+                Class.name.label("class_name"),
+            )
+            .outerjoin(Assistant.threads)
+            .join(Assistant.class_)
+            .where(Assistant.model == model)
+            .group_by(
+                Assistant.id,
+                Assistant.class_id,
+                Assistant.updated,
+                Assistant.created,
+                Class.name,
+            )
+        )
         result = await session.execute(stmt)
         return result.all()
 
