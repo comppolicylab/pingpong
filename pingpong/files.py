@@ -146,7 +146,6 @@ async def handle_create_file(
 
         # Vision files are not supported by OpenAI's AsyncAzureOpenAI client
         if _is_vision_supported(content_type) and not isAzureOpenAIClient:
-            logger.info("About to create a vision file")
             new_v_file = await handle_create_file(
                 session,
                 authz,
@@ -229,6 +228,10 @@ async def handle_create_file(
                         purpose="assistants",
                     )
 
+                    # We can run these tasks concurrently,
+                    # since we're not using the upload object when
+                    # creating the image description, unlike when
+                    # we're creating actual vision & assistant files
                     image_description, new_f_file = await asyncio.gather(
                         description_task, new_f_task
                     )
@@ -247,6 +250,9 @@ async def handle_create_file(
                 if new_v_file:
                     await oai_client.files.delete(new_v_file.vision_file_id)
                     await authz.write(revoke=_file_grants(new_v_file))
+                if new_f_file:
+                    await oai_client.files.delete(new_f_file.file_id)
+                    await authz.write(revoke=_file_grants(new_f_file))
                 raise e
 
         primary_file = new_f_file if new_f_file else new_v_file
@@ -656,35 +662,29 @@ async def generate_file_description(
     Returns:
         str: Generated description
     """
-    try:
-        response = await oai_client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "system",
-                    "content": IMAGE_DESCRIPTION_PROMPT,
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "What do you see?",
+    response = await oai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {
+                "role": "system",
+                "content": IMAGE_DESCRIPTION_PROMPT,
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "What do you see?",
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{content_type};base64,{base64_image}"
                         },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{content_type};base64,{base64_image}"
-                            },
-                        },
-                    ],
-                },
-            ],
-            temperature=0,
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"An error occurred: {str(e)}",
-        )
+                    },
+                ],
+            },
+        ],
+        temperature=0,
+    )
+    return response.choices[0].message.content
