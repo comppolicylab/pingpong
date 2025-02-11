@@ -3840,7 +3840,6 @@ async def update_assistant(
         )
 
     if openai_update:
-        print(openai_update)
         try:
             await openai_client.beta.assistants.update(
                 assistant_id=asst.assistant_id, **openai_update

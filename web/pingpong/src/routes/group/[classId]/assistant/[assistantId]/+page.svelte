@@ -470,7 +470,6 @@
     const params = parseFormData(form);
 
     if (preventEdits && data.assistantId) {
-      console.log(params);
       const result = await api.updateAssistant(fetch, data.class.id, data.assistantId, {
         published: params.published,
         use_image_descriptions: params.use_image_descriptions
