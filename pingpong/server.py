@@ -3548,7 +3548,7 @@ async def create_assistant(
         )
 
         new_asst = await openai_client.beta.assistants.create(
-            instructions=format_instructions(req.instructions, use_latex=req.use_latex),
+            instructions=format_instructions(req.instructions, use_latex=req.use_latex, use_image_descriptions=req.use_image_descriptions),
             model=_model,
             tools=req.tools,
             temperature=req.temperature,
@@ -3719,6 +3719,8 @@ async def update_assistant(
     openai_update["tool_resources"] = tool_resources
     if req.use_latex is not None:
         asst.use_latex = req.use_latex
+    if req.use_image_descriptions is not None:
+        asst.use_image_descriptions = req.use_image_descriptions
     if req.hide_prompt is not None:
         asst.hide_prompt = req.hide_prompt
     if req.instructions is not None:
@@ -3780,7 +3782,7 @@ async def update_assistant(
     if not asst.instructions:
         raise HTTPException(500, "Instructions cannot be empty.")
     openai_update["instructions"] = format_instructions(
-        asst.instructions, use_latex=asst.use_latex
+        asst.instructions, use_latex=asst.use_latex, use_image_descriptions=asst.use_image_descriptions
     )
 
     try:

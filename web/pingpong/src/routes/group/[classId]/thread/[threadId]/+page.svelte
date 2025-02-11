@@ -123,10 +123,12 @@
   $: canSubmit = !!$participants.user && $participants.user.includes('Me');
   $: assistantDeleted = !$assistantId && $assistantId === 0;
   let useLatex = false;
+  let useImageDescriptions = false;
   $: {
     const assistant = data.assistants.find((assistant) => assistant.id === $assistantId);
     if (assistant) {
       useLatex = assistant.use_latex || false;
+      useImageDescriptions = assistant.use_image_descriptions || false;
     } else {
       console.warn(`Definition for assistant ${$assistantId} not found.`);
     }
