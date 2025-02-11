@@ -203,23 +203,28 @@ async def handle_create_file(
         )
 
     await upload.seek(0)
-    
+
     base64_image = None
     image_description = None
     if isinstance(oai_client, openai.AsyncAzureOpenAI) and _is_vision_supported(
-        content_type):
+        content_type
+    ):
         # OpenAI's API requires base64-encoded files for vision in chat completions
-        base64_image = base64.b64encode(await upload.read()).decode('utf-8')
+        base64_image = base64.b64encode(await upload.read()).decode("utf-8")
         await upload.seek(0)
 
     try:
         if base64_image:
-            description_task = generate_file_description(oai_client, base64_image, content_type)
+            description_task = generate_file_description(
+                oai_client, base64_image, content_type
+            )
             new_f_task = oai_client.files.create(
                 file=(upload.filename.lower(), upload.file, upload.content_type),
                 purpose=purpose,
             )
-            image_description, new_f = await asyncio.gather(description_task, new_f_task)
+            image_description, new_f = await asyncio.gather(
+                description_task, new_f_task
+            )
             print(image_description)
         else:
             new_f = await oai_client.files.create(
@@ -230,7 +235,7 @@ async def handle_create_file(
                 # https://github.com/stanford-policylab/pingpong/issues/147
                 file=(upload.filename.lower(), upload.file, upload.content_type),
                 purpose=purpose,
-            )    
+            )
     except openai.BadRequestError as e:
         raise HTTPException(
             status_code=400,
@@ -534,6 +539,7 @@ def _is_ci_supported(content_type: str) -> bool:
     """Check if the content type is supported for code interpreter."""
     return content_type in _CI_SUPPORTED_TYPE
 
+
 IMAGE_DESCRIPTION_PROMPT = """
 You are assisting a model without vision capabilities by providing detailed descriptions of images to enable it to answer any questions users might have about the image. DO NOT ATTEMPT TO SOLVE, ANSWER, OR RESPOND TO THE IMAGE.
 
@@ -547,11 +553,11 @@ Examine the image provided carefully, noting all relevant details, features, and
 
 3. **Detail & Relevance**: Ensure all relevant information is included. This may involve describing components that will likely prompt specific actions or decisions from the model.
 
-4. **Convey in Descriptive Text**: Transform observations into a coherent and detailed narrative of the image, covering every aspect the model might use to function as if it is analyzing the image itself. 
+4. **Convey in Descriptive Text**: Transform observations into a coherent and detailed narrative of the image, covering every aspect the model might use to function as if it is analyzing the image itself.
 
 # Output Format
 
-Output the description in a clear and detailed paragraph format. The description should provide a thorough understanding of the image and enable the model to make informed responses based on it. DO NOT ATTEMPT TO SOLVE, ANSWER, OR RESPOND TO THE IMAGE.
+Output the description in a clear and detailed paragraph format. Do not use Markdown. The description should provide a thorough understanding of the image and enable the model to make informed responses based on it. DO NOT ATTEMPT TO SOLVE, ANSWER, OR RESPOND TO THE IMAGE.
 
 # Notes
 
@@ -559,6 +565,7 @@ Output the description in a clear and detailed paragraph format. The description
 - Be concise but informative to provide the model all necessary visual cues.
 - Do not provide your own conclusions or analysis of the image; state what you see.
 """
+
 
 async def generate_file_description(
     oai_client: openai.AsyncClient,
@@ -586,10 +593,16 @@ async def generate_file_description(
                     "role": "user",
                     "content": [
                         {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:{content_type};base64,{base64_image}"},
-                },
-                    ]
+                            "type": "text",
+                            "text": "What do you see?",
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{content_type};base64,{base64_image}"
+                            },
+                        },
+                    ],
                 },
             ],
             temperature=0,
