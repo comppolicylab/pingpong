@@ -398,7 +398,6 @@
               {@const cleanedText = content.text.value
                 .replace(/<user_image>.*?<\/user_image>/gs, '')
                 .trim()}
-              {@debug images}
 
               <div class="leading-6">
                 <Markdown
@@ -423,17 +422,17 @@
                       <AttachmentDeletedPlaceholder {file_id} />
                     {/if}
                   {/each}
-                    {#each imageInfo as image}
-                    {#if !(image.response && "file_id" in image.response && image.response.file_id in allFiles)}
+                  {#each imageInfo as image}
+                    {#if !(image.response && 'file_id' in image.response && image.response.file_id in allFiles)}
                       <FilePlaceholder
-                      info={image}
-                      purpose="vision"
-                      mimeType={data.uploadInfo.mimeType}
-                      preventDeletion={true}
-                      on:delete={() => {}}
+                        info={image}
+                        purpose="vision"
+                        mimeType={data.uploadInfo.mimeType}
+                        preventDeletion={true}
+                        on:delete={() => {}}
                       />
                     {/if}
-                    {/each}
+                  {/each}
                 </div>
               {/if}
             {:else if content.type === 'code'}
