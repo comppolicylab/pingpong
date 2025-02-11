@@ -428,6 +428,16 @@ export type ServerFiles = {
   files: ServerFile[];
 };
 
+/*
+ * Information about an image proxy.
+ */
+export type ImageProxy = {
+  name: string;
+  content_type: string;
+  description: string;
+  complements: string | null;
+};
+
 /**
  * Get the current user.
  */
@@ -1641,6 +1651,7 @@ export type CreateThreadRequest = {
   file_search_file_ids?: string[];
   code_interpreter_file_ids?: string[];
   vision_file_ids?: string[];
+  vision_image_descriptions?: ImageProxy[];
 };
 
 /**

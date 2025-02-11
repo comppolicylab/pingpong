@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 import openai
 import logging
 from fastapi import HTTPException, UploadFile
@@ -137,9 +138,14 @@ async def handle_create_file(
             status_code=403, detail="File type not supported for File Search by OpenAI!"
         )
 
+    isAzureOpenAIClient = isinstance(oai_client, openai.AsyncAzureOpenAI)
+
     if "multimodal" in purpose:
-        new_v_file, new_f_file = None, None
-        if _is_vision_supported(content_type):
+        new_v_file, new_f_file, image_description = None, None, None
+
+        # Vision files are not supported by OpenAI's AsyncAzureOpenAI client
+        if _is_vision_supported(content_type) and not isAzureOpenAIClient:
+            logger.info("About to create a vision file")
             new_v_file = await handle_create_file(
                 session,
                 authz,
@@ -153,20 +159,85 @@ async def handle_create_file(
 
         # There is a case where the file is vision supported but not file search or code interpreter supported
         # image/webp is an example of this case
+        if (
+            not (
+                (_is_fs_supported(content_type) and "fs" in purpose)
+                or (_is_ci_supported(content_type) and "ci" in purpose)
+            )
+            and _is_vision_supported(content_type)
+            and isAzureOpenAIClient
+        ):
+            # File isn't supported by File Search or Code Interpreter
+            # If we haven't created a vision file, we need to create a dummy file
+            # with the description in case of AsyncAzureOpenAI client
+            await upload.seek(0)
+            base64_image = base64.b64encode(await upload.read()).decode("utf-8")
+
+            try:
+                description = await generate_file_description(
+                    oai_client, base64_image, content_type
+                )
+            except openai.BadRequestError as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=get_details_from_api_error(
+                        e, "OpenAI rejected this request."
+                    ),
+                )
+
+            # Create a dummy File schema with the description
+            return FileSchema(
+                id=0,
+                name=upload.filename,
+                content_type=content_type,
+                file_id="",
+                vision_obj_id=None,
+                class_id=class_id,
+                private=None,
+                uploader_id=None,
+                created=datetime.now(timezone.utc),
+                updated=None,
+                image_description=description,
+            )
+
         if (_is_fs_supported(content_type) and "fs" in purpose) or (
             _is_ci_supported(content_type) and "ci" in purpose
         ):
             try:
-                new_f_file = await handle_create_file(
-                    session,
-                    authz,
-                    oai_client,
-                    upload=upload,
-                    class_id=class_id,
-                    uploader_id=uploader_id,
-                    private=private,
-                    purpose="assistants",
-                )
+                if _is_vision_supported(content_type) and isAzureOpenAIClient:
+                    await upload.seek(0)
+                    base64_image = base64.b64encode(await upload.read()).decode("utf-8")
+
+                    description_task = generate_file_description(
+                        oai_client, base64_image, content_type
+                    )
+
+                    new_f_task = handle_create_file(
+                        session,
+                        authz,
+                        oai_client,
+                        upload=upload,
+                        class_id=class_id,
+                        uploader_id=uploader_id,
+                        private=private,
+                        purpose="assistants",
+                    )
+
+                    image_description_, new_f_file = await asyncio.gather(
+                        description_task, new_f_task
+                    )
+                    image_description = image_description_
+                else:
+                    new_f_file = await handle_create_file(
+                        session,
+                        authz,
+                        oai_client,
+                        upload=upload,
+                        class_id=class_id,
+                        uploader_id=uploader_id,
+                        private=private,
+                        purpose="assistants",
+                    )
             except Exception as e:
                 if new_v_file:
                     await oai_client.files.delete(new_v_file.vision_file_id)
@@ -200,42 +271,21 @@ async def handle_create_file(
             uploader_id=primary_file.uploader_id,
             created=primary_file.created,
             updated=primary_file.updated,
+            image_description=image_description,
         )
 
     await upload.seek(0)
 
-    base64_image = None
-    image_description = None
-    if isinstance(oai_client, openai.AsyncAzureOpenAI) and _is_vision_supported(
-        content_type
-    ):
-        # OpenAI's API requires base64-encoded files for vision in chat completions
-        base64_image = base64.b64encode(await upload.read()).decode("utf-8")
-        await upload.seek(0)
-
     try:
-        if base64_image:
-            description_task = generate_file_description(
-                oai_client, base64_image, content_type
-            )
-            new_f_task = oai_client.files.create(
-                file=(upload.filename.lower(), upload.file, upload.content_type),
-                purpose=purpose,
-            )
-            image_description, new_f = await asyncio.gather(
-                description_task, new_f_task
-            )
-            print(image_description)
-        else:
-            new_f = await oai_client.files.create(
-                # NOTE(jnu): the client tries to infer the filename, which doesn't
-                # work on this file that exists as bytes in memory. There's an
-                # undocumented way to specify name, content, and content_type which
-                # we use here to force correctness.
-                # https://github.com/stanford-policylab/pingpong/issues/147
-                file=(upload.filename.lower(), upload.file, upload.content_type),
-                purpose=purpose,
-            )
+        new_f = await oai_client.files.create(
+            # NOTE(jnu): the client tries to infer the filename, which doesn't
+            # work on this file that exists as bytes in memory. There's an
+            # undocumented way to specify name, content, and content_type which
+            # we use here to force correctness.
+            # https://github.com/stanford-policylab/pingpong/issues/147
+            file=(upload.filename.lower(), upload.file, upload.content_type),
+            purpose=purpose,
+        )
     except openai.BadRequestError as e:
         raise HTTPException(
             status_code=400,
@@ -274,7 +324,6 @@ async def handle_create_file(
             uploader_id=f.uploader_id,
             created=f.created,
             updated=f.updated,
-            image_description=image_description,
         )
     except Exception as e:
         await oai_client.files.delete(new_f.id)
@@ -607,7 +656,6 @@ async def generate_file_description(
             ],
             temperature=0,
         )
-        print(response.usage.dict())
         return response.choices[0].message.content
     except Exception as e:
         raise HTTPException(

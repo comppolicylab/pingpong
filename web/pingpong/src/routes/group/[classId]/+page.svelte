@@ -160,7 +160,8 @@
           tools_available: tools,
           code_interpreter_file_ids: form.code_interpreter_file_ids,
           file_search_file_ids: form.file_search_file_ids,
-          vision_file_ids: form.vision_file_ids
+          vision_file_ids: form.vision_file_ids,
+          vision_image_descriptions: form.visionFileImageDescriptions
         })
       );
       data.threads = [newThread as api.Thread, ...data.threads];

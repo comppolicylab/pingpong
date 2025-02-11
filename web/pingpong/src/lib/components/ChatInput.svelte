@@ -9,6 +9,7 @@
     code_interpreter_file_ids: string[];
     file_search_file_ids: string[];
     vision_file_ids: string[];
+    visionFileImageDescriptions: ImageProxy[];
     message: string;
     callback: ({ success, errorMessage, message_sent }: CallbackParams) => void;
   };
@@ -25,7 +26,8 @@
     FileRemover,
     FileUploader,
     FileUploadInfo,
-    ServerFile
+    ServerFile,
+    ImageProxy
   } from '$lib/api';
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import FileUpload from '$lib/components/FileUpload.svelte';
@@ -164,6 +166,15 @@
     .map((f) => (f.response as ServerFile).vision_file_id);
 
   $: visionFileIds = visionFiles.join(',');
+  let visionFileImageDescriptions: ImageProxy[] = [];
+  $: visionFileImageDescriptions = (finalVisionAcceptedFiles ? $allFiles : [])
+    .filter((f) => f.state === 'success' && (f.response as ServerFile).image_description)
+    .map((f) => ({
+      name: (f.response as ServerFile).name,
+      description: (f.response as ServerFile).image_description ?? 'No description',
+      content_type: (f.response as ServerFile).content_type,
+      complements: (f.response as ServerFile).file_id
+    }));
 
   $: attachments = $allFiles
     .filter(
@@ -305,6 +316,7 @@
       file_search_file_ids,
       code_interpreter_file_ids,
       vision_file_ids,
+      visionFileImageDescriptions,
       message,
       callback: (params: CallbackParams) => {
         if (params.success) {

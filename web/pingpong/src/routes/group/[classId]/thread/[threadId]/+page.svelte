@@ -150,6 +150,26 @@
     }
   };
 
+  const imageProxyRegex =
+    /<user_image><name>(.*?)<\/name><type>(.*?)<\/type><desc>(.*?)<\/desc><file_id>(.*?)<\/file_id><\/user_image>/gs;
+
+  const convertImageProxyToInfo = (data: api.ImageProxy[]) => {
+    return data.map((image) => {
+      const imageAsServerFile = {
+        file_id: image.complements ?? '',
+        content_type: image.content_type,
+        name: image.name
+      } as api.ServerFile;
+      return {
+        state: 'success',
+        progress: 100,
+        file: { type: image.content_type, name: image.name },
+        response: imageAsServerFile,
+        promise: Promise.resolve(imageAsServerFile)
+      } as api.FileUploadInfo;
+    });
+  };
+
   // Get the avatar URL of the participant in the chat thread.
   const getImage = (message: api.OpenAIMessage) => {
     if (message.role === 'user') {
@@ -366,10 +386,22 @@
           <div class="font-semibold text-blue-dark-40 mb-2 mt-1">{getName(message.data)}</div>
           {#each message.data.content as content}
             {#if content.type === 'text'}
+              {@const images = [...content.text.value.matchAll(imageProxyRegex)].map((match) => ({
+                name: match[1].trim(),
+                content_type: match[2].trim(),
+                description: match[3].trim(),
+                complements: match[4].trim()
+              }))}
+              {@const imageInfo = convertImageProxyToInfo(images)}
+              {@const cleanedText = content.text.value
+                .replace(/<user_image>.*?<\/user_image>/gs, '')
+                .trim()}
+              {@debug images}
+
               <div class="leading-6">
                 <Markdown
                   content={parseTextContent(
-                    content.text,
+                    { value: cleanedText, annotations: content.text.annotations },
                     api.fullPath(`/class/${classId}/thread/${threadId}`)
                   )}
                   syntax={true}
@@ -389,6 +421,17 @@
                       <AttachmentDeletedPlaceholder {file_id} />
                     {/if}
                   {/each}
+                    {#each imageInfo as image}
+                    {#if !(image.response && "file_id" in image.response && image.response.file_id in allFiles)}
+                      <FilePlaceholder
+                      info={image}
+                      purpose="vision"
+                      mimeType={data.uploadInfo.mimeType}
+                      preventDeletion={true}
+                      on:delete={() => {}}
+                      />
+                    {/if}
+                    {/each}
                 </div>
               {/if}
             {:else if content.type === 'code'}

@@ -38,6 +38,7 @@
   import DropdownHeader from '$lib/components/DropdownHeader.svelte';
   import DropdownFooter from '$lib/components/DropdownFooter.svelte';
   import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
+  import DropdownBadge from '$lib/components/DropdownBadge.svelte';
   export let data;
 
   // Flag indicating whether we should check for changes before navigating away.
@@ -906,6 +907,7 @@
       </div>
     {/if}
 
+
     <div class="col-span-2 mb-4">
       <Checkbox
         id="published"
@@ -924,6 +926,21 @@
           the assistant with the rest of your group, select this option.</Helper
         >
       {/if}
+    </div>
+
+    <div class="col-span-2 mb-4">
+      <Checkbox
+        id="image_descriptions"
+        name="image_descriptions"
+        class="mb-1"
+        checked={!!assistant?.published}><div class="flex flex-row gap-1"><DropdownBadge extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
+          ><span slot="name">experimental</span></DropdownBadge
+        ><div>Enable Vision capabilities through Image Descriptions</div></div></Checkbox
+      >
+      <Helper
+          >Your AI Provider doesn't support direct image analysis for this model. Enable this option to try a new experimental feature that uses image descriptions to provide Vision capabilities. This feature is still under active development and might produce unexpected or inaccurate results.
+          </Helper
+        >
     </div>
 
     <div class="w-8/9 my-5">

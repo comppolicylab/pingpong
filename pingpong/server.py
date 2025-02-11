@@ -2343,11 +2343,11 @@ async def list_class_models(
         filtered = [m for m in filtered if m["id"] not in AZURE_UNAVAILABLE_MODELS]
 
     # Vision is not supported in Azure, set vision_support_override to False
-    if isinstance(openai_client, openai.AsyncAzureOpenAI):
-        for model in filtered:
-            model["vision_support_override"] = (
-                False if model["supports_vision"] else None
-            )
+    # if isinstance(openai_client, openai.AsyncAzureOpenAI):
+    #     for model in filtered:
+    #         model["vision_support_override"] = (
+    #             False if model["supports_vision"] else None
+    #         )
 
     filtered.sort(key=lambda x: x["sort_order"])
 
@@ -2854,7 +2854,16 @@ async def create_thread(
         )
         tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
 
-    messageContent: MessageContentPartParam = [{"type": "text", "text": req.message}]
+    vision_image_descriptions = None
+    if req.vision_image_descriptions:
+        # Create XLM string for vision image descriptions
+        vision_image_descriptions = "\n".join(
+            [
+                f"<user_image><name>{proxy.name}</name><type>{proxy.content_type}</type><desc>{proxy.description}</desc><file_id>{proxy.complements or ''}</file_id></user_image>"
+                for proxy in req.vision_image_descriptions
+            ]
+        )
+    messageContent: MessageContentPartParam = [{"type": "text", "text": req.message + (("\n" + vision_image_descriptions) if vision_image_descriptions else "")}]
 
     attachments: list[Attachment] = []
     attachments_dict: dict[str, list[dict[str, str]]] = {}
@@ -3347,8 +3356,8 @@ async def create_user_file(
             status_code=413,
             detail=f"File too large. Max size is {humanize.naturalsize(config.upload.private_file_max_size)}.",
         )
-    start_time = time.monotonic()
-    result = await handle_create_file(
+
+    return await handle_create_file(
         request.state.db,
         request.state.authz,
         openai_client,
@@ -3358,9 +3367,6 @@ async def create_user_file(
         private=True,
         purpose=purpose,
     )
-    duration = time.monotonic() - start_time
-    logger.info(f"File upload took {duration:.2f} seconds")
-    return result
 
 
 @v1.delete(
