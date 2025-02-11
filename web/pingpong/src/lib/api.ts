@@ -418,6 +418,7 @@ export type ServerFile = {
   uploader_id: number | null;
   created: string;
   updated: string | null;
+  image_description?: string | null;
 };
 
 /**

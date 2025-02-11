@@ -3347,7 +3347,8 @@ async def create_user_file(
             status_code=413,
             detail=f"File too large. Max size is {humanize.naturalsize(config.upload.private_file_max_size)}.",
         )
-    return await handle_create_file(
+    start_time = time.monotonic()
+    result = await handle_create_file(
         request.state.db,
         request.state.authz,
         openai_client,
@@ -3357,6 +3358,9 @@ async def create_user_file(
         private=True,
         purpose=purpose,
     )
+    duration = time.monotonic() - start_time
+    logger.info(f"File upload took {duration:.2f} seconds")
+    return result
 
 
 @v1.delete(

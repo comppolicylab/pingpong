@@ -241,6 +241,7 @@ class File(BaseModel):
     uploader_id: int | None
     created: datetime
     updated: datetime | None
+    image_description: str | None = None
 
     class Config:
         from_attributes = True

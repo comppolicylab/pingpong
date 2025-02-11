@@ -10,6 +10,7 @@ from .authz import AuthzClient, Relation
 from .models import File
 from .schemas import FileTypeInfo, GenericStatus, FileUploadPurpose
 from .schemas import File as FileSchema
+import base64
 
 logger = logging.getLogger(__name__)
 
@@ -202,16 +203,34 @@ async def handle_create_file(
         )
 
     await upload.seek(0)
+    
+    base64_image = None
+    image_description = None
+    if isinstance(oai_client, openai.AsyncAzureOpenAI) and _is_vision_supported(
+        content_type):
+        # OpenAI's API requires base64-encoded files for vision in chat completions
+        base64_image = base64.b64encode(await upload.read()).decode('utf-8')
+        await upload.seek(0)
+
     try:
-        new_f = await oai_client.files.create(
-            # NOTE(jnu): the client tries to infer the filename, which doesn't
-            # work on this file that exists as bytes in memory. There's an
-            # undocumented way to specify name, content, and content_type which
-            # we use here to force correctness.
-            # https://github.com/stanford-policylab/pingpong/issues/147
-            file=(upload.filename.lower(), upload.file, upload.content_type),
-            purpose=purpose,
-        )
+        if base64_image:
+            description_task = generate_file_description(oai_client, base64_image, content_type)
+            new_f_task = oai_client.files.create(
+                file=(upload.filename.lower(), upload.file, upload.content_type),
+                purpose=purpose,
+            )
+            image_description, new_f = await asyncio.gather(description_task, new_f_task)
+            print(image_description)
+        else:
+            new_f = await oai_client.files.create(
+                # NOTE(jnu): the client tries to infer the filename, which doesn't
+                # work on this file that exists as bytes in memory. There's an
+                # undocumented way to specify name, content, and content_type which
+                # we use here to force correctness.
+                # https://github.com/stanford-policylab/pingpong/issues/147
+                file=(upload.filename.lower(), upload.file, upload.content_type),
+                purpose=purpose,
+            )    
     except openai.BadRequestError as e:
         raise HTTPException(
             status_code=400,
@@ -250,6 +269,7 @@ async def handle_create_file(
             uploader_id=f.uploader_id,
             created=f.created,
             updated=f.updated,
+            image_description=image_description,
         )
     except Exception as e:
         await oai_client.files.delete(new_f.id)
@@ -513,3 +533,71 @@ def _is_fs_supported(content_type: str) -> bool:
 def _is_ci_supported(content_type: str) -> bool:
     """Check if the content type is supported for code interpreter."""
     return content_type in _CI_SUPPORTED_TYPE
+
+IMAGE_DESCRIPTION_PROMPT = """
+You are assisting a model without vision capabilities by providing detailed descriptions of images to enable it to answer any questions users might have about the image. DO NOT ATTEMPT TO SOLVE, ANSWER, OR RESPOND TO THE IMAGE.
+
+Examine the image provided carefully, noting all relevant details, features, and contexts that might be meaningful or actionable. Your task is to translate the visual content into a comprehensive textual description that encapsulates everything the model would need to know to effectively simulate an understanding of the image.
+
+# Steps
+
+1. **Observe the Image**: Look closely at the image to identify key elements, such as objects, people, activities, colors, and background.
+
+2. **Identify Key Features**: Note any text within the image, objects' positions, expressions, actions, and any notable landmarks. DO NOT ATTEMPT TO SOLVE, ANSWER, OR RESPOND TO THE IMAGE.
+
+3. **Detail & Relevance**: Ensure all relevant information is included. This may involve describing components that will likely prompt specific actions or decisions from the model.
+
+4. **Convey in Descriptive Text**: Transform observations into a coherent and detailed narrative of the image, covering every aspect the model might use to function as if it is analyzing the image itself. 
+
+# Output Format
+
+Output the description in a clear and detailed paragraph format. The description should provide a thorough understanding of the image and enable the model to make informed responses based on it. DO NOT ATTEMPT TO SOLVE, ANSWER, OR RESPOND TO THE IMAGE.
+
+# Notes
+
+- Ensure the description covers all relevant aspects of the image, not missing any critical elements that could aid in the simulation of vision capabilities.
+- Be concise but informative to provide the model all necessary visual cues.
+- Do not provide your own conclusions or analysis of the image; state what you see.
+"""
+
+async def generate_file_description(
+    oai_client: openai.AsyncClient,
+    base64_image: str,
+    content_type: str,
+) -> str:
+    """Generate a description for a file using OpenAI's API.
+
+    Args:
+        oai_client (openai.AsyncClient): OpenAI API client
+        base64_image (bytes): Base64-encoded image data
+
+    Returns:
+        str: Generated description
+    """
+    try:
+        response = await oai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": IMAGE_DESCRIPTION_PROMPT,
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{content_type};base64,{base64_image}"},
+                },
+                    ]
+                },
+            ],
+            temperature=0,
+        )
+        print(response.usage.dict())
+        return response.choices[0].message.content
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"An error occurred: {str(e)}",
+        )
