@@ -952,7 +952,12 @@
           >Your AI Provider doesn't support direct image analysis for this model. Enable this option
           to try a new experimental feature that uses image descriptions to provide Vision
           capabilities. This feature is still under active development and might produce unexpected
-          or inaccurate results.
+          or inaccurate results. To share your thoughts or report any issues, <a
+            href="https://airtable.com/appR9m6YfvPTg1H3d/pagS1VLdLrPSbeqoN/form"
+            class="underline"
+            rel="noopener noreferrer"
+            target="_blank">use this form</a
+          >.
         </Helper>
       </div>
     {/if}

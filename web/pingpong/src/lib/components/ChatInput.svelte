@@ -654,8 +654,13 @@
       </List>
 
       <P>
-        We appreciate your feedback as we work to improve this functionality. If you have any
-        questions or need assistance, please reach out to your Moderators.
+        We appreciate your feedback as we work to improve this functionality. To share your thoughts
+        or report any issues, <a
+          href="https://airtable.com/appR9m6YfvPTg1H3d/pagS1VLdLrPSbeqoN/form"
+          class="underline"
+          rel="noopener noreferrer"
+          target="_blank">use this form</a
+        >.
       </P>
     </div>
   </div>
