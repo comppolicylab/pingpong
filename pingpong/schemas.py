@@ -525,6 +525,7 @@ class NewThreadMessage(BaseModel):
     code_interpreter_file_ids: list[str] = Field([])
     file_search_file_ids: list[str] = Field([])
     vision_file_ids: list[str] = Field([])
+    vision_image_descriptions: list[ImageProxy] = Field([])
 
     _file_check = model_validator(mode="after")(file_validator)
 

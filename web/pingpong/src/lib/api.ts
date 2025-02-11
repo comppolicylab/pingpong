@@ -1975,6 +1975,7 @@ export type NewThreadMessageRequest = {
   file_search_file_ids?: string[];
   code_interpreter_file_ids?: string[];
   vision_file_ids?: string[];
+  vision_image_descriptions?: ImageProxy[];
 };
 
 /**

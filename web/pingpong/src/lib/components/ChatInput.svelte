@@ -138,9 +138,6 @@
 
   // The list of files being uploaded.
   let allFiles = writable<FileUploadInfo[]>([]);
-  $: {
-    console.log('allFiles', $allFiles);
-  }
   $: uploading = $allFiles.some((f) => f.state === 'pending');
   let purpose: FileUploadPurpose | null = null;
   $: purpose =

@@ -3127,9 +3127,26 @@ async def send_message(
             await models.Thread.add_code_interpeter_files(
                 request.state.db, thread.id, data.code_interpreter_file_ids
             )
+        vision_image_descriptions = None
 
+        if data.vision_image_descriptions:
+            # Create XLM string for vision image descriptions
+            vision_image_descriptions = "\n".join(
+                [
+                    f"<user_image><name>{proxy.name}</name><type>{proxy.content_type}</type><desc>{proxy.description}</desc><file_id>{proxy.complements or ''}</file_id></user_image>"
+                    for proxy in data.vision_image_descriptions
+                ]
+            )
         messageContent: MessageContentPartParam = [
-            {"type": "text", "text": data.message}
+            {
+                "type": "text",
+                "text": data.message
+                + (
+                    ("\n" + vision_image_descriptions)
+                    if vision_image_descriptions
+                    else ""
+                ),
+            }
         ]
 
         if data.vision_file_ids:
@@ -3356,9 +3373,7 @@ async def create_user_file(
     upload: UploadFile,
     openai_client: OpenAIClient,
     purpose: schemas.FileUploadPurpose = Header(None, alias="X-Upload-Purpose"),
-    use_image_descriptions: bool = Header(
-        False, alias="X-Use-Image-Descriptions"
-    ),
+    use_image_descriptions: bool = Header(False, alias="X-Use-Image-Descriptions"),
 ) -> schemas.File:
     if upload.size > config.upload.private_file_max_size:
         raise HTTPException(
@@ -3643,7 +3658,7 @@ async def update_assistant(
     revokes = list[Relation]()
 
     # Users without publish permission can't toggle the published status of assistants.
-    if req.published is not None and asst.published != req.published:
+    if "published" in req.model_fields_set and asst.published != req.published:
         if not await request.state.authz.test(
             f"user:{request.state.session.user.id}",
             "can_publish",
@@ -3658,7 +3673,7 @@ async def update_assistant(
         return asst
 
     # Only Administrators can edit locked assistants
-    if asst.locked:
+    if asst.locked and req.model_fields_set != {"published", "use_image_descriptions"}:
         if not await request.state.authz.test(
             f"user:{request.state.session.user.id}",
             "admin",
@@ -3671,6 +3686,8 @@ async def update_assistant(
 
     openai_update: dict[str, Any] = {}
     tool_resources: ToolResources = {}
+    update_tool_resources = False
+    update_instructions = False
 
     # Track whether we have an empty vector store to delete
     vector_store_id_to_delete = None
@@ -3680,69 +3697,85 @@ async def update_assistant(
         # Fetch all the code interpreter files associated with the assistant
         # based on the Update request and update the assistant's
         # code interpreter files
-        if (
-            req.code_interpreter_file_ids is not None
-            and req.code_interpreter_file_ids != []
-        ):
-            tool_resources["code_interpreter"] = {
-                "file_ids": req.code_interpreter_file_ids
-            }
-            asst.code_interpreter_files = await models.File.get_all_by_file_id(
-                request.state.db, req.code_interpreter_file_ids
-            )
-        else:
-            asst.code_interpreter_files = []
+        if "code_interpreter_file_ids" in req.model_fields_set:
+            update_tool_resources = True
+            if (
+                req.code_interpreter_file_ids is not None
+                and req.code_interpreter_file_ids != []
+            ):
+                tool_resources["code_interpreter"] = {
+                    "file_ids": req.code_interpreter_file_ids
+                }
+                asst.code_interpreter_files = await models.File.get_all_by_file_id(
+                    request.state.db, req.code_interpreter_file_ids
+                )
+            else:
+                asst.code_interpreter_files = []
 
         # --------------------- File Search ---------------------
-        if req.file_search_file_ids is not None and req.file_search_file_ids != []:
-            # Files will need to be stored in a vector store
-            if asst.vector_store_id:
-                # Vector store already exists, update
-                vector_store_id = await sync_vector_store_files(
-                    request.state.db,
-                    openai_client,
-                    asst.vector_store_id,
-                    req.file_search_file_ids,
-                )
-                tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
+        if "file_search_file_ids" in req.model_fields_set:
+            update_tool_resources = True
+            if req.file_search_file_ids is not None and req.file_search_file_ids != []:
+                # Files will need to be stored in a vector store
+                if asst.vector_store_id:
+                    # Vector store already exists, update
+                    vector_store_id = await sync_vector_store_files(
+                        request.state.db,
+                        openai_client,
+                        asst.vector_store_id,
+                        req.file_search_file_ids,
+                    )
+                    tool_resources["file_search"] = {
+                        "vector_store_ids": [vector_store_id]
+                    }
+                else:
+                    # Store doesn't exist, create a new one
+                    vector_store_id, vector_store_object_id = await create_vector_store(
+                        request.state.db,
+                        openai_client,
+                        class_id,
+                        req.file_search_file_ids,
+                        type=schemas.VectorStoreType.THREAD,
+                    )
+                    asst.vector_store_id = vector_store_object_id
+                    tool_resources["file_search"] = {
+                        "vector_store_ids": [vector_store_id]
+                    }
             else:
-                # Store doesn't exist, create a new one
-                vector_store_id, vector_store_object_id = await create_vector_store(
-                    request.state.db,
-                    openai_client,
-                    class_id,
-                    req.file_search_file_ids,
-                    type=schemas.VectorStoreType.THREAD,
-                )
-                asst.vector_store_id = vector_store_object_id
-                tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
-        else:
-            # No files stored in vector store, remove it
-            if asst.vector_store_id:
-                id_to_delete = asst.vector_store_id
-                asst.vector_store_id = None
-                vector_store_id_to_delete = await delete_vector_store_db(
-                    request.state.db, id_to_delete
-                )
-                tool_resources["file_search"] = {}
+                # No files stored in vector store, remove it
+                if asst.vector_store_id:
+                    id_to_delete = asst.vector_store_id
+                    asst.vector_store_id = None
+                    vector_store_id_to_delete = await delete_vector_store_db(
+                        request.state.db, id_to_delete
+                    )
+                    tool_resources["file_search"] = {}
     except Exception:
         raise HTTPException(
             500, "Error updating assistant files. Please try saving again."
         )
 
-    openai_update["tool_resources"] = tool_resources
-    if req.use_latex is not None:
+    if update_tool_resources:
+        openai_update["tool_resources"] = tool_resources
+    if "use_latex" in req.model_fields_set and req.use_latex is not None:
+        update_instructions = True
         asst.use_latex = req.use_latex
-    if req.use_image_descriptions is not None:
+    if (
+        "use_image_descriptions" in req.model_fields_set
+        and req.use_image_descriptions is not None
+        and asst.use_image_descriptions != req.use_image_descriptions
+    ):
+        update_instructions = True
         asst.use_image_descriptions = req.use_image_descriptions
-    if req.hide_prompt is not None:
+    if "hide_prompt" in req.model_fields_set and req.hide_prompt is not None:
         asst.hide_prompt = req.hide_prompt
-    if req.instructions is not None:
+    if "instructions" in req.model_fields_set and req.instructions is not None:
+        update_instructions = True
         if not req.instructions:
             raise HTTPException(400, "Instructions cannot be empty.")
         asst.instructions = req.instructions
     _model = None
-    if req.model is not None:
+    if "model" in req.model_fields_set and req.model is not None:
         _model = (
             get_azure_model_deployment_name_equivalent(req.model)
             if isinstance(openai_client, openai.AsyncAzureOpenAI)
@@ -3750,9 +3783,9 @@ async def update_assistant(
         )
         openai_update["model"] = _model
         asst.model = req.model
-    if req.description is not None:
+    if "description" in req.model_fields_set and req.description is not None:
         asst.description = req.description
-    if req.tools is not None:
+    if "tools" in req.model_fields_set and req.tools is not None:
         openai_update["tools"] = req.tools
         asst.tools = json.dumps([t.model_dump() for t in req.tools])
 
@@ -3776,7 +3809,11 @@ async def update_assistant(
         openai_update["extra_body"] = reasoning_extra_body
         asst.reasoning_effort = req.reasoning_effort
 
-    if req.published is not None:
+    if (
+        "published" in req.model_fields_set
+        and req.published is not None
+        and req.published != asst.published
+    ):
         ptuple = (f"class:{class_id}#member", "can_view", f"assistant:{asst.id}")
         if req.published:
             asst.published = func.now()
@@ -3785,7 +3822,7 @@ async def update_assistant(
             asst.published = None
             revokes.append(ptuple)
 
-    if req.name is not None:
+    if "name" in req.model_fields_set and req.name is not None:
         asst.name = req.name
 
     await models.Thread.update_tools_available(request.state.db, asst.id, asst.tools)
@@ -3795,43 +3832,50 @@ async def update_assistant(
 
     if not asst.instructions:
         raise HTTPException(500, "Instructions cannot be empty.")
-    openai_update["instructions"] = format_instructions(
-        asst.instructions,
-        use_latex=asst.use_latex,
-        use_image_descriptions=asst.use_image_descriptions,
-    )
+    if update_instructions:
+        openai_update["instructions"] = format_instructions(
+            asst.instructions,
+            use_latex=asst.use_latex,
+            use_image_descriptions=asst.use_image_descriptions,
+        )
 
-    try:
-        await openai_client.beta.assistants.update(
-            assistant_id=asst.assistant_id, **openai_update
-        )
-        # Delete vector store as late as possible to avoid orphaned assistant
-        if vector_store_id_to_delete:
-            await delete_vector_store_oai(openai_client, vector_store_id_to_delete)
-    except openai.BadRequestError as e:
-        raise HTTPException(
-            400, get_details_from_api_error(e, "OpenAI rejected this request")
-        )
-    except openai.NotFoundError as e:
-        if e.code == "DeploymentNotFound":
-            raise HTTPException(
-                404,
-                f"Deployment <b>{_model}</b> does not exist on Azure. Please make sure the <b>deployment name</b> matches the one in Azure. If you created the deployment within the last 5 minutes, please wait a moment and try again.",
+    if openai_update:
+        print(openai_update)
+        try:
+            await openai_client.beta.assistants.update(
+                assistant_id=asst.assistant_id, **openai_update
             )
-        raise HTTPException(
-            404, get_details_from_api_error(e, "OpenAI rejected this request")
-        )
+            # Delete vector store as late as possible to avoid orphaned assistant
+            if vector_store_id_to_delete:
+                await delete_vector_store_oai(openai_client, vector_store_id_to_delete)
+        except openai.BadRequestError as e:
+            raise HTTPException(
+                400, get_details_from_api_error(e, "OpenAI rejected this request")
+            )
+        except openai.NotFoundError as e:
+            if e.code == "DeploymentNotFound":
+                raise HTTPException(
+                    404,
+                    f"Deployment <b>{_model}</b> does not exist on Azure. Please make sure the <b>deployment name</b> matches the one in Azure. If you created the deployment within the last 5 minutes, please wait a moment and try again.",
+                )
+            raise HTTPException(
+                404, get_details_from_api_error(e, "OpenAI rejected this request")
+            )
 
-    try:
-        # Delete any private files that were removed
-        await handle_delete_files(
-            request.state.db,
-            request.state.authz,
-            openai_client,
-            req.deleted_private_files,
-        )
-    except Exception as e:
-        raise HTTPException(500, f"Error removing private files: {e}")
+    if (
+        "deleted_private_files" in req.model_fields_set
+        and req.deleted_private_files != []
+    ):
+        try:
+            # Delete any private files that were removed
+            await handle_delete_files(
+                request.state.db,
+                request.state.authz,
+                openai_client,
+                req.deleted_private_files,
+            )
+        except Exception as e:
+            raise HTTPException(500, f"Error removing private files: {e}")
 
     await request.state.authz.write_safe(grant=grants, revoke=revokes)
     return asst

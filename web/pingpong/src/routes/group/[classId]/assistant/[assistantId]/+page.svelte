@@ -470,9 +470,11 @@
     const params = parseFormData(form);
 
     if (preventEdits && data.assistantId) {
-      const result = !params.published
-        ? await api.unpublishAssistant(fetch, data.class.id, data.assistantId)
-        : await api.publishAssistant(fetch, data.class.id, data.assistantId);
+      console.log(params);
+      const result = await api.updateAssistant(fetch, data.class.id, data.assistantId, {
+        published: params.published,
+        use_image_descriptions: params.use_image_descriptions
+      });
       const expanded = api.expandResponse(result);
 
       if (expanded.error) {

@@ -282,6 +282,27 @@ async def handle_create_file(
     await upload.seek(0)
 
     try:
+        if purpose == "vision" and isAzureOpenAIClient:
+            description_ = None
+            if use_image_descriptions:
+                base64_image = base64.b64encode(await upload.read()).decode("utf-8")
+                description_ = await generate_file_description(
+                    oai_client, base64_image, content_type
+                )
+
+            return FileSchema(
+                id=0,
+                name=upload.filename,
+                content_type=content_type,
+                file_id="",
+                vision_obj_id=None,
+                class_id=class_id,
+                private=None,
+                uploader_id=None,
+                created=datetime.now(timezone.utc),
+                updated=None,
+                image_description=description_ if use_image_descriptions else None,
+            )
         new_f = await oai_client.files.create(
             # NOTE(jnu): the client tries to infer the filename, which doesn't
             # work on this file that exists as bytes in memory. There's an
