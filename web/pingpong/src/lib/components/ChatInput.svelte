@@ -531,7 +531,7 @@
                     on:click={() => (visionUseImageDescriptionsModalOpen = true)}
                     class="flex flex-row justify-between items-center bg-sky-700 rounded-t-md rounded-b-none py-2 px-3"
                     ><span class="uppercase text-xs font-medium text-white leading-none text-start"
-                      >Experimental Vision Support</span
+                      >Experimental<br />Vision Support</span
                     >
                     <QuestionCircleOutline color="white" /></Button
                   >{/if}<span class="py-2 px-3 text-sm"
