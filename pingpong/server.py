@@ -2343,11 +2343,11 @@ async def list_class_models(
         filtered = [m for m in filtered if m["id"] not in AZURE_UNAVAILABLE_MODELS]
 
     # Vision is not supported in Azure, set vision_support_override to False
-    # if isinstance(openai_client, openai.AsyncAzureOpenAI):
-    #     for model in filtered:
-    #         model["vision_support_override"] = (
-    #             False if model["supports_vision"] else None
-    #         )
+    if isinstance(openai_client, openai.AsyncAzureOpenAI):
+        for model in filtered:
+            model["vision_support_override"] = (
+                False if model["supports_vision"] else None
+            )
 
     filtered.sort(key=lambda x: x["sort_order"])
 
