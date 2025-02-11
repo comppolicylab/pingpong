@@ -84,11 +84,13 @@
   $: parties = data.me.user?.id ? `${data.me.user.id}` : '';
   // The assistant ID from the URL.
   $: linkedAssistant = parseInt($page.url.searchParams.get('assistant') || '0', 10);
+  let useImageDescriptions = false;
   $: {
     if (linkedAssistant && assistants) {
       const selectedAssistant = (assistants || []).find((asst) => asst.id === linkedAssistant);
       if (selectedAssistant) {
         assistant = selectedAssistant;
+        useImageDescriptions = assistant.use_image_descriptions || false;
       }
     }
   }
@@ -114,9 +116,17 @@
   const handleUpload = (
     f: File,
     onProgress: (p: number) => void,
-    purpose: FileUploadPurpose = 'assistants'
+    purpose: FileUploadPurpose = 'assistants',
+    useImageDescriptions: boolean = false
   ) => {
-    return api.uploadUserFile(data.class.id, data.me.user!.id, f, { onProgress }, purpose);
+    return api.uploadUserFile(
+      data.class.id,
+      data.me.user!.id,
+      f,
+      { onProgress },
+      purpose,
+      useImageDescriptions
+    );
   };
 
   // Handle file removal
@@ -324,6 +334,7 @@
               })
             : null}
           {visionSupportOverride}
+          {useImageDescriptions}
           fileSearchAcceptedFiles={supportsFileSearch
             ? data.uploadInfo.fileTypes({
                 file_search: true,

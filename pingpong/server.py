@@ -3356,6 +3356,9 @@ async def create_user_file(
     upload: UploadFile,
     openai_client: OpenAIClient,
     purpose: schemas.FileUploadPurpose = Header(None, alias="X-Upload-Purpose"),
+    use_image_descriptions: bool = Header(
+        False, alias="X-Use-Image-Descriptions"
+    ),
 ) -> schemas.File:
     if upload.size > config.upload.private_file_max_size:
         raise HTTPException(
@@ -3372,6 +3375,7 @@ async def create_user_file(
         uploader_id=request.state.session.user.id,
         private=True,
         purpose=purpose,
+        use_image_descriptions=use_image_descriptions,
     )
 
 

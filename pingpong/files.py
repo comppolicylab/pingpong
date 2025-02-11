@@ -119,6 +119,7 @@ async def handle_create_file(
     uploader_id: int,
     private: bool,
     purpose: FileUploadPurpose = "assistants",
+    use_image_descriptions: bool = False,
 ) -> FileSchema:
     """Handle file creation.
 
@@ -166,6 +167,7 @@ async def handle_create_file(
             )
             and _is_vision_supported(content_type)
             and isAzureOpenAIClient
+            and use_image_descriptions
         ):
             # File isn't supported by File Search or Code Interpreter
             # If we haven't created a vision file, we need to create a dummy file
@@ -204,7 +206,11 @@ async def handle_create_file(
             _is_ci_supported(content_type) and "ci" in purpose
         ):
             try:
-                if _is_vision_supported(content_type) and isAzureOpenAIClient:
+                if (
+                    _is_vision_supported(content_type)
+                    and isAzureOpenAIClient
+                    and use_image_descriptions
+                ):
                     await upload.seek(0)
                     base64_image = base64.b64encode(await upload.read()).decode("utf-8")
 
@@ -223,10 +229,9 @@ async def handle_create_file(
                         purpose="assistants",
                     )
 
-                    image_description_, new_f_file = await asyncio.gather(
+                    image_description, new_f_file = await asyncio.gather(
                         description_task, new_f_task
                     )
-                    image_description = image_description_
                 else:
                     new_f_file = await handle_create_file(
                         session,

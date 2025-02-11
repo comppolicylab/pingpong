@@ -271,9 +271,17 @@
   const handleUpload = (
     f: File,
     onProgress: (p: number) => void,
-    purpose: api.FileUploadPurpose = 'assistants'
+    purpose: api.FileUploadPurpose = 'assistants',
+    useImageDescriptions: boolean = false
   ) => {
-    return api.uploadUserFile(data.class.id, data.me.user!.id, f, { onProgress }, purpose);
+    return api.uploadUserFile(
+      data.class.id,
+      data.me.user!.id,
+      f,
+      { onProgress },
+      purpose,
+      useImageDescriptions
+    );
   };
 
   // Handle file removal
@@ -528,6 +536,7 @@
           {fileSearchAcceptedFiles}
           {codeInterpreterAcceptedFiles}
           {visionSupportOverride}
+          {useImageDescriptions}
           {assistantDeleted}
           {canViewAssistant}
           canSubmit={canSubmit && !assistantDeleted && canViewAssistant}

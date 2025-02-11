@@ -932,27 +932,29 @@
       {/if}
     </div>
 
-    <div class="col-span-2 mb-4">
-      <Checkbox
-        id="use_image_descriptions"
-        name="use_image_descriptions"
-        class="mb-1"
-        checked={!!assistant?.use_image_descriptions}
-        ><div class="flex flex-row gap-1">
-          <DropdownBadge
-            extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
-            ><span slot="name">experimental</span></DropdownBadge
-          >
-          <div>Enable Vision capabilities through Image Descriptions</div>
-        </div></Checkbox
-      >
-      <Helper
-        >Your AI Provider doesn't support direct image analysis for this model. Enable this option
-        to try a new experimental feature that uses image descriptions to provide Vision
-        capabilities. This feature is still under active development and might produce unexpected or
-        inaccurate results.
-      </Helper>
-    </div>
+    {#if visionSupportOverride === false}
+      <div class="col-span-2 mb-4">
+        <Checkbox
+          id="use_image_descriptions"
+          name="use_image_descriptions"
+          class="mb-1"
+          checked={!!assistant?.use_image_descriptions}
+          ><div class="flex flex-row gap-1">
+            <DropdownBadge
+              extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
+              ><span slot="name">Experimental</span></DropdownBadge
+            >
+            <div>Enable Vision capabilities through Image Descriptions</div>
+          </div></Checkbox
+        >
+        <Helper
+          >Your AI Provider doesn't support direct image analysis for this model. Enable this option
+          to try a new experimental feature that uses image descriptions to provide Vision
+          capabilities. This feature is still under active development and might produce unexpected
+          or inaccurate results.
+        </Helper>
+      </div>
+    {/if}
 
     <div class="w-8/9 my-5">
       <Accordion>

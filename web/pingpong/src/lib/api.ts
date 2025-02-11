@@ -1295,10 +1295,11 @@ export const uploadUserFile = (
   userId: number,
   file: File,
   opts?: UploadOptions,
-  purpose: FileUploadPurpose = 'assistants'
+  purpose: FileUploadPurpose = 'assistants',
+  useImageDescriptions: boolean = false
 ) => {
   const url = fullPath(`class/${classId}/user/${userId}/file`);
-  return _doUpload(url, file, opts, purpose);
+  return _doUpload(url, file, opts, purpose, useImageDescriptions);
 };
 
 /**
@@ -1334,7 +1335,8 @@ export interface FileUploadInfo {
 export type FileUploader = (
   file: File,
   progress: (p: number) => void,
-  purpose: FileUploadPurpose
+  purpose: FileUploadPurpose,
+  useImageDescriptions: boolean
 ) => FileUploadInfo;
 
 /**
@@ -1351,7 +1353,8 @@ const _doUpload = (
   url: string,
   file: File,
   opts?: UploadOptions,
-  purpose: FileUploadPurpose = 'assistants'
+  purpose: FileUploadPurpose = 'assistants',
+  useImageDescriptions: boolean = false
 ): FileUploadInfo => {
   if (!browser) {
     throw new Error('File uploads are not supported in this environment.');
@@ -1383,6 +1386,7 @@ const _doUpload = (
     xhr.open('POST', url, true);
     xhr.setRequestHeader('Accept', 'application/json');
     xhr.setRequestHeader('X-Upload-Purpose', purpose);
+    xhr.setRequestHeader('X-Use-Image-Descriptions', useImageDescriptions.toString());
     xhr.upload.onprogress = onProgress;
     xhr.onreadystatechange = () => {
       if (xhr.readyState === 4) {

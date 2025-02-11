@@ -19,7 +19,7 @@
   import { createEventDispatcher } from 'svelte';
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
-  import { Button, Heading, Modal, Popover } from 'flowbite-svelte';
+  import { Button, Heading, Li, List, Modal, P, Popover } from 'flowbite-svelte';
   import { page } from '$app/stores';
   import type {
     MimeTypeLookupFn,
@@ -42,6 +42,7 @@
     QuestionCircleOutline
   } from 'flowbite-svelte-icons';
   import Sanitize from '$lib/components/Sanitize.svelte';
+  import DropdownBadge from './DropdownBadge.svelte';
 
   const dispatcher = createEventDispatcher();
 
@@ -102,12 +103,15 @@
    * Whether the specific AI Provider supports Vision for this model.
    */
   export let visionSupportOverride: boolean | undefined = undefined;
+  export let useImageDescriptions = false;
   /**
    * (Based on model capabilities AND AI Provider capabilities)
    * Files to accept for Vision. If null, vision capabilities are disabled.
    */
-  let finalVisionAcceptedFiles = visionSupportOverride === false ? null : visionAcceptedFiles;
+  let finalVisionAcceptedFiles =
+    visionSupportOverride === false && !useImageDescriptions ? null : visionAcceptedFiles;
   let visionOverrideModalOpen = false;
+  let visionUseImageDescriptionsModalOpen = false;
   /**
    * Max upload size.
    */
@@ -134,6 +138,9 @@
 
   // The list of files being uploaded.
   let allFiles = writable<FileUploadInfo[]>([]);
+  $: {
+    console.log('allFiles', $allFiles);
+  }
   $: uploading = $allFiles.some((f) => f.state === 'pending');
   let purpose: FileUploadPurpose | null = null;
   $: purpose =
@@ -494,6 +501,7 @@
             type="multimodal"
             {fileSearchAcceptedFiles}
             {codeInterpreterAcceptedFiles}
+            {useImageDescriptions}
             visionAcceptedFiles={finalVisionAcceptedFiles}
             documentMaxCount={10}
             visionMaxCount={10}
@@ -513,12 +521,20 @@
           {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || finalVisionAcceptedFiles) && !(tooManyAttachments || tooManyVisionFiles) && !(loading || disabled || !upload) && !tooManyFileSearchFiles && !tooManyCodeInterpreterFiles}
             <Popover defaultClass="w-52" arrow={false}
               ><div class="flex flex-col h-fit align-center">
-                {#if visionSupportOverride === false}
+                {#if visionSupportOverride === false && !useImageDescriptions}
                   <Button
                     on:click={() => (visionOverrideModalOpen = true)}
                     class="flex flex-row justify-between items-center bg-amber-700 rounded-t-md rounded-b-none py-2 px-3"
                     ><span class="uppercase text-xs font-medium text-white leading-none"
                       >No Vision capabilities</span
+                    >
+                    <QuestionCircleOutline color="white" /></Button
+                  >{:else if visionSupportOverride === false && useImageDescriptions}
+                  <Button
+                    on:click={() => (visionUseImageDescriptionsModalOpen = true)}
+                    class="flex flex-row justify-between items-center bg-sky-700 rounded-t-md rounded-b-none py-2 px-3"
+                    ><span class="uppercase text-xs font-medium text-white leading-none text-start"
+                      >Experimental Vision Support</span
                     >
                     <QuestionCircleOutline color="white" /></Button
                   >{/if}<span class="py-2 px-3 text-sm"
@@ -593,6 +609,57 @@
         We are working on adding Vision support for your AI Provider. In the meantime, you can still
         upload and use supported image files with Code Interpreter.
       </div>
+    </div>
+  </div>
+</Modal>
+
+<Modal
+  classHeader="text-gray-700"
+  class="text-gray-700"
+  bind:open={visionUseImageDescriptionsModalOpen}
+  autoclose
+  outsideclose
+>
+  <div class="flex flex-col gap-5 p-4">
+    <div class="flex flex-col items-center gap-2">
+      <DropdownBadge
+        extraClasses="border-sky-400 from-sky-100 to-sky-200 text-sky-800 text-xs uppercase"
+        ><span slot="name">Experimental Feature</span></DropdownBadge
+      >
+      <Heading tag="h2" class="text-3xl font-semibold text-center"
+        >Vision capabilities through<br />image descriptions</Heading
+      >
+    </div>
+    <div class="flex flex-col gap-1">
+      <P class="mb-4">
+        Your group's Moderators have enabled an experimental feature for this Assistant that enables
+        image analysis using detailed text descriptions, even though direct Vision capabilities
+        aren't currently supported for this model.
+      </P>
+
+      <Heading tag="h4" class="mb-2 text-base font-semibold">What does this mean for you?</Heading>
+
+      <List class="space-y-2 list-disc list-inside mb-4">
+        <Li>
+          <b>Enhanced image understanding:</b> When you upload images, PingPong provides the AI model
+          with comprehensive text descriptions, allowing it to analyze and respond to image-based queries.
+        </Li>
+        <Li>
+          <b>Seamless integration:</b> PingPong automatically converts images into detailed descriptions,
+          enabling the AI to understand and discuss visual content in your conversations.
+        </Li>
+        <Li>
+          <b>Check for important info:</b> Because this feature relies on an intermediary description,
+          it is subject to the limitations of both the image captioning model and the text-based analysis.
+          Expect potential inaccuracies, especially with complex or nuanced images. This is an active
+          area of development.
+        </Li>
+      </List>
+
+      <P>
+        We appreciate your feedback as we work to improve this functionality. If you have any
+        questions or need assistance, please reach out to your Moderators.
+      </P>
     </div>
   </div>
 </Modal>
