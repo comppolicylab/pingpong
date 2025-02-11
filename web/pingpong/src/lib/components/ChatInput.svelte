@@ -513,14 +513,15 @@
           {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || finalVisionAcceptedFiles) && !(tooManyAttachments || tooManyVisionFiles) && !(loading || disabled || !upload) && !tooManyFileSearchFiles && !tooManyCodeInterpreterFiles}
             <Popover defaultClass="w-52" arrow={false}
               ><div class="flex flex-col h-fit align-center">
-                <Button
-                  on:click={() => (visionOverrideModalOpen = true)}
-                  class="flex flex-row justify-between items-center bg-amber-700 rounded-t-md rounded-b-none py-2 px-3"
-                  ><span class="uppercase text-xs font-medium text-white leading-none"
-                    >No Vision capabilities</span
-                  >
-                  <QuestionCircleOutline color="white" /></Button
-                ><span class="py-2 px-3 text-sm"
+                {#if visionSupportOverride === false}
+                  <Button
+                    on:click={() => (visionOverrideModalOpen = true)}
+                    class="flex flex-row justify-between items-center bg-amber-700 rounded-t-md rounded-b-none py-2 px-3"
+                    ><span class="uppercase text-xs font-medium text-white leading-none"
+                      >No Vision capabilities</span
+                    >
+                    <QuestionCircleOutline color="white" /></Button
+                  >{/if}<span class="py-2 px-3 text-sm"
                   >Upload files to thread<br />Documents: {Math.max(
                     currentFileSearchFileCount,
                     currentCodeInterpreterFileCount
