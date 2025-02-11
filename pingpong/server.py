@@ -2863,7 +2863,13 @@ async def create_thread(
                 for proxy in req.vision_image_descriptions
             ]
         )
-    messageContent: MessageContentPartParam = [{"type": "text", "text": req.message + (("\n" + vision_image_descriptions) if vision_image_descriptions else "")}]
+    messageContent: MessageContentPartParam = [
+        {
+            "type": "text",
+            "text": req.message
+            + (("\n" + vision_image_descriptions) if vision_image_descriptions else ""),
+        }
+    ]
 
     attachments: list[Attachment] = []
     attachments_dict: dict[str, list[dict[str, str]]] = {}
@@ -3548,7 +3554,11 @@ async def create_assistant(
         )
 
         new_asst = await openai_client.beta.assistants.create(
-            instructions=format_instructions(req.instructions, use_latex=req.use_latex, use_image_descriptions=req.use_image_descriptions),
+            instructions=format_instructions(
+                req.instructions,
+                use_latex=req.use_latex,
+                use_image_descriptions=req.use_image_descriptions,
+            ),
             model=_model,
             tools=req.tools,
             temperature=req.temperature,
@@ -3782,7 +3792,9 @@ async def update_assistant(
     if not asst.instructions:
         raise HTTPException(500, "Instructions cannot be empty.")
     openai_update["instructions"] = format_instructions(
-        asst.instructions, use_latex=asst.use_latex, use_image_descriptions=asst.use_image_descriptions
+        asst.instructions,
+        use_latex=asst.use_latex,
+        use_image_descriptions=asst.use_image_descriptions,
     )
 
     try:

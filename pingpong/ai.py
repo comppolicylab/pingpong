@@ -505,7 +505,9 @@ async def run_thread(
         yield b'{"type":"done"}\n'
 
 
-def format_instructions(instructions: str, use_latex: bool = False, use_image_descriptions: bool = False) -> str:
+def format_instructions(
+    instructions: str, use_latex: bool = False, use_image_descriptions: bool = False
+) -> str:
     """Format instructions for a prompt."""
     if use_latex:
         instructions + (
@@ -525,7 +527,7 @@ def format_instructions(instructions: str, use_latex: bool = False, use_image_de
             """
             If a user message contains a section in the format `<user_image><name>{file_name}</name><desc>{image_desc}</desc></user_image>`, act as if the user has uploaded an image with the file name `{file_name}` and description `{image_desc}`. Use the provided image description to inform your responses without revealing that you are using an image description. Always refer to the image description as the image the user has uploaded.
 
-            **Example:** 
+            **Example:**
             - **Input:** `<user_image><name>image.png</name><desc>The image illustrates the process of photosynthesis... glucose and oxygen.</desc></user_image>` Help, I can't understand this graph.
             - **Output:** What role do the sun's rays play in this process, and how might the energy they provide be used by a plant? Understanding the source and function of this energy can be key to understanding photosynthesis.
             - **Input:** Can you see the image I uploaded?

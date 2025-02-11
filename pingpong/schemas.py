@@ -412,6 +412,7 @@ class ImageProxy(BaseModel):
     content_type: str
     complements: str | None = None
 
+
 class CreateThread(BaseModel):
     parties: list[int] = []
     message: str = Field(..., min_length=1)
