@@ -449,6 +449,7 @@ export class ThreadManager {
     code_interpreter_file_ids?: string[],
     file_search_file_ids?: string[],
     vision_file_ids?: string[],
+    vision_image_descriptions?: api.ImageProxy[],
     attachments?: api.ServerFile[]
   ) {
     if (!message) {
@@ -488,11 +489,21 @@ export class ThreadManager {
     const optimisticMsgId = `optimistic-${(Math.random() + 1).toString(36).substring(2)}`;
     const optimisticImageContent: api.MessageContentImageFile[] =
       vision_file_ids?.map((id) => ({ type: 'image_file', image_file: { file_id: id } })) ?? [];
+    const visionImageDescriptions =
+      vision_image_descriptions
+        ?.map(
+          (proxy) =>
+            `<user_image><name>${proxy.name}</name><type>${proxy.content_type}</type><desc>${proxy.description}</desc><file_id>${proxy.complements || ''}</file_id></user_image>`
+        )
+        .join('\n') || '';
+
+    const optimisticMessageContent =
+      message + (visionImageDescriptions ? `\n${visionImageDescriptions}` : '');
     const optimistic: api.OpenAIMessage = {
       id: optimisticMsgId,
       role: 'user',
       content: [
-        { type: 'text', text: { value: message, annotations: [] } },
+        { type: 'text', text: { value: optimisticMessageContent, annotations: [] } },
         ...optimisticImageContent
       ],
       created_at: Date.now(),
@@ -522,7 +533,8 @@ export class ThreadManager {
       message,
       file_search_file_ids,
       code_interpreter_file_ids,
-      vision_file_ids
+      vision_file_ids,
+      vision_image_descriptions
     });
 
     this.attachments = derived(this.#data, ($data) => {

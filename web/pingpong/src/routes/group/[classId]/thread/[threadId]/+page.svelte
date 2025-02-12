@@ -241,6 +241,7 @@
     code_interpreter_file_ids,
     file_search_file_ids,
     vision_file_ids,
+    visionFileImageDescriptions,
     callback
   }: ChatInputMessage) => {
     try {
@@ -251,6 +252,7 @@
         code_interpreter_file_ids,
         file_search_file_ids,
         vision_file_ids,
+        visionFileImageDescriptions,
         currentMessageAttachments
       );
     } catch (e) {
