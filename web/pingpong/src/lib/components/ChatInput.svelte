@@ -108,7 +108,8 @@
    * (Based on model capabilities AND AI Provider capabilities)
    * Files to accept for Vision. If null, vision capabilities are disabled.
    */
-  let finalVisionAcceptedFiles =
+  let finalVisionAcceptedFiles: string | null = null;
+  $: finalVisionAcceptedFiles =
     visionSupportOverride === false && !useImageDescriptions ? null : visionAcceptedFiles;
   let visionOverrideModalOpen = false;
   let visionUseImageDescriptionsModalOpen = false;
@@ -378,6 +379,13 @@
     if (file.state === 'pending' || file.state === 'deleting') {
       return;
     } else if (file.state === 'error') {
+      allFiles.update((f) => f.filter((x) => x !== file));
+    } else if (
+      file.state === 'success' &&
+      (file.response as ServerFile).image_description &&
+      (file.response as ServerFile).id === 0 &&
+      (file.response as ServerFile).file_id === ''
+    ) {
       allFiles.update((f) => f.filter((x) => x !== file));
     } else {
       allFiles.update((f) => {

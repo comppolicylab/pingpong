@@ -179,21 +179,21 @@ async def handle_create_single_purpose_file(
     # ---------------------------------------------------------
     match purpose:
         case "assistants":
-            if not (_is_fs_supported(content_type) and _is_ci_supported(content_type)):
+            if not (_is_fs_supported(content_type) or _is_ci_supported(content_type)):
                 raise HTTPException(
-                    status_code=403,
+                    status_code=400,
                     detail="File type not supported as a document by OpenAI!",
                 )
         case "vision":
             if not _is_vision_supported(content_type):
                 raise HTTPException(
-                    status_code=403,
+                    status_code=400,
                     detail="File type not supported for Vision by OpenAI!",
                 )
         case _:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported purpose: {purpose}",
+                detail=f"Unsupported file purpose: {purpose}",
             )
 
     await upload.seek(0)
