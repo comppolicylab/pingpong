@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { goto } from '$app/navigation';
+  import { afterNavigate, goto } from '$app/navigation';
   import { navigating, page } from '$app/stores';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
   import {
@@ -22,7 +22,6 @@
   import * as api from '$lib/api';
   import { errorMessage } from '$lib/errors';
   import type { Assistant, FileUploadPurpose } from '$lib/api';
-  import { onMount } from 'svelte';
   import { loading } from '$lib/stores/general';
   import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
 
@@ -42,7 +41,7 @@
     );
   }
 
-  onMount(async () => {
+  afterNavigate(async () => {
     const errorCode = $page.url.searchParams.get('error_code');
     if (errorCode) {
       const errorMessage = getErrorMessage(parseInt(errorCode) || 0);
