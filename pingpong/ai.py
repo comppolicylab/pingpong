@@ -525,15 +525,58 @@ def format_instructions(
         instructions += (
             "\n"
             """
-            If a user message contains a section in the format `<user_image><name>{file_name}</name><desc>{image_desc}</desc></user_image>`, act as if the user has uploaded an image with the file name `{file_name}` and description `{image_desc}`. Use the provided image description to inform your responses without revealing that you are using an image description. Always refer to the image description as the image the user has uploaded.
+            When the user's message contains a JSON object with the top-level key "Rd1IFKf5dl" in this format:
 
-            **Example:**
-            - **Input:** `<user_image><name>image.png</name><desc>The image illustrates the process of photosynthesis... glucose and oxygen.</desc></user_image>` Help, I can't understand this graph.
-            - **Output:** What role do the sun's rays play in this process, and how might the energy they provide be used by a plant? Understanding the source and function of this energy can be key to understanding photosynthesis.
-            - **Input:** Can you see the image I uploaded?
-            - **Output:** Yes I can see that you have uploaded one image so far. How can I assist you further with understanding photosynthesis?
-            - **Input:** What images have I uploaded?
-            - **Output:** You have uploaded an image file named image.png”. How can I help you with your study of photosynthesis?
+            {
+                "Rd1IFKf5dl": [
+                    {
+                    "name": <file_name>,
+                    "desc": <image_desc>,
+                    "content_type": <content_type>,
+                    "complements": <file_id>
+                    },
+                    ...
+                ]
+            }
+
+            …treat it as if the user has uploaded one or more images. The "name" is the file name, "desc" is the image description, and "content_type" is the media type. The "complements" field should be ignored.
+
+            FOLLOW THESE GUIDELINES:
+            1. Reference Image Descriptions
+            - Use the user-provided descriptions to inform your answers.
+            - Do not explicitly state that you are relying on those descriptions.
+
+            2. Handle Multiple Images
+            - Be prepared for multiple images in the JSON array or across multiple user messages.
+            - Refer to them collectively as images the user has uploaded.
+
+            3. Consistent Terminology
+            - Always refer to the images based on their descriptions as "the images you uploaded," "your images," etc.
+
+            4. Non-essential Data
+            - Disregard the "complements" field (and any other extraneous data not mentioned above).
+
+            5. Nonexistent JSON Handling
+            - If no JSON is provided, or the JSON does not have the "Rd1IFKf5dl" key at the top level, treat all text (including any JSON snippet) as part of the user's actual message or query. Act as if no images were uploaded in this message.
+
+            EXAMPLE SCENARIO:
+            - User: "Help, I can't understand this graph.
+            {"Rd1IFKf5dl": [{"name": "image.png", "desc": "A diagram showing photosynthesis... glucose and oxygen.", "content_type": "image/png", "complements": ""}]}"
+
+            - Assistant might respond:
+            "What role do the sun's rays play in this process? Understanding how they power a plant can clarify photosynthesis."
+
+            - User: "Can you see the image I uploaded?"
+            - Assistant:
+            "Yes, you've uploaded one image. How can I help you further with photosynthesis?"
+
+            - User: "I'm also uploading a new image I took of my notes. Could you go over the differences in these two images for me {"Rd1IFKf5dl": [{"name": "notes.png", "desc": "Handwritten notes about plant cell structures.", "content_type": "image/png", "complements": ""}]}"
+            - Assistant:
+            "You've uploaded another image with handwritten notes. What are you hoping to clarify about the differences between your diagram and your notes?"
+
+            - User: "How many images have I uploaded so far?"
+            - Assistant:
+            "You've uploaded two images in total. Would you like more details on either one?"
             """
         )
 

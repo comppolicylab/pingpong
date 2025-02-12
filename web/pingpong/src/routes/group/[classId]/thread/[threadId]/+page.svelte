@@ -152,8 +152,28 @@
     }
   };
 
-  const imageProxyRegex =
-    /<user_image><name>(.*?)<\/name><type>(.*?)<\/type><desc>(.*?)<\/desc><file_id>(.*?)<\/file_id><\/user_image>/gs;
+  export function processString(dirty_string: string): {
+    clean_string: string;
+    images: api.ImageProxy[];
+  } {
+    const jsonPattern = /\{"Rd1IFKf5dl"\s*:\s*\[.*?\]\}/s;
+    const match = dirty_string.match(jsonPattern);
+
+    let clean_string = dirty_string;
+    let images: api.ImageProxy[] = [];
+
+    if (match) {
+      try {
+        const user_images = JSON.parse(match[0]);
+        images = user_images['Rd1IFKf5dl'] || [];
+        clean_string = dirty_string.replace(jsonPattern, '').trim();
+      } catch (error) {
+        console.error('Failed to parse user images JSON:', error);
+      }
+    }
+
+    return { clean_string, images };
+  }
 
   const convertImageProxyToInfo = (data: api.ImageProxy[]) => {
     return data.map((image) => {
@@ -398,21 +418,13 @@
           <div class="font-semibold text-blue-dark-40 mb-2 mt-1">{getName(message.data)}</div>
           {#each message.data.content as content}
             {#if content.type === 'text'}
-              {@const images = [...content.text.value.matchAll(imageProxyRegex)].map((match) => ({
-                name: match[1].trim(),
-                content_type: match[2].trim(),
-                description: match[3].trim(),
-                complements: match[4].trim()
-              }))}
+              {@const { clean_string, images } = processString(content.text.value)}
               {@const imageInfo = convertImageProxyToInfo(images)}
-              {@const cleanedText = content.text.value
-                .replace(/<user_image>.*?<\/user_image>/gs, '')
-                .trim()}
 
               <div class="leading-6">
                 <Markdown
                   content={parseTextContent(
-                    { value: cleanedText, annotations: content.text.annotations },
+                    { value: clean_string, annotations: content.text.annotations },
                     api.fullPath(`/class/${classId}/thread/${threadId}`)
                   )}
                   syntax={true}

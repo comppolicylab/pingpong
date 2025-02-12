@@ -1385,8 +1385,6 @@ const _doUpload = (
   const promise = new Promise<FileUploadResult>((resolve, reject) => {
     xhr.open('POST', url, true);
     xhr.setRequestHeader('Accept', 'application/json');
-    xhr.setRequestHeader('X-Upload-Purpose', purpose);
-    xhr.setRequestHeader('X-Use-Image-Descriptions', useImageDescriptions.toString());
     xhr.upload.onprogress = onProgress;
     xhr.onreadystatechange = () => {
       if (xhr.readyState === 4) {
@@ -1412,6 +1410,10 @@ const _doUpload = (
   });
   const formData = new FormData();
   formData.append('upload', file);
+  formData.append('purpose', purpose);
+  if (useImageDescriptions === true) {
+    formData.append('use_image_descriptions', 'true');
+  }
   xhr.send(formData);
 
   return { ...info, promise };

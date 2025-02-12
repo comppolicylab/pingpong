@@ -489,16 +489,14 @@ export class ThreadManager {
     const optimisticMsgId = `optimistic-${(Math.random() + 1).toString(36).substring(2)}`;
     const optimisticImageContent: api.MessageContentImageFile[] =
       vision_file_ids?.map((id) => ({ type: 'image_file', image_file: { file_id: id } })) ?? [];
-    const visionImageDescriptions =
-      vision_image_descriptions
-        ?.map(
-          (proxy) =>
-            `<user_image><name>${proxy.name}</name><type>${proxy.content_type}</type><desc>${proxy.description}</desc><file_id>${proxy.complements || ''}</file_id></user_image>`
-        )
-        .join('\n') || '';
+    let visionImageDescriptionsString = '';
+    if (vision_image_descriptions && vision_image_descriptions.length > 0) {
+      const visionImageDescriptions =
+        vision_image_descriptions?.map((proxy) => JSON.stringify(proxy)).join(',') || '';
+      visionImageDescriptionsString = `\n{"Rd1IFKf5dl": [${visionImageDescriptions}]}`;
+    }
 
-    const optimisticMessageContent =
-      message + (visionImageDescriptions ? `\n${visionImageDescriptions}` : '');
+    const optimisticMessageContent = message + visionImageDescriptionsString;
     const optimistic: api.OpenAIMessage = {
       id: optimisticMsgId,
       role: 'user',

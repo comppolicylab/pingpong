@@ -12,11 +12,11 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     FastAPI,
+    Form,
     HTTPException,
     Request,
     Response,
     UploadFile,
-    Header,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import PositiveInt
@@ -81,6 +81,7 @@ from .errors import sentry
 from .files import (
     FILE_TYPES,
     FileNotFoundException,
+    generate_vision_image_descriptions_string,
     handle_create_file,
     handle_delete_file,
     handle_delete_files,
@@ -2856,18 +2857,13 @@ async def create_thread(
 
     vision_image_descriptions = None
     if req.vision_image_descriptions:
-        # Create XLM string for vision image descriptions
-        vision_image_descriptions = "\n".join(
-            [
-                f"<user_image><name>{proxy.name}</name><type>{proxy.content_type}</type><desc>{proxy.description}</desc><file_id>{proxy.complements or ''}</file_id></user_image>"
-                for proxy in req.vision_image_descriptions
-            ]
+        vision_image_descriptions = generate_vision_image_descriptions_string(
+            req.vision_image_descriptions
         )
     messageContent: MessageContentPartParam = [
         {
             "type": "text",
-            "text": req.message
-            + (("\n" + vision_image_descriptions) if vision_image_descriptions else ""),
+            "text": req.message + (vision_image_descriptions or ""),
         }
     ]
 
@@ -3127,25 +3123,17 @@ async def send_message(
             await models.Thread.add_code_interpeter_files(
                 request.state.db, thread.id, data.code_interpreter_file_ids
             )
-        vision_image_descriptions = None
 
+        vision_image_descriptions = None
         if data.vision_image_descriptions:
-            # Create XLM string for vision image descriptions
-            vision_image_descriptions = "\n".join(
-                [
-                    f"<user_image><name>{proxy.name}</name><type>{proxy.content_type}</type><desc>{proxy.description}</desc><file_id>{proxy.complements or ''}</file_id></user_image>"
-                    for proxy in data.vision_image_descriptions
-                ]
+            vision_image_descriptions = generate_vision_image_descriptions_string(
+                data.vision_image_descriptions
             )
+
         messageContent: MessageContentPartParam = [
             {
                 "type": "text",
-                "text": data.message
-                + (
-                    ("\n" + vision_image_descriptions)
-                    if vision_image_descriptions
-                    else ""
-                ),
+                "text": data.message + (vision_image_descriptions or ""),
             }
         ]
 
@@ -3372,8 +3360,8 @@ async def create_user_file(
     request: Request,
     upload: UploadFile,
     openai_client: OpenAIClient,
-    purpose: schemas.FileUploadPurpose = Header(None, alias="X-Upload-Purpose"),
-    use_image_descriptions: bool = Header(False, alias="X-Use-Image-Descriptions"),
+    purpose: schemas.FileUploadPurpose = Form("assistants"),
+    use_image_descriptions: bool = Form(False),
 ) -> schemas.File:
     if upload.size > config.upload.private_file_max_size:
         raise HTTPException(
