@@ -38,6 +38,7 @@
   import DropdownHeader from '$lib/components/DropdownHeader.svelte';
   import DropdownFooter from '$lib/components/DropdownFooter.svelte';
   import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
+  import DropdownBadge from '$lib/components/DropdownBadge.svelte';
   export let data;
 
   // Flag indicating whether we should check for changes before navigating away.
@@ -279,6 +280,9 @@
             ? false
             : (preventEdits ? !!assistant?.use_latex : newValue) !== oldValue;
         break;
+      case 'use_image_descriptions':
+        dirty = newValue === undefined ? false : newValue !== !!oldValue;
+        break;
       case 'hide_prompt':
         dirty =
           newValue === undefined
@@ -318,6 +322,7 @@
           'model',
           'published',
           'use_latex',
+          'use_image_descriptions',
           'hide_prompt',
           'tools',
           'temperature',
@@ -390,6 +395,7 @@
       reasoning_effort: supportsReasoning ? reasoningEffortValue : null,
       published: body.published?.toString() === 'on',
       use_latex: body.use_latex?.toString() === 'on',
+      use_image_descriptions: body.use_image_descriptions?.toString() === 'on',
       hide_prompt: body.hide_prompt?.toString() === 'on',
       deleted_private_files: [...$trashPrivateFileIds, ...fileSearchCodeInterpreterUnusedFiles]
     };
@@ -464,9 +470,10 @@
     const params = parseFormData(form);
 
     if (preventEdits && data.assistantId) {
-      const result = !params.published
-        ? await api.unpublishAssistant(fetch, data.class.id, data.assistantId)
-        : await api.publishAssistant(fetch, data.class.id, data.assistantId);
+      const result = await api.updateAssistant(fetch, data.class.id, data.assistantId, {
+        published: params.published,
+        use_image_descriptions: params.use_image_descriptions
+      });
       const expanded = api.expandResponse(result);
 
       if (expanded.error) {
@@ -925,6 +932,35 @@
         >
       {/if}
     </div>
+
+    {#if visionSupportOverride === false}
+      <div class="col-span-2 mb-4">
+        <Checkbox
+          id="use_image_descriptions"
+          name="use_image_descriptions"
+          class="mb-1"
+          checked={!!assistant?.use_image_descriptions}
+          ><div class="flex flex-row gap-1">
+            <DropdownBadge
+              extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
+              ><span slot="name">Experimental</span></DropdownBadge
+            >
+            <div>Enable Vision capabilities through Image Descriptions</div>
+          </div></Checkbox
+        >
+        <Helper
+          >Your AI Provider doesn't support direct image analysis for this model. Enable this option
+          to try a new experimental feature that uses image descriptions to provide Vision
+          capabilities. This feature is still under active development and might produce unexpected
+          or inaccurate results. To share your thoughts or report any issues, <a
+            href="https://airtable.com/appR9m6YfvPTg1H3d/pagS1VLdLrPSbeqoN/form"
+            class="underline"
+            rel="noopener noreferrer"
+            target="_blank">use this form</a
+          >.
+        </Helper>
+      </div>
+    {/if}
 
     <div class="w-8/9 my-5">
       <Accordion>

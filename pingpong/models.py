@@ -1336,6 +1336,7 @@ class Assistant(Base):
     description = Column(String)
     assistant_id = Column(String)
     use_latex = Column(Boolean)
+    use_image_descriptions = Column(Boolean)
     hide_prompt = Column(Boolean, default=False)
     locked = Column(Boolean, server_default="false")
     tools = Column(String)
@@ -1431,6 +1432,7 @@ class Assistant(Base):
         params["assistant_id"] = assistant_id
         params["published"] = func.now() if data.published else None
         params["use_latex"] = data.use_latex
+        params["use_image_descriptions"] = data.use_image_descriptions
         params["vector_store_id"] = vector_store_id
         params["version"] = version
 

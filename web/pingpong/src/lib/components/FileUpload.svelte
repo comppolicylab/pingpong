@@ -6,6 +6,7 @@
     files: Writable<FileUploadInfo[]>,
     maxSize = 0,
     purpose: FileUploadPurpose = 'assistants',
+    useImageDescriptions: boolean = false,
     dispatch: (
       type: string,
       detail: { file: File; message: string } | Writable<FileUploadInfo[]>
@@ -40,7 +41,8 @@
             return existingFiles;
           });
         },
-        purpose
+        purpose,
+        useImageDescriptions
       );
 
       // Update the file list when the upload is complete.
@@ -146,6 +148,8 @@
 
   export let purpose: FileUploadPurpose = 'assistants';
 
+  export let useImageDescriptions: boolean = false;
+
   /**
    * Additional classes to apply to wrapper.
    */
@@ -228,7 +232,15 @@
       return;
     }
 
-    autoupload(Array.from(e.dataTransfer.files), upload, files, maxSize, purpose, dispatch);
+    autoupload(
+      Array.from(e.dataTransfer.files),
+      upload,
+      files,
+      maxSize,
+      purpose,
+      useImageDescriptions,
+      dispatch
+    );
   };
 
   /**
@@ -314,6 +326,7 @@
       files,
       maxSize,
       purpose,
+      useImageDescriptions,
       dispatch,
       undefined,
       uploadRef

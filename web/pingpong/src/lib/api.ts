@@ -418,6 +418,7 @@ export type ServerFile = {
   uploader_id: number | null;
   created: string;
   updated: string | null;
+  image_description?: string | null;
 };
 
 /**
@@ -425,6 +426,16 @@ export type ServerFile = {
  */
 export type ServerFiles = {
   files: ServerFile[];
+};
+
+/*
+ * Information about an image proxy.
+ */
+export type ImageProxy = {
+  name: string;
+  content_type: string;
+  description: string;
+  complements: string | null;
 };
 
 /**
@@ -1107,6 +1118,7 @@ export type Assistant = {
   creator_id: number;
   published: string | null;
   use_latex: boolean | null;
+  use_image_descriptions: boolean | null;
   hide_prompt: boolean | null;
   locked: boolean | null;
   endorsed: boolean | null;
@@ -1179,6 +1191,7 @@ export type CreateAssistantRequest = {
   file_search_file_ids: string[];
   published?: boolean;
   use_latex?: boolean;
+  use_image_descriptions?: boolean;
   hide_prompt?: boolean;
   deleted_private_files?: number[];
 };
@@ -1198,6 +1211,7 @@ export type UpdateAssistantRequest = {
   file_search_file_ids?: string[];
   published?: boolean;
   use_latex?: boolean;
+  use_image_descriptions?: boolean;
   hide_prompt?: boolean;
   deleted_private_files?: number[];
 };
@@ -1281,10 +1295,11 @@ export const uploadUserFile = (
   userId: number,
   file: File,
   opts?: UploadOptions,
-  purpose: FileUploadPurpose = 'assistants'
+  purpose: FileUploadPurpose = 'assistants',
+  useImageDescriptions: boolean = false
 ) => {
   const url = fullPath(`class/${classId}/user/${userId}/file`);
-  return _doUpload(url, file, opts, purpose);
+  return _doUpload(url, file, opts, purpose, useImageDescriptions);
 };
 
 /**
@@ -1320,7 +1335,8 @@ export interface FileUploadInfo {
 export type FileUploader = (
   file: File,
   progress: (p: number) => void,
-  purpose: FileUploadPurpose
+  purpose: FileUploadPurpose,
+  useImageDescriptions: boolean
 ) => FileUploadInfo;
 
 /**
@@ -1337,7 +1353,8 @@ const _doUpload = (
   url: string,
   file: File,
   opts?: UploadOptions,
-  purpose: FileUploadPurpose = 'assistants'
+  purpose: FileUploadPurpose = 'assistants',
+  useImageDescriptions: boolean = false
 ): FileUploadInfo => {
   if (!browser) {
     throw new Error('File uploads are not supported in this environment.');
@@ -1368,7 +1385,6 @@ const _doUpload = (
   const promise = new Promise<FileUploadResult>((resolve, reject) => {
     xhr.open('POST', url, true);
     xhr.setRequestHeader('Accept', 'application/json');
-    xhr.setRequestHeader('X-Upload-Purpose', purpose);
     xhr.upload.onprogress = onProgress;
     xhr.onreadystatechange = () => {
       if (xhr.readyState === 4) {
@@ -1394,6 +1410,10 @@ const _doUpload = (
   });
   const formData = new FormData();
   formData.append('upload', file);
+  formData.append('purpose', purpose);
+  if (useImageDescriptions === true) {
+    formData.append('use_image_descriptions', 'true');
+  }
   xhr.send(formData);
 
   return { ...info, promise };
@@ -1640,6 +1660,7 @@ export type CreateThreadRequest = {
   file_search_file_ids?: string[];
   code_interpreter_file_ids?: string[];
   vision_file_ids?: string[];
+  vision_image_descriptions?: ImageProxy[];
 };
 
 /**
@@ -1956,6 +1977,7 @@ export type NewThreadMessageRequest = {
   file_search_file_ids?: string[];
   code_interpreter_file_ids?: string[];
   vision_file_ids?: string[];
+  vision_image_descriptions?: ImageProxy[];
 };
 
 /**

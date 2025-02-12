@@ -25,6 +25,8 @@
 
   export let mimeType: MimeTypeLookupFn;
 
+  export let preventDeletion = false;
+
   // Custom events
   const dispatch = createEventDispatcher();
 
@@ -74,11 +76,18 @@
     <div class="text-xs text-gray-500">{type}</div>
   </div>
   {#if state !== 'pending' && state !== 'deleting'}
-    <div class="absolute top-[-6px] right-[-6px] -delete-button">
-      <Button pill color="dark" class="p-0" on:click={deleteFile}>
-        <CloseOutline class="w-4 h-4" />
-      </Button>
-    </div>
+    {#if !preventDeletion}
+      <div class="absolute top-[-6px] right-[-6px] -delete-button">
+        <Button pill color="dark" class="p-0" on:click={deleteFile}>
+          <CloseOutline class="w-4 h-4" />
+        </Button>
+      </div>
+    {:else if preventDeletion && purpose === 'vision'}
+      <Tooltip arrow={false} class="font-light w-64"
+        >This file is an image file and cannot be removed from the conversation. Delete the Thread
+        to remove it.</Tooltip
+      >
+    {/if}
   {/if}
 </div>
 
