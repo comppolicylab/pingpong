@@ -381,7 +381,6 @@ async def handle_multimodal_upload(
                     use_image_descriptions,
                 )
         except Exception as e:
-            # On error, make sure to try cleaning up any files created.
             if new_v_file:
                 await oai_client.files.delete(new_v_file.file_id)
                 await authz.write(revoke=_file_grants(new_v_file))
@@ -435,7 +434,7 @@ async def handle_create_file(
 
     - Checks if the file type is supported.
     - If the purpose contains “multimodal”, then delegates to handle_multimodal_upload.
-    - Otherwise, creates a file using create_standard_file.
+    - Otherwise, creates a file using handle_create_single_purpose_file.
     """
     content_type = upload.content_type.lower()
     if not _is_supported(content_type):
