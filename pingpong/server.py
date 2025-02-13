@@ -724,9 +724,21 @@ async def auth(request: Request):
         user = await models.User.get_by_id(request.state.db, int(e.user_id))
         forward = request.query_params.get("redirect", "/")
         if user and user.email:
-            await login_magic(
-                schemas.MagicLoginRequest(email=user.email, forward=forward), request
-            )
+            try:
+                await login_magic(
+                    schemas.MagicLoginRequest(email=user.email, forward=forward),
+                    request,
+                )
+            except HTTPException as e:
+                # login_magic will throw a 401 if the user needs to use SSO
+                # to log in. In that case, we redirect them to the SSO login
+                # page.
+                if e.status_code == 401:
+                    RedirectResponse(e.detail, status_code=303)
+                else:
+                    RedirectResponse(
+                        f"/login?expired=true&forward={forward}", status_code=303
+                    )
             return RedirectResponse("/login?new_link=true", status_code=303)
         return RedirectResponse(
             f"/login?expired=true&forward={forward}", status_code=303
