@@ -8,4 +8,4 @@ class IgnoreHealthEndpoint(logging.Filter):
 
         True means log, False means discard.
         """
-        return bool(re.search(r'"GET /health.*" 200', record.getMessage()))
+        return not bool(re.search(r'"GET /health.*" 200', record.getMessage()))
