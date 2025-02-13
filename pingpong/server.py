@@ -405,7 +405,7 @@ async def login_sso(provider: str, request: Request):
     if sso_config.protocol == "saml":
         saml_client = await get_saml2_client(sso_config, request)
         dest = request.query_params.get("redirect", "/")
-        dest_encoded = dest.replace("#", "%23")
+        dest_encoded = dest.replace("#", "%2523")
         return RedirectResponse(saml_client.login(dest_encoded))
     else:
         raise HTTPException(
