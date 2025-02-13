@@ -727,9 +727,9 @@ async def auth(request: Request):
             await login_magic(
                 schemas.MagicLoginRequest(email=user.email, forward=forward), request
             )
-            return RedirectResponse("/login/?new_link=true", status_code=303)
+            return RedirectResponse("/login?new_link=true", status_code=303)
         return RedirectResponse(
-            f"/login/?expired=true&forward={forward}", status_code=303
+            f"/login?expired=true&forward={forward}", status_code=303
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
