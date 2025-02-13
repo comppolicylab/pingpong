@@ -730,7 +730,7 @@ async def auth(request: Request):
                     request,
                 )
             except HTTPException as e:
-                # login_magic will throw a 401 if the user needs to use SSO
+                # login_magic will throw a 403 if the user needs to use SSO
                 # to log in. In that case, we redirect them to the SSO login
                 # page.
                 if e.status_code == 403:
