@@ -405,7 +405,8 @@ async def login_sso(provider: str, request: Request):
     if sso_config.protocol == "saml":
         saml_client = await get_saml2_client(sso_config, request)
         dest = request.query_params.get("redirect", "/")
-        return RedirectResponse(saml_client.login(dest))
+        dest_encoded = dest.replace("#", "%23")
+        return RedirectResponse(saml_client.login(dest_encoded))
     else:
         raise HTTPException(
             status_code=501, detail=f"SSO protocol {sso_config.protocol} not supported"
