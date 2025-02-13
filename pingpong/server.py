@@ -733,10 +733,10 @@ async def auth(request: Request):
                 # login_magic will throw a 401 if the user needs to use SSO
                 # to log in. In that case, we redirect them to the SSO login
                 # page.
-                if e.status_code == 401:
-                    RedirectResponse(e.detail, status_code=303)
+                if e.status_code == 403:
+                    return RedirectResponse(e.detail, status_code=303)
                 else:
-                    RedirectResponse(
+                    return RedirectResponse(
                         f"/login?expired=true&forward={forward}", status_code=303
                     )
             return RedirectResponse("/login?new_link=true", status_code=303)
