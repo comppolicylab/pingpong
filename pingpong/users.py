@@ -3,6 +3,7 @@ import logging
 from typing import Optional
 from pingpong.authz.openfga import OpenFgaAuthzClient
 from email_validator import validate_email, EmailSyntaxError
+from pingpong.bg_tasks import safe_task
 import pingpong.models as models
 import pingpong.schemas as schemas
 
@@ -473,6 +474,7 @@ class AddNewUsersManual(AddNewUsers):
                 redirect=f"/group/{self.class_id}",
             )
             self.tasks.add_task(
+                safe_task,
                 send_invite,
                 config.email.sender,
                 invite,
