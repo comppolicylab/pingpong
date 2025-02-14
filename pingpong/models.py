@@ -1504,7 +1504,7 @@ class Assistant(Base):
     async def get_by_model(cls, session: AsyncSession, model: str) -> List["Assistant"]:
         stmt = select(Assistant).where(Assistant.model == model)
         result = await session.execute(stmt)
-        return result.all()
+        return [row.Assistant for row in result]
 
 
 class LMSClass(Base):

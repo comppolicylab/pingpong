@@ -2503,13 +2503,14 @@ async def export_class_threads(
     "/admin/migrate/assistants/model",
     dependencies=[Depends(Authz("admin"))],
 )
-async def migrate_models(req: schemas.AssistantModelUpgradeRequest, request: Request, tasks: BackgroundTasks):
+async def migrate_models(
+    req: schemas.AssistantModelUpgradeRequest, request: Request, tasks: BackgroundTasks
+):
     tasks.add_task(
-        upgrade_assistants_model,
-        req.deprecated_model,
-        req.replacement_model
+        safe_task, upgrade_assistants_model, req.deprecated_model, req.replacement_model
     )
     return {"status": "ok"}
+
 
 @v1.get(
     "/admin/export/threads",

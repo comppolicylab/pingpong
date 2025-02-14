@@ -55,9 +55,11 @@ class AssistantModelInfoResponse(BaseModel):
     model: str
     assistants: list[AssistantModelInfo]
 
+
 class AssistantModelUpgradeRequest(BaseModel):
     deprecated_model: str
     replacement_model: str
+
 
 class GenericStatus(BaseModel):
     status: str
