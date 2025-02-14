@@ -8,6 +8,7 @@
   // Props
   export let open: boolean = false;
   export let code: string = '';
+  export let preventEdits: boolean = false;
 
   // Event dispatcher
   const dispatch = createEventDispatcher();
@@ -68,7 +69,7 @@
             rows={10}
             class="w-full h-full font-mono"
             bind:value={code}
-            disabled={$loading}
+            disabled={$loading || preventEdits}
             placeholder="Enter your HTML code here..."
           />
         </div>

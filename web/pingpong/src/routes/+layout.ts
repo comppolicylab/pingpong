@@ -34,7 +34,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 
   const authed = me.data.status === 'valid';
   const needsOnboarding = !!me.data?.user && (!me.data.user.first_name || !me.data.user.last_name);
-  const needsAgreements = me.data?.pending_term_id !== null;
+  const needsAgreements = me.data?.agreement_id !== null;
   let doNotShowSidebar = false;
 
   // If the page is public, don't redirect to the login page.
@@ -64,7 +64,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
         // If the user is logged in and hasn't agreed to the terms, redirect them to the terms page. Exclude the privacy policy page.
         doNotShowSidebar = true;
         const destination = encodeURIComponent(`${url.pathname}${url.search}`);
-        redirect(302, `${TERMS}?forward=${destination}&id=${me.data.pending_term_id}`);
+        redirect(302, `${TERMS}?forward=${destination}&id=${me.data.agreement_id}`);
       } else if (!needsAgreements && url.pathname === TERMS) {
         // Just in case someone tries to go to the terms page when they don't need to.
         const destination = url.searchParams.get('forward') || HOME;

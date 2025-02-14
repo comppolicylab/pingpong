@@ -11,6 +11,7 @@
   export let data;
 
   $: agreement = data.agreement;
+  $: policyId = data.policyId;
 
   const logout = async () => {
     await goto('/logout');
@@ -18,22 +19,22 @@
 
   const goToDestination = async () => {
     $loading = true;
-    const destination = $page.url.searchParams.get('destination') || '/';
+    const destination = $page.url.searchParams.get('forward') || '/';
     await goto(destination);
     $loading = false;
   };
 
   const acceptAgreement = async () => {
-    if (!agreement) {
+    if (!agreement || !policyId) {
       return;
     }
     $loading = true;
-    const response = await api.acceptUserAgreement(fetch, agreement.id).then(api.expandResponse);
+    const response = await api.acceptAgreementByPolicyId(fetch, policyId).then(api.expandResponse);
     if (response.error) {
       $loading = false;
       return sadToast(response.error.detail || 'Unknown error accepting agreement');
     }
-    happyToast('Agreement accepted.');
+    happyToast('Agreement accepted. Redirecting...');
     await goToDestination();
     $loading = false;
   };
@@ -47,7 +48,7 @@
     <div class="px-12 py-8 bg-white">
       <div class="flex flex-col gap-4">
         {#if agreement !== null}
-          <SanitizeFlowbite html={agreement?.code} />
+          <SanitizeFlowbite html={agreement?.body} />
           <div class="flex-row gap-4 text-center flex justify-end mt-4">
             <Button
               class="text-blue-dark-40 bg-white border border-blue-dark-40 rounded-full hover:bg-blue-dark-40 hover:text-white"

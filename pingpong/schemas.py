@@ -1136,7 +1136,7 @@ class SessionState(BaseModel):
     token: SessionToken | None = None
     user: User | None = None
     profile: Profile | None = None
-    pending_term_id: int | None = None
+    agreement_id: int | None = None
 
 
 class Support(BaseModel):
@@ -1194,98 +1194,119 @@ class GrantsList(BaseModel):
     target_ids: list[int]
 
 
-class UserAgreementDisplay(BaseModel):
+class AgreementBody(BaseModel):
     id: int
-    code: str
+    body: str
 
     class Config:
         from_attributes = True
 
 
-class UserAgreementCategory(BaseModel):
-    id: int
-    name: str
-    show_all: bool
-
-    class Config:
-        from_attributes = True
-
-
-class UserAgreementCategories(BaseModel):
-    categories: list[UserAgreementCategory]
-
-    class Config:
-        from_attributes = True
-
-
-class UserAgreementInfo(BaseModel):
+class Agreement(BaseModel):
     id: int
     name: str
-    active: bool
-    category: UserAgreementCategory
-    effective_date: datetime
-    always_display: bool
+    created: datetime
+    updated: datetime | None
+
+    class Config:
+        from_attributes = True
+
+
+class Agreements(BaseModel):
+    agreements: list[Agreement]
+
+    class Config:
+        from_attributes = True
+
+
+class AgreementPolicyLite(BaseModel):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+class AgreementDetail(BaseModel):
+    id: int
+    name: str
+    body: str
+    policies: list[AgreementPolicyLite]
+
+    class Config:
+        from_attributes = True
+
+
+class AgreementLite(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+
+
+class AgreementPolicy(BaseModel):
+    id: int
+    name: str
+    agreement_id: int
+    agreement: AgreementLite
+    not_before: datetime | None
+    not_after: datetime | None
     apply_to_all: bool
 
     class Config:
         from_attributes = True
 
 
-class UserAgreementDetail(BaseModel):
+class ExternalLoginProviderLite(BaseModel):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+class AgreementPolicyDetail(BaseModel):
     id: int
     name: str
-    code: str
-    active: bool
-    category: UserAgreementCategory
-    effective_date: datetime
-    always_display: bool
+    agreement_id: int
+    not_before: datetime | None
+    not_after: datetime | None
     apply_to_all: bool
-    limit_to_providers: list[ExternalLoginProvider]
+    limit_to_providers: list[ExternalLoginProviderLite] | None
 
     class Config:
         from_attributes = True
 
 
-class UserAgreementsInfo(BaseModel):
-    agreements: list[UserAgreementInfo]
+class AgreementPolicies(BaseModel):
+    policies: list[AgreementPolicy]
 
     class Config:
         from_attributes = True
 
 
-class UserAgreementsDetail(BaseModel):
-    agreements: list[UserAgreementDetail]
-
-    class Config:
-        from_attributes = True
-
-
-class CreateUserAgreementCategoryRequest(BaseModel):
+class CreateAgreementRequest(BaseModel):
     name: str
-    show_all: bool
+    body: str
 
 
-class UpdateUserAgreementRequest(BaseModel):
+class UpdateAgreementRequest(BaseModel):
     name: str | None = None
-    code: str | None = None
-    active: bool | None = None
-    category_id: int | None = None
-    effective_date: datetime | None = None
-    always_display: bool | None = None
+    body: str | None = None
+
+
+class ToggleAgreementPolicyRequest(BaseModel):
+    action: Literal["enable", "disable"]
+
+
+class CreateAgreementPolicyRequest(BaseModel):
+    name: str
+    agreement_id: int
+    apply_to_all: bool
+    limit_to_providers: list[int] | None
+
+
+class UpdateAgreementPolicyRequest(BaseModel):
+    name: str | None = None
+    agreement_id: int | None = None
     apply_to_all: bool | None = None
     limit_to_providers: list[int] | None = None
-
-
-class CreateUserAgreementRequest(BaseModel):
-    name: str
-    code: str
-    category_id: int
-    effective_date: datetime
-    always_display: bool
-    apply_to_all: bool
-    limit_to_providers: list[int]
-
-
-class UpdateUserAgreementCategoryRequest(BaseModel):
-    name: str | None = None
-    show_all: bool | None = None

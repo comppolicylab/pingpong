@@ -6,18 +6,20 @@ export const load: PageLoad = async ({ fetch, url }) => {
 
   if (!termsId) {
     return {
-      agreement: null
+      agreement: null,
+      policyId: null
     };
   }
-  const agreementId = parseInt(termsId, 10);
-  let agreement: api.UserAgreementDetail | null = null;
+  const policyId = parseInt(termsId, 10);
+  let agreement: api.AgreementBody | null = null;
   const agreementsResponse = await api
-    .getUserAgreementDetail(fetch, agreementId)
+    .getAgreementByPolicyId(fetch, policyId)
     .then(api.expandResponse);
 
   agreement = agreementsResponse.error ? null : agreementsResponse.data;
 
   return {
-    agreement
+    agreement,
+    policyId
   };
 };

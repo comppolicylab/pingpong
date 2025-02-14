@@ -168,9 +168,11 @@ async def parse_session_token(request: Request, call_next):
                 await request.state.db.flush()
                 await request.state.db.refresh(user)
 
-            # Check if there is a pending user agreement
-            agreement_id = await models.UserAgreement.get_pending_user_agreement_id(
-                request.state.db, user.id, current_time=get_now_fn(request)()
+            # Get the first ID of any pending agreements
+            agreement_id = (
+                await models.AgreementPolicy.get_pending_agreement_by_user_id(
+                    request.state.db, user.id
+                )
             )
 
             request.state.session = schemas.SessionState(
@@ -179,7 +181,7 @@ async def parse_session_token(request: Request, call_next):
                 error=None,
                 user=user,
                 profile=schemas.Profile.from_email(user.email),
-                pending_term_id=agreement_id,
+                agreement_id=agreement_id,
             )
 
         except TimeException as e:
@@ -4280,17 +4282,17 @@ async def get_grants(query: schemas.GrantsQuery, request: Request):
 
 
 @v1.get(
-    "/me/terms/{agreement_id}",
+    "/me/terms/{policy_id}",
     dependencies=[Depends(LoggedIn())],
-    response_model=schemas.UserAgreementDisplay,
+    response_model=schemas.AgreementBody,
 )
 async def get_user_agreement(
-    agreement_id: str,
+    policy_id: str,
     request: Request,
 ):
     """Get the user agreement."""
-    agreement = await models.UserAgreement.get_by_id(
-        request.state.db, int(agreement_id)
+    agreement = await models.Agreement.get_by_policy_id(
+        request.state.db, int(policy_id)
     )
     if not agreement:
         raise HTTPException(404, "Agreement not found.")
@@ -4298,104 +4300,64 @@ async def get_user_agreement(
 
 
 @v1.post(
-    "/me/terms/{agreement_id}",
+    "/me/terms/{policy_id}",
     dependencies=[Depends(LoggedIn())],
     response_model=schemas.GenericStatus,
 )
-async def accept_user_agreement(agreement_id: str, request: Request):
+async def accept_user_agreement(policy_id: str, request: Request):
     """Accept the user agreement."""
-    acceptance = await models.UserAgreementAcceptance.accept_agreement(
+    policy = await models.AgreementPolicy.get_by_id_if_eligible(
+        request.state.db, int(policy_id), request.state.session.user.id
+    )
+    if not policy:
+        raise HTTPException(404, "Agreement not found.")
+
+    await models.AgreementAcceptance.accept_agreement(
         request.state.db,
         request.state.session.user.id,
-        int(agreement_id),
-        accepted_at=get_now_fn(request)(),
+        policy.agreement_id,
+        policy.id,
     )
-    if not acceptance:
-        raise HTTPException(404, "Agreement not found.")
 
     return {"status": "ok"}
 
 
 @v1.get(
-    "/admin/terms",
+    "/admin/terms/agreement",
     dependencies=[Depends(Authz("admin"))],
-    response_model=schemas.UserAgreementsInfo,
+    response_model=schemas.Agreements,
 )
 async def list_user_agreements(request: Request):
-    """Get the user agreements."""
-    agreements = await models.UserAgreement.get_all(request.state.db)
+    """Get all user agreements."""
+    agreements = await models.Agreement.get_all(request.state.db)
     return {"agreements": agreements}
 
 
 @v1.post(
-    "/admin/terms",
+    "/admin/terms/agreement",
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.GenericStatus,
 )
 async def create_user_agreement(
-    req: schemas.CreateUserAgreementRequest,
+    req: schemas.CreateAgreementRequest,
     request: Request,
 ):
     """Create a user agreement."""
-    await models.UserAgreement.create(request.state.db, req)
+    await models.Agreement.create(request.state.db, req)
     return {"status": "ok"}
 
 
 @v1.get(
-    "/admin/terms/categories",
+    "/admin/terms/agreement/{agreement_id}",
     dependencies=[Depends(Authz("admin"))],
-    response_model=schemas.UserAgreementCategories,
-)
-async def list_user_agreement_categories(request: Request):
-    """Get the user agreement categories."""
-    categories = await models.UserAgreementCategory.get_all(request.state.db)
-    return {"categories": categories}
-
-
-@v1.post(
-    "/admin/terms/categories",
-    dependencies=[Depends(Authz("admin"))],
-    response_model=schemas.UserAgreementCategory,
-)
-async def create_user_agreement_category(
-    req: schemas.CreateUserAgreementCategoryRequest,
-    request: Request,
-):
-    """Create a user agreement category."""
-    category = await models.UserAgreementCategory.get_or_create(request.state.db, req)
-    return category
-
-
-@v1.put(
-    "/admin/terms/categories/{category_id}",
-    dependencies=[Depends(Authz("admin"))],
-    response_model=schemas.GenericStatus,
-)
-async def update_user_agreement_category(
-    category_id: str,
-    req: schemas.UpdateUserAgreementCategoryRequest,
-    request: Request,
-):
-    """Update a user agreement category."""
-    category = await models.UserAgreementCategory.update(
-        request.state.db, int(category_id), req
-    )
-    if not category:
-        raise HTTPException(404, "Category not found.")
-    return {"status": "ok"}
-
-
-@v1.get(
-    "/admin/terms/{agreement_id}",
-    dependencies=[Depends(Authz("admin"))],
-    response_model=schemas.UserAgreementDetail,
+    response_model=schemas.AgreementDetail,
 )
 async def get_user_agreement_detail(
     agreement_id: str,
     request: Request,
 ):
-    """Get the user agreement."""
-    agreement = await models.UserAgreement.get_by_id_with_providers(
+    """Get a user agreement."""
+    agreement = await models.Agreement.get_by_id_with_policies(
         request.state.db, int(agreement_id)
     )
     if not agreement:
@@ -4404,68 +4366,227 @@ async def get_user_agreement_detail(
 
 
 @v1.put(
-    "/admin/terms/{agreement_id}",
+    "/admin/terms/agreement/{agreement_id}",
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.GenericStatus,
 )
 async def update_user_agreement(
     agreement_id: str,
-    req: schemas.UpdateUserAgreementRequest,
+    req: schemas.UpdateAgreementRequest,
     request: Request,
 ):
-    """Update the user agreement."""
-    agreement = await models.UserAgreement.get_by_id_with_providers(
+    """Update a user agreement."""
+    agreement = await models.Agreement.get_by_id_with_policies(
         request.state.db, int(agreement_id)
+    )
+
+    if not agreement:
+        raise HTTPException(404, "Agreement not found.")
+
+    # If the agreement is already attached to a policy, updates are not allowed
+    if agreement.policies:
+        raise HTTPException(
+            400, "Cannot update an agreement that is already attached to a policy."
+        )
+
+    if "name" in req.model_fields_set and req.name is not None:
+        agreement.name = req.name
+
+    if "body" in req.model_fields_set and req.body is not None:
+        agreement.body = req.body
+
+    request.state.db.add(agreement)
+    await request.state.db.flush()
+    return {"status": "ok"}
+
+
+@v1.get(
+    "/admin/terms/policy",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.AgreementPolicies,
+)
+async def list_user_agreement_policies(request: Request):
+    """Get all user agreement policies."""
+    policies = await models.AgreementPolicy.get_all(request.state.db)
+    return {"policies": policies}
+
+
+@v1.post(
+    "/admin/terms/policy",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.GenericStatus,
+)
+async def create_user_agreement_policy(
+    req: schemas.CreateAgreementPolicyRequest,
+    request: Request,
+):
+    """Create a user agreement policy."""
+    if req.apply_to_all and req.limit_to_providers:
+        raise HTTPException(
+            400,
+            "Cannot limit user agreement to specific users when Display to All is selected.",
+        )
+    if not req.apply_to_all and not req.limit_to_providers:
+        raise HTTPException(
+            400,
+            "The user agreement must be limited to specific users or apply to all users.",
+        )
+
+    agreement = await models.Agreement.get_by_id(
+        request.state.db, int(req.agreement_id)
     )
     if not agreement:
         raise HTTPException(404, "Agreement not found.")
 
-    if req.category_id is not None:
-        category = await models.UserAgreementCategory.get_by_id(
-            request.state.db, int(req.category_id)
+    providers = []
+    if req.limit_to_providers:
+        providers = await models.ExternalLoginProvider.get_by_ids(
+            request.state.db, req.limit_to_providers
         )
-        if not category:
-            raise HTTPException(404, "Category not found.")
-        agreement.category_id = category.id
 
-    if req.name is not None:
-        agreement.name = req.name
+    policy = models.AgreementPolicy(
+        agreement_id=agreement.id,
+        name=req.name,
+        apply_to_all=req.apply_to_all,
+        limit_to_providers=providers,
+    )
+    request.state.db.add(policy)
+    await request.state.db.flush()
 
-    if req.active is not None:
-        agreement.active = req.active
+    return {"status": "ok"}
 
-    if req.effective_date is not None:
-        agreement.effective_date = req.effective_date
 
-    if req.always_display is not None:
-        agreement.always_display = req.always_display
+@v1.get(
+    "/admin/terms/policy/{policy_id}",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.AgreementPolicyDetail,
+)
+async def get_user_agreement_policy(
+    policy_id: str,
+    request: Request,
+):
+    """Get a user agreement policy."""
+    policy = await models.AgreementPolicy.get_by_id_with_external_logins(
+        request.state.db, int(policy_id)
+    )
+    if not policy:
+        raise HTTPException(404, "Policy not found.")
+    return policy
 
-    current_apply_to_all = agreement.apply_to_all
-    if req.apply_to_all is not None:
-        current_apply_to_all = req.apply_to_all
-        agreement.apply_to_all = req.apply_to_all
 
-        if req.apply_to_all:
-            agreement.limit_to_providers = []
+@v1.put(
+    "/admin/terms/policy/{policy_id}",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.GenericStatus,
+)
+async def update_user_agreement_policy(
+    policy_id: str,
+    req: schemas.UpdateAgreementPolicyRequest,
+    request: Request,
+):
+    """Update a user agreement policy."""
+    policy = await models.AgreementPolicy.get_by_id_with_external_logins(
+        request.state.db, int(policy_id)
+    )
+    if not policy:
+        raise HTTPException(404, "Policy not found.")
 
-    if req.limit_to_providers is not None:
-        if current_apply_to_all and req.limit_to_providers != []:
+    print(req.model_dump_json())
+    if "name" in req.model_fields_set and req.name is not None:
+        policy.name = req.name
+
+    if "agreement_id" in req.model_fields_set and req.agreement_id is not None:
+        if policy.not_before:
+            raise HTTPException(
+                400,
+                "Cannot change the agreement of a policy that has already been enabled.",
+            )
+        agreement = await models.Agreement.get_by_id(
+            request.state.db, int(req.agreement_id)
+        )
+        if not agreement:
+            raise HTTPException(404, "Agreement not found.")
+        policy.agreement_id = agreement.id
+
+    if "apply_to_all" in req.model_fields_set and req.apply_to_all is not None:
+        if req.apply_to_all and req.limit_to_providers:
             raise HTTPException(
                 400,
                 "Cannot limit user agreement to specific users when Display to All is selected.",
             )
+        if not req.apply_to_all and not req.limit_to_providers:
+            raise HTTPException(
+                400,
+                "The user agreement must be limited to specific users or apply to all users.",
+            )
+        policy.apply_to_all = req.apply_to_all
 
-        providers = await models.ExternalLoginProvider.get_by_ids(
-            request.state.db, req.limit_to_providers
-        )
-        if len(providers) != len(req.limit_to_providers):
-            raise HTTPException(404, "Some providers not found.")
-        agreement.limit_to_providers = providers
+    if "limit_to_providers" in req.model_fields_set:
+        if (
+            policy.apply_to_all
+            and req.limit_to_providers is not None
+            and req.limit_to_providers != []
+        ):
+            raise HTTPException(
+                400,
+                "Cannot limit user agreement to specific users when Display to All is selected.",
+            )
+        if not policy.apply_to_all and (
+            req.limit_to_providers is None or req.limit_to_providers == []
+        ):
+            raise HTTPException(
+                400,
+                "The user agreement must be limited to specific users or apply to all users.",
+            )
+        providers = []
+        if req.limit_to_providers:
+            providers = await models.ExternalLoginProvider.get_by_ids(
+                request.state.db, req.limit_to_providers
+            )
+        policy.limit_to_providers = providers
 
-    if req.code is not None:
-        agreement.code = req.code
+    request.state.db.add(policy)
+    await request.state.db.flush()
 
-    request.state.db.add(agreement)
+    return {"status": "ok"}
+
+
+@v1.patch(
+    "/admin/terms/policy/{policy_id}/status",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.GenericStatus,
+)
+async def toggle_user_agreement_policy(
+    policy_id: str,
+    req: schemas.ToggleAgreementPolicyRequest,
+    request: Request,
+):
+    """Enable a user agreement policy."""
+    policy = await models.AgreementPolicy.get_by_id(request.state.db, int(policy_id))
+    if not policy:
+        raise HTTPException(404, "Policy not found.")
+
+    match req.action:
+        case "enable":
+            if policy.not_before:
+                raise HTTPException(
+                    400, "Cannot enable a policy that has already been enabled."
+                )
+            policy.not_before = func.now()
+        case "disable":
+            if not policy.not_before:
+                raise HTTPException(
+                    400, "Cannot disable a policy that has not been enabled."
+                )
+            if policy.not_after:
+                raise HTTPException(
+                    400, "Cannot disable a policy that has already been disabled."
+                )
+            policy.not_after = func.now()
+        case _:
+            raise HTTPException(400, "Invalid action.")
+
+    request.state.db.add(policy)
     await request.state.db.flush()
     return {"status": "ok"}
 
