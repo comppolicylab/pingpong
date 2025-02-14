@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import PositiveInt
 
 from pingpong.artifacts import ArtifactStoreError
+from pingpong.bg_tasks import safe_task
 from pingpong.emails import (
     parse_addresses,
     revalidate_email_addresses,
@@ -1524,6 +1525,7 @@ async def request_class_summary(
     after = utcnow() - timedelta(days=opts.days or 7)
 
     tasks.add_task(
+        safe_task,
         send_class_summary_to_user_task,
         openai_client,
         int(class_id),
@@ -2485,6 +2487,7 @@ async def export_class_threads(
             detail="Cannot export private classes",
         )
     tasks.add_task(
+        safe_task,
         export_class_threads_anonymized,
         openai_client,
         class_id,
@@ -2504,6 +2507,7 @@ async def export_class_threads_multiple_classes(
     tasks: BackgroundTasks,
 ):
     tasks.add_task(
+        safe_task,
         export_threads_multiple_classes,
         data.class_ids,
         request.state.session.user.id,
