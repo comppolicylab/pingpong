@@ -1959,20 +1959,19 @@ async def list_class_models(
         # ----------------- Latest Models -----------------
         #
         # -----------------   o* Family   -----------------
-        # Temporarily unavailable as it doesn't support streaming.
-        # "o1": {
-        #     "name": "o1",
-        #     "sort_order": 3,
-        #     "is_new": True,
-        #     "highlight": False,
-        #     "is_latest": True,
-        #     "supports_vision": False,
-        #     "supports_file_search": False,
-        #     "supports_code_interpreter": False,
-        #     "supports_temperature": False,
-        #     "supports_reasoning": True,
-        #     "description": "Reasoning model designed to solve hard problems across domains. Limited capabilities.",
-        # },
+        "o1": {
+            "name": "o1",
+            "sort_order": 3,
+            "is_new": True,
+            "highlight": False,
+            "is_latest": True,
+            "supports_vision": False,
+            "supports_file_search": False,
+            "supports_code_interpreter": False,
+            "supports_temperature": False,
+            "supports_reasoning": True,
+            "description": "Reasoning model designed to solve hard problems across domains. Limited capabilities.",
+        },
         "o3-mini": {
             "name": "o3 mini",
             "sort_order": 2,
@@ -2091,20 +2090,19 @@ async def list_class_models(
             "supports_reasoning": True,
             "description": "o3 mini initial release version. Limited capabilities.",
         },
-        # Temporarily unavailable as it doesn't support streaming.
-        # "o1-2024-12-17": {
-        #     "name": "o1-2024-12-17",
-        #     "sort_order": 9,
-        #     "is_new": True,
-        #     "highlight": False,
-        #     "is_latest": False,
-        #     "supports_vision": False,
-        #     "supports_file_search": False,
-        #     "supports_code_interpreter": False,
-        #     "supports_temperature": False,
-        #     "supports_reasoning": True,
-        #     "description": "o1 initial release version. Limited capabilities.",
-        # },
+        "o1-2024-12-17": {
+            "name": "o1-2024-12-17",
+            "sort_order": 9,
+            "is_new": True,
+            "highlight": False,
+            "is_latest": False,
+            "supports_vision": False,
+            "supports_file_search": False,
+            "supports_code_interpreter": False,
+            "supports_temperature": False,
+            "supports_reasoning": True,
+            "description": "o1 initial release version. Limited capabilities.",
+        },
         # -----------------   gpt-4o Family   -----------------
         "gpt-4o-2024-11-20": {
             "name": "gpt-4o-2024-11-20",
@@ -2352,6 +2350,8 @@ async def list_class_models(
         "o1-2024-12-17",
         "o3-mini",
         "o3-mini-2025-01-31",
+        "o1",
+        "o1-2024-12-17",
     ]
 
     if isinstance(openai_client, openai.AsyncAzureOpenAI):
