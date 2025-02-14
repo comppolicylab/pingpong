@@ -30,7 +30,7 @@ from openai.types.beta.threads.text_content_block import TextContentBlock
 from pingpong.now import NowFn, utcnow
 from pingpong.schemas import CodeInterpreterMessage, DownloadExport
 from pingpong.config import config
-from typing import Dict, Literal, overload
+from typing import Dict, Literal, Union, overload
 from sqlalchemy.ext.asyncio import AsyncSession
 from zoneinfo import ZoneInfo
 
@@ -60,10 +60,12 @@ REASONING_EFFORT_MAP = {
     2: "high",
 }
 
+OpenAIClientType = Union[openai.AsyncClient, openai.AsyncAzureOpenAI]
+
 
 async def get_openai_client_by_class_id(
     session: AsyncSession, class_id: int
-) -> openai.AsyncClient:
+) -> OpenAIClientType:
     result = await models.Class.get_api_key(session, class_id)
     if result.api_key_obj:
         if result.api_key_obj.provider == "openai":
