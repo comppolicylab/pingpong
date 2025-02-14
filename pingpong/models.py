@@ -432,378 +432,115 @@ user_thread_association = Table(
 )
 
 
-user_agreement_external_login_association = Table(
-    "user_agreements_external_logins",
+agreement_policy_external_login_association = Table(
+    "agreement_policies_external_logins",
     Base.metadata,
-    Column("agreement_id", Integer, ForeignKey("user_agreements.id")),
+    Column("agreement_policy_id", Integer, ForeignKey("agreement_policies.id")),
     Column("provider_id", Integer, ForeignKey("external_login_providers.id")),
     Index(
-        "user_agreement_external_login_idx", "agreement_id", "provider_id", unique=True
+        "agreement_policy_external_login_idx", "agreement_policy_id", "provider_id", unique=True
     ),
 )
 
+class Agreement(Base):
+    """
+    Represents an Agreement that defines the terms provided to users. An 
+    Agreement includes an administrative name, and the HTML text of the agreement. 
+    May have multiple associated AgreementPolicy records.
+    Once used by at least one AgreementPolicy, the Agreement should be read-only.
 
-class UserAgreementCategory(Base):
-    __tablename__ = "user_agreement_categories"
+    Attributes:
+      id (int): Unique identifier for the agreement.
+      name (str): The administrative name of the agreement.
+      body (str): The HTML content containing the text of the agreement.
+      created (datetime): Timestamp when the agreement was first created.
+      updated (datetime): Timestamp when the agreement was last updated.
+    """
+    __tablename__ = "agreements"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    
     name = Column(String, nullable=False)
-    show_all = Column(Boolean, default=False)
-    agreements = relationship(
-        "UserAgreement", back_populates="category", lazy="selectin"
+    body = Column(String, nullable=False)
+    
+    policies = relationship(
+        "AgreementPolicy", back_populates="agreement", lazy="selectin"
     )
+    
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
-    __table_args__ = (Index("ix_user_agreement_categories_name", "name"),)
+class AgreementPolicy(Base):
+    """
+    Represents a policy for an agreement. An AgreementPolicy defines when 
+    and under what conditions an agreement is applicable to users.
 
-    @classmethod
-    async def create(
-        cls, session: AsyncSession, name: str, show_all: bool = False
-    ) -> "UserAgreementCategory":
-        category = UserAgreementCategory(name=name, show_all=show_all)
-        session.add(category)
-        await session.flush()
-        await session.refresh(category)
-        return category
-
-    @classmethod
-    async def get_or_create(
-        cls, session: AsyncSession, schema: schemas.CreateUserAgreementCategoryRequest
-    ) -> "UserAgreementCategory":
-        existing = await cls.get_by_name(session, schema.name)
-        if existing:
-            existing.show_all = schema.show_all
-            session.add(existing)
-            await session.flush()
-            await session.refresh(existing)
-            return existing
-
-        category = UserAgreementCategory(name=schema.name, show_all=schema.show_all)
-        session.add(category)
-        await session.flush()
-        await session.refresh(category)
-        return category
-
-    @classmethod
-    async def get_by_name(
-        cls, session: AsyncSession, name: str
-    ) -> "UserAgreementCategory":
-        stmt = select(UserAgreementCategory).where(UserAgreementCategory.name == name)
-        return await session.scalar(stmt)
-
-    @classmethod
-    async def get_by_id(
-        cls, session: AsyncSession, id_: int
-    ) -> "UserAgreementCategory":
-        stmt = select(UserAgreementCategory).where(UserAgreementCategory.id == id_)
-        return await session.scalar(stmt)
-
-    @classmethod
-    async def get_all(cls, session: AsyncSession) -> list["UserAgreementCategory"]:
-        stmt = select(UserAgreementCategory)
-        result = await session.execute(stmt)
-        return [row.UserAgreementCategory for row in result]
-
-    @classmethod
-    async def update(
-        cls,
-        session: AsyncSession,
-        id_: int,
-        data: schemas.UpdateUserAgreementCategoryRequest,
-    ) -> "UserAgreementCategory":
-        data_dict = data.model_dump(exclude_none=True)
-        stmt = (
-            update(UserAgreementCategory)
-            .where(UserAgreementCategory.id == id_)
-            .values(**data_dict)
-            .returning(UserAgreementCategory)
-        )
-        result = await session.scalar(stmt)
-        return result
-
-
-class UserAgreement(Base):
-    __tablename__ = "user_agreements"
-    __table_args__ = (
-        Index("ix_user_agreements_category_id", "category_id"),
-        Index("ix_user_agreements_effective_date", "effective_date"),
-        Index("ix_user_agreements_active", "active"),
-    )
+    Attributes:
+      id (int): Unique identifier for the agreement policy.
+      name (str): The unique name of the policy within an agreement.
+      agreement_id (int): Foreign key that references the associated Agreement.
+      agreement (Agreement): The related Agreement instance.
+      not_before (datetime): Policy's start datetime - the policy does not apply before this time.
+      not_after (datetime): Policy's expiry datetime - the policy does not apply after this time.
+      apply_to_all (bool): Indicates if the policy applies universally to all users.
+      limit_to_providers (List[ExternalLoginProvider]): A list of external login providers to which the policy is limited. The policy applies only to users with an ExternalLogin from at least one of these providers.
+      created (datetime): Timestamp indicating when the policy was created.
+      updated (datetime): Timestamp indicating when the policy was last updated.
+    """
+    __tablename__ = "agreement_policies"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String, nullable=False)
-    code = Column(String, nullable=False)
-    active = Column(Boolean, default=False)
-    category_id: Mapped[int] = mapped_column(
-        ForeignKey("user_agreement_categories.id", ondelete="cascade"), nullable=False
+    
+    agreement_id: Mapped[int] = mapped_column(
+        ForeignKey("agreements.id", ondelete="cascade"), nullable=False
     )
-    category = relationship(
-        "UserAgreementCategory", back_populates="agreements", lazy="selectin"
-    )
-    effective_date = Column(DateTime(timezone=True), nullable=False)
-    always_display = Column(Boolean, default=False)
+    agreement = relationship("Agreement", back_populates="policies", lazy="selectin")
+    
+    not_before = Column(DateTime(timezone=True), nullable=True)
+    not_after = Column(DateTime(timezone=True), nullable=True)
+    
     apply_to_all = Column(Boolean, default=False)
     limit_to_providers = relationship(
         "ExternalLoginProvider",
-        secondary=user_agreement_external_login_association,
-        back_populates="user_agreements",
+        secondary=agreement_policy_external_login_association,
+        back_populates="agreement_policies",
     )
-    acceptances = relationship(
-        "UserAgreementAcceptance", back_populates="agreement", lazy="selectin"
-    )
+    
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
-    @classmethod
-    async def get_by_id_with_providers(
-        cls, session: AsyncSession, id_: int
-    ) -> "UserAgreement":
-        stmt = (
-            select(UserAgreement)
-            .options(joinedload(UserAgreement.limit_to_providers))
-            .where(UserAgreement.id == id_)
-        )
-        return await session.scalar(stmt)
+class AgreementAcceptance(Base):
+    """
+    Represents a user's acceptance of an agreement under a specific policy.
 
-    @classmethod
-    async def get_by_id(cls, session: AsyncSession, id_: int) -> "UserAgreement":
-        stmt = select(UserAgreement).where(UserAgreement.id == id_)
-        return await session.scalar(stmt)
-
-    @classmethod
-    async def get_pending_user_agreement_id(
-        cls, session: AsyncSession, user_id: int, current_time: datetime
-    ) -> int:
-        """
-        For each category:
-        - If any mandatory (UserAgreement.always_display=TRUE, UserAgreementCategory.show_all=TRUE) agreements exist, pick the earliest effective_date among them.
-        - Otherwise, pick the single newest (effective_date DESC) date-based agreement (always_display=FALSE).
-        Then among all categories' chosen entries, pick the one with the earliest effective_date overall.
-        """
-
-        # ----------------------------------------------------------------
-        # Common rules for mandatory and date-based categories/agreements:
-        # ----------------------------------------------------------------
-
-        # Must be active
-        # Must not have been accepted by this user
-        # Must be in effect now (or no effective_date set)
-        # Must not be overshadowed by a newer agreement in the same category
-
-        UA = aliased(UserAgreement)
-        UAA = aliased(UserAgreementAcceptance)
-
-        common_filters = [
-            UserAgreement.active.is_(True),
-            not_(
-                UserAgreement.acceptances.any(
-                    UserAgreementAcceptance.user_id == user_id
-                )
-            ),
-            or_(
-                UserAgreement.effective_date <= current_time,
-                UserAgreement.effective_date.is_(None),
-            ),
-            not_(
-                select(UAA.id)
-                .join(UA, UAA.agreement)
-                .where(
-                    and_(
-                        UAA.user_id == user_id,
-                        UA.category_id == UserAgreement.category_id,
-                        UA.effective_date > UserAgreement.effective_date,
-                    )
-                )
-                .exists()
-            ),
-            # Must apply_to_all or be limited to an ExternalLoginProvider that
-            # this user has
-            or_(
-                UserAgreement.apply_to_all.is_(True),
-                UserAgreement.limit_to_providers.any(
-                    ExternalLoginProvider.external_logins.any(
-                        ExternalLogin.user_id == user_id
-                    )
-                ),
-            ),
-        ]
-
-        # ----------------------------------------------------------------
-        #  Subquery #1: mandatory_agreements
-        #  For categories that have at least one mandatory item,
-        #  we want the earliest date among them.
-        # ----------------------------------------------------------------
-        mandatory_agreements_stmt = (
-            select(
-                UserAgreement.id.label("ua_id"),
-                UserAgreement.category_id.label("cat_id"),
-                func.row_number()
-                .over(
-                    partition_by=UserAgreement.category_id,
-                    order_by=UserAgreement.effective_date.asc().nulls_first(),
-                )
-                .label("category_rank"),
-            )
-            .join(UserAgreementCategory, UserAgreement.category)
-            .where(
-                and_(
-                    *common_filters,
-                    or_(
-                        UserAgreement.always_display.is_(True),
-                        UserAgreementCategory.show_all.is_(True),
-                    ),
-                )
-            )
-        )
-
-        mandatory_agreements = select(
-            mandatory_agreements_stmt.c.ua_id, mandatory_agreements_stmt.c.cat_id
-        ).where(mandatory_agreements_stmt.c.category_rank == 1)
-
-        # ----------------------------------------------------------------
-        # Subquery #2: date_based_agreements
-        # For the categories that do NOT have mandatory agreements,
-        # we want the single newest date-based agreement.
-        # ----------------------------------------------------------------
-        date_based_agreements_stmt = (
-            select(
-                UserAgreement.id.label("ua_id"),
-                UserAgreement.category_id.label("cat_id"),
-                func.row_number()
-                .over(
-                    partition_by=UserAgreement.category_id,
-                    order_by=UserAgreement.effective_date.desc().nulls_last(),
-                )
-                .label("category_rank"),
-            )
-            .join(UserAgreementCategory, UserAgreement.category)
-            .where(
-                and_(
-                    *common_filters,
-                    UserAgreement.always_display.is_(False),
-                    UserAgreementCategory.show_all.is_(False),
-                )
-            )
-        )
-
-        date_based_agreements = select(
-            date_based_agreements_stmt.c.ua_id, date_based_agreements_stmt.c.cat_id
-        ).where(
-            and_(date_based_agreements_stmt.c.category_rank == 1),
-            not_(
-                date_based_agreements_stmt.c.cat_id.in_(
-                    select(mandatory_agreements.c.cat_id)
-                )
-            ),
-        )
-
-        # ----------------------------------------------------------------
-        #  Final query: get the earliest effective_date from the union of
-        #  the two subqueries
-        # ----------------------------------------------------------------
-        all_agreements = mandatory_agreements.union_all(date_based_agreements).subquery(
-            "all_agreements"
-        )
-
-        stmt = (
-            select(UserAgreement.id)
-            .join(all_agreements, all_agreements.c.ua_id == UserAgreement.id)
-            .order_by(UserAgreement.effective_date.asc().nulls_first())
-            .limit(1)
-        )
-        result = await session.scalar(stmt)
-        return result
-
-    @classmethod
-    async def create(
-        cls,
-        session: AsyncSession,
-        schema: schemas.CreateUserAgreementRequest,
-    ) -> "UserAgreement":
-        agreement = UserAgreement(
-            **schema.model_dump(exclude_none=True),
-        )
-        session.add(agreement)
-        await session.flush()
-        await session.refresh(agreement)
-        return agreement
-
-    @classmethod
-    async def get_all(cls, session: AsyncSession) -> list["UserAgreement"]:
-        stmt = select(UserAgreement)
-        result = await session.execute(stmt)
-        return [row.UserAgreement for row in result]
-
-    @classmethod
-    async def update(
-        cls, session: AsyncSession, id_: int, data: schemas.UpdateUserAgreementRequest
-    ) -> "UserAgreement":
-        data_dict = data.model_dump(exclude_none=True)
-        provider_ids = data_dict.pop("limit_to_providers", None)
-
-        stmt = (
-            update(UserAgreement)
-            .where(UserAgreement.id == id_)
-            .values(**data_dict)
-            .returning(UserAgreement)
-        )
-        agreement = await session.scalar(stmt)
-
-        if provider_ids:
-            providers_ = await ExternalLoginProvider.get_by_ids(session, provider_ids)
-            agreement.limit_to_providers = providers_
-
-        await session.flush()
-        await session.refresh(agreement)
-
-        return agreement
-
-
-class UserAgreementAcceptance(Base):
-    __tablename__ = "user_agreement_acceptances"
+    Attributes:
+      id (int): Unique identifier for the acceptance record.
+      user_id (int): Foreign key referencing the user who accepted the agreement.
+      agreement_id (int): Foreign key referencing the accepted Agreement.
+      agreement (Agreement): The related Agreement instance.
+      policy_id (int): Foreign key referencing the AgreementPolicy under which the agreement was accepted.
+      policy (AgreementPolicy): The related AgreementPolicy instance.
+      accepted_at (datetime): Timestamp when the user accepted the agreement.
+    """
+    __tablename__ = "agreement_acceptances"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="cascade"), nullable=False
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    
+    agreement_id: Mapped[int] = mapped_column(ForeignKey("agreements.id"), nullable=False)
+    agreement = relationship("Agreement", backref="acceptances", lazy="selectin")
+    
+    policy_id: Mapped[int] = mapped_column(
+         ForeignKey("agreement_policies.id"), nullable=False
     )
-    user = relationship("User", back_populates="agreements", lazy="selectin")
-    agreement_id: Mapped[int] = mapped_column(
-        ForeignKey("user_agreements.id", ondelete="cascade"), nullable=False
-    )
-    accepted_at = Column(DateTime(timezone=True), nullable=False)
-    agreement = relationship(
-        "UserAgreement", back_populates="acceptances", lazy="selectin"
-    )
+    policy = relationship("AgreementPolicy", backref="acceptances", lazy="selectin")
+
+    accepted_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         UniqueConstraint("user_id", "agreement_id", name="_user_agreement_uc"),
-        Index("ix_user_agreement_acceptances_agreement_id", "agreement_id"),
     )
-
-    @classmethod
-    async def accept_agreement(
-        cls,
-        session: AsyncSession,
-        user_id: int,
-        agreement_id: int,
-        accepted_at: datetime,
-    ) -> "UserAgreementAcceptance":
-        stmt = (
-            _get_upsert_stmt(session)(UserAgreementAcceptance)
-            .values(
-                user_id=user_id,
-                agreement_id=agreement_id,
-                accepted_at=accepted_at,
-            )
-            .on_conflict_do_update(
-                index_elements=["user_id", "agreement_id"],
-                set_=dict(accepted_at=accepted_at),
-            )
-            .returning(UserAgreementAcceptance)
-        )
-        result = await session.scalar(stmt)
-        return result
 
 
 class ExternalLoginProvider(Base):
@@ -818,9 +555,9 @@ class ExternalLoginProvider(Base):
     external_logins: Mapped[List["ExternalLogin"]] = relationship(
         "ExternalLogin", back_populates="provider_obj", lazy="selectin"
     )
-    user_agreements: Mapped[List["UserAgreement"]] = relationship(
-        "UserAgreement",
-        secondary=user_agreement_external_login_association,
+    agreement_policies: Mapped[List["AgreementPolicy"]] = relationship(
+        "AgreementPolicy",
+        secondary=agreement_policy_external_login_association,
         back_populates="limit_to_providers",
     )
 
@@ -1102,8 +839,8 @@ class User(Base):
     dna_as_join = Column(Boolean, server_default="false")
     # Do Not Add - Activity Summaries - Groups I Create
     dna_as_create = Column(Boolean, server_default="false")
-    agreements = relationship(
-        "UserAgreementAcceptance", back_populates="user", lazy="selectin"
+    acceptances = relationship(
+        "AgreementAcceptance", back_populates="user", lazy="selectin"
     )
 
     @classmethod
