@@ -1469,6 +1469,7 @@ class Assistant(Base):
     description = Column(String)
     assistant_id = Column(String)
     use_latex = Column(Boolean)
+    use_image_descriptions = Column(Boolean)
     hide_prompt = Column(Boolean, default=False)
     locked = Column(Boolean, server_default="false")
     tools = Column(String)
@@ -1564,6 +1565,7 @@ class Assistant(Base):
         params["assistant_id"] = assistant_id
         params["published"] = func.now() if data.published else None
         params["use_latex"] = data.use_latex
+        params["use_image_descriptions"] = data.use_image_descriptions
         params["vector_store_id"] = vector_store_id
         params["version"] = version
 
@@ -1605,9 +1607,27 @@ class Assistant(Base):
 
     @classmethod
     async def get_by_model(cls, session: AsyncSession, model: str) -> List["Assistant"]:
-        stmt = select(
-            Assistant.id, Assistant.class_id, Assistant.updated, Assistant.created
-        ).where(Assistant.model == model)
+        stmt = (
+            select(
+                Assistant.id,
+                Assistant.name,
+                Assistant.class_id,
+                Assistant.updated,
+                Assistant.created,
+                func.max(Thread.last_activity).label("last_activity"),
+                Class.name.label("class_name"),
+            )
+            .outerjoin(Assistant.threads)
+            .join(Assistant.class_)
+            .where(Assistant.model == model)
+            .group_by(
+                Assistant.id,
+                Assistant.class_id,
+                Assistant.updated,
+                Assistant.created,
+                Class.name,
+            )
+        )
         result = await session.execute(stmt)
         return result.all()
 

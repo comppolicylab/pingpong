@@ -91,7 +91,16 @@
     }
 
     $loading = true;
-    autoupload(Array.from(input.files), upload, files, maxSize, 'assistants', dispatch, value);
+    autoupload(
+      Array.from(input.files),
+      upload,
+      files,
+      maxSize,
+      'assistants',
+      false,
+      dispatch,
+      value
+    );
     $loading = false;
   };
   $: privateFileIds = privateFiles.map((file) => file.file_id);

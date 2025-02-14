@@ -1,4 +1,6 @@
 import asyncio
+from datetime import datetime, timezone
+from typing import Union
 import openai
 import logging
 from fastapi import HTTPException, UploadFile
@@ -8,10 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .ai import get_details_from_api_error
 from .authz import AuthzClient, Relation
 from .models import File
-from .schemas import FileTypeInfo, GenericStatus, FileUploadPurpose
+from .schemas import FileTypeInfo, FileUploadPurpose, GenericStatus, ImageProxy
 from .schemas import File as FileSchema
+import base64
 
 logger = logging.getLogger(__name__)
+
+OpenAIClientType = Union[openai.AsyncClient, openai.AsyncAzureOpenAI]
 
 
 def _file_grants(file: File) -> list[Relation]:
@@ -107,99 +112,89 @@ async def handle_delete_files(
     return GenericStatus(status="ok")
 
 
-async def handle_create_file(
+async def get_base64_encoded_file(upload: UploadFile) -> str:
+    """
+    Reads the entire content of upload, resets the pointer,
+    and returns the base64-encoded string.
+    """
+    await upload.seek(0)
+    return base64.b64encode(await upload.read()).decode("utf-8")
+
+
+async def handle_create_single_purpose_file(
     session: AsyncSession,
     authz: AuthzClient,
-    oai_client: openai.AsyncClient,
-    *,
+    oai_client: OpenAIClientType,
     upload: UploadFile,
     class_id: int,
     uploader_id: int,
     private: bool,
-    purpose: FileUploadPurpose = "assistants",
-) -> FileSchema:
-    """Handle file creation.
-
-    Args:
-        session (AsyncSession): Database session
-        authz (AuthzClient): Authorization client
-        oai_client (openai.AsyncClient): OpenAI API client
-        upload (UploadFile): File to upload
-        class_id (int): Class ID
-        uploader_id (int): Uploader ID
-        private (bool): File privacy
+    purpose: FileUploadPurpose,
+    content_type: str,
+    is_azure_client: bool,
+    use_image_descriptions: bool,
+) -> "FileSchema":
     """
-    content_type = upload.content_type.lower()
+    Creates a file for a single purpose (assistants or vision)
+    (including creating a DB record and granting permissions)
+    or returns a dummy file if this is an Azure vision file.
+    """
 
-    if not _is_supported(content_type):
-        raise HTTPException(
-            status_code=403, detail="File type not supported for File Search by OpenAI!"
-        )
-
-    if "multimodal" in purpose:
-        new_v_file, new_f_file = None, None
-        if _is_vision_supported(content_type):
-            new_v_file = await handle_create_file(
-                session,
-                authz,
-                oai_client,
-                upload=upload,
-                class_id=class_id,
-                uploader_id=uploader_id,
-                private=private,
-                purpose="vision",
-            )
-
-        # There is a case where the file is vision supported but not file search or code interpreter supported
-        # image/webp is an example of this case
-        if (_is_fs_supported(content_type) and "fs" in purpose) or (
-            _is_ci_supported(content_type) and "ci" in purpose
-        ):
-            try:
-                new_f_file = await handle_create_file(
-                    session,
-                    authz,
-                    oai_client,
-                    upload=upload,
-                    class_id=class_id,
-                    uploader_id=uploader_id,
-                    private=private,
-                    purpose="assistants",
-                )
-            except Exception as e:
-                if new_v_file:
-                    await oai_client.files.delete(new_v_file.vision_file_id)
-                    await authz.write(revoke=_file_grants(new_v_file))
-                raise e
-
-        primary_file = new_f_file if new_f_file else new_v_file
-
-        # Always true, as we have checked _is_supported
-        if not primary_file:
+    # ---------------------------------------------------------
+    # Client: Azure OpenAI
+    # Purpose: Vision
+    # ---------------------------------------------------------
+    if purpose == "vision" and is_azure_client:
+        if not _is_vision_supported(content_type):
             raise HTTPException(
-                status_code=500,
-                detail="File not uploaded, something went wrong!",
+                status_code=403,
+                detail="File type not supported for Vision by OpenAI!",
             )
-
+        image_description = None
+        if use_image_descriptions:
+            base64_image = await get_base64_encoded_file(upload)
+            image_description = await generate_image_description(
+                oai_client, base64_image, content_type
+            )
         return FileSchema(
-            id=primary_file.id,
-            name=primary_file.name,
-            content_type=primary_file.content_type,
-            file_id=primary_file.file_id,
-            vision_obj_id=new_v_file.id if new_v_file and new_f_file else None,
-            file_search_file_id=primary_file.file_id
-            if _is_fs_supported(content_type) and "fs" in purpose
-            else None,
-            code_interpreter_file_id=primary_file.file_id
-            if _is_ci_supported(content_type) and "ci" in purpose
-            else None,
-            vision_file_id=new_v_file.file_id if new_v_file else None,
-            class_id=primary_file.class_id,
-            private=primary_file.private,
-            uploader_id=primary_file.uploader_id,
-            created=primary_file.created,
-            updated=primary_file.updated,
+            id=0,
+            name=upload.filename,
+            content_type=content_type,
+            file_id="",
+            vision_obj_id=None,
+            class_id=class_id,
+            private=None,
+            uploader_id=None,
+            created=datetime.now(timezone.utc),
+            updated=None,
+            image_description=image_description,
         )
+
+    # ---------------------------------------------------------
+    # Client: OpenAI
+    # Purpose: Assistants or Vision
+    # ---------------------------------------------------------
+    # Client: Azure OpenAI
+    # Purpose: Assistants
+    # ---------------------------------------------------------
+    match purpose:
+        case "assistants":
+            if not (_is_fs_supported(content_type) or _is_ci_supported(content_type)):
+                raise HTTPException(
+                    status_code=400,
+                    detail="File type not supported as a document by OpenAI!",
+                )
+        case "vision":
+            if not _is_vision_supported(content_type):
+                raise HTTPException(
+                    status_code=400,
+                    detail="File type not supported for Vision by OpenAI!",
+                )
+        case _:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file purpose: {purpose}",
+            )
 
     await upload.seek(0)
     try:
@@ -224,7 +219,7 @@ async def handle_create_file(
         "private": private,
         "uploader_id": int(uploader_id),
         "name": upload.filename,
-        "content_type": upload.content_type,
+        "content_type": content_type,
     }
 
     try:
@@ -255,6 +250,228 @@ async def handle_create_file(
         await oai_client.files.delete(new_f.id)
         await authz.write(revoke=_file_grants(f))
         raise e
+
+
+async def handle_multimodal_upload(
+    session: AsyncSession,
+    authz: AuthzClient,
+    oai_client: OpenAIClientType,
+    upload: UploadFile,
+    class_id: int,
+    uploader_id: int,
+    private: bool,
+    purpose: FileUploadPurpose,
+    content_type: str,
+    is_azure_client: bool,
+    use_image_descriptions: bool,
+) -> "FileSchema":
+    """
+    Handles multimodal file creation by creating separate files (e.g. vision and
+    assistants files) and combining the results. In some cases a dummy file with an image description is returned.
+    """
+    new_v_file, new_f_file, image_description = None, None, None
+
+    can_generate_image_description = (
+        _is_vision_supported(content_type)
+        and is_azure_client
+        and use_image_descriptions
+    )
+    can_upload_as_document = (_is_fs_supported(content_type) and "fs" in purpose) or (
+        _is_ci_supported(content_type) and "ci" in purpose
+    )
+
+    # There is a case where the file is vision supported
+    # but not file search or code interpreter supported
+    # image/webp is an example of this case
+    if not can_upload_as_document and can_generate_image_description:
+        # ----------------------------------------------------------
+        # Client: Azure OpenAI
+        # Purpose: Vision
+        # Returns: Dummy Vision File with Description
+        # ----------------------------------------------------------
+        return await handle_create_single_purpose_file(
+            session,
+            authz,
+            oai_client,
+            upload,
+            class_id,
+            uploader_id,
+            private,
+            "vision",
+            content_type,
+            is_azure_client,
+            use_image_descriptions,
+        )
+
+    if _is_vision_supported(content_type) and not is_azure_client:
+        # ----------------------------------------------------------
+        # Client: OpenAI
+        # Purpose: Vision
+        # Sets: new_v_file as regular File
+        # ----------------------------------------------------------
+        new_v_file = await handle_create_single_purpose_file(
+            session,
+            authz,
+            oai_client,
+            upload,
+            class_id,
+            uploader_id,
+            private,
+            "vision",
+            content_type,
+            is_azure_client,
+            use_image_descriptions,
+        )
+
+    if can_upload_as_document:
+        try:
+            if can_generate_image_description:
+                # ----------------------------------------------------------
+                # Client: Azure OpenAI
+                # Purpose: Vision
+                # Sets: image_description with generated description
+                # ----------------------------------------------------------
+                base64_image = await get_base64_encoded_file(upload)
+                description_task = generate_image_description(
+                    oai_client, base64_image, content_type
+                )
+
+                # ----------------------------------------------------------
+                # Client: Azure OpenAI
+                # Purpose: Assistants
+                # Sets: new_f_file as regular File
+                # ----------------------------------------------------------
+                new_f_task = handle_create_single_purpose_file(
+                    session,
+                    authz,
+                    oai_client,
+                    upload,
+                    class_id,
+                    uploader_id,
+                    private,
+                    "assistants",
+                    content_type,
+                    is_azure_client,
+                    use_image_descriptions,
+                )
+
+                # We can run these tasks concurrently,
+                # since we're not using the upload object when
+                # creating the image description
+                image_description, new_f_file = await asyncio.gather(
+                    description_task, new_f_task
+                )
+            else:
+                # ----------------------------------------------------------
+                # Client: OpenAI
+                # Purpose: Assistants
+                # Sets: new_f_file as regular File
+                # ----------------------------------------------------------
+                new_f_file = await handle_create_single_purpose_file(
+                    session,
+                    authz,
+                    oai_client,
+                    upload,
+                    class_id,
+                    uploader_id,
+                    private,
+                    "assistants",
+                    content_type,
+                    is_azure_client,
+                    use_image_descriptions,
+                )
+        except Exception as e:
+            if new_v_file:
+                await oai_client.files.delete(new_v_file.file_id)
+                await authz.write(revoke=_file_grants(new_v_file))
+            if new_f_file:
+                await oai_client.files.delete(new_f_file.file_id)
+                await authz.write(revoke=_file_grants(new_f_file))
+            raise e
+
+    primary_file = new_f_file or new_v_file
+    if not primary_file:
+        raise HTTPException(
+            status_code=500, detail="File not uploaded, something went wrong!"
+        )
+
+    return FileSchema(
+        id=primary_file.id,
+        name=primary_file.name,
+        content_type=primary_file.content_type,
+        file_id=primary_file.file_id,
+        vision_obj_id=new_v_file.id if (new_v_file and new_f_file) else None,
+        file_search_file_id=primary_file.file_id
+        if _is_fs_supported(content_type) and "fs" in purpose
+        else None,
+        code_interpreter_file_id=primary_file.file_id
+        if _is_ci_supported(content_type) and "ci" in purpose
+        else None,
+        vision_file_id=new_v_file.file_id if new_v_file else None,
+        class_id=primary_file.class_id,
+        private=primary_file.private,
+        uploader_id=primary_file.uploader_id,
+        created=primary_file.created,
+        updated=primary_file.updated,
+        image_description=image_description,
+    )
+
+
+async def handle_create_file(
+    session: AsyncSession,
+    authz: AuthzClient,
+    oai_client: OpenAIClientType,
+    *,
+    upload: UploadFile,
+    class_id: int,
+    uploader_id: int,
+    private: bool,
+    purpose: FileUploadPurpose = "assistants",
+    use_image_descriptions: bool = False,
+) -> "FileSchema":
+    """
+    Main entry point for file creation.
+
+    - Checks if the file type is supported.
+    - If the purpose contains “multimodal”, then delegates to handle_multimodal_upload.
+    - Otherwise, creates a file using handle_create_single_purpose_file.
+    """
+    content_type = upload.content_type.lower()
+    if not _is_supported(content_type):
+        raise HTTPException(
+            status_code=403, detail="File type not supported by OpenAI!"
+        )
+
+    is_azure_client = isinstance(oai_client, openai.AsyncAzureOpenAI)
+
+    if "multimodal" in purpose:
+        return await handle_multimodal_upload(
+            session,
+            authz,
+            oai_client,
+            upload,
+            class_id,
+            uploader_id,
+            private,
+            purpose,
+            content_type,
+            is_azure_client,
+            use_image_descriptions,
+        )
+    else:
+        return await handle_create_single_purpose_file(
+            session,
+            authz,
+            oai_client,
+            upload,
+            class_id,
+            uploader_id,
+            private,
+            purpose,
+            content_type,
+            is_azure_client,
+            use_image_descriptions,
+        )
 
 
 # Support information comes from:
@@ -513,3 +730,89 @@ def _is_fs_supported(content_type: str) -> bool:
 def _is_ci_supported(content_type: str) -> bool:
     """Check if the content type is supported for code interpreter."""
     return content_type in _CI_SUPPORTED_TYPE
+
+
+IMAGE_DESCRIPTION_PROMPT = """
+You are assisting a model without vision capabilities by providing detailed descriptions of images to enable it to answer any questions users might have about the image. DO NOT ATTEMPT TO SOLVE, ANSWER, OR RESPOND TO THE IMAGE.
+
+Examine the image provided carefully, noting all relevant details, features, and contexts that might be meaningful or actionable. Your task is to translate the visual content into a comprehensive textual description that encapsulates everything the model would need to know to effectively simulate an understanding of the image.
+
+# Steps
+
+1. **Observe the Image**: Look closely at the image to identify key elements, such as objects, people, activities, colors, and background.
+
+2. **Identify Key Features**: Note any text within the image, objects' positions, expressions, actions, and any notable landmarks. DO NOT ATTEMPT TO SOLVE, ANSWER, OR RESPOND TO THE IMAGE.
+
+3. **Detail & Relevance**: Ensure all relevant information is included. This may involve describing components that will likely prompt specific actions or decisions from the model.
+
+4. **Convey in Descriptive Text**: Transform observations into a coherent and detailed narrative of the image, covering every aspect the model might use to function as if it is analyzing the image itself.
+
+# Output Format
+
+Output the description in a clear and detailed paragraph format. Do not use Markdown. The description should provide a thorough understanding of the image and enable the model to make informed responses based on it. DO NOT ATTEMPT TO SOLVE, ANSWER, OR RESPOND TO THE IMAGE.
+
+# Notes
+
+- Ensure the description covers all relevant aspects of the image, not missing any critical elements that could aid in the simulation of vision capabilities.
+- Be concise but informative to provide the model all necessary visual cues.
+- Do not provide your own conclusions or analysis of the image; state what you see.
+"""
+
+
+async def generate_image_description(
+    oai_client: openai.AsyncClient,
+    base64_image: str,
+    content_type: str,
+) -> str:
+    """Generate a description for an image using OpenAI's API.
+
+    Args:
+        oai_client (openai.AsyncClient): OpenAI API client
+        base64_image (bytes): Base64-encoded image data
+
+    Returns:
+        str: Generated description
+    """
+    response = await oai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {
+                "role": "system",
+                "content": IMAGE_DESCRIPTION_PROMPT,
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "What do you see?",
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{content_type};base64,{base64_image}"
+                        },
+                    },
+                ],
+            },
+        ],
+        temperature=0,
+    )
+    return response.choices[0].message.content
+
+
+def generate_vision_image_descriptions_string(images: list[ImageProxy]) -> str:
+    """Generate a string of image descriptions for vision files.
+
+    Args:
+        images (list[ImageProxy]): List of images
+
+    Returns:
+        str: String of image descriptions
+    """
+    return (
+        "\n"
+        + '{"Rd1IFKf5dl": ['
+        + ",".join(proxy.model_dump_json() for proxy in images)
+        + "]}"
+    )

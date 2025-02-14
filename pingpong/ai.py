@@ -505,10 +505,12 @@ async def run_thread(
         yield b'{"type":"done"}\n'
 
 
-def format_instructions(instructions: str, use_latex: bool = False) -> str:
+def format_instructions(
+    instructions: str, use_latex: bool = False, use_image_descriptions: bool = False
+) -> str:
     """Format instructions for a prompt."""
     if use_latex:
-        return instructions + (
+        instructions + (
             "\n"
             "---Formatting: LaTeX---"
             "Use LaTeX with math mode delimiters when outputting "
@@ -517,6 +519,65 @@ def format_instructions(instructions: str, use_latex: bool = False) -> str:
             "inline math. For block-level math, use double dollar signs $$ "
             "with newlines before and after them as the opening and closing "
             "delimiter. Do not use LaTeX inside backticks."
+        )
+
+    if use_image_descriptions:
+        instructions += (
+            "\n"
+            """
+            When the user's message contains a JSON object with the top-level key "Rd1IFKf5dl" in this format:
+
+            {
+                "Rd1IFKf5dl": [
+                    {
+                    "name": <file_name>,
+                    "desc": <image_desc>,
+                    "content_type": <content_type>,
+                    "complements": <file_id>
+                    },
+                    ...
+                ]
+            }
+
+            …treat it as if the user has uploaded one or more images. The "name" is the file name, "desc" is the image description, and "content_type" is the media type. The "complements" field should be ignored.
+
+            FOLLOW THESE GUIDELINES:
+            1. Reference Image Descriptions
+            - Use the user-provided descriptions to inform your answers.
+            - Do not explicitly state that you are relying on those descriptions.
+
+            2. Handle Multiple Images
+            - Be prepared for multiple images in the JSON array or across multiple user messages.
+            - Refer to them collectively as images the user has uploaded.
+
+            3. Consistent Terminology
+            - Always refer to the images based on their descriptions as "the images you uploaded," "your images," etc.
+
+            4. Non-essential Data
+            - Disregard the "complements" field (and any other extraneous data not mentioned above).
+
+            5. Nonexistent JSON Handling
+            - If no JSON is provided, or the JSON does not have the "Rd1IFKf5dl" key at the top level, treat all text (including any JSON snippet) as part of the user's actual message or query. Act as if no images were uploaded in this message.
+
+            EXAMPLE SCENARIO:
+            - User: "Help, I can't understand this graph.
+            {"Rd1IFKf5dl": [{"name": "image.png", "desc": "A diagram showing photosynthesis... glucose and oxygen.", "content_type": "image/png", "complements": ""}]}"
+
+            - Assistant might respond:
+            "What role do the sun's rays play in this process? Understanding how they power a plant can clarify photosynthesis."
+
+            - User: "Can you see the image I uploaded?"
+            - Assistant:
+            "Yes, you've uploaded one image. How can I help you further with photosynthesis?"
+
+            - User: "I'm also uploading a new image I took of my notes. Could you go over the differences in these two images for me {"Rd1IFKf5dl": [{"name": "notes.png", "desc": "Handwritten notes about plant cell structures.", "content_type": "image/png", "complements": ""}]}"
+            - Assistant:
+            "You've uploaded another image with handwritten notes. What are you hoping to clarify about the differences between your diagram and your notes?"
+
+            - User: "How many images have I uploaded so far?"
+            - Assistant:
+            "You've uploaded two images in total. Would you like more details on either one?"
+            """
         )
 
     # Inject the current time into the instructions

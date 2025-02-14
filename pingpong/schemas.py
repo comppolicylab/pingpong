@@ -44,8 +44,11 @@ class ModelStatisticsResponse(BaseModel):
 
 class AssistantModelInfo(BaseModel):
     class_id: int
+    class_name: str
     assistant_id: int
-    last_edited_at: datetime
+    assistant_name: str
+    last_edited: datetime
+    last_user_activity: datetime | None
 
 
 class AssistantModelInfoResponse(BaseModel):
@@ -238,6 +241,7 @@ class File(BaseModel):
     uploader_id: int | None
     created: datetime
     updated: datetime | None
+    image_description: str | None = None
 
     class Config:
         from_attributes = True
@@ -314,6 +318,7 @@ class Assistant(BaseModel):
     creator_id: int
     locked: bool = False
     use_latex: bool | None
+    use_image_descriptions: bool | None
     hide_prompt: bool | None
     published: datetime | None
     endorsed: bool | None = None
@@ -336,6 +341,7 @@ class CreateAssistant(BaseModel):
     tools: list[Tool]
     published: bool = False
     use_latex: bool = False
+    use_image_descriptions: bool = False
     hide_prompt: bool = False
     deleted_private_files: list[int] = []
 
@@ -353,6 +359,7 @@ class UpdateAssistant(BaseModel):
     published: bool | None = None
     use_latex: bool | None = None
     hide_prompt: bool | None = None
+    use_image_descriptions: bool | None = None
     deleted_private_files: list[int] = []
 
 
@@ -399,12 +406,20 @@ def file_validator(self):
     return self
 
 
+class ImageProxy(BaseModel):
+    name: str
+    description: str
+    content_type: str
+    complements: str | None = None
+
+
 class CreateThread(BaseModel):
     parties: list[int] = []
     message: str = Field(..., min_length=1)
     code_interpreter_file_ids: list[str] = Field([])
     file_search_file_ids: list[str] = Field([])
     vision_file_ids: list[str] = Field([])
+    vision_image_descriptions: list[ImageProxy] = Field([])
     tools_available: list[Tool]
     assistant_id: int
 
@@ -510,6 +525,7 @@ class NewThreadMessage(BaseModel):
     code_interpreter_file_ids: list[str] = Field([])
     file_search_file_ids: list[str] = Field([])
     vision_file_ids: list[str] = Field([])
+    vision_image_descriptions: list[ImageProxy] = Field([])
 
     _file_check = model_validator(mode="after")(file_validator)
 

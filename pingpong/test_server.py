@@ -185,7 +185,7 @@ async def test_auth_with_expired_token(api, now):
     expired_token = encode_session_token(123, nowfn=offset(now, seconds=-100_000))
     response = api.get(f"/api/v1/auth?token={expired_token}", allow_redirects=False)
     assert response.status_code == 303
-    assert response.headers["location"] == "/login/?expired=true&forward=/"
+    assert response.headers["location"] == "/login?expired=true&forward=/"
 
 
 @with_user(123, "foo@bar.com")

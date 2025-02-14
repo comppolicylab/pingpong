@@ -123,10 +123,12 @@
   $: canSubmit = !!$participants.user && $participants.user.includes('Me');
   $: assistantDeleted = !$assistantId && $assistantId === 0;
   let useLatex = false;
+  let useImageDescriptions = false;
   $: {
     const assistant = data.assistants.find((assistant) => assistant.id === $assistantId);
     if (assistant) {
       useLatex = assistant.use_latex || false;
+      useImageDescriptions = assistant.use_image_descriptions || false;
     } else {
       console.warn(`Definition for assistant ${$assistantId} not found.`);
     }
@@ -148,6 +150,46 @@
       }
       return 'PingPong Bot';
     }
+  };
+
+  export function processString(dirty_string: string): {
+    clean_string: string;
+    images: api.ImageProxy[];
+  } {
+    const jsonPattern = /\{"Rd1IFKf5dl"\s*:\s*\[.*?\]\}/s;
+    const match = dirty_string.match(jsonPattern);
+
+    let clean_string = dirty_string;
+    let images: api.ImageProxy[] = [];
+
+    if (match) {
+      try {
+        const user_images = JSON.parse(match[0]);
+        images = user_images['Rd1IFKf5dl'] || [];
+        clean_string = dirty_string.replace(jsonPattern, '').trim();
+      } catch (error) {
+        console.error('Failed to parse user images JSON:', error);
+      }
+    }
+
+    return { clean_string, images };
+  }
+
+  const convertImageProxyToInfo = (data: api.ImageProxy[]) => {
+    return data.map((image) => {
+      const imageAsServerFile = {
+        file_id: image.complements ?? '',
+        content_type: image.content_type,
+        name: image.name
+      } as api.ServerFile;
+      return {
+        state: 'success',
+        progress: 100,
+        file: { type: image.content_type, name: image.name },
+        response: imageAsServerFile,
+        promise: Promise.resolve(imageAsServerFile)
+      } as api.FileUploadInfo;
+    });
   };
 
   // Get the avatar URL of the participant in the chat thread.
@@ -219,6 +261,7 @@
     code_interpreter_file_ids,
     file_search_file_ids,
     vision_file_ids,
+    visionFileImageDescriptions,
     callback
   }: ChatInputMessage) => {
     try {
@@ -229,6 +272,7 @@
         code_interpreter_file_ids,
         file_search_file_ids,
         vision_file_ids,
+        visionFileImageDescriptions,
         currentMessageAttachments
       );
     } catch (e) {
@@ -249,9 +293,17 @@
   const handleUpload = (
     f: File,
     onProgress: (p: number) => void,
-    purpose: api.FileUploadPurpose = 'assistants'
+    purpose: api.FileUploadPurpose = 'assistants',
+    useImageDescriptions: boolean = false
   ) => {
-    return api.uploadUserFile(data.class.id, data.me.user!.id, f, { onProgress }, purpose);
+    return api.uploadUserFile(
+      data.class.id,
+      data.me.user!.id,
+      f,
+      { onProgress },
+      purpose,
+      useImageDescriptions
+    );
   };
 
   // Handle file removal
@@ -366,10 +418,13 @@
           <div class="font-semibold text-blue-dark-40 mb-2 mt-1">{getName(message.data)}</div>
           {#each message.data.content as content}
             {#if content.type === 'text'}
+              {@const { clean_string, images } = processString(content.text.value)}
+              {@const imageInfo = convertImageProxyToInfo(images)}
+
               <div class="leading-6">
                 <Markdown
                   content={parseTextContent(
-                    content.text,
+                    { value: clean_string, annotations: content.text.annotations },
                     api.fullPath(`/class/${classId}/thread/${threadId}`)
                   )}
                   syntax={true}
@@ -387,6 +442,17 @@
                       />
                     {:else}
                       <AttachmentDeletedPlaceholder {file_id} />
+                    {/if}
+                  {/each}
+                  {#each imageInfo as image}
+                    {#if !(image.response && 'file_id' in image.response && image.response.file_id in allFiles)}
+                      <FilePlaceholder
+                        info={image}
+                        purpose="vision"
+                        mimeType={data.uploadInfo.mimeType}
+                        preventDeletion={true}
+                        on:delete={() => {}}
+                      />
                     {/if}
                   {/each}
                 </div>
@@ -484,6 +550,7 @@
           {fileSearchAcceptedFiles}
           {codeInterpreterAcceptedFiles}
           {visionSupportOverride}
+          {useImageDescriptions}
           {assistantDeleted}
           {canViewAssistant}
           canSubmit={canSubmit && !assistantDeleted && canViewAssistant}

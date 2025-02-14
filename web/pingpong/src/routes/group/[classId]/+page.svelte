@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { goto } from '$app/navigation';
+  import { afterNavigate, goto } from '$app/navigation';
   import { navigating, page } from '$app/stores';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
   import {
@@ -22,7 +22,6 @@
   import * as api from '$lib/api';
   import { errorMessage } from '$lib/errors';
   import type { Assistant, FileUploadPurpose } from '$lib/api';
-  import { onMount } from 'svelte';
   import { loading } from '$lib/stores/general';
   import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
 
@@ -42,7 +41,7 @@
     );
   }
 
-  onMount(async () => {
+  afterNavigate(async () => {
     const errorCode = $page.url.searchParams.get('error_code');
     if (errorCode) {
       const errorMessage = getErrorMessage(parseInt(errorCode) || 0);
@@ -84,11 +83,13 @@
   $: parties = data.me.user?.id ? `${data.me.user.id}` : '';
   // The assistant ID from the URL.
   $: linkedAssistant = parseInt($page.url.searchParams.get('assistant') || '0', 10);
+  let useImageDescriptions = false;
   $: {
     if (linkedAssistant && assistants) {
       const selectedAssistant = (assistants || []).find((asst) => asst.id === linkedAssistant);
       if (selectedAssistant) {
         assistant = selectedAssistant;
+        useImageDescriptions = assistant.use_image_descriptions || false;
       }
     }
   }
@@ -114,9 +115,17 @@
   const handleUpload = (
     f: File,
     onProgress: (p: number) => void,
-    purpose: FileUploadPurpose = 'assistants'
+    purpose: FileUploadPurpose = 'assistants',
+    useImageDescriptions: boolean = false
   ) => {
-    return api.uploadUserFile(data.class.id, data.me.user!.id, f, { onProgress }, purpose);
+    return api.uploadUserFile(
+      data.class.id,
+      data.me.user!.id,
+      f,
+      { onProgress },
+      purpose,
+      useImageDescriptions
+    );
   };
 
   // Handle file removal
@@ -160,7 +169,8 @@
           tools_available: tools,
           code_interpreter_file_ids: form.code_interpreter_file_ids,
           file_search_file_ids: form.file_search_file_ids,
-          vision_file_ids: form.vision_file_ids
+          vision_file_ids: form.vision_file_ids,
+          vision_image_descriptions: form.visionFileImageDescriptions
         })
       );
       data.threads = [newThread as api.Thread, ...data.threads];
@@ -323,6 +333,7 @@
               })
             : null}
           {visionSupportOverride}
+          {useImageDescriptions}
           fileSearchAcceptedFiles={supportsFileSearch
             ? data.uploadInfo.fileTypes({
                 file_search: true,
