@@ -21,6 +21,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import PositiveInt
 
+from pingpong.ai_models import upgrade_assistants_model
 from pingpong.artifacts import ArtifactStoreError
 from pingpong.bg_tasks import safe_task
 from pingpong.emails import (
@@ -950,7 +951,9 @@ async def get_models_stats(request: Request):
     response_model=schemas.AssistantModelInfoResponse,
 )
 async def get_model_assistants(model_name: str, request: Request):
-    assistants = await models.Assistant.get_by_model(request.state.db, model_name)
+    assistants = await models.Assistant.get_by_model_with_stats(
+        request.state.db, model_name
+    )
     stats = [
         {
             "assistant_id": a.id,
@@ -2492,6 +2495,19 @@ async def export_class_threads(
         openai_client,
         class_id,
         request.state.session.user.id,
+    )
+    return {"status": "ok"}
+
+
+@v1.post(
+    "/admin/migrate/assistants/model",
+    dependencies=[Depends(Authz("admin"))],
+)
+async def migrate_models(
+    req: schemas.AssistantModelUpgradeRequest, request: Request, tasks: BackgroundTasks
+):
+    tasks.add_task(
+        safe_task, upgrade_assistants_model, req.deprecated_model, req.replacement_model
     )
     return {"status": "ok"}
 

@@ -1473,7 +1473,9 @@ class Assistant(Base):
         return result.all()
 
     @classmethod
-    async def get_by_model(cls, session: AsyncSession, model: str) -> List["Assistant"]:
+    async def get_by_model_with_stats(
+        cls, session: AsyncSession, model: str
+    ) -> List["Assistant"]:
         stmt = (
             select(
                 Assistant.id,
@@ -1497,6 +1499,12 @@ class Assistant(Base):
         )
         result = await session.execute(stmt)
         return result.all()
+
+    @classmethod
+    async def get_by_model(cls, session: AsyncSession, model: str) -> List["Assistant"]:
+        stmt = select(Assistant).where(Assistant.model == model)
+        result = await session.execute(stmt)
+        return [row.Assistant for row in result]
 
 
 class LMSClass(Base):
