@@ -126,7 +126,7 @@
       sadToast(errorMessage);
     }
 
-    // If URL contains #summary, scroll the manageContainer to the summaryElement
+    // If URL contains the section 'summary', scroll the manageContainer to the summaryElement
     const waitForHeaderHeight = () => {
       if (headerHeight > 0) {
         manageContainer.scrollTo({
@@ -138,7 +138,8 @@
       }
     };
 
-    if ($page.url.hash === '#summary') {
+    const section = $page.url.searchParams.get('section');
+    if (section === 'summary') {
       waitForHeaderHeight();
     }
 
