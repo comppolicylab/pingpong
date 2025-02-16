@@ -231,7 +231,7 @@ async def send_class_summary(
         user_id,
         expiry=86_400 * 7,
         nowfn=nowfn,
-        redirect=f"/group/{class_id}/manage%23summary",
+        redirect=f"/group/{class_id}/manage?section=summary",
     )
 
     days_before_today = (nowfn() - after).days
