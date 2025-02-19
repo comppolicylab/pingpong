@@ -543,7 +543,7 @@ class AgreementPolicy(Base):
     name = Column(String, nullable=False)
 
     agreement_id: Mapped[int] = mapped_column(
-        ForeignKey("agreements.id", ondelete="cascade"), nullable=False
+        ForeignKey("agreements.id", ondelete="cascade"), nullable=False, index=True
     )
     agreement = relationship("Agreement", back_populates="policies", lazy="selectin")
 
@@ -565,7 +565,7 @@ class AgreementPolicy(Base):
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     @staticmethod
-    def eligibility_conditions(user_id: int) -> list[BinaryExpression[bool]]:
+    def eligibility_conditions(user_id: int) -> BinaryExpression[bool]:
         """
         Finds Agreement records that satisfy the following conditions:
         - The AgreementPolicy has a linked Agreement.
@@ -575,7 +575,7 @@ class AgreementPolicy(Base):
             - its `apply_to_all` flag is True, or
             - if the policy is limited to a particular set of external login providers then the user must have at least one ExternalLogin with one of those providers.
         """
-        return [
+        return and_(
             AgreementPolicy.agreement_id.is_not(None),
             or_(
                 AgreementPolicy.not_before.is_not(None),
@@ -601,7 +601,7 @@ class AgreementPolicy(Base):
                     )
                 ),
             ),
-        ]
+        )
 
     @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "AgreementPolicy":
@@ -615,7 +615,7 @@ class AgreementPolicy(Base):
         stmt = (
             select(AgreementPolicy)
             .where(AgreementPolicy.id == id_)
-            .where(*cls.eligibility_conditions(user_id))
+            .where(cls.eligibility_conditions(user_id))
         )
         return await session.scalar(stmt)
 
@@ -695,16 +695,18 @@ class AgreementAcceptance(Base):
     __tablename__ = "agreement_acceptances"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
     user = relationship("User", back_populates="acceptances", lazy="selectin")
 
     agreement_id: Mapped[int] = mapped_column(
-        ForeignKey("agreements.id"), nullable=False
+        ForeignKey("agreements.id"), nullable=False, index=True
     )
     agreement = relationship("Agreement", back_populates="acceptances", lazy="selectin")
 
     policy_id: Mapped[int] = mapped_column(
-        ForeignKey("agreement_policies.id"), nullable=False
+        ForeignKey("agreement_policies.id"), nullable=False, index=True
     )
     policy = relationship(
         "AgreementPolicy", back_populates="acceptances", lazy="selectin"

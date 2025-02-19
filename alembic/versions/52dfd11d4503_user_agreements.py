@@ -1,8 +1,8 @@
 """User Agreements
 
-Revision ID: a7ea4692417e
+Revision ID: 52dfd11d4503
 Revises: dcf2fe04f74f
-Create Date: 2025-02-13 22:34:43.911496
+Create Date: 2025-02-19 13:53:24.904399
 
 """
 
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "a7ea4692417e"
+revision: str = "52dfd11d4503"
 down_revision: Union[str, None] = "dcf2fe04f74f"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -59,6 +59,12 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
+        op.f("ix_agreement_policies_agreement_id"),
+        "agreement_policies",
+        ["agreement_id"],
+        unique=False,
+    )
+    op.create_index(
         op.f("ix_agreement_policies_updated"),
         "agreement_policies",
         ["updated"],
@@ -90,6 +96,24 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("user_id", "agreement_id", name="_user_agreement_uc"),
+    )
+    op.create_index(
+        op.f("ix_agreement_acceptances_agreement_id"),
+        "agreement_acceptances",
+        ["agreement_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_agreement_acceptances_policy_id"),
+        "agreement_acceptances",
+        ["policy_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_agreement_acceptances_user_id"),
+        "agreement_acceptances",
+        ["user_id"],
+        unique=False,
     )
     op.create_table(
         "agreement_policies_external_logins",
@@ -129,9 +153,22 @@ def downgrade() -> None:
         table_name="agreement_policies_external_logins",
     )
     op.drop_table("agreement_policies_external_logins")
+    op.drop_index(
+        op.f("ix_agreement_acceptances_user_id"), table_name="agreement_acceptances"
+    )
+    op.drop_index(
+        op.f("ix_agreement_acceptances_policy_id"), table_name="agreement_acceptances"
+    )
+    op.drop_index(
+        op.f("ix_agreement_acceptances_agreement_id"),
+        table_name="agreement_acceptances",
+    )
     op.drop_table("agreement_acceptances")
     op.drop_index(
         op.f("ix_agreement_policies_updated"), table_name="agreement_policies"
+    )
+    op.drop_index(
+        op.f("ix_agreement_policies_agreement_id"), table_name="agreement_policies"
     )
     op.drop_table("agreement_policies")
     op.drop_index(op.f("ix_agreements_updated"), table_name="agreements")

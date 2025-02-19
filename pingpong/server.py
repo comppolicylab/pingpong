@@ -4491,7 +4491,6 @@ async def update_user_agreement_policy(
     if not policy:
         raise HTTPException(404, "Policy not found.")
 
-    print(req.model_dump_json())
     if "name" in req.model_fields_set and req.name is not None:
         policy.name = req.name
 
