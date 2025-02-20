@@ -4,7 +4,7 @@ import { TextLineStream, JSONStream } from '$lib/streams';
 /**
  * HTTP methods.
  */
-export type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
+export type Method = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 
 /**
  * General fetcher type.
@@ -218,7 +218,7 @@ const _qmethod = async <T extends BaseData, R extends BaseData>(
  */
 const _bmethod = async <T extends BaseData, R extends BaseData>(
   f: Fetcher,
-  method: 'POST' | 'PUT',
+  method: 'POST' | 'PUT' | 'PATCH',
   path: string,
   data?: T
 ) => {
@@ -257,6 +257,17 @@ const POST = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: st
  */
 const PUT = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T) => {
   return await _bmethod<T, R>(f, 'PUT', path, data);
+};
+
+/**
+ * Query with PATCH.
+ */
+const PATCH = async <T extends BaseData, R extends BaseData>(
+  f: Fetcher,
+  path: string,
+  data?: T
+) => {
+  return await _bmethod<T, R>(f, 'PATCH', path, data);
 };
 
 /**
@@ -399,6 +410,7 @@ export type SessionState = {
   token: SessionToken | null;
   user: AppUser | null;
   profile: Profile | null;
+  agreement_id: number | null;
 };
 
 /**
@@ -2546,4 +2558,163 @@ export type ExtraUserInfo = {
 export const updateUserInfo = async (f: Fetcher, data: ExtraUserInfo) => {
   const url = `me`;
   return await PUT<ExtraUserInfo, AppUser>(f, url, data);
+};
+
+/**
+ * Information about a user agreement.
+ */
+
+export type AgreementBody = {
+  id: number;
+  body: string;
+};
+
+export type Agreement = {
+  id: number;
+  name: string;
+  created: string;
+  updated: string | null;
+};
+
+export type Agreements = {
+  agreements: Agreement[];
+};
+
+export type AgreementPolicyLite = {
+  id: number;
+};
+
+export type AgreementDetail = {
+  id: number;
+  name: string;
+  body: string;
+  policies: AgreementPolicyLite[];
+};
+
+export type AgreementLite = {
+  id: number;
+  name: string;
+};
+
+export type AgreementPolicy = {
+  id: number;
+  name: string;
+  agreement_id: number;
+  agreement: AgreementLite;
+  not_before: string | null;
+  not_after: string | null;
+  apply_to_all: boolean;
+};
+
+export type ExternalLoginProviderLite = {
+  id: number;
+};
+
+export type AgreementPolicyDetail = {
+  id: number;
+  name: string;
+  agreement_id: number;
+  not_before: string;
+  not_after: string;
+  apply_to_all: boolean;
+  limit_to_providers: ExternalLoginProviderLite[];
+};
+
+export type AgreementPolicies = {
+  policies: AgreementPolicy[];
+};
+
+export type CreateAgreementRequest = {
+  name: string;
+  body: string;
+};
+
+export type UpdateAgreementRequest = {
+  name?: string;
+  body?: string;
+};
+
+export type CreateAgreementPolicyRequest = {
+  name: string;
+  agreement_id: number;
+  apply_to_all: boolean;
+  limit_to_providers: number[] | null;
+};
+
+export type UpdateAgreementPolicyRequest = {
+  name?: string;
+  agreement_id?: number;
+  apply_to_all?: boolean;
+  limit_to_providers?: number[] | null;
+};
+
+export const getAgreementByPolicyId = async (f: Fetcher, policy_id: number) => {
+  const url = `me/terms/${policy_id}`;
+  return await GET<never, AgreementBody>(f, url);
+};
+
+export const acceptAgreementByPolicyId = async (f: Fetcher, policy_id: number) => {
+  const url = `me/terms/${policy_id}`;
+  return await POST<never, GenericStatus>(f, url);
+};
+
+export const listAgreements = async (f: Fetcher) => {
+  const url = `admin/terms/agreement`;
+  return await GET<never, Agreements>(f, url);
+};
+
+export const createAgreement = async (f: Fetcher, data: CreateAgreementRequest) => {
+  const url = `admin/terms/agreement`;
+  return await POST<CreateAgreementRequest, GenericStatus>(f, url, data);
+};
+
+export const getAgreement = async (f: Fetcher, agreement_id: number) => {
+  const url = `admin/terms/agreement/${agreement_id}`;
+  return await GET<never, AgreementDetail>(f, url);
+};
+
+export const updateAgreement = async (
+  f: Fetcher,
+  agreement_id: number,
+  data: UpdateAgreementRequest
+) => {
+  const url = `admin/terms/agreement/${agreement_id}`;
+  return await PUT<UpdateAgreementRequest, GenericStatus>(f, url, data);
+};
+
+export const listAgreementPolicies = async (f: Fetcher) => {
+  const url = `admin/terms/policy`;
+  return await GET<never, AgreementPolicies>(f, url);
+};
+
+export const createAgreementPolicy = async (f: Fetcher, data: CreateAgreementPolicyRequest) => {
+  const url = `admin/terms/policy`;
+  return await POST<CreateAgreementPolicyRequest, AgreementPolicyDetail>(f, url, data);
+};
+
+export const getAgreementPolicy = async (f: Fetcher, policy_id: number) => {
+  const url = `admin/terms/policy/${policy_id}`;
+  return await GET<never, AgreementPolicyDetail>(f, url);
+};
+
+export const updateAgreementPolicy = async (
+  f: Fetcher,
+  policy_id: number,
+  data: UpdateAgreementPolicyRequest
+) => {
+  const url = `admin/terms/policy/${policy_id}`;
+  return await PUT<UpdateAgreementPolicyRequest, GenericStatus>(f, url, data);
+};
+
+export type ToggleAgreementPolicyRequest = {
+  action: 'enable' | 'disable';
+};
+
+export const toggleAgreementPolicy = async (
+  f: Fetcher,
+  policy_id: number,
+  data: ToggleAgreementPolicyRequest
+) => {
+  const url = `admin/terms/policy/${policy_id}/status`;
+  return await PATCH<ToggleAgreementPolicyRequest, GenericStatus>(f, url, data);
 };

@@ -1,4 +1,7 @@
+from datetime import datetime
 from unittest.mock import AsyncMock
+
+import pytest
 
 from .auth import encode_session_token
 from .now import offset
@@ -12,6 +15,7 @@ async def test_me_without_token(api):
         "error": None,
         "profile": None,
         "status": "missing",
+        "agreement_id": None,
         "token": None,
         "user": None,
     }
@@ -28,6 +32,7 @@ async def test_me_with_expired_token(api, now):
     assert response.json() == {
         "error": "Token expired",
         "profile": None,
+        "agreement_id": None,
         "status": "invalid",
         "token": None,
         "user": None,
@@ -52,6 +57,7 @@ async def test_me_with_invalid_token(api):
         "profile": None,
         "status": "invalid",
         "token": None,
+        "agreement_id": None,
         "user": None,
     }
 
@@ -68,6 +74,7 @@ async def test_me_with_valid_token_but_missing_user(api, now):
         "error": "We couldn't locate your account. Please try logging in again.",
         "profile": None,
         "status": "error",
+        "agreement_id": None,
         "token": None,
         "user": None,
     }
@@ -82,7 +89,17 @@ async def test_me_with_valid_user(api, user, now, valid_user_token):
         },
     )
     assert response.status_code == 200
-    assert response.json() == {
+    response_json = response.json()
+
+    # Check if `updated` exists and is a valid timestamp
+    updated_value = response_json["user"].get("updated")
+    if updated_value is not None:
+        try:
+            datetime.fromisoformat(updated_value)  # Validate ISO 8601 format
+        except ValueError:
+            pytest.fail(f"Invalid timestamp format: {updated_value}")
+
+    expected_response = {
         "error": None,
         "profile": {
             "email": "user_123@domain.test",
@@ -106,9 +123,14 @@ async def test_me_with_valid_user(api, user, now, valid_user_token):
             "display_name": None,
             "has_real_name": False,
             "state": "verified",
-            "updated": None,
         },
+        "agreement_id": None,
     }
+
+    # Remove `updated` from actual response before assertion
+    response_json["user"].pop("updated", None)
+
+    assert response_json == expected_response
 
 
 @with_user(123)

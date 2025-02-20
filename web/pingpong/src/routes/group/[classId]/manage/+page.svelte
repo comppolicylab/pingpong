@@ -1031,7 +1031,13 @@
                 ></Helper
               >
               <div class="grid gap-4 w-full xl:w-2/3 md:grid-cols-2 mb-5">
-                <Radio name="provider" value="openai" bind:group={apiProvider} custom>
+                <Radio
+                  name="provider"
+                  value="openai"
+                  bind:group={apiProvider}
+                  custom
+                  class="hidden-radio"
+                >
                   <div
                     class="inline-flex gap-4 items-center px-5 py-3 w-full text-gray-900 bg-white rounded-lg border border-gray-200 cursor-pointer peer-checked:border-red-600 peer-checked:text-red-600 hover:text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:bg-gray-800 dark:hover:bg-gray-700 font-normal peer-checked:font-medium min-w-fit"
                   >
@@ -1039,7 +1045,13 @@
                     <div class="w-full text-base">OpenAI</div>
                   </div>
                 </Radio>
-                <Radio name="provider" value="azure" bind:group={apiProvider} custom>
+                <Radio
+                  name="provider"
+                  value="azure"
+                  bind:group={apiProvider}
+                  custom
+                  class="hidden-radio"
+                >
                   <div
                     class="inline-flex gap-4 items-center px-5 py-3 w-full text-gray-900 bg-white rounded-lg border border-gray-200 cursor-pointer peer-checked:border-red-600 peer-checked:text-red-600 hover:text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:bg-gray-800 dark:hover:bg-gray-700 font-normal peer-checked:font-medium"
                   >

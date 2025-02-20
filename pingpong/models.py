@@ -3,7 +3,15 @@ import json
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional, Union, Callable, Coroutine, Any
 
-from sqlalchemy import Boolean, Column, DateTime, Float, UniqueConstraint, or_
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    UniqueConstraint,
+    not_,
+    or_,
+)
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
     ForeignKey,
@@ -423,8 +431,314 @@ user_thread_association = Table(
 )
 
 
+agreement_policy_external_login_association = Table(
+    "agreement_policies_external_logins",
+    Base.metadata,
+    Column("agreement_policy_id", Integer, ForeignKey("agreement_policies.id")),
+    Column("provider_id", Integer, ForeignKey("external_login_providers.id")),
+    Index(
+        "agreement_policy_external_login_idx",
+        "agreement_policy_id",
+        "provider_id",
+        unique=True,
+    ),
+)
+
+
+class Agreement(Base):
+    """
+    Represents an Agreement that defines the terms provided to users. An
+    Agreement includes an administrative name, and the HTML text of the agreement.
+    May have multiple associated AgreementPolicy records.
+    Once used by at least one AgreementPolicy, the Agreement should be read-only.
+
+    Attributes:
+      id (int): Unique identifier for the agreement.
+      name (str): The administrative name of the agreement.
+      body (str): The HTML content containing the text of the agreement.
+      created (datetime): Timestamp when the agreement was first created.
+      updated (datetime): Timestamp when the agreement was last updated.
+    """
+
+    __tablename__ = "agreements"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    name = Column(String, nullable=False)
+    body = Column(String, nullable=False)
+
+    policies = relationship(
+        "AgreementPolicy", back_populates="agreement", lazy="selectin"
+    )
+    acceptances = relationship(
+        "AgreementAcceptance", back_populates="agreement", lazy="selectin"
+    )
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
+
+    @classmethod
+    async def get_by_id(cls, session: AsyncSession, id_: int) -> "Agreement":
+        stmt = select(Agreement).where(Agreement.id == id_)
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_with_policies(
+        cls, session: AsyncSession, id_: int
+    ) -> "Agreement":
+        stmt = (
+            select(Agreement)
+            .where(Agreement.id == id_)
+            .options(selectinload(Agreement.policies).load_only(AgreementPolicy.id))
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_all(cls, session: AsyncSession) -> list["Agreement"]:
+        stmt = select(Agreement)
+        result = await session.execute(stmt)
+        return [row.Agreement for row in result]
+
+    @classmethod
+    async def get_by_policy_id(
+        cls, session: AsyncSession, policy_id: int
+    ) -> "Agreement":
+        stmt = select(Agreement).where(
+            Agreement.policies.any(AgreementPolicy.id == policy_id)
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def create(
+        cls, session: AsyncSession, data: schemas.CreateAgreementRequest
+    ) -> "Agreement":
+        agreement = Agreement(name=data.name, body=data.body)
+        session.add(agreement)
+        await session.flush()
+        await session.refresh(agreement)
+        return agreement
+
+
+class AgreementPolicy(Base):
+    """
+    Represents a policy for an agreement. An AgreementPolicy defines when
+    and under what conditions an agreement is applicable to users.
+
+    Attributes:
+      id (int): Unique identifier for the agreement policy.
+      name (str): The unique name of the policy within an agreement.
+      agreement_id (int): Foreign key that references the associated Agreement.
+      agreement (Agreement): The related Agreement instance.
+      not_before (datetime): Policy's start datetime - the policy does not apply before this time.
+      not_after (datetime): Policy's expiry datetime - the policy does not apply after this time.
+      apply_to_all (bool): Indicates if the policy applies universally to all users.
+      limit_to_providers (List[ExternalLoginProvider]): A list of external login providers to which the policy is limited. The policy applies only to users with an ExternalLogin from at least one of these providers.
+      created (datetime): Timestamp indicating when the policy was created.
+      updated (datetime): Timestamp indicating when the policy was last updated.
+    """
+
+    __tablename__ = "agreement_policies"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name = Column(String, nullable=False)
+
+    agreement_id: Mapped[int] = mapped_column(
+        ForeignKey("agreements.id", ondelete="cascade"), nullable=False, index=True
+    )
+    agreement = relationship("Agreement", back_populates="policies", lazy="selectin")
+
+    not_before = Column(DateTime(timezone=True), nullable=True)
+    not_after = Column(DateTime(timezone=True), nullable=True)
+
+    apply_to_all = Column(Boolean, default=False)
+    limit_to_providers = relationship(
+        "ExternalLoginProvider",
+        secondary=agreement_policy_external_login_association,
+        back_populates="agreement_policies",
+    )
+
+    acceptances = relationship(
+        "AgreementAcceptance", back_populates="policy", lazy="selectin"
+    )
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
+
+    @staticmethod
+    def eligibility_conditions(user_id: int) -> BinaryExpression[bool]:
+        """
+        Finds Agreement records that satisfy the following conditions:
+        - The AgreementPolicy has a linked Agreement.
+        - If the AgreementPolicy has a not_before or not_after time range, the current time must be in the allowed range.
+        - There is no matching AgreementAcceptance record for the user for the Agreement ID.
+        - The policy “applies” to the user, meaning that either:
+            - its `apply_to_all` flag is True, or
+            - if the policy is limited to a particular set of external login providers then the user must have at least one ExternalLogin with one of those providers.
+        """
+        return and_(
+            AgreementPolicy.agreement_id.is_not(None),
+            or_(
+                AgreementPolicy.not_before.is_not(None),
+                AgreementPolicy.not_before <= func.now(),
+            ),
+            or_(
+                AgreementPolicy.not_after.is_(None),
+                AgreementPolicy.not_after >= func.now(),
+            ),
+            not_(
+                select(AgreementAcceptance.id)
+                .where(
+                    AgreementAcceptance.agreement_id == AgreementPolicy.agreement_id,
+                    AgreementAcceptance.user_id == user_id,
+                )
+                .exists()
+            ),
+            or_(
+                AgreementPolicy.apply_to_all,
+                AgreementPolicy.limit_to_providers.any(
+                    ExternalLoginProvider.external_logins.any(
+                        ExternalLogin.user_id == user_id
+                    )
+                ),
+            ),
+        )
+
+    @classmethod
+    async def get_by_id(cls, session: AsyncSession, id_: int) -> "AgreementPolicy":
+        stmt = select(AgreementPolicy).where(AgreementPolicy.id == id_)
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_if_eligible(
+        cls, session: AsyncSession, id_: int, user_id: int
+    ) -> "AgreementPolicy":
+        stmt = (
+            select(AgreementPolicy)
+            .where(AgreementPolicy.id == id_)
+            .where(cls.eligibility_conditions(user_id))
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_all(cls, session: AsyncSession) -> list["AgreementPolicy"]:
+        stmt = select(AgreementPolicy).options(
+            selectinload(AgreementPolicy.agreement).load_only(
+                Agreement.id, Agreement.name
+            )
+        )
+        result = await session.execute(stmt)
+        return [row.AgreementPolicy for row in result]
+
+    @classmethod
+    async def get_by_id_with_external_logins(
+        cls, session: AsyncSession, id_: int
+    ) -> "AgreementPolicy":
+        stmt = (
+            select(AgreementPolicy)
+            .where(AgreementPolicy.id == id_)
+            .options(
+                selectinload(AgreementPolicy.limit_to_providers).load_only(
+                    ExternalLoginProvider.id
+                )
+            )
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_pending_agreement_by_user_id(
+        cls, session: AsyncSession, user_id: int
+    ) -> int | None:
+        """
+        Returns the ID of the first pending Agreement for a user.
+
+        Attributes:
+            user_id (int): The ID of the user for whom to retrieve pending agreements.
+
+        Returns:
+            agreement_id (int | None): The ID of the first pending Agreement, or None if no pending agreements exist.
+
+        Finds Agreement records that satisfy the following conditions:
+        - If the AgreementPolicy has a not_before or not_after time range, the current time must be in the allowed range.
+        - There is no matching AgreementAcceptance record for the user for the Agreement ID.
+        - The policy “applies” to the user, meaning that either:
+            - its `apply_to_all` flag is True, or
+            - if the policy is limited to a particular set of external login providers then the user must have at least one ExternalLogin with one of those providers.
+
+        Returns the ID of the first matching Agreement, or None if no such policy exists.
+        """
+
+        stmt = (
+            select(AgreementPolicy.id)
+            .where(*cls.eligibility_conditions(user_id))
+            .order_by(AgreementPolicy.created.asc())
+            .limit(1)
+        )
+
+        result = await session.scalar(stmt)
+        return result
+
+
+class AgreementAcceptance(Base):
+    """
+    Represents a user's acceptance of an agreement under a specific policy.
+
+    Attributes:
+      id (int): Unique identifier for the acceptance record.
+      user_id (int): Foreign key referencing the user who accepted the agreement.
+      agreement_id (int): Foreign key referencing the accepted Agreement.
+      agreement (Agreement): The related Agreement instance.
+      policy_id (int): Foreign key referencing the AgreementPolicy under which the agreement was accepted.
+      policy (AgreementPolicy): The related AgreementPolicy instance.
+      accepted_at (datetime): Timestamp when the user accepted the agreement.
+    """
+
+    __tablename__ = "agreement_acceptances"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    user = relationship("User", back_populates="acceptances", lazy="selectin")
+
+    agreement_id: Mapped[int] = mapped_column(
+        ForeignKey("agreements.id"), nullable=False, index=True
+    )
+    agreement = relationship("Agreement", back_populates="acceptances", lazy="selectin")
+
+    policy_id: Mapped[int] = mapped_column(
+        ForeignKey("agreement_policies.id"), nullable=False, index=True
+    )
+    policy = relationship(
+        "AgreementPolicy", back_populates="acceptances", lazy="selectin"
+    )
+
+    accepted_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "agreement_id", name="_user_agreement_uc"),
+    )
+
+    @classmethod
+    async def accept_agreement(
+        cls, session: AsyncSession, user_id: int, agreement_id: int, policy_id: int
+    ) -> None:
+        stmt = (
+            _get_upsert_stmt(session)(AgreementAcceptance)
+            .values(
+                user_id=user_id,
+                agreement_id=agreement_id,
+                policy_id=policy_id,
+            )
+            .on_conflict_do_nothing(
+                index_elements=["user_id", "agreement_id"],
+            )
+        )
+        return await session.scalar(stmt)
+
+
 class ExternalLoginProvider(Base):
     __tablename__ = "external_login_providers"
+    __table_args__ = (Index("ix_external_login_providers_name", "name"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String, nullable=False)
@@ -433,6 +747,11 @@ class ExternalLoginProvider(Base):
     icon = Column(String, nullable=True)
     external_logins: Mapped[List["ExternalLogin"]] = relationship(
         "ExternalLogin", back_populates="provider_obj", lazy="selectin"
+    )
+    agreement_policies: Mapped[List["AgreementPolicy"]] = relationship(
+        "AgreementPolicy",
+        secondary=agreement_policy_external_login_association,
+        back_populates="limit_to_providers",
     )
 
     @classmethod
@@ -448,6 +767,14 @@ class ExternalLoginProvider(Base):
     ) -> "ExternalLoginProvider":
         stmt = select(ExternalLoginProvider).where(ExternalLoginProvider.id == id_)
         return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_ids(
+        cls, session: AsyncSession, ids: list[int]
+    ) -> list["ExternalLoginProvider"]:
+        stmt = select(ExternalLoginProvider).where(ExternalLoginProvider.id.in_(ids))
+        result = await session.execute(stmt)
+        return [row.ExternalLoginProvider for row in result]
 
     @classmethod
     async def get_or_create_by_name(
@@ -705,10 +1032,9 @@ class User(Base):
     dna_as_join = Column(Boolean, server_default="false")
     # Do Not Add - Activity Summaries - Groups I Create
     dna_as_create = Column(Boolean, server_default="false")
-
-    async def verify(self, session: AsyncSession) -> None:
-        self.state = schemas.UserState.VERIFIED
-        session.add(self)
+    acceptances = relationship(
+        "AgreementAcceptance", back_populates="user", lazy="selectin"
+    )
 
     @classmethod
     async def update_info(

@@ -1141,6 +1141,7 @@ class SessionState(BaseModel):
     token: SessionToken | None = None
     user: User | None = None
     profile: Profile | None = None
+    agreement_id: int | None = None
 
 
 class Support(BaseModel):
@@ -1196,3 +1197,121 @@ class GrantsList(BaseModel):
     target_type: str
     relation: str
     target_ids: list[int]
+
+
+class AgreementBody(BaseModel):
+    id: int
+    body: str
+
+    class Config:
+        from_attributes = True
+
+
+class Agreement(BaseModel):
+    id: int
+    name: str
+    created: datetime
+    updated: datetime | None
+
+    class Config:
+        from_attributes = True
+
+
+class Agreements(BaseModel):
+    agreements: list[Agreement]
+
+    class Config:
+        from_attributes = True
+
+
+class AgreementPolicyLite(BaseModel):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+class AgreementDetail(BaseModel):
+    id: int
+    name: str
+    body: str
+    policies: list[AgreementPolicyLite]
+
+    class Config:
+        from_attributes = True
+
+
+class AgreementLite(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+
+
+class AgreementPolicy(BaseModel):
+    id: int
+    name: str
+    agreement_id: int
+    agreement: AgreementLite
+    not_before: datetime | None
+    not_after: datetime | None
+    apply_to_all: bool
+
+    class Config:
+        from_attributes = True
+
+
+class ExternalLoginProviderLite(BaseModel):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+class AgreementPolicyDetail(BaseModel):
+    id: int
+    name: str
+    agreement_id: int
+    not_before: datetime | None
+    not_after: datetime | None
+    apply_to_all: bool
+    limit_to_providers: list[ExternalLoginProviderLite] | None
+
+    class Config:
+        from_attributes = True
+
+
+class AgreementPolicies(BaseModel):
+    policies: list[AgreementPolicy]
+
+    class Config:
+        from_attributes = True
+
+
+class CreateAgreementRequest(BaseModel):
+    name: str
+    body: str
+
+
+class UpdateAgreementRequest(BaseModel):
+    name: str | None = None
+    body: str | None = None
+
+
+class ToggleAgreementPolicyRequest(BaseModel):
+    action: Literal["enable", "disable"]
+
+
+class CreateAgreementPolicyRequest(BaseModel):
+    name: str
+    agreement_id: int
+    apply_to_all: bool
+    limit_to_providers: list[int] | None
+
+
+class UpdateAgreementPolicyRequest(BaseModel):
+    name: str | None = None
+    agreement_id: int | None = None
+    apply_to_all: bool | None = None
+    limit_to_providers: list[int] | None = None

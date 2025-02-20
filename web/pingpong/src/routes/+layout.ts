@@ -5,6 +5,7 @@ import type { LayoutLoad } from './$types';
 const LOGIN = '/login';
 const HOME = '/';
 const ONBOARDING = '/onboarding';
+const TERMS = '/terms';
 const ABOUT = '/about';
 const PRIVACY_POLICY = '/privacy-policy';
 const EDU = '/eduaccess';
@@ -33,6 +34,8 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 
   const authed = me.data.status === 'valid';
   const needsOnboarding = !!me.data?.user && (!me.data.user.first_name || !me.data.user.last_name);
+  const needsAgreements = me.data?.agreement_id !== null;
+  let doNotShowSidebar = false;
 
   // If the page is public, don't redirect to the login page.
   let isPublicPage = false;
@@ -54,7 +57,19 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
       const destination = encodeURIComponent(`${url.pathname}${url.search}`);
       redirect(302, `${LOGIN}?forward=${destination}`);
     } else {
-      if (needsOnboarding && url.pathname !== ONBOARDING) {
+      if (needsAgreements && (url.pathname === LOGOUT || url.pathname === TERMS)) {
+        // If the user is logged in and tries to access the logout or terms page, don't show the sidebar.
+        doNotShowSidebar = true;
+      } else if (needsAgreements && url.pathname !== TERMS && url.pathname !== PRIVACY_POLICY) {
+        // If the user is logged in and hasn't agreed to the terms, redirect them to the terms page. Exclude the privacy policy page.
+        doNotShowSidebar = true;
+        const destination = encodeURIComponent(`${url.pathname}${url.search}`);
+        redirect(302, `${TERMS}?forward=${destination}&id=${me.data.agreement_id}`);
+      } else if (!needsAgreements && url.pathname === TERMS) {
+        // Just in case someone tries to go to the terms page when they don't need to.
+        const destination = url.searchParams.get('forward') || HOME;
+        redirect(302, destination);
+      } else if (needsOnboarding && url.pathname !== ONBOARDING) {
         const destination = encodeURIComponent(`${url.pathname}${url.search}`);
         redirect(302, `${ONBOARDING}?forward=${destination}`);
       } else if (!needsOnboarding && url.pathname === ONBOARDING) {
@@ -101,6 +116,8 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   return {
     isPublicPage,
     needsOnboarding,
+    needsAgreements,
+    doNotShowSidebar,
     me: me.data,
     authed,
     classes,
