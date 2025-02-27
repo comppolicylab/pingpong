@@ -67,6 +67,22 @@ async def add_assistant_to_class(
         return schemas.Assistant(**response)
 
 
+async def update_assistant(
+    session,
+    class_id: int,
+    assistant_id: int,
+    assistant: scripts_schemas.UpdateAssistant,
+    url: str,
+) -> schemas.Assistant:
+    async with session.put(
+        f"{url}/api/v1/class/{class_id}/assistant/{assistant_id}",
+        json=assistant.model_dump(),
+        raise_for_status=True,
+    ) as resp:
+        response = await resp.json()
+        return schemas.Assistant(**response)
+
+
 async def get_user_by_email(session, email: str, url: str) -> schemas.User:
     async with session.get(
         f"{url}/api/v1/user",

@@ -65,3 +65,7 @@ def add_fields_to_entitlements() -> None:
     Add course fields.
     """
     asyncio.run(_add_fields_to_entitlements())
+
+
+if __name__ == "__main__":
+    cli()
