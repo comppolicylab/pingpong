@@ -55,6 +55,7 @@ class AssistantTemplate(Model):
     use_latex = F.CheckboxField("Use LaTeX")
     file_search = F.CheckboxField("Enable File Search")
     code_interpreter = F.CheckboxField("Enable Code Interpreter")
+    experimental_vision = F.CheckboxField("Experimental Vision")
     publish = F.CheckboxField("Publish")
 
     class Meta:
@@ -114,6 +115,11 @@ class AssistantTemplateNonStudy(Model):
 class PingPongAssistant(Model):
     pingpong_id = F.NumberField("ID")
     template = F.SingleLinkField("Assistant Template", AssistantTemplate)
+    update_to = F.SingleLinkField("Update To Template", AssistantTemplate)
+    pp_class = F.SingleLinkField("PingPong Class", "PingPongClass")
+    pp_class_id = F.LookupField[str]("PingPong ID")
+    status = F.SelectField("Status")
+    status_notes = F.TextField("Status Notes")
 
     class Meta:
         table_name: str = "PingPong Assistants"
@@ -243,3 +249,19 @@ class CreateAssistant(BaseModel):
     published: bool
     use_latex: bool
     hide_prompt: bool
+    use_image_descriptions: bool = False
+
+
+class UpdateAssistant(BaseModel):
+    name: str
+    code_interpreter_file_ids: list[str] = []
+    file_search_file_ids: list[str] = []
+    instructions: str
+    description: str
+    model: str
+    temperature: float
+    tools: list[Tool]
+    published: bool | None = None
+    use_latex: bool
+    hide_prompt: bool
+    use_image_descriptions: bool = False

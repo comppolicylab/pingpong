@@ -150,6 +150,7 @@ async def _add_course_to_jira() -> None:
             & (
                 match({"Status": "Added — Control"})
                 | match({"Status": "Added — Treatment"})
+                | match({"Status": "Excluded from Study"})
             )
         )
     )

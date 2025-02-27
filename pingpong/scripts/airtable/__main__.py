@@ -4,6 +4,7 @@ import logging
 
 from pingpong.scripts.airtable.helpers import (
     _process_airtable_class_requests,
+    _process_airtable_class_update_requests,
     _process_remove_self_from_classes,
     _process_airtable_nonstudy_class_requests,
     _process_external_logins_to_add_non_study,
@@ -77,6 +78,16 @@ def process_external_logins_to_add_non_study() -> None:
     logger.info("Processing external login creation requests for non-study...")
     asyncio.run(_process_external_logins_to_add_non_study())
     logger.info("Finished processing external login creation requests for non-study.")
+
+
+@cli.command("process_airtable_class_update_requests")
+def process_airtable_class_update_requests() -> None:
+    """
+    Process pending Airtable class update requests.
+    """
+    logger.info("Processing class update requests...")
+    asyncio.run(_process_airtable_class_update_requests())
+    logger.info("Finished processing class update requests.")
 
 
 if __name__ == "__main__":

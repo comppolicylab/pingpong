@@ -10,7 +10,7 @@ from pingpong.scripts.airtable.vars import (
     PINGPONG_COOKIE,
     PINGPONG_URL,
 )
-from pyairtable.formulas import match
+from pyairtable.formulas import match, AND, NE, Field
 
 logger = logging.getLogger(__name__)
 
@@ -330,6 +330,45 @@ async def add_assistant(
     return pingpong_assistant
 
 
+async def update_assistant(
+    session,
+    assistant: scripts_schemas.PingPongAssistant,
+) -> None:
+    assistant_tools = []
+    if assistant.update_to.file_search:
+        assistant_tools.append({"type": "file_search"})
+    if assistant.update_to.code_interpreter:
+        assistant_tools.append({"type": "code_interpreter"})
+
+    assistant_data = scripts_schemas.UpdateAssistant(
+        name=assistant.update_to.name,
+        code_interpreter_file_ids=[],
+        file_search_file_ids=[],
+        instructions=compute_assistant_prompt(assistant.pp_class, assistant.update_to),
+        description=assistant.update_to.description,
+        model=compute_model_name(assistant.pp_class, assistant.update_to),
+        temperature=1.0,
+        tools=assistant_tools,
+        use_latex=assistant.update_to.use_latex,
+        hide_prompt=assistant.update_to.hide_prompt,
+        use_image_descriptions=assistant.update_to.experimental_vision,
+    )
+
+    # logger.info(f'About to update assistant "{assistant.update_to.name}" ({assistant.pingpong_id}) with data: {assistant_data.model_dump_json(indent=2)}')
+    pp_assistant = await server_requests.update_assistant(
+        session,
+        int(assistant.pp_class.pingpong_id),
+        assistant.pingpong_id,
+        assistant_data,
+        _PINGPONG_URL,
+    )
+    logger.info(
+        f'Assistant "{pp_assistant.name}" ({pp_assistant.id}) updated in class "{assistant.pp_class.class_name}" ({assistant.pp_class.pingpong_id}).'
+    )
+
+    return None
+
+
 async def add_assistant_non_study(
     session,
     assistant_template: scripts_schemas.AssistantTemplateNonStudy,
@@ -552,4 +591,26 @@ async def _process_remove_self_from_classes() -> None:
                 class_.save()
             except Exception as e:
                 logger.warning(f"Error processing class: {e}")
+                continue
+
+
+async def _process_airtable_class_update_requests() -> None:
+    requests_to_process = scripts_schemas.PingPongAssistant.all(
+        formula=AND(match({"Status": "Update"}), NE(Field("Update To Template"), ""))
+    )
+
+    async with aiohttp.ClientSession(cookies={"session": _PINGPONG_COOKIE}) as session:
+        for request in requests_to_process:
+            try:
+                if request.update_to:
+                    await update_assistant(session, request)
+                request.status = "Complete"
+                request.template = request.update_to
+                request.update_to = None
+                request.save()
+            except Exception as e:
+                logger.warning(f"Error processing request: {e}")
+                request.status = "Error"
+                request.status_notes = str(e)
+                request.save()
                 continue
