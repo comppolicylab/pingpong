@@ -424,6 +424,72 @@ def set_key_as_default(
     asyncio.run(_set_key_as_default())
 
 
+@db.command("clear_rate_limit_logs")
+@click.option(
+    "--before",
+    type=str,
+    default=None,
+    help="Clear logs before this date (YYYY-MM-DD[THH:MM:SS] or ISO format)",
+)
+@click.option(
+    "--after",
+    type=str,
+    default=None,
+    help="Clear logs after this date (YYYY-MM-DD[THH:MM:SS] or ISO format)",
+)
+def clear_rate_limit_logs(before: Optional[str], after: Optional[str]) -> None:
+    async def _clear_rate_limit_logs() -> None:
+        async with config.db.driver.async_session() as session:
+            before_dt = None
+            after_dt = None
+
+            if before:
+                try:
+                    before_dt = datetime.fromisoformat(before)
+                except ValueError:
+                    try:
+                        before_dt = datetime.strptime(before, "%Y-%m-%d")
+                        # Add end of day time if only date is provided
+                        before_dt = before_dt.replace(hour=23, minute=59, second=59)
+                    except ValueError:
+                        logger.error(f"Invalid date format for 'before': {before}")
+                        return
+
+            if after:
+                try:
+                    after_dt = datetime.fromisoformat(after)
+                except ValueError:
+                    try:
+                        after_dt = datetime.strptime(after, "%Y-%m-%d")
+                        # Add start of day time if only date is provided
+                        after_dt = after_dt.replace(hour=0, minute=0, second=0)
+                    except ValueError:
+                        logger.error(f"Invalid date format for 'after': {after}")
+                        return
+
+            date_range = ""
+            if before_dt and after_dt:
+                date_range = f"between {after_dt} and {before_dt}"
+            elif before_dt:
+                date_range = f"before {before_dt}"
+            elif after_dt:
+                date_range = f"after {after_dt}"
+            else:
+                date_range = "all"
+
+            logger.info(f"Clearing rate limit logs ({date_range})...")
+
+            await Class.clear_rate_limit_logs(
+                session,
+                after=after_dt,
+                before=before_dt,
+            )
+            await session.commit()
+            logger.info("Done!")
+
+    asyncio.run(_clear_rate_limit_logs())
+
+
 @db.command("migrate_external_providers")
 def migrate_external_providers() -> None:
     async def _migrate_external_providers() -> None:

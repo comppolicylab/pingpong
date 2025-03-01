@@ -2426,6 +2426,24 @@ class Class(Base):
         await session.execute(stmt)
 
     @classmethod
+    async def clear_rate_limit_logs(
+        cls,
+        session: AsyncSession,
+        after: DateTime | None = None,
+        before: DateTime | None = None,
+    ) -> None:
+        """Clear rate limit logs for classes."""
+        conditions: list[BinaryExpression[bool]] = []
+        conditions.append(Class.last_rate_limited_at.isnot(None))
+        if after:
+            conditions.append(Class.last_rate_limited_at > after)
+        if before:
+            conditions.append(Class.last_rate_limited_at < before)
+
+        stmt = update(Class).where(and_(*conditions)).values(last_rate_limited_at=None)
+        await session.execute(stmt)
+
+    @classmethod
     async def get_all_classes_to_summarize(
         cls, session: AsyncSession, before: datetime | None = None
     ) -> AsyncGenerator["Class", None]:
