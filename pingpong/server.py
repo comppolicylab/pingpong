@@ -21,7 +21,12 @@ from fastapi import (
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import PositiveInt
 
-from pingpong.ai_models import upgrade_assistants_model
+from pingpong.ai_models import (
+    upgrade_assistants_model,
+    KNOWN_MODELS,
+    ADMIN_ONLY_MODELS,
+    HIDDEN_MODELS,
+)
 from pingpong.artifacts import ArtifactStoreError
 from pingpong.bg_tasks import safe_task
 from pingpong.emails import (
@@ -1970,384 +1975,28 @@ async def list_class_models(
                 e, "OpenAI was unable to process your request."
             ),
         )
-    known_models: dict[str, schemas.AssistantModelDict] = {
-        # ----------------- Latest Models -----------------
-        #
-        # -----------------   o* Family   -----------------
-        "o1": {
-            "name": "o1",
-            "sort_order": 4,
-            "is_new": True,
-            "highlight": False,
-            "is_latest": True,
-            "supports_vision": False,
-            "supports_file_search": False,
-            "supports_code_interpreter": False,
-            "supports_temperature": False,
-            "supports_reasoning": True,
-            "description": "Reasoning model designed to solve hard problems across domains. Limited capabilities.",
-        },
-        "o3-mini": {
-            "name": "o3 mini",
-            "sort_order": 3,
-            "is_new": True,
-            "highlight": False,
-            "is_latest": True,
-            "supports_vision": False,
-            "supports_file_search": False,
-            "supports_code_interpreter": False,
-            "supports_temperature": False,
-            "supports_reasoning": True,
-            "description": "Faster reasoning model particularly good at coding, math, and science. Limited capabilities.",
-        },
-        #
-        # -----------------   gpt-4.5 Family   -----------------
-        #
-        "gpt-4.5-preview": {
-            "name": "GPT-4.5",
-            "sort_order": 2,
-            "is_new": True,
-            "highlight": False,
-            "is_latest": True,
-            "supports_vision": True,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "Excels at tasks that benefit from creative, open-ended thinking and conversation, such as writing, learning, or exploring new ideas.",
-        },
-        #
-        # -----------------   gpt-4o Family   -----------------
-        #
-        "gpt-4o": {
-            "name": "GPT-4o",
-            "sort_order": 0,
-            "is_new": False,
-            "highlight": True,
-            "is_latest": True,
-            "supports_vision": True,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "The latest GPT-4o model, suitable for complex, multi-step tasks.",
-        },
-        "gpt-4o-mini": {
-            "name": "GPT-4o mini",
-            "sort_order": 1,
-            "is_new": False,
-            "highlight": False,
-            "is_latest": True,
-            "supports_vision": True,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "The latest GPT-4o mini model, suitable for fast, lightweight tasks. More capable than GPT-3.5 Turbo.",
-        },
-        #
-        # -----------------   gpt-4 Family   -----------------
-        #
-        "gpt-4-turbo": {
-            "name": "GPT-4 Turbo",
-            "sort_order": 5,
-            "is_new": False,
-            "highlight": False,
-            "is_latest": True,
-            "supports_vision": True,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "The latest GPT-4 Turbo model.",
-        },
-        "gpt-4-turbo-preview": {
-            "name": "GPT-4 Turbo preview",
-            "sort_order": 6,
-            "is_new": False,
-            "highlight": False,
-            "is_latest": True,
-            "supports_vision": False,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "The latest GPT-4 Turbo preview model.",
-        },
-        #
-        # -----------------   gpt-3.5 Family   -----------------
-        #
-        "gpt-3.5-turbo": {
-            "name": "GPT-3.5 Turbo",
-            "sort_order": 7,
-            "is_new": False,
-            "highlight": False,
-            "is_latest": True,
-            "supports_vision": False,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "The latest GPT-3.5 Turbo model. Choose the more capable GPT-4o mini model instead.",
-        },
-        # gpt-3.5-turbo equivalent model in Azure
-        "gpt-35-turbo": {
-            "name": "GPT-3.5 Turbo",
-            "sort_order": 7,
-            "is_new": False,
-            "highlight": False,
-            "is_latest": True,
-            "supports_vision": False,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "The latest GPT-3.5 Turbo model. Choose the more capable GPT-4o mini model instead.",
-        },
-        #
-        # ----------------- Pinned Models -----------------
-        #
-        # -----------------   o* Family   -----------------
-        "o3-mini-2025-01-31": {
-            "name": "o3-mini-2025-01-31",
-            "sort_order": 9,
-            "is_new": True,
-            "highlight": False,
-            "is_latest": False,
-            "supports_vision": False,
-            "supports_file_search": False,
-            "supports_code_interpreter": False,
-            "supports_temperature": False,
-            "supports_reasoning": True,
-            "description": "o3 mini initial release version. Limited capabilities.",
-        },
-        "o1-2024-12-17": {
-            "name": "o1-2024-12-17",
-            "sort_order": 10,
-            "is_new": True,
-            "highlight": False,
-            "is_latest": False,
-            "supports_vision": False,
-            "supports_file_search": False,
-            "supports_code_interpreter": False,
-            "supports_temperature": False,
-            "supports_reasoning": True,
-            "description": "o1 initial release version. Limited capabilities.",
-        },
-        #
-        # -----------------   gpt-4.5 Family   -----------------
-        #
-        "gpt-4.5-preview-2025-02-27": {
-            "name": "gpt-4.5-preview-2025-02-27",
-            "sort_order": 8,
-            "is_new": True,
-            "highlight": False,
-            "is_latest": False,
-            "supports_vision": True,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "GPT-4.5 initial research preview release version.",
-        },
-        # -----------------   gpt-4o Family   -----------------
-        "gpt-4o-2024-11-20": {
-            "name": "gpt-4o-2024-11-20",
-            "sort_order": 11,
-            "is_latest": False,
-            "is_new": False,
-            "highlight": False,
-            "supports_vision": True,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "GPT-4o model snapshot with enhanced creative writing ability.",
-        },
-        "gpt-4o-2024-08-06": {
-            "name": "gpt-4o-2024-08-06",
-            "sort_order": 12,
-            "is_latest": False,
-            "is_new": False,
-            "highlight": False,
-            "supports_vision": True,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "GPT-4o model snapshot. GPT-4o (Latest) points to this version.",
-        },
-        "gpt-4o-2024-05-13": {
-            "name": "gpt-4o-2024-05-13",
-            "sort_order": 14,
-            "is_latest": False,
-            "is_new": False,
-            "highlight": False,
-            "supports_vision": True,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "GPT-4o initial release version, 2x faster than GPT-4 Turbo.",
-        },
-        "gpt-4o-mini-2024-07-18": {
-            "name": "gpt-4o-mini-2024-07-18",
-            "sort_order": 13,
-            "is_latest": False,
-            "is_new": False,
-            "highlight": False,
-            "supports_vision": True,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "GPT-4o mini initial release version.",
-        },
-        # -----------------   gpt-4 Family   -----------------
-        "gpt-4-turbo-2024-04-09": {
-            "name": "gpt-4-turbo-2024-04-09",
-            "sort_order": 15,
-            "is_latest": False,
-            "is_new": False,
-            "highlight": False,
-            "supports_vision": True,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "GPT-4 Turbo with Vision model.",
-        },
-        "gpt-4-0125-preview": {
-            "name": "gpt-4-0125-preview",
-            "sort_order": 16,
-            "is_latest": False,
-            "is_new": False,
-            "highlight": False,
-            "supports_vision": False,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": 'GPT-4 Turbo preview model with a fix for "laziness," where the model doesn\'t complete a task.',
-        },
-        # Azure model equivalent
-        "gpt-4-0125-Preview": {
-            "name": "gpt-4-0125-Preview",
-            "sort_order": 16,
-            "is_latest": False,
-            "is_new": False,
-            "highlight": False,
-            "supports_vision": False,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": 'GPT-4 Turbo preview model with a fix for "laziness," where the model doesn\'t complete a task.',
-        },
-        "gpt-4-1106-preview": {
-            "name": "gpt-4-1106-preview",
-            "sort_order": 17,
-            "is_latest": False,
-            "is_new": False,
-            "highlight": False,
-            "supports_vision": False,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "GPT-4 Turbo preview model with improved instruction following, reproducible outputs, and more.",
-        },
-        # Azure model equivalent
-        "gpt-4-1106-Preview": {
-            "name": "gpt-4-1106-Preview",
-            "sort_order": 17,
-            "is_latest": False,
-            "is_new": False,
-            "highlight": False,
-            "supports_vision": False,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "GPT-4 Turbo preview model with improved instruction following, reproducible outputs, and more.",
-        },
-        # -----------------   gpt-3.5 Family   -----------------
-        "gpt-3.5-turbo-0125": {
-            "name": "gpt-3.5-turbo-0125",
-            "sort_order": 18,
-            "is_latest": False,
-            "is_new": False,
-            "highlight": False,
-            "supports_vision": False,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "GPT-3.5 Turbo model with higher accuracy at responding in requested formats.",
-        },
-        # Azure model equivalent
-        "gpt-35-turbo-0125": {
-            "name": "gpt-35-turbo-0125",
-            "sort_order": 18,
-            "is_latest": False,
-            "is_new": False,
-            "highlight": False,
-            "supports_vision": False,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "GPT-3.5 Turbo model with higher accuracy at responding in requested formats.",
-        },
-        "gpt-3.5-turbo-1106": {
-            "name": "gpt-3.5-turbo-1106",
-            "sort_order": 19,
-            "is_latest": False,
-            "is_new": False,
-            "highlight": False,
-            "supports_vision": False,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "GPT-3.5 Turbo model with improved instruction following, reproducible outputs, and more.",
-        },
-        # Azure model equivalent
-        "gpt-35-turbo-1106": {
-            "name": "gpt-35-turbo-1106",
-            "sort_order": 19,
-            "is_latest": False,
-            "is_new": False,
-            "highlight": False,
-            "supports_vision": False,
-            "supports_file_search": True,
-            "supports_code_interpreter": True,
-            "supports_temperature": True,
-            "supports_reasoning": False,
-            "description": "GPT-3.5 Turbo model with improved instruction following, reproducible outputs, and more.",
-        },
-    }
+
     filtered = [
         {
             "id": m.id,
             "created": datetime.fromtimestamp(m.created or m.created_at or 0),
             "owner": m.owned_by or "",
-            "name": known_models[m.id]["name"],
-            "sort_order": known_models[m.id]["sort_order"],
-            "description": known_models[m.id]["description"],
-            "is_latest": known_models[m.id]["is_latest"],
-            "is_new": known_models[m.id]["is_new"],
-            "highlight": known_models[m.id]["highlight"],
-            "supports_vision": known_models[m.id]["supports_vision"],
-            "supports_file_search": known_models[m.id]["supports_file_search"],
-            "supports_code_interpreter": known_models[m.id][
+            "name": KNOWN_MODELS[m.id]["name"],
+            "sort_order": KNOWN_MODELS[m.id]["sort_order"],
+            "description": KNOWN_MODELS[m.id]["description"],
+            "is_latest": KNOWN_MODELS[m.id]["is_latest"],
+            "is_new": KNOWN_MODELS[m.id]["is_new"],
+            "highlight": KNOWN_MODELS[m.id]["highlight"],
+            "supports_vision": KNOWN_MODELS[m.id]["supports_vision"],
+            "supports_file_search": KNOWN_MODELS[m.id]["supports_file_search"],
+            "supports_code_interpreter": KNOWN_MODELS[m.id][
                 "supports_code_interpreter"
             ],
-            "supports_temperature": known_models[m.id]["supports_temperature"],
-            "supports_reasoning": known_models[m.id]["supports_reasoning"],
+            "supports_temperature": KNOWN_MODELS[m.id]["supports_temperature"],
+            "supports_reasoning": KNOWN_MODELS[m.id]["supports_reasoning"],
         }
         for m in all_models.data
-        if m.id in known_models.keys()
+        if m.id in KNOWN_MODELS.keys()
     ]
     if isinstance(openai_client, openai.AsyncAzureOpenAI) and any(
         m.id == "gpt-4-turbo-2024-04-09" for m in all_models.data
@@ -2392,11 +2041,6 @@ async def list_class_models(
             }
         )
 
-    ADMIN_ONLY_MODELS = [
-        "gpt-4.5-preview",
-        "gpt-4.5-preview-2025-02-27",
-    ]
-
     if not (
         await request.state.authz.check(
             [
@@ -2414,23 +2058,6 @@ async def list_class_models(
                 if model["id"] in ADMIN_ONLY_MODELS
                 else model.get("hide_in_model_selector")
             )
-
-    HIDDEN_MODELS = [
-        "gpt-4-turbo",
-        "gpt-4-turbo-preview",
-        "gpt-3.5-turbo",
-        "gpt-35-turbo",
-        "gpt-4o-2024-05-13",
-        "gpt-4-turbo-2024-04-09",
-        "gpt-4-0125-preview",
-        "gpt-4-0125-Preview",
-        "gpt-4-1106-preview",
-        "gpt-4-1106-Preview",
-        "gpt-3.5-turbo-0125",
-        "gpt-35-turbo-0125",
-        "gpt-3.5-turbo-1106",
-        "gpt-35-turbo-1106",
-    ]
 
     for model in filtered:
         model["hide_in_model_selector"] = (
@@ -3643,6 +3270,24 @@ async def create_assistant(
     class_id_int = int(class_id)
     creator_id = request.state.session.user.id
 
+    # Check that the model is available
+    if req.model in HIDDEN_MODELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model {req.model} is not available for use.",
+        )
+    # Check that the model is not admin-only
+    if not await request.state.authz.test(
+        f"user:{creator_id}",
+        "admin",
+        f"class:{class_id}",
+    ):
+        if req.model in ADMIN_ONLY_MODELS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model {req.model} is not available for use.",
+            )
+
     if req.published:
         if not await request.state.authz.test(
             f"user:{creator_id}", "can_publish_assistants", f"class:{class_id}"
@@ -3801,6 +3446,36 @@ async def update_assistant(
     tool_resources: ToolResources = {}
     update_tool_resources = False
     update_instructions = False
+
+    # Check that the model is available
+    if "model" in req.model_fields_set and req.model is not None:
+        _model = None
+        _model = (
+            get_azure_model_deployment_name_equivalent(req.model)
+            if isinstance(openai_client, openai.AsyncAzureOpenAI)
+            else req.model
+        )
+
+        if _model != asst.model:
+            if req.model in HIDDEN_MODELS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Model {req.model} is not available for use.",
+                )
+            # Check that the model is not admin-only
+            if not await request.state.authz.test(
+                f"user:{request.state.session.user.id}",
+                "admin",
+                f"class:{class_id}",
+            ):
+                if req.model in ADMIN_ONLY_MODELS:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Model {req.model} is not available for use.",
+                    )
+
+        openai_update["model"] = _model
+        asst.model = req.model
 
     # Track whether we have an empty vector store to delete
     vector_store_id_to_delete = None
