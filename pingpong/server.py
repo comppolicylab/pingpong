@@ -2410,8 +2410,34 @@ async def list_class_models(
     )[0]:
         for model in filtered:
             model["hide_in_model_selector"] = (
-                True if model["id"] in ADMIN_ONLY_MODELS else None
+                True
+                if model["id"] in ADMIN_ONLY_MODELS
+                else model.get("hide_in_model_selector")
             )
+
+    HIDDEN_MODELS = [
+        "gpt-4-turbo",
+        "gpt-4-turbo-preview",
+        "gpt-3.5-turbo",
+        "gpt-35-turbo",
+        "gpt-4o-2024-05-13",
+        "gpt-4-turbo-2024-04-09",
+        "gpt-4-0125-preview",
+        "gpt-4-0125-Preview",
+        "gpt-4-1106-preview",
+        "gpt-4-1106-Preview",
+        "gpt-3.5-turbo-0125",
+        "gpt-35-turbo-0125",
+        "gpt-3.5-turbo-1106",
+        "gpt-35-turbo-1106",
+    ]
+
+    for model in filtered:
+        model["hide_in_model_selector"] = (
+            True
+            if model["id"] in HIDDEN_MODELS
+            else model.get("hide_in_model_selector")
+        )
 
     AZURE_UNAVAILABLE_MODELS = [
         "gpt-4o-2024-11-20",
