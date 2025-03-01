@@ -1976,7 +1976,7 @@ async def list_class_models(
         # -----------------   o* Family   -----------------
         "o1": {
             "name": "o1",
-            "sort_order": 3,
+            "sort_order": 4,
             "is_new": True,
             "highlight": False,
             "is_latest": True,
@@ -1989,7 +1989,7 @@ async def list_class_models(
         },
         "o3-mini": {
             "name": "o3 mini",
-            "sort_order": 2,
+            "sort_order": 3,
             "is_new": True,
             "highlight": False,
             "is_latest": True,
@@ -1999,6 +1999,22 @@ async def list_class_models(
             "supports_temperature": False,
             "supports_reasoning": True,
             "description": "Faster reasoning model particularly good at coding, math, and science. Limited capabilities.",
+        },
+        #
+        # -----------------   gpt-4.5 Family   -----------------
+        #
+        "gpt-4.5-preview": {
+            "name": "GPT-4.5",
+            "sort_order": 2,
+            "is_new": True,
+            "highlight": False,
+            "is_latest": True,
+            "supports_vision": True,
+            "supports_file_search": True,
+            "supports_code_interpreter": True,
+            "supports_temperature": True,
+            "supports_reasoning": False,
+            "description": "Excels at tasks that benefit from creative, open-ended thinking and conversation, such as writing, learning, or exploring new ideas.",
         },
         #
         # -----------------   gpt-4o Family   -----------------
@@ -2034,7 +2050,7 @@ async def list_class_models(
         #
         "gpt-4-turbo": {
             "name": "GPT-4 Turbo",
-            "sort_order": 4,
+            "sort_order": 5,
             "is_new": False,
             "highlight": False,
             "is_latest": True,
@@ -2047,7 +2063,7 @@ async def list_class_models(
         },
         "gpt-4-turbo-preview": {
             "name": "GPT-4 Turbo preview",
-            "sort_order": 5,
+            "sort_order": 6,
             "is_new": False,
             "highlight": False,
             "is_latest": True,
@@ -2063,7 +2079,7 @@ async def list_class_models(
         #
         "gpt-3.5-turbo": {
             "name": "GPT-3.5 Turbo",
-            "sort_order": 6,
+            "sort_order": 7,
             "is_new": False,
             "highlight": False,
             "is_latest": True,
@@ -2077,7 +2093,7 @@ async def list_class_models(
         # gpt-3.5-turbo equivalent model in Azure
         "gpt-35-turbo": {
             "name": "GPT-3.5 Turbo",
-            "sort_order": 6,
+            "sort_order": 7,
             "is_new": False,
             "highlight": False,
             "is_latest": True,
@@ -2094,7 +2110,7 @@ async def list_class_models(
         # -----------------   o* Family   -----------------
         "o3-mini-2025-01-31": {
             "name": "o3-mini-2025-01-31",
-            "sort_order": 8,
+            "sort_order": 9,
             "is_new": True,
             "highlight": False,
             "is_latest": False,
@@ -2107,7 +2123,7 @@ async def list_class_models(
         },
         "o1-2024-12-17": {
             "name": "o1-2024-12-17",
-            "sort_order": 9,
+            "sort_order": 10,
             "is_new": True,
             "highlight": False,
             "is_latest": False,
@@ -2118,23 +2134,39 @@ async def list_class_models(
             "supports_reasoning": True,
             "description": "o1 initial release version. Limited capabilities.",
         },
+        #
+        # -----------------   gpt-4.5 Family   -----------------
+        #
+        "gpt-4.5-preview-2025-02-27": {
+            "name": "gpt-4.5-preview-2025-02-27",
+            "sort_order": 8,
+            "is_new": True,
+            "highlight": False,
+            "is_latest": False,
+            "supports_vision": True,
+            "supports_file_search": True,
+            "supports_code_interpreter": True,
+            "supports_temperature": True,
+            "supports_reasoning": False,
+            "description": "GPT-4.5 initial research preview release version.",
+        },
         # -----------------   gpt-4o Family   -----------------
         "gpt-4o-2024-11-20": {
             "name": "gpt-4o-2024-11-20",
             "sort_order": 11,
             "is_latest": False,
-            "is_new": True,
+            "is_new": False,
             "highlight": False,
             "supports_vision": True,
             "supports_file_search": True,
             "supports_code_interpreter": True,
             "supports_temperature": True,
             "supports_reasoning": False,
-            "description": "New GPT-4o model snapshot with enhanced creative writing ability.",
+            "description": "GPT-4o model snapshot with enhanced creative writing ability.",
         },
         "gpt-4o-2024-08-06": {
             "name": "gpt-4o-2024-08-06",
-            "sort_order": 13,
+            "sort_order": 12,
             "is_latest": False,
             "is_new": False,
             "highlight": False,
@@ -2160,7 +2192,7 @@ async def list_class_models(
         },
         "gpt-4o-mini-2024-07-18": {
             "name": "gpt-4o-mini-2024-07-18",
-            "sort_order": 10,
+            "sort_order": 13,
             "is_latest": False,
             "is_new": False,
             "highlight": False,
@@ -2360,6 +2392,27 @@ async def list_class_models(
             }
         )
 
+    ADMIN_ONLY_MODELS = [
+        "gpt-4.5-preview",
+        "gpt-4.5-preview-2025-02-27",
+    ]
+
+    if not (
+        await request.state.authz.check(
+            [
+                (
+                    f"user:{request.state.session.user.id}",
+                    "admin",
+                    f"class:{class_id}",
+                ),
+            ]
+        )
+    )[0]:
+        for model in filtered:
+            model["hide_in_model_selector"] = (
+                True if model["id"] in ADMIN_ONLY_MODELS else None
+            )
+
     AZURE_UNAVAILABLE_MODELS = [
         "gpt-4o-2024-11-20",
         "o1-2024-12-17",
@@ -2367,6 +2420,8 @@ async def list_class_models(
         "o3-mini-2025-01-31",
         "o1",
         "o1-2024-12-17",
+        "gpt-4.5-preview",
+        "gpt-4.5-preview-2025-02-27",
     ]
 
     if isinstance(openai_client, openai.AsyncAzureOpenAI):

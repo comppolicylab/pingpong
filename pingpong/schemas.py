@@ -958,6 +958,7 @@ class AssistantModel(BaseModel):
     supports_code_interpreter: bool
     supports_temperature: bool
     supports_reasoning: bool
+    hide_in_model_selector: bool | None = None
 
 
 class AssistantModelDict(TypedDict):

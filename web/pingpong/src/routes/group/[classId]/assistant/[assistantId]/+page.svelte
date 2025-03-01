@@ -101,7 +101,9 @@
     acc[model.id] = model.name + (model.is_latest ? ' (Latest)' : ' (Pinned Version)');
     return acc;
   }, {});
-  $: latestModelOptions = (data.models.filter((model) => model.is_latest) || []).map((model) => ({
+  $: latestModelOptions = (
+    data.models.filter((model) => model.is_latest && !(model.hide_in_model_selector ?? false)) || []
+  ).map((model) => ({
     value: model.id,
     name: model.name,
     description: model.description,
@@ -116,18 +118,19 @@
     selectedModel = assistant?.model || latestModelOptions[0].value;
   }
   $: selectedModelName = modelNameDict[selectedModel];
-  $: versionedModelOptions = (data.models.filter((model) => !model.is_latest) || []).map(
-    (model) => ({
-      value: model.id,
-      name: model.name,
-      description: model.description,
-      supports_vision:
-        model.supports_vision &&
-        (model.vision_support_override === undefined || model.vision_support_override),
-      is_new: model.is_new,
-      highlight: model.highlight
-    })
-  );
+  $: versionedModelOptions = (
+    data.models.filter((model) => !model.is_latest && !(model.hide_in_model_selector ?? false)) ||
+    []
+  ).map((model) => ({
+    value: model.id,
+    name: model.name,
+    description: model.description,
+    supports_vision:
+      model.supports_vision &&
+      (model.vision_support_override === undefined || model.vision_support_override),
+    is_new: model.is_new,
+    highlight: model.highlight
+  }));
   $: supportVisionModels = (data.models.filter((model) => model.supports_vision) || []).map(
     (model) => model.id
   );

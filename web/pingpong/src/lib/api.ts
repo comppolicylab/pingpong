@@ -981,6 +981,7 @@ export type AssistantModel = {
   supports_code_interpreter: boolean;
   supports_temperature: boolean;
   supports_reasoning: boolean;
+  hide_in_model_selector?: boolean;
 };
 
 export type AssistantModelOptions = {
