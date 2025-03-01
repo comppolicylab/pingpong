@@ -126,7 +126,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_code_interpreter": True,
         "supports_temperature": True,
         "supports_reasoning": False,
-        "description": "The latest GPT-4o mini model, suitable for fast, lightweight tasks. More capable than GPT-3.5 Turbo.",
+        "description": "The latest GPT-4o mini model, suitable for fast, lightweight tasks.",
     },
     #
     # -----------------   gpt-4 Family   -----------------
@@ -271,7 +271,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_code_interpreter": True,
         "supports_temperature": True,
         "supports_reasoning": False,
-        "description": "GPT-4o initial release version, 2x faster than GPT-4 Turbo.",
+        "description": "GPT-4o initial release version.",
     },
     "gpt-4o-mini-2024-07-18": {
         "name": "gpt-4o-mini-2024-07-18",
