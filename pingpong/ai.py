@@ -466,7 +466,7 @@ async def run_thread(
     except openai.APIError as openai_error:
         if openai_error.type == "server_error":
             try:
-                logger.warning(f"Server error in thread run: {openai_error}")
+                logger.exception(f"Server error in thread run: {openai_error}")
                 yield (
                     orjson.dumps(
                         {
