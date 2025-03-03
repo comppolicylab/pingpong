@@ -321,7 +321,9 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
         self.enqueue(
             {
                 "type": "tool_call_created",
-                "tool_call": tool_call.model_dump(),
+                "tool_call": tool_call
+                if isinstance(tool_call, Dict)
+                else tool_call.model_dump(),
             }
         )
 
@@ -464,7 +466,7 @@ async def run_thread(
     except openai.APIError as openai_error:
         if openai_error.type == "server_error":
             try:
-                logger.warning(f"Server error in thread run: {openai_error}")
+                logger.exception(f"Server error in thread run: {openai_error}")
                 yield (
                     orjson.dumps(
                         {
@@ -498,7 +500,7 @@ async def run_thread(
                 pass
     except (ValueError, Exception) as e:
         try:
-            logger.warning(f"Error adding new thread message: {e}")
+            logger.exception(f"Error adding new thread message: {e}")
             yield orjson.dumps({"type": "presend_error", "detail": str(e)}) + b"\n"
         except Exception as e_:
             logger.exception(f"Error writing to stream: {e_}")
