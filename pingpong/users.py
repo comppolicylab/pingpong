@@ -411,13 +411,25 @@ class AddNewUsers(ABC):
             invite_roles = []
             for role in ["admin", "teacher", "student"]:
                 if getattr(ucr.roles, role):
-                    grants.append((f"user:{user.id}", role, f"class:{self.class_id}"))
-                    if not self.new_ucr.silent:
-                        invite_roles.append(self.invite_config.formatted_roles[role])
+                    new_role = (f"user:{user.id}", role, f"class:{self.class_id}")
+                    if new_role in grants:
+                        logger.warning(
+                            f"Duplicate tuple found in grant list: {ucr.email}, {ucr.sso_id}."
+                        )
+                    else:
+                        grants.append(new_role)
+                        if not self.new_ucr.silent:
+                            invite_roles.append(
+                                self.invite_config.formatted_roles[role]
+                            )
                 else:
-                    self.revokes.append(
-                        (f"user:{user.id}", role, f"class:{self.class_id}")
-                    )
+                    new_role = (f"user:{user.id}", role, f"class:{self.class_id}")
+                    if new_role in self.revokes:
+                        logger.warning(
+                            f"Duplicate tuple found in revoke list: {ucr.email}, {ucr.sso_id}."
+                        )
+                    else:
+                        self.revokes.append(new_role)
 
             if enrollment:
                 await self._update_user_enrollment(enrollment, ucr.roles, ucr.sso_id)
@@ -437,13 +449,6 @@ class AddNewUsers(ABC):
         if self.new_ucr.lms_tenant:
             await self._remove_deleted_users()
             await self._merge_accounts()
-
-        grants_dupl = [role for role in grants if grants.count(role) > 1]
-        if grants_dupl:
-            logger.warning("Duplicate tuples found in grant list", grants_dupl)
-        revokes_dupl = [role for role in self.revokes if self.revokes.count(role) > 1]
-        if revokes_dupl:
-            logger.warning("Duplicate tuples found in revoke list", revokes_dupl)
 
         await self.client.write_safe(
             grant=list(set(grants)), revoke=list(set(self.revokes))
