@@ -410,8 +410,8 @@ class AddNewUsers(ABC):
 
             invite_roles = []
             for role in ["admin", "teacher", "student"]:
+                new_role = (f"user:{user.id}", role, f"class:{self.class_id}")
                 if getattr(ucr.roles, role):
-                    new_role = (f"user:{user.id}", role, f"class:{self.class_id}")
                     if new_role in grants:
                         logger.warning(
                             f"Duplicate tuple found in grant list: {ucr.email}, {ucr.sso_id}."
@@ -423,7 +423,6 @@ class AddNewUsers(ABC):
                                 self.invite_config.formatted_roles[role]
                             )
                 else:
-                    new_role = (f"user:{user.id}", role, f"class:{self.class_id}")
                     if new_role in self.revokes:
                         logger.warning(
                             f"Duplicate tuple found in revoke list: {ucr.email}, {ucr.sso_id}."
