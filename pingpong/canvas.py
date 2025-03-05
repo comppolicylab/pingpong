@@ -657,11 +657,18 @@ class CanvasCourseClient(ABC):
         #                  ‘final_score’, ‘current_grade’ and ‘final_grade’ values.
         params = {"include[]": ["enrollments"]}
 
-        return [
+        roles = [
             user_role
             async for result in self._request_all_pages(request_url, params=params)
             for user_role in self._process_users(result)
         ]
+
+        duplicates = [role.email for role in roles if roles.count(role) > 1]
+        if duplicates:
+            logging.warning(
+                f"Duplicate user records found in the Canvas response: {duplicates}"
+            )
+        return roles
 
     @abstractmethod
     async def _update_user_roles(self) -> None:

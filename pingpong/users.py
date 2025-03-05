@@ -438,7 +438,16 @@ class AddNewUsers(ABC):
             await self._remove_deleted_users()
             await self._merge_accounts()
 
-        await self.client.write_safe(grant=grants, revoke=self.revokes)
+        grants_dupl = [role for role in grants if grants.count(role) > 1]
+        if grants_dupl:
+            logger.warning("Duplicate tuples found in grant list", grants_dupl)
+        revokes_dupl = [role for role in self.revokes if self.revokes.count(role) > 1]
+        if revokes_dupl:
+            logger.warning("Duplicate tuples found in revoke list", revokes_dupl)
+
+        await self.client.write_safe(
+            grant=list(set(grants)), revoke=list(set(self.revokes))
+        )
         return schemas.CreateUserResults(results=results)
 
 
