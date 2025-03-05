@@ -668,19 +668,26 @@ class CanvasCourseClient(ABC):
         #                  ‘final_score’, ‘current_grade’ and ‘final_grade’ values.
         params = {"include[]": ["enrollments"]}
 
-        roles = [
-            user_role
-            async for result in self._request_all_pages(
-                request_url, params=params, check_authorized_user=False
-            )
-            for user_role in self._process_users(result)
-        ]
+        roles = []
+        seen_emails: dict[str, dict] = {}
 
-        duplicates = [role.email for role in roles if roles.count(role) > 1]
-        if duplicates:
-            logging.warning(
-                f"Duplicate user records found in the Canvas response: {duplicates}"
-            )
+        async for result in self._request_all_pages(
+            request_url, params=params, check_authorized_user=False
+        ):
+            for user_role in self._process_users(result):
+                if user_role.email in seen_emails.keys():
+                    logger.warning("CANVAS SYNC ROSTER DUPLICATE FOUND:")
+                    logger.warning(
+                        f"Original User Record: {seen_emails[user_role.email]}"
+                    )
+                    logger.warning(
+                        f"Duplicate Record: {[row for row in result if row.get('email') == user_role.email][0]}"
+                    )
+                else:
+                    seen_emails[user_role.email] = [
+                        row for row in result if row.get("email") == user_role.email
+                    ][0]
+                    roles.append(user_role)
         return roles
 
     @abstractmethod
