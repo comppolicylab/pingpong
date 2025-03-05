@@ -438,7 +438,9 @@ class AddNewUsers(ABC):
             await self._remove_deleted_users()
             await self._merge_accounts()
 
-        await self.client.write_safe(grant=grants, revoke=self.revokes)
+        await self.client.write_safe(
+            grant=list(set(grants)), revoke=list(set(self.revokes))
+        )
         return schemas.CreateUserResults(results=results)
 
 
