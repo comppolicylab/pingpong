@@ -170,7 +170,7 @@ def list_permissions(user_id: int) -> None:
         await config.authz.driver.init()
         async with config.authz.driver.get_client() as c:
             perms = await list_all_permissions(c, user_id)
-            logging.info(f"Permissions for user {user_id}: {perms}")
+            logger.info(f"Permissions for user {user_id}: {perms}")
 
     asyncio.run(_list_permissions())
 
@@ -185,7 +185,7 @@ def users_merge_permissions() -> None:
             async with config.authz.driver.get_client() as c:
                 logger.info("Merging permissions for all users...")
                 async for row in get_merged_user_tuples(session):
-                    logging.info(
+                    logger.info(
                         f"Merging permissions for {row.merged_user_id} into {row.current_user_id}"
                     )
                     await merge_permissions(c, row.current_user_id, row.merged_user_id)
