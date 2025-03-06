@@ -324,6 +324,7 @@ class CanvasCourseClient(ABC):
         """
 
         next_page = self.config.url(path)
+        page_num = 1
         while next_page:
             if method == "GET":
                 response = await self._make_authed_request_get(
@@ -334,9 +335,14 @@ class CanvasCourseClient(ABC):
                     next_page, body, params, check_authorized_user=check_authorized_user
                 )
 
+            logger.info(
+                f"Received PAGE {page_num} response from Canvas: {response.response}"
+            )
             yield response.response
 
             next_page = response.next_page
+            logger.info(f"Next page: {next_page}")
+            page_num += 1
 
     async def _get_initial_access_token(self, code: str) -> CanvasAccessToken:
         params = {
