@@ -630,10 +630,19 @@ class CanvasCourseClient(ABC):
 
             # Calculate user permissions
             is_teacher = False
+            latest_activity = None
             for enrollment in user["enrollments"]:
-                if enrollment["type"] in ["TeacherEnrollment", "TaEnrollment"]:
+                if enrollment.get("type") in ["TeacherEnrollment", "TaEnrollment"]:
                     is_teacher = True
-                    break
+
+                last_activity_at = enrollment.get("last_activity_at")
+                if last_activity_at:
+                    activity_date = datetime.fromisoformat(
+                        last_activity_at.replace("Z", "+00:00")
+                    )
+
+                    if not latest_activity or activity_date > latest_activity:
+                        latest_activity = activity_date
 
             # Create UserClassRole object for the user
             yield CreateUserClassRole(
@@ -644,6 +653,7 @@ class CanvasCourseClient(ABC):
                     teacher=is_teacher,
                     student=not is_teacher,
                 ),
+                sso_last_activity=latest_activity,
             )
 
     async def _get_course_users(self, course_id: str) -> list[CreateUserClassRole]:
@@ -668,13 +678,28 @@ class CanvasCourseClient(ABC):
         #                  ‘final_score’, ‘current_grade’ and ‘final_grade’ values.
         params = {"include[]": ["enrollments"]}
 
-        return [
+        users = [
             user_role
             async for result in self._request_all_pages(
                 request_url, params=params, check_authorized_user=False
             )
             for user_role in self._process_users(result)
         ]
+
+        unique_users: dict[str, CreateUserClassRole] = {}
+
+        for user in users:
+            if user.email not in unique_users:
+                unique_users[user.email] = user
+            else:
+                if user.sso_last_activity is None:
+                    continue
+
+                current_last = unique_users[user.email].sso_last_activity
+                if current_last is None or user.sso_last_activity > current_last:
+                    unique_users[user.email] = user
+
+        return list(unique_users.values())
 
     @abstractmethod
     async def _update_user_roles(self) -> None:
