@@ -26,7 +26,7 @@ async def transfer_api_keys(
     result = await session.execute(stmt)
     for row in result:
         class_ = row[0]
-        logging.info(f"Transferring API key for class: {class_.id}")
+        logger.info(f"Transferring API key for class: {class_.id}")
         api_key_obj = await models.APIKey.create_or_update(
             session=session,
             api_key=class_.api_key,
