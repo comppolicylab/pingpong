@@ -653,7 +653,7 @@ class CanvasCourseClient(ABC):
                     teacher=is_teacher,
                     student=not is_teacher,
                 ),
-                sso_last_activity=latest_activity,
+                last_active=latest_activity,
             )
 
     async def _get_course_users(self, course_id: str) -> list[CreateUserClassRole]:
@@ -692,11 +692,11 @@ class CanvasCourseClient(ABC):
             if user.email not in unique_users:
                 unique_users[user.email] = user
             else:
-                if user.sso_last_activity is None:
+                if user.last_active is None:
                     continue
 
-                current_last = unique_users[user.email].sso_last_activity
-                if current_last is None or user.sso_last_activity > current_last:
+                current_last = unique_users[user.email].last_active
+                if current_last is None or user.last_active > current_last:
                     unique_users[user.email] = user
 
         return list(unique_users.values())

@@ -567,7 +567,7 @@ class CreateUserClassRole(BaseModel):
     email: str = Field(..., min_length=3, max_length=100)
     display_name: str | None = None
     sso_id: str | None = None
-    sso_last_activity: datetime | None = None
+    last_active: datetime | None = None
     roles: ClassUserRoles
 
 
