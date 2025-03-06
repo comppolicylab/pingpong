@@ -134,6 +134,12 @@ async def generate_name(
         return response.choices[0].message.parsed
     except openai.RateLimitError as e:
         raise e
+    except openai.BadRequestError:
+        # We are typically seeing this error when the Azure content filter
+        # is triggered. We should print the message that triggered the error
+        # and return None.
+        logger.exception(f"Error generating thread name. Message: {transcript}")
+        return None
     except openai.APIError:
         logger.exception("Error generating thread name.")
         return None
