@@ -460,7 +460,7 @@
             {:else if content.type === 'code'}
               <div class="leading-6 w-full">
                 <Accordion flush>
-                  <AccordionItem open>
+                  <AccordionItem>
                     <span slot="header"
                       ><div class="flex-row flex items-center space-x-2">
                         <div><CodeOutline size="lg" /></div>
