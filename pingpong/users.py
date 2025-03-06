@@ -412,23 +412,11 @@ class AddNewUsers(ABC):
             for role in ["admin", "teacher", "student"]:
                 new_role = (f"user:{user.id}", role, f"class:{self.class_id}")
                 if getattr(ucr.roles, role):
-                    if new_role in grants:
-                        logger.warning(
-                            f"Duplicate tuple found in grant list: {ucr.email}, {ucr.sso_id}."
-                        )
-                    else:
-                        grants.append(new_role)
-                        if not self.new_ucr.silent:
-                            invite_roles.append(
-                                self.invite_config.formatted_roles[role]
-                            )
+                    grants.append(new_role)
+                    if not self.new_ucr.silent:
+                        invite_roles.append(self.invite_config.formatted_roles[role])
                 else:
-                    if new_role in self.revokes:
-                        logger.warning(
-                            f"Duplicate tuple found in revoke list: {ucr.email}, {ucr.sso_id}."
-                        )
-                    else:
-                        self.revokes.append(new_role)
+                    self.revokes.append(new_role)
 
             if enrollment:
                 await self._update_user_enrollment(enrollment, ucr.roles, ucr.sso_id)

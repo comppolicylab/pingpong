@@ -324,7 +324,6 @@ class CanvasCourseClient(ABC):
         """
 
         next_page = self.config.url(path)
-        page_num = 1
         while next_page:
             if method == "GET":
                 response = await self._make_authed_request_get(
@@ -335,14 +334,9 @@ class CanvasCourseClient(ABC):
                     next_page, body, params, check_authorized_user=check_authorized_user
                 )
 
-            logger.info(
-                f"Received PAGE {page_num} response from Canvas: {response.response}"
-            )
             yield response.response
 
             next_page = response.next_page
-            logger.info(f"Next page: {next_page}")
-            page_num += 1
 
     async def _get_initial_access_token(self, code: str) -> CanvasAccessToken:
         params = {
@@ -674,27 +668,13 @@ class CanvasCourseClient(ABC):
         #                  ‘final_score’, ‘current_grade’ and ‘final_grade’ values.
         params = {"include[]": ["enrollments"]}
 
-        roles = []
-        seen_emails: dict[str, dict] = {}
-
-        async for result in self._request_all_pages(
-            request_url, params=params, check_authorized_user=False
-        ):
-            for user_role in self._process_users(result):
-                if user_role.email in seen_emails.keys():
-                    logger.warning("CANVAS SYNC ROSTER DUPLICATE FOUND:")
-                    logger.warning(
-                        f"Original User Record: {seen_emails[user_role.email]}"
-                    )
-                    logger.warning(
-                        f"Duplicate Record: {[row for row in result if row.get('email') == user_role.email][0]}"
-                    )
-                else:
-                    seen_emails[user_role.email] = [
-                        row for row in result if row.get("email") == user_role.email
-                    ][0]
-                    roles.append(user_role)
-        return roles
+        return [
+            user_role
+            async for result in self._request_all_pages(
+                request_url, params=params, check_authorized_user=False
+            )
+            for user_role in self._process_users(result)
+        ]
 
     @abstractmethod
     async def _update_user_roles(self) -> None:
