@@ -2722,7 +2722,7 @@ export const toggleAgreementPolicy = async (
 
 export const createAudioWebsocket = (classId: number, threadId: number): WebSocket => {
   if (!browser) {
-      throw new Error('WebSocket can only be created in a browser environment.');
+    throw new Error('WebSocket can only be created in a browser environment.');
   }
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const host = window.location.host;

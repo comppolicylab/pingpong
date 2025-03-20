@@ -502,10 +502,7 @@
         style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
       />
       <div class="flex flex-row gap-1">
-        <Audio
-          classId={classId}
-          threadId={threadId}
-          />
+        <Audio {classId} {threadId} />
         {#if upload && purpose}
           <FileUpload
             {maxSize}

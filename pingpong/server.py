@@ -18,7 +18,6 @@ from fastapi import (
     Response,
     UploadFile,
     WebSocket,
-    WebSocketDisconnect,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import PositiveInt
@@ -2091,6 +2090,15 @@ async def list_class_models(
         "models": filtered,
     }
 
+@v1.websocket(
+    "/class/{class_id}/thread/{thread_id}/audio",
+)
+async def audio_stream(
+    websocket: WebSocket,
+    class_id: str,
+    thread_id: str,
+):
+    await realtime_websocket(websocket, class_id, thread_id)
 
 @v1.get(
     "/class/{class_id}/thread/{thread_id}",
@@ -4472,28 +4480,3 @@ app.mount("/api/v1", v1)
 async def health():
     """Health check."""
     return {"status": "ok"}
-
-
-@v1.websocket(
-    "/class/{class_id}/thread/{thread_id}/audio",
-)
-async def audio_stream(
-    websocket: WebSocket,
-):
-    await realtime_websocket(websocket)
-    await websocket.accept()
-    try:
-        while True:
-            message = await websocket.receive()
-            websocket._raise_on_disconnect(message)
-            if "text" in message:
-                try:
-                    data = json.loads(message["text"])
-                    print("Received event:", data)
-                except json.JSONDecodeError as e:
-                    print("Error decoding JSON:", e)
-            elif "bytes" in message:
-                audio_chunk = message["bytes"]
-                print(f"Received audio chunk of {len(audio_chunk)} bytes")
-    except WebSocketDisconnect:
-        print("Client disconnected.")
