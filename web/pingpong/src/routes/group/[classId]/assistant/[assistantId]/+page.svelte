@@ -12,7 +12,9 @@
     Badge,
     Accordion,
     AccordionItem,
-    Range
+    Range,
+    ButtonGroup,
+    RadioButton
   } from 'flowbite-svelte';
   import type { Tool, ServerFile, FileUploadInfo } from '$lib/api';
   import { beforeNavigate, goto } from '$app/navigation';
@@ -28,7 +30,11 @@
     CogOutline,
     LockSolid,
     BanOutline,
-    FileImageOutline
+    FileImageOutline,
+    MessageDotsSolid,
+    MessageDotsOutline,
+    MicrophoneOutline,
+    MicrophoneSolid
   } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
   import { writable, type Writable } from 'svelte/store';
@@ -45,10 +51,11 @@
   let checkForChanges = true;
   let assistantForm: HTMLFormElement;
   let deleteModal = false;
-
+  let interactionMode: 'chat' | 'live_audio' = 'chat';
   $: assistant = data.assistant;
   $: preventEdits = !!assistant?.locked;
   $: canPublish = data.grants.canPublishAssistants;
+  $: interactionMode = assistant?.interaction_mode || 'chat';
 
   let selectedFileSearchFiles = writable(
     data.selectedFileSearchFiles.slice().map((f) => f.file_id)
@@ -634,6 +641,16 @@
     <div class="mb-4">
       <Label class="pb-1" for="name">Name</Label>
       <Input id="name" name="name" value={assistant?.name} disabled={preventEdits} />
+    </div>
+    <div class="mb-4">
+      <Label for="interactionMode">Interaction Mode</Label>
+      <Helper class="pb-1"
+        >Choose which mode users should primarily use to interact with this assistant.</Helper
+      >
+      <ButtonGroup>
+        <RadioButton value="text" bind:group={radioGroup}><div class="flex flex-row gap-2 items-center">{#if radioGroup === "text"}<MessageDotsSolid class="w-6 h-6"/>{:else}<MessageDotsOutline class="w-6 h-6"/>{/if}Text Mode</div></RadioButton>
+        <RadioButton value="audio" bind:group={radioGroup}><div class="flex flex-row gap-2 items-center">{#if radioGroup === "audio"}<MicrophoneSolid class="w-5 h-5"/>{:else}<MicrophoneOutline class="w-5 h-5"/>{/if}Audio Mode</div></RadioButton>
+      </ButtonGroup>
     </div>
     <div class="mb-4">
       <Label for="model">Model</Label>

@@ -968,6 +968,7 @@ class AssistantModelDict(TypedDict):
     is_latest: bool
     is_new: bool
     highlight: bool
+    model_type: Literal["chat", "live_audio"]
     supports_vision: bool
     supports_file_search: bool
     supports_code_interpreter: bool

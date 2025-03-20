@@ -21,6 +21,10 @@
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const microphones = devices.filter(device => device.kind === 'audioinput');
+
+      console.log(microphones);
       mediaRecorder = new MediaRecorder(stream);
       socket = createAudioWebsocket(classId, threadId);
       socket.binaryType = 'arraybuffer';

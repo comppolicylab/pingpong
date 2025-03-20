@@ -1980,6 +1980,7 @@ async def list_class_models(
             "owner": m.owned_by or "",
             "name": KNOWN_MODELS[m.id]["name"],
             "sort_order": KNOWN_MODELS[m.id]["sort_order"],
+            "model_type": KNOWN_MODELS[m.id]["model_type"],
             "description": KNOWN_MODELS[m.id]["description"],
             "is_latest": KNOWN_MODELS[m.id]["is_latest"],
             "is_new": KNOWN_MODELS[m.id]["is_new"],
@@ -2005,6 +2006,7 @@ async def list_class_models(
                 "owner": "",
                 "name": "GPT-4 Turbo",
                 "sort_order": 4,
+                "model_type": "chat",
                 "is_new": False,
                 "highlight": False,
                 "is_latest": True,
@@ -2026,6 +2028,7 @@ async def list_class_models(
                 "owner": "",
                 "name": "GPT-4 Turbo preview",
                 "sort_order": 5,
+                "model_type": "chat",
                 "is_new": False,
                 "highlight": False,
                 "is_latest": True,
@@ -2072,6 +2075,8 @@ async def list_class_models(
         "o1-2024-12-17",
         "gpt-4.5-preview",
         "gpt-4.5-preview-2025-02-27",
+        "gpt-4o-realtime-preview",
+        "gpt-4o-mini-realtime-preview"
     ]
 
     if isinstance(openai_client, openai.AsyncAzureOpenAI):

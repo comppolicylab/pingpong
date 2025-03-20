@@ -971,6 +971,7 @@ export type AssistantModel = {
   created: string;
   owner: string;
   name: string;
+  model_type: 'chat' | 'live_audio';
   description: string;
   is_latest: boolean;
   is_new: boolean;
