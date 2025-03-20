@@ -4,7 +4,7 @@
     let socket: WebSocket;
     export let classId: number;
     export let threadId: number;
-    
+
     import { onMount } from 'svelte';
   let mediaRecorder: MediaRecorder;
   let isRecording: boolean = false;
@@ -33,48 +33,48 @@
     });
 
     // Request access to the user's microphone.
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorder = new MediaRecorder(stream);
+    // try {
+    //   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    //   mediaRecorder = new MediaRecorder(stream);
 
-      // The ondataavailable event is triggered when a chunk of audio is ready.
-      mediaRecorder.ondataavailable = async (event: BlobEvent) => {
-        if (event.data.size > 0 && socket.readyState === WebSocket.OPEN) {
-          // Convert the Blob to an ArrayBuffer before sending.
-          const arrayBuffer = await event.data.arrayBuffer();
-          socket.send(arrayBuffer);
-        }
-      };
-    } catch (error) {
-      console.error("Error accessing microphone:", error);
-    }
+    //   // The ondataavailable event is triggered when a chunk of audio is ready.
+    //   mediaRecorder.ondataavailable = async (event: BlobEvent) => {
+    //     if (event.data.size > 0 && socket.readyState === WebSocket.OPEN) {
+    //       // Convert the Blob to an ArrayBuffer before sending.
+    //       const arrayBuffer = await event.data.arrayBuffer();
+    //       socket.send(arrayBuffer);
+    //     }
+    //   };
+    // } catch (error) {
+    //   console.error("Error accessing microphone:", error);
+    // }
   });
 
   // Function to start recording audio.
   function startRecording() {
-    if (mediaRecorder && !isRecording) {
-      isRecording = true;
-      // Start recording; the argument is the timeslice in milliseconds (e.g., 100ms).
-      mediaRecorder.start(100);
-      // Optionally, send an event message to the server.
-      const eventMessage = { type: "recording", status: "started" };
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify(eventMessage));
-      }
-    }
+    // if (mediaRecorder && !isRecording) {
+    //   isRecording = true;
+    //   // Start recording; the argument is the timeslice in milliseconds (e.g., 100ms).
+    //   mediaRecorder.start(100);
+    //   // Optionally, send an event message to the server.
+    //   const eventMessage = { type: "recording", status: "started" };
+    //   if (socket.readyState === WebSocket.OPEN) {
+    //     socket.send(JSON.stringify(eventMessage));
+    //   }
+    // }
   }
 
   // Function to stop recording audio.
   function stopRecording() {
-    if (mediaRecorder && isRecording) {
-      isRecording = false;
-      mediaRecorder.stop();
-      // Send an event message to the server.
-      const eventMessage = { type: "recording", status: "stopped" };
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify(eventMessage));
-      }
-    }
+    // if (mediaRecorder && isRecording) {
+    //   isRecording = false;
+    //   mediaRecorder.stop();
+    //   // Send an event message to the server.
+    //   const eventMessage = { type: "recording", status: "stopped" };
+    //   if (socket.readyState === WebSocket.OPEN) {
+    //     socket.send(JSON.stringify(eventMessage));
+    //   }
+    // }
   }
 </script>
 

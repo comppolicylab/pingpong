@@ -8,6 +8,10 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      '^/api/v1/class/.*/thread/.*/audio': {
+        target: 'ws://localhost:8000',
+        ws: true
+      },
       '/api': {
         target: 'http://localhost:8000',
         secure: false

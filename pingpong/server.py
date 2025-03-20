@@ -36,6 +36,7 @@ from pingpong.emails import (
     revalidate_email_addresses,
     validate_email_addresses,
 )
+from pingpong.realtime import realtime_websocket
 from pingpong.stats import get_statistics
 from pingpong.summary import send_class_summary_to_user_task
 from .animal_hash import process_threads, pseudonym, user_names
@@ -111,6 +112,7 @@ from .users import (
     AddNewUsersManual,
     AddUserException,
     CheckUserPermissionException,
+    UserNotFoundException,
     check_permissions,
     delete_canvas_permissions,
 )
@@ -143,12 +145,6 @@ async def get_openai_client_for_class(request: Request) -> OpenAIClientType:
 
 OpenAIClientDependency = Depends(get_openai_client_for_class)
 OpenAIClient = Annotated[OpenAIClientType, OpenAIClientDependency]
-
-
-class UserNotFoundException(Exception):
-    def __init__(self, detail: str = "", user_id: str = ""):
-        self.user_id = user_id
-        self.detail = detail
 
 
 @v1.middleware("http")
@@ -2095,33 +2091,6 @@ async def list_class_models(
         "models": filtered,
     }
 
-
-@v1.websocket(
-    "/class/{class_id}/thread/{thread_id}/audio",
-)
-async def audio_stream(
-    websocket: WebSocket,
-):
-    await websocket.accept()
-    print("WebSocket connection accepted.")
-    try:
-        while True:
-            message = await websocket.receive()
-            if "text" in message:
-                # Assume text messages are JSON formatted events
-                try:
-                    data = json.loads(message["text"])
-                    print("Received event:", data)
-                    # Process event (e.g., UI command, status update, etc.)
-                except json.JSONDecodeError as e:
-                    print("Error decoding JSON:", e)
-            elif "bytes" in message:
-                # Received binary message (audio chunk)
-                audio_chunk = message["bytes"]
-                print(f"Received audio chunk of {len(audio_chunk)} bytes")
-                # Process or store the audio data as needed
-    except WebSocketDisconnect:
-        print("Client disconnected.")
 
 @v1.get(
     "/class/{class_id}/thread/{thread_id}",
@@ -4503,3 +4472,28 @@ app.mount("/api/v1", v1)
 async def health():
     """Health check."""
     return {"status": "ok"}
+
+
+@v1.websocket(
+    "/class/{class_id}/thread/{thread_id}/audio",
+)
+async def audio_stream(
+    websocket: WebSocket,
+):
+    await realtime_websocket(websocket)
+    await websocket.accept()
+    try:
+        while True:
+            message = await websocket.receive()
+            websocket._raise_on_disconnect(message)
+            if "text" in message:
+                try:
+                    data = json.loads(message["text"])
+                    print("Received event:", data)
+                except json.JSONDecodeError as e:
+                    print("Error decoding JSON:", e)
+            elif "bytes" in message:
+                audio_chunk = message["bytes"]
+                print(f"Received audio chunk of {len(audio_chunk)} bytes")
+    except WebSocketDisconnect:
+        print("Client disconnected.")
