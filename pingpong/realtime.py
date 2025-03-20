@@ -11,19 +11,22 @@ from pingpong.websocket import (
 
 async def check_realtime_permissions(ws: WebSocket, thread_id: str):
     if ws.state.session.status != schemas.SessionStatus.VALID:
-        await ws.send_denial_response(Response(status_code=403))
-        return
+        raise ValueError("Session token is invalid.")
     if not await ws.state.authz.test(
         f"user:{ws.state.session.user.id}", "can_participate", f"thread:{thread_id}"
     ):
-        await ws.send_denial_response(Response(status_code=403))
+        raise ValueError("User is not allowed to participate in this thread.")
 
 
 @ws_auth_middleware
 @ws_db_middleware
 @ws_parse_session_token
 async def realtime_websocket(ws: WebSocket, class_id: str, thread_id: str):
-    await check_realtime_permissions(ws, thread_id)
+    try:
+        await check_realtime_permissions(ws, thread_id)
+    except ValueError as e:
+        await ws.send_denial_response(Response(status_code=403, content=str(e)))
+        return
     await ws.accept()
     try:
         while True:

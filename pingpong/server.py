@@ -2090,6 +2090,7 @@ async def list_class_models(
         "models": filtered,
     }
 
+
 @v1.websocket(
     "/class/{class_id}/thread/{thread_id}/audio",
 )
@@ -2099,6 +2100,7 @@ async def audio_stream(
     thread_id: str,
 ):
     await realtime_websocket(websocket, class_id, thread_id)
+
 
 @v1.get(
     "/class/{class_id}/thread/{thread_id}",
