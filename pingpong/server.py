@@ -17,6 +17,8 @@ from fastapi import (
     Request,
     Response,
     UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import PositiveInt
@@ -2093,6 +2095,33 @@ async def list_class_models(
         "models": filtered,
     }
 
+
+@v1.websocket(
+    "/class/{class_id}/thread/{thread_id}/audio",
+)
+async def audio_stream(
+    websocket: WebSocket,
+):
+    await websocket.accept()
+    print("WebSocket connection accepted.")
+    try:
+        while True:
+            message = await websocket.receive()
+            if "text" in message:
+                # Assume text messages are JSON formatted events
+                try:
+                    data = json.loads(message["text"])
+                    print("Received event:", data)
+                    # Process event (e.g., UI command, status update, etc.)
+                except json.JSONDecodeError as e:
+                    print("Error decoding JSON:", e)
+            elif "bytes" in message:
+                # Received binary message (audio chunk)
+                audio_chunk = message["bytes"]
+                print(f"Received audio chunk of {len(audio_chunk)} bytes")
+                # Process or store the audio data as needed
+    except WebSocketDisconnect:
+        print("Client disconnected.")
 
 @v1.get(
     "/class/{class_id}/thread/{thread_id}",

@@ -560,6 +560,8 @@
           {codeInterpreterAttachmentCount}
           upload={handleUpload}
           remove={handleRemove}
+          threadId={threadId}
+          classId={classId}
           on:submit={handleSubmit}
           on:dismissError={handleDismissError}
         />

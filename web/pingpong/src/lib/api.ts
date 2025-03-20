@@ -2719,3 +2719,14 @@ export const toggleAgreementPolicy = async (
   const url = `admin/terms/policy/${policy_id}/status`;
   return await PATCH<ToggleAgreementPolicyRequest, GenericStatus>(f, url, data);
 };
+
+export const createAudioWebsocket = (classId: number, threadId: number): WebSocket => {
+  if (!browser) {
+      throw new Error('WebSocket can only be created in a browser environment.');
+  }
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const host = window.location.host;
+  const url = `${protocol}://${host}/v1/api/class/${classId}/thread/${threadId}/audio`;
+  console.log('Creating WebSocket connection to', url);
+  return new WebSocket(url);
+};
