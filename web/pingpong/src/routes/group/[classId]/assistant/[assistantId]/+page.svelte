@@ -145,7 +145,7 @@
     (latestModelOptions.length > 0 && !selectedModel) ||
     !latestModelOptions.map((m) => m.value).includes(selectedModel)
   ) {
-    if (latestModelOptions.map((m) => m.value).includes(selectedModel)) {
+    if (latestModelOptions.map((m) => m.value).includes(assistant?.model || '')) {
       selectedModel = assistant?.model || latestModelOptions[0].value;
     } else {
       selectedModel = latestModelOptions[0].value;
@@ -360,6 +360,7 @@
           'name',
           'description',
           'instructions',
+          'interaction_mode',
           'model',
           'published',
           'use_latex',
@@ -420,6 +421,7 @@
     }
     const params = {
       name: preventEdits ? assistant?.name || '' : body.name.toString(),
+      interaction_mode: interactionMode,
       description: preventEdits
         ? assistant?.description || ''
         : normalizeNewlines(body.description.toString()),
@@ -520,9 +522,7 @@
       if (expanded.error) {
         $loading = false;
         $loadingMessage = '';
-        sadToast(
-          `Could not update the assistant's publish status:\n${expanded.error.detail || 'Unknown error'}`
-        );
+        sadToast(`Could not update the assistant:\n${expanded.error.detail || 'Unknown error'}`);
         return;
       } else {
         $loading = false;
@@ -673,28 +673,57 @@
       <Label class="pb-1" for="name">Name</Label>
       <Input id="name" name="name" value={assistant?.name} disabled={preventEdits} />
     </div>
-    <div class="mb-4">
-      <Label for="interactionMode">Interaction Mode</Label>
-      <Helper class="pb-1"
-        >Choose which mode users should primarily use to interact with this assistant.</Helper
-      >
-      <ButtonGroup>
-        <RadioButton value="chat" bind:group={interactionMode}
-          ><div class="flex flex-row gap-2 items-center">
-            {#if interactionMode === 'chat'}<MessageDotsSolid
-                class="w-6 h-6"
-              />{:else}<MessageDotsOutline class="w-6 h-6" />{/if}Text Mode
-          </div></RadioButton
+    {#if data.isCreating}
+      <div class="mb-4">
+        <Label for="interactionMode">Interaction Mode</Label>
+        <Helper class="pb-1"
+          >Choose how users should primarily interact with this assistant. <span
+            class="font-semibold"
+            >You cannot change the interaction mode after you've created an assistant.</span
+          >
+        </Helper>
+        <ButtonGroup>
+          <RadioButton value="chat" bind:group={interactionMode} disabled={preventEdits}
+            ><div class="flex flex-row gap-2 items-center">
+              {#if interactionMode === 'chat'}<MessageDotsSolid
+                  class="w-6 h-6"
+                />{:else}<MessageDotsOutline class="w-6 h-6" />{/if}Text Mode
+            </div></RadioButton
+          >
+          <RadioButton value="live_audio" bind:group={interactionMode} disabled={preventEdits}
+            ><div class="flex flex-row gap-2 items-center">
+              {#if interactionMode === 'live_audio'}<MicrophoneSolid
+                  class="w-5 h-5"
+                />{:else}<MicrophoneOutline class="w-5 h-5" />{/if}Audio Mode
+            </div></RadioButton
+          >
+        </ButtonGroup>
+      </div>
+    {:else}
+      <div class="mb-4">
+        <Label for="interactionMode">Interaction Mode</Label>
+        <Helper class="pb-1"
+          >Controls how users interact with this assistant. <span class="font-semibold"
+            >You cannot change the interaction mode after you've created an assistant.</span
+          ></Helper
         >
-        <RadioButton value="live_audio" bind:group={interactionMode}
-          ><div class="flex flex-row gap-2 items-center">
-            {#if interactionMode === 'live_audio'}<MicrophoneSolid
-                class="w-5 h-5"
-              />{:else}<MicrophoneOutline class="w-5 h-5" />{/if}Audio Mode
-          </div></RadioButton
-        >
-      </ButtonGroup>
-    </div>
+        <ButtonGroup>
+          {#if interactionMode === 'chat'}
+            <RadioButton value="chat" bind:group={interactionMode} disabled
+              ><div class="flex flex-row gap-2 items-center">
+                <MessageDotsSolid class="w-6 h-6" />Text Mode
+              </div></RadioButton
+            >
+          {:else if interactionMode === 'live_audio'}
+            <RadioButton value="live_audio" bind:group={interactionMode} disabled
+              ><div class="flex flex-row gap-2 items-center">
+                <MicrophoneSolid class="w-5 h-5" />Audio Mode
+              </div></RadioButton
+            >
+          {/if}
+        </ButtonGroup>
+      </div>
+    {/if}
     <div class="mb-4">
       <Label for="model">Model</Label>
       <Helper class="pb-1"
@@ -837,23 +866,37 @@
       >
     </div>
     <div class="col-span-2 mb-4">
-      <Checkbox
-        id="use_latex"
-        name="use_latex"
-        disabled={preventEdits}
-        checked={(assistant ? assistant.use_latex : true) || false}>Use LaTeX</Checkbox
-      >
-      <Helper>Enable LaTeX formatting for assistant responses.</Helper>
+      {#if interactionMode === 'chat'}
+        <Checkbox
+          id="use_latex"
+          name="use_latex"
+          disabled={preventEdits}
+          checked={(assistant ? assistant.use_latex : true) || false}>Use LaTeX</Checkbox
+        >
+        <Helper>Enable LaTeX formatting for assistant responses.</Helper>
+      {:else}
+      <div class="flex flex-col gap-y-1">
+        <Badge
+          class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
+          ><CloseOutline size="sm" />
+          <div>No LaTeX formatting for assistant responses</div>
+          </Badge>
+          <Helper
+            >This interaction mode does not support LaTeX formatting for assistant responses. To use
+            LaTeX formatting, select a different interaction mode.</Helper
+          >
+        </div>
+      {/if}
     </div>
     <div class="col-span-2 mb-4">
       <Label for="tools">Tools</Label>
       <Helper>Select tools available to the assistant when generating a response.</Helper>
     </div>
     {#if !supportsFileSearch}
-      <div class="col-span-2 mb-2">
-        <div class="flex flex-row items-center gap-x-2">
+      <div class="col-span-2 mb-3">
+        <div class="flex flex-col gap-y-1">
           <Badge
-            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-red-400 from-rose-100 to-rose-200 text-rose-800 shrink-0"
+            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
             ><CloseOutline size="sm" />
             <div>No File Search capabilities</div>
           </Badge>
@@ -879,9 +922,9 @@
     {/if}
     <div class="col-span-2 mb-4">
       {#if !supportsCodeInterpreter}
-        <div class="flex flex-row items-center gap-x-2">
+        <div class="flex flex-col gap-y-1">
           <Badge
-            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-red-400 from-rose-100 to-rose-200 text-rose-800 shrink-0"
+            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
             ><CloseOutline size="sm" />
             <div>No Code Interpreter capabilities</div>
           </Badge>

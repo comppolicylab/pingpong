@@ -3283,12 +3283,37 @@ async def create_assistant(
     class_id_int = int(class_id)
     creator_id = request.state.session.user.id
 
-    # Check that the model is available
-    if req.model in HIDDEN_MODELS:
+    class_models_response = schemas.AssistantModels.model_validate(
+        await list_class_models(request.state.db, request, openai_client)
+    )
+    class_models = class_models_response.models
+
+    # Find the call model record (.id == req.model)
+    model_record = next(
+        (model for model in class_models if model.id == req.model), None
+    )
+
+    # Check if model is available for use in this class
+    if not model_record:
         raise HTTPException(
             status_code=400,
             detail=f"Model {req.model} is not available for use.",
         )
+
+    # Check that the model is not hidden
+    if model_record.hide_in_model_selector:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model {req.model} is not available for use.",
+        )
+
+    # Check that the model supports the interaction mode
+    if model_record.model_type != req.interaction_mode:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model {req.model} is not available for use in {req.interaction_mode} mode.",
+        )
+
     # Check that the model is not admin-only
     if not await request.state.authz.test(
         f"user:{creator_id}",

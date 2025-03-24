@@ -1199,6 +1199,7 @@ export type CreateAssistantRequest = {
   description: string;
   instructions: string;
   model: string;
+  interaction_mode: 'chat' | 'live_audio';
   temperature: number | null;
   reasoning_effort: number | null;
   tools: Tool[];
@@ -1219,6 +1220,7 @@ export type UpdateAssistantRequest = {
   description?: string;
   instructions?: string;
   model?: string;
+  interaction_mode?: 'chat' | 'live_audio';
   temperature?: number | null;
   reasoning_effort?: number | null;
   tools?: Tool[];

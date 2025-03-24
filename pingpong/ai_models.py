@@ -465,6 +465,52 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_reasoning": False,
         "description": "GPT-3.5 Turbo model with improved instruction following, reproducible outputs, and more.",
     },
+    #
+    # ----------------- Realtime Models -----------------
+    #
+    "gpt-4o-realtime-preview-2024-12-17": {
+        "name": "gpt-4o-realtime-preview-2024-12-17",
+        "sort_order": 1,
+        "model_type": "live_audio",
+        "is_new": False,
+        "highlight": False,
+        "is_latest": False,
+        "supports_vision": False,
+        "supports_file_search": False,
+        "supports_code_interpreter": False,
+        "supports_temperature": True,
+        "supports_reasoning": False,
+        "description": "Higher intelligence version of the GPT-4o Realtime model. gpt-4o-realtime-preview points to this version.",
+    },
+    "gpt-4o-realtime-preview-2024-10-01": {
+        "name": "gpt-4o-realtime-preview-2024-10-01",
+        "sort_order": 2,
+        "model_type": "live_audio",
+        "is_new": False,
+        "highlight": False,
+        "is_latest": False,
+        "supports_vision": False,
+        "supports_file_search": False,
+        "supports_code_interpreter": False,
+        "supports_temperature": True,
+        "supports_reasoning": False,
+        "description": "GPT-4o Realtime initial release version.",
+    },
+    "gpt-4o-mini-realtime-preview-2024-12-17": {
+        "name": "gpt-4o-mini-realtime-preview-2024-12-17",
+        "sort_order": 3,
+        "model_type": "live_audio",
+        "is_new": False,
+        "highlight": False,
+        "is_latest": False,
+        "supports_vision": False,
+        "supports_file_search": False,
+        "supports_code_interpreter": False,
+        "supports_temperature": True,
+        "supports_reasoning": False,
+        "description": "GPt-4o mini Realtime initial release version.",
+    },
+    #
 }
 
 # Models that should be hidden from the Model Selector
