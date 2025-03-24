@@ -3288,7 +3288,6 @@ async def create_assistant(
     )
     class_models = class_models_response.models
 
-    # Find the call model record (.id == req.model)
     model_record = next(
         (model for model in class_models if model.id == req.model), None
     )
@@ -3334,8 +3333,16 @@ async def create_assistant(
 
     tool_resources: ToolResources = {}
     vector_store_object_id = None
+    uses_live_audio = (
+        req.interaction_mode == schemas.AssistantInteractionMode.LIVE_AUDIO
+    )
 
     if req.file_search_file_ids:
+        if uses_live_audio:
+            raise HTTPException(
+                status_code=400,
+                detail="File search is not supported in live audio mode.",
+            )
         vector_store_id, vector_store_object_id = await create_vector_store(
             request.state.db,
             openai_client,
@@ -3348,14 +3355,22 @@ async def create_assistant(
     del req.file_search_file_ids
 
     if req.code_interpreter_file_ids:
+        if uses_live_audio:
+            raise HTTPException(
+                status_code=400,
+                detail="Code interpreter is not supported in live audio mode.",
+            )
         tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
 
     try:
-        _model = (
-            get_azure_model_deployment_name_equivalent(req.model)
-            if isinstance(openai_client, openai.AsyncAzureOpenAI)
-            else req.model
-        )
+        if uses_live_audio:
+            _model = "gpt-4o"
+        else:
+            _model = (
+                get_azure_model_deployment_name_equivalent(req.model)
+                if isinstance(openai_client, openai.AsyncAzureOpenAI)
+                else req.model
+            )
 
         reasoning_effort = (
             REASONING_EFFORT_MAP.get(req.reasoning_effort)
@@ -3373,6 +3388,8 @@ async def create_assistant(
                 req.instructions,
                 use_latex=req.use_latex,
                 use_image_descriptions=req.use_image_descriptions,
+                interaction_mode=req.interaction_mode,
+                skip_timestamp=uses_live_audio,
             ),
             model=_model,
             tools=req.tools,
