@@ -215,7 +215,7 @@
     temperatureValue === undefined &&
     (data.isCreating || assistant?.temperature === undefined || assistant?.temperature === null)
   ) {
-    temperatureValue = 1;
+    temperatureValue = 0.2;
   }
   $: if (
     reasoningEffortValue === undefined &&
