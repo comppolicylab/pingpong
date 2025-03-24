@@ -56,6 +56,7 @@ class AssistantTemplate(Model):
     file_search = F.CheckboxField("Enable File Search")
     code_interpreter = F.CheckboxField("Enable Code Interpreter")
     experimental_vision = F.CheckboxField("Experimental Vision")
+    temperature = F.NumberField("Temperature")
     publish = F.CheckboxField("Publish")
 
     class Meta:
