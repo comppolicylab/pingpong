@@ -3292,15 +3292,8 @@ async def create_assistant(
         (model for model in class_models if model.id == req.model), None
     )
 
-    # Check if model is available for use in this class
-    if not model_record:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Model {req.model} is not available for use.",
-        )
-
-    # Check that the model is not hidden
-    if model_record.hide_in_model_selector:
+    # Check if model is available for use in this class and that the model is not hidden
+    if not model_record or model_record.hide_in_model_selector:
         raise HTTPException(
             status_code=400,
             detail=f"Model {req.model} is not available for use.",
@@ -3389,7 +3382,6 @@ async def create_assistant(
                 use_latex=req.use_latex,
                 use_image_descriptions=req.use_image_descriptions,
                 interaction_mode=req.interaction_mode,
-                skip_timestamp=uses_live_audio,
             ),
             model=_model,
             tools=req.tools,
@@ -3501,6 +3493,15 @@ async def update_assistant(
     tool_resources: ToolResources = {}
     update_tool_resources = False
     update_instructions = False
+    interaction_mode = (
+        req.interaction_mode
+        if (
+            "interaction_mode" in req.model_fields_set
+            and req.interaction_mode is not None
+        )
+        else schemas.AssistantInteractionMode(asst.interaction_mode)
+    )
+    uses_live_audio = interaction_mode == schemas.AssistantInteractionMode.LIVE_AUDIO
 
     # Check that the model is available
     if "model" in req.model_fields_set and req.model is not None:
@@ -3512,23 +3513,44 @@ async def update_assistant(
         )
 
         if _model != asst.model:
-            if req.model in HIDDEN_MODELS:
+            class_models_response = schemas.AssistantModels.model_validate(
+                await list_class_models(request.state.db, request, openai_client)
+            )
+            class_models = class_models_response.models
+
+            model_record = next(
+                (model for model in class_models if model.id == req.model), None
+            )
+
+            if not model_record or model_record.hide_in_model_selector:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Model {req.model} is not available for use.",
                 )
+
+            # Check that the model supports the interaction mode
+            if model_record.model_type != interaction_mode:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Model {req.model} is not available for use in {interaction_mode} mode.",
+                )
+
             # Check that the model is not admin-only
             if not await request.state.authz.test(
                 f"user:{request.state.session.user.id}",
                 "admin",
                 f"class:{class_id}",
             ):
-                if req.model in ADMIN_ONLY_MODELS:
+                if model_record.id in ADMIN_ONLY_MODELS:
                     raise HTTPException(
                         status_code=400,
                         detail=f"Model {req.model} is not available for use.",
                     )
 
+        # Override the assistant model we send to OpenAI
+        # when using live audio
+        if uses_live_audio:
+            _model = "gpt-4o"
         openai_update["model"] = _model
         asst.model = req.model
 
@@ -3546,6 +3568,11 @@ async def update_assistant(
                 req.code_interpreter_file_ids is not None
                 and req.code_interpreter_file_ids != []
             ):
+                if uses_live_audio:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Code interpreter is not supported in live audio mode.",
+                    )
                 tool_resources["code_interpreter"] = {
                     "file_ids": req.code_interpreter_file_ids
                 }
@@ -3559,6 +3586,11 @@ async def update_assistant(
         if "file_search_file_ids" in req.model_fields_set:
             update_tool_resources = True
             if req.file_search_file_ids is not None and req.file_search_file_ids != []:
+                if uses_live_audio:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="File search is not supported in live audio mode.",
+                    )
                 # Files will need to be stored in a vector store
                 if asst.vector_store_id:
                     # Vector store already exists, update
@@ -3600,9 +3632,11 @@ async def update_assistant(
 
     if update_tool_resources:
         openai_update["tool_resources"] = tool_resources
+
     if "use_latex" in req.model_fields_set and req.use_latex is not None:
         update_instructions = True
         asst.use_latex = req.use_latex
+
     if (
         "use_image_descriptions" in req.model_fields_set
         and req.use_image_descriptions is not None
@@ -3610,24 +3644,23 @@ async def update_assistant(
     ):
         update_instructions = True
         asst.use_image_descriptions = req.use_image_descriptions
+
+    if "interaction_mode" in req.model_fields_set and req.interaction_mode is not None:
+        asst.interaction_mode = req.interaction_mode
+
     if "hide_prompt" in req.model_fields_set and req.hide_prompt is not None:
         asst.hide_prompt = req.hide_prompt
+
     if "instructions" in req.model_fields_set and req.instructions is not None:
         update_instructions = True
         if not req.instructions:
             raise HTTPException(400, "Instructions cannot be empty.")
         asst.instructions = req.instructions
     _model = None
-    if "model" in req.model_fields_set and req.model is not None:
-        _model = (
-            get_azure_model_deployment_name_equivalent(req.model)
-            if isinstance(openai_client, openai.AsyncAzureOpenAI)
-            else req.model
-        )
-        openai_update["model"] = _model
-        asst.model = req.model
+
     if "description" in req.model_fields_set and req.description is not None:
         asst.description = req.description
+
     if "tools" in req.model_fields_set and req.tools is not None:
         openai_update["tools"] = req.tools
         asst.tools = json.dumps([t.model_dump() for t in req.tools])

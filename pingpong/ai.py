@@ -520,7 +520,6 @@ def format_instructions(
     use_latex: bool = False,
     use_image_descriptions: bool = False,
     interaction_mode: AssistantInteractionMode = AssistantInteractionMode.CHAT,
-    skip_timestamp: bool = False,
 ) -> str:
     """Format instructions for a prompt."""
 
@@ -607,13 +606,12 @@ def format_instructions(
             """
         )
 
-    if not skip_timestamp:
-        # Inject the current time into the instructions
-        instructions += (
-            "\n---Other context---\n"
-            "The current date and time is "
-            f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} (UTC)."
-        )
+    # Inject the current time into the instructions
+    instructions += (
+        "\n---Other context---\n"
+        "The current date and time is "
+        f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} (UTC)."
+    )
 
     return instructions
 
