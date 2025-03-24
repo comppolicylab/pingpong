@@ -51,11 +51,26 @@
   let checkForChanges = true;
   let assistantForm: HTMLFormElement;
   let deleteModal = false;
-  let interactionMode: 'chat' | 'live_audio' = 'chat';
   $: assistant = data.assistant;
   $: preventEdits = !!assistant?.locked;
   $: canPublish = data.grants.canPublishAssistants;
-  $: interactionMode = assistant?.interaction_mode || 'chat';
+
+  let interactionMode: 'chat' | 'live_audio';
+  $: if (
+    assistant?.interaction_mode !== undefined &&
+    assistant?.interaction_mode !== null &&
+    interactionMode === undefined
+  ) {
+    interactionMode = assistant.interaction_mode;
+  }
+  $: if (
+    interactionMode === undefined &&
+    (data.isCreating ||
+      assistant?.interaction_mode === undefined ||
+      assistant?.interaction_mode === null)
+  ) {
+    interactionMode = 'chat';
+  }
 
   let selectedFileSearchFiles = writable(
     data.selectedFileSearchFiles.slice().map((f) => f.file_id)
@@ -109,7 +124,12 @@
     return acc;
   }, {});
   $: latestModelOptions = (
-    data.models.filter((model) => model.is_latest && !(model.hide_in_model_selector ?? false)) || []
+    data.models.filter(
+      (model) =>
+        model.is_latest &&
+        !(model.hide_in_model_selector ?? false) &&
+        model.model_type === interactionMode
+    ) || []
   ).map((model) => ({
     value: model.id,
     name: model.name,
@@ -121,13 +141,24 @@
     highlight: model.highlight
   }));
   let selectedModel = '';
-  $: if (latestModelOptions.length > 0 && !selectedModel) {
-    selectedModel = assistant?.model || latestModelOptions[0].value;
+  $: if (
+    (latestModelOptions.length > 0 && !selectedModel) ||
+    !latestModelOptions.map((m) => m.value).includes(selectedModel)
+  ) {
+    if (latestModelOptions.map((m) => m.value).includes(selectedModel)) {
+      selectedModel = assistant?.model || latestModelOptions[0].value;
+    } else {
+      selectedModel = latestModelOptions[0].value;
+    }
   }
   $: selectedModelName = modelNameDict[selectedModel];
   $: versionedModelOptions = (
-    data.models.filter((model) => !model.is_latest && !(model.hide_in_model_selector ?? false)) ||
-    []
+    data.models.filter(
+      (model) =>
+        !model.is_latest &&
+        !(model.hide_in_model_selector ?? false) &&
+        model.model_type === interactionMode
+    ) || []
   ).map((model) => ({
     value: model.id,
     name: model.name,
@@ -648,8 +679,20 @@
         >Choose which mode users should primarily use to interact with this assistant.</Helper
       >
       <ButtonGroup>
-        <RadioButton value="text" bind:group={radioGroup}><div class="flex flex-row gap-2 items-center">{#if radioGroup === "text"}<MessageDotsSolid class="w-6 h-6"/>{:else}<MessageDotsOutline class="w-6 h-6"/>{/if}Text Mode</div></RadioButton>
-        <RadioButton value="audio" bind:group={radioGroup}><div class="flex flex-row gap-2 items-center">{#if radioGroup === "audio"}<MicrophoneSolid class="w-5 h-5"/>{:else}<MicrophoneOutline class="w-5 h-5"/>{/if}Audio Mode</div></RadioButton>
+        <RadioButton value="chat" bind:group={interactionMode}
+          ><div class="flex flex-row gap-2 items-center">
+            {#if interactionMode === 'chat'}<MessageDotsSolid
+                class="w-6 h-6"
+              />{:else}<MessageDotsOutline class="w-6 h-6" />{/if}Text Mode
+          </div></RadioButton
+        >
+        <RadioButton value="live_audio" bind:group={interactionMode}
+          ><div class="flex flex-row gap-2 items-center">
+            {#if interactionMode === 'live_audio'}<MicrophoneSolid
+                class="w-5 h-5"
+              />{:else}<MicrophoneOutline class="w-5 h-5" />{/if}Audio Mode
+          </div></RadioButton
+        >
       </ButtonGroup>
     </div>
     <div class="mb-4">

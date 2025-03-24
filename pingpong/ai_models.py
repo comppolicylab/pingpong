@@ -211,7 +211,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_code_interpreter": False,
         "supports_temperature": True,
         "supports_reasoning": False,
-        "description": "Model capable of responding to audio and text inputs in real-time."
+        "description": "Model capable of responding to audio and text inputs in real-time.",
     },
     "gpt-4o-mini-realtime-preview": {
         "name": "GPT-4o mini Realtime",
@@ -225,7 +225,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_code_interpreter": False,
         "supports_temperature": True,
         "supports_reasoning": False,
-        "description": "Smaller model capable of responding to audio and text inputs in real-time."
+        "description": "Smaller model capable of responding to audio and text inputs in real-time.",
     },
     #
     # ----------------- Pinned Models -----------------

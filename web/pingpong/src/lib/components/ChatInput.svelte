@@ -47,8 +47,8 @@
 
   const dispatcher = createEventDispatcher();
 
-  export let classId: number;
-  export let threadId: number;
+  export let classId: number = 1;
+  export let threadId: number = 1;
 
   /**
    * Whether to allow sending.

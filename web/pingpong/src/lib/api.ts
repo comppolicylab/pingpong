@@ -1124,6 +1124,7 @@ export type Assistant = {
   name: string;
   description: string | null;
   instructions: string;
+  interaction_mode: 'chat' | 'live_audio';
   model: string;
   temperature: number | null;
   reasoning_effort: number | null;

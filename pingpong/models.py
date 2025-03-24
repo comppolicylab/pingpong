@@ -1659,6 +1659,10 @@ class Assistant(Base):
     name = Column(String)
     version = Column(Integer, default=1)
     instructions = Column(String)
+    interaction_mode = Column(
+        SQLEnum(schemas.AssistantInteractionMode),
+        server_default=schemas.AssistantInteractionMode.CHAT,
+    )
     description = Column(String)
     assistant_id = Column(String)
     use_latex = Column(Boolean)

@@ -2076,7 +2076,7 @@ async def list_class_models(
         "gpt-4.5-preview",
         "gpt-4.5-preview-2025-02-27",
         "gpt-4o-realtime-preview",
-        "gpt-4o-mini-realtime-preview"
+        "gpt-4o-mini-realtime-preview",
     ]
 
     if isinstance(openai_client, openai.AsyncAzureOpenAI):

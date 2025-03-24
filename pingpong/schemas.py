@@ -310,11 +310,17 @@ class VectorStoreType(Enum):
     THREAD = "thread"
 
 
+class AssistantInteractionMode(StrEnum):
+    CHAT = "chat"
+    LIVE_AUDIO = "live_audio"
+
+
 class Assistant(BaseModel):
     id: int
     name: str
     instructions: str
     description: str | None
+    interaction_mode: AssistantInteractionMode
     tools: str
     model: str
     temperature: float | None
@@ -950,6 +956,7 @@ class AssistantModel(BaseModel):
     owner: str
     name: str
     description: str
+    model_type: Literal["chat", "live_audio"]
     is_latest: bool
     is_new: bool
     highlight: bool
