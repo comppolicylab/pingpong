@@ -28,7 +28,11 @@
     CogOutline,
     LockSolid,
     BanOutline,
-    FileImageOutline
+    FileImageOutline,
+    ArrowLeftOutline,
+    ArrowRightOutline,
+    HeartSolid,
+    LightbulbSolid
   } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
   import { writable, type Writable } from 'svelte/store';
@@ -195,13 +199,32 @@
     $trashPrivateFileIds = [...$trashPrivateFileIds, ...files];
   };
 
+  const checkForLargeTemperature = (evt: Event) => {
+    const target = evt.target as HTMLInputElement;
+    const value = target.valueAsNumber;
+    if (value > 1.0 && _temperatureValue <= 1.0) {
+      if (confirm('Temperatures above 1.0 may lead to nonsensical responses. Are you sure?')) {
+        temperatureValue = value;
+        _temperatureValue = value;
+      } else {
+        target.valueAsNumber = _temperatureValue;
+        temperatureValue = _temperatureValue;
+      }
+    } else {
+      temperatureValue = value;
+      _temperatureValue = value;
+    }
+  };
+
   let temperatureValue: number;
+  let _temperatureValue: number;
   $: if (
     assistant?.temperature !== undefined &&
     assistant?.temperature !== null &&
     temperatureValue === undefined
   ) {
     temperatureValue = assistant.temperature;
+    _temperatureValue = assistant.temperature;
   }
   let reasoningEffortValue: number;
   $: if (
@@ -215,7 +238,8 @@
     temperatureValue === undefined &&
     (data.isCreating || assistant?.temperature === undefined || assistant?.temperature === null)
   ) {
-    temperatureValue = 1;
+    temperatureValue = 0.2;
+    _temperatureValue = 0.2;
   }
   $: if (
     reasoningEffortValue === undefined &&
@@ -650,7 +674,7 @@
       >
       {#if supportsVision && visionSupportOverride === false}
         <div
-          class="flex flex-row items-center gap-4 p-4 py-2 mb-2 text-amber-800 border border-amber-400 rounded-lg bg-amber-50"
+          class="flex flex-row items-center gap-4 p-4 py-2 mb-2 text-amber-800 border rounded-lg bg-gradient-to-b border-amber-400 from-amber-50 to-amber-100 text-amber-800"
         >
           <div class="flex items-center justify-center relative h-8 w-12">
             <BanOutline class="text-amber-600 w-12 h-12 z-10 absolute" strokeWidth="1.5" />
@@ -990,6 +1014,21 @@
                 experimental responses, as it may lead to less predictable and more random answers.
                 You can change this setting anytime.</Helper
               >
+              <div class="mt-2 flex flex-row justify-between">
+                <div class="flex flex-row gap-1 items-center text-sm">
+                  <ArrowLeftOutline />
+                  <div>More focused</div>
+                </div>
+                <Badge
+                  class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-md text-xs normal-case bg-gradient-to-b border-sky-400 from-sky-100 to-sky-200 text-sky-800 shrink-0"
+                >
+                  <div>Temperature: {temperatureValue.toFixed(1)}</div>
+                </Badge>
+                <div class="flex flex-row gap-1 items-center text-sm">
+                  <div>More creative</div>
+                  <ArrowRightOutline />
+                </div>
+              </div>
               <Range
                 id="temperature"
                 name="temperature"
@@ -998,11 +1037,50 @@
                 bind:value={temperatureValue}
                 step="0.1"
                 disabled={preventEdits}
+                on:change={checkForLargeTemperature}
               />
-              <div class="mt-2 flex flex-row justify-between">
-                <p class="text-sm">More focused</p>
-                <p class="text-sm">Temperature: {temperatureValue}</p>
-                <p class="text-sm">More creative</p>
+              <div class="grid grid-cols-20 gap-0 mx-2">
+                <button
+                  type="button"
+                  class="ml-1 col-span-4 flex flex-col items-center justify-start bg-transparent border-0"
+                  on:click={() => {
+                    temperatureValue = 0.2;
+                    _temperatureValue = 0.2;
+                  }}
+                  on:keydown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      temperatureValue = 0.2;
+                      _temperatureValue = 0.2;
+                    }
+                  }}
+                >
+                  <HeartSolid class="text-gray-500 max-w-fit" />
+                  <div class="mt-1 mx-10 text-center text-sm text-wrap">Default (recommended)</div>
+                </button>
+                <button
+                  type="button"
+                  class="col-start-6 col-span-4 flex flex-col items-center justify-start bg-transparent border-0"
+                  on:click={() => {
+                    temperatureValue = 0.7;
+                    _temperatureValue = 0.7;
+                  }}
+                  on:keydown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      temperatureValue = 0.7;
+                      _temperatureValue = 0.7;
+                    }
+                  }}
+                >
+                  <LightbulbSolid class="text-gray-500 max-w-fit" />
+                  <div class="mt-1 mx-10 text-center text-sm text-wrap">
+                    Great for creative tasks and brainstorming
+                  </div>
+                </button>
+                <div
+                  class="col-start-12 col-span-9 rounded-md border text-center bg-gradient-to-b border-amber-400 from-amber-100 to-amber-200 text-amber-800 h-6 text-sm -mr-2 -ml-2 h-fit py-1"
+                >
+                  Output may be unpredictable
+                </div>
               </div>
             {/if}
             {#if supportsReasoning}

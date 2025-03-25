@@ -341,7 +341,7 @@ class CreateAssistant(BaseModel):
     instructions: str = Field(..., min_length=3)
     description: str
     model: str = Field(..., min_length=2)
-    temperature: float | None = Field(None, ge=0.0, le=2.0)
+    temperature: float | None = Field(0.2, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=0, le=2)
     tools: list[Tool]
     published: bool = False
