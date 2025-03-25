@@ -1020,7 +1020,7 @@
                   <div>More focused</div>
                 </div>
                 <Badge
-                  class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-sky-400 from-sky-100 to-sky-200 text-sky-800 shrink-0"
+                  class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-md text-xs normal-case bg-gradient-to-b border-sky-400 from-sky-100 to-sky-200 text-sky-800 shrink-0"
                 >
                   <div>Temperature: {temperatureValue.toFixed(1)}</div>
                 </Badge>
