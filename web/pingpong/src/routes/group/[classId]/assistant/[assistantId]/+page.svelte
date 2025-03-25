@@ -1040,16 +1040,42 @@
                 on:change={checkForLargeTemperature}
               />
               <div class="grid grid-cols-20 gap-0 mx-2">
-                <div class="ml-1 col-span-4 flex flex-col items-center justify-start">
+                <button
+                  type="button"
+                  class="ml-1 col-span-4 flex flex-col items-center justify-start bg-transparent border-0"
+                  on:click={() => {
+                    temperatureValue = 0.2;
+                    _temperatureValue = 0.2;
+                  }}
+                  on:keydown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      temperatureValue = 0.2;
+                      _temperatureValue = 0.2;
+                    }
+                  }}
+                >
                   <HeartSolid class="text-gray-500 max-w-fit" />
                   <div class="mt-1 mx-10 text-center text-sm text-wrap">Default (recommended)</div>
-                </div>
-                <div class="col-start-6 col-span-4 flex flex-col items-center justify-start">
+                </button>
+                <button
+                  type="button"
+                  class="col-start-6 col-span-4 flex flex-col items-center justify-start bg-transparent border-0"
+                  on:click={() => {
+                    temperatureValue = 0.7;
+                    _temperatureValue = 0.7;
+                  }}
+                  on:keydown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      temperatureValue = 0.7;
+                      _temperatureValue = 0.7;
+                    }
+                  }}
+                >
                   <LightbulbSolid class="text-gray-500 max-w-fit" />
                   <div class="mt-1 mx-10 text-center text-sm text-wrap">
                     Great for creative tasks and brainstorming
                   </div>
-                </div>
+                </button>
                 <div
                   class="col-start-11 col-span-10 rounded-md border text-center bg-gradient-to-b border-amber-400 from-amber-100 to-amber-200 text-amber-800 h-6 text-sm -mr-2 h-fit"
                 >
