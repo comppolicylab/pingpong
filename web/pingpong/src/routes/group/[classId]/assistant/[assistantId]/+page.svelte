@@ -203,7 +203,7 @@
     const target = evt.target as HTMLInputElement;
     const value = target.valueAsNumber;
     if (value > 1.0 && _temperatureValue <= 1.0) {
-      if (confirm('Temperatures above 1.0 can lead to nonsensical responses. Are you sure?')) {
+      if (confirm('Temperatures above 1.0 may lead to nonsensical responses. Are you sure?')) {
         temperatureValue = value;
         _temperatureValue = value;
       } else {
@@ -1077,7 +1077,7 @@
                   </div>
                 </button>
                 <div
-                  class="col-start-11 col-span-10 rounded-md border text-center bg-gradient-to-b border-amber-400 from-amber-100 to-amber-200 text-amber-800 h-6 text-sm -mr-2 h-fit"
+                  class="col-start-12 col-span-9 rounded-md border text-center bg-gradient-to-b border-amber-400 from-amber-100 to-amber-200 text-amber-800 h-6 text-sm -mr-2 -ml-2 h-fit py-1"
                 >
                   Output may be unpredictable
                 </div>
