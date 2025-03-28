@@ -67,7 +67,6 @@ optional = true
 
 [tool.poetry.group.local-scripts-qualtrics.dependencies]
 selenium = "^4.30.0"
-webdriver-manager = "^4.0.2"
 
 [build-system]
 requires = ["poetry-core"]
