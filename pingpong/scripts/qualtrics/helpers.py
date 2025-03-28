@@ -41,22 +41,27 @@ async def process_exams(email: str) -> None:
                 assert exam.pp_airtable_class_RID == class_.id
                 qualtrics_file = generate_qsf(exam, class_)
                 result = await server_requests.import_qsf(session, qualtrics_file)
-                logger.info(f"Exam created for class: {class_.name}")
+                logger.info(f"Exam imported for class: {class_.name}")
                 assert await server_requests.publish_survey(
                     session, result.result.SurveyID
                 )
+                logger.info(f"Exam published for class: {class_.name}")
                 webdriver.enable_survey_workflow(result.result.SurveyID)
+                logger.info(f"Survey workflow enabled for class: {class_.name}")
                 webdriver.enable_response_collection(result.result.SurveyID)
+                logger.info(f"Response collection enabled for class: {class_.name}")
                 class_.postassessment_status = "Created"
                 class_.postassessment_url = (
                     f"{_QUALTRICS_BASE_URL}/jfe/form/{result.result.SurveyID}"
                 )
                 class_.postassessment_workflow = True
                 class_.save()
-                logger.info(f"Postassessment created for class: {class_.name}")
                 logger.info(
                     f"Class {class_.name} postassessment URL: {class_.postassessment_url}"
                 )
             except Exception as e:
-                logger.warning(f"Error processing class: {e}")
+                logger.warning(
+                    f"Error processing class {class_.name} {class_.id}: {e}",
+                    exc_info=True,
+                )
                 continue

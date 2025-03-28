@@ -9,22 +9,86 @@ def escape_latex_within_span(text):
 
     def escape(match):
         content = match.group(2)
-        content = re.sub(r"\\", r"\\\\", content)  # Escape backslashes
-        content = re.sub(r'"', r'\\"', content)  # Escape double quotes
-        content = content.replace("$", "")  # Remove dollar signs
-        return rf"<span class=\"katex\">{content}{match.group(3)}"
+        # Remove LaTeX delimiters
+        content = content.replace("$", "")
+        content = content.replace("\\(", "")
+        content = content.replace("\\)", "")
+        content = content.replace("\\[", "")
+        content = content.replace("\\]", "")
+        # Fix special characters
+        content = content.replace("&gt;", "\gt")
+        content = content.replace("<", "\lt")
+        content = content.replace(">", "\gt")
+        # Escape special characters
+        content = re.sub(r"\\", r"\\\\", content)
+        content = re.sub(r'"', r'\\"', content)
+        if "{array}" in content:
+            return rf"<br><br><span class=\"katex\" style=\"font-size: 0.9em;white-space: nowrap;\">{content}{match.group(3)}<br><br>"
+        else:
+            return rf"<span class=\"katex\" style=\"font-size: 0.9em;white-space: nowrap;\">{content}{match.group(3)}"
 
     text = re.sub(pattern, escape, text)
-
-    text = re.sub(r'(?<!\\)"', r'\\"', text)
-    text = re.sub(r"\n", r"\\n", text)
     return text
+
+
+def escape_non_span(text):
+    text = text.replace("\n", "<br>")
+    text = re.sub(r" {2,}", lambda m: "&nbsp;" * len(m.group(0)), text)
+    text = re.sub(r'(?<!\\)"', r'\\"', text)
+    return text
+
+
+def escape_latex_within_span_options(text):
+    pattern = r"(<span class=\"katex\">)(.*?)(</span>)"
+
+    def escape(match):
+        content = match.group(2)
+        # Remove LaTeX delimiters
+        content = content.replace("$", "")
+        content = content.replace("\\(", "")
+        content = content.replace("\\)", "")
+        content = content.replace("\\[", "")
+        content = content.replace("\\]", "")
+        # Fix special characters
+        content = content.replace("&gt;", "\\gt")
+        content = content.replace("<", "\\lt")
+        content = content.replace(">", "\\gt")
+        return f'<span class="katex" style="font-size: 0.9em;white-space: nowrap;">{content}{match.group(3)}'
+
+    text = re.sub(pattern, escape, text)
+    return text
+
+
+def escape_text(text):
+    pattern = r"(<span\s+class=\"katex\">.*?</span>)"
+    segments = re.split(pattern, text)
+
+    for i, seg in enumerate(segments):
+        if re.fullmatch(pattern, seg):
+            segments[i] = escape_latex_within_span(seg)
+        else:
+            segments[i] = escape_non_span(seg)
+
+    return "".join(segments)
+
+
+def escape_option_text(text):
+    pattern = r"(<span\s+class=\"katex\">.*?</span>)"
+    segments = re.split(pattern, text)
+
+    for i, seg in enumerate(segments):
+        if re.fullmatch(pattern, seg):
+            segments[i] = escape_latex_within_span_options(seg)
+        else:
+            segments[i] = seg
+
+    return "".join(segments)
 
 
 def qsf_choices(options: list[str]) -> str:
     option_dict = {}
     for i, option in enumerate(options):
-        option_dict[str(i + 1)] = {"Display": option.replace("$", "")}
+        option_dict[str(i + 1)] = {"Display": escape_option_text(option)}
     return json.dumps(option_dict)
 
 
@@ -43,52 +107,52 @@ def generate_qsf(exam: ExamJSON, class_: AirtableClass) -> str:
         PingPongClassID=class_.pingpong_class_id[0] if class_.pingpong_class_id else -1,
         CourseRandomization=class_.randomization,
         Footer=KATEX_FOOTER if exam.uses_latex else NON_KATEX_FOOTER,
-        A1QuestionText=escape_latex_within_span(exam.questions[0].question),
+        A1QuestionText=escape_text(exam.questions[0].question),
         A1Choices=qsf_choices(exam.questions[0].options),
         A1ChoiceOrder=qsf_choice_order(exam.questions[0].options),
         A1RecodeValues=qsf_recoded_values(exam.questions[0].options),
         A1JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[0].uses_latex else '""',
-        A2QuestionText=escape_latex_within_span(exam.questions[1].question),
+        A2QuestionText=escape_text(exam.questions[1].question),
         A2Choices=qsf_choices(exam.questions[1].options),
         A2ChoiceOrder=qsf_choice_order(exam.questions[1].options),
         A2RecodeValues=qsf_recoded_values(exam.questions[1].options),
         A2JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[1].uses_latex else '""',
-        A3QuestionText=escape_latex_within_span(exam.questions[2].question),
+        A3QuestionText=escape_text(exam.questions[2].question),
         A3Choices=qsf_choices(exam.questions[2].options),
         A3ChoiceOrder=qsf_choice_order(exam.questions[2].options),
         A3RecodeValues=qsf_recoded_values(exam.questions[2].options),
         A3JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[2].uses_latex else '""',
-        A4QuestionText=escape_latex_within_span(exam.questions[3].question),
+        A4QuestionText=escape_text(exam.questions[3].question),
         A4Choices=qsf_choices(exam.questions[3].options),
         A4ChoiceOrder=qsf_choice_order(exam.questions[3].options),
         A4RecodeValues=qsf_recoded_values(exam.questions[3].options),
         A4JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[3].uses_latex else '""',
-        A5QuestionText=escape_latex_within_span(exam.questions[4].question),
+        A5QuestionText=escape_text(exam.questions[4].question),
         A5Choices=qsf_choices(exam.questions[4].options),
         A5ChoiceOrder=qsf_choice_order(exam.questions[4].options),
         A5RecodeValues=qsf_recoded_values(exam.questions[4].options),
         A5JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[4].uses_latex else '""',
-        A6QuestionText=escape_latex_within_span(exam.questions[5].question),
+        A6QuestionText=escape_text(exam.questions[5].question),
         A6Choices=qsf_choices(exam.questions[5].options),
         A6ChoiceOrder=qsf_choice_order(exam.questions[5].options),
         A6RecodeValues=qsf_recoded_values(exam.questions[5].options),
         A6JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[5].uses_latex else '""',
-        A7QuestionText=escape_latex_within_span(exam.questions[6].question),
+        A7QuestionText=escape_text(exam.questions[6].question),
         A7Choices=qsf_choices(exam.questions[6].options),
         A7ChoiceOrder=qsf_choice_order(exam.questions[6].options),
         A7RecodeValues=qsf_recoded_values(exam.questions[6].options),
         A7JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[6].uses_latex else '""',
-        A8QuestionText=escape_latex_within_span(exam.questions[7].question),
+        A8QuestionText=escape_text(exam.questions[7].question),
         A8Choices=qsf_choices(exam.questions[7].options),
         A8ChoiceOrder=qsf_choice_order(exam.questions[7].options),
         A8RecodeValues=qsf_recoded_values(exam.questions[7].options),
         A8JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[7].uses_latex else '""',
-        A9QuestionText=escape_latex_within_span(exam.questions[8].question),
+        A9QuestionText=escape_text(exam.questions[8].question),
         A9Choices=qsf_choices(exam.questions[8].options),
         A9ChoiceOrder=qsf_choice_order(exam.questions[8].options),
         A9RecodeValues=qsf_recoded_values(exam.questions[8].options),
         A9JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[8].uses_latex else '""',
-        A10QuestionText=escape_latex_within_span(exam.questions[9].question),
+        A10QuestionText=escape_text(exam.questions[9].question),
         A10Choices=qsf_choices(exam.questions[9].options),
         A10ChoiceOrder=qsf_choice_order(exam.questions[9].options),
         A10RecodeValues=qsf_recoded_values(exam.questions[9].options),
@@ -96,7 +160,7 @@ def generate_qsf(exam: ExamJSON, class_: AirtableClass) -> str:
     )
 
 
-KATEX_QS_JS = r"Qualtrics.SurveyEngine.addOnload(function()\n{\n\tjQuery(\".katex\").each(function() {\n\t\tkatex.render(this.innerHTML, this, { throwOnError: false });\n\t});\n});\n\nQualtrics.SurveyEngine.addOnReady(function()\n{\n\t/*Place your JavaScript here to run when the page is fully displayed*/\n\n});\n\nQualtrics.SurveyEngine.addOnUnload(function()\n{\n\t/*Place your JavaScript here to run when the page is unloaded*/\n\n});"
+KATEX_QS_JS = r"Qualtrics.SurveyEngine.addOnload(function()\n{\n\tjQuery(\".katex\").each(function() {\n\t\tlet htmlText = this.innerHTML;\n\t\thtmlText = htmlText.replace(\/&amp;\/g, '&');\n\t\tkatex.render(htmlText, this, { throwOnError: false });\n\t});\n});\n\nQualtrics.SurveyEngine.addOnReady(function()\n{\n\t/*Place your JavaScript here to run when the page is fully displayed*/\n\n});\n\nQualtrics.SurveyEngine.addOnUnload(function()\n{\n\t/*Place your JavaScript here to run when the page is unloaded*/\n\n});"
 
 NON_KATEX_FOOTER = r"<script src=\"https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js\"></script>"
 
@@ -592,181 +656,32 @@ EXAM_QSF_TEMPLATE = Template(r"""
             "Autofill": []
           },
           {
-            "Type": "EmbeddedData",
-            "FlowID": "FL_35",
-            "EmbeddedData": [
-              {
-                "Description": "primary_email_verification",
-                "Type": "Custom",
-                "Field": "primary_email_verification",
-                "VariableType": "String",
-                "DataVisibility": [],
-                "AnalyzeText": false,
-                "Value": "$${rand://int/1000:9999}"
-              }
-            ]
-          },
-          {
-            "Type": "WebService",
-            "FlowID": "FL_34",
-            "URL": "https://hooks.airtable.com/workflows/v1/genericWebhook/appkYePjv3xImn60Z/wflXjGYq8j3n31dRg/wtrW3iL7AWJdE34uY",
-            "Method": "POST",
-            "RequestParams": [],
-            "EditBodyParams": [
-              {
-                "key": "code",
-                "value": "$${e://Field/primary_email_verification}"
-              },
-              {
-                "key": "email",
-                "value": "$${q://QID3/ChoiceTextEntryValue}"
-              }
-            ],
-            "Body": {
-              "code": "$${e://Field/primary_email_verification}",
-              "email": "$${q://QID3/ChoiceTextEntryValue}"
-            },
-            "ContentType": "application/json",
-            "Headers": [],
-            "ResponseMap": [],
-            "FireAndForget": false,
-            "SchemaVersion": 0,
-            "StringifyValues": true
-          },
-          {
-            "Type": "Standard",
-            "ID": "BL_3XcOLSMVJpP6fHM",
-            "FlowID": "FL_32",
-            "Autofill": []
-          },
-          {
             "Type": "Branch",
-            "FlowID": "FL_38",
+            "FlowID": "FL_54",
             "Description": "New Branch",
             "BranchLogic": {
               "0": {
                 "0": {
                   "LogicType": "Question",
-                  "QuestionID": "QID48",
+                  "QuestionID": "QID3",
                   "QuestionIsInLoop": "no",
-                  "ChoiceLocator": "q://QID48/SelectableChoice/1",
-                  "Operator": "Selected",
-                  "QuestionIDFromLocator": "QID48",
-                  "LeftOperand": "q://QID48/SelectableChoice/1",
+                  "ChoiceLocator": "q://QID3/ChoiceTextEntryValue",
+                  "Operator": "DoesNotContain",
+                  "QuestionIDFromLocator": "QID3",
+                  "LeftOperand": "q://QID3/ChoiceTextEntryValue",
+                  "RightOperand": "@RCT@",
+                  "IgnoreCase": 1,
                   "Type": "Expression",
-                  "Description": "<span class=\"ConjDesc\">If</span> <span class=\"QuestionDesc\">Having issues receiving the code?</span> <span class=\"LeftOpDesc\">Check this box to resend the code.</span> <span class=\"OpDesc\">Is Selected</span> "
+                  "Description": "<span class=\"ConjDesc\">If</span> <span class=\"QuestionDesc\">Academic Email Use the same email you used to complete the assignment earlier this semester, even...</span> <span class=\"LeftOpDesc\">Text Response</span> <span class=\"OpDesc\">Does Not Contain</span> <span class=\"RightOpDesc\"> @RCT@ </span>"
                 },
                 "Type": "If"
               },
               "Type": "BooleanExpression"
             },
             "Flow": [
-              {
-                "Type": "WebService",
-                "FlowID": "FL_47",
-                "URL": "https://hooks.airtable.com/workflows/v1/genericWebhook/appkYePjv3xImn60Z/wflXjGYq8j3n31dRg/wtrW3iL7AWJdE34uY",
-                "Method": "POST",
-                "RequestParams": [],
-                "EditBodyParams": [
-                  {
-                    "key": "code",
-                    "value": "$${e://Field/primary_email_verification}"
-                  },
-                  {
-                    "key": "email",
-                    "value": "$${q://QID3/ChoiceTextEntryValue}"
-                  }
-                ],
-                "Body": {
-                  "code": "$${e://Field/primary_email_verification}",
-                  "email": "$${q://QID3/ChoiceTextEntryValue}"
-                },
-                "ContentType": "application/json",
-                "Headers": [],
-                "ResponseMap": [],
-                "FireAndForget": false,
-                "SchemaVersion": 0,
-                "StringifyValues": true
-              },
-              {
-                "Type": "Standard",
-                "ID": "BL_br40aFNTwf5ttB4",
-                "FlowID": "FL_36",
-                "Autofill": []
-              },
-              {
-                "Type": "Branch",
-                "FlowID": "FL_43",
-                "Description": "New Branch",
-                "BranchLogic": {
-                  "0": {
-                    "0": {
-                      "LogicType": "Question",
-                      "QuestionID": "QID50",
-                      "QuestionIsInLoop": "no",
-                      "ChoiceLocator": "q://QID50/SelectableChoice/1",
-                      "Operator": "Selected",
-                      "QuestionIDFromLocator": "QID50",
-                      "LeftOperand": "q://QID50/SelectableChoice/1",
-                      "Type": "Expression",
-                      "Description": "<span class=\"ConjDesc\">If</span> <span class=\"QuestionDesc\">Still having issues?</span> <span class=\"LeftOpDesc\">Check this box to continue.</span> <span class=\"OpDesc\">Is Selected</span> "
-                    },
-                    "Type": "If"
-                  },
-                  "Type": "BooleanExpression"
-                },
-                "Flow": [
-                  {
-                    "Type": "EndSurvey",
-                    "FlowID": "FL_44",
-                    "EndingType": "Advanced",
-                    "Options": {
-                      "Advanced": "true",
-                      "EmailThankYou": "",
-                      "SurveyTermination": "DisplayMessage",
-                      "CountQuotas": "No",
-                      "AnonymizeResponse": "Yes",
-                      "IgnoreResponse": "Yes",
-                      "ResponseFlag": "Screened",
-                      "EOSMessageLibrary": "UR_bQHormGseyEZkzz",
-                      "EOSMessage": "MS_etSVKCFPWkNmA06"
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "Type": "Branch",
-            "FlowID": "FL_40",
-            "Description": "New Branch",
-            "BranchLogic": {
-              "0": {
-                "0": {
-                  "LogicType": "Question",
-                  "QuestionID": "QID48",
-                  "QuestionIsInLoop": "no",
-                  "ChoiceLocator": "q://QID48/SelectableChoice/2",
-                  "Operator": "Selected",
-                  "QuestionIDFromLocator": "QID48",
-                  "LeftOperand": "q://QID48/SelectableChoice/2",
-                  "Type": "Expression",
-                  "Description": "<span class=\"ConjDesc\">If</span> <span class=\"QuestionDesc\">Having issues receiving the code?</span> <span class=\"LeftOpDesc\">Check this box to correct your email address.</span> <span class=\"OpDesc\">Is Selected</span> "
-                },
-                "Type": "If"
-              },
-              "Type": "BooleanExpression"
-            },
-            "Flow": [
-              {
-                "Type": "Block",
-                "ID": "BL_3xyVR7mBcg6zsy2",
-                "FlowID": "FL_41",
-                "Autofill": []
-              },
               {
                 "Type": "EmbeddedData",
-                "FlowID": "FL_39",
+                "FlowID": "FL_35",
                 "EmbeddedData": [
                   {
                     "Description": "primary_email_verification",
@@ -781,7 +696,7 @@ EXAM_QSF_TEMPLATE = Template(r"""
               },
               {
                 "Type": "WebService",
-                "FlowID": "FL_42",
+                "FlowID": "FL_34",
                 "URL": "https://hooks.airtable.com/workflows/v1/genericWebhook/appkYePjv3xImn60Z/wflXjGYq8j3n31dRg/wtrW3iL7AWJdE34uY",
                 "Method": "POST",
                 "RequestParams": [],
@@ -808,26 +723,26 @@ EXAM_QSF_TEMPLATE = Template(r"""
               },
               {
                 "Type": "Standard",
-                "ID": "BL_8G3NLOlCdaTUwGq",
-                "FlowID": "FL_37",
+                "ID": "BL_3XcOLSMVJpP6fHM",
+                "FlowID": "FL_32",
                 "Autofill": []
               },
               {
                 "Type": "Branch",
-                "FlowID": "FL_46",
+                "FlowID": "FL_38",
                 "Description": "New Branch",
                 "BranchLogic": {
                   "0": {
                     "0": {
                       "LogicType": "Question",
-                      "QuestionID": "QID52",
+                      "QuestionID": "QID48",
                       "QuestionIsInLoop": "no",
-                      "ChoiceLocator": "q://QID52/SelectableChoice/1",
+                      "ChoiceLocator": "q://QID48/SelectableChoice/1",
                       "Operator": "Selected",
-                      "QuestionIDFromLocator": "QID52",
-                      "LeftOperand": "q://QID52/SelectableChoice/1",
+                      "QuestionIDFromLocator": "QID48",
+                      "LeftOperand": "q://QID48/SelectableChoice/1",
                       "Type": "Expression",
-                      "Description": "<span class=\"ConjDesc\">If</span> <span class=\"QuestionDesc\">Still having issues?</span> <span class=\"LeftOpDesc\">Check this box to continue.</span> <span class=\"OpDesc\">Is Selected</span> "
+                      "Description": "<span class=\"ConjDesc\">If</span> <span class=\"QuestionDesc\">Having issues receiving the code?</span> <span class=\"LeftOpDesc\">Check this box to resend the code.</span> <span class=\"OpDesc\">Is Selected</span> "
                     },
                     "Type": "If"
                   },
@@ -835,20 +750,195 @@ EXAM_QSF_TEMPLATE = Template(r"""
                 },
                 "Flow": [
                   {
-                    "Type": "EndSurvey",
-                    "FlowID": "FL_45",
-                    "EndingType": "Advanced",
-                    "Options": {
-                      "Advanced": "true",
-                      "EmailThankYou": "",
-                      "SurveyTermination": "DisplayMessage",
-                      "CountQuotas": "No",
-                      "AnonymizeResponse": "Yes",
-                      "IgnoreResponse": "Yes",
-                      "ResponseFlag": "Screened",
-                      "EOSMessageLibrary": "UR_bQHormGseyEZkzz",
-                      "EOSMessage": "MS_etSVKCFPWkNmA06"
-                    }
+                    "Type": "WebService",
+                    "FlowID": "FL_47",
+                    "URL": "https://hooks.airtable.com/workflows/v1/genericWebhook/appkYePjv3xImn60Z/wflXjGYq8j3n31dRg/wtrW3iL7AWJdE34uY",
+                    "Method": "POST",
+                    "RequestParams": [],
+                    "EditBodyParams": [
+                      {
+                        "key": "code",
+                        "value": "$${e://Field/primary_email_verification}"
+                      },
+                      {
+                        "key": "email",
+                        "value": "$${q://QID3/ChoiceTextEntryValue}"
+                      }
+                    ],
+                    "Body": {
+                      "code": "$${e://Field/primary_email_verification}",
+                      "email": "$${q://QID3/ChoiceTextEntryValue}"
+                    },
+                    "ContentType": "application/json",
+                    "Headers": [],
+                    "ResponseMap": [],
+                    "FireAndForget": false,
+                    "SchemaVersion": 0,
+                    "StringifyValues": true
+                  },
+                  {
+                    "Type": "Standard",
+                    "ID": "BL_br40aFNTwf5ttB4",
+                    "FlowID": "FL_36",
+                    "Autofill": []
+                  },
+                  {
+                    "Type": "Branch",
+                    "FlowID": "FL_43",
+                    "Description": "New Branch",
+                    "BranchLogic": {
+                      "0": {
+                        "0": {
+                          "LogicType": "Question",
+                          "QuestionID": "QID50",
+                          "QuestionIsInLoop": "no",
+                          "ChoiceLocator": "q://QID50/SelectableChoice/1",
+                          "Operator": "Selected",
+                          "QuestionIDFromLocator": "QID50",
+                          "LeftOperand": "q://QID50/SelectableChoice/1",
+                          "Type": "Expression",
+                          "Description": "<span class=\"ConjDesc\">If</span> <span class=\"QuestionDesc\">Still having issues?</span> <span class=\"LeftOpDesc\">Check this box to continue.</span> <span class=\"OpDesc\">Is Selected</span> "
+                        },
+                        "Type": "If"
+                      },
+                      "Type": "BooleanExpression"
+                    },
+                    "Flow": [
+                      {
+                        "Type": "EndSurvey",
+                        "FlowID": "FL_44",
+                        "EndingType": "Advanced",
+                        "Options": {
+                          "Advanced": "true",
+                          "EmailThankYou": "",
+                          "SurveyTermination": "DisplayMessage",
+                          "CountQuotas": "No",
+                          "AnonymizeResponse": "Yes",
+                          "IgnoreResponse": "Yes",
+                          "ResponseFlag": "Screened",
+                          "EOSMessageLibrary": "UR_bQHormGseyEZkzz",
+                          "EOSMessage": "MS_etSVKCFPWkNmA06"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "Type": "Branch",
+                "FlowID": "FL_40",
+                "Description": "New Branch",
+                "BranchLogic": {
+                  "0": {
+                    "0": {
+                      "LogicType": "Question",
+                      "QuestionID": "QID48",
+                      "QuestionIsInLoop": "no",
+                      "ChoiceLocator": "q://QID48/SelectableChoice/2",
+                      "Operator": "Selected",
+                      "QuestionIDFromLocator": "QID48",
+                      "LeftOperand": "q://QID48/SelectableChoice/2",
+                      "Type": "Expression",
+                      "Description": "<span class=\"ConjDesc\">If</span> <span class=\"QuestionDesc\">Having issues receiving the code?</span> <span class=\"LeftOpDesc\">Check this box to correct your email address.</span> <span class=\"OpDesc\">Is Selected</span> "
+                    },
+                    "Type": "If"
+                  },
+                  "Type": "BooleanExpression"
+                },
+                "Flow": [
+                  {
+                    "Type": "Block",
+                    "ID": "BL_3xyVR7mBcg6zsy2",
+                    "FlowID": "FL_41",
+                    "Autofill": []
+                  },
+                  {
+                    "Type": "EmbeddedData",
+                    "FlowID": "FL_39",
+                    "EmbeddedData": [
+                      {
+                        "Description": "primary_email_verification",
+                        "Type": "Custom",
+                        "Field": "primary_email_verification",
+                        "VariableType": "String",
+                        "DataVisibility": [],
+                        "AnalyzeText": false,
+                        "Value": "$${rand://int/1000:9999}"
+                      }
+                    ]
+                  },
+                  {
+                    "Type": "WebService",
+                    "FlowID": "FL_42",
+                    "URL": "https://hooks.airtable.com/workflows/v1/genericWebhook/appkYePjv3xImn60Z/wflXjGYq8j3n31dRg/wtrW3iL7AWJdE34uY",
+                    "Method": "POST",
+                    "RequestParams": [],
+                    "EditBodyParams": [
+                      {
+                        "key": "code",
+                        "value": "$${e://Field/primary_email_verification}"
+                      },
+                      {
+                        "key": "email",
+                        "value": "$${q://QID3/ChoiceTextEntryValue}"
+                      }
+                    ],
+                    "Body": {
+                      "code": "$${e://Field/primary_email_verification}",
+                      "email": "$${q://QID3/ChoiceTextEntryValue}"
+                    },
+                    "ContentType": "application/json",
+                    "Headers": [],
+                    "ResponseMap": [],
+                    "FireAndForget": false,
+                    "SchemaVersion": 0,
+                    "StringifyValues": true
+                  },
+                  {
+                    "Type": "Standard",
+                    "ID": "BL_8G3NLOlCdaTUwGq",
+                    "FlowID": "FL_37",
+                    "Autofill": []
+                  },
+                  {
+                    "Type": "Branch",
+                    "FlowID": "FL_46",
+                    "Description": "New Branch",
+                    "BranchLogic": {
+                      "0": {
+                        "0": {
+                          "LogicType": "Question",
+                          "QuestionID": "QID52",
+                          "QuestionIsInLoop": "no",
+                          "ChoiceLocator": "q://QID52/SelectableChoice/1",
+                          "Operator": "Selected",
+                          "QuestionIDFromLocator": "QID52",
+                          "LeftOperand": "q://QID52/SelectableChoice/1",
+                          "Type": "Expression",
+                          "Description": "<span class=\"ConjDesc\">If</span> <span class=\"QuestionDesc\">Still having issues?</span> <span class=\"LeftOpDesc\">Check this box to continue.</span> <span class=\"OpDesc\">Is Selected</span> "
+                        },
+                        "Type": "If"
+                      },
+                      "Type": "BooleanExpression"
+                    },
+                    "Flow": [
+                      {
+                        "Type": "EndSurvey",
+                        "FlowID": "FL_45",
+                        "EndingType": "Advanced",
+                        "Options": {
+                          "Advanced": "true",
+                          "EmailThankYou": "",
+                          "SurveyTermination": "DisplayMessage",
+                          "CountQuotas": "No",
+                          "AnonymizeResponse": "Yes",
+                          "IgnoreResponse": "Yes",
+                          "ResponseFlag": "Screened",
+                          "EOSMessageLibrary": "UR_bQHormGseyEZkzz",
+                          "EOSMessage": "MS_etSVKCFPWkNmA06"
+                        }
+                      }
+                    ]
                   }
                 ]
               }
@@ -921,6 +1011,48 @@ EXAM_QSF_TEMPLATE = Template(r"""
             "Autofill": []
           },
           {
+            "Type": "Branch",
+            "FlowID": "FL_55",
+            "Description": "New Branch",
+            "BranchLogic": {
+              "0": {
+                "0": {
+                  "LogicType": "Question",
+                  "QuestionID": "QID3",
+                  "QuestionIsInLoop": "no",
+                  "ChoiceLocator": "q://QID3/ChoiceTextEntryValue",
+                  "Operator": "Contains",
+                  "QuestionIDFromLocator": "QID3",
+                  "LeftOperand": "q://QID3/ChoiceTextEntryValue",
+                  "RightOperand": "@RCT@",
+                  "IgnoreCase": 1,
+                  "Type": "Expression",
+                  "Description": "<span class=\"ConjDesc\">If</span> <span class=\"QuestionDesc\">Academic Email Use the same email you used to complete the assignment earlier this semester, even...</span> <span class=\"LeftOpDesc\">Text Response</span> <span class=\"OpDesc\">Contains</span> <span class=\"RightOpDesc\"> @RCT@ </span>"
+                },
+                "Type": "If"
+              },
+              "Type": "BooleanExpression"
+            },
+            "Flow": [
+              {
+                "Type": "EndSurvey",
+                "FlowID": "FL_56",
+                "EndingType": "Advanced",
+                "Options": {
+                  "Advanced": "true",
+                  "SurveyTermination": "DisplayMessage",
+                  "EOSMessageLibrary": "UR_bQHormGseyEZkzz",
+                  "EOSMessage": "MS_d4CsfOr3LWsJfwy",
+                  "CountQuotas": "No",
+                  "AnonymizeResponse": "Yes",
+                  "EmailThankYou": "",
+                  "IgnoreResponse": "Yes",
+                  "ResponseFlag": "Screened"
+                }
+              }
+            ]
+          },
+          {
             "Type": "Standard",
             "ID": "BL_2gwh3Zh9Q3Nsn3g",
             "FlowID": "FL_4",
@@ -932,7 +1064,7 @@ EXAM_QSF_TEMPLATE = Template(r"""
           }
         ],
         "Properties": {
-          "Count": 53
+          "Count": 57
         }
       }
     },
@@ -1818,9 +1950,8 @@ EXAM_QSF_TEMPLATE = Template(r"""
           "Settings": {
             "ForceResponse": "ON",
             "ForceResponseType": "ON",
-            "Type": "ContentType",
+            "Type": "CustomValidation",
             "MinChars": "1",
-            "ContentType": "ValidEmail",
             "ValidDateType": "DateWithFormat",
             "ValidPhoneType": "ValidUSPhone",
             "ValidZipType": "ValidUSZip",
@@ -1828,6 +1959,32 @@ EXAM_QSF_TEMPLATE = Template(r"""
               "Min": "",
               "Max": "",
               "NumDecimals": ""
+            },
+            "CustomValidation": {
+              "Logic": {
+                "0": {
+                  "0": {
+                    "QuestionID": "QID3",
+                    "QuestionIsInLoop": "no",
+                    "ChoiceLocator": "q://QID3/ChoiceTextEntryValue",
+                    "Operator": "MatchesRegex",
+                    "QuestionIDFromLocator": "QID3",
+                    "LeftOperand": "q://QID3/ChoiceTextEntryValue",
+                    "RightOperand": "/@RCT@|[^@]+@[^@]+.[^@]+$$/gmi",
+                    "Type": "Expression",
+                    "LogicType": "Question",
+                    "Description": "<span class=\"ConjDesc\">If</span> <span class=\"QuestionDesc\">Academic Email Use the same email you used to complete the assignment earlier this semester, even...</span> <span class=\"LeftOpDesc\">Text Response</span> <span class=\"OpDesc\">Matches Regex</span> <span class=\"RightOpDesc\"> /@RCT@|[^@]+@[^@]+.[^@]+$$/gmi </span>"
+                  },
+                  "Type": "If"
+                },
+                "Type": "BooleanExpression"
+              },
+              "Message": {
+                "messageID": null,
+                "subMessageID": "VE_VALIDEMAIL",
+                "libraryID": null,
+                "description": "Require valid email address"
+              }
             }
           }
         },
@@ -1838,7 +1995,7 @@ EXAM_QSF_TEMPLATE = Template(r"""
         "SearchSource": {
           "AllowFreeResponse": "false"
         },
-        "QuestionJS": "Qualtrics.SurveyEngine.addOnload(function() {\n    let questionElement = document.getElementById(\"question-QID73\");\n\tlet initCounter = parseInt(Qualtrics.SurveyEngine.getJSEmbeddedData('failed_attempts_email'), 10);\n\tif (initCounter < 2) {\n\t\tquestionElement.style.display = 'none';\n\t}\n\t\n    var qthis = this;  // Reference to the current question context\n\n    // Update this selector based on which input holds the email.\n    var codeSelector = \"#question-QID3 .text-input\";  // adjust as needed\n\n    // Intercept the Next button using its current ID in the new layout.\n    jQuery(\"#next-button\").off(\"click.emailCheck\").on(\"click.emailCheck\", function(event) {\n        // Prevent default actions and propagation.\n        event.preventDefault();\n        event.stopImmediatePropagation();\n\t\t\n\t\tlet overrideCheckbox = document.getElementById(\"mc-choice-input-QID73-1\");\n\t\tif (overrideCheckbox.checked) {\n\t\t\tqthis.clickNextButton();\n\t\t\treturn false;\n\t\t};\n\n        // Get the code entered by the user.\n        var userEmail = jQuery(codeSelector).val();\n\t\t\n\t\tvar courseId = \"$${e://Field/pp_airtable_class_RID}\"\n\n        // Make an API call to Airtable to verify the code.\n\t\tvar formula = \"https://api.airtable.com/v0/appkYePjv3xImn60Z/Students?filterByFormula=\" + \"AND(FIND('$$' %26 LOWER(TRIM('\"+ userEmail.trim() + \"')) %26 '$$', LOWER({fld7N2h5AZWxdpKZq})) > 0, FIND('\" + courseId + \"', {fld3PVyJIkRa5Cxh5}) > 0)\";\n\n\t\tjQuery.ajax({\n            url: formula,\n            method: \"GET\",\n            headers: {\n                \"Authorization\": \"Bearer patI8DqO3lh0f9BHP.df50e1a9e6f4564beb814476e4b3c0d6500ff91bce307e61261a9960a9549ca7\"\n            },\n            success: function(response) {\n                // Check if at least one record is returned\n                if (response.records && response.records.length > 0 && response.records[0].id) {\n                    // Email is valid – proceed to the next page.\n\t\t\t\t\tQualtrics.SurveyEngine.setJSEmbeddedData(\"airtable_student_RID\", response.records[0].id);\n                    qthis.clickNextButton();\n                } else {\n                    // No valid records were found.\n\t\t\t\t\tvar counter = parseInt(Qualtrics.SurveyEngine.getJSEmbeddedData('failed_attempts_email'), 10);\n\t\t\t\t\tQualtrics.SurveyEngine.setJSEmbeddedData(\"failed_attempts_email\", counter + 1);\n\t\t\t\t\tcounter = parseInt(Qualtrics.SurveyEngine.getJSEmbeddedData('failed_attempts_email'), 10);\n\t\t\t\t\tif (counter > 1) {\n\t\t\t\t\t\talert(\"We're still having trouble finding your record.\\n\\nIf you're certain you completed the previous assignment for this class with this email, check the \\\"Still having issues\\\" checkbox to continue.\");\n\t\t\t\t\t\tquestionElement.style.display = 'block';\n\t\t\t\t\t\treturn false;\n\t\t\t\t\t}\n                    alert(\"We don't have a record of the email address you entered as enrolled in this class.\\n\\nPlease try again. Make sure to use the same email you used to complete the assignment earlier this semester, even if it was not your academic email.\");\n                }\n            },\n            error: function(error) {\n                // Handle errors in the API call\n\t\t\t\tconsole.log(error);\n                alert(\"There was an error contacting the server. Please try again later. If the issue persists, contact your instructor or email pingpongedu@hks.harvard.edu\");\n            }\n        });\n\n        // Returning false ensures that no other click events are triggered.\n        return false;\n    });\n});\n\nQualtrics.SurveyEngine.addOnReady(function()\n{\n\t/*Place your JavaScript here to run when the page is fully displayed*/\n\n});\n\nQualtrics.SurveyEngine.addOnUnload(function()\n{\n\tQualtrics.SurveyEngine.setJSEmbeddedData(\"failed_attempts_email\", 0);\n\t/*Place your JavaScript here to run when the page is unloaded*/\n\tjQuery(\"#next-button\").off(\"click.emailCheck\");\n\n});"
+        "QuestionJS": "Qualtrics.SurveyEngine.addOnload(function() {\n    let questionElement = document.getElementById(\"question-QID73\");\n\tlet initCounter = parseInt(Qualtrics.SurveyEngine.getJSEmbeddedData('failed_attempts_email'), 10);\n\tif (initCounter < 2) {\n\t\tquestionElement.style.display = 'none';\n\t}\n\t\n    var qthis = this;  // Reference to the current question context\n\n    // Update this selector based on which input holds the email.\n    var codeSelector = \"#question-QID3 .text-input\";  // adjust as needed\n\n    // Intercept the Next button using its current ID in the new layout.\n    jQuery(\"#next-button\").off(\"click.emailCheck\").on(\"click.emailCheck\", function(event) {\n        // Prevent default actions and propagation.\n        event.preventDefault();\n        event.stopImmediatePropagation();\n\t\t\n\t\tlet overrideCheckbox = document.getElementById(\"mc-choice-input-QID73-1\");\n\t\tif (overrideCheckbox.checked) {\n\t\t\tqthis.clickNextButton();\n\t\t\treturn false;\n\t\t};\n\n        // Get the code entered by the user.\n        var userEmail = jQuery(codeSelector).val();\n\t\t\n\t\tif (userEmail.toLowerCase().trim()===\"@rct@\") {\n\t\t\tqthis.clickNextButton();\n\t\t\treturn false;\n\t\t};\n\t\t\n\t\tvar courseId = \"$${e://Field/pp_airtable_class_RID}\"\n\n        // Make an API call to Airtable to verify the code.\n\t\tvar formula = \"https://api.airtable.com/v0/appkYePjv3xImn60Z/Students?filterByFormula=\" + \"AND(FIND('$$' %26 LOWER(TRIM('\"+ userEmail.trim() + \"')) %26 '$$', LOWER({fld7N2h5AZWxdpKZq})) > 0, FIND('\" + courseId + \"', {fld3PVyJIkRa5Cxh5}) > 0)\";\n\n\t\tjQuery.ajax({\n            url: formula,\n            method: \"GET\",\n            headers: {\n                \"Authorization\": \"Bearer patI8DqO3lh0f9BHP.df50e1a9e6f4564beb814476e4b3c0d6500ff91bce307e61261a9960a9549ca7\"\n            },\n            success: function(response) {\n                // Check if at least one record is returned\n                if (response.records && response.records.length > 0 && response.records[0].id) {\n                    // Email is valid – proceed to the next page.\n\t\t\t\t\tQualtrics.SurveyEngine.setJSEmbeddedData(\"airtable_student_RID\", response.records[0].id);\n                    qthis.clickNextButton();\n                } else {\n                    // No valid records were found.\n\t\t\t\t\tvar counter = parseInt(Qualtrics.SurveyEngine.getJSEmbeddedData('failed_attempts_email'), 10);\n\t\t\t\t\tQualtrics.SurveyEngine.setJSEmbeddedData(\"failed_attempts_email\", counter + 1);\n\t\t\t\t\tcounter = parseInt(Qualtrics.SurveyEngine.getJSEmbeddedData('failed_attempts_email'), 10);\n\t\t\t\t\tif (counter > 1) {\n\t\t\t\t\t\talert(\"We're still having trouble finding your record.\\n\\nIf you're certain you completed the previous assignment for this class with this email, check the \\\"Still having issues\\\" checkbox to continue.\");\n\t\t\t\t\t\tquestionElement.style.display = 'block';\n\t\t\t\t\t\treturn false;\n\t\t\t\t\t}\n                    alert(\"We don't have a record of the email address you entered as enrolled in this class.\\n\\nPlease try again. Make sure to use the same email you used to complete the assignment earlier this semester, even if it was not your academic email.\");\n                }\n            },\n            error: function(error) {\n                // Handle errors in the API call\n\t\t\t\tconsole.log(error);\n                alert(\"There was an error contacting the server. Please try again later. If the issue persists, contact your instructor or email pingpongedu@hks.harvard.edu\");\n            }\n        });\n\n        // Returning false ensures that no other click events are triggered.\n        return false;\n    });\n});\n\nQualtrics.SurveyEngine.addOnReady(function()\n{\n\t/*Place your JavaScript here to run when the page is fully displayed*/\n\n});\n\nQualtrics.SurveyEngine.addOnUnload(function()\n{\n\tQualtrics.SurveyEngine.setJSEmbeddedData(\"failed_attempts_email\", 0);\n\t/*Place your JavaScript here to run when the page is unloaded*/\n\tjQuery(\"#next-button\").off(\"click.emailCheck\");\n\n});"
       }
     },
     {
