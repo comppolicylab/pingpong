@@ -1494,6 +1494,17 @@
                 <Button
                   pill
                   size="xs"
+                  class="border border-green-900 bg-gradient-to-t from-green-800 to-green-700 text-white hover:from-green-700 hover:to-green-600"
+                  on:click={syncClass}
+                  on:touchstart={syncClass}
+                  disabled={syncingCanvasClass || $updatingApiKey}
+                >
+                  {#if syncingCanvasClass}<Spinner color="white" class="w-4 h-4 me-2" />Syncing
+                    roster...{:else}<RefreshOutline class="w-4 h-4 me-2" />Sync roster{/if}</Button
+                >
+                <Button
+                  pill
+                  size="xs"
                   class="border border-green-900 hover:bg-green-900 text-green-900 hover:bg-gradient-to-t hover:from-green-800 hover:to-green-700 hover:text-white"
                   disabled={removingCanvasConnection}
                   on:click={() => (disconnectCanvas = true)}

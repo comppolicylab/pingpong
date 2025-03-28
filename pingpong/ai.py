@@ -134,6 +134,12 @@ async def generate_name(
         return response.choices[0].message.parsed
     except openai.RateLimitError as e:
         raise e
+    except openai.BadRequestError:
+        # We are typically seeing this error when the Azure content filter
+        # is triggered. We should print the message that triggered the error
+        # and return None.
+        logger.exception(f"Error generating thread name. Message: {transcript}")
+        return None
     except openai.APIError:
         logger.exception("Error generating thread name.")
         return None
@@ -321,7 +327,9 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
         self.enqueue(
             {
                 "type": "tool_call_created",
-                "tool_call": tool_call.model_dump(),
+                "tool_call": tool_call
+                if isinstance(tool_call, Dict)
+                else tool_call.model_dump(),
             }
         )
 
@@ -464,7 +472,7 @@ async def run_thread(
     except openai.APIError as openai_error:
         if openai_error.type == "server_error":
             try:
-                logger.warning(f"Server error in thread run: {openai_error}")
+                logger.exception(f"Server error in thread run: {openai_error}")
                 yield (
                     orjson.dumps(
                         {
@@ -498,7 +506,7 @@ async def run_thread(
                 pass
     except (ValueError, Exception) as e:
         try:
-            logger.warning(f"Error adding new thread message: {e}")
+            logger.exception(f"Error adding new thread message: {e}")
             yield orjson.dumps({"type": "presend_error", "detail": str(e)}) + b"\n"
         except Exception as e_:
             logger.exception(f"Error writing to stream: {e_}")

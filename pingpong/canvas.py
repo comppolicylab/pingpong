@@ -165,7 +165,7 @@ class CanvasCourseClient(ABC):
         self,
         buffer: int = 60,
         force_refresh: bool = False,
-        log_out: bool = False,
+        check_authorized_user: bool = True,
     ) -> str:
         """Get the Canvas access token for the class.
 
@@ -184,7 +184,7 @@ class CanvasCourseClient(ABC):
             raise CanvasException("No Canvas access token for class", code=404)
 
         # Check if the user making the request is the user whose Canvas account is connected for the class
-        if not log_out and response.user_id != self.user_id:
+        if check_authorized_user and response.user_id != self.user_id:
             raise CanvasException(
                 "You're not the authorized Canvas user for this class",
                 code=403,
@@ -226,7 +226,7 @@ class CanvasCourseClient(ABC):
     @with_retry(max_retries=3, raise_custom_errors={400: CanvasInvalidTokenException()})
     async def log_out(self, retry_attempt: int = 0) -> None:
         access_token = await self._get_access_token(
-            force_refresh=retry_attempt > 0, log_out=True
+            force_refresh=retry_attempt > 0, check_authorized_user=False
         )
         params = {"access_token": access_token}
         await self.http_session.delete(
@@ -264,9 +264,12 @@ class CanvasCourseClient(ABC):
         body: dict | None = None,
         params: dict | None = None,
         retry_attempt: int = 0,
+        check_authorized_user: bool = True,
     ) -> CanvasRequestResponse:
         # Get the access token. Force refresh the token if this is a retry attempt
-        access_token = await self._get_access_token(force_refresh=retry_attempt > 0)
+        access_token = await self._get_access_token(
+            force_refresh=retry_attempt > 0, check_authorized_user=check_authorized_user
+        )
         headers = {"Authorization": f"Bearer {access_token}"}
 
         async with self.http_session.post(
@@ -284,9 +287,12 @@ class CanvasCourseClient(ABC):
         path: str,
         params: dict | None = None,
         retry_attempt: int = 0,
+        check_authorized_user: bool = True,
     ) -> CanvasRequestResponse:
         # Get the access token. Force refresh the token if this is a retry attempt
-        access_token = await self._get_access_token(force_refresh=retry_attempt > 0)
+        access_token = await self._get_access_token(
+            force_refresh=retry_attempt > 0, check_authorized_user=check_authorized_user
+        )
         headers = {"Authorization": f"Bearer {access_token}"}
 
         async with self.http_session.get(
@@ -303,6 +309,7 @@ class CanvasCourseClient(ABC):
         body: dict | None = None,
         params: dict | None = None,
         method: Union[Literal["GET"], Literal["POST"]] = "GET",
+        check_authorized_user: bool = True,
     ):
         """Paginate through a request response. Returns the parsed response of all pages.
 
@@ -319,9 +326,13 @@ class CanvasCourseClient(ABC):
         next_page = self.config.url(path)
         while next_page:
             if method == "GET":
-                response = await self._make_authed_request_get(next_page, params)
+                response = await self._make_authed_request_get(
+                    next_page, params, check_authorized_user=check_authorized_user
+                )
             else:
-                response = await self._make_authed_request_post(next_page, body, params)
+                response = await self._make_authed_request_post(
+                    next_page, body, params, check_authorized_user=check_authorized_user
+                )
 
             yield response.response
 
@@ -619,10 +630,19 @@ class CanvasCourseClient(ABC):
 
             # Calculate user permissions
             is_teacher = False
+            latest_activity = None
             for enrollment in user["enrollments"]:
-                if enrollment["type"] in ["TeacherEnrollment", "TaEnrollment"]:
+                if enrollment.get("type") in ["TeacherEnrollment", "TaEnrollment"]:
                     is_teacher = True
-                    break
+
+                last_activity_at = enrollment.get("last_activity_at")
+                if last_activity_at:
+                    activity_date = datetime.fromisoformat(
+                        last_activity_at.replace("Z", "+00:00")
+                    )
+
+                    if not latest_activity or activity_date > latest_activity:
+                        latest_activity = activity_date
 
             # Create UserClassRole object for the user
             yield CreateUserClassRole(
@@ -633,6 +653,7 @@ class CanvasCourseClient(ABC):
                     teacher=is_teacher,
                     student=not is_teacher,
                 ),
+                last_active=latest_activity,
             )
 
     async def _get_course_users(self, course_id: str) -> list[CreateUserClassRole]:
@@ -657,11 +678,28 @@ class CanvasCourseClient(ABC):
         #                  ‘final_score’, ‘current_grade’ and ‘final_grade’ values.
         params = {"include[]": ["enrollments"]}
 
-        return [
+        users = [
             user_role
-            async for result in self._request_all_pages(request_url, params=params)
+            async for result in self._request_all_pages(
+                request_url, params=params, check_authorized_user=False
+            )
             for user_role in self._process_users(result)
         ]
+
+        unique_users: dict[str, CreateUserClassRole] = {}
+
+        for user in users:
+            if user.email not in unique_users:
+                unique_users[user.email] = user
+            else:
+                if user.last_active is None:
+                    continue
+
+                current_last = unique_users[user.email].last_active
+                if current_last is None or user.last_active > current_last:
+                    unique_users[user.email] = user
+
+        return list(unique_users.values())
 
     @abstractmethod
     async def _update_user_roles(self) -> None:

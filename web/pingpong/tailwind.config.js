@@ -95,6 +95,9 @@ const config = {
         'opal-100': '#e1ecea',
         'opal-400': '#729e98',
         'opal-800': '#3b4f4f'
+      },
+      gridTemplateColumns: {
+        20: 'repeat(20, minmax(0, 1fr))'
       }
     }
   },

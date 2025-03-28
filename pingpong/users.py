@@ -410,14 +410,13 @@ class AddNewUsers(ABC):
 
             invite_roles = []
             for role in ["admin", "teacher", "student"]:
+                new_role = (f"user:{user.id}", role, f"class:{self.class_id}")
                 if getattr(ucr.roles, role):
-                    grants.append((f"user:{user.id}", role, f"class:{self.class_id}"))
+                    grants.append(new_role)
                     if not self.new_ucr.silent:
                         invite_roles.append(self.invite_config.formatted_roles[role])
                 else:
-                    self.revokes.append(
-                        (f"user:{user.id}", role, f"class:{self.class_id}")
-                    )
+                    self.revokes.append(new_role)
 
             if enrollment:
                 await self._update_user_enrollment(enrollment, ucr.roles, ucr.sso_id)
@@ -438,7 +437,12 @@ class AddNewUsers(ABC):
             await self._remove_deleted_users()
             await self._merge_accounts()
 
-        await self.client.write_safe(grant=grants, revoke=self.revokes)
+        if len(grants) > len(list(set(grants))):
+            logger.exception("Duplicate grants detected.")
+
+        await self.client.write_safe(
+            grant=list(set(grants)), revoke=list(set(self.revokes))
+        )
         return schemas.CreateUserResults(results=results)
 
 
