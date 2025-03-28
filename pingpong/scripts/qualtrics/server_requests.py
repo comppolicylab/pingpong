@@ -1,127 +1,62 @@
-import pingpong.scripts.jira.schemas as scripts_schemas
+import json
+import pingpong.scripts.qualtrics.schemas as scripts_schemas
+from pingpong.scripts.qualtrics.vars import (
+    QUALTRICS_API_KEY,
+)
 
 
-async def add_instructor_to_jira(
-    session, data: scripts_schemas.AddInstructorRequest, url: str, token: str
-) -> scripts_schemas.JiraCustomerResponse:
-    auth_header = f"Basic {token}"
-    async with session.post(
-        f"{url}/rest/servicedeskapi/customer",
+async def get_exam_object(session, url: str) -> scripts_schemas.ExamJSON:
+    async with session.get(
+        url,
         raise_for_status=True,
-        json=data.model_dump(),
         headers={
-            "Authorization": auth_header,
             "Accept": "application/json",
-            "Content-Type": "application/json",
-            "X-ExperimentalApi": "true",
         },
     ) as resp:
         response = await resp.json()
-        return scripts_schemas.JiraCustomerResponse(**response)
+        return scripts_schemas.ExamJSON(**response)
 
 
-async def add_instructor_to_project(
-    session, instructor_id: str, service_desk_id: str, url: str, token: str
-) -> None:
-    auth_header = f"Basic {token}"
+async def import_qsf(session, qsf: str) -> scripts_schemas.QualtricsAddSurveyResponse:
+    try:
+        json.loads(qsf)
+    except json.JSONDecodeError as e:
+        # Extract position of the error
+        error_pos = e.pos
+
+        # Split the string into lines
+        lines = qsf.splitlines()  # Changed from json_string to qsf
+
+        # Calculate line number and character position within that line
+        current_pos = 0
+        for line_number, line in enumerate(lines):
+            next_pos = current_pos + len(line) + 1  # +1 for the newline character
+            if current_pos <= error_pos < next_pos:
+                raise ValueError(f"Offending line {line_number + 1}: {line.strip()}")
+            current_pos = next_pos
+
     async with session.post(
-        f"{url}/rest/servicedeskapi/servicedesk/{service_desk_id}/customer",
+        "https://pdx1.qualtrics.com/API/v3/survey-definitions",
         raise_for_status=True,
-        json={"accountIds": [instructor_id]},
         headers={
-            "Authorization": auth_header,
-            "Accept": "application/json",
+            "X-API-TOKEN": QUALTRICS_API_KEY,
             "Content-Type": "application/json",
-            "X-ExperimentalApi": "opt-in",
         },
-    ) as resp:
-        if resp.status == 204:
-            return None
-
-
-async def add_instructor_field_to_jira(
-    session,
-    instructor_id: str,
-    field_name: str,
-    field_values: list[str],
-    cloudId: str,
-    token: str,
-) -> None:
-    auth_header = f"Basic {token}"
-    async with session.put(
-        f"https://api.atlassian.com/jsm/csm/cloudid/{cloudId}/api/v1/customer/{instructor_id}/details",
-        raise_for_status=True,
-        params={"fieldName": field_name},
-        json={"values": field_values},
-        headers={
-            "Authorization": auth_header,
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "X-ExperimentalApi": "opt-in",
-        },
-    ) as resp:
-        if resp.status == 200:
-            return None
-
-
-async def add_course_to_jira(
-    session, course_name: str, cloudId: str, token: str
-) -> str:
-    auth_header = f"Basic {token}"
-    async with session.post(
-        f"https://api.atlassian.com/jsm/csm/cloudid/{cloudId}/api/v1/product",
-        raise_for_status=True,
-        json={"name": course_name},
-        headers={
-            "Authorization": auth_header,
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "X-ExperimentalApi": "opt-in",
-        },
+        json=json.loads(qsf),
     ) as resp:
         response = await resp.json()
-        return response.get("id")
+        return scripts_schemas.QualtricsAddSurveyResponse(**response)
 
 
-async def add_course_to_instructor(
-    session, instructor_id: str, course_id: str, cloudId: str, token: str
-) -> str:
-    auth_header = f"Basic {token}"
+async def publish_survey(session, survey_id: str) -> bool:
     async with session.post(
-        f"https://api.atlassian.com/jsm/csm/cloudid/{cloudId}/api/v1/customer/{instructor_id}/entitlement",
+        f"https://pdx1.qualtrics.com/API/v3/survey-definitions/{survey_id}/versions",
         raise_for_status=True,
-        json={"productId": course_id},
         headers={
-            "Authorization": auth_header,
-            "Accept": "application/json",
+            "X-API-TOKEN": QUALTRICS_API_KEY,
             "Content-Type": "application/json",
-            "X-ExperimentalApi": "opt-in",
         },
+        json={"Published": True, "Description": "Initial version"},
     ) as resp:
         response = await resp.json()
-        return response.get("id")
-
-
-async def add_entitlement_field_to_jira(
-    session,
-    entitlement_id: str,
-    field_name: str,
-    field_values: list[str],
-    cloudId: str,
-    token: str,
-) -> None:
-    auth_header = f"Basic {token}"
-    async with session.put(
-        f"https://api.atlassian.com/jsm/csm/cloudid/{cloudId}/api/v1/entitlement/{entitlement_id}/details",
-        raise_for_status=True,
-        params={"fieldName": field_name},
-        json={"values": field_values},
-        headers={
-            "Authorization": auth_header,
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "X-ExperimentalApi": "opt-in",
-        },
-    ) as resp:
-        if resp.status == 200:
-            return None
+        return response["result"]["metadata"]["wasPublished"]

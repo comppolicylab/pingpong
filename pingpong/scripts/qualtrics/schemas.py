@@ -1,3 +1,4 @@
+from typing import Literal
 from pyairtable.orm import Model, fields as F
 from pydantic import BaseModel
 
@@ -28,6 +29,10 @@ class AirtableClass(Model):
     jira_added_ent_fields = F.CheckboxField("Added Entitlement Fields")
     jira_instructor_id = F.LookupField[str]("Instructor Jira ID")
     airtable_url = F.TextField("Airtable Record URL")
+    json_file = F.AttachmentsField("Exam JSON")
+    postassessment_status = F.SelectField("PostAssessment")
+    postassessment_url = F.UrlField("PostAssessment Link")
+    postassessment_workflow = F.CheckboxField("Workflow On?")
 
     class Meta:
         table_name: str = "Airtable Classes"
@@ -35,28 +40,22 @@ class AirtableClass(Model):
         api_key: str = _AIRTABLE_API_KEY
 
 
-class Instructor(Model):
-    first_name = F.TextField("First Name")
-    last_name = F.TextField("Last Name")
-    email = F.EmailField("Email")
-    classes = F.LinkField("Classes", AirtableClass)
-    deadline_url = F.UrlField("Deadline Survey URL")
-    jira = F.CheckboxField("Added to Jira")
-    jira_account_id = F.TextField("Jira AccountId")
-    jira_project = F.CheckboxField("Added to Jira Project")
-    jira_fields = F.CheckboxField("Added Jira Fields")
-    airtable_url = F.TextField("Airtable Record URL")
-
-    class Meta:
-        table_name: str = "Instructors"
-        base_id: str = _AIRTABLE_BASE_ID
-        api_key: str = _AIRTABLE_API_KEY
+class ExamQuestion(BaseModel):
+    type: Literal["multiple_choice"]
+    question: str
+    options: list[str]
+    uses_latex: bool
 
 
-class AddInstructorRequest(BaseModel):
-    email: str
-    displayName: str
+class ExamJSON(BaseModel):
+    pp_airtable_class_RID: str
+    uses_latex: bool
+    questions: list[ExamQuestion]
 
 
-class JiraCustomerResponse(BaseModel):
-    accountId: str
+class QualtricsAddSurveyResult(BaseModel):
+    SurveyID: str
+
+
+class QualtricsAddSurveyResponse(BaseModel):
+    result: QualtricsAddSurveyResult
