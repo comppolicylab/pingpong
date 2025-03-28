@@ -62,6 +62,12 @@ optional = true
 [tool.poetry.group.local-scripts.dependencies]
 pyairtable = "^3.0.0"
 
+[tool.poetry.group.local-scripts-qualtrics]
+optional = true
+
+[tool.poetry.group.local-scripts-qualtrics.dependencies]
+selenium = "^4.30.0"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"

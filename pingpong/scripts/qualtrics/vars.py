@@ -1,0 +1,10 @@
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()
+AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
+AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
+AIRTABLE_WEBHOOK_URL = os.getenv("AIRTABLE_WEBHOOK_URL")
+QUALTRICS_API_KEY = os.getenv("QUALTRICS_API_KEY")
+QUALTRICS_BASE_URL = os.getenv("QUALTRICS_BASE_URL")
