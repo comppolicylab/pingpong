@@ -3876,9 +3876,10 @@ async def get_me(request: Request):
 )
 async def update_me(request: Request, update: schemas.UpdateUserInfo):
     """Update the user profile."""
-    return await models.User.update_info(
-        request.state.db, request.state.session.user.id, update
-    )
+    return request.state.session
+    # return await models.User.update_info(
+    #     request.state.db, request.state.session.user.id, update
+    # )
 
 
 @v1.get(
