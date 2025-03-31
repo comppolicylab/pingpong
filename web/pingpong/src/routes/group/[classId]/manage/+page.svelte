@@ -238,7 +238,7 @@
       return aName.localeCompare(bName);
     }) as FileUploadInfo[];
 
-  $: hasApiKey = !!data?.apiKey?.api_key;
+  $: hasApiKey = !!data?.hasAPIKey;
   $: canExportThreads = !!data?.grants?.isAdmin || !!data?.grants?.isTeacher;
   $: canEditClassInfo = !!data?.grants?.canEditInfo;
   $: canManageClassUsers = !!data?.grants?.canManageUsers;
@@ -910,7 +910,7 @@
     </form>
   {/if}
 
-  {#if subscriptionInfo && data?.hasAPIKey}
+  {#if subscriptionInfo && hasApiKey}
     <div bind:this={summaryElement} class="grid md:grid-cols-3 gap-x-6 gap-y-8 pt-6">
       <div>
         <Heading customSize="text-xl font-bold" tag="h3"
