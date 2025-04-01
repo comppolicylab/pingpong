@@ -105,7 +105,7 @@ class InspectAuthz(BaseModel):
 
 
 class InspectAuthzAllResult(BaseModel):
-    results: list[Relation]
+    result: list[Relation]
 
 
 class AddEmailToUserRequest(BaseModel):

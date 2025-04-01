@@ -343,7 +343,7 @@ async def inspect_authz(request: Request, subj: str, obj: str, rel: str):
     response_model=schemas.InspectAuthzAllResult,
 )
 async def list_all_user_permissions(request: Request, user_id: str):
-    return {"results": await list_all_permissions(request.state.authz, int(user_id))}
+    return {"result": await list_all_permissions(request.state.authz, int(user_id))}
 
 
 @v1.post(
