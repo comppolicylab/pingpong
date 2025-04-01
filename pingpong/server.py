@@ -3873,6 +3873,7 @@ async def get_me(request: Request):
 @v1.put(
     "/me",
     dependencies=[Depends(LoggedIn())],
+    response_model=schemas.User,
 )
 async def update_me(request: Request, update: schemas.UpdateUserInfo):
     """Update the user profile."""
