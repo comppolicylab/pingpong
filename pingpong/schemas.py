@@ -12,6 +12,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from pingpong.authz.base import Relation
 from .gravatar import get_email_hash, get_gravatar_image
 
 
@@ -100,6 +102,10 @@ class InspectAuthz(BaseModel):
     relation: str
     object: AuthzEntity
     result: InspectAuthzResult
+
+
+class InspectAuthzAllResult(BaseModel):
+    result: list[Relation]
 
 
 class AddEmailToUserRequest(BaseModel):
