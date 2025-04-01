@@ -291,7 +291,7 @@ def get_config(request: Request):
         d["db"]["password"] = "******"
     if "webhook" in d.get("support", {}):
         d["support"]["webhook"] = "******"
-    return {"config": config.dict(), "headers": dict(request.headers)}
+    return {"config": config.model_dump(), "headers": dict(request.headers)}
 
 
 @v1.get(
@@ -337,9 +337,13 @@ async def inspect_authz(request: Request, subj: str, obj: str, rel: str):
     )
 
 
-@v1.get("/authz/audit_all", dependencies=[Depends(Authz("admin"))])
+@v1.get(
+    "/authz/audit_all",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.InspectAuthzAllResult,
+)
 async def list_all_user_permissions(request: Request, user_id: str):
-    return await list_all_permissions(request.state.authz, int(user_id))
+    return {"results": await list_all_permissions(request.state.authz, int(user_id))}
 
 
 @v1.post(
@@ -1571,6 +1575,7 @@ async def get_class_summary_subscription(class_id: str, request: Request):
 @v1.post(
     "/class/{class_id}/summarize/subscription",
     dependencies=[Depends(Authz("can_receive_summaries", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
 )
 async def subscribe_to_class_summary(class_id: str, request: Request):
     class_ = await models.Class.get_by_id(request.state.db, int(class_id))
@@ -1595,6 +1600,7 @@ async def subscribe_to_class_summary(class_id: str, request: Request):
 @v1.delete(
     "/class/{class_id}/summarize/subscription",
     dependencies=[Depends(Authz("can_receive_summaries", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
 )
 async def unsubscribe_from_class_summary(class_id: str, request: Request):
     class_ = await models.Class.get_by_id(request.state.db, int(class_id))
@@ -2222,6 +2228,7 @@ async def export_class_threads(
 @v1.post(
     "/admin/migrate/assistants/model",
     dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.GenericStatus,
 )
 async def migrate_models(
     req: schemas.AssistantModelUpgradeRequest, request: Request, tasks: BackgroundTasks
@@ -2982,6 +2989,7 @@ async def unpublish_thread(class_id: str, thread_id: str, request: Request):
     dependencies=[
         Depends(Authz("can_participate", "thread:{thread_id}")),
     ],
+    response_model=schemas.GenericStatus,
 )
 async def remove_file_from_thread(
     class_id: str,
@@ -3671,6 +3679,7 @@ async def update_assistant(
 @v1.post(
     "/class/{class_id}/assistant/{assistant_id}/publish",
     dependencies=[Depends(Authz("can_publish", "assistant:{assistant_id}"))],
+    response_model=schemas.GenericStatus,
 )
 async def publish_assistant(class_id: str, assistant_id: str, request: Request):
     asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
@@ -3685,6 +3694,7 @@ async def publish_assistant(class_id: str, assistant_id: str, request: Request):
 @v1.delete(
     "/class/{class_id}/assistant/{assistant_id}/publish",
     dependencies=[Depends(Authz("can_publish", "assistant:{assistant_id}"))],
+    response_model=schemas.GenericStatus,
 )
 async def unpublish_assistant(class_id: str, assistant_id: str, request: Request):
     asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
@@ -3905,6 +3915,7 @@ async def get_activity_summaries(request: Request):
 @v1.post(
     "/me/activity_summaries",
     dependencies=[Depends(LoggedIn())],
+    response_model=schemas.GenericStatus,
 )
 async def subscribe_to_all_summaries(
     request: Request,
@@ -3931,6 +3942,7 @@ async def subscribe_to_all_summaries(
 @v1.delete(
     "/me/activity_summaries",
     dependencies=[Depends(LoggedIn())],
+    response_model=schemas.GenericStatus,
 )
 async def unsubscribe_from_all_summaries(
     request: Request,
@@ -3957,6 +3969,7 @@ async def unsubscribe_from_all_summaries(
 @v1.post(
     "/me/activity_summaries/create",
     dependencies=[Depends(LoggedIn())],
+    response_model=schemas.GenericStatus,
 )
 async def enable_dna_as_create(
     request: Request,
@@ -3971,6 +3984,7 @@ async def enable_dna_as_create(
 @v1.delete(
     "/me/activity_summaries/create",
     dependencies=[Depends(LoggedIn())],
+    response_model=schemas.GenericStatus,
 )
 async def disable_dna_as_create(
     request: Request,
@@ -3985,6 +3999,7 @@ async def disable_dna_as_create(
 @v1.post(
     "/me/activity_summaries/join",
     dependencies=[Depends(LoggedIn())],
+    response_model=schemas.GenericStatus,
 )
 async def enable_dna_as_join(
     request: Request,
@@ -3999,6 +4014,7 @@ async def enable_dna_as_join(
 @v1.delete(
     "/me/activity_summaries/join",
     dependencies=[Depends(LoggedIn())],
+    response_model=schemas.GenericStatus,
 )
 async def disable_dna_as_join(
     request: Request,
