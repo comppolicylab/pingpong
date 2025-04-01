@@ -3879,7 +3879,7 @@ async def update_me(request: Request, update: schemas.UpdateUserInfo):
     await models.User.update_info(
         request.state.db, request.state.session.user.id, update
     )
-    return request.state.session
+    return await models.User.get_by_id(request.state.db, request.state.session.user.id)
     # return await models.User.update_info(
     #     request.state.db, request.state.session.user.id, update
     # )

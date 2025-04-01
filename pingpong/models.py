@@ -1039,11 +1039,10 @@ class User(Base):
     @classmethod
     async def update_info(
         self, session: AsyncSession, user_id: int, data: schemas.UpdateUserInfo
-    ) -> "User":
+    ) -> None:
         data_dict = data.model_dump(exclude_none=True)
         stmt = update(User).where(User.id == int(user_id)).values(**data_dict)
         await session.execute(stmt)
-        return await User.get_by_id(session, user_id)
 
     @classmethod
     async def update_dna_as_create(
