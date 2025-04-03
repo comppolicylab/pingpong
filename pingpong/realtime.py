@@ -1,6 +1,8 @@
 import json
 from fastapi import Response, WebSocket, WebSocketDisconnect
 
+from openai.resources.beta.realtime.realtime import AsyncRealtimeConnection
+
 from pingpong import schemas
 from pingpong.websocket import (
     ws_auth_middleware,
