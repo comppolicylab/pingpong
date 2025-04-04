@@ -958,7 +958,7 @@ class AssistantModel(BaseModel):
     owner: str
     name: str
     description: str
-    model_type: AssistantInteractionMode
+    type: AssistantInteractionMode
     is_latest: bool
     is_new: bool
     highlight: bool
@@ -977,7 +977,7 @@ class AssistantModelDict(TypedDict):
     is_latest: bool
     is_new: bool
     highlight: bool
-    model_type: Literal["chat", "live_audio"]
+    type: Literal["chat", "live_audio"]
     supports_vision: bool
     supports_file_search: bool
     supports_code_interpreter: bool

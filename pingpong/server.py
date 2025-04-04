@@ -1980,7 +1980,7 @@ async def list_class_models(
             "owner": m.owned_by or "",
             "name": KNOWN_MODELS[m.id]["name"],
             "sort_order": KNOWN_MODELS[m.id]["sort_order"],
-            "model_type": KNOWN_MODELS[m.id]["model_type"],
+            "type": KNOWN_MODELS[m.id]["type"],
             "description": KNOWN_MODELS[m.id]["description"],
             "is_latest": KNOWN_MODELS[m.id]["is_latest"],
             "is_new": KNOWN_MODELS[m.id]["is_new"],
@@ -2006,7 +2006,7 @@ async def list_class_models(
                 "owner": "",
                 "name": "GPT-4 Turbo",
                 "sort_order": 4,
-                "model_type": "chat",
+                "type": "chat",
                 "is_new": False,
                 "highlight": False,
                 "is_latest": True,
@@ -2028,7 +2028,7 @@ async def list_class_models(
                 "owner": "",
                 "name": "GPT-4 Turbo preview",
                 "sort_order": 5,
-                "model_type": "chat",
+                "type": "chat",
                 "is_new": False,
                 "highlight": False,
                 "is_latest": True,
@@ -3300,7 +3300,7 @@ async def create_assistant(
         )
 
     # Check that the model supports the interaction mode
-    if model_record.model_type != req.interaction_mode:
+    if model_record.type != req.interaction_mode:
         raise HTTPException(
             status_code=400,
             detail=f"Model {req.model} is not available for use in {req.interaction_mode} mode.",
@@ -3529,7 +3529,7 @@ async def update_assistant(
                 )
 
             # Check that the model supports the interaction mode
-            if model_record.model_type != interaction_mode:
+            if model_record.type != interaction_mode:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Model {req.model} is not available for use in {interaction_mode} mode.",

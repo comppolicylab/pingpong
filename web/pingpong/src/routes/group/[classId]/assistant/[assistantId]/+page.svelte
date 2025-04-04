@@ -128,7 +128,7 @@
       (model) =>
         model.is_latest &&
         !(model.hide_in_model_selector ?? false) &&
-        model.model_type === interactionMode
+        model.type === interactionMode
     ) || []
   ).map((model) => ({
     value: model.id,
@@ -142,7 +142,7 @@
   }));
   $: hiddenModelNames = (
     data.models.filter(
-      (model) => (model.hide_in_model_selector ?? false) && model.model_type === interactionMode
+      (model) => (model.hide_in_model_selector ?? false) && model.type === interactionMode
     ) || []
   ).map((model) => model.id);
   let selectedModel = '';
@@ -165,7 +165,7 @@
       (model) =>
         !model.is_latest &&
         !(model.hide_in_model_selector ?? false) &&
-        model.model_type === interactionMode
+        model.type === interactionMode
     ) || []
   ).map((model) => ({
     value: model.id,
