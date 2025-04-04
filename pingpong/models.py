@@ -1660,8 +1660,8 @@ class Assistant(Base):
     version = Column(Integer, default=1)
     instructions = Column(String)
     interaction_mode = Column(
-        SQLEnum(schemas.AssistantInteractionMode),
-        server_default=schemas.AssistantInteractionMode.CHAT,
+        SQLEnum(schemas.InteractionMode),
+        server_default=schemas.InteractionMode.CHAT,
     )
     description = Column(String)
     assistant_id = Column(String)
@@ -2548,6 +2548,10 @@ class Thread(Base):
     class_ = relationship("Class", back_populates="threads", lazy="selectin")
     assistant_id = Column(Integer, ForeignKey("assistants.id"), index=True)
     assistant = relationship("Assistant", back_populates="threads", uselist=False)
+    interaction_mode = Column(
+        SQLEnum(schemas.InteractionMode),
+        server_default=schemas.InteractionMode.CHAT,
+    )
     private = Column(Boolean)
     user_message_ct = Column(Integer, server_default="1")
     users = relationship(

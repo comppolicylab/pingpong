@@ -310,7 +310,7 @@ class VectorStoreType(Enum):
     THREAD = "thread"
 
 
-class AssistantInteractionMode(StrEnum):
+class InteractionMode(StrEnum):
     CHAT = "chat"
     LIVE_AUDIO = "live_audio"
 
@@ -320,7 +320,7 @@ class Assistant(BaseModel):
     name: str
     instructions: str
     description: str | None
-    interaction_mode: AssistantInteractionMode
+    interaction_mode: InteractionMode
     tools: str
     model: str
     temperature: float | None
@@ -346,7 +346,7 @@ class CreateAssistant(BaseModel):
     file_search_file_ids: list[str] | None = None
     instructions: str = Field(..., min_length=3)
     description: str
-    interaction_mode: AssistantInteractionMode = AssistantInteractionMode.CHAT
+    interaction_mode: InteractionMode = InteractionMode.CHAT
     model: str = Field(..., min_length=2)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=0, le=2)
@@ -364,7 +364,7 @@ class UpdateAssistant(BaseModel):
     file_search_file_ids: list[str] | None = None
     instructions: str | None = Field(None, min_length=3)
     description: str | None = None
-    interaction_mode: AssistantInteractionMode | None = None
+    interaction_mode: InteractionMode | None = None
     model: str | None = Field(None, min_length=2)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=0, le=2)
@@ -394,6 +394,7 @@ class Thread(BaseModel):
     name: str | None
     thread_id: str
     class_id: int
+    interaction_mode: InteractionMode
     assistant_names: dict[int, str] = {}
     assistant_id: int | None = None
     private: bool
@@ -437,6 +438,11 @@ class CreateThread(BaseModel):
     assistant_id: int
 
     _file_check = model_validator(mode="after")(file_validator)
+
+
+class CreateAudioThread(BaseModel):
+    parties: list[int] = []
+    assistant_id: int
 
 
 class ThreadName(BaseModel):
@@ -958,7 +964,7 @@ class AssistantModel(BaseModel):
     owner: str
     name: str
     description: str
-    type: AssistantInteractionMode
+    type: InteractionMode
     is_latest: bool
     is_new: bool
     highlight: bool

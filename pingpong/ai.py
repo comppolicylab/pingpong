@@ -10,7 +10,7 @@ import orjson
 from pingpong.auth import encode_auth_token
 from pingpong.invite import send_export_download
 import pingpong.models as models
-from pingpong.schemas import ThreadName, NewThreadMessage, AssistantInteractionMode
+from pingpong.schemas import ThreadName, NewThreadMessage, InteractionMode
 
 from datetime import datetime, timezone
 from openai.types.beta.assistant_stream_event import (
@@ -519,11 +519,11 @@ def format_instructions(
     instructions: str,
     use_latex: bool = False,
     use_image_descriptions: bool = False,
-    interaction_mode: AssistantInteractionMode = AssistantInteractionMode.CHAT,
+    interaction_mode: InteractionMode = InteractionMode.CHAT,
 ) -> str:
     """Format instructions for a prompt."""
 
-    if interaction_mode == AssistantInteractionMode.LIVE_AUDIO:
+    if interaction_mode == InteractionMode.LIVE_AUDIO:
         instructions = (
             "Your knowledge cutoff is 2023-10. You are a helpful, witty, and "
             "friendly AI. Act like a human, but remember that you aren't a "

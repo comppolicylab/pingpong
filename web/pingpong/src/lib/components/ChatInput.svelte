@@ -43,12 +43,8 @@
   } from 'flowbite-svelte-icons';
   import Sanitize from '$lib/components/Sanitize.svelte';
   import DropdownBadge from './DropdownBadge.svelte';
-  import Audio from './SocketButton.svelte';
 
   const dispatcher = createEventDispatcher();
-
-  export let classId: number = 1;
-  export let threadId: number = 1;
 
   /**
    * Whether to allow sending.
@@ -502,7 +498,6 @@
         style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
       />
       <div class="flex flex-row gap-1">
-        <Audio {classId} {threadId} />
         {#if upload && purpose}
           <FileUpload
             {maxSize}

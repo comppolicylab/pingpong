@@ -1680,6 +1680,10 @@ export type CreateThreadRequest = {
   vision_image_descriptions?: ImageProxy[];
 };
 
+export type CreateAudioThreadRequest = {
+  assistant_id: number;
+  parties?: number[];
+};
 /**
  * Thread information.
  */
@@ -1687,6 +1691,7 @@ export type Thread = {
   id: number;
   name: string | null;
   thread_id: string;
+  interaction_mode: 'chat' | 'live_audio';
   class_id: number;
   assistant_names?: Record<number, string> | null;
   assistant_id: number;
@@ -1703,6 +1708,18 @@ export type Thread = {
 export const createThread = async (f: Fetcher, classId: number, data: CreateThreadRequest) => {
   const url = `class/${classId}/thread`;
   return await POST<CreateThreadRequest, Thread>(f, url, data);
+};
+
+/**
+ * Create live audio thread.
+ */
+export const createAudioThread = async (
+  f: Fetcher,
+  classId: number,
+  data: CreateAudioThreadRequest
+) => {
+  const url = `class/${classId}/thread/audio`;
+  return await POST<CreateAudioThreadRequest, Thread>(f, url, data);
 };
 
 /**

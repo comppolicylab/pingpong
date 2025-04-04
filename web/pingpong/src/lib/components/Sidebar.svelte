@@ -13,7 +13,8 @@
     CogOutline,
     EyeOutline,
     UserCircleSolid,
-    FileLinesOutline
+    FileLinesOutline,
+    MicrophoneOutline
   } from 'flowbite-svelte-icons';
 
   import {
@@ -197,6 +198,9 @@
                 <EyeSlashOutline size="sm" class="text-white" />
               {:else}
                 <EyeOutline size="sm" class="text-white" />
+              {/if}
+              {#if thread.interaction_mode === 'live_audio'}
+                <MicrophoneOutline size="sm" class="text-white" />
               {/if}
             </svelte:fragment>
 

@@ -2594,6 +2594,88 @@ async def list_threads(
 
 
 @v1.post(
+    "/class/{class_id}/thread/audio",
+    dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
+    response_model=schemas.Thread,
+)
+async def create_audio_thread(
+    class_id: str,
+    req: schemas.CreateAudioThread,
+    request: Request,
+    openai_client: OpenAIClient,
+):
+    parties = list[models.User]()
+    thread = None
+    try:
+        thread, parties = await asyncio.gather(
+            openai_client.beta.threads.create(
+                metadata={
+                    "user_id": str(request.state.session.user.id),
+                },
+            ),
+            models.User.get_all_by_id(request.state.db, req.parties),
+        )
+    except openai.InternalServerError:
+        logger.exception("Error creating thread")
+        if thread:
+            await openai_client.beta.threads.delete(thread.id)
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI is experiencing issues so we can't create your conversation right now. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+        )
+    except (openai.APIError, Exception):
+        logger.exception("Error creating thread")
+        if thread:
+            await openai_client.beta.threads.delete(thread.id)
+        raise HTTPException(
+            status_code=400,
+            detail="Something went wrong while creating your conversation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+        )
+
+    if not thread:
+        raise HTTPException(
+            status_code=500,
+            detail="We faced an error while creating your conversation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+        )
+
+    new_thread = {
+        "name": "New Audio Conversation",
+        "class_id": int(class_id),
+        "private": True if parties else False,
+        "interaction_mode": "live_audio",
+        "users": parties or [],
+        "thread_id": thread.id,
+        "assistant_id": req.assistant_id,
+        "vector_store_id": None,
+        "code_interpreter_file_ids": [],
+        "image_file_ids": [],
+        "tools_available": json.dumps([]),
+        "version": 2,
+        "last_activity": func.now(),
+    }
+
+    result: None | models.Thread = None
+    try:
+        result = await models.Thread.create(request.state.db, new_thread)
+
+        grants = [
+            (f"class:{class_id}", "parent", f"thread:{result.id}"),
+        ] + [(f"user:{p.id}", "party", f"thread:{result.id}") for p in parties]
+        await request.state.authz.write(grant=grants)
+
+        return result
+    except Exception as e:
+        logger.exception("Error creating thread: %s", e)
+        await openai_client.beta.threads.delete(thread.id)
+        if result:
+            # Delete users-threads mapping
+            for user in result.users:
+                result.users.remove(user)
+            await result.delete(request.state.db)
+        raise e
+
+
+@v1.post(
     "/class/{class_id}/thread",
     dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
     response_model=schemas.Thread,
@@ -3326,9 +3408,7 @@ async def create_assistant(
 
     tool_resources: ToolResources = {}
     vector_store_object_id = None
-    uses_live_audio = (
-        req.interaction_mode == schemas.AssistantInteractionMode.LIVE_AUDIO
-    )
+    uses_live_audio = req.interaction_mode == schemas.InteractionMode.LIVE_AUDIO
 
     if req.file_search_file_ids:
         if uses_live_audio:
@@ -3499,9 +3579,9 @@ async def update_assistant(
             "interaction_mode" in req.model_fields_set
             and req.interaction_mode is not None
         )
-        else schemas.AssistantInteractionMode(asst.interaction_mode)
+        else schemas.InteractionMode(asst.interaction_mode)
     )
-    uses_live_audio = interaction_mode == schemas.AssistantInteractionMode.LIVE_AUDIO
+    uses_live_audio = interaction_mode == schemas.InteractionMode.LIVE_AUDIO
 
     # Check that the model is available
     if "model" in req.model_fields_set and req.model is not None:

@@ -16,10 +16,12 @@ export const load: PageLoad = async ({ fetch, params }) => {
   const expanded = api.expandResponse(threadData);
   let threadModel = '';
   let threadTools = '';
+  let threadInteractionMode = '';
   let assistantGrants = { canViewAssistant: false };
   if (!expanded.error) {
     threadTools = expanded.data.tools_available || '';
     threadModel = expanded.data.model || '';
+    threadInteractionMode = expanded.data.thread.interaction_mode || '';
     if (expanded.data.thread.assistant_id) {
       assistantGrants = await api.grants(fetch, {
         canViewAssistant: {
@@ -34,6 +36,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
   return {
     threadData,
     threadModel,
+    threadInteractionMode,
     availableTools: threadTools,
     canDeleteThread: threadGrants.canDelete,
     canPublishThread: threadGrants.canPublish,
