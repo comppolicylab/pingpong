@@ -407,10 +407,38 @@
   let isMicOn = false;
   let audioLevel = 0;
 
+  let socket: WebSocket;
+
   function startSession() {
     isSessionActive = true;
     isMicOn = true;
-    // TODO: implement your logic for starting voice capture with chosenMicrophone
+    if (!audioStream || !chosenMicrophone) {
+      console.error("No audio stream or microphone selected");
+      return;
+    }
+
+    socket = api.createAudioWebsocket(classId, threadId);
+    socket.binaryType = 'arraybuffer';
+
+    socket.addEventListener('open', () => {
+      console.log('WebSocket connection opened.');
+      const initEvent = { type: 'connection', message: 'Client connected' };
+      socket.send(JSON.stringify(initEvent));
+    });
+
+    socket.addEventListener('message', (event) => {
+      console.log('Received message from server:', event.data);
+    });
+
+    socket.addEventListener('close', () => {
+      console.log('WebSocket connection closed.');
+    });
+
+    socket.addEventListener('error', (error) => {
+      console.error('WebSocket error:', error);
+      socket.close();
+    });
+
   }
 
   function stopSession() {

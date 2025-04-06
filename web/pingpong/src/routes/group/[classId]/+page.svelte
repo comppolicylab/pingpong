@@ -355,6 +355,17 @@
               new session.
             </p>
           </div>
+          <div class="flex flex-row p-1.5">
+            <Button
+              class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all"
+              on:click={handleAudioThreadCreate}
+              on:touchstart={handleAudioThreadCreate}
+              type="button"
+            >
+              <CirclePlusSolid size="sm" />
+              <span class="text-sm font-normal text-center"> Create session </span>
+            </Button>
+          </div>
         </div>
       {/if}
       <div class="shrink-0 grow-0">
@@ -391,22 +402,6 @@
             remove={handleRemove}
             on:submit={handleSubmit}
           />
-        {:else if assistant.interaction_mode === 'live_audio'}
-          <div class="flex flex-col items-center">
-            <div class="flex flex-row p-1.5">
-              <Button
-                class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all"
-                on:click={handleAudioThreadCreate}
-                on:touchstart={handleAudioThreadCreate}
-                type="button"
-              >
-                <CirclePlusSolid size="sm" />
-                <span class="text-sm font-normal text-center"> Create session </span>
-              </Button>
-            </div>
-          </div>
-        {:else}
-          <h1 class="text-2xl font-bold">The assistant is not configured.</h1>
         {/if}
         <input type="hidden" name="assistant_id" bind:value={assistant.id} />
         <input type="hidden" name="parties" bind:value={parties} />

@@ -1,4 +1,7 @@
+import asyncio
+import base64
 import json
+from typing import Any, cast
 from fastapi import WebSocket, WebSocketDisconnect
 
 
@@ -78,18 +81,36 @@ async def browser_realtime_websocket(
                 "message": "Connected to OpenAI.",
             }
         )
-        try:
-            while True:
-                message = await browser_connection.receive()
-                browser_connection._raise_on_disconnect(message)
-                if "text" in message:
-                    try:
-                        data = json.loads(message["text"])
-                        print("Received event:", data)
-                    except json.JSONDecodeError as e:
-                        print("Error decoding JSON:", e)
-                elif "bytes" in message:
-                    audio_chunk = message["bytes"]
-                    print(f"Received audio chunk of {len(audio_chunk)} bytes")
-        except WebSocketDisconnect:
-            print("Client disconnected.")
+        async def handle_browser_messages():
+            try:
+                while True:
+                    message = await browser_connection.receive()
+                    browser_connection._raise_on_disconnect(message)
+                    if "text" in message:
+                        try:
+                            data = json.loads(message["text"])
+                            print("Received event:", data)
+                        except json.JSONDecodeError as e:
+                            print("Error decoding JSON:", e)
+                    elif "bytes" in message:
+                        audio_chunk = message["bytes"]
+                        print(f"Received audio chunk of {len(audio_chunk)} bytes")
+
+                        await openai_connection.input_audio_buffer.append(
+                            audio=base64.b64encode(cast(Any, audio_chunk)).decode("utf-8")
+                        )
+
+            except WebSocketDisconnect:
+                print("Client disconnected.")
+
+        async def handle_openai_events():
+            try:
+                async for event in openai_connection:
+                    print("🔁 Received OpenAI event:", event)
+            except Exception as e:
+                print("Error receiving from OpenAI:", e)
+
+        await asyncio.gather(
+            handle_browser_messages(),
+            handle_openai_events(),
+        )

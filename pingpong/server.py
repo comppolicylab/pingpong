@@ -2639,7 +2639,7 @@ async def create_audio_thread(
         )
 
     new_thread = {
-        "name": "New Audio Conversation",
+        "name": "Audio Conversation",
         "class_id": int(class_id),
         "private": True if parties else False,
         "interaction_mode": "live_audio",
