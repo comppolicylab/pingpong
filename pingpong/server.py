@@ -35,7 +35,7 @@ from pingpong.emails import (
     revalidate_email_addresses,
     validate_email_addresses,
 )
-from pingpong.realtime import realtime_websocket
+from pingpong.realtime import browser_realtime_websocket
 from pingpong.stats import get_statistics
 from pingpong.summary import send_class_summary_to_user_task
 from .animal_hash import process_threads, pseudonym, user_names
@@ -2104,7 +2104,7 @@ async def audio_stream(
     class_id: str,
     thread_id: str,
 ):
-    await realtime_websocket(websocket, class_id, thread_id)
+    await browser_realtime_websocket(websocket, class_id, thread_id)
 
 
 @v1.get(
