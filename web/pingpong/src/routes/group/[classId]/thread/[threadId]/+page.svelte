@@ -29,7 +29,15 @@
     EyeSlashOutline,
     LockSolid,
     MicrophoneOutline,
-    QuoteSolid
+    QuoteSolid,
+
+    PlayOutline,
+
+    ChevronSortOutline,
+
+    PlaySolid,
+
+    StopSolid
   } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
@@ -297,16 +305,25 @@
   };
 
   let microphones: MediaDeviceInfo[] = [];
+  let selectedMicrophone: MediaDeviceInfo | null = null;
 
   const updateMicrophones = async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       microphones = devices.filter((device) => device.kind === 'audioinput');
+      selectedMicrophone = microphones.length > 0 ? microphones[0] : null; 
+      if (selectedMicrophone) {
+        console.log('Selected microphone:', selectedMicrophone);
+      } else {
+        console.error('No microphone found');
+      }
       console.log('Microphones:', microphones);
     } catch (error) {
       console.error('Error accessing microphone:', error);
     }
   };
+  let openMicrophoneModal = false;
+  let activeSession = false;
 
   const enableMicrophoneAccess = async () => {
     try {
@@ -768,52 +785,49 @@ function playPCMChunk(pcm16Data: Uint8Array, sampleRate = 24000) {
             on:dismissError={handleDismissError}
           />
         {:else if data.threadInteractionMode === 'live_audio'}
-          <div class="flex flex-col items-center justify-center gap-2">
-            <div class="flex items-center gap-2">
-              <!-- First button for starting/stopping session -->
-              {#if !isSessionActive}
-                <Button color="blue" on:click={startSession}>
-                  <span class="flex items-center gap-1"> Start session </span>
-                </Button>
-              {:else}
-                <Button color="red" on:click={stopSession}>Stop session</Button>
-              {/if}
-
-              <Button color="light" class="flex items-center gap-2">
-                <MicrophoneOutline class="w-4 h-4" />
-                {chosenMicrophone?.label || 'Select a microphone'}
-              </Button>
-              <!-- Second button for microphone dropdown -->
-              <Dropdown>
-                <!-- This button appears next to "Start session" -->
-                <!-- Microphone list items -->
-                {#each microphones as mic}
-                  <DropdownItem on:click={() => setChosenMicrophone(mic)}>
-                    {#if chosenMicrophone && mic.deviceId === chosenMicrophone.deviceId}
-                      <span class="flex items-center gap-2">
-                        ✓ {mic.label}
-                      </span>
-                    {:else}
-                      {mic.label}
-                    {/if}
-                  </DropdownItem>
-                {/each}
-                <!-- Mic status (On/Off) + volume bar -->
-                <DropdownItem>
-                  <div class="flex items-center gap-2">
-                    <MicrophoneOutline class="w-4 h-4" />
-                    {isMicOn ? 'On' : 'Off'}
-                    <div class="relative w-16 h-1 bg-gray-200 rounded-full overflow-hidden">
-                      <div
-                        class="absolute top-0 left-0 h-1 bg-green-500"
-                        style="width: {audioLevel}%"
-                      ></div>
-                    </div>
-                  </div>
+        <div class="w-full flex justify-center">
+          <div class="bg-gray-100 flex flex-row gap-2 items-center justify-center shadow-xl rounded-lg px-2 py-1.5 w-fit h-fit">
+            {#if !activeSession}
+            <Button class="flex flex-row gap-1 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 transition-all text-sm font-normal text-center px-3 py-2" type="button" on:click={() => {activeSession = true;}} disabled={!audioStream}>
+              <PlaySolid
+                class="pl-0 ml-0"
+                size="md"
+                />
+              <span class="mr-1">Start session</span>
+            </Button>
+            {:else}
+            <Button class="flex flex-row gap-1 bg-amber-700 text-white rounded rounded-lg text-xs hover:bg-amber-800 transition-all text-sm font-normal text-center px-3 py-2" type="button" on:click={() => {activeSession = false;}} disabled={!audioStream}>
+              <StopSolid
+                class="pl-0 ml-0"
+                size="md"
+                />
+              <span class="mr-1">End session</span>
+            </Button>
+            {/if}
+            <Button id='top-dd' class="flex flex-row gap-2 min-w-56 max-w-56 hover:bg-gray-300 px-3 py-2 grow-0 shrink-0 transition-all text-sm font-normal justify-between text-gray-800 rounded-lg" disabled={!audioStream}>
+              <div class="flex flex-row gap-2 justify-start w-5/6">
+                <MicrophoneOutline class="w-5 h-5" />
+              <span class="truncate">{selectedMicrophone?.label || 'Select microphone...'}</span>
+              </div>
+              <ChevronSortOutline class="ml-2 w-4 h-4" strokeWidth="2"/></Button>
+              
+            <Dropdown placement='top' triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
+              {#each microphones as microphone}
+                <DropdownItem
+                  class="flex flex-row gap-2 items-center"
+                  on:click={() => {
+                    selectedMicrophone = microphone;
+                    console.log('Selected microphone:', selectedMicrophone);
+                    openMicrophoneModal = false;
+                  }}
+                >
+                  <MicrophoneOutline class="w-5 h-5" />
+                  <span>{microphone.label}</span>
                 </DropdownItem>
-              </Dropdown>
-            </div>
+              {/each}
+            </Dropdown>            
           </div>
+          </div> 
         {:else}
           <h1 class="text-2xl font-bold">The assistant is not configured.</h1>
         {/if}
