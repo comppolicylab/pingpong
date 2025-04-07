@@ -406,16 +406,55 @@
   let isSessionActive = false;
   let isMicOn = false;
   let audioLevel = 0;
-
+  let mediaRecorder: MediaRecorder;
+  let audioContext: AudioContext;
+  let workletNode: AudioWorkletNode;
+  let mediaStream: MediaStream;
   let socket: WebSocket;
 
-  function startSession() {
+  function pcm16ToFloat32(pcm16: Uint8Array): Float32Array {
+  const float32 = new Float32Array(pcm16.length / 2);
+  for (let i = 0; i < float32.length; i++) {
+    const low = pcm16[i * 2];
+    const high = pcm16[i * 2 + 1];
+    const sample = (high << 8) | low;
+    float32[i] = sample < 0x8000
+      ? sample / 0x8000
+      : (sample - 0x10000) / 0x8000;
+  }
+  return float32;
+}
+
+let playbackContext = new AudioContext({ sampleRate: 24000 });
+let nextPlaybackTime = playbackContext.currentTime;
+
+function playPCMChunk(pcm16Data: Uint8Array, sampleRate = 24000) {
+
+  const float32 = pcm16ToFloat32(pcm16Data);
+  const buffer = playbackContext.createBuffer(1, float32.length, sampleRate);
+  buffer.copyToChannel(float32, 0);
+
+  const source = playbackContext.createBufferSource();
+  source.buffer = buffer;
+  source.connect(playbackContext.destination);
+
+  const now = playbackContext.currentTime;
+  const startTime = Math.max(nextPlaybackTime, now);
+
+  source.start(startTime);
+  nextPlaybackTime = startTime + buffer.duration;
+}
+
+
+  const startSession = async () => {
     isSessionActive = true;
     isMicOn = true;
     if (!audioStream || !chosenMicrophone) {
       console.error("No audio stream or microphone selected");
       return;
     }
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
 
     socket = api.createAudioWebsocket(classId, threadId);
     socket.binaryType = 'arraybuffer';
@@ -426,25 +465,65 @@
       socket.send(JSON.stringify(initEvent));
     });
 
-    socket.addEventListener('message', (event) => {
-      console.log('Received message from server:', event.data);
-    });
+    socket.addEventListener('message', (event: MessageEvent) => {
+  if (typeof event.data === 'string') {
+    const data = JSON.parse(event.data);
 
+    if (data.type === 'audio' && data.audio) {
+      const base64 = data.audio;
+      const binaryStr = atob(base64);
+      const pcm16 = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        pcm16[i] = binaryStr.charCodeAt(i);
+      }
+
+      playPCMChunk(pcm16, 24000);
+    }
+  }
+});
     socket.addEventListener('close', () => {
       console.log('WebSocket connection closed.');
     });
 
     socket.addEventListener('error', (error) => {
       console.error('WebSocket error:', error);
-      socket.close();
+      // socket.close();
     });
 
+    audioContext = new AudioContext({ sampleRate: 48000 });
+
+    await audioContext.audioWorklet.addModule("/pcm-processor.js");
+
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        sampleRate: 48000,
+      },
+    });
+
+    const source = audioContext.createMediaStreamSource(mediaStream);
+    workletNode = new AudioWorkletNode(audioContext, "pcm-processor");
+
+    source.connect(workletNode);
+
+    workletNode.port.onmessage = (event) => {
+      const pcm16Buffer = event.data;
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(pcm16Buffer); // already little-endian Int16Array
+      }
+    };
   }
 
   function stopSession() {
     isSessionActive = false;
     isMicOn = false;
     // TODO: implement your logic for stopping voice capture
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      mediaRecorder.stop();
+    }
+    if (socket) {
+      socket.close();
+    }
   }
 
   function setChosenMicrophone(mic: MediaDeviceInfo) {

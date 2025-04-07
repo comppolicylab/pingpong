@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import logging
 from typing import Any, cast
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -13,6 +14,7 @@ from pingpong.websocket import (
     ws_parse_session_token,
 )
 
+logger = logging.getLogger(__name__)
 
 async def check_realtime_permissions(ws: WebSocket, thread_id: str):
     if ws.state.session.status != schemas.SessionStatus.VALID:
@@ -65,16 +67,16 @@ async def browser_realtime_websocket(
     async with openai_client.beta.realtime.connect(
         model="gpt-4o-realtime-preview",
         extra_query={
-            "input_audio_transcription": {
-                "language": "en",
-                "model": "gpt-4o-transcribe",
-            },
             "temperature": 0.8,
             "tool_choice": "none",
-            "turn_direction": {"type": "semantic_vad"},
             "voice": "alloy",
         },
     ) as openai_connection:
+        await openai_connection.session.update(
+            session={"input_audio_transcription": {"language": "en", "model": "gpt-4o-transcribe"}, "temperature": 0.8,
+            "tool_choice": "none",
+            "voice": "alloy"}
+        )
         await browser_connection.send_json(
             {
                 "type": "session.created",
@@ -94,23 +96,64 @@ async def browser_realtime_websocket(
                             print("Error decoding JSON:", e)
                     elif "bytes" in message:
                         audio_chunk = message["bytes"]
-                        print(f"Received audio chunk of {len(audio_chunk)} bytes")
-
                         await openai_connection.input_audio_buffer.append(
                             audio=base64.b64encode(cast(Any, audio_chunk)).decode("utf-8")
                         )
+                        await asyncio.sleep(0)
 
             except WebSocketDisconnect:
-                print("Client disconnected.")
+                print("WebSocket disconnected.")
+            except asyncio.CancelledError:
+                print("❌ Browser message task cancelled.")
+                await browser_connection.close()
+                raise
+            finally:
+                print("🧹 Cleanup for browser message handler.")
 
         async def handle_openai_events():
             try:
                 async for event in openai_connection:
-                    print("🔁 Received OpenAI event:", event)
+                    if event.type == "response.content_part.done":
+                        print("🔁 Received OpenAI event:", event)
+                    elif event.type == "session.created":
+                        print("Session created:", event)
+                    elif event.type == "session.updated":
+                        print("Session updated:", event)
+                    elif event.type == "session.error":
+                        print("Session error:", event)
+                    elif event.type == "session.ended":
+                        print("Session ended:", event)
+                    elif event.type == "conversation.item.input_audio_transcription.completed":
+                        print("Audio transcription completed:", event)
+                    elif event.type == "response.audio.delta":
+                        delta_audio_b64 = event.delta  # base64-encoded audio
+                        await browser_connection.send_json({
+                            "type": "audio",
+                            "audio": delta_audio_b64,
+                            "content_index": event.content_index
+                        })
+                    else:
+                        print("Unknown event type:", event.type)
+
+            except asyncio.CancelledError:
+                print("❌ OpenAI event task cancelled.")
+                raise
             except Exception as e:
                 print("Error receiving from OpenAI:", e)
+            finally:
+                print("🧹 Cleanup for OpenAI event handler.")
 
-        await asyncio.gather(
-            handle_browser_messages(),
-            handle_openai_events(),
+        browser_task = asyncio.create_task(handle_browser_messages())
+        openai_task = asyncio.create_task(handle_openai_events())
+
+        _, pending = await asyncio.wait(
+            [browser_task, openai_task],
+            return_when=asyncio.FIRST_COMPLETED,
         )
+
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
