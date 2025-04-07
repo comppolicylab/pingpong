@@ -1,7 +1,7 @@
 class PCMProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.inputSampleRate = sampleRate;
+    this.inputSampleRate = 48000;
     this.outputSampleRate = 24000;
     this.ratio = this.inputSampleRate / this.outputSampleRate;
     this.buffer = [];
@@ -16,14 +16,15 @@ class PCMProcessor extends AudioWorkletProcessor {
 
     while (offsetResult < result.length) {
       const nextOffsetBuffer = Math.floor((offsetResult + 1) * this.ratio);
-      let sum = 0, count = 0;
+      let sum = 0,
+        count = 0;
       for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
         sum += buffer[i];
         count++;
       }
       const avg = sum / count;
       const intSample = Math.max(-1, Math.min(1, avg));
-      result[offsetResult] = intSample < 0 ? intSample * 0x8000 : intSample * 0x7FFF;
+      result[offsetResult] = intSample < 0 ? intSample * 0x8000 : intSample * 0x7fff;
       offsetResult++;
       offsetBuffer = nextOffsetBuffer;
     }
@@ -52,4 +53,4 @@ class PCMProcessor extends AudioWorkletProcessor {
   }
 }
 
-registerProcessor("pcm-processor", PCMProcessor);
+registerProcessor('pcm-processor', PCMProcessor);
