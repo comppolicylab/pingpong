@@ -1,4 +1,7 @@
 /**
+ * Parts of this code are derived from the following copyrighted
+ * material, the use of which is hereby acknowledged.
+ *
  * OpenAI (openai-realtime-console)
  *
  * MIT License

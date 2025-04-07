@@ -1,4 +1,7 @@
 /**
+ * Parts of this code are derived from the following copyrighted
+ * material, the use of which is hereby acknowledged.
+ *
  * OpenAI (openai-realtime-console)
  *
  * MIT License
@@ -43,6 +46,10 @@ export interface DecodedAudioType {
   audioBuffer: AudioBuffer;
 }
 
+export interface ExtendedMediaDeviceInfo extends MediaDeviceInfo {
+  default?: boolean;
+}
+
 /**
  * Options for WavRecorder constructor
  */
@@ -65,7 +72,6 @@ export class WavRecorder {
   debug: boolean;
 
   private _deviceChangeCallback: ((this: MediaDevices, ev: Event) => any) | null; // eslint-disable-line @typescript-eslint/no-explicit-any
-  private _devices: MediaDeviceInfo[];
 
   stream: MediaStream | null;
   processor: AudioWorkletNode | null;
@@ -73,6 +79,7 @@ export class WavRecorder {
   node: AudioNode | null;
   analyser: AnalyserNode | undefined;
   recording: boolean;
+  allowedMicrophoneAccess: boolean;
 
   private _lastEventId: number;
   private eventReceipts: { [key: number]: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -98,8 +105,8 @@ export class WavRecorder {
     this.outputToSpeakers = outputToSpeakers;
     this.debug = !!debug;
     this._deviceChangeCallback = null;
-    this._devices = [];
     // State variables
+    this.allowedMicrophoneAccess = false;
     this.stream = null;
     this.processor = null;
     this.source = null;
@@ -203,7 +210,7 @@ export class WavRecorder {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   log(...args: any[]): true {
     if (this.debug) {
-      console.log(...args);
+      console.debug(...args);
     }
     return true;
   }
@@ -268,11 +275,11 @@ export class WavRecorder {
 
   /**
    * Sets device change callback, remove if callback provided is `null`
-   * @param {(Array<MediaDeviceInfo & {default: boolean}>): void|null} callback
+   * @param {(Array<ExtendedMediaDeviceInfo>): void|null} callback
    * @returns {true}
    */
   listenForDeviceChange(
-    callback: ((devices: Array<MediaDeviceInfo & { default: boolean }>) => void) | null
+    callback: ((devices: Array<ExtendedMediaDeviceInfo>) => void) | null
   ): true {
     if (callback === null && this._deviceChangeCallback) {
       navigator.mediaDevices.removeEventListener('devicechange', this._deviceChangeCallback);
@@ -282,8 +289,8 @@ export class WavRecorder {
       // And we only want the most recent callback() to be executed
       // if a few are operating at the same time
       let lastId = 0;
-      let lastDevices: MediaDeviceInfo[] = [];
-      const serializeDevices = (devices: MediaDeviceInfo[]) =>
+      let lastDevices: ExtendedMediaDeviceInfo[] = [];
+      const serializeDevices = (devices: ExtendedMediaDeviceInfo[]) =>
         devices
           .map((d) => d.deviceId)
           .sort()
@@ -294,7 +301,7 @@ export class WavRecorder {
         if (id === lastId) {
           if (serializeDevices(lastDevices) !== serializeDevices(devices)) {
             lastDevices = devices;
-            callback(devices.slice() as Array<MediaDeviceInfo & { default: boolean }>);
+            callback(devices.slice() as Array<ExtendedMediaDeviceInfo>);
           }
         }
       };
@@ -307,55 +314,70 @@ export class WavRecorder {
 
   /**
    * Manually request permission to use the microphone
-   * @returns {Promise<true>}
+   * @returns {Promise<boolean>}
    */
-  async requestPermission(): Promise<true> {
-    const permissionStatus = await navigator.permissions.query({
-      name: 'microphone' as PermissionName
-    });
-    if (permissionStatus.state === 'denied') {
-      window.alert('You must grant microphone access to use this feature.');
-    } else if (permissionStatus.state === 'prompt') {
+  async requestPermission(): Promise<boolean> {
+    if (navigator.permissions && navigator.permissions.query) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true
+        const permissionStatus = await navigator.permissions.query({
+          name: 'microphone' as PermissionName
         });
-        const tracks = stream.getTracks();
-        tracks.forEach((track) => track.stop());
+        if (permissionStatus.state === 'denied') {
+          window.alert('You must grant microphone access to use this feature.');
+          this.allowedMicrophoneAccess = false;
+          return false;
+        } else if (permissionStatus.state === 'granted') {
+          this.allowedMicrophoneAccess = true;
+          return true;
+        }
       } catch {
-        window.alert('You must grant microphone access to use this feature.');
+        // Some browsers do not support permissions.query
+        // and will throw an error
       }
     }
-    return true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true
+      });
+      const tracks = stream.getTracks();
+      tracks.forEach((track) => track.stop());
+      this.allowedMicrophoneAccess = true;
+      return true;
+    } catch {
+      window.alert('You must grant microphone access to use this feature.');
+      this.allowedMicrophoneAccess = false;
+      return false;
+    }
   }
 
   /**
    * List all eligible devices for recording, will request permission to use microphone
-   * @returns {Promise<Array<MediaDeviceInfo & {default: boolean}>>}
+   * @returns {Promise<Array<ExtendedMediaDeviceInfo>>}
    */
-  async listDevices(): Promise<Array<MediaDeviceInfo & { default: boolean }>> {
+  async listDevices(): Promise<Array<ExtendedMediaDeviceInfo>> {
     if (!navigator.mediaDevices || !('enumerateDevices' in navigator.mediaDevices)) {
       throw new Error('Could not request user devices');
     }
-    await this.requestPermission();
+    const microphoneAccess = await this.requestPermission();
+    if (!microphoneAccess) {
+      throw new Error('Could not access microphone. Please check permissions.');
+    }
     const devices = await navigator.mediaDevices.enumerateDevices();
     const audioDevices = devices.filter((device) => device.kind === 'audioinput');
     const defaultDeviceIndex = audioDevices.findIndex((device) => device.deviceId === 'default');
-    const deviceList: Array<MediaDeviceInfo & { default: boolean }> = [];
+    const deviceList: Array<ExtendedMediaDeviceInfo> = [];
     if (defaultDeviceIndex !== -1) {
-      let defaultDevice = audioDevices.splice(defaultDeviceIndex, 1)[0];
+      let defaultDevice = audioDevices.splice(defaultDeviceIndex, 1)[0] as ExtendedMediaDeviceInfo;
       const existingIndex = audioDevices.findIndex(
         (device) => device.groupId === defaultDevice.groupId
       );
       if (existingIndex !== -1) {
-        defaultDevice = audioDevices.splice(existingIndex, 1)[0];
+        defaultDevice = audioDevices.splice(existingIndex, 1)[0] as ExtendedMediaDeviceInfo;
       }
-      (defaultDevice as MediaDeviceInfo & { default: boolean }).default = true;
-      deviceList.push(defaultDevice as MediaDeviceInfo & { default: boolean });
+      defaultDevice.default = true;
+      deviceList.push(defaultDevice);
     }
-    return deviceList.concat(
-      audioDevices.map((dev) => dev as MediaDeviceInfo & { default: boolean })
-    );
+    return deviceList.concat(audioDevices as ExtendedMediaDeviceInfo[]);
   }
 
   /**

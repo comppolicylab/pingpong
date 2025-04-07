@@ -66,11 +66,6 @@ async def browser_realtime_websocket(
         return
     async with openai_client.beta.realtime.connect(
         model="gpt-4o-realtime-preview",
-        extra_query={
-            "temperature": 0.8,
-            "tool_choice": "none",
-            "voice": "alloy",
-        },
     ) as openai_connection:
         await openai_connection.session.update(
             session={"input_audio_transcription": {"language": "en", "model": "gpt-4o-transcribe"}, "temperature": 0.8,

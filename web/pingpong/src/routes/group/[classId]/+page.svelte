@@ -90,7 +90,6 @@
     if (linkedAssistant && assistants) {
       const selectedAssistant = (assistants || []).find((asst) => asst.id === linkedAssistant);
       if (selectedAssistant) {
-        console.log('Selected assistant:', selectedAssistant);
         assistant = selectedAssistant;
         useImageDescriptions = assistant.use_image_descriptions || false;
       }

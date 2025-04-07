@@ -1,6 +1,6 @@
 <script lang="ts">
   import { navigating, page } from '$app/stores';
-  import { goto, invalidateAll } from '$app/navigation';
+  import { goto, invalidateAll, onNavigate } from '$app/navigation';
   import * as api from '$lib/api';
   import { happyToast, sadToast } from '$lib/toast';
   import { errorMessage } from '$lib/errors';
@@ -14,7 +14,8 @@
     Dropdown,
     DropdownItem,
     Modal,
-    Span
+    Span,
+    Spinner
   } from 'flowbite-svelte';
   import { DoubleBounce } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
@@ -29,10 +30,10 @@
     EyeSlashOutline,
     LockSolid,
     MicrophoneOutline,
-    QuoteSolid,
     ChevronSortOutline,
     PlaySolid,
-    StopSolid
+    StopSolid,
+    CheckOutline
   } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
@@ -41,6 +42,8 @@
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import { writable } from 'svelte/store';
   import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
+  import { WavRecorder } from '$lib/wavtools/index';
+  import type { ExtendedMediaDeviceInfo } from '$lib/wavtools/lib/wav_recorder';
 
   export let data;
 
@@ -50,7 +53,6 @@
     data.threadInteractionMode === 'live_audio'
       ? new AudioThreadManager(fetch, classId, threadId, data.threadData)
       : new ThreadManager(fetch, classId, threadId, data.threadData);
-  let audioStream: MediaStream | null = null;
   $: isPrivate = data.class.private || false;
   $: teachers = data?.supervisors || [];
   $: canDeleteThread = data.canDeleteThread;
@@ -299,47 +301,6 @@
     await postMessage(e.detail);
   };
 
-  let microphones: MediaDeviceInfo[] = [];
-  let selectedMicrophone: MediaDeviceInfo | null = null;
-
-  const updateMicrophones = async () => {
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      microphones = devices.filter((device) => device.kind === 'audioinput');
-      selectedMicrophone = microphones.length > 0 ? microphones[0] : null;
-      if (selectedMicrophone) {
-        console.log('Selected microphone:', selectedMicrophone);
-      } else {
-        console.error('No microphone found');
-      }
-      console.log('Microphones:', microphones);
-    } catch (error) {
-      console.error('Error accessing microphone:', error);
-    }
-  };
-  let openMicrophoneModal = false;
-  let activeSession = false;
-
-  const enableMicrophoneAccess = async () => {
-    try {
-      audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      if (!audioStream) {
-        console.error('No audio stream available');
-        return;
-      }
-      audioStream.getTracks().forEach((track) => track.stop());
-      await updateMicrophones();
-
-      navigator.mediaDevices.addEventListener('devicechange', async () => {
-        console.log('Device change detected');
-        await updateMicrophones();
-      });
-    } catch (error) {
-      console.error('Error accessing microphone:', error);
-    }
-  };
-
   // Handle file upload
   const handleUpload = (
     f: File,
@@ -414,130 +375,168 @@
     }
   };
 
-  // let chosenMicrophone: MediaDeviceInfo | null = null;
-  // let isSessionActive = false;
-  // let isMicOn = false;
-  // let audioLevel = 0;
-  // let mediaRecorder: MediaRecorder;
-  // let audioContext: AudioContext;
-  // let workletNode: AudioWorkletNode;
-  // let mediaStream: MediaStream;
-  // let socket: WebSocket;
+  let wavRecorder: WavRecorder | null = null;
+  let microphoneAccess = false;
+  let audioDevices: ExtendedMediaDeviceInfo[] = [];
+  let selectedAudioDevice: ExtendedMediaDeviceInfo | null = null;
+  let openMicrophoneModal = false;
 
-  // function pcm16ToFloat32(pcm16: Uint8Array): Float32Array {
-  //   const float32 = new Float32Array(pcm16.length / 2);
-  //   for (let i = 0; i < float32.length; i++) {
-  //     const low = pcm16[i * 2];
-  //     const high = pcm16[i * 2 + 1];
-  //     const sample = (high << 8) | low;
-  //     float32[i] = sample < 0x8000 ? sample / 0x8000 : (sample - 0x10000) / 0x8000;
-  //   }
-  //   return float32;
-  // }
+  /**
+   * Select an audio device. If no device ID is provided, the first available device will be selected.
+   * @param deviceId Optional ID of the audio device to select.
+   */
+  const selectAudioDevice = (deviceId?: string) => {
+    const lookupDeviceId = deviceId || selectedAudioDevice?.deviceId;
+    if (lookupDeviceId) {
+      selectedAudioDevice =
+        audioDevices.find((device) => device.deviceId === lookupDeviceId) || null;
+    }
 
-  // let playbackContext = new AudioContext({ sampleRate: 24000 });
-  // let nextPlaybackTime = playbackContext.currentTime;
+    // Check if any device is default based on ExtendedMediaDeviceInfo
+    if (audioDevices.length > 0) {
+      const defaultDevice = audioDevices.find((device) => device.default);
+      if (defaultDevice) {
+        selectedAudioDevice = defaultDevice;
+      }
+    }
 
-  // function playPCMChunk(pcm16Data: Uint8Array, sampleRate = 24000) {
-  //   const float32 = pcm16ToFloat32(pcm16Data);
-  //   const buffer = playbackContext.createBuffer(1, float32.length, sampleRate);
-  //   buffer.copyToChannel(float32, 0);
+    // If no device is selected, select the first available device
+    if (!selectedAudioDevice) {
+      selectedAudioDevice = audioDevices[0] || null;
+    }
+  };
 
-  //   const source = playbackContext.createBufferSource();
-  //   source.buffer = buffer;
-  //   source.connect(playbackContext.destination);
+  /**
+   * Handle changes in the list of available audio devices.
+   * This function updates the list of audio devices and selects a default device.
+   * @param devices The updated list of available audio devices.
+   */
+  const handleDeviceChange = (devices: ExtendedMediaDeviceInfo[]) => {
+    audioDevices = devices;
+    selectAudioDevice();
+  };
 
-  //   const now = playbackContext.currentTime;
-  //   const startTime = Math.max(nextPlaybackTime, now);
+  /**
+   * Handle the setup of a session.
+   * This function initializes the WavRecorder and updates available audio devices.
+   * The user will be asked to allow microphone access.
+   */
+  const handleSessionSetup = async () => {
+    wavRecorder = new WavRecorder({ sampleRate: 24000 });
+    try {
+      audioDevices = await wavRecorder.listDevices();
+      wavRecorder.listenForDeviceChange(handleDeviceChange);
+      microphoneAccess = true;
+    } catch (error) {
+      sadToast(
+        `Failed to access microphone. Error: ${errorMessage(error, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
+      );
+      wavRecorder.quit();
+      wavRecorder = null;
+      return;
+    }
 
-  //   source.start(startTime);
-  //   nextPlaybackTime = startTime + buffer.duration;
-  // }
+    // handleDeviceChange is called when set
+    // when listenForDeviceChange is called,
+    // but just in case
+    if (!selectedAudioDevice) {
+      selectAudioDevice();
+    }
+  };
 
-  // const startSession = async () => {
-  //   isSessionActive = true;
-  //   isMicOn = true;
-  //   if (!audioStream || !chosenMicrophone) {
-  //     console.error('No audio stream or microphone selected');
-  //     return;
-  //   }
-  //   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  //   mediaRecorder = new MediaRecorder(stream);
+  let socket: WebSocket | null = null;
+  let startingAudioSession = false;
+  let audioSessionStarted = false;
 
-  //   socket = api.createAudioWebsocket(classId, threadId);
-  //   socket.binaryType = 'arraybuffer';
+  /**
+   * Process audio chunks.
+   * This function sends the audio data to the server via WebSocket.
+   * @param data The audio data to be processed.
+   * @param data.raw The raw audio data.
+   * @param data.mono The mono audio data.
+   */
+  const chunkProcessor = (data: { raw: ArrayBuffer; mono: ArrayBuffer }) => {
+    if (!socket || !audioSessionStarted) {
+      return;
+    }
+    socket.send(data.mono);
+  };
 
-  //   socket.addEventListener('open', () => {
-  //     console.log('WebSocket connection opened.');
-  //     const initEvent = { type: 'connection', message: 'Client connected' };
-  //     socket.send(JSON.stringify(initEvent));
-  //   });
+  /**
+   * Reset the audio session.
+   * This function closes the WebSocket connection and resets the state of the audio session.
+   */
+  const resetAudioSession = async () => {
+    if (socket) {
+      socket.close();
+      socket = null;
+    }
+    startingAudioSession = false;
+    audioSessionStarted = false;
+    openMicrophoneModal = false;
+    microphoneAccess = false;
+    audioDevices = [];
+    selectedAudioDevice = null;
+    if (wavRecorder) {
+      await wavRecorder.quit();
+      wavRecorder = null;
+    }
+  };
 
-  //   socket.addEventListener('message', (event: MessageEvent) => {
-  //     if (typeof event.data === 'string') {
-  //       const data = JSON.parse(event.data);
+  /**
+   * Handle the start of a session.
+   */
+  const handleSessionStart = async () => {
+    startingAudioSession = true;
+    if (!wavRecorder) {
+      sadToast('We failed to start the session. Please try again.');
+      return;
+    }
+    if (!selectedAudioDevice) {
+      sadToast('No audio device selected. Please select a microphone.');
+      return;
+    }
 
-  //       if (data.type === 'audio' && data.audio) {
-  //         const base64 = data.audio;
-  //         const binaryStr = atob(base64);
-  //         const pcm16 = new Uint8Array(binaryStr.length);
-  //         for (let i = 0; i < binaryStr.length; i++) {
-  //           pcm16[i] = binaryStr.charCodeAt(i);
-  //         }
+    socket = api.createAudioWebsocket(classId, threadId);
+    socket.binaryType = 'arraybuffer';
 
-  //         playPCMChunk(pcm16, 24000);
-  //       }
-  //     }
-  //   });
-  //   socket.addEventListener('close', () => {
-  //     console.log('WebSocket connection closed.');
-  //   });
-
-  //   socket.addEventListener('error', (error) => {
-  //     console.error('WebSocket error:', error);
-  //     // socket.close();
-  //   });
-
-  //   audioContext = new AudioContext({ sampleRate: 48000 });
-
-  //   await audioContext.audioWorklet.addModule('/pcm-processor.js');
-
-  //   mediaStream = await navigator.mediaDevices.getUserMedia({
-  //     audio: {
-  //       channelCount: 1,
-  //       sampleRate: 48000
-  //     }
-  //   });
-
-  //   const source = audioContext.createMediaStreamSource(mediaStream);
-  //   workletNode = new AudioWorkletNode(audioContext, 'pcm-processor');
-
-  //   source.connect(workletNode);
-
-  //   workletNode.port.onmessage = (event) => {
-  //     const pcm16Buffer = event.data;
-  //     if (socket.readyState === WebSocket.OPEN) {
-  //       socket.send(pcm16Buffer); // already little-endian Int16Array
-  //     }
-  //   };
-  // };
-
-  // function stopSession() {
-  //   isSessionActive = false;
-  //   isMicOn = false;
-  //   // TODO: implement your logic for stopping voice capture
-  //   if (mediaRecorder && mediaRecorder.state === 'recording') {
-  //     mediaRecorder.stop();
-  //   }
-  //   if (socket) {
-  //     socket.close();
-  //   }
-  // }
-
-  // function setChosenMicrophone(mic: MediaDeviceInfo) {
-  //   chosenMicrophone = mic;
-  //   // TODO: update audio constraints or re-init stream if needed
-  // }
+    socket.addEventListener('message', async (event) => {
+      const message = JSON.parse(event.data);
+      switch (message.type) {
+        case 'session.created':
+          if (!wavRecorder) {
+            sadToast('We failed to start the session. Please try again.');
+            return;
+          }
+          if (!selectedAudioDevice) {
+            sadToast('No audio device selected. Please select a microphone.');
+            return;
+          }
+          await wavRecorder.begin(selectedAudioDevice.deviceId);
+          await wavRecorder.record(chunkProcessor);
+          startingAudioSession = false;
+          audioSessionStarted = true;
+          break;
+        case 'error':
+          if (message.error.type === 'invalid_request_error') {
+            sadToast(
+              `Failed to start session. Error: ${errorMessage(message.error.message, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
+            );
+            await resetAudioSession();
+          } else {
+            sadToast(
+              `We faced an error. Error: ${errorMessage(
+                message.error.message,
+                "We're facing an unknown error. Check PingPong's status page for updates if this persists."
+              )}`
+            );
+          }
+          break;
+        default:
+          console.warn('Unknown message type:', message.type);
+      }
+    });
+  };
 
   /*
    * Delete a file from the thread.
@@ -567,6 +566,10 @@
   const showModeratorsModal = () => {
     showModerators = true;
   };
+
+  onNavigate(async () => {
+    await resetAudioSession();
+  });
 </script>
 
 <div class="w-full flex flex-col justify-between grow min-h-0 relative">
@@ -710,7 +713,7 @@
     ><ModeratorsTable moderators={teachers} /></Modal
   >
   {#if !$loading}
-    {#if data.threadInteractionMode === 'live_audio' && !audioStream}
+    {#if data.threadInteractionMode === 'live_audio' && !microphoneAccess}
       <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
         <div class="bg-blue-light-50 p-3 rounded-lg">
           <MicrophoneOutline size="xl" class="text-blue-dark-40" />
@@ -724,20 +727,93 @@
         <Button
           class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all text-sm font-normal text-center"
           type="button"
-          on:click={enableMicrophoneAccess}
-          on:touchstart={enableMicrophoneAccess}
+          on:click={handleSessionSetup}
+          on:touchstart={handleSessionSetup}
         >
           Enable access
         </Button>
       </div>
-    {:else if data.threadInteractionMode === 'live_audio' && audioStream}
+    {:else if data.threadInteractionMode === 'live_audio' && microphoneAccess}
       <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
         <div class="bg-blue-light-50 p-3 rounded-lg">
-          <QuoteSolid size="xl" class="text-blue-dark-40" />
+          <MicrophoneOutline size="xl" class="text-blue-dark-40" />
         </div>
         <div class="flex flex-col items-center w-2/5">
           <p class="text-xl font-semibold text-blue-dark-40 text-center">Audio Mode</p>
-          <p class="text-md font-base text-gray-600 text-center">Conversation will appear here</p>
+          <p class="text-md font-base text-gray-600 text-center">
+            When you're ready, start the session to begin recording.
+          </p>
+        </div>
+        <div class="w-full flex justify-center">
+          <div
+            class="bg-gray-100 flex flex-row gap-2 items-center justify-center shadow-xl rounded-xl px-2 py-1.5 w-fit h-fit"
+          >
+            {#if !audioSessionStarted}
+              <Button
+                class="flex flex-row gap-1 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 transition-all text-sm font-normal text-center px-3 py-2"
+                type="button"
+                on:click={handleSessionStart}
+                on:touchstart={handleSessionStart}
+                disabled={!microphoneAccess}
+              >
+                {#if startingAudioSession}
+                  <Spinner color="custom" customColor="fill-white" class="w-4 h-4 mr-1" />
+                {:else}
+                  <PlaySolid class="pl-0 ml-0" size="md" />
+                {/if}
+                <span class="mr-1">Start session</span>
+              </Button>
+            {:else}
+              <Button
+                class="flex flex-row gap-1 bg-amber-700 text-white rounded rounded-lg text-xs hover:bg-amber-800 transition-all text-sm font-normal text-center px-3 py-2"
+                type="button"
+                on:click={() => {
+                  audioSessionStarted = false;
+                }}
+                disabled={!microphoneAccess}
+              >
+                <StopSolid class="pl-0 ml-0" size="md" />
+                <span class="mr-1">End session</span>
+              </Button>
+            {/if}
+            <Button
+              id="top-dd"
+              class="flex flex-row gap-2 min-w-56 max-w-56 hover:bg-gray-300 px-3 py-2 grow-0 shrink-0 transition-all text-sm font-normal justify-between text-gray-800 rounded-lg"
+              disabled={!microphoneAccess}
+            >
+              <div class="flex flex-row gap-2 justify-start w-5/6">
+                <MicrophoneOutline class="w-5 h-5" />
+                <span class="truncate">{selectedAudioDevice?.label || 'Select microphone...'}</span>
+              </div>
+              <ChevronSortOutline class="ml-2 w-4 h-4" strokeWidth="2" /></Button
+            >
+            {#if audioDevices.length === 0}
+              <Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
+                <DropdownItem class="flex flex-row gap-2 items-center">
+                  <span>No microphones available</span>
+                </DropdownItem>
+              </Dropdown>
+            {:else}
+              <Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
+                {#each audioDevices as audioDevice}
+                  <DropdownItem
+                    class="flex flex-row gap-2 items-center"
+                    on:click={() => {
+                      selectAudioDevice(audioDevice.deviceId);
+                      openMicrophoneModal = false;
+                    }}
+                  >
+                    {#if audioDevice.deviceId === selectedAudioDevice?.deviceId}
+                      <CheckOutline class="w-5 h-5" />
+                    {:else}
+                      <span class="w-5 h-5"></span>
+                    {/if}
+                    <span>{audioDevice.label}</span>
+                  </DropdownItem>
+                {/each}
+              </Dropdown>
+            {/if}
+          </div>
         </div>
       </div>
     {/if}
@@ -775,68 +851,6 @@
             on:submit={handleSubmit}
             on:dismissError={handleDismissError}
           />
-        {:else if data.threadInteractionMode === 'live_audio'}
-          <div class="w-full flex justify-center">
-            <div
-              class="bg-gray-100 flex flex-row gap-2 items-center justify-center shadow-xl rounded-lg px-2 py-1.5 w-fit h-fit"
-            >
-              {#if !activeSession}
-                <Button
-                  class="flex flex-row gap-1 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 transition-all text-sm font-normal text-center px-3 py-2"
-                  type="button"
-                  on:click={() => {
-                    activeSession = true;
-                  }}
-                  disabled={!audioStream}
-                >
-                  <PlaySolid class="pl-0 ml-0" size="md" />
-                  <span class="mr-1">Start session</span>
-                </Button>
-              {:else}
-                <Button
-                  class="flex flex-row gap-1 bg-amber-700 text-white rounded rounded-lg text-xs hover:bg-amber-800 transition-all text-sm font-normal text-center px-3 py-2"
-                  type="button"
-                  on:click={() => {
-                    activeSession = false;
-                  }}
-                  disabled={!audioStream}
-                >
-                  <StopSolid class="pl-0 ml-0" size="md" />
-                  <span class="mr-1">End session</span>
-                </Button>
-              {/if}
-              <Button
-                id="top-dd"
-                class="flex flex-row gap-2 min-w-56 max-w-56 hover:bg-gray-300 px-3 py-2 grow-0 shrink-0 transition-all text-sm font-normal justify-between text-gray-800 rounded-lg"
-                disabled={!audioStream}
-              >
-                <div class="flex flex-row gap-2 justify-start w-5/6">
-                  <MicrophoneOutline class="w-5 h-5" />
-                  <span class="truncate">{selectedMicrophone?.label || 'Select microphone...'}</span
-                  >
-                </div>
-                <ChevronSortOutline class="ml-2 w-4 h-4" strokeWidth="2" /></Button
-              >
-
-              <Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
-                {#each microphones as microphone}
-                  <DropdownItem
-                    class="flex flex-row gap-2 items-center"
-                    on:click={() => {
-                      selectedMicrophone = microphone;
-                      console.log('Selected microphone:', selectedMicrophone);
-                      openMicrophoneModal = false;
-                    }}
-                  >
-                    <MicrophoneOutline class="w-5 h-5" />
-                    <span>{microphone.label}</span>
-                  </DropdownItem>
-                {/each}
-              </Dropdown>
-            </div>
-          </div>
-        {:else}
-          <h1 class="text-2xl font-bold">The assistant is not configured.</h1>
         {/if}
         <div class="flex gap-2 items-center w-full text-sm justify-between grow my-3">
           <div class="flex gap-2 grow shrink min-w-0">
