@@ -132,10 +132,6 @@ async def browser_realtime_websocket(
                 )
                 await browser_connection.close()
                 raise
-            finally:
-                browser_connection_logger.debug(
-                    "Cleanup for browser connection handler."
-                )
 
         async def handle_openai_events():
             try:
@@ -247,6 +243,7 @@ async def browser_realtime_websocket(
                             | "transcription_session.updated"
                             | "rate_limits.updated"
                         ):
+                            # Making sure we don't miss any events
                             continue
                         case _:
                             openai_connection_logger.warning(
@@ -260,8 +257,6 @@ async def browser_realtime_websocket(
                 raise
             except Exception as e:
                 openai_connection_logger.exception(f"Error handling OpenAI event: {e}")
-            finally:
-                openai_connection_logger.debug("Cleanup for OpenAI connection handler.")
 
         browser_task = asyncio.create_task(handle_browser_messages())
         openai_task = asyncio.create_task(handle_openai_events())

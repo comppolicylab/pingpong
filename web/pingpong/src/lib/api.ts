@@ -2748,6 +2748,5 @@ export const createAudioWebsocket = (classId: number, threadId: number): WebSock
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const host = window.location.host;
   const url = `${protocol}://${host}/api/v1/class/${classId}/thread/${threadId}/audio`;
-  console.log('Creating WebSocket connection to', url);
   return new WebSocket(url);
 };
