@@ -346,6 +346,16 @@ class Assistant(BaseModel):
         from_attributes = True
 
 
+def temperature_validator(self):
+    if (
+        self.temperature is not None
+        and self.interaction_mode == InteractionMode.LIVE_AUDIO
+        and (self.temperature < 0.6 or self.temperature > 1.2)
+    ):
+        raise ValueError("Temperature must be between 0.6 and 1.2 for live audio mode.")
+    return self
+
+
 class CreateAssistant(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
     code_interpreter_file_ids: list[str] | None = None
@@ -354,7 +364,7 @@ class CreateAssistant(BaseModel):
     description: str
     interaction_mode: InteractionMode = InteractionMode.CHAT
     model: str = Field(..., min_length=2)
-    temperature: float | None = Field(0.2, ge=0.0, le=2.0)
+    temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=0, le=2)
     tools: list[Tool]
     published: bool = False
@@ -362,6 +372,8 @@ class CreateAssistant(BaseModel):
     use_image_descriptions: bool = False
     hide_prompt: bool = False
     deleted_private_files: list[int] = []
+
+    _temperature_check = model_validator(mode="after")(temperature_validator)
 
 
 class UpdateAssistant(BaseModel):
@@ -380,6 +392,8 @@ class UpdateAssistant(BaseModel):
     hide_prompt: bool | None = None
     use_image_descriptions: bool | None = None
     deleted_private_files: list[int] = []
+
+    _temperature_check = model_validator(mode="after")(temperature_validator)
 
 
 class DeleteAssistant(BaseModel):

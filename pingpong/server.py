@@ -60,6 +60,7 @@ from .ai import (
     export_threads_multiple_classes,
     format_instructions,
     get_openai_client_by_class_id,
+    get_original_model_name_by_azure_equivalent,
     get_thread_conversation_name,
     get_initial_thread_conversation_name,
     run_thread,
@@ -3591,6 +3592,19 @@ async def update_assistant(
     )
     uses_live_audio = interaction_mode == schemas.InteractionMode.LIVE_AUDIO
 
+    # If the interaction mode is changing, and the user did not specify a
+    # temperature, set a default temperature based on the interaction mode
+    # This is to ensure that the temperature is set appropriately for the mode.
+    if interaction_mode != asst.interaction_mode and (
+        "temperature" not in req.model_fields_set or req.temperature is None
+    ):
+        if uses_live_audio:
+            openai_update["temperature"] = 0.8
+            asst.temperature = 0.8
+        else:
+            openai_update["temperature"] = 0.2
+            asst.temperature = 0.2
+
     # Check that the model is available
     if "model" in req.model_fields_set and req.model is not None:
         _model = None
@@ -3641,6 +3655,29 @@ async def update_assistant(
             _model = "gpt-4o"
         openai_update["model"] = _model
         asst.model = req.model
+
+    else:
+        _model = (
+            get_original_model_name_by_azure_equivalent(asst.model)
+            if isinstance(openai_client, openai.AsyncAzureOpenAI)
+            else asst.model
+        )
+
+        class_models_response = schemas.AssistantModels.model_validate(
+            await list_class_models(request.state.db, request, openai_client)
+        )
+        class_models = class_models_response.models
+
+        model_record = next(
+            (model for model in class_models if model.id == _model), None
+        )
+
+        # Check that the model supports the interaction mode
+        if not model_record or model_record.type != interaction_mode:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model {req.model} is not available for use in {interaction_mode} mode.",
+            )
 
     # Track whether we have an empty vector store to delete
     vector_store_id_to_delete = None

@@ -104,6 +104,20 @@ def get_azure_model_deployment_name_equivalent(model_name: str) -> str:
     return model_name
 
 
+def get_original_model_name_by_azure_equivalent(model_name: str) -> str:
+    """Get the original model name for Azure models.
+
+    :param model_name: Model deployment name
+    :return: Original model name
+    """
+    match model_name:
+        case "gpt-4-turbo-2024-04-09":
+            return "gpt-4-turbo"
+        case "gpt-4-0125-Preview":
+            return "gpt-4-turbo-preview"
+    return model_name
+
+
 async def generate_name(
     cli: openai.AsyncClient, transcript: str, model: str = "gpt-4o-mini"
 ) -> ThreadName | None:
