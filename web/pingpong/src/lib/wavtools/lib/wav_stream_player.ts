@@ -118,9 +118,9 @@ export class WavStreamPlayer {
   /**
    * Starts audio streaming
    * @private
-   * @returns {Promise<true>}
+   * @returns {true}
    */
-  private async _start(): Promise<true> {
+  private _start(): true {
     if (!this.context) {
       throw new Error('Not connected, please call .connect() first');
     }
