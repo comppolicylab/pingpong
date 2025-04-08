@@ -3,8 +3,14 @@
   import Sidebar from '../lib/components/Sidebar.svelte';
   import Main from '$lib/components/Main.svelte';
   import { SvelteToast } from '@zerodevx/svelte-toast';
+  import { onMount } from 'svelte';
+  import { detectBrowser } from '$lib/stores/general';
 
   export let data;
+
+  onMount(() => {
+    detectBrowser();
+  });
 </script>
 
 <SvelteToast />

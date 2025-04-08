@@ -18,13 +18,14 @@
     ArrowRightOutline,
     LockSolid,
     MicrophoneOutline,
-    CirclePlusSolid
+    CirclePlusSolid,
+    MicrophoneSlashOutline
   } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
   import { errorMessage } from '$lib/errors';
   import type { Assistant, FileUploadPurpose } from '$lib/api';
-  import { loading } from '$lib/stores/general';
+  import { loading, isFirefox } from '$lib/stores/general';
   import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
 
   /**
@@ -343,29 +344,46 @@
         <ModeratorsTable moderators={teachers} />
       </Modal>
       {#if assistant.interaction_mode === 'live_audio'}
-        <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
-          <div class="bg-blue-light-50 p-3 rounded-lg">
-            <MicrophoneOutline size="xl" class="text-blue-dark-40" />
+        {#if $isFirefox}
+          <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+            <div class="bg-blue-light-50 p-3 rounded-lg">
+              <MicrophoneSlashOutline size="xl" class="text-blue-dark-40" />
+            </div>
+            <div class="flex flex-col items-center w-3/5">
+              <p class="text-xl font-semibold text-blue-dark-40 text-center">
+                Audio Mode not available on Firefox
+              </p>
+              <p class="text-md font-base text-gray-600 text-center">
+                We're working on bringing Audio Mode to Firefox in a future update. For the best
+                experience, please use Safari, Chrome, or Edge in the meantime.
+              </p>
+            </div>
           </div>
-          <div class="flex flex-col items-center w-2/5">
-            <p class="text-xl font-semibold text-blue-dark-40 text-center">Audio Mode</p>
-            <p class="text-md font-base text-gray-600 text-center">
-              This assistant has been configured to use audio interactions. To get started, create a
-              new session.
-            </p>
+        {:else}
+          <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+            <div class="bg-blue-light-50 p-3 rounded-lg">
+              <MicrophoneOutline size="xl" class="text-blue-dark-40" />
+            </div>
+            <div class="flex flex-col items-center w-2/5">
+              <p class="text-xl font-semibold text-blue-dark-40 text-center">Audio Mode</p>
+              <p class="text-md font-base text-gray-600 text-center">
+                This assistant has been configured to use audio interactions. To get started, create
+                a new session.
+              </p>
+            </div>
+            <div class="flex flex-row p-1.5">
+              <Button
+                class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all"
+                on:click={handleAudioThreadCreate}
+                on:touchstart={handleAudioThreadCreate}
+                type="button"
+              >
+                <CirclePlusSolid size="sm" />
+                <span class="text-sm font-normal text-center"> Create session </span>
+              </Button>
+            </div>
           </div>
-          <div class="flex flex-row p-1.5">
-            <Button
-              class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all"
-              on:click={handleAudioThreadCreate}
-              on:touchstart={handleAudioThreadCreate}
-              type="button"
-            >
-              <CirclePlusSolid size="sm" />
-              <span class="text-sm font-normal text-center"> Create session </span>
-            </Button>
-          </div>
-        </div>
+        {/if}
       {/if}
       <div class="shrink-0 grow-0">
         {#if assistant.interaction_mode === 'chat'}

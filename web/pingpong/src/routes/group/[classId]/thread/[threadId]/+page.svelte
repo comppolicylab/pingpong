@@ -33,7 +33,8 @@
     ChevronSortOutline,
     PlaySolid,
     StopSolid,
-    CheckOutline
+    CheckOutline,
+    MicrophoneSlashOutline
   } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
@@ -44,7 +45,7 @@
   import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
   import { base64ToArrayBuffer, WavRecorder, WavStreamPlayer } from '$lib/wavtools/index';
   import type { ExtendedMediaDeviceInfo } from '$lib/wavtools/lib/wav_recorder';
-
+  import { isFirefox } from '$lib/stores/general';
   export let data;
 
   $: classId = parseInt($page.params.classId);
@@ -791,118 +792,154 @@
   >
   {#if !$loading}
     {#if data.threadInteractionMode === 'live_audio' && !microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'live_audio'}
-      <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
-        <div class="bg-blue-light-50 p-3 rounded-lg">
-          <MicrophoneOutline size="xl" class="text-blue-dark-40" />
-        </div>
-        <div class="flex flex-col items-center w-2/5">
-          <p class="text-xl font-semibold text-blue-dark-40 text-center">Audio Mode</p>
-          <p class="text-md font-base text-gray-600 text-center">
-            To get started, enable microphone access.
-          </p>
-        </div>
-        <Button
-          class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all text-sm font-normal text-center"
-          type="button"
-          on:click={handleSessionSetup}
-          on:touchstart={handleSessionSetup}
-        >
-          Enable access
-        </Button>
-      </div>
-    {:else if data.threadInteractionMode === 'live_audio' && microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'live_audio'}
-      <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
-        <div class="bg-blue-light-50 p-3 rounded-lg">
-          <MicrophoneOutline size="xl" class="text-blue-dark-40" />
-        </div>
-        <div class="flex flex-col items-center w-2/5">
-          <p class="text-xl font-semibold text-blue-dark-40 text-center">Audio Mode</p>
-          {#if endingAudioSession}
-            <p class="text-md font-base text-gray-600 text-center">Finishing up your session.</p>
-          {:else}
-            <p class="text-md font-base text-gray-600 text-center">
-              When you're ready, start the session to begin recording.
+      {#if $isFirefox}
+        <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+          <div class="bg-blue-light-50 p-3 rounded-lg">
+            <MicrophoneSlashOutline size="xl" class="text-blue-dark-40" />
+          </div>
+          <div class="flex flex-col items-center w-2/5">
+            <p class="text-xl font-semibold text-blue-dark-40 text-center">
+              Audio Mode not available on Firefox
             </p>
-          {/if}
-        </div>
-        <div class="w-full flex justify-center">
-          <div
-            class="bg-gray-100 flex flex-row gap-2 items-center justify-center shadow-xl rounded-xl px-2 py-1.5 w-fit h-fit"
-          >
-            {#if !audioSessionStarted}
-              <Button
-                class="flex flex-row gap-1 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 transition-all text-sm font-normal text-center px-3 py-2"
-                type="button"
-                on:click={handleSessionStart}
-                on:touchstart={handleSessionStart}
-                disabled={!microphoneAccess}
-              >
-                {#if startingAudioSession}
-                  <Spinner color="custom" customColor="fill-white" class="w-4 h-4 mr-1" />
-                {:else}
-                  <PlaySolid class="pl-0 ml-0" size="md" />
-                {/if}
-                <span class="mr-1">Start session</span>
-              </Button>
-            {:else}
-              <Button
-                class="flex flex-row gap-1 bg-amber-700 text-white rounded rounded-lg text-xs hover:bg-amber-800 transition-all text-sm font-normal text-center px-3 py-2"
-                type="button"
-                on:click={handleSessionEnd}
-                on:touchstart={handleSessionEnd}
-                disabled={!microphoneAccess}
-              >
-                {#if endingAudioSession}
-                  <Spinner color="custom" customColor="fill-white" class="w-4 h-4 mr-1" />
-                {:else}
-                  <StopSolid class="pl-0 ml-0" size="md" />
-                {/if}
-                <span class="mr-1">End session</span>
-              </Button>
-            {/if}
-            <Button
-              id="top-dd"
-              class="flex flex-row gap-2 min-w-56 max-w-56 hover:bg-gray-300 px-3 py-2 grow-0 shrink-0 transition-all text-sm font-normal justify-between text-gray-800 rounded-lg"
-              disabled={!microphoneAccess ||
-                audioSessionStarted ||
-                startingAudioSession ||
-                endingAudioSession}
-            >
-              <div class="flex flex-row gap-2 justify-start w-5/6">
-                <MicrophoneOutline class="w-5 h-5" />
-                <span class="truncate">{selectedAudioDevice?.label || 'Select microphone...'}</span>
-              </div>
-              <ChevronSortOutline class="ml-2 w-4 h-4" strokeWidth="2" /></Button
-            >
-            {#if audioDevices.length === 0}
-              <Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
-                <DropdownItem class="flex flex-row gap-2 items-center">
-                  <span>No microphones available</span>
-                </DropdownItem>
-              </Dropdown>
-            {:else}
-              <Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
-                {#each audioDevices as audioDevice}
-                  <DropdownItem
-                    class="flex flex-row gap-2 items-center"
-                    on:click={() => {
-                      selectAudioDevice(audioDevice.deviceId);
-                      openMicrophoneModal = false;
-                    }}
-                  >
-                    {#if audioDevice.deviceId === selectedAudioDevice?.deviceId}
-                      <CheckOutline class="w-5 h-5" />
-                    {:else}
-                      <span class="w-5 h-5"></span>
-                    {/if}
-                    <span>{audioDevice.label}</span>
-                  </DropdownItem>
-                {/each}
-              </Dropdown>
-            {/if}
+            <p class="text-md font-base text-gray-600 text-center">
+              We're working on bringing Audio Mode to Firefox in a future update. For the best
+              experience, please use Safari, Chrome, or Edge in the meantime.
+            </p>
           </div>
         </div>
-      </div>
+      {:else}
+        <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+          <div class="bg-blue-light-50 p-3 rounded-lg">
+            <MicrophoneOutline size="xl" class="text-blue-dark-40" />
+          </div>
+          <div class="flex flex-col items-center w-2/5">
+            <p class="text-xl font-semibold text-blue-dark-40 text-center">Audio Mode</p>
+            <p class="text-md font-base text-gray-600 text-center">
+              To get started, enable microphone access.
+            </p>
+          </div>
+          <Button
+            class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all text-sm font-normal text-center"
+            type="button"
+            on:click={handleSessionSetup}
+            on:touchstart={handleSessionSetup}
+          >
+            Enable access
+          </Button>
+        </div>
+      {/if}
+    {:else if data.threadInteractionMode === 'live_audio' && microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'live_audio'}
+      {#if $isFirefox}
+        <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+          <div class="bg-blue-light-50 p-3 rounded-lg">
+            <MicrophoneSlashOutline size="xl" class="text-blue-dark-40" />
+          </div>
+          <div class="flex flex-col items-center w-2/5">
+            <p class="text-xl font-semibold text-blue-dark-40 text-center">
+              Audio Mode not available on Firefox
+            </p>
+            <p class="text-md font-base text-gray-600 text-center">
+              We're working on bringing Audio Mode to Firefox in a future update. For the best
+              experience, please use Safari, Chrome, or Edge in the meantime.
+            </p>
+          </div>
+        </div>
+      {:else}
+        <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+          <div class="bg-blue-light-50 p-3 rounded-lg">
+            <MicrophoneOutline size="xl" class="text-blue-dark-40" />
+          </div>
+          <div class="flex flex-col items-center w-2/5">
+            <p class="text-xl font-semibold text-blue-dark-40 text-center">Audio Mode</p>
+            {#if endingAudioSession}
+              <p class="text-md font-base text-gray-600 text-center">Finishing up your session.</p>
+            {:else}
+              <p class="text-md font-base text-gray-600 text-center">
+                When you're ready, start the session to begin recording.
+              </p>
+            {/if}
+          </div>
+          <div class="w-full flex justify-center">
+            <div
+              class="bg-gray-100 flex flex-row gap-2 items-center justify-center shadow-xl rounded-xl px-2 py-1.5 w-fit h-fit"
+            >
+              {#if !audioSessionStarted}
+                <Button
+                  class="flex flex-row gap-1 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 transition-all text-sm font-normal text-center px-3 py-2"
+                  type="button"
+                  on:click={handleSessionStart}
+                  on:touchstart={handleSessionStart}
+                  disabled={!microphoneAccess}
+                >
+                  {#if startingAudioSession}
+                    <Spinner color="custom" customColor="fill-white" class="w-4 h-4 mr-1" />
+                  {:else}
+                    <PlaySolid class="pl-0 ml-0" size="md" />
+                  {/if}
+                  <span class="mr-1">Start session</span>
+                </Button>
+              {:else}
+                <Button
+                  class="flex flex-row gap-1 bg-amber-700 text-white rounded rounded-lg text-xs hover:bg-amber-800 transition-all text-sm font-normal text-center px-3 py-2"
+                  type="button"
+                  on:click={handleSessionEnd}
+                  on:touchstart={handleSessionEnd}
+                  disabled={!microphoneAccess}
+                >
+                  {#if endingAudioSession}
+                    <Spinner color="custom" customColor="fill-white" class="w-4 h-4 mr-1" />
+                  {:else}
+                    <StopSolid class="pl-0 ml-0" size="md" />
+                  {/if}
+                  <span class="mr-1">End session</span>
+                </Button>
+              {/if}
+              <Button
+                id="top-dd"
+                class="flex flex-row gap-2 min-w-56 max-w-56 hover:bg-gray-300 px-3 py-2 grow-0 shrink-0 transition-all text-sm font-normal justify-between text-gray-800 rounded-lg"
+                disabled={!microphoneAccess ||
+                  audioSessionStarted ||
+                  startingAudioSession ||
+                  endingAudioSession}
+              >
+                <div class="flex flex-row gap-2 justify-start w-5/6">
+                  <MicrophoneOutline class="w-5 h-5" />
+                  <span class="truncate"
+                    >{selectedAudioDevice?.label || 'Select microphone...'}</span
+                  >
+                </div>
+                <ChevronSortOutline class="ml-2 w-4 h-4" strokeWidth="2" /></Button
+              >
+              {#if audioDevices.length === 0}
+                <Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
+                  <DropdownItem class="flex flex-row gap-2 items-center">
+                    <span>No microphones available</span>
+                  </DropdownItem>
+                </Dropdown>
+              {:else}
+                <Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
+                  {#each audioDevices as audioDevice}
+                    <DropdownItem
+                      class="flex flex-row gap-2 items-center"
+                      on:click={() => {
+                        selectAudioDevice(audioDevice.deviceId);
+                        openMicrophoneModal = false;
+                      }}
+                    >
+                      {#if audioDevice.deviceId === selectedAudioDevice?.deviceId}
+                        <CheckOutline class="w-5 h-5" />
+                      {:else}
+                        <span class="w-5 h-5"></span>
+                      {/if}
+                      <span>{audioDevice.label}</span>
+                    </DropdownItem>
+                  {/each}
+                </Dropdown>
+              {/if}
+            </div>
+          </div>
+        </div>
+      {/if}
     {/if}
 
     <div class="w-full bg-gradient-to-t from-white to-transparent">
