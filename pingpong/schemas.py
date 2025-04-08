@@ -12,6 +12,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from pingpong.authz.base import Relation
 from .gravatar import get_email_hash, get_gravatar_image
 
 
@@ -100,6 +102,10 @@ class InspectAuthz(BaseModel):
     relation: str
     object: AuthzEntity
     result: InspectAuthzResult
+
+
+class InspectAuthzAllResult(BaseModel):
+    result: list[Relation]
 
 
 class AddEmailToUserRequest(BaseModel):
@@ -348,7 +354,7 @@ class CreateAssistant(BaseModel):
     description: str
     interaction_mode: InteractionMode = InteractionMode.CHAT
     model: str = Field(..., min_length=2)
-    temperature: float | None = Field(None, ge=0.0, le=2.0)
+    temperature: float | None = Field(0.2, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=0, le=2)
     tools: list[Tool]
     published: bool = False
