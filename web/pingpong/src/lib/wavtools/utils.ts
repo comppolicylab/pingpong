@@ -2,7 +2,7 @@
  * Parts of this code are derived from the following copyrighted
  * material, the use of which is hereby acknowledged.
  *
- * OpenAI (openai-realtime-console)
+ * OpenAI (openai-realtime-api-beta)
  *
  * MIT License
  *
@@ -27,10 +27,17 @@
  * SOFTWARE.
  */
 
-import { WavPacker } from './lib/wav_packer';
-import { AudioAnalysis } from './lib/analysis/audio_analysis';
-import { WavStreamPlayer } from './lib/wav_stream_player';
-import { WavRecorder } from './lib/wav_recorder';
-import { base64ToArrayBuffer } from './utils';
-
-export { AudioAnalysis, WavPacker, WavStreamPlayer, WavRecorder, base64ToArrayBuffer };
+/**
+ * Converts a base64 string to an ArrayBuffer
+ * @param base64 - The base64 encoded string
+ * @returns An ArrayBuffer representation of the base64 string
+ */
+export function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+}

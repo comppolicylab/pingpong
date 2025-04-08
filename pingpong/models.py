@@ -3025,3 +3025,17 @@ class Thread(Base):
         ]
         results = await asyncio.gather(*tasks)
         return {k: v for result in results for k, v in result.items()}
+
+    @classmethod
+    async def get_by_id_with_assistant(
+        cls, session: AsyncSession, thread_id: int
+    ) -> "Thread":
+        """Get a thread by its thread_id with the assistant eager loaded."""
+        stmt = (
+            select(Thread)
+            .options(joinedload(Thread.assistant))
+            .where(Thread.id == thread_id)
+        )
+        result = await session.execute(stmt)
+        thread = result.scalar()
+        return thread

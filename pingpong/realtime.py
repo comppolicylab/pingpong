@@ -4,17 +4,26 @@ import json
 import logging
 from typing import Any, cast
 from fastapi import WebSocket, WebSocketDisconnect
+from openai import OpenAIError
+from sqlalchemy import func
 
 
 from pingpong import schemas
-from pingpong.ai import OpenAIClientType, get_openai_client_by_class_id
+from pingpong.ai import (
+    OpenAIClientType,
+    format_instructions,
+    get_openai_client_by_class_id,
+)
+from pingpong.models import Thread
 from pingpong.websocket import (
     ws_auth_middleware,
     ws_db_middleware,
     ws_parse_session_token,
 )
 
-logger = logging.getLogger(__name__)
+browser_connection_logger = logging.getLogger("realtime_browser")
+openai_connection_logger = logging.getLogger("realtime_openai")
+
 
 async def check_realtime_permissions(ws: WebSocket, thread_id: str):
     if ws.state.session.status != schemas.SessionStatus.VALID:
@@ -64,20 +73,31 @@ async def browser_realtime_websocket(
         )
         await browser_connection.close()
         return
+    thread = await Thread.get_by_id_with_assistant(
+        browser_connection.state.db,
+        int(thread_id),
+    )
+    assistant = thread.assistant
+    conversation_instructions = format_instructions(
+        assistant.instructions,
+        interaction_mode=schemas.InteractionMode.LIVE_AUDIO,
+    )
     async with openai_client.beta.realtime.connect(
-        model="gpt-4o-realtime-preview",
+        model=assistant.model,
     ) as openai_connection:
         await openai_connection.session.update(
-            session={"input_audio_transcription": {"language": "en", "model": "gpt-4o-transcribe"}, "temperature": 0.8,
-            "tool_choice": "none",
-            "voice": "alloy"}
-        )
-        await browser_connection.send_json(
-            {
-                "type": "session.created",
-                "message": "Connected to OpenAI.",
+            session={
+                "input_audio_transcription": {
+                    "model": "gpt-4o-transcribe",
+                },
+                "temperature": assistant.temperature,
+                "tool_choice": "none",
+                "voice": "alloy",
+                "turn_detection": {"type": "server_vad"},
+                "instructions": conversation_instructions,
             }
         )
+
         async def handle_browser_messages():
             try:
                 while True:
@@ -86,57 +106,162 @@ async def browser_realtime_websocket(
                     if "text" in message:
                         try:
                             data = json.loads(message["text"])
-                            print("Received event:", data)
+                            browser_connection_logger.warning(
+                                f"Received unexpected message: {data}"
+                            )
                         except json.JSONDecodeError as e:
-                            print("Error decoding JSON:", e)
+                            browser_connection_logger.error(
+                                f"Failed to decode unexpected message JSON: {e}"
+                            )
                     elif "bytes" in message:
                         audio_chunk = message["bytes"]
                         await openai_connection.input_audio_buffer.append(
-                            audio=base64.b64encode(cast(Any, audio_chunk)).decode("utf-8")
+                            audio=base64.b64encode(cast(Any, audio_chunk)).decode(
+                                "utf-8"
+                            )
                         )
                         await asyncio.sleep(0)
 
             except WebSocketDisconnect:
-                print("WebSocket disconnected.")
+                browser_connection_logger.debug(
+                    "Browser closed the websocket connection."
+                )
             except asyncio.CancelledError:
-                print("❌ Browser message task cancelled.")
+                browser_connection_logger.debug(
+                    "Received task cancellation signal. Closing the browser websocket."
+                )
                 await browser_connection.close()
                 raise
             finally:
-                print("🧹 Cleanup for browser message handler.")
+                browser_connection_logger.debug(
+                    "Cleanup for browser connection handler."
+                )
 
         async def handle_openai_events():
             try:
                 async for event in openai_connection:
-                    if event.type == "response.content_part.done":
-                        print("🔁 Received OpenAI event:", event)
-                    elif event.type == "session.created":
-                        print("Session created:", event)
-                    elif event.type == "session.updated":
-                        print("Session updated:", event)
-                    elif event.type == "session.error":
-                        print("Session error:", event)
-                    elif event.type == "session.ended":
-                        print("Session ended:", event)
-                    elif event.type == "conversation.item.input_audio_transcription.completed":
-                        print("Audio transcription completed:", event)
-                    elif event.type == "response.audio.delta":
-                        delta_audio_b64 = event.delta  # base64-encoded audio
-                        await browser_connection.send_json({
-                            "type": "audio",
-                            "audio": delta_audio_b64,
-                            "content_index": event.content_index
-                        })
-                    else:
-                        print("Unknown event type:", event.type)
+                    match event.type:
+                        case "response.audio_transcript.done":
+                            await openai_client.beta.threads.messages.create(
+                                thread_id=thread.thread_id,
+                                role="assistant",
+                                content=event.transcript,
+                                metadata={
+                                    "item_id": event.item_id,
+                                },
+                            )
+                        case "session.created":
+                            openai_connection_logger.debug(
+                                f"Session successfully created: {event.session}"
+                            )
+                        case "session.updated":
+                            openai_connection_logger.debug(
+                                f"Session successfully updated: {event.session}"
+                            )
+                            await browser_connection.send_json(
+                                {
+                                    "type": "session.updated",
+                                    "message": "Connected to OpenAI.",
+                                }
+                            )
+                        case "session.error":
+                            openai_connection_logger.exception(
+                                f"Session error: {event.error}"
+                            )
+                        case "session.ended":
+                            openai_connection_logger.debug(
+                                f"Session ended: {event.session}"
+                            )
+                            await browser_connection.send_json(
+                                {
+                                    "type": "session.ended",
+                                    "message": "Session ended.",
+                                }
+                            )
+                        case "conversation.item.input_audio_transcription.completed":
+                            try:
+                                await openai_client.beta.threads.messages.create(
+                                    thread_id=thread.thread_id,
+                                    role="user",
+                                    content=event.transcript,
+                                    metadata={
+                                        "user_id": str(
+                                            browser_connection.state.session.user.id
+                                        ),
+                                        "item_id": event.item_id,
+                                    },
+                                )
+                            except OpenAIError as e:
+                                openai_connection_logger.exception(
+                                    f"Failed to send message to OpenAI: {e}, {event}"
+                                )
+                            try:
+                                thread.user_message_ct += 1
+                                thread.last_activity = func.now()
+
+                                browser_connection.state.db.add(thread)
+                                await browser_connection.state.db.flush()
+                                await browser_connection.state.db.refresh(thread)
+                            except Exception as e:
+                                openai_connection_logger.exception(
+                                    f"Failed to update thread in database: {e}"
+                                )
+                        case "response.audio.delta":
+                            delta_audio_b64 = event.delta
+                            await browser_connection.send_json(
+                                {
+                                    "type": "response.audio.delta",
+                                    "audio": delta_audio_b64,
+                                    "item_id": event.item_id,
+                                }
+                            )
+                        case "input_audio_buffer.speech_started":
+                            await browser_connection.send_json(
+                                {
+                                    "type": "input_audio_buffer.speech_started",
+                                    "message": "User speech detected.",
+                                }
+                            )
+                        case (
+                            "conversation.created"
+                            | "conversation.item.created"
+                            | "conversation.item.input_audio_transcription.delta"
+                            | "conversation.item.input_audio_transcription.failed"
+                            | "conversation.item.truncated"
+                            | "conversation.item.deleted"
+                            | "input_audio_buffer.committed"
+                            | "input_audio_buffer.cleared"
+                            | "input_audio_buffer.speech_stopped"
+                            | "response.created"
+                            | "response.done"
+                            | "response.output_item.added"
+                            | "response.output_item.done"
+                            | "response.content_part.added"
+                            | "response.content_part.done"
+                            | "response.text.delta"
+                            | "response.text.done"
+                            | "response.audio_transcript.delta"
+                            | "response.audio.done"
+                            | "response.function_call_arguments.delta"
+                            | "response.function_call_arguments.done"
+                            | "transcription_session.updated"
+                            | "rate_limits.updated"
+                        ):
+                            continue
+                        case _:
+                            openai_connection_logger.warning(
+                                f"Ignoring unknown event type... {event.type}"
+                            )
 
             except asyncio.CancelledError:
-                print("❌ OpenAI event task cancelled.")
+                openai_connection_logger.debug(
+                    "Received task cancellation signal. Closing the OpenAI connection."
+                )
                 raise
             except Exception as e:
-                print("Error receiving from OpenAI:", e)
+                openai_connection_logger.exception(f"Error handling OpenAI event: {e}")
             finally:
-                print("🧹 Cleanup for OpenAI event handler.")
+                openai_connection_logger.debug("Cleanup for OpenAI connection handler.")
 
         browser_task = asyncio.create_task(handle_browser_messages())
         openai_task = asyncio.create_task(handle_openai_events())

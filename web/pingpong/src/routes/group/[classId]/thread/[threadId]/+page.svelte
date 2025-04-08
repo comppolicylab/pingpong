@@ -42,7 +42,7 @@
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import { writable } from 'svelte/store';
   import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
-  import { WavRecorder } from '$lib/wavtools/index';
+  import { base64ToArrayBuffer, WavRecorder, WavStreamPlayer } from '$lib/wavtools/index';
   import type { ExtendedMediaDeviceInfo } from '$lib/wavtools/lib/wav_recorder';
 
   export let data;
@@ -136,11 +136,13 @@
   $: assistantDeleted = !$assistantId && $assistantId === 0;
   let useLatex = false;
   let useImageDescriptions = false;
+  let assistantInteractionMode: 'live_audio' | 'chat' | null = null;
   $: {
     const assistant = data.assistants.find((assistant) => assistant.id === $assistantId);
     if (assistant) {
       useLatex = assistant.use_latex || false;
       useImageDescriptions = assistant.use_image_descriptions || false;
+      assistantInteractionMode = assistant.interaction_mode;
     } else {
       console.warn(`Definition for assistant ${$assistantId} not found.`);
     }
@@ -376,6 +378,7 @@
   };
 
   let wavRecorder: WavRecorder | null = null;
+  let wavStreamPlayer: WavStreamPlayer | null = null;
   let microphoneAccess = false;
   let audioDevices: ExtendedMediaDeviceInfo[] = [];
   let selectedAudioDevice: ExtendedMediaDeviceInfo | null = null;
@@ -422,7 +425,19 @@
    * The user will be asked to allow microphone access.
    */
   const handleSessionSetup = async () => {
-    wavRecorder = new WavRecorder({ sampleRate: 24000 });
+    wavRecorder = new WavRecorder({ sampleRate: 24000, debug: true });
+    wavStreamPlayer = new WavStreamPlayer({ sampleRate: 24000 });
+    try {
+      await wavStreamPlayer.connect();
+    } catch (error) {
+      sadToast(
+        `Failed to set up audio output to your speakers. Error: ${errorMessage(error, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
+      );
+      wavRecorder.quit();
+      wavRecorder = null;
+      wavStreamPlayer = null;
+      return;
+    }
     try {
       audioDevices = await wavRecorder.listDevices();
       wavRecorder.listenForDeviceChange(handleDeviceChange);
@@ -433,6 +448,7 @@
       );
       wavRecorder.quit();
       wavRecorder = null;
+      wavStreamPlayer = null;
       return;
     }
 
@@ -481,12 +497,19 @@
       await wavRecorder.quit();
       wavRecorder = null;
     }
+    if (wavStreamPlayer) {
+      await wavStreamPlayer.interrupt();
+      wavStreamPlayer = null;
+    }
   };
 
   /**
    * Handle the start of a session.
    */
   const handleSessionStart = async () => {
+    if (startingAudioSession) {
+      return;
+    }
     startingAudioSession = true;
     if (!wavRecorder) {
       sadToast('We failed to start the session. Please try again.');
@@ -496,6 +519,10 @@
       sadToast('No audio device selected. Please select a microphone.');
       return;
     }
+    if (!wavStreamPlayer) {
+      sadToast('Failed to set up audio output to your speakers.');
+      return;
+    }
 
     socket = api.createAudioWebsocket(classId, threadId);
     socket.binaryType = 'arraybuffer';
@@ -503,7 +530,7 @@
     socket.addEventListener('message', async (event) => {
       const message = JSON.parse(event.data);
       switch (message.type) {
-        case 'session.created':
+        case 'session.updated':
           if (!wavRecorder) {
             sadToast('We failed to start the session. Please try again.');
             return;
@@ -516,6 +543,25 @@
           await wavRecorder.record(chunkProcessor);
           startingAudioSession = false;
           audioSessionStarted = true;
+          break;
+        case 'input_audio_buffer.speech_started':
+          if (!wavStreamPlayer) {
+            sadToast('Failed to set up audio output to your speakers.');
+            return;
+          }
+          await wavStreamPlayer.interrupt();
+          // TODO: Inform the server that we've stopped playing the audio.
+          // const trackSampleOffset = await wavStreamPlayer.interrupt();
+          // if (trackSampleOffset?.trackId) {
+          //   const { trackId, offset } = trackSampleOffset;
+          // }
+          break;
+        case 'response.audio.delta':
+          if (!wavStreamPlayer) {
+            sadToast('Failed to set up audio output to your speakers.');
+            return;
+          }
+          wavStreamPlayer.add16BitPCM(base64ToArrayBuffer(message.audio), message.item_id);
           break;
         case 'error':
           if (message.error.type === 'invalid_request_error') {
@@ -536,6 +582,37 @@
           console.warn('Unknown message type:', message.type);
       }
     });
+  };
+
+  let endingAudioSession = false;
+  /**
+   * Handle session end.
+   */
+  const handleSessionEnd = async () => {
+    if (endingAudioSession) {
+      return;
+    }
+    endingAudioSession = true;
+    if (socket) {
+      socket.close();
+      socket = null;
+    }
+    audioDevices = [];
+    selectedAudioDevice = null;
+    if (wavRecorder) {
+      await wavRecorder.quit();
+      wavRecorder = null;
+    }
+    if (wavStreamPlayer) {
+      await wavStreamPlayer.interrupt();
+      wavStreamPlayer = null;
+    }
+    await invalidateAll();
+    startingAudioSession = false;
+    audioSessionStarted = false;
+    openMicrophoneModal = false;
+    microphoneAccess = false;
+    endingAudioSession = false;
   };
 
   /*
@@ -713,7 +790,7 @@
     ><ModeratorsTable moderators={teachers} /></Modal
   >
   {#if !$loading}
-    {#if data.threadInteractionMode === 'live_audio' && !microphoneAccess}
+    {#if data.threadInteractionMode === 'live_audio' && !microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'live_audio'}
       <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
         <div class="bg-blue-light-50 p-3 rounded-lg">
           <MicrophoneOutline size="xl" class="text-blue-dark-40" />
@@ -733,16 +810,20 @@
           Enable access
         </Button>
       </div>
-    {:else if data.threadInteractionMode === 'live_audio' && microphoneAccess}
+    {:else if data.threadInteractionMode === 'live_audio' && microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'live_audio'}
       <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
         <div class="bg-blue-light-50 p-3 rounded-lg">
           <MicrophoneOutline size="xl" class="text-blue-dark-40" />
         </div>
         <div class="flex flex-col items-center w-2/5">
           <p class="text-xl font-semibold text-blue-dark-40 text-center">Audio Mode</p>
-          <p class="text-md font-base text-gray-600 text-center">
-            When you're ready, start the session to begin recording.
-          </p>
+          {#if endingAudioSession}
+            <p class="text-md font-base text-gray-600 text-center">Finishing up your session.</p>
+          {:else}
+            <p class="text-md font-base text-gray-600 text-center">
+              When you're ready, start the session to begin recording.
+            </p>
+          {/if}
         </div>
         <div class="w-full flex justify-center">
           <div
@@ -767,19 +848,25 @@
               <Button
                 class="flex flex-row gap-1 bg-amber-700 text-white rounded rounded-lg text-xs hover:bg-amber-800 transition-all text-sm font-normal text-center px-3 py-2"
                 type="button"
-                on:click={() => {
-                  audioSessionStarted = false;
-                }}
+                on:click={handleSessionEnd}
+                on:touchstart={handleSessionEnd}
                 disabled={!microphoneAccess}
               >
-                <StopSolid class="pl-0 ml-0" size="md" />
+                {#if endingAudioSession}
+                  <Spinner color="custom" customColor="fill-white" class="w-4 h-4 mr-1" />
+                {:else}
+                  <StopSolid class="pl-0 ml-0" size="md" />
+                {/if}
                 <span class="mr-1">End session</span>
               </Button>
             {/if}
             <Button
               id="top-dd"
               class="flex flex-row gap-2 min-w-56 max-w-56 hover:bg-gray-300 px-3 py-2 grow-0 shrink-0 transition-all text-sm font-normal justify-between text-gray-800 rounded-lg"
-              disabled={!microphoneAccess}
+              disabled={!microphoneAccess ||
+                audioSessionStarted ||
+                startingAudioSession ||
+                endingAudioSession}
             >
               <div class="flex flex-row gap-2 justify-start w-5/6">
                 <MicrophoneOutline class="w-5 h-5" />
@@ -820,7 +907,7 @@
 
     <div class="w-full bg-gradient-to-t from-white to-transparent">
       <div class="w-11/12 mx-auto relative flex flex-col">
-        {#if data.threadInteractionMode == 'chat'}
+        {#if data.threadInteractionMode == 'chat' && assistantInteractionMode === 'chat'}
           {#if $waiting || $submitting}
             <div
               class="w-full flex justify-center absolute -top-10"
@@ -851,6 +938,36 @@
             on:submit={handleSubmit}
             on:dismissError={handleDismissError}
           />
+        {:else if data.threadInteractionMode === 'live_audio' && ($messages.length > 0 || assistantInteractionMode === 'chat')}
+          <div
+            class="flex flex-col bg-seasalt gap-2 border border-melon pl-4 py-2.5 pr-3 items-stretch transition-all duration-200 relative shadow-[0_0.25rem_1.25rem_rgba(254,184,175,0.15)] focus-within:shadow-[0_0.25rem_1.25rem_rgba(253,148,134,0.25)] hover:border-coral-pink focus-within:border-coral-pink z-20 rounded-2xl"
+          >
+            <div class="flex flex-row gap-2">
+              <MicrophoneOutline class="w-6 h-6 text-gray-700" />
+              <div class="flex flex-col">
+                <span class="font-semibold text-md text-gray-700">Live Audio Session</span><span
+                  class="font-normal text-md text-gray-700"
+                  >This conversation was completed as a Live Audio session and is read-only. To
+                  continue chatting, start a new session.</span
+                >
+              </div>
+            </div>
+          </div>
+        {:else if data.threadInteractionMode === 'chat' && $messages.length > 0 && assistantInteractionMode === 'live_audio'}
+          <div
+            class="flex flex-col bg-seasalt gap-2 border border-melon pl-4 py-2.5 pr-3 items-stretch transition-all duration-200 relative shadow-[0_0.25rem_1.25rem_rgba(254,184,175,0.15)] focus-within:shadow-[0_0.25rem_1.25rem_rgba(253,148,134,0.25)] hover:border-coral-pink focus-within:border-coral-pink z-20 rounded-2xl"
+          >
+            <div class="flex flex-row gap-2">
+              <MicrophoneOutline class="w-6 h-6 text-gray-700" />
+              <div class="flex flex-col">
+                <span class="font-semibold text-md text-gray-700">Assistant in Audio Mode</span
+                ><span class="font-normal text-md text-gray-700"
+                  >This assistant has been configured to use audio interactions. To continue the
+                  conversation, start a new session.</span
+                >
+              </div>
+            </div>
+          </div>
         {/if}
         <div class="flex gap-2 items-center w-full text-sm justify-between grow my-3">
           <div class="flex gap-2 grow shrink min-w-0">
