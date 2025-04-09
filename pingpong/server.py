@@ -2757,7 +2757,7 @@ async def create_thread(
     except openai.InternalServerError:
         logger.exception("Error creating thread")
         if vector_store_id:
-            await openai_client.beta.vector_stores.delete(vector_store_id)
+            await openai_client.vector_stores.delete(vector_store_id)
         if thread:
             await openai_client.beta.threads.delete(thread.id)
         raise HTTPException(
@@ -2767,7 +2767,7 @@ async def create_thread(
     except (openai.APIError, Exception):
         logger.exception("Error creating thread")
         if vector_store_id:
-            await openai_client.beta.vector_stores.delete(vector_store_id)
+            await openai_client.vector_stores.delete(vector_store_id)
         if thread:
             await openai_client.beta.threads.delete(thread.id)
         raise HTTPException(
@@ -2779,7 +2779,7 @@ async def create_thread(
 
     if not thread:
         if vector_store_id:
-            await openai_client.beta.vector_stores.delete(vector_store_id)
+            await openai_client.vector_stores.delete(vector_store_id)
         raise HTTPException(
             status_code=500,
             detail="We faced an error while creating your conversation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
@@ -2812,7 +2812,7 @@ async def create_thread(
     except Exception as e:
         logger.exception("Error creating thread: %s", e)
         if vector_store_id:
-            await openai_client.beta.vector_stores.delete(vector_store_id)
+            await openai_client.vector_stores.delete(vector_store_id)
         await openai_client.beta.threads.delete(thread.id)
         if result:
             # Delete users-threads mapping
@@ -3526,7 +3526,7 @@ async def create_assistant(
         return asst
     except Exception as e:
         if vector_store_object_id:
-            await openai_client.beta.vector_stores.delete(vector_store_id)
+            await openai_client.vector_stores.delete(vector_store_id)
         await openai_client.beta.assistants.delete(new_asst.id)
         raise e
 

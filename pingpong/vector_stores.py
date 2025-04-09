@@ -30,13 +30,13 @@ async def create_vector_store(
     """
 
     try:
-        new_vector_store = await openai_client.beta.vector_stores.create(
+        new_vector_store = await openai_client.vector_stores.create(
             metadata={
                 "class_id": class_id,
             },
         )
         if upload_to_oai:
-            await openai_client.beta.vector_stores.file_batches.create_and_poll(
+            await openai_client.vector_stores.file_batches.create_and_poll(
                 new_vector_store.id, file_ids=file_search_file_ids
             )
     except openai.BadRequestError as e:
@@ -56,7 +56,7 @@ async def create_vector_store(
             session, data, file_search_file_ids
         )
     except Exception as e:
-        await openai_client.beta.vector_stores.delete(new_vector_store.id)
+        await openai_client.vector_stores.delete(new_vector_store.id)
         raise e
 
     return new_vector_store.id, vector_store_object_id
@@ -87,7 +87,7 @@ async def append_vector_store_files(
     )
 
     try:
-        await openai_client.beta.vector_stores.file_batches.create_and_poll(
+        await openai_client.vector_stores.file_batches.create_and_poll(
             vector_store_id, file_ids=file_search_file_ids
         )
     except openai.BadRequestError as e:
@@ -148,7 +148,7 @@ async def sync_vector_store_files(
 
     if file_ids_to_add:
         try:
-            await openai_client.beta.vector_stores.file_batches.create_and_poll(
+            await openai_client.vector_stores.file_batches.create_and_poll(
                 vector_store_id, file_ids=file_ids_to_add
             )
         except openai.BadRequestError as e:
@@ -158,7 +158,7 @@ async def sync_vector_store_files(
 
     for file_id in file_ids_to_remove:
         try:
-            await openai_client.beta.vector_stores.files.delete(
+            await openai_client.vector_stores.files.delete(
                 file_id, vector_store_id=vector_store_id
             )
         # Don't raise an error if the file is already deleted
@@ -254,7 +254,7 @@ async def delete_vector_store_oai(
         vector_store_id (str): OpenAI API vector store id
     """
     try:
-        await openai_client.beta.vector_stores.delete(vector_store_id)
+        await openai_client.vector_stores.delete(vector_store_id)
     except openai.NotFoundError:
         pass
     except openai.BadRequestError as e:
