@@ -343,7 +343,7 @@
       <Modal title="Group Moderators" bind:open={showModerators} autoclose outsideclose>
         <ModeratorsTable moderators={teachers} />
       </Modal>
-      {#if assistant.interaction_mode === 'live_audio'}
+      {#if assistant.interaction_mode === 'voice'}
         {#if $isFirefox}
           <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
             <div class="bg-blue-light-50 p-3 rounded-lg">
@@ -351,10 +351,10 @@
             </div>
             <div class="flex flex-col items-center w-3/5">
               <p class="text-xl font-semibold text-blue-dark-40 text-center">
-                Audio Mode not available on Firefox
+                Voice mode not available on Firefox
               </p>
               <p class="text-md font-base text-gray-600 text-center">
-                We're working on bringing Audio Mode to Firefox in a future update. For the best
+                We're working on bringing Voice mode to Firefox in a future update. For the best
                 experience, please use Safari, Chrome, or Edge in the meantime.
               </p>
             </div>
@@ -364,11 +364,10 @@
             <div class="bg-blue-light-50 p-3 rounded-lg">
               <MicrophoneOutline size="xl" class="text-blue-dark-40" />
             </div>
-            <div class="flex flex-col items-center w-2/5">
-              <p class="text-xl font-semibold text-blue-dark-40 text-center">Audio Mode</p>
+            <div class="flex flex-col items-center min-w-2/5">
+              <p class="text-xl font-semibold text-blue-dark-40 text-center">Voice mode</p>
               <p class="text-md font-base text-gray-600 text-center">
-                This assistant has been configured to use audio interactions. To get started, create
-                a new session.
+                Talk to this assistant using your voice.<br />Create a new session to begin.
               </p>
             </div>
             <div class="flex flex-row p-1.5">

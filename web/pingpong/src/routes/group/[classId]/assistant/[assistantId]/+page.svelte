@@ -59,7 +59,7 @@
   $: preventEdits = !!assistant?.locked;
   $: canPublish = data.grants.canPublishAssistants;
 
-  let interactionMode: 'chat' | 'live_audio';
+  let interactionMode: 'chat' | 'voice';
   $: if (
     assistant?.interaction_mode !== undefined &&
     assistant?.interaction_mode !== null &&
@@ -121,7 +121,7 @@
   const defaultTools = [{ type: 'file_search' }];
 
   $: chatModelCount = data.models.filter((model) => model.type === 'chat').length;
-  $: audioModelCount = data.models.filter((model) => model.type === 'live_audio').length;
+  $: audioModelCount = data.models.filter((model) => model.type === 'voice').length;
 
   $: initialTools = (assistant?.tools ? (JSON.parse(assistant.tools) as Tool[]) : defaultTools).map(
     (t) => t.type
@@ -324,7 +324,7 @@
     ) {
       temperatureValue = assistant.temperature;
       _temperatureValue = assistant.temperature;
-    } else if (mode === 'live_audio') {
+    } else if (mode === 'voice') {
       temperatureValue = defaultAudioTemperature;
       _temperatureValue = defaultAudioTemperature;
     } else if (mode === 'chat') {
@@ -344,7 +344,7 @@
     temperatureValue === undefined &&
     (data.isCreating || assistant?.temperature === undefined || assistant?.temperature === null)
   ) {
-    if (interactionMode === 'live_audio') {
+    if (interactionMode === 'voice') {
       temperatureValue = defaultAudioTemperature;
       _temperatureValue = defaultAudioTemperature;
     } else if (interactionMode === 'chat') {
@@ -784,21 +784,21 @@
             ><div class="flex flex-row gap-2 items-center">
               {#if interactionMode === 'chat'}<MessageDotsSolid
                   class="w-6 h-6"
-                />{:else}<MessageDotsOutline class="w-6 h-6" />{/if}Text Mode
+                />{:else}<MessageDotsOutline class="w-6 h-6" />{/if}Chat mode
             </div></RadioButton
           >
         {/if}
         {#if audioModelCount !== 0}
           <RadioButton
-            value="live_audio"
+            value="voice"
             bind:group={interactionMode}
             disabled={preventEdits}
             on:change={changeTemperatureInteractionMode}
             class={`${preventEdits ? 'hover:bg-transparent' : ''} select-none`}
             ><div class="flex flex-row gap-2 items-center">
-              {#if interactionMode === 'live_audio'}<MicrophoneSolid
+              {#if interactionMode === 'voice'}<MicrophoneSolid
                   class="w-5 h-5"
-                />{:else}<MicrophoneOutline class="w-5 h-5" />{/if}Audio Mode
+                />{:else}<MicrophoneOutline class="w-5 h-5" />{/if}Voice mode
             </div></RadioButton
           >
         {/if}
@@ -963,7 +963,7 @@
           </Badge>
           <Helper
             >This interaction mode does not support LaTeX formatting for assistant responses. To use
-            LaTeX formatting, switch to Text Mode.</Helper
+            LaTeX formatting, switch to Chat mode.</Helper
           >
         </div>
       {/if}
@@ -1174,7 +1174,7 @@
                   unless you need very experimental responses, as it may lead to less predictable
                   and more random answers. You can change this setting anytime.</Helper
                 >
-              {:else if interactionMode === 'live_audio'}
+              {:else if interactionMode === 'voice'}
                 <Helper class="pb-1"
                   >Select the model's "temperature," a setting from 0.6 to 1.2 that controls how
                   creative or predictable the assistant's responses are. For audio models, a

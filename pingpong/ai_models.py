@@ -202,7 +202,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     "gpt-4o-realtime-preview": {
         "name": "GPT-4o Realtime",
         "sort_order": 1,
-        "type": "live_audio",
+        "type": "voice",
         "is_new": False,
         "highlight": True,
         "is_latest": True,
@@ -216,7 +216,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     "gpt-4o-mini-realtime-preview": {
         "name": "GPT-4o mini Realtime",
         "sort_order": 1,
-        "type": "live_audio",
+        "type": "voice",
         "is_new": False,
         "highlight": False,
         "is_latest": True,
@@ -471,7 +471,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     "gpt-4o-realtime-preview-2024-12-17": {
         "name": "gpt-4o-realtime-preview-2024-12-17",
         "sort_order": 1,
-        "type": "live_audio",
+        "type": "voice",
         "is_new": False,
         "highlight": False,
         "is_latest": False,
@@ -485,7 +485,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     "gpt-4o-realtime-preview-2024-10-01": {
         "name": "gpt-4o-realtime-preview-2024-10-01",
         "sort_order": 2,
-        "type": "live_audio",
+        "type": "voice",
         "is_new": False,
         "highlight": False,
         "is_latest": False,
@@ -499,7 +499,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     "gpt-4o-mini-realtime-preview-2024-12-17": {
         "name": "gpt-4o-mini-realtime-preview-2024-12-17",
         "sort_order": 3,
-        "type": "live_audio",
+        "type": "voice",
         "is_new": False,
         "highlight": False,
         "is_latest": False,

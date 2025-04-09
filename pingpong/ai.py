@@ -537,7 +537,7 @@ def format_instructions(
 ) -> str:
     """Format instructions for a prompt."""
 
-    if interaction_mode == InteractionMode.LIVE_AUDIO:
+    if interaction_mode == InteractionMode.VOICE:
         instructions = (
             "Your knowledge cutoff is 2023-10. You are a helpful, witty, and "
             "friendly AI. Act like a human, but remember that you aren't a "

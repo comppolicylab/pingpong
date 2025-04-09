@@ -51,7 +51,7 @@
   $: classId = parseInt($page.params.classId);
   $: threadId = parseInt($page.params.threadId);
   $: threadMgr =
-    data.threadInteractionMode === 'live_audio'
+    data.threadInteractionMode === 'voice'
       ? new AudioThreadManager(fetch, classId, threadId, data.threadData)
       : new ThreadManager(fetch, classId, threadId, data.threadData);
   $: isPrivate = data.class.private || false;
@@ -137,7 +137,7 @@
   $: assistantDeleted = !$assistantId && $assistantId === 0;
   let useLatex = false;
   let useImageDescriptions = false;
-  let assistantInteractionMode: 'live_audio' | 'chat' | null = null;
+  let assistantInteractionMode: 'voice' | 'chat' | null = null;
   $: {
     const assistant = data.assistants.find((assistant) => assistant.id === $assistantId);
     if (assistant) {
@@ -791,7 +791,7 @@
     ><ModeratorsTable moderators={teachers} /></Modal
   >
   {#if !$loading}
-    {#if data.threadInteractionMode === 'live_audio' && !microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'live_audio'}
+    {#if data.threadInteractionMode === 'voice' && !microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'voice'}
       {#if $isFirefox}
         <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
           <div class="bg-blue-light-50 p-3 rounded-lg">
@@ -799,10 +799,10 @@
           </div>
           <div class="flex flex-col items-center w-2/5">
             <p class="text-xl font-semibold text-blue-dark-40 text-center">
-              Audio Mode not available on Firefox
+              Voice mode not available on Firefox
             </p>
             <p class="text-md font-base text-gray-600 text-center">
-              We're working on bringing Audio Mode to Firefox in a future update. For the best
+              We're working on bringing Voice mode to Firefox in a future update. For the best
               experience, please use Safari, Chrome, or Edge in the meantime.
             </p>
           </div>
@@ -813,7 +813,7 @@
             <MicrophoneOutline size="xl" class="text-blue-dark-40" />
           </div>
           <div class="flex flex-col items-center w-2/5">
-            <p class="text-xl font-semibold text-blue-dark-40 text-center">Audio Mode</p>
+            <p class="text-xl font-semibold text-blue-dark-40 text-center">Voice mode</p>
             <p class="text-md font-base text-gray-600 text-center">
               To get started, enable microphone access.
             </p>
@@ -828,7 +828,7 @@
           </Button>
         </div>
       {/if}
-    {:else if data.threadInteractionMode === 'live_audio' && microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'live_audio'}
+    {:else if data.threadInteractionMode === 'voice' && microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'voice'}
       {#if $isFirefox}
         <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
           <div class="bg-blue-light-50 p-3 rounded-lg">
@@ -836,10 +836,10 @@
           </div>
           <div class="flex flex-col items-center w-2/5">
             <p class="text-xl font-semibold text-blue-dark-40 text-center">
-              Audio Mode not available on Firefox
+              Voice mode not available on Firefox
             </p>
             <p class="text-md font-base text-gray-600 text-center">
-              We're working on bringing Audio Mode to Firefox in a future update. For the best
+              We're working on bringing Voice mode to Firefox in a future update. For the best
               experience, please use Safari, Chrome, or Edge in the meantime.
             </p>
           </div>
@@ -850,9 +850,11 @@
             <MicrophoneOutline size="xl" class="text-blue-dark-40" />
           </div>
           <div class="flex flex-col items-center w-2/5">
-            <p class="text-xl font-semibold text-blue-dark-40 text-center">Audio Mode</p>
+            <p class="text-xl font-semibold text-blue-dark-40 text-center">Voice mode</p>
             {#if endingAudioSession}
-              <p class="text-md font-base text-gray-600 text-center">Finishing up your session.</p>
+              <p class="text-md font-base text-gray-600 text-center">
+                Finishing up your session...
+              </p>
             {:else}
               <p class="text-md font-base text-gray-600 text-center">
                 When you're ready, start the session to begin recording.
@@ -975,29 +977,29 @@
             on:submit={handleSubmit}
             on:dismissError={handleDismissError}
           />
-        {:else if data.threadInteractionMode === 'live_audio' && ($messages.length > 0 || assistantInteractionMode === 'chat')}
+        {:else if data.threadInteractionMode === 'voice' && ($messages.length > 0 || assistantInteractionMode === 'chat')}
           <div
             class="flex flex-col bg-seasalt gap-2 border border-melon pl-4 py-2.5 pr-3 items-stretch transition-all duration-200 relative shadow-[0_0.25rem_1.25rem_rgba(254,184,175,0.15)] focus-within:shadow-[0_0.25rem_1.25rem_rgba(253,148,134,0.25)] hover:border-coral-pink focus-within:border-coral-pink z-20 rounded-2xl"
           >
             <div class="flex flex-row gap-2">
               <MicrophoneOutline class="w-6 h-6 text-gray-700" />
               <div class="flex flex-col">
-                <span class="font-semibold text-md text-gray-700">Live Audio Session</span><span
+                <span class="font-semibold text-md text-gray-700">Voice Mode Session</span><span
                   class="font-normal text-md text-gray-700"
-                  >This conversation was completed as a Live Audio session and is read-only. To
-                  continue chatting, start a new session.</span
+                  >This conversation was completed in Voice mode and is read-only. To continue
+                  chatting, start a new conversation.</span
                 >
               </div>
             </div>
           </div>
-        {:else if data.threadInteractionMode === 'chat' && $messages.length > 0 && assistantInteractionMode === 'live_audio'}
+        {:else if data.threadInteractionMode === 'chat' && $messages.length > 0 && assistantInteractionMode === 'voice'}
           <div
             class="flex flex-col bg-seasalt gap-2 border border-melon pl-4 py-2.5 pr-3 items-stretch transition-all duration-200 relative shadow-[0_0.25rem_1.25rem_rgba(254,184,175,0.15)] focus-within:shadow-[0_0.25rem_1.25rem_rgba(253,148,134,0.25)] hover:border-coral-pink focus-within:border-coral-pink z-20 rounded-2xl"
           >
             <div class="flex flex-row gap-2">
               <MicrophoneOutline class="w-6 h-6 text-gray-700" />
               <div class="flex flex-col">
-                <span class="font-semibold text-md text-gray-700">Assistant in Audio Mode</span
+                <span class="font-semibold text-md text-gray-700">Assistant in Voice mode</span
                 ><span class="font-normal text-md text-gray-700"
                   >This assistant has been configured to use audio interactions. To continue the
                   conversation, start a new session.</span

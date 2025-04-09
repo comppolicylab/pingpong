@@ -318,7 +318,7 @@ class VectorStoreType(Enum):
 
 class InteractionMode(StrEnum):
     CHAT = "chat"
-    LIVE_AUDIO = "live_audio"
+    VOICE = "voice"
 
 
 class Assistant(BaseModel):
@@ -349,10 +349,10 @@ class Assistant(BaseModel):
 def temperature_validator(self):
     if (
         self.temperature is not None
-        and self.interaction_mode == InteractionMode.LIVE_AUDIO
+        and self.interaction_mode == InteractionMode.VOICE
         and (self.temperature < 0.6 or self.temperature > 1.2)
     ):
-        raise ValueError("Temperature must be between 0.6 and 1.2 for live audio mode.")
+        raise ValueError("Temperature must be between 0.6 and 1.2 for Voice mode.")
     return self
 
 
@@ -1003,7 +1003,7 @@ class AssistantModelDict(TypedDict):
     is_latest: bool
     is_new: bool
     highlight: bool
-    type: Literal["chat", "live_audio"]
+    type: Literal["chat", "voice"]
     supports_vision: bool
     supports_file_search: bool
     supports_code_interpreter: bool

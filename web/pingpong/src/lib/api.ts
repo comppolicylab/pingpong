@@ -971,7 +971,7 @@ export type AssistantModel = {
   created: string;
   owner: string;
   name: string;
-  type: 'chat' | 'live_audio';
+  type: 'chat' | 'voice';
   description: string;
   is_latest: boolean;
   is_new: boolean;
@@ -1124,7 +1124,7 @@ export type Assistant = {
   name: string;
   description: string | null;
   instructions: string;
-  interaction_mode: 'chat' | 'live_audio';
+  interaction_mode: 'chat' | 'voice';
   model: string;
   temperature: number | null;
   reasoning_effort: number | null;
@@ -1199,7 +1199,7 @@ export type CreateAssistantRequest = {
   description: string;
   instructions: string;
   model: string;
-  interaction_mode: 'chat' | 'live_audio';
+  interaction_mode: 'chat' | 'voice';
   temperature: number | null;
   reasoning_effort: number | null;
   tools: Tool[];
@@ -1220,7 +1220,7 @@ export type UpdateAssistantRequest = {
   description?: string;
   instructions?: string;
   model?: string;
-  interaction_mode?: 'chat' | 'live_audio';
+  interaction_mode?: 'chat' | 'voice';
   temperature?: number | null;
   reasoning_effort?: number | null;
   tools?: Tool[];
@@ -1691,7 +1691,7 @@ export type Thread = {
   id: number;
   name: string | null;
   thread_id: string;
-  interaction_mode: 'chat' | 'live_audio';
+  interaction_mode: 'chat' | 'voice';
   class_id: number;
   assistant_names?: Record<number, string> | null;
   assistant_id: number;
@@ -1711,7 +1711,7 @@ export const createThread = async (f: Fetcher, classId: number, data: CreateThre
 };
 
 /**
- * Create live audio thread.
+ * Create voice mode thread.
  */
 export const createAudioThread = async (
   f: Fetcher,

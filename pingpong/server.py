@@ -2638,7 +2638,7 @@ async def create_audio_thread(
         "name": "Audio Conversation",
         "class_id": int(class_id),
         "private": True if parties else False,
-        "interaction_mode": "live_audio",
+        "interaction_mode": "voice",
         "users": parties or [],
         "thread_id": thread.id,
         "assistant_id": req.assistant_id,
@@ -3405,13 +3405,13 @@ async def create_assistant(
 
     tool_resources: ToolResources = {}
     vector_store_object_id = None
-    uses_live_audio = req.interaction_mode == schemas.InteractionMode.LIVE_AUDIO
+    uses_voice = req.interaction_mode == schemas.InteractionMode.VOICE
 
     if req.file_search_file_ids:
-        if uses_live_audio:
+        if uses_voice:
             raise HTTPException(
                 status_code=400,
-                detail="File search is not supported in live audio mode.",
+                detail="File search is not supported in Voice mode.",
             )
         vector_store_id, vector_store_object_id = await create_vector_store(
             request.state.db,
@@ -3425,15 +3425,15 @@ async def create_assistant(
     del req.file_search_file_ids
 
     if req.code_interpreter_file_ids:
-        if uses_live_audio:
+        if uses_voice:
             raise HTTPException(
                 status_code=400,
-                detail="Code interpreter is not supported in live audio mode.",
+                detail="Code interpreter is not supported in Voice mode.",
             )
         tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
 
     try:
-        if uses_live_audio:
+        if uses_voice:
             _model = "gpt-4o"
         else:
             _model = (
@@ -3578,7 +3578,7 @@ async def update_assistant(
         )
         else schemas.InteractionMode(asst.interaction_mode)
     )
-    uses_live_audio = interaction_mode == schemas.InteractionMode.LIVE_AUDIO
+    uses_voice = interaction_mode == schemas.InteractionMode.VOICE
 
     # If the interaction mode is changing, and the user did not specify a
     # temperature, set a default temperature based on the interaction mode
@@ -3586,7 +3586,7 @@ async def update_assistant(
     if interaction_mode != asst.interaction_mode and (
         "temperature" not in req.model_fields_set or req.temperature is None
     ):
-        if uses_live_audio:
+        if uses_voice:
             openai_update["temperature"] = 0.8
             asst.temperature = 0.8
         else:
@@ -3638,8 +3638,8 @@ async def update_assistant(
                     )
 
         # Override the assistant model we send to OpenAI
-        # when using live audio
-        if uses_live_audio:
+        # when using voice mode
+        if uses_voice:
             _model = "gpt-4o"
         openai_update["model"] = _model
         asst.model = req.model
@@ -3664,7 +3664,7 @@ async def update_assistant(
         if not model_record or model_record.type != interaction_mode:
             raise HTTPException(
                 status_code=400,
-                detail=f"Model {req.model} is not available for use in {interaction_mode} mode.",
+                detail=f"Model {req.model} is not available for use in {interaction_mode.capitalize()} mode.",
             )
 
     # Track whether we have an empty vector store to delete
@@ -3681,10 +3681,10 @@ async def update_assistant(
                 req.code_interpreter_file_ids is not None
                 and req.code_interpreter_file_ids != []
             ):
-                if uses_live_audio:
+                if uses_voice:
                     raise HTTPException(
                         status_code=400,
-                        detail="Code interpreter is not supported in live audio mode.",
+                        detail="Code interpreter is not supported in Voice mode.",
                     )
                 tool_resources["code_interpreter"] = {
                     "file_ids": req.code_interpreter_file_ids
@@ -3699,10 +3699,10 @@ async def update_assistant(
         if "file_search_file_ids" in req.model_fields_set:
             update_tool_resources = True
             if req.file_search_file_ids is not None and req.file_search_file_ids != []:
-                if uses_live_audio:
+                if uses_voice:
                     raise HTTPException(
                         status_code=400,
-                        detail="File search is not supported in live audio mode.",
+                        detail="File search is not supported in Voice mode.",
                     )
                 # Files will need to be stored in a vector store
                 if asst.vector_store_id:

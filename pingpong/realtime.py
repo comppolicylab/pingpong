@@ -80,7 +80,7 @@ async def browser_realtime_websocket(
     assistant = thread.assistant
     conversation_instructions = format_instructions(
         assistant.instructions,
-        interaction_mode=schemas.InteractionMode.LIVE_AUDIO,
+        interaction_mode=schemas.InteractionMode.VOICE,
     )
     try:
         async with openai_client.beta.realtime.connect(

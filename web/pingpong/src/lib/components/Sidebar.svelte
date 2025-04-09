@@ -199,7 +199,7 @@
               {:else}
                 <EyeOutline size="sm" class="text-white" />
               {/if}
-              {#if thread.interaction_mode === 'live_audio'}
+              {#if thread.interaction_mode === 'voice'}
                 <MicrophoneOutline size="sm" class="text-white" />
               {/if}
             </svelte:fragment>
