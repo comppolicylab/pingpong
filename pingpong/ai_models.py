@@ -508,7 +508,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_code_interpreter": False,
         "supports_temperature": True,
         "supports_reasoning": False,
-        "description": "GPt-4o mini Realtime initial release version.",
+        "description": "GPT-4o mini Realtime initial release version.",
     },
     #
 }
@@ -553,4 +553,9 @@ AZURE_UNAVAILABLE_MODELS = [
     "o1-2024-12-17",
     "gpt-4.5-preview",
     "gpt-4.5-preview-2025-02-27",
+    "gpt-4o-realtime-preview",
+    "gpt-4o-mini-realtime-preview",
+    "gpt-4o-realtime-preview-2024-12-17",
+    "gpt-4o-realtime-preview-2024-10-01",
+    "gpt-4o-mini-realtime-preview-2024-12-17",
 ]

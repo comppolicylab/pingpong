@@ -120,6 +120,9 @@
   };
   const defaultTools = [{ type: 'file_search' }];
 
+  $: chatModelCount = data.models.filter((model) => model.type === 'chat').length;
+  $: audioModelCount = data.models.filter((model) => model.type === 'live_audio').length;
+
   $: initialTools = (assistant?.tools ? (JSON.parse(assistant.tools) as Tool[]) : defaultTools).map(
     (t) => t.type
   );
@@ -151,16 +154,26 @@
   ).map((model) => model.id);
   let selectedModel = '';
   $: if (
-    (latestModelOptions.length > 0 && !selectedModel) ||
-    !latestModelOptions.map((m) => m.value).includes(selectedModel)
+    ((latestModelOptions.length > 0 || versionedModelOptions.length > 0) && !selectedModel) ||
+    (!latestModelOptions.map((m) => m.value).includes(selectedModel) &&
+      !versionedModelOptions.map((m) => m.value).includes(selectedModel))
   ) {
     if (
       latestModelOptions.map((m) => m.value).includes(assistant?.model || '') ||
       hiddenModelNames.includes(assistant?.model || '')
     ) {
       selectedModel = assistant?.model || latestModelOptions[0].value;
-    } else {
+    } else if (
+      versionedModelOptions.map((m) => m.value).includes(assistant?.model || '') ||
+      hiddenModelNames.includes(assistant?.model || '')
+    ) {
+      selectedModel = assistant?.model || versionedModelOptions[0].value;
+    } else if (latestModelOptions.length > 0) {
       selectedModel = latestModelOptions[0].value;
+    } else if (versionedModelOptions.length > 0) {
+      selectedModel = versionedModelOptions[0].value;
+    } else {
+      selectedModel = '';
     }
   }
   $: selectedModelName = modelNameDict[selectedModel];
@@ -761,28 +774,34 @@
       <Label for="interactionMode">Interaction Mode</Label>
       <Helper class="pb-1">Choose how users will primarily interact with this assistant.</Helper>
       <ButtonGroup>
-        <RadioButton
-          value="chat"
-          bind:group={interactionMode}
-          disabled={preventEdits}
-          on:change={changeTemperatureInteractionMode}
-          ><div class="flex flex-row gap-2 items-center">
-            {#if interactionMode === 'chat'}<MessageDotsSolid
-                class="w-6 h-6"
-              />{:else}<MessageDotsOutline class="w-6 h-6" />{/if}Text Mode
-          </div></RadioButton
-        >
-        <RadioButton
-          value="live_audio"
-          bind:group={interactionMode}
-          disabled={preventEdits}
-          on:change={changeTemperatureInteractionMode}
-          ><div class="flex flex-row gap-2 items-center">
-            {#if interactionMode === 'live_audio'}<MicrophoneSolid
-                class="w-5 h-5"
-              />{:else}<MicrophoneOutline class="w-5 h-5" />{/if}Audio Mode
-          </div></RadioButton
-        >
+        {#if chatModelCount !== 0}
+          <RadioButton
+            value="chat"
+            bind:group={interactionMode}
+            disabled={preventEdits}
+            on:change={changeTemperatureInteractionMode}
+            class={`${preventEdits ? 'hover:bg-transparent' : ''} select-none`}
+            ><div class="flex flex-row gap-2 items-center">
+              {#if interactionMode === 'chat'}<MessageDotsSolid
+                  class="w-6 h-6"
+                />{:else}<MessageDotsOutline class="w-6 h-6" />{/if}Text Mode
+            </div></RadioButton
+          >
+        {/if}
+        {#if audioModelCount !== 0}
+          <RadioButton
+            value="live_audio"
+            bind:group={interactionMode}
+            disabled={preventEdits}
+            on:change={changeTemperatureInteractionMode}
+            class={`${preventEdits ? 'hover:bg-transparent' : ''} select-none`}
+            ><div class="flex flex-row gap-2 items-center">
+              {#if interactionMode === 'live_audio'}<MicrophoneSolid
+                  class="w-5 h-5"
+                />{:else}<MicrophoneOutline class="w-5 h-5" />{/if}Audio Mode
+            </div></RadioButton
+          >
+        {/if}
       </ButtonGroup>
     </div>
     <div class="mb-4">

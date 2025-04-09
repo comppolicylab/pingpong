@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import PositiveInt
 
 from pingpong.ai_models import (
+    AZURE_UNAVAILABLE_MODELS,
     upgrade_assistants_model,
     KNOWN_MODELS,
     ADMIN_ONLY_MODELS,
@@ -2072,19 +2073,6 @@ async def list_class_models(
             if model["id"] in HIDDEN_MODELS
             else model.get("hide_in_model_selector")
         )
-
-    AZURE_UNAVAILABLE_MODELS = [
-        "gpt-4o-2024-11-20",
-        "o1-2024-12-17",
-        "o3-mini",
-        "o3-mini-2025-01-31",
-        "o1",
-        "o1-2024-12-17",
-        "gpt-4.5-preview",
-        "gpt-4.5-preview-2025-02-27",
-        "gpt-4o-realtime-preview",
-        "gpt-4o-mini-realtime-preview",
-    ]
 
     if isinstance(openai_client, openai.AsyncAzureOpenAI):
         filtered = [m for m in filtered if m["id"] not in AZURE_UNAVAILABLE_MODELS]
