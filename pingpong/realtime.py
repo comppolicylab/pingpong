@@ -49,7 +49,7 @@ async def add_message_to_thread(
 
         await openai_client.beta.threads.messages.create(
             thread_id=thread.thread_id,
-            role="user",
+            role="user" if is_user_message else "assistant",
             content=event.transcript,
             metadata=metadata,
         )
@@ -122,11 +122,11 @@ async def handle_openai_events(
             match event.type:
                 case "response.audio_transcript.done":
                     await openai_task_queue.put(
-                        add_message_to_thread(
+                        lambda _event=event: add_message_to_thread(
                             openai_client,
                             browser_connection,
                             thread,
-                            event,
+                            _event,
                             is_user_message=False,
                         )
                     )
@@ -156,11 +156,11 @@ async def handle_openai_events(
                     )
                 case "conversation.item.input_audio_transcription.completed":
                     await openai_task_queue.put(
-                        add_message_to_thread(
+                        lambda _event=event: add_message_to_thread(
                             openai_client,
                             browser_connection,
                             thread,
-                            event,
+                            _event,
                             is_user_message=True,
                         )
                     )

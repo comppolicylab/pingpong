@@ -220,6 +220,7 @@ def ws_with_realtime_connection(func):
                     session={
                         "input_audio_transcription": {
                             "model": "gpt-4o-transcribe",
+                            "language": "en",
                         },
                         "temperature": assistant.temperature,
                         "tool_choice": "none",
