@@ -3453,6 +3453,15 @@ async def create_assistant(
             else {}
         )
 
+        # Set default temperature based on the interaction mode
+        # This is to ensure that the temperature is set
+        # appropriately for the mode.
+        if "temperature" not in req.model_fields_set or req.temperature is None:
+            if uses_voice:
+                req.temperature = 0.8
+            else:
+                req.temperature = 0.2
+
         new_asst = await openai_client.beta.assistants.create(
             instructions=format_instructions(
                 req.instructions,
