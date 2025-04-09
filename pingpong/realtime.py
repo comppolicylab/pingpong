@@ -1,6 +1,5 @@
 import asyncio
 import base64
-from functools import partial
 import json
 import logging
 from typing import cast
@@ -123,14 +122,12 @@ async def handle_openai_events(
             match event.type:
                 case "response.audio_transcript.done":
                     await openai_task_queue.put(
-                        partial(
-                            add_message_to_thread(
-                                openai_client,
-                                browser_connection,
-                                thread,
-                                event,
-                                is_user_message=False,
-                            )
+                        lambda: add_message_to_thread(
+                            openai_client,
+                            browser_connection,
+                            thread,
+                            event,
+                            is_user_message=False,
                         )
                     )
                 case "session.created":
@@ -159,14 +156,12 @@ async def handle_openai_events(
                     )
                 case "conversation.item.input_audio_transcription.completed":
                     await openai_task_queue.put(
-                        partial(
-                            add_message_to_thread(
-                                openai_client,
-                                browser_connection,
-                                thread,
-                                event,
-                                is_user_message=True,
-                            )
+                        lambda: add_message_to_thread(
+                            openai_client,
+                            browser_connection,
+                            thread,
+                            event,
+                            is_user_message=True,
                         )
                     )
                 case "response.audio.delta":
