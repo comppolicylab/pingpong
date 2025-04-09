@@ -122,7 +122,7 @@ async def handle_openai_events(
             match event.type:
                 case "response.audio_transcript.done":
                     await openai_task_queue.put(
-                        lambda: add_message_to_thread(
+                        add_message_to_thread(
                             openai_client,
                             browser_connection,
                             thread,
@@ -156,7 +156,7 @@ async def handle_openai_events(
                     )
                 case "conversation.item.input_audio_transcription.completed":
                     await openai_task_queue.put(
-                        lambda: add_message_to_thread(
+                        add_message_to_thread(
                             openai_client,
                             browser_connection,
                             thread,
