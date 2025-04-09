@@ -1001,8 +1001,7 @@
               <div class="flex flex-col">
                 <span class="font-semibold text-md text-gray-700">Assistant in Voice mode</span
                 ><span class="font-normal text-md text-gray-700"
-                  >This assistant has been configured to use audio interactions. To continue the
-                  conversation, start a new session.</span
+                  >This assistant uses audio. Start a new session to keep the conversation going.</span
                 >
               </div>
             </div>
