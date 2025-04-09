@@ -992,7 +992,7 @@
               </div>
             </div>
           </div>
-        {:else if data.threadInteractionMode === 'chat' &&  assistantInteractionMode === 'voice'}
+        {:else if data.threadInteractionMode === 'chat' && assistantInteractionMode === 'voice'}
           <div
             class="flex flex-col bg-seasalt gap-2 border border-melon pl-4 py-2.5 pr-3 items-stretch transition-all duration-200 relative shadow-[0_0.25rem_1.25rem_rgba(254,184,175,0.15)] focus-within:shadow-[0_0.25rem_1.25rem_rgba(253,148,134,0.25)] hover:border-coral-pink focus-within:border-coral-pink z-20 rounded-2xl"
           >
@@ -1050,23 +1050,23 @@
           </div>
 
           {#if !(data.threadInteractionMode === 'voice' && $messages.length === 0 && assistantInteractionMode === 'voice')}
-          <div class="shrink-0 grow-0 h-auto">
-            <CogOutline class="dark:text-white cursor-pointer w-6 h-4 font-light" size="lg" />
-            <Dropdown>
-              <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
-                <span class:text-gray-300={!canPublishThread}>
-                  {#if $published}
-                    Unpublish
-                  {:else}
-                    Publish
-                  {/if}
-                </span>
-              </DropdownItem>
-              <DropdownItem on:click={deleteThread} disabled={!canDeleteThread}>
-                <span class:text-gray-300={!canDeleteThread}>Delete</span>
-              </DropdownItem>
-            </Dropdown>
-          </div>
+            <div class="shrink-0 grow-0 h-auto">
+              <CogOutline class="dark:text-white cursor-pointer w-6 h-4 font-light" size="lg" />
+              <Dropdown>
+                <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
+                  <span class:text-gray-300={!canPublishThread}>
+                    {#if $published}
+                      Unpublish
+                    {:else}
+                      Publish
+                    {/if}
+                  </span>
+                </DropdownItem>
+                <DropdownItem on:click={deleteThread} disabled={!canDeleteThread}>
+                  <span class:text-gray-300={!canDeleteThread}>Delete</span>
+                </DropdownItem>
+              </Dropdown>
+            </div>
           {/if}
         </div>
       </div>
