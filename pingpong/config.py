@@ -165,11 +165,13 @@ class CanvasSettings(BaseSettings):
 
     type: Literal["canvas"]
     tenant: str
+    tenant_friendly_name: str
     client_id: str
     client_secret: str
     base_url: str
     sso_target: str | None = Field(None)
     sso_tenant: str | None = Field(None)
+    require_sso: bool = Field(True)
     sync_wait: int = Field(60 * 10)  # 10 mins
     auth_token_expiry: int = Field(60 * 60)  # 1 hour
 

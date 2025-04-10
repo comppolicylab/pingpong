@@ -103,12 +103,22 @@ type = "mock"
 type = "canvas"
 # Institution associated with LMS instance
 tenant = "demo-institution"
+# Institution name to display in the UI
+tenant_friendly_name = "Demo Institution"
 # The associated SSO to compare against for identifying existing accounts
 # Optional.
 sso_tenant = "demo-sso"
 # The attribute to get from Canvas for identifying duplicate accounts and
 # merging them when logging in through SSO. Optional.
 sso_target = "key"
+# Whether to require that all users synced from this LMS instance
+# have a valid SSO attribute returned by the LMS.
+# This is useful for ensuring that a user has permissions to view the SSO
+# information of users enrolled in the course.
+# If you know that an LMS instance will not have SSO attributes for all users,
+# you can set this to false.
+# Defaults to true.
+require_sso = true
 # The URL where the application should send Canvas API requests to.
 # For local development, this should be the default localhost Canvas URL
 # if you follow their Quick Start guide.
