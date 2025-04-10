@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Select, Label, Input, Textarea, Heading, P, Button, Modal } from 'flowbite-svelte';
+  import { Select, Label, Input, Textarea, Heading, P, Button, Modal, A } from 'flowbite-svelte';
   import Sanitize from '$lib/components/Sanitize.svelte';
   import { writable } from 'svelte/store';
   import { happyToast, sadToast } from '$lib/toast.js';
@@ -99,6 +99,7 @@
 
   let handleModalConfirm: () => void;
   let handleModalCancel: () => void;
+  let acknowledgementsModal = false;
 </script>
 
 <div class="flex flex-col gap-8 about h-full overflow-y-auto">
@@ -314,7 +315,84 @@
       </div>
     </div>
     <P class="text-xs w-full text-center text-gray-100 mt-4"
-      >All content &copy; {year} Computational Policy Lab. All rights reserved.</P
+      >All content &copy; {year} Computational Policy Lab. All rights reserved. <A
+        class="underline"
+        on:click={() => {
+          acknowledgementsModal = true;
+        }}>Acknowledgements</A
+      ></P
     >
   </div>
 </div>
+
+<Modal
+  bind:open={acknowledgementsModal}
+  autoclose
+  outsideclose
+  title="Acknowledgements"
+  size="lg"
+  classHeader="text-base"
+>
+  <div class="flex flex-col gap-4 text-sm">
+    <p>
+      Portions of this PingPong Software may utilize the following copyrighted material, the use of
+      which is hereby acknowledged.
+    </p>
+    <div class="flex flex-col gap-2">
+      <p class="font-semibold text-base">OpenAI (openai-realtime-console)</p>
+      <div>MIT License</div>
+
+      <div>Copyright © 2024 OpenAI</div>
+
+      <div>
+        Permission is hereby granted, free of charge, to any person obtaining a copy of this
+        software and associated documentation files (the "Software"), to deal in the Software
+        without restriction, including without limitation the rights to use, copy, modify, merge,
+        publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+        to whom the Software is furnished to do so, subject to the following conditions:
+      </div>
+
+      <div>
+        The above copyright notice and this permission notice shall be included in all copies or
+        substantial portions of the Software.
+      </div>
+
+      <div>
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+        INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+        PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+        FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+        OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+        DEALINGS IN THE SOFTWARE.
+      </div>
+    </div>
+    <div class="flex flex-col gap-2">
+      <p class="font-semibold text-base">OpenAI (openai-realtime-api-beta)</p>
+      <div>MIT License</div>
+
+      <div>Copyright © 2024 OpenAI</div>
+
+      <div>
+        Permission is hereby granted, free of charge, to any person obtaining a copy of this
+        software and associated documentation files (the "Software"), to deal in the Software
+        without restriction, including without limitation the rights to use, copy, modify, merge,
+        publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+        to whom the Software is furnished to do so, subject to the following conditions:
+      </div>
+
+      <div>
+        The above copyright notice and this permission notice shall be included in all copies or
+        substantial portions of the Software.
+      </div>
+
+      <div>
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+        INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+        PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+        FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+        OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+        DEALINGS IN THE SOFTWARE.
+      </div>
+    </div>
+  </div>
+</Modal>
