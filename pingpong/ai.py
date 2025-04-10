@@ -421,7 +421,7 @@ async def run_thread(
                     raise ValueError("Vector store ID is required for file search")
                 await asyncio.gather(
                     *[
-                        cli.beta.vector_stores.files.poll(
+                        cli.vector_stores.files.poll(
                             file_id=file_id, vector_store_id=vector_store_id
                         )
                         for file_id in file_search_file_ids
