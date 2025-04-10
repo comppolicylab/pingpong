@@ -339,10 +339,10 @@
       which is hereby acknowledged.
     </p>
     <div class="flex flex-col gap-2">
-      <p class="font-semibold text-base">OpenAI (openai-realtime-console)</p>
+      <p class="font-semibold text-base">OpenAI ( openai-realtime-console )</p>
       <div>MIT License</div>
 
-      <div>Copyright © 2024 OpenAI</div>
+      <div>Copyright &copy; 2024 OpenAI</div>
 
       <div>
         Permission is hereby granted, free of charge, to any person obtaining a copy of this
@@ -367,10 +367,10 @@
       </div>
     </div>
     <div class="flex flex-col gap-2">
-      <p class="font-semibold text-base">OpenAI (openai-realtime-api-beta)</p>
+      <p class="font-semibold text-base">OpenAI ( openai-realtime-api-beta )</p>
       <div>MIT License</div>
 
-      <div>Copyright © 2024 OpenAI</div>
+      <div>Copyright &copy; 2024 OpenAI</div>
 
       <div>
         Permission is hereby granted, free of charge, to any person obtaining a copy of this
