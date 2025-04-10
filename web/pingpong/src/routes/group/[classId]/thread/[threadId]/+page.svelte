@@ -1,6 +1,6 @@
 <script lang="ts">
   import { navigating, page } from '$app/stores';
-  import { goto, invalidateAll } from '$app/navigation';
+  import { goto, invalidateAll, onNavigate } from '$app/navigation';
   import * as api from '$lib/api';
   import { happyToast, sadToast } from '$lib/toast';
   import { errorMessage } from '$lib/errors';
@@ -14,7 +14,8 @@
     Dropdown,
     DropdownItem,
     Modal,
-    Span
+    Span,
+    Spinner
   } from 'flowbite-svelte';
   import { DoubleBounce } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
@@ -27,7 +28,13 @@
     CogOutline,
     EyeOutline,
     EyeSlashOutline,
-    LockSolid
+    LockSolid,
+    MicrophoneOutline,
+    ChevronSortOutline,
+    PlaySolid,
+    StopSolid,
+    CheckOutline,
+    MicrophoneSlashOutline
   } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
@@ -35,12 +42,20 @@
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import { writable } from 'svelte/store';
   import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
-
+  import { base64ToArrayBuffer, WavRecorder, WavStreamPlayer } from '$lib/wavtools/index';
+  import type { ExtendedMediaDeviceInfo } from '$lib/wavtools/lib/wav_recorder';
+  import { isFirefox } from '$lib/stores/general';
   export let data;
 
   $: classId = parseInt($page.params.classId);
   $: threadId = parseInt($page.params.threadId);
-  $: threadMgr = new ThreadManager(fetch, classId, threadId, data.threadData);
+  $: threadMgr = new ThreadManager(
+    fetch,
+    classId,
+    threadId,
+    data.threadData,
+    data.threadInteractionMode || 'chat'
+  );
   $: isPrivate = data.class.private || false;
   $: teachers = data?.supervisors || [];
   $: canDeleteThread = data.canDeleteThread;
@@ -124,11 +139,13 @@
   $: assistantDeleted = !$assistantId && $assistantId === 0;
   let useLatex = false;
   let useImageDescriptions = false;
+  let assistantInteractionMode: 'voice' | 'chat' | null = null;
   $: {
     const assistant = data.assistants.find((assistant) => assistant.id === $assistantId);
     if (assistant) {
       useLatex = assistant.use_latex || false;
       useImageDescriptions = assistant.use_image_descriptions || false;
+      assistantInteractionMode = assistant.interaction_mode;
     } else {
       console.warn(`Definition for assistant ${$assistantId} not found.`);
     }
@@ -363,6 +380,244 @@
     }
   };
 
+  let wavRecorder: WavRecorder | null = null;
+  let wavStreamPlayer: WavStreamPlayer | null = null;
+  let microphoneAccess = false;
+  let audioDevices: ExtendedMediaDeviceInfo[] = [];
+  let selectedAudioDevice: ExtendedMediaDeviceInfo | null = null;
+  let openMicrophoneModal = false;
+
+  /**
+   * Select an audio device. If no device ID is provided, the first available device will be selected.
+   * @param deviceId Optional ID of the audio device to select.
+   */
+  const selectAudioDevice = (deviceId?: string) => {
+    const lookupDeviceId = deviceId || selectedAudioDevice?.deviceId;
+    if (lookupDeviceId) {
+      selectedAudioDevice =
+        audioDevices.find((device) => device.deviceId === lookupDeviceId) || null;
+    }
+
+    // Check if any device is default based on ExtendedMediaDeviceInfo
+    if (audioDevices.length > 0) {
+      const defaultDevice = audioDevices.find((device) => device.default);
+      if (defaultDevice) {
+        selectedAudioDevice = defaultDevice;
+      }
+    }
+
+    // If no device is selected, select the first available device
+    if (!selectedAudioDevice) {
+      selectedAudioDevice = audioDevices[0] || null;
+    }
+  };
+
+  /**
+   * Handle changes in the list of available audio devices.
+   * This function updates the list of audio devices and selects a default device.
+   * @param devices The updated list of available audio devices.
+   */
+  const handleDeviceChange = (devices: ExtendedMediaDeviceInfo[]) => {
+    audioDevices = devices;
+    selectAudioDevice();
+  };
+
+  /**
+   * Handle the setup of a session.
+   * This function initializes the WavRecorder and updates available audio devices.
+   * The user will be asked to allow microphone access.
+   */
+  const handleSessionSetup = async () => {
+    wavRecorder = new WavRecorder({ sampleRate: 24000, debug: true });
+    wavStreamPlayer = new WavStreamPlayer({ sampleRate: 24000 });
+    try {
+      await wavStreamPlayer.connect();
+    } catch (error) {
+      sadToast(
+        `Failed to set up audio output to your speakers. Error: ${errorMessage(error, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
+      );
+      wavRecorder.quit();
+      wavRecorder = null;
+      wavStreamPlayer = null;
+      return;
+    }
+    try {
+      audioDevices = await wavRecorder.listDevices();
+      wavRecorder.listenForDeviceChange(handleDeviceChange);
+      microphoneAccess = true;
+    } catch (error) {
+      sadToast(
+        `Failed to access microphone. Error: ${errorMessage(error, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
+      );
+      wavRecorder.quit();
+      wavRecorder = null;
+      wavStreamPlayer = null;
+      return;
+    }
+
+    // handleDeviceChange is called when set
+    // when listenForDeviceChange is called,
+    // but just in case
+    if (!selectedAudioDevice) {
+      selectAudioDevice();
+    }
+  };
+
+  let socket: WebSocket | null = null;
+  let startingAudioSession = false;
+  let audioSessionStarted = false;
+
+  /**
+   * Process audio chunks.
+   * This function sends the audio data to the server via WebSocket.
+   * @param data The audio data to be processed.
+   * @param data.raw The raw audio data.
+   * @param data.mono The mono audio data.
+   */
+  const chunkProcessor = (data: { raw: ArrayBuffer; mono: ArrayBuffer }) => {
+    if (!socket || !audioSessionStarted) {
+      return;
+    }
+    socket.send(data.mono);
+  };
+
+  /**
+   * Reset the audio session.
+   * This function closes the WebSocket connection and resets the state of the audio session.
+   */
+  const resetAudioSession = async () => {
+    if (socket) {
+      socket.close();
+      socket = null;
+    }
+    startingAudioSession = false;
+    audioSessionStarted = false;
+    openMicrophoneModal = false;
+    microphoneAccess = false;
+    audioDevices = [];
+    selectedAudioDevice = null;
+    if (wavRecorder) {
+      await wavRecorder.quit();
+      wavRecorder = null;
+    }
+    if (wavStreamPlayer) {
+      await wavStreamPlayer.interrupt();
+      wavStreamPlayer = null;
+    }
+  };
+
+  /**
+   * Handle the start of a session.
+   */
+  const handleSessionStart = async () => {
+    if (startingAudioSession) {
+      return;
+    }
+    startingAudioSession = true;
+    if (!wavRecorder) {
+      sadToast('We failed to start the session. Please try again.');
+      return;
+    }
+    if (!selectedAudioDevice) {
+      sadToast('No audio device selected. Please select a microphone.');
+      return;
+    }
+    if (!wavStreamPlayer) {
+      sadToast('Failed to set up audio output to your speakers.');
+      return;
+    }
+
+    socket = api.createAudioWebsocket(classId, threadId);
+    socket.binaryType = 'arraybuffer';
+
+    socket.addEventListener('message', async (event) => {
+      const message = JSON.parse(event.data);
+      switch (message.type) {
+        case 'session.updated':
+          if (!wavRecorder) {
+            sadToast('We failed to start the session. Please try again.');
+            return;
+          }
+          if (!selectedAudioDevice) {
+            sadToast('No audio device selected. Please select a microphone.');
+            return;
+          }
+          await wavRecorder.begin(selectedAudioDevice.deviceId);
+          await wavRecorder.record(chunkProcessor);
+          startingAudioSession = false;
+          audioSessionStarted = true;
+          break;
+        case 'input_audio_buffer.speech_started':
+          if (!wavStreamPlayer) {
+            sadToast('Failed to set up audio output to your speakers.');
+            return;
+          }
+          await wavStreamPlayer.interrupt();
+          // TODO: Inform the server that we've stopped playing the audio.
+          // const trackSampleOffset = await wavStreamPlayer.interrupt();
+          // if (trackSampleOffset?.trackId) {
+          //   const { trackId, offset } = trackSampleOffset;
+          // }
+          break;
+        case 'response.audio.delta':
+          if (!wavStreamPlayer) {
+            sadToast('Failed to set up audio output to your speakers.');
+            return;
+          }
+          wavStreamPlayer.add16BitPCM(base64ToArrayBuffer(message.audio), message.item_id);
+          break;
+        case 'error':
+          if (message.error.type === 'invalid_request_error') {
+            sadToast(
+              `Failed to start session. Error: ${errorMessage(message.error.message, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
+            );
+            await resetAudioSession();
+          } else {
+            sadToast(
+              `We faced an error. Error: ${errorMessage(
+                message.error.message,
+                "We're facing an unknown error. Check PingPong's status page for updates if this persists."
+              )}`
+            );
+          }
+          break;
+        default:
+          console.warn('Unknown message type:', message.type);
+      }
+    });
+  };
+
+  let endingAudioSession = false;
+  /**
+   * Handle session end.
+   */
+  const handleSessionEnd = async () => {
+    if (endingAudioSession) {
+      return;
+    }
+    endingAudioSession = true;
+    if (socket) {
+      socket.close();
+      socket = null;
+    }
+    audioDevices = [];
+    selectedAudioDevice = null;
+    if (wavRecorder) {
+      await wavRecorder.quit();
+      wavRecorder = null;
+    }
+    if (wavStreamPlayer) {
+      await wavStreamPlayer.interrupt();
+      wavStreamPlayer = null;
+    }
+    await invalidateAll();
+    startingAudioSession = false;
+    audioSessionStarted = false;
+    openMicrophoneModal = false;
+    microphoneAccess = false;
+    endingAudioSession = false;
+  };
+
   /*
    * Delete a file from the thread.
    */
@@ -391,6 +646,10 @@
   const showModeratorsModal = () => {
     showModerators = true;
   };
+
+  onNavigate(async () => {
+    await resetAudioSession();
+  });
 </script>
 
 <div class="w-full flex flex-col justify-between grow min-h-0 relative">
@@ -534,35 +793,222 @@
     ><ModeratorsTable moderators={teachers} /></Modal
   >
   {#if !$loading}
+    {#if data.threadInteractionMode === 'voice' && !microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'voice'}
+      {#if $isFirefox}
+        <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+          <div class="bg-blue-light-50 p-3 rounded-lg">
+            <MicrophoneSlashOutline size="xl" class="text-blue-dark-40" />
+          </div>
+          <div class="flex flex-col items-center w-2/5">
+            <p class="text-xl font-semibold text-blue-dark-40 text-center">
+              Voice mode not available on Firefox
+            </p>
+            <p class="text-md font-base text-gray-600 text-center">
+              We're working on bringing Voice mode to Firefox in a future update. For the best
+              experience, please use Safari, Chrome, or Edge in the meantime.
+            </p>
+          </div>
+        </div>
+      {:else}
+        <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+          <div class="bg-blue-light-50 p-3 rounded-lg">
+            <MicrophoneOutline size="xl" class="text-blue-dark-40" />
+          </div>
+          <div class="flex flex-col items-center w-2/5">
+            <p class="text-xl font-semibold text-blue-dark-40 text-center">Voice mode</p>
+            <p class="text-md font-base text-gray-600 text-center">
+              To get started, enable microphone access.
+            </p>
+          </div>
+          <Button
+            class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all text-sm font-normal text-center"
+            type="button"
+            on:click={handleSessionSetup}
+            on:touchstart={handleSessionSetup}
+          >
+            Enable access
+          </Button>
+        </div>
+      {/if}
+    {:else if data.threadInteractionMode === 'voice' && microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'voice'}
+      {#if $isFirefox}
+        <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+          <div class="bg-blue-light-50 p-3 rounded-lg">
+            <MicrophoneSlashOutline size="xl" class="text-blue-dark-40" />
+          </div>
+          <div class="flex flex-col items-center w-2/5">
+            <p class="text-xl font-semibold text-blue-dark-40 text-center">
+              Voice mode not available on Firefox
+            </p>
+            <p class="text-md font-base text-gray-600 text-center">
+              We're working on bringing Voice mode to Firefox in a future update. For the best
+              experience, please use Safari, Chrome, or Edge in the meantime.
+            </p>
+          </div>
+        </div>
+      {:else}
+        <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+          <div class="bg-blue-light-50 p-3 rounded-lg">
+            <MicrophoneOutline size="xl" class="text-blue-dark-40" />
+          </div>
+          <div class="flex flex-col items-center w-2/5">
+            <p class="text-xl font-semibold text-blue-dark-40 text-center">Voice mode</p>
+            {#if endingAudioSession}
+              <p class="text-md font-base text-gray-600 text-center">
+                Finishing up your session...
+              </p>
+            {:else}
+              <p class="text-md font-base text-gray-600 text-center">
+                When you're ready, start the session to begin recording.
+              </p>
+            {/if}
+          </div>
+          <div class="w-full flex justify-center">
+            <div
+              class="bg-gray-100 flex flex-row gap-2 items-center justify-center shadow-xl rounded-xl px-2 py-1.5 w-fit h-fit"
+            >
+              {#if !audioSessionStarted}
+                <Button
+                  class="flex flex-row gap-1 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 transition-all text-sm font-normal text-center px-3 py-2"
+                  type="button"
+                  on:click={handleSessionStart}
+                  on:touchstart={handleSessionStart}
+                  disabled={!microphoneAccess}
+                >
+                  {#if startingAudioSession}
+                    <Spinner color="custom" customColor="fill-white" class="w-4 h-4 mr-1" />
+                  {:else}
+                    <PlaySolid class="pl-0 ml-0" size="md" />
+                  {/if}
+                  <span class="mr-1">Start session</span>
+                </Button>
+              {:else}
+                <Button
+                  class="flex flex-row gap-1 bg-amber-700 text-white rounded rounded-lg text-xs hover:bg-amber-800 transition-all text-sm font-normal text-center px-3 py-2"
+                  type="button"
+                  on:click={handleSessionEnd}
+                  on:touchstart={handleSessionEnd}
+                  disabled={!microphoneAccess}
+                >
+                  {#if endingAudioSession}
+                    <Spinner color="custom" customColor="fill-white" class="w-4 h-4 mr-1" />
+                  {:else}
+                    <StopSolid class="pl-0 ml-0" size="md" />
+                  {/if}
+                  <span class="mr-1">End session</span>
+                </Button>
+              {/if}
+              <Button
+                id="top-dd"
+                class="flex flex-row gap-2 min-w-56 max-w-56 hover:bg-gray-300 px-3 py-2 grow-0 shrink-0 transition-all text-sm font-normal justify-between text-gray-800 rounded-lg"
+                disabled={!microphoneAccess ||
+                  audioSessionStarted ||
+                  startingAudioSession ||
+                  endingAudioSession}
+              >
+                <div class="flex flex-row gap-2 justify-start w-5/6">
+                  <MicrophoneOutline class="w-5 h-5" />
+                  <span class="truncate"
+                    >{selectedAudioDevice?.label || 'Select microphone...'}</span
+                  >
+                </div>
+                <ChevronSortOutline class="ml-2 w-4 h-4" strokeWidth="2" /></Button
+              >
+              {#if audioDevices.length === 0}
+                <Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
+                  <DropdownItem class="flex flex-row gap-2 items-center">
+                    <span>No microphones available</span>
+                  </DropdownItem>
+                </Dropdown>
+              {:else}
+                <Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
+                  {#each audioDevices as audioDevice}
+                    <DropdownItem
+                      class="flex flex-row gap-2 items-center"
+                      on:click={() => {
+                        selectAudioDevice(audioDevice.deviceId);
+                        openMicrophoneModal = false;
+                      }}
+                    >
+                      {#if audioDevice.deviceId === selectedAudioDevice?.deviceId}
+                        <CheckOutline class="w-5 h-5" />
+                      {:else}
+                        <span class="w-5 h-5"></span>
+                      {/if}
+                      <span>{audioDevice.label}</span>
+                    </DropdownItem>
+                  {/each}
+                </Dropdown>
+              {/if}
+            </div>
+          </div>
+        </div>
+      {/if}
+    {/if}
+
     <div class="w-full bg-gradient-to-t from-white to-transparent">
       <div class="w-11/12 mx-auto relative flex flex-col">
-        {#if $waiting || $submitting}
-          <div class="w-full flex justify-center absolute -top-10" transition:blur={{ amount: 10 }}>
-            <DoubleBounce color="#0ea5e9" size="30" />
+        {#if data.threadInteractionMode == 'chat' && assistantInteractionMode === 'chat'}
+          {#if $waiting || $submitting}
+            <div
+              class="w-full flex justify-center absolute -top-10"
+              transition:blur={{ amount: 10 }}
+            >
+              <DoubleBounce color="#0ea5e9" size="30" />
+            </div>
+          {/if}
+          <ChatInput
+            mimeType={data.uploadInfo.mimeType}
+            maxSize={data.uploadInfo.private_file_max_size}
+            bind:attachments={currentMessageAttachments}
+            {threadManagerError}
+            {visionAcceptedFiles}
+            {fileSearchAcceptedFiles}
+            {codeInterpreterAcceptedFiles}
+            {visionSupportOverride}
+            {useImageDescriptions}
+            {assistantDeleted}
+            {canViewAssistant}
+            canSubmit={canSubmit && !assistantDeleted && canViewAssistant}
+            disabled={!canSubmit || assistantDeleted || !!$navigating || !canViewAssistant}
+            loading={$submitting || $waiting}
+            {fileSearchAttachmentCount}
+            {codeInterpreterAttachmentCount}
+            upload={handleUpload}
+            remove={handleRemove}
+            on:submit={handleSubmit}
+            on:dismissError={handleDismissError}
+          />
+        {:else if data.threadInteractionMode === 'voice' && ($messages.length > 0 || assistantInteractionMode === 'chat')}
+          <div
+            class="flex flex-col bg-seasalt gap-2 border border-melon pl-4 py-2.5 pr-3 items-stretch transition-all duration-200 relative shadow-[0_0.25rem_1.25rem_rgba(254,184,175,0.15)] focus-within:shadow-[0_0.25rem_1.25rem_rgba(253,148,134,0.25)] hover:border-coral-pink focus-within:border-coral-pink z-20 rounded-2xl"
+          >
+            <div class="flex flex-row gap-2">
+              <MicrophoneOutline class="w-6 h-6 text-gray-700" />
+              <div class="flex flex-col">
+                <span class="font-semibold text-md text-gray-700">Voice Mode Session</span><span
+                  class="font-normal text-md text-gray-700"
+                  >This conversation was completed in Voice mode and is read-only. To continue
+                  chatting, start a new conversation.</span
+                >
+              </div>
+            </div>
+          </div>
+        {:else if data.threadInteractionMode === 'chat' && assistantInteractionMode === 'voice'}
+          <div
+            class="flex flex-col bg-seasalt gap-2 border border-melon pl-4 py-2.5 pr-3 items-stretch transition-all duration-200 relative shadow-[0_0.25rem_1.25rem_rgba(254,184,175,0.15)] focus-within:shadow-[0_0.25rem_1.25rem_rgba(253,148,134,0.25)] hover:border-coral-pink focus-within:border-coral-pink z-20 rounded-2xl"
+          >
+            <div class="flex flex-row gap-2">
+              <MicrophoneOutline class="w-6 h-6 text-gray-700" />
+              <div class="flex flex-col">
+                <span class="font-semibold text-md text-gray-700">Assistant in Voice mode</span
+                ><span class="font-normal text-md text-gray-700"
+                  >This assistant uses audio. Start a new session to keep the conversation going.</span
+                >
+              </div>
+            </div>
           </div>
         {/if}
-        <ChatInput
-          mimeType={data.uploadInfo.mimeType}
-          maxSize={data.uploadInfo.private_file_max_size}
-          bind:attachments={currentMessageAttachments}
-          {threadManagerError}
-          {visionAcceptedFiles}
-          {fileSearchAcceptedFiles}
-          {codeInterpreterAcceptedFiles}
-          {visionSupportOverride}
-          {useImageDescriptions}
-          {assistantDeleted}
-          {canViewAssistant}
-          canSubmit={canSubmit && !assistantDeleted && canViewAssistant}
-          disabled={!canSubmit || assistantDeleted || !!$navigating || !canViewAssistant}
-          loading={$submitting || $waiting}
-          {fileSearchAttachmentCount}
-          {codeInterpreterAttachmentCount}
-          upload={handleUpload}
-          remove={handleRemove}
-          on:submit={handleSubmit}
-          on:dismissError={handleDismissError}
-        />
         <div class="flex gap-2 items-center w-full text-sm justify-between grow my-3">
           <div class="flex gap-2 grow shrink min-w-0">
             {#if !$published && isPrivate}
@@ -605,23 +1051,25 @@
             {/if}
           </div>
 
-          <div class="shrink-0 grow-0 h-auto">
-            <CogOutline class="dark:text-white cursor-pointer w-6 h-4 font-light" size="lg" />
-            <Dropdown>
-              <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
-                <span class:text-gray-300={!canPublishThread}>
-                  {#if $published}
-                    Unpublish
-                  {:else}
-                    Publish
-                  {/if}
-                </span>
-              </DropdownItem>
-              <DropdownItem on:click={deleteThread} disabled={!canDeleteThread}>
-                <span class:text-gray-300={!canDeleteThread}>Delete</span>
-              </DropdownItem>
-            </Dropdown>
-          </div>
+          {#if !(data.threadInteractionMode === 'voice' && $messages.length === 0 && assistantInteractionMode === 'voice')}
+            <div class="shrink-0 grow-0 h-auto">
+              <CogOutline class="dark:text-white cursor-pointer w-6 h-4 font-light" size="lg" />
+              <Dropdown>
+                <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
+                  <span class:text-gray-300={!canPublishThread}>
+                    {#if $published}
+                      Unpublish
+                    {:else}
+                      Publish
+                    {/if}
+                  </span>
+                </DropdownItem>
+                <DropdownItem on:click={deleteThread} disabled={!canDeleteThread}>
+                  <span class:text-gray-300={!canDeleteThread}>Delete</span>
+                </DropdownItem>
+              </Dropdown>
+            </div>
+          {/if}
         </div>
       </div>
     </div>

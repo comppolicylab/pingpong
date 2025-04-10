@@ -17,11 +17,13 @@ from fastapi import (
     Request,
     Response,
     UploadFile,
+    WebSocket,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import PositiveInt
 
 from pingpong.ai_models import (
+    AZURE_UNAVAILABLE_MODELS,
     upgrade_assistants_model,
     KNOWN_MODELS,
     ADMIN_ONLY_MODELS,
@@ -34,6 +36,7 @@ from pingpong.emails import (
     revalidate_email_addresses,
     validate_email_addresses,
 )
+from pingpong.realtime import browser_realtime_websocket
 from pingpong.stats import get_statistics
 from pingpong.summary import send_class_summary_to_user_task
 from .animal_hash import process_threads, pseudonym, user_names
@@ -58,6 +61,7 @@ from .ai import (
     export_threads_multiple_classes,
     format_instructions,
     get_openai_client_by_class_id,
+    get_original_model_name_by_azure_equivalent,
     get_thread_conversation_name,
     get_initial_thread_conversation_name,
     run_thread,
@@ -109,6 +113,7 @@ from .users import (
     AddNewUsersManual,
     AddUserException,
     CheckUserPermissionException,
+    UserNotFoundException,
     check_permissions,
     delete_canvas_permissions,
 )
@@ -141,12 +146,6 @@ async def get_openai_client_for_class(request: Request) -> OpenAIClientType:
 
 OpenAIClientDependency = Depends(get_openai_client_for_class)
 OpenAIClient = Annotated[OpenAIClientType, OpenAIClientDependency]
-
-
-class UserNotFoundException(Exception):
-    def __init__(self, detail: str = "", user_id: str = ""):
-        self.user_id = user_id
-        self.detail = detail
 
 
 @v1.middleware("http")
@@ -1989,6 +1988,7 @@ async def list_class_models(
             "owner": m.owned_by or "",
             "name": KNOWN_MODELS[m.id]["name"],
             "sort_order": KNOWN_MODELS[m.id]["sort_order"],
+            "type": KNOWN_MODELS[m.id]["type"],
             "description": KNOWN_MODELS[m.id]["description"],
             "is_latest": KNOWN_MODELS[m.id]["is_latest"],
             "is_new": KNOWN_MODELS[m.id]["is_new"],
@@ -2014,6 +2014,7 @@ async def list_class_models(
                 "owner": "",
                 "name": "GPT-4 Turbo",
                 "sort_order": 4,
+                "type": "chat",
                 "is_new": False,
                 "highlight": False,
                 "is_latest": True,
@@ -2035,6 +2036,7 @@ async def list_class_models(
                 "owner": "",
                 "name": "GPT-4 Turbo preview",
                 "sort_order": 5,
+                "type": "chat",
                 "is_new": False,
                 "highlight": False,
                 "is_latest": True,
@@ -2072,17 +2074,6 @@ async def list_class_models(
             else model.get("hide_in_model_selector")
         )
 
-    AZURE_UNAVAILABLE_MODELS = [
-        "gpt-4o-2024-11-20",
-        "o1-2024-12-17",
-        "o3-mini",
-        "o3-mini-2025-01-31",
-        "o1",
-        "o1-2024-12-17",
-        "gpt-4.5-preview",
-        "gpt-4.5-preview-2025-02-27",
-    ]
-
     if isinstance(openai_client, openai.AsyncAzureOpenAI):
         filtered = [m for m in filtered if m["id"] not in AZURE_UNAVAILABLE_MODELS]
 
@@ -2098,6 +2089,17 @@ async def list_class_models(
     return {
         "models": filtered,
     }
+
+
+@v1.websocket(
+    "/class/{class_id}/thread/{thread_id}/audio",
+)
+async def audio_stream(
+    websocket: WebSocket,
+    class_id: str,
+    thread_id: str,
+):
+    await browser_realtime_websocket(websocket, class_id, thread_id)
 
 
 @v1.get(
@@ -2588,6 +2590,88 @@ async def list_threads(
 
 
 @v1.post(
+    "/class/{class_id}/thread/audio",
+    dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
+    response_model=schemas.Thread,
+)
+async def create_audio_thread(
+    class_id: str,
+    req: schemas.CreateAudioThread,
+    request: Request,
+    openai_client: OpenAIClient,
+):
+    parties = list[models.User]()
+    thread = None
+    try:
+        thread, parties = await asyncio.gather(
+            openai_client.beta.threads.create(
+                metadata={
+                    "user_id": str(request.state.session.user.id),
+                },
+            ),
+            models.User.get_all_by_id(request.state.db, req.parties),
+        )
+    except openai.InternalServerError:
+        logger.exception("Error creating thread")
+        if thread:
+            await openai_client.beta.threads.delete(thread.id)
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI is experiencing issues so we can't create your conversation right now. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+        )
+    except (openai.APIError, Exception):
+        logger.exception("Error creating thread")
+        if thread:
+            await openai_client.beta.threads.delete(thread.id)
+        raise HTTPException(
+            status_code=400,
+            detail="Something went wrong while creating your conversation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+        )
+
+    if not thread:
+        raise HTTPException(
+            status_code=500,
+            detail="We faced an error while creating your conversation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+        )
+
+    new_thread = {
+        "name": "Audio Conversation",
+        "class_id": int(class_id),
+        "private": True if parties else False,
+        "interaction_mode": "voice",
+        "users": parties or [],
+        "thread_id": thread.id,
+        "assistant_id": req.assistant_id,
+        "vector_store_id": None,
+        "code_interpreter_file_ids": [],
+        "image_file_ids": [],
+        "tools_available": json.dumps([]),
+        "version": 2,
+        "last_activity": func.now(),
+    }
+
+    result: None | models.Thread = None
+    try:
+        result = await models.Thread.create(request.state.db, new_thread)
+
+        grants = [
+            (f"class:{class_id}", "parent", f"thread:{result.id}"),
+        ] + [(f"user:{p.id}", "party", f"thread:{result.id}") for p in parties]
+        await request.state.authz.write(grant=grants)
+
+        return result
+    except Exception as e:
+        logger.exception("Error creating thread: %s", e)
+        await openai_client.beta.threads.delete(thread.id)
+        if result:
+            # Delete users-threads mapping
+            for user in result.users:
+                result.users.remove(user)
+            await result.delete(request.state.db)
+        raise e
+
+
+@v1.post(
     "/class/{class_id}/thread",
     dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
     response_model=schemas.Thread,
@@ -2673,7 +2757,7 @@ async def create_thread(
     except openai.InternalServerError:
         logger.exception("Error creating thread")
         if vector_store_id:
-            await openai_client.beta.vector_stores.delete(vector_store_id)
+            await openai_client.vector_stores.delete(vector_store_id)
         if thread:
             await openai_client.beta.threads.delete(thread.id)
         raise HTTPException(
@@ -2683,7 +2767,7 @@ async def create_thread(
     except (openai.APIError, Exception):
         logger.exception("Error creating thread")
         if vector_store_id:
-            await openai_client.beta.vector_stores.delete(vector_store_id)
+            await openai_client.vector_stores.delete(vector_store_id)
         if thread:
             await openai_client.beta.threads.delete(thread.id)
         raise HTTPException(
@@ -2695,7 +2779,7 @@ async def create_thread(
 
     if not thread:
         if vector_store_id:
-            await openai_client.beta.vector_stores.delete(vector_store_id)
+            await openai_client.vector_stores.delete(vector_store_id)
         raise HTTPException(
             status_code=500,
             detail="We faced an error while creating your conversation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
@@ -2728,7 +2812,7 @@ async def create_thread(
     except Exception as e:
         logger.exception("Error creating thread: %s", e)
         if vector_store_id:
-            await openai_client.beta.vector_stores.delete(vector_store_id)
+            await openai_client.vector_stores.delete(vector_store_id)
         await openai_client.beta.threads.delete(thread.id)
         if result:
             # Delete users-threads mapping
@@ -3278,12 +3362,29 @@ async def create_assistant(
     class_id_int = int(class_id)
     creator_id = request.state.session.user.id
 
-    # Check that the model is available
-    if req.model in HIDDEN_MODELS:
+    class_models_response = schemas.AssistantModels.model_validate(
+        await list_class_models(request.state.db, request, openai_client)
+    )
+    class_models = class_models_response.models
+
+    model_record = next(
+        (model for model in class_models if model.id == req.model), None
+    )
+
+    # Check if model is available for use in this class and that the model is not hidden
+    if not model_record or model_record.hide_in_model_selector:
         raise HTTPException(
             status_code=400,
             detail=f"Model {req.model} is not available for use.",
         )
+
+    # Check that the model supports the interaction mode
+    if model_record.type != req.interaction_mode:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model {req.model} is not available for use in {req.interaction_mode} mode.",
+        )
+
     # Check that the model is not admin-only
     if not await request.state.authz.test(
         f"user:{creator_id}",
@@ -3304,8 +3405,14 @@ async def create_assistant(
 
     tool_resources: ToolResources = {}
     vector_store_object_id = None
+    uses_voice = req.interaction_mode == schemas.InteractionMode.VOICE
 
     if req.file_search_file_ids:
+        if uses_voice:
+            raise HTTPException(
+                status_code=400,
+                detail="File search is not supported in Voice mode.",
+            )
         vector_store_id, vector_store_object_id = await create_vector_store(
             request.state.db,
             openai_client,
@@ -3318,14 +3425,22 @@ async def create_assistant(
     del req.file_search_file_ids
 
     if req.code_interpreter_file_ids:
+        if uses_voice:
+            raise HTTPException(
+                status_code=400,
+                detail="Code interpreter is not supported in Voice mode.",
+            )
         tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
 
     try:
-        _model = (
-            get_azure_model_deployment_name_equivalent(req.model)
-            if isinstance(openai_client, openai.AsyncAzureOpenAI)
-            else req.model
-        )
+        if uses_voice:
+            _model = "gpt-4o"
+        else:
+            _model = (
+                get_azure_model_deployment_name_equivalent(req.model)
+                if isinstance(openai_client, openai.AsyncAzureOpenAI)
+                else req.model
+            )
 
         reasoning_effort = (
             REASONING_EFFORT_MAP.get(req.reasoning_effort)
@@ -3338,11 +3453,21 @@ async def create_assistant(
             else {}
         )
 
+        # Set default temperature based on the interaction mode
+        # This is to ensure that the temperature is set
+        # appropriately for the mode.
+        if "temperature" not in req.model_fields_set or req.temperature is None:
+            if uses_voice:
+                req.temperature = 0.8
+            else:
+                req.temperature = 0.2
+
         new_asst = await openai_client.beta.assistants.create(
             instructions=format_instructions(
                 req.instructions,
                 use_latex=req.use_latex,
                 use_image_descriptions=req.use_image_descriptions,
+                interaction_mode=req.interaction_mode,
             ),
             model=_model,
             tools=req.tools,
@@ -3401,7 +3526,7 @@ async def create_assistant(
         return asst
     except Exception as e:
         if vector_store_object_id:
-            await openai_client.beta.vector_stores.delete(vector_store_id)
+            await openai_client.vector_stores.delete(vector_store_id)
         await openai_client.beta.assistants.delete(new_asst.id)
         raise e
 
@@ -3454,6 +3579,28 @@ async def update_assistant(
     tool_resources: ToolResources = {}
     update_tool_resources = False
     update_instructions = False
+    interaction_mode = (
+        req.interaction_mode
+        if (
+            "interaction_mode" in req.model_fields_set
+            and req.interaction_mode is not None
+        )
+        else schemas.InteractionMode(asst.interaction_mode)
+    )
+    uses_voice = interaction_mode == schemas.InteractionMode.VOICE
+
+    # If the interaction mode is changing, and the user did not specify a
+    # temperature, set a default temperature based on the interaction mode
+    # This is to ensure that the temperature is set appropriately for the mode.
+    if interaction_mode != asst.interaction_mode and (
+        "temperature" not in req.model_fields_set or req.temperature is None
+    ):
+        if uses_voice:
+            openai_update["temperature"] = 0.8
+            asst.temperature = 0.8
+        else:
+            openai_update["temperature"] = 0.2
+            asst.temperature = 0.2
 
     # Check that the model is available
     if "model" in req.model_fields_set and req.model is not None:
@@ -3465,25 +3612,69 @@ async def update_assistant(
         )
 
         if _model != asst.model:
-            if req.model in HIDDEN_MODELS:
+            class_models_response = schemas.AssistantModels.model_validate(
+                await list_class_models(request.state.db, request, openai_client)
+            )
+            class_models = class_models_response.models
+
+            model_record = next(
+                (model for model in class_models if model.id == req.model), None
+            )
+
+            if not model_record or model_record.hide_in_model_selector:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Model {req.model} is not available for use.",
                 )
+
+            # Check that the model supports the interaction mode
+            if model_record.type != interaction_mode:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Model {req.model} is not available for use in {interaction_mode} mode.",
+                )
+
             # Check that the model is not admin-only
             if not await request.state.authz.test(
                 f"user:{request.state.session.user.id}",
                 "admin",
                 f"class:{class_id}",
             ):
-                if req.model in ADMIN_ONLY_MODELS:
+                if model_record.id in ADMIN_ONLY_MODELS:
                     raise HTTPException(
                         status_code=400,
                         detail=f"Model {req.model} is not available for use.",
                     )
 
+        # Override the assistant model we send to OpenAI
+        # when using voice mode
+        if uses_voice:
+            _model = "gpt-4o"
         openai_update["model"] = _model
         asst.model = req.model
+
+    else:
+        _model = (
+            get_original_model_name_by_azure_equivalent(asst.model)
+            if isinstance(openai_client, openai.AsyncAzureOpenAI)
+            else asst.model
+        )
+
+        class_models_response = schemas.AssistantModels.model_validate(
+            await list_class_models(request.state.db, request, openai_client)
+        )
+        class_models = class_models_response.models
+
+        model_record = next(
+            (model for model in class_models if model.id == _model), None
+        )
+
+        # Check that the model supports the interaction mode
+        if not model_record or model_record.type != interaction_mode:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model {req.model} is not available for use in {interaction_mode.capitalize()} mode.",
+            )
 
     # Track whether we have an empty vector store to delete
     vector_store_id_to_delete = None
@@ -3499,6 +3690,11 @@ async def update_assistant(
                 req.code_interpreter_file_ids is not None
                 and req.code_interpreter_file_ids != []
             ):
+                if uses_voice:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Code interpreter is not supported in Voice mode.",
+                    )
                 tool_resources["code_interpreter"] = {
                     "file_ids": req.code_interpreter_file_ids
                 }
@@ -3512,6 +3708,11 @@ async def update_assistant(
         if "file_search_file_ids" in req.model_fields_set:
             update_tool_resources = True
             if req.file_search_file_ids is not None and req.file_search_file_ids != []:
+                if uses_voice:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="File search is not supported in Voice mode.",
+                    )
                 # Files will need to be stored in a vector store
                 if asst.vector_store_id:
                     # Vector store already exists, update
@@ -3553,9 +3754,11 @@ async def update_assistant(
 
     if update_tool_resources:
         openai_update["tool_resources"] = tool_resources
+
     if "use_latex" in req.model_fields_set and req.use_latex is not None:
         update_instructions = True
         asst.use_latex = req.use_latex
+
     if (
         "use_image_descriptions" in req.model_fields_set
         and req.use_image_descriptions is not None
@@ -3563,24 +3766,23 @@ async def update_assistant(
     ):
         update_instructions = True
         asst.use_image_descriptions = req.use_image_descriptions
+
+    if "interaction_mode" in req.model_fields_set and req.interaction_mode is not None:
+        asst.interaction_mode = req.interaction_mode
+
     if "hide_prompt" in req.model_fields_set and req.hide_prompt is not None:
         asst.hide_prompt = req.hide_prompt
+
     if "instructions" in req.model_fields_set and req.instructions is not None:
         update_instructions = True
         if not req.instructions:
             raise HTTPException(400, "Instructions cannot be empty.")
         asst.instructions = req.instructions
     _model = None
-    if "model" in req.model_fields_set and req.model is not None:
-        _model = (
-            get_azure_model_deployment_name_equivalent(req.model)
-            if isinstance(openai_client, openai.AsyncAzureOpenAI)
-            else req.model
-        )
-        openai_update["model"] = _model
-        asst.model = req.model
+
     if "description" in req.model_fields_set and req.description is not None:
         asst.description = req.description
+
     if "tools" in req.model_fields_set and req.tools is not None:
         openai_update["tools"] = req.tools
         asst.tools = json.dumps([t.model_dump() for t in req.tools])

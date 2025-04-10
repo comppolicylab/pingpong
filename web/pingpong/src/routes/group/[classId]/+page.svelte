@@ -16,13 +16,16 @@
     EyeSlashOutline,
     ChevronDownOutline,
     ArrowRightOutline,
-    LockSolid
+    LockSolid,
+    MicrophoneOutline,
+    CirclePlusSolid,
+    MicrophoneSlashOutline
   } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
   import { errorMessage } from '$lib/errors';
   import type { Assistant, FileUploadPurpose } from '$lib/api';
-  import { loading } from '$lib/stores/general';
+  import { loading, isFirefox } from '$lib/stores/general';
   import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
 
   /**
@@ -134,6 +137,27 @@
     if (api.isErrorResponse(result)) {
       sadToast(`Failed to delete file. Error: ${result.detail || 'unknown error'}`);
       throw new Error(result.detail || 'unknown error');
+    }
+  };
+
+  const handleAudioThreadCreate = async (e: Event) => {
+    $loading = true;
+    const partyIds = parties ? parties.split(',').map((id) => parseInt(id, 10)) : [];
+    try {
+      const newThread = api.explodeResponse(
+        await api.createAudioThread(fetch, data.class.id, {
+          assistant_id: assistant.id,
+          parties: partyIds
+        })
+      );
+      data.threads = [newThread as api.Thread, ...data.threads];
+      $loading = false;
+      await goto(`/group/${$page.params.classId}/thread/${newThread.id}`);
+    } catch (e) {
+      $loading = false;
+      sadToast(
+        `Failed to create thread. Error: ${errorMessage(e, "Something went wrong while creating your conversation. If the issue persists, check PingPong's status page for updates.")}`
+      );
     }
   };
 
@@ -319,39 +343,82 @@
       <Modal title="Group Moderators" bind:open={showModerators} autoclose outsideclose>
         <ModeratorsTable moderators={teachers} />
       </Modal>
+      {#if assistant.interaction_mode === 'voice'}
+        {#if $isFirefox}
+          <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+            <div class="bg-blue-light-50 p-3 rounded-lg">
+              <MicrophoneSlashOutline size="xl" class="text-blue-dark-40" />
+            </div>
+            <div class="flex flex-col items-center w-3/5">
+              <p class="text-xl font-semibold text-blue-dark-40 text-center">
+                Voice mode not available on Firefox
+              </p>
+              <p class="text-md font-base text-gray-600 text-center">
+                We're working on bringing Voice mode to Firefox in a future update. For the best
+                experience, please use Safari, Chrome, or Edge in the meantime.
+              </p>
+            </div>
+          </div>
+        {:else}
+          <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+            <div class="bg-blue-light-50 p-3 rounded-lg">
+              <MicrophoneOutline size="xl" class="text-blue-dark-40" />
+            </div>
+            <div class="flex flex-col items-center min-w-2/5">
+              <p class="text-xl font-semibold text-blue-dark-40 text-center">Voice mode</p>
+              <p class="text-md font-base text-gray-600 text-center">
+                Talk to this assistant using your voice.<br />Create a new session to begin.
+              </p>
+            </div>
+            <div class="flex flex-row p-1.5">
+              <Button
+                class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all"
+                on:click={handleAudioThreadCreate}
+                on:touchstart={handleAudioThreadCreate}
+                type="button"
+              >
+                <CirclePlusSolid size="sm" />
+                <span class="text-sm font-normal text-center"> Create session </span>
+              </Button>
+            </div>
+          </div>
+        {/if}
+      {/if}
       <div class="shrink-0 grow-0">
-        <ChatInput
-          mimeType={data.uploadInfo.mimeType}
-          maxSize={data.uploadInfo.private_file_max_size}
-          loading={$loading || !!$navigating}
-          canSubmit={true}
-          visionAcceptedFiles={supportsVision && allowVisionUpload
-            ? data.uploadInfo.fileTypes({
-                file_search: false,
-                code_interpreter: false,
-                vision: true
-              })
-            : null}
-          {visionSupportOverride}
-          {useImageDescriptions}
-          fileSearchAcceptedFiles={supportsFileSearch
-            ? data.uploadInfo.fileTypes({
-                file_search: true,
-                code_interpreter: false,
-                vision: false
-              })
-            : null}
-          codeInterpreterAcceptedFiles={supportsCodeInterpreter
-            ? data.uploadInfo.fileTypes({
-                file_search: false,
-                code_interpreter: true,
-                vision: false
-              })
-            : null}
-          upload={handleUpload}
-          remove={handleRemove}
-          on:submit={handleSubmit}
-        />
+        {#if assistant.interaction_mode === 'chat'}
+          <ChatInput
+            mimeType={data.uploadInfo.mimeType}
+            maxSize={data.uploadInfo.private_file_max_size}
+            loading={$loading || !!$navigating}
+            canSubmit={true}
+            visionAcceptedFiles={supportsVision && allowVisionUpload
+              ? data.uploadInfo.fileTypes({
+                  file_search: false,
+                  code_interpreter: false,
+                  vision: true
+                })
+              : null}
+            {visionSupportOverride}
+            {useImageDescriptions}
+            fileSearchAcceptedFiles={supportsFileSearch
+              ? data.uploadInfo.fileTypes({
+                  file_search: true,
+                  code_interpreter: false,
+                  vision: false
+                })
+              : null}
+            codeInterpreterAcceptedFiles={supportsCodeInterpreter
+              ? data.uploadInfo.fileTypes({
+                  file_search: false,
+                  code_interpreter: true,
+                  vision: false
+                })
+              : null}
+            upload={handleUpload}
+            remove={handleRemove}
+            on:submit={handleSubmit}
+          />
+        {/if}
         <input type="hidden" name="assistant_id" bind:value={assistant.id} />
         <input type="hidden" name="parties" bind:value={parties} />
         <div class="my-3">

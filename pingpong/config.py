@@ -244,6 +244,7 @@ class Config(BaseSettings):
     """Stats Chat Bot config."""
 
     log_level: str = Field("INFO", env="LOG_LEVEL")
+    realtime_log_level: str = Field("INFO", env="REALTIME_LOG_LEVEL")
 
     reload: int = Field(0)
     public_url: str = Field("http://localhost:8000")
@@ -314,5 +315,7 @@ logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
     logging.WARNING
 )
 logging.getLogger("uvicorn.access").addFilter(IgnoreHealthEndpoint())
+logging.getLogger("realtime_browser").setLevel(config.realtime_log_level)
+logging.getLogger("realtime_openai").setLevel(config.realtime_log_level)
 if config.log_level != "DEBUG":
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)

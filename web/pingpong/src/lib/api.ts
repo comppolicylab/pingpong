@@ -971,6 +971,7 @@ export type AssistantModel = {
   created: string;
   owner: string;
   name: string;
+  type: 'chat' | 'voice';
   description: string;
   is_latest: boolean;
   is_new: boolean;
@@ -1123,6 +1124,7 @@ export type Assistant = {
   name: string;
   description: string | null;
   instructions: string;
+  interaction_mode: 'chat' | 'voice';
   model: string;
   temperature: number | null;
   reasoning_effort: number | null;
@@ -1197,6 +1199,7 @@ export type CreateAssistantRequest = {
   description: string;
   instructions: string;
   model: string;
+  interaction_mode: 'chat' | 'voice';
   temperature: number | null;
   reasoning_effort: number | null;
   tools: Tool[];
@@ -1217,6 +1220,7 @@ export type UpdateAssistantRequest = {
   description?: string;
   instructions?: string;
   model?: string;
+  interaction_mode?: 'chat' | 'voice';
   temperature?: number | null;
   reasoning_effort?: number | null;
   tools?: Tool[];
@@ -1676,6 +1680,10 @@ export type CreateThreadRequest = {
   vision_image_descriptions?: ImageProxy[];
 };
 
+export type CreateAudioThreadRequest = {
+  assistant_id: number;
+  parties?: number[];
+};
 /**
  * Thread information.
  */
@@ -1683,6 +1691,7 @@ export type Thread = {
   id: number;
   name: string | null;
   thread_id: string;
+  interaction_mode: 'chat' | 'voice';
   class_id: number;
   assistant_names?: Record<number, string> | null;
   assistant_id: number;
@@ -1699,6 +1708,18 @@ export type Thread = {
 export const createThread = async (f: Fetcher, classId: number, data: CreateThreadRequest) => {
   const url = `class/${classId}/thread`;
   return await POST<CreateThreadRequest, Thread>(f, url, data);
+};
+
+/**
+ * Create voice mode thread.
+ */
+export const createAudioThread = async (
+  f: Fetcher,
+  classId: number,
+  data: CreateAudioThreadRequest
+) => {
+  const url = `class/${classId}/thread/audio`;
+  return await POST<CreateAudioThreadRequest, Thread>(f, url, data);
 };
 
 /**
@@ -2718,4 +2739,14 @@ export const toggleAgreementPolicy = async (
 ) => {
   const url = `admin/terms/policy/${policy_id}/status`;
   return await PATCH<ToggleAgreementPolicyRequest, GenericStatus>(f, url, data);
+};
+
+export const createAudioWebsocket = (classId: number, threadId: number): WebSocket => {
+  if (!browser) {
+    throw new Error('WebSocket can only be created in a browser environment.');
+  }
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const host = window.location.host;
+  const url = `${protocol}://${host}/api/v1/class/${classId}/thread/${threadId}/audio`;
+  return new WebSocket(url);
 };

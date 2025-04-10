@@ -19,6 +19,12 @@ from .merge import merge
 logger = logging.getLogger(__name__)
 
 
+class UserNotFoundException(Exception):
+    def __init__(self, detail: str = "", user_id: str = ""):
+        self.user_id = user_id
+        self.detail = detail
+
+
 class AddUserException(Exception):
     def __init__(self, detail: str = "", code: int | None = None):
         self.code = code

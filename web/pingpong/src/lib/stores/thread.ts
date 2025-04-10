@@ -115,7 +115,8 @@ export class ThreadManager {
     fetcher: api.Fetcher,
     classId: number,
     threadId: number,
-    threadData: BaseResponse & (ThreadWithMeta | Error | api.ValidationError)
+    threadData: BaseResponse & (ThreadWithMeta | Error | api.ValidationError),
+    interactionMode: 'chat' | 'voice' = 'chat'
   ) {
     const expanded = api.expandResponse(threadData);
     this.#fetcher = fetcher;
@@ -136,7 +137,9 @@ export class ThreadManager {
       attachments: expanded.data?.attachments || {}
     });
 
-    this.#ensureRun(threadData);
+    if (interactionMode === 'chat') {
+      this.#ensureRun(threadData);
+    }
 
     this.messages = derived(this.#data, ($data) => {
       if (!$data) {

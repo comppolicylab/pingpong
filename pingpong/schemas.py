@@ -316,11 +316,17 @@ class VectorStoreType(Enum):
     THREAD = "thread"
 
 
+class InteractionMode(StrEnum):
+    CHAT = "chat"
+    VOICE = "voice"
+
+
 class Assistant(BaseModel):
     id: int
     name: str
     instructions: str
     description: str | None
+    interaction_mode: InteractionMode
     tools: str
     model: str
     temperature: float | None
@@ -340,14 +346,25 @@ class Assistant(BaseModel):
         from_attributes = True
 
 
+def temperature_validator(self):
+    if (
+        self.temperature is not None
+        and self.interaction_mode == InteractionMode.VOICE
+        and (self.temperature < 0.6 or self.temperature > 1.2)
+    ):
+        raise ValueError("Temperature must be between 0.6 and 1.2 for Voice mode.")
+    return self
+
+
 class CreateAssistant(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
     code_interpreter_file_ids: list[str] | None = None
     file_search_file_ids: list[str] | None = None
     instructions: str = Field(..., min_length=3)
     description: str
+    interaction_mode: InteractionMode = InteractionMode.CHAT
     model: str = Field(..., min_length=2)
-    temperature: float | None = Field(0.2, ge=0.0, le=2.0)
+    temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=0, le=2)
     tools: list[Tool]
     published: bool = False
@@ -356,6 +373,8 @@ class CreateAssistant(BaseModel):
     hide_prompt: bool = False
     deleted_private_files: list[int] = []
 
+    _temperature_check = model_validator(mode="after")(temperature_validator)
+
 
 class UpdateAssistant(BaseModel):
     name: str | None = Field(None, min_length=3, max_length=100)
@@ -363,6 +382,7 @@ class UpdateAssistant(BaseModel):
     file_search_file_ids: list[str] | None = None
     instructions: str | None = Field(None, min_length=3)
     description: str | None = None
+    interaction_mode: InteractionMode | None = None
     model: str | None = Field(None, min_length=2)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=0, le=2)
@@ -372,6 +392,8 @@ class UpdateAssistant(BaseModel):
     hide_prompt: bool | None = None
     use_image_descriptions: bool | None = None
     deleted_private_files: list[int] = []
+
+    _temperature_check = model_validator(mode="after")(temperature_validator)
 
 
 class DeleteAssistant(BaseModel):
@@ -392,6 +414,7 @@ class Thread(BaseModel):
     name: str | None
     thread_id: str
     class_id: int
+    interaction_mode: InteractionMode
     assistant_names: dict[int, str] = {}
     assistant_id: int | None = None
     private: bool
@@ -435,6 +458,11 @@ class CreateThread(BaseModel):
     assistant_id: int
 
     _file_check = model_validator(mode="after")(file_validator)
+
+
+class CreateAudioThread(BaseModel):
+    parties: list[int] = []
+    assistant_id: int
 
 
 class ThreadName(BaseModel):
@@ -956,6 +984,7 @@ class AssistantModel(BaseModel):
     owner: str
     name: str
     description: str
+    type: InteractionMode
     is_latest: bool
     is_new: bool
     highlight: bool
@@ -974,6 +1003,7 @@ class AssistantModelDict(TypedDict):
     is_latest: bool
     is_new: bool
     highlight: bool
+    type: Literal["chat", "voice"]
     supports_vision: bool
     supports_file_search: bool
     supports_code_interpreter: bool

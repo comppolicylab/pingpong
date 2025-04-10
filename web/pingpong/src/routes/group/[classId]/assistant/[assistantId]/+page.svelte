@@ -12,7 +12,9 @@
     Badge,
     Accordion,
     AccordionItem,
-    Range
+    Range,
+    ButtonGroup,
+    RadioButton
   } from 'flowbite-svelte';
   import type { Tool, ServerFile, FileUploadInfo } from '$lib/api';
   import { beforeNavigate, goto } from '$app/navigation';
@@ -32,7 +34,11 @@
     ArrowLeftOutline,
     ArrowRightOutline,
     HeartSolid,
-    LightbulbSolid
+    LightbulbSolid,
+    MessageDotsSolid,
+    MessageDotsOutline,
+    MicrophoneOutline,
+    MicrophoneSolid
   } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
   import { writable, type Writable } from 'svelte/store';
@@ -49,10 +55,26 @@
   let checkForChanges = true;
   let assistantForm: HTMLFormElement;
   let deleteModal = false;
-
   $: assistant = data.assistant;
   $: preventEdits = !!assistant?.locked;
   $: canPublish = data.grants.canPublishAssistants;
+
+  let interactionMode: 'chat' | 'voice';
+  $: if (
+    assistant?.interaction_mode !== undefined &&
+    assistant?.interaction_mode !== null &&
+    interactionMode === undefined
+  ) {
+    interactionMode = assistant.interaction_mode;
+  }
+  $: if (
+    interactionMode === undefined &&
+    (data.isCreating ||
+      assistant?.interaction_mode === undefined ||
+      assistant?.interaction_mode === null)
+  ) {
+    interactionMode = 'chat';
+  }
 
   let selectedFileSearchFiles = writable(
     data.selectedFileSearchFiles.slice().map((f) => f.file_id)
@@ -98,6 +120,9 @@
   };
   const defaultTools = [{ type: 'file_search' }];
 
+  $: chatModelCount = data.models.filter((model) => model.type === 'chat').length;
+  $: audioModelCount = data.models.filter((model) => model.type === 'voice').length;
+
   $: initialTools = (assistant?.tools ? (JSON.parse(assistant.tools) as Tool[]) : defaultTools).map(
     (t) => t.type
   );
@@ -106,7 +131,12 @@
     return acc;
   }, {});
   $: latestModelOptions = (
-    data.models.filter((model) => model.is_latest && !(model.hide_in_model_selector ?? false)) || []
+    data.models.filter(
+      (model) =>
+        model.is_latest &&
+        !(model.hide_in_model_selector ?? false) &&
+        model.type === interactionMode
+    ) || []
   ).map((model) => ({
     value: model.id,
     name: model.name,
@@ -117,14 +147,43 @@
     is_new: model.is_new,
     highlight: model.highlight
   }));
+  $: hiddenModelNames = (
+    data.models.filter(
+      (model) => (model.hide_in_model_selector ?? false) && model.type === interactionMode
+    ) || []
+  ).map((model) => model.id);
   let selectedModel = '';
-  $: if (latestModelOptions.length > 0 && !selectedModel) {
-    selectedModel = assistant?.model || latestModelOptions[0].value;
+  $: if (
+    ((latestModelOptions.length > 0 || versionedModelOptions.length > 0) && !selectedModel) ||
+    (!latestModelOptions.map((m) => m.value).includes(selectedModel) &&
+      !versionedModelOptions.map((m) => m.value).includes(selectedModel))
+  ) {
+    if (
+      latestModelOptions.map((m) => m.value).includes(assistant?.model || '') ||
+      hiddenModelNames.includes(assistant?.model || '')
+    ) {
+      selectedModel = assistant?.model || latestModelOptions[0].value;
+    } else if (
+      versionedModelOptions.map((m) => m.value).includes(assistant?.model || '') ||
+      hiddenModelNames.includes(assistant?.model || '')
+    ) {
+      selectedModel = assistant?.model || versionedModelOptions[0].value;
+    } else if (latestModelOptions.length > 0) {
+      selectedModel = latestModelOptions[0].value;
+    } else if (versionedModelOptions.length > 0) {
+      selectedModel = versionedModelOptions[0].value;
+    } else {
+      selectedModel = '';
+    }
   }
   $: selectedModelName = modelNameDict[selectedModel];
   $: versionedModelOptions = (
-    data.models.filter((model) => !model.is_latest && !(model.hide_in_model_selector ?? false)) ||
-    []
+    data.models.filter(
+      (model) =>
+        !model.is_latest &&
+        !(model.hide_in_model_selector ?? false) &&
+        model.type === interactionMode
+    ) || []
   ).map((model) => ({
     value: model.id,
     name: model.name,
@@ -199,11 +258,39 @@
     $trashPrivateFileIds = [...$trashPrivateFileIds, ...files];
   };
 
-  const checkForLargeTemperature = (evt: Event) => {
+  let defaultAudioTemperature = 0.8;
+  let defaultChatTemperature = 0.2;
+  let minChatTemperature = 0.0;
+  let maxChatTemperature = 2.0;
+  let minAudioTemperature = 0.6;
+  let maxAudioTemperature = 1.2;
+
+  const checkForLargeTemperatureChat = (evt: Event) => {
     const target = evt.target as HTMLInputElement;
     const value = target.valueAsNumber;
     if (value > 1.0 && _temperatureValue <= 1.0) {
       if (confirm('Temperatures above 1.0 may lead to nonsensical responses. Are you sure?')) {
+        temperatureValue = value;
+        _temperatureValue = value;
+      } else {
+        target.valueAsNumber = _temperatureValue;
+        temperatureValue = _temperatureValue;
+      }
+    } else {
+      temperatureValue = value;
+      _temperatureValue = value;
+    }
+  };
+
+  const checkForLargeTemperatureAudio = (evt: Event) => {
+    const target = evt.target as HTMLInputElement;
+    const value = target.valueAsNumber;
+    if (value !== defaultAudioTemperature && _temperatureValue === defaultAudioTemperature) {
+      if (
+        confirm(
+          'For audio models, a temperature of 0.8 is highly recommended for best performance. Are you sure?'
+        )
+      ) {
         temperatureValue = value;
         _temperatureValue = value;
       } else {
@@ -226,6 +313,25 @@
     temperatureValue = assistant.temperature;
     _temperatureValue = assistant.temperature;
   }
+
+  const changeTemperatureInteractionMode = (evt: Event) => {
+    const target = evt.target as HTMLInputElement;
+    const mode = target.value;
+    if (
+      assistant?.interaction_mode === mode &&
+      assistant?.temperature !== undefined &&
+      assistant?.temperature !== null
+    ) {
+      temperatureValue = assistant.temperature;
+      _temperatureValue = assistant.temperature;
+    } else if (mode === 'voice') {
+      temperatureValue = defaultAudioTemperature;
+      _temperatureValue = defaultAudioTemperature;
+    } else if (mode === 'chat') {
+      temperatureValue = defaultChatTemperature;
+      _temperatureValue = defaultChatTemperature;
+    }
+  };
   let reasoningEffortValue: number;
   $: if (
     assistant?.reasoning_effort !== undefined &&
@@ -238,8 +344,13 @@
     temperatureValue === undefined &&
     (data.isCreating || assistant?.temperature === undefined || assistant?.temperature === null)
   ) {
-    temperatureValue = 0.2;
-    _temperatureValue = 0.2;
+    if (interactionMode === 'voice') {
+      temperatureValue = defaultAudioTemperature;
+      _temperatureValue = defaultAudioTemperature;
+    } else if (interactionMode === 'chat') {
+      temperatureValue = defaultChatTemperature;
+      _temperatureValue = defaultChatTemperature;
+    }
   }
   $: if (
     reasoningEffortValue === undefined &&
@@ -346,6 +457,7 @@
           'name',
           'description',
           'instructions',
+          'interaction_mode',
           'model',
           'published',
           'use_latex',
@@ -406,6 +518,7 @@
     }
     const params = {
       name: preventEdits ? assistant?.name || '' : body.name.toString(),
+      interaction_mode: interactionMode,
       description: preventEdits
         ? assistant?.description || ''
         : normalizeNewlines(body.description.toString()),
@@ -506,9 +619,7 @@
       if (expanded.error) {
         $loading = false;
         $loadingMessage = '';
-        sadToast(
-          `Could not update the assistant's publish status:\n${expanded.error.detail || 'Unknown error'}`
-        );
+        sadToast(`Could not update the assistant:\n${expanded.error.detail || 'Unknown error'}`);
         return;
       } else {
         $loading = false;
@@ -660,6 +771,40 @@
       <Input id="name" name="name" value={assistant?.name} disabled={preventEdits} />
     </div>
     <div class="mb-4">
+      <Label for="interactionMode">Interaction Mode</Label>
+      <Helper class="pb-1">Choose how users will primarily interact with this assistant.</Helper>
+      <ButtonGroup>
+        {#if chatModelCount !== 0}
+          <RadioButton
+            value="chat"
+            bind:group={interactionMode}
+            disabled={preventEdits}
+            on:change={changeTemperatureInteractionMode}
+            class={`${preventEdits ? 'hover:bg-transparent' : ''} select-none`}
+            ><div class="flex flex-row gap-2 items-center">
+              {#if interactionMode === 'chat'}<MessageDotsSolid
+                  class="w-6 h-6"
+                />{:else}<MessageDotsOutline class="w-6 h-6" />{/if}Chat mode
+            </div></RadioButton
+          >
+        {/if}
+        {#if audioModelCount !== 0}
+          <RadioButton
+            value="voice"
+            bind:group={interactionMode}
+            disabled={preventEdits}
+            on:change={changeTemperatureInteractionMode}
+            class={`${preventEdits ? 'hover:bg-transparent' : ''} select-none`}
+            ><div class="flex flex-row gap-2 items-center">
+              {#if interactionMode === 'voice'}<MicrophoneSolid
+                  class="w-5 h-5"
+                />{:else}<MicrophoneOutline class="w-5 h-5" />{/if}Voice mode
+            </div></RadioButton
+          >
+        {/if}
+      </ButtonGroup>
+    </div>
+    <div class="mb-4">
       <Label for="model">Model</Label>
       <Helper class="pb-1"
         >Select the model to use for this assistant. You can update your model selection at any
@@ -801,23 +946,37 @@
       >
     </div>
     <div class="col-span-2 mb-4">
-      <Checkbox
-        id="use_latex"
-        name="use_latex"
-        disabled={preventEdits}
-        checked={(assistant ? assistant.use_latex : true) || false}>Use LaTeX</Checkbox
-      >
-      <Helper>Enable LaTeX formatting for assistant responses.</Helper>
+      {#if interactionMode === 'chat'}
+        <Checkbox
+          id="use_latex"
+          name="use_latex"
+          disabled={preventEdits}
+          checked={(assistant ? assistant.use_latex : true) || false}>Use LaTeX</Checkbox
+        >
+        <Helper>Enable LaTeX formatting for assistant responses.</Helper>
+      {:else}
+        <div class="flex flex-col gap-y-1">
+          <Badge
+            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
+            ><CloseOutline size="sm" />
+            <div>No LaTeX formatting for assistant responses</div>
+          </Badge>
+          <Helper
+            >This interaction mode does not support LaTeX formatting for assistant responses. To use
+            LaTeX formatting, switch to Chat mode.</Helper
+          >
+        </div>
+      {/if}
     </div>
     <div class="col-span-2 mb-4">
       <Label for="tools">Tools</Label>
       <Helper>Select tools available to the assistant when generating a response.</Helper>
     </div>
     {#if !supportsFileSearch}
-      <div class="col-span-2 mb-2">
-        <div class="flex flex-row items-center gap-x-2">
+      <div class="col-span-2 mb-3">
+        <div class="flex flex-col gap-y-1">
           <Badge
-            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-red-400 from-rose-100 to-rose-200 text-rose-800 shrink-0"
+            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
             ><CloseOutline size="sm" />
             <div>No File Search capabilities</div>
           </Badge>
@@ -843,9 +1002,9 @@
     {/if}
     <div class="col-span-2 mb-4">
       {#if !supportsCodeInterpreter}
-        <div class="flex flex-row items-center gap-x-2">
+        <div class="flex flex-col gap-y-1">
           <Badge
-            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-red-400 from-rose-100 to-rose-200 text-rose-800 shrink-0"
+            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
             ><CloseOutline size="sm" />
             <div>No Code Interpreter capabilities</div>
           </Badge>
@@ -1006,14 +1165,23 @@
           <div class="flex flex-col gap-4 px-1">
             {#if supportsTemperature}
               <Label for="temperature">Temperature</Label>
-              <Helper class="pb-1"
-                >Select the model's "temperature," a setting from 0 to 2 that controls how creative
-                or predictable the assistant's responses are. For reliable, focused answers, choose
-                a temperature closer to 0.2. For more varied or creative responses, try a setting
-                closer to 1. Avoid setting the temperature much above 1 unless you need very
-                experimental responses, as it may lead to less predictable and more random answers.
-                You can change this setting anytime.</Helper
-              >
+              {#if interactionMode === 'chat'}
+                <Helper class="pb-1"
+                  >Select the model's "temperature," a setting from 0 to 2 that controls how
+                  creative or predictable the assistant's responses are. For reliable, focused
+                  answers, choose a temperature closer to 0.2. For more varied or creative
+                  responses, try a setting closer to 1. Avoid setting the temperature much above 1
+                  unless you need very experimental responses, as it may lead to less predictable
+                  and more random answers. You can change this setting anytime.</Helper
+                >
+              {:else if interactionMode === 'voice'}
+                <Helper class="pb-1"
+                  >Select the model's "temperature," a setting from 0.6 to 1.2 that controls how
+                  creative or predictable the assistant's responses are. For audio models, a
+                  temperature of 0.8 is highly recommended for best performance. You can change this
+                  setting anytime.</Helper
+                >
+              {/if}
               <div class="mt-2 flex flex-row justify-between">
                 <div class="flex flex-row gap-1 items-center text-sm">
                   <ArrowLeftOutline />
@@ -1029,59 +1197,95 @@
                   <ArrowRightOutline />
                 </div>
               </div>
-              <Range
-                id="temperature"
-                name="temperature"
-                min="0"
-                max="2"
-                bind:value={temperatureValue}
-                step="0.1"
-                disabled={preventEdits}
-                on:change={checkForLargeTemperature}
-              />
-              <div class="grid grid-cols-20 gap-0 mx-2">
-                <button
-                  type="button"
-                  class="ml-1 col-span-4 flex flex-col items-center justify-start bg-transparent border-0"
-                  on:click={() => {
-                    temperatureValue = 0.2;
-                    _temperatureValue = 0.2;
-                  }}
-                  on:keydown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      temperatureValue = 0.2;
-                      _temperatureValue = 0.2;
-                    }
-                  }}
-                >
-                  <HeartSolid class="text-gray-500 max-w-fit" />
-                  <div class="mt-1 mx-10 text-center text-sm text-wrap">Default (recommended)</div>
-                </button>
-                <button
-                  type="button"
-                  class="col-start-6 col-span-4 flex flex-col items-center justify-start bg-transparent border-0"
-                  on:click={() => {
-                    temperatureValue = 0.7;
-                    _temperatureValue = 0.7;
-                  }}
-                  on:keydown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
+              {#if interactionMode === 'chat'}
+                <Range
+                  id="temperature"
+                  name="temperature"
+                  min={minChatTemperature}
+                  max={maxChatTemperature}
+                  bind:value={temperatureValue}
+                  step="0.1"
+                  disabled={preventEdits}
+                  on:change={checkForLargeTemperatureChat}
+                />
+                <div class="grid grid-cols-20 gap-0 mx-2">
+                  <button
+                    type="button"
+                    class="ml-1 col-span-4 flex flex-col items-center justify-start bg-transparent border-0"
+                    on:click={() => {
+                      temperatureValue = defaultChatTemperature;
+                      _temperatureValue = defaultChatTemperature;
+                    }}
+                    on:keydown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        temperatureValue = defaultChatTemperature;
+                        _temperatureValue = defaultChatTemperature;
+                      }
+                    }}
+                  >
+                    <HeartSolid class="text-gray-500 max-w-fit" />
+                    <div class="mt-1 mx-10 text-center text-sm text-wrap">
+                      Default (recommended)
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    class="col-start-6 col-span-4 flex flex-col items-center justify-start bg-transparent border-0"
+                    on:click={() => {
                       temperatureValue = 0.7;
                       _temperatureValue = 0.7;
-                    }
-                  }}
-                >
-                  <LightbulbSolid class="text-gray-500 max-w-fit" />
-                  <div class="mt-1 mx-10 text-center text-sm text-wrap">
-                    Great for creative tasks and brainstorming
+                    }}
+                    on:keydown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        temperatureValue = 0.7;
+                        _temperatureValue = 0.7;
+                      }
+                    }}
+                  >
+                    <LightbulbSolid class="text-gray-500 max-w-fit" />
+                    <div class="mt-1 mx-10 text-center text-sm text-wrap">
+                      Great for creative tasks and brainstorming
+                    </div>
+                  </button>
+                  <div
+                    class="col-start-12 col-span-9 rounded-md border text-center bg-gradient-to-b border-amber-400 from-amber-100 to-amber-200 text-amber-800 h-6 text-sm -mr-2 -ml-2 h-fit py-1"
+                  >
+                    Output may be unpredictable
                   </div>
-                </button>
-                <div
-                  class="col-start-12 col-span-9 rounded-md border text-center bg-gradient-to-b border-amber-400 from-amber-100 to-amber-200 text-amber-800 h-6 text-sm -mr-2 -ml-2 h-fit py-1"
-                >
-                  Output may be unpredictable
                 </div>
-              </div>
+              {:else}
+                <Range
+                  id="temperature"
+                  name="temperature"
+                  min={minAudioTemperature}
+                  max={maxAudioTemperature}
+                  bind:value={temperatureValue}
+                  step="0.1"
+                  disabled={preventEdits}
+                  on:change={checkForLargeTemperatureAudio}
+                />
+                <div class="grid grid-cols-6 gap-0 mx-2">
+                  <button
+                    type="button"
+                    class="ml-1 col-span-4 flex flex-col items-center justify-start bg-transparent border-0"
+                    on:click={() => {
+                      temperatureValue = defaultAudioTemperature;
+                      _temperatureValue = defaultAudioTemperature;
+                    }}
+                    on:keydown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        temperatureValue = defaultAudioTemperature;
+                        _temperatureValue = defaultAudioTemperature;
+                      }
+                    }}
+                  >
+                    <HeartSolid class="text-gray-500 max-w-fit" />
+                    <div class="mt-1 mx-10 text-center text-sm text-wrap">
+                      Default (highly recommended)
+                    </div>
+                  </button>
+                </div>
+              {/if}
             {/if}
             {#if supportsReasoning}
               <Label for="reasoning-effort">Reasoning effort</Label>

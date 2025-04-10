@@ -1659,6 +1659,10 @@ class Assistant(Base):
     name = Column(String)
     version = Column(Integer, default=1)
     instructions = Column(String)
+    interaction_mode = Column(
+        SQLEnum(schemas.InteractionMode),
+        server_default=schemas.InteractionMode.CHAT,
+    )
     description = Column(String)
     assistant_id = Column(String)
     use_latex = Column(Boolean)
@@ -2544,6 +2548,10 @@ class Thread(Base):
     class_ = relationship("Class", back_populates="threads", lazy="selectin")
     assistant_id = Column(Integer, ForeignKey("assistants.id"), index=True)
     assistant = relationship("Assistant", back_populates="threads", uselist=False)
+    interaction_mode = Column(
+        SQLEnum(schemas.InteractionMode),
+        server_default=schemas.InteractionMode.CHAT,
+    )
     private = Column(Boolean)
     user_message_ct = Column(Integer, server_default="1")
     users = relationship(
@@ -3017,3 +3025,17 @@ class Thread(Base):
         ]
         results = await asyncio.gather(*tasks)
         return {k: v for result in results for k, v in result.items()}
+
+    @classmethod
+    async def get_by_id_with_assistant(
+        cls, session: AsyncSession, thread_id: int
+    ) -> "Thread":
+        """Get a thread by its thread_id with the assistant eager loaded."""
+        stmt = (
+            select(Thread)
+            .options(joinedload(Thread.assistant))
+            .where(Thread.id == thread_id)
+        )
+        result = await session.execute(stmt)
+        thread = result.scalar()
+        return thread

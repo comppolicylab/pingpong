@@ -14,3 +14,11 @@ export const appMenuOpen = writable(false);
 export const loading = writable(false);
 
 export const loadingMessage = writable('');
+
+export const isFirefox = writable(false);
+
+export function detectBrowser() {
+  if (typeof window !== 'undefined') {
+    isFirefox.set(navigator.userAgent.toLowerCase().includes('firefox'));
+  }
+}
