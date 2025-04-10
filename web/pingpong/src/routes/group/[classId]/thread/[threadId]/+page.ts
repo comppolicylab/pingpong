@@ -16,12 +16,12 @@ export const load: PageLoad = async ({ fetch, params }) => {
   const expanded = api.expandResponse(threadData);
   let threadModel = '';
   let threadTools = '';
-  let threadInteractionMode = '';
+  let threadInteractionMode: 'chat' | 'voice' | null = null;
   let assistantGrants = { canViewAssistant: false };
   if (!expanded.error) {
     threadTools = expanded.data.tools_available || '';
     threadModel = expanded.data.model || '';
-    threadInteractionMode = expanded.data.thread.interaction_mode || '';
+    threadInteractionMode = expanded.data.thread.interaction_mode || 'chat';
     if (expanded.data.thread.assistant_id) {
       assistantGrants = await api.grants(fetch, {
         canViewAssistant: {

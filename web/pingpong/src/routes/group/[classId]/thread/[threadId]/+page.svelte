@@ -38,7 +38,6 @@
   } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
-  import { ThreadManager as AudioThreadManager } from '$lib/stores/audioThread';
   import AttachmentDeletedPlaceholder from '$lib/components/AttachmentDeletedPlaceholder.svelte';
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import { writable } from 'svelte/store';
@@ -50,10 +49,13 @@
 
   $: classId = parseInt($page.params.classId);
   $: threadId = parseInt($page.params.threadId);
-  $: threadMgr =
-    data.threadInteractionMode === 'voice'
-      ? new AudioThreadManager(fetch, classId, threadId, data.threadData)
-      : new ThreadManager(fetch, classId, threadId, data.threadData);
+  $: threadMgr = new ThreadManager(
+    fetch,
+    classId,
+    threadId,
+    data.threadData,
+    data.threadInteractionMode || 'chat'
+  );
   $: isPrivate = data.class.private || false;
   $: teachers = data?.supervisors || [];
   $: canDeleteThread = data.canDeleteThread;
