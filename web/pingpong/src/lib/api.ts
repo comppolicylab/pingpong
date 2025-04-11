@@ -620,6 +620,8 @@ export type Class = {
   updated: string | null;
   private: boolean | null;
   lms_user: AppUser | null;
+  lms_type: LMSType | null;
+  lms_tenant: string | null;
   lms_status: LMSStatus | null;
   lms_class: LMSClass | null;
   lms_last_synced: string | null;
@@ -1479,8 +1481,6 @@ export type ClassUserRoles = {
   student: boolean;
 };
 
-export type LMSType = 'canvas';
-
 /**
  * Information about a user inside of a class.
  */
@@ -2305,6 +2305,23 @@ export const loginWithMagicLink = async (f: Fetcher, email: string, forward: str
   return response;
 };
 
+export type LMSType = 'canvas';
+
+export type LMSInstance = {
+  tenant: string;
+  tenant_friendly_name: string;
+  type: LMSType;
+  base_url: string;
+};
+
+export type LMSInstances = {
+  instances: LMSInstance[];
+};
+export const loadLMSInstances = async (f: Fetcher, classId: number, lms_type: LMSType) => {
+  const url = `class/${classId}/lms/${lms_type}`;
+  return await GET<never, LMSInstances>(f, url);
+};
+
 export type CanvasRedirect = {
   url: string;
 };
@@ -2313,23 +2330,23 @@ export type CanvasRedirect = {
  * Request for state token for Canvas sync.
  */
 export const getCanvasLink = async (f: Fetcher, classId: number, tenant: string) => {
-  const url = `class/${classId}/canvas/${tenant}/link`;
+  const url = `class/${classId}/lms/canvas/${tenant}/link`;
   return await GET<never, CanvasRedirect>(f, url);
 };
 
 /**
  * Dismiss Canvas Sync box.
  */
-export const dismissCanvasSync = async (f: Fetcher, classId: number, tenant: string) => {
-  const url = `class/${classId}/canvas/${tenant}/sync/dismiss`;
+export const dismissCanvasSync = async (f: Fetcher, classId: number) => {
+  const url = `class/${classId}/lms/canvas/sync/dismiss`;
   return await POST<never, GenericStatus>(f, url);
 };
 
 /**
  * Bring back Canvas Sync box.
  */
-export const bringBackCanvasSync = async (f: Fetcher, classId: number, tenant: string) => {
-  const url = `class/${classId}/canvas/${tenant}/sync/enable`;
+export const bringBackCanvasSync = async (f: Fetcher, classId: number) => {
+  const url = `class/${classId}/lms/canvas/sync/enable`;
   return await POST<never, GenericStatus>(f, url);
 };
 
@@ -2342,10 +2359,11 @@ export type LMSClass = {
   name: string | null;
   course_code: string | null;
   term: string | null;
+  lms_tenant: string;
 };
 
 export const loadCanvasClasses = async (f: Fetcher, classId: number, tenant: string) => {
-  const url = `class/${classId}/canvas/${tenant}/classes`;
+  const url = `class/${classId}/lms/canvas/${tenant}/classes`;
   return await GET<never, LMSClasses>(f, url);
 };
 
@@ -2355,7 +2373,7 @@ export const saveCanvasClass = async (
   tenant: string,
   canvasClassId: string
 ) => {
-  const url = `class/${classId}/canvas/${tenant}/classes/${canvasClassId}`;
+  const url = `class/${classId}/lms/canvas/${tenant}/classes/${canvasClassId}`;
   return await POST<never, GenericStatus>(f, url);
 };
 
@@ -2365,12 +2383,12 @@ export const verifyCanvasClass = async (
   tenant: string,
   canvasClassId: string
 ) => {
-  const url = `class/${classId}/canvas/${tenant}/classes/${canvasClassId}/verify`;
+  const url = `class/${classId}/lms/canvas/${tenant}/classes/${canvasClassId}/verify`;
   return await POST<never, GenericStatus>(f, url);
 };
 
 export const syncCanvasClass = async (f: Fetcher, classId: number, tenant: string) => {
-  const url = `class/${classId}/canvas/${tenant}/sync`;
+  const url = `class/${classId}/lms/canvas/${tenant}/sync`;
   return await POST<never, GenericStatus>(f, url);
 };
 
@@ -2380,7 +2398,7 @@ export const deleteCanvasClassSync = async (
   tenant: string,
   keep: boolean
 ) => {
-  const url = `class/${classId}/canvas/${tenant}/sync`;
+  const url = `class/${classId}/lms/canvas/${tenant}/sync`;
   return await DELETE<{ keep_users: boolean }, GenericStatus>(f, url, { keep_users: keep });
 };
 
@@ -2390,7 +2408,7 @@ export const removeCanvasConnection = async (
   tenant: string,
   keep: boolean
 ) => {
-  const url = `class/${classId}/canvas/${tenant}/account`;
+  const url = `class/${classId}/lms/canvas/${tenant}/account`;
   return await DELETE<{ keep_users: boolean }, GenericStatus>(f, url, { keep_users: keep });
 };
 

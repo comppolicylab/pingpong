@@ -117,7 +117,9 @@ class CanvasCourseClient(ABC):
         self.nowfn = nowfn
         self.missing_sso_ids = False
         self.missing_user_information = False
-        self.sync_without_sso_ids = sync_without_sso_ids
+        self.sync_without_sso_ids = (
+            sync_without_sso_ids or not canvas_backend_config.require_sso
+        )
 
     async def __aenter__(self):
         self.http_session = aiohttp.ClientSession()
@@ -353,7 +355,10 @@ class CanvasCourseClient(ABC):
     async def complete_initial_auth(self, code: str) -> RedirectResponse:
         try:
             response = await self._get_initial_access_token(code)
-        except aiohttp.ClientResponseError:
+        except aiohttp.ClientResponseError as e:
+            logger.exception(
+                f"Error obtaining Canvas access token for class {self.class_id}: {e}, code: {code}"
+            )
             return RedirectResponse(
                 config.url(f"/group/{self.class_id}/manage?error_code=5"),
                 status_code=303,
@@ -367,6 +372,8 @@ class CanvasCourseClient(ABC):
             response.expires_in,
             refresh_token=response.refresh_token,
             user_id=self.user_id,
+            lms_tenant=self.config.tenant,
+            lms_type=LMSType(self.config.type),
         )
         logger.info(
             f"Canvas access token saved for class {self.class_id} by user {self.user_id}"
@@ -501,7 +508,11 @@ class CanvasCourseClient(ABC):
             if not result:
                 return False
             for user in result:
-                if self.config.sso_target and not user.get(self.config.sso_target):
+                if (
+                    self.config.sso_target
+                    and not user.get(self.config.sso_target)
+                    and not self.sync_without_sso_ids
+                ):
                     raise CanvasException(
                         code=403,
                         detail="You do not have permission to access SIS information for this class. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
@@ -518,9 +529,7 @@ class CanvasCourseClient(ABC):
                         code=403,
                         detail="You do not have permission to access enrollment information for this class. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
                     )
-
-                return True
-        return False
+        return True
 
     async def verify_access(self, course_id: str) -> None:
         """Verify that the user has access to the course and the roster."""
@@ -577,7 +586,13 @@ class CanvasCourseClient(ABC):
         logger.info(
             f"Canvas class {lms_class.lms_id} was set as the LMS class for PingPong class {self.class_id} by user {self.user_id}."
         )
-        await Class.update_lms_class(self.db, self.class_id, lms_class.id)
+        await Class.update_lms_class(
+            self.db,
+            self.class_id,
+            lms_class.id,
+            self.config.tenant,
+            LMSType(self.config.type),
+        )
 
     @abstractmethod
     def _sync_allowed(self, last_synced: datetime | None, now: datetime) -> bool:
@@ -620,7 +635,11 @@ class CanvasCourseClient(ABC):
                 break
 
             # Check that the user has an SSO ID if required
-            if self.config.sso_target and not user.get(self.config.sso_target):
+            if (
+                self.config.sso_target
+                and not user.get(self.config.sso_target)
+                and not self.sync_without_sso_ids
+            ):
                 logging.warning(
                     f"User {user['email']} does not have an SSO ID in the Canvas response. Marking class as having a sync error."
                 )

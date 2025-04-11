@@ -56,7 +56,8 @@
     EyeSlashOutline,
     ArrowRightOutline,
     RectangleListOutline,
-    EnvelopeOpenSolid
+    EnvelopeOpenSolid,
+    ChevronSortOutline
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
@@ -402,9 +403,10 @@
 
   $: classId = data.class.id;
   $: canvasLinkedClass = data.class.lms_class;
+  $: canvasInstances = data.canvasInstances || [];
 
-  const redirectToCanvas = async () => {
-    const result = await api.getCanvasLink(fetch, data.class.id, 'harvard');
+  const redirectToCanvas = async (tenantId: string) => {
+    const result = await api.getCanvasLink(fetch, data.class.id, tenantId);
     const response = api.expandResponse(result);
     if (response.error) {
       sadToast(response.error.detail || 'An unknown error occurred');
@@ -416,7 +418,7 @@
     }
   };
   const dismissCanvasSync = async () => {
-    const result = await api.dismissCanvasSync(fetch, data.class.id, 'harvard');
+    const result = await api.dismissCanvasSync(fetch, data.class.id);
     const response = api.expandResponse(result);
     if (response.error) {
       sadToast(response.error.detail || 'An unknown error occurred');
@@ -425,7 +427,7 @@
     }
   };
   const enableCanvasSync = async () => {
-    const result = await api.bringBackCanvasSync(fetch, data.class.id, 'harvard');
+    const result = await api.bringBackCanvasSync(fetch, data.class.id);
     const response = api.expandResponse(result);
     if (response.error) {
       sadToast(response.error.detail || 'An unknown error occurred');
@@ -444,7 +446,8 @@
       lms_id: c.lms_id,
       name: c.name || 'Unnamed class',
       course_code: c.course_code || '',
-      term: c.term
+      term: c.term,
+      lms_tenant: c.lms_tenant
     }))
     .sort((a, b) => a.course_code.localeCompare(b.course_code));
 
@@ -452,8 +455,12 @@
   let loadingCanvasClasses = false;
   // Load canvas classes from the API.
   const loadCanvasClasses = async () => {
+    if (!data.class.lms_tenant) {
+      sadToast('No Canvas account linked to this group.');
+      return;
+    }
     loadingCanvasClasses = true;
-    const result = await api.loadCanvasClasses(fetch, data.class.id, 'harvard');
+    const result = await api.loadCanvasClasses(fetch, data.class.id, data.class.lms_tenant);
     const response = api.expandResponse(result);
     if (response.error) {
       loadingCanvasClasses = false;
@@ -489,7 +496,16 @@
     if (!selectedClass) {
       return;
     }
-    const result = await api.saveCanvasClass(fetch, data.class.id, 'harvard', selectedClass);
+    if (!data.class.lms_tenant) {
+      sadToast('No Canvas account linked to this group.');
+      return;
+    }
+    const result = await api.saveCanvasClass(
+      fetch,
+      data.class.id,
+      data.class.lms_tenant,
+      selectedClass
+    );
     const response = api.expandResponse(result);
     if (response.error) {
       sadToast(response.error.detail || 'An unknown error occurred');
@@ -504,8 +520,17 @@
   let canvasClassVerificationError = '';
 
   const verifyCanvasClass = async () => {
+    if (!data.class.lms_tenant) {
+      sadToast('No Canvas account linked to this group.');
+      return;
+    }
     canvasClassBeingVerified = true;
-    const result = await api.verifyCanvasClass(fetch, data.class.id, 'harvard', selectedClass);
+    const result = await api.verifyCanvasClass(
+      fetch,
+      data.class.id,
+      data.class.lms_tenant,
+      selectedClass
+    );
     const response = api.expandResponse(result);
     if (response.error) {
       canvasClassVerificationError =
@@ -519,8 +544,12 @@
 
   let syncingCanvasClass = false;
   const syncClass = async () => {
+    if (!data.class.lms_tenant) {
+      sadToast('No Canvas account linked to this group.');
+      return;
+    }
     syncingCanvasClass = true;
-    const result = await api.syncCanvasClass(fetch, data.class.id, 'harvard');
+    const result = await api.syncCanvasClass(fetch, data.class.id, data.class.lms_tenant);
     const response = api.expandResponse(result);
     if (response.error) {
       // Needed here to update the timer (Last sync: ...)
@@ -537,7 +566,16 @@
 
   let editDropdownOpen = false;
   const deleteClassSync = async (keep: boolean) => {
-    const result = await api.deleteCanvasClassSync(fetch, data.class.id, 'harvard', keep);
+    if (!data.class.lms_tenant) {
+      sadToast('No Canvas account linked to this group.');
+      return;
+    }
+    const result = await api.deleteCanvasClassSync(
+      fetch,
+      data.class.id,
+      data.class.lms_tenant,
+      keep
+    );
     const response = api.expandResponse(result);
     if (response.error) {
       editDropdownOpen = false;
@@ -555,8 +593,17 @@
 
   let removingCanvasConnection = false;
   const removeCanvasConnection = async (keep: boolean) => {
+    if (!data.class.lms_tenant) {
+      sadToast('No Canvas account linked to this group.');
+      return;
+    }
     removingCanvasConnection = true;
-    const result = await api.removeCanvasConnection(fetch, data.class.id, 'harvard', keep);
+    const result = await api.removeCanvasConnection(
+      fetch,
+      data.class.id,
+      data.class.lms_tenant,
+      keep
+    );
     const response = api.expandResponse(result);
     if (response.error) {
       editDropdownOpen = false;
@@ -599,13 +646,18 @@
   };
 
   const reconnectCanvasAccount = async () => {
-    const result = await api.removeCanvasConnection(fetch, data.class.id, 'harvard', true);
+    if (!canvasLinkedClass) {
+      sadToast('No Canvas class linked to this group.');
+      return;
+    }
+    const tenant = canvasLinkedClass?.lms_tenant;
+    const result = await api.removeCanvasConnection(fetch, data.class.id, tenant, true);
     const response = api.expandResponse(result);
     if (response.error) {
       invalidateAll();
       sadToast(response.error.detail || 'An unknown error occurred');
     } else {
-      await redirectToCanvas();
+      await redirectToCanvas(tenant);
     }
   };
 
@@ -1188,449 +1240,472 @@
         <Info>Manage users who have access to this group.</Info>
       </div>
       <div class="col-span-2">
-        {#if !data.class.lms_status || data.class.lms_status === 'none'}
-          <Alert
-            color="none"
-            class="bg-blue-50 text-blue-900"
-            defaultClass="p-4 gap-3 text-sm border-2 border-blue-200"
-          >
-            <div class="p-1.5">
-              <div class="flex flex-row justify-between items-center">
+        {#if canvasInstances.length > 0}
+          {#if !data.class.lms_status || data.class.lms_status === 'none'}
+            <Alert
+              color="none"
+              class="bg-blue-50 text-blue-900"
+              defaultClass="p-4 gap-3 text-sm border-2 border-blue-200"
+            >
+              <div class="p-1.5">
+                <div class="flex flex-row justify-between items-center">
+                  <div class="flex items-center gap-3">
+                    <CanvasLogo size="5" />
+                    <span class="text-lg font-medium"
+                      >Sync your PingPong group's users with Canvas</span
+                    >
+                  </div>
+                  <CloseButton class="hover:bg-blue-200" on:click={dismissCanvasSync} />
+                </div>
+                <p class="mt-2 mb-4 text-sm">
+                  If you're teaching a course at a supported institution, link your PingPong group
+                  with your Canvas course to automatically sync your course roster with PingPong.
+                </p>
+                <div class="flex gap-1">
+                  <Button
+                    pill
+                    size="xs"
+                    class="border border-blue-900 bg-gradient-to-t from-blue-900 to-blue-800 text-white hover:from-blue-800 hover:to-blue-700"
+                  >
+                    Pick your institution...<ChevronSortOutline class="w-4 h-4 ms-2" /></Button
+                  >
+                  <Dropdown placement="bottom-start">
+                    {#each canvasInstances as instance}
+                      <DropdownItem
+                        on:click={() => redirectToCanvas(instance.tenant)}
+                        class="tracking-wide flex flex-col gap-1"
+                      >
+                        <span>{instance.tenant_friendly_name}</span>
+                        <span class="font-light text-gray-700 text-xs"
+                          >{instance.base_url.replace(/^https?:\/\//, '').replace(/\/$/, '')}</span
+                        >
+                      </DropdownItem>
+                    {/each}
+                  </Dropdown>
+                </div>
+              </div>
+            </Alert>
+          {:else if data.class.lms_status === 'authorized' && data.class.lms_user?.id && data.me.user?.id === data.class.lms_user?.id}
+            <Alert color="yellow" defaultClass="p-4 gap-3 text-sm border-2">
+              <div class="p-1.5">
                 <div class="flex items-center gap-3">
                   <CanvasLogo size="5" />
                   <span class="text-lg font-medium"
-                    >Sync your PingPong group's users with Canvas</span
+                    >Almost there: Select which Canvas class to sync</span
                   >
                 </div>
-                <CloseButton class="hover:bg-blue-200" on:click={dismissCanvasSync} />
-              </div>
-              <p class="mt-2 mb-4 text-sm">
-                If you're teaching a course at Harvard, link your PingPong group with your Canvas
-                course to automatically sync your course roster with PingPong.
-              </p>
-              <div class="flex gap-1">
-                <Button
-                  pill
-                  size="xs"
-                  class="border border-blue-900 bg-gradient-to-t from-blue-900 to-blue-800 text-white hover:from-blue-800 hover:to-blue-700"
-                  on:click={redirectToCanvas}
-                  on:touchstart={redirectToCanvas}
-                >
-                  <LinkOutline class="w-4 h-4 me-2" />Sync with Canvas</Button
-                >
-              </div>
-            </div>
-          </Alert>
-        {:else if data.class.lms_status === 'authorized' && data.class.lms_user?.id && data.me.user?.id === data.class.lms_user?.id}
-          <Alert color="yellow" defaultClass="p-4 gap-3 text-sm border-2">
-            <div class="p-1.5">
-              <div class="flex items-center gap-3">
-                <CanvasLogo size="5" />
-                <span class="text-lg font-medium"
-                  >Almost there: Select which Canvas class to sync</span
-                >
-              </div>
-              <p class="mt-2 mb-4 text-sm">
-                Your Canvas account is now connected to this PingPong group. Select which class
-                you'd like to link with this PingPong group.
-              </p>
-              <div class="flex flex-row gap-2 items-stretch">
-                {#if canvasClasses.length > 0}
-                  <DropdownContainer
-                    optionNodes={classNodes}
-                    bind:dropdownOpen={classSelectDropdownOpen}
-                    bind:selectedOption={selectedClass}
-                    placeholder={selectedClassName}
-                    width="w-full"
-                  >
-                    <CanvasClassDropdownOptions
-                      {canvasClasses}
-                      {selectedClass}
-                      {updateSelectedClass}
-                      bind:classNodes
-                    />
-                  </DropdownContainer>
-                  <div class="flex gap-2 items-center">
-                    {#if canvasClassBeingVerified}
-                      <Spinner color="yellow" class="w-6 h-6" />
-                      <Tooltip
-                        defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
-                        arrow={false}
-                        >We're verifying your access to the class roster. This shouldn't take long.</Tooltip
+                <p class="mt-2 mb-4 text-sm">
+                  Your Canvas account is now connected to this PingPong group. Select which class
+                  you'd like to link with this PingPong group.
+                </p>
+                <div class="flex flex-row gap-2 items-stretch">
+                  {#if canvasClasses.length > 0}
+                    <DropdownContainer
+                      optionNodes={classNodes}
+                      bind:dropdownOpen={classSelectDropdownOpen}
+                      bind:selectedOption={selectedClass}
+                      placeholder={selectedClassName}
+                      width="w-full"
+                    >
+                      <CanvasClassDropdownOptions
+                        {canvasClasses}
+                        {selectedClass}
+                        {updateSelectedClass}
+                        bind:classNodes
+                      />
+                    </DropdownContainer>
+                    <div class="flex gap-2 items-center">
+                      {#if canvasClassBeingVerified}
+                        <Spinner color="yellow" class="w-6 h-6" />
+                        <Tooltip
+                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
+                          arrow={false}
+                          >We're verifying your access to the class roster. This shouldn't take
+                          long.</Tooltip
+                        >
+                      {:else if canvasClassVerified}
+                        <CheckCircleOutline class="w-6 h-6 text-amber-800" />
+                        <Tooltip
+                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
+                          arrow={false}>Your access to the class roster has been verified.</Tooltip
+                        >
+                      {:else if canvasClassVerificationError}
+                        <ExclamationCircleOutline class="w-6 h-6 text-amber-800" />
+                        <Tooltip
+                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
+                          arrow={false}>{canvasClassVerificationError}</Tooltip
+                        >
+                      {:else if !canvasClassVerified}
+                        <CheckCircleOutline class="w-6 h-6 text-amber-800 text-opacity-25" />
+                        <Tooltip
+                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
+                          arrow={false}
+                          >We'll verify your permissions to access the class roster. Select a class
+                          to begin.</Tooltip
+                        >
+                      {/if}
+                      <Button
+                        pill
+                        size="xs"
+                        class="shrink-0 max-h-fit border border-amber-900 bg-gradient-to-t from-amber-900 to-amber-800 text-white hover:from-amber-800 hover:to-amber-700"
+                        on:click={saveSelectedClass}
+                        on:touchstart={saveSelectedClass}
+                        disabled={loadingCanvasClasses ||
+                          !selectedClass ||
+                          canvasClassBeingVerified ||
+                          !canvasClassVerified}
                       >
-                    {:else if canvasClassVerified}
-                      <CheckCircleOutline class="w-6 h-6 text-amber-800" />
-                      <Tooltip
-                        defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
-                        arrow={false}>Your access to the class roster has been verified.</Tooltip
+                        Save</Button
                       >
-                    {:else if canvasClassVerificationError}
-                      <ExclamationCircleOutline class="w-6 h-6 text-amber-800" />
-                      <Tooltip
-                        defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
-                        arrow={false}>{canvasClassVerificationError}</Tooltip
+                      <Button
+                        pill
+                        size="xs"
+                        class="shrink-0 max-h-fit border border-gray-400 bg-gradient-to-t from-gray-100 to-gray-100 text-gray-800 hover:from-gray-200 hover:to-gray-100"
+                        disabled={loadingCanvasClasses || canvasClassBeingVerified}
+                        on:click={() => {
+                          $loadedCanvasClasses = [];
+                          selectedClass = '';
+                          canvasClassVerified = false;
+                          canvasClassBeingVerified = false;
+                          canvasClassVerificationError = '';
+                          classSelectDropdownOpen = false;
+                        }}
+                        on:touchstart={() => {
+                          $loadedCanvasClasses = [];
+                          selectedClass = '';
+                          canvasClassVerified = false;
+                          canvasClassBeingVerified = false;
+                          canvasClassVerificationError = '';
+                          classSelectDropdownOpen = false;
+                        }}
                       >
-                    {:else if !canvasClassVerified}
-                      <CheckCircleOutline class="w-6 h-6 text-amber-800 text-opacity-25" />
-                      <Tooltip
-                        defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
-                        arrow={false}
-                        >We'll verify your permissions to access the class roster. Select a class to
-                        begin.</Tooltip
+                        Cancel</Button
                       >
-                    {/if}
-                    <Button
-                      pill
-                      size="xs"
-                      class="shrink-0 max-h-fit border border-amber-900 bg-gradient-to-t from-amber-900 to-amber-800 text-white hover:from-amber-800 hover:to-amber-700"
-                      on:click={saveSelectedClass}
-                      on:touchstart={saveSelectedClass}
-                      disabled={loadingCanvasClasses ||
-                        !selectedClass ||
-                        canvasClassBeingVerified ||
-                        !canvasClassVerified}
-                    >
-                      Save</Button
-                    >
-                    <Button
-                      pill
-                      size="xs"
-                      class="shrink-0 max-h-fit border border-gray-400 bg-gradient-to-t from-gray-100 to-gray-100 text-gray-800 hover:from-gray-200 hover:to-gray-100"
-                      disabled={loadingCanvasClasses || canvasClassBeingVerified}
-                      on:click={() => {
-                        $loadedCanvasClasses = [];
-                        selectedClass = '';
-                        canvasClassVerified = false;
-                        canvasClassBeingVerified = false;
-                        canvasClassVerificationError = '';
-                        classSelectDropdownOpen = false;
-                      }}
-                      on:touchstart={() => {
-                        $loadedCanvasClasses = [];
-                        selectedClass = '';
-                        canvasClassVerified = false;
-                        canvasClassBeingVerified = false;
-                        canvasClassVerificationError = '';
-                        classSelectDropdownOpen = false;
-                      }}
-                    >
-                      Cancel</Button
-                    >
-                  </div>
-                {:else}
-                  <div class="flex flex-row flex-grow gap-2 justify-between items-center">
-                    <Button
-                      pill
-                      size="xs"
-                      class="border border-amber-900 bg-gradient-to-t from-amber-900 to-amber-800 text-white hover:from-amber-800 hover:to-amber-700"
-                      on:click={loadCanvasClasses}
-                      on:touchstart={loadCanvasClasses}
-                    >
-                      {#if loadingCanvasClasses}<Spinner
-                          color="white"
-                          class="w-4 h-4 me-2"
-                        />{:else}<LinkOutline class="w-4 h-4 me-2" />{/if}Load your classes</Button
-                    >
-                    <Button
-                      pill
-                      size="xs"
-                      class="border border-amber-900 hover:bg-amber-900 text-amber-900 hover:bg-gradient-to-t hover:from-amber-800 hover:to-amber-700 hover:text-white"
-                      disabled={removingCanvasConnection || syncingCanvasClass || $updatingApiKey}
-                      on:click={() => removeCanvasConnection(false)}
-                      on:touchstart={() => removeCanvasConnection(false)}
-                    >
-                      {#if removingCanvasConnection}<Spinner
-                          color="custom"
-                          customColor="fill-amber-900"
-                          class="w-4 h-4 me-2"
-                        />{:else}<UserRemoveSolid class="w-4 h-4 me-2" />{/if}Disconnect Canvas
-                      account</Button
-                    >
-                  </div>
-                {/if}
-              </div>
-            </div>
-          </Alert>
-        {:else if data.class.lms_status === 'authorized'}
-          <Alert color="yellow" defaultClass="p-4 gap-3 text-sm border-2">
-            <div class="p-1.5">
-              <div class="flex items-center gap-3">
-                <CanvasLogo size="5" />
-                <span class="text-lg font-medium">Canvas Sync setup in process</span>
-              </div>
-              <p class="mt-2 text-sm">
-                {data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
-                with this group. Once they have selected a course to sync with this group, PingPong will
-                automatically sync the course's roster.
-              </p>
-              <p class="mt-2 mb-4 text-sm">
-                Need to link your own account? You can disconnect their Canvas account from this
-                PingPong group.
-              </p>
-              <div class="flex gap-2">
-                <Button
-                  pill
-                  size="xs"
-                  class="border border-amber-900 hover:bg-amber-900 text-amber-900 hover:bg-gradient-to-t hover:from-amber-800 hover:to-amber-700 hover:text-white"
-                  disabled={removingCanvasConnection}
-                  on:click={() => removeCanvasConnection(false)}
-                  on:touchstart={() => removeCanvasConnection(false)}
-                >
-                  {#if removingCanvasConnection}<Spinner
-                      color="custom"
-                      customColor="fill-amber-900"
-                      class="w-4 h-4 me-2"
-                    />{:else}<UserRemoveSolid class="w-4 h-4 me-2" />{/if}Disconnect Canvas account</Button
-                >
-              </div>
-            </div>
-          </Alert>
-        {:else if data.class.lms_status === 'linked' && data.class.lms_user?.id && data.me.user?.id === data.class.lms_user?.id}
-          <Alert color="green" defaultClass="p-4 gap-3 text-sm border-2">
-            <div class="p-1.5">
-              <div class="flex items-center gap-3">
-                <div class="animate-pulse"><CanvasLogo size="5" /></div>
-                <span class="text-lg font-medium">Canvas Sync is active</span>
-              </div>
-              <p class="mt-2 text-sm">
-                This PingPong group is linked to <span class="font-semibold"
-                  >{canvasLinkedClass?.course_code}: {canvasLinkedClass?.name}</span
-                >
-                on Canvas. The class roster is automatically synced with this group's user list about
-                once every hour. Use the Sync button below to request an immediate sync. Users are not
-                notified when they get added to this group though Canvas Sync.
-              </p>
-              <p class="mt-2 mb-4 text-sm">
-                Last sync: {data.class.lms_last_synced
-                  ? dayjs.utc(data.class.lms_last_synced).fromNow()
-                  : 'never'}
-              </p>
-              <div class="flex flex-row justify-between items-center">
-                <Button
-                  pill
-                  size="xs"
-                  class="border border-green-900 bg-gradient-to-t from-green-800 to-green-700 text-white hover:from-green-700 hover:to-green-600"
-                  on:click={syncClass}
-                  on:touchstart={syncClass}
-                  disabled={syncingCanvasClass || $updatingApiKey}
-                >
-                  {#if syncingCanvasClass}<Spinner color="white" class="w-4 h-4 me-2" />Syncing
-                    roster...{:else}<RefreshOutline class="w-4 h-4 me-2" />Sync roster{/if}</Button
-                >
-                <Button
-                  pill
-                  size="xs"
-                  class="border border-green-900 hover:bg-green-900 text-green-900 hover:bg-gradient-to-t hover:from-green-800 hover:to-green-700 hover:text-white"
-                  disabled={syncingCanvasClass || $updatingApiKey}
-                >
-                  <AdjustmentsHorizontalOutline class="w-4 h-4 me-2" />Edit Canvas Sync</Button
-                >
-                <Dropdown bind:open={editDropdownOpen}>
-                  <DropdownItem on:click={() => (disconnectClass = true)}
-                    ><div class="flex flex-row gap-2 items-center">
-                      <div class="border bg-green-800 border-green-800 text-white rounded-full">
-                        <SortHorizontalOutline class="w-4 h-4 m-2" />
-                      </div>
-                      Sync another class
-                    </div></DropdownItem
-                  >
-                  <DropdownItem on:click={() => (disconnectCanvas = true)}
-                    ><div class="flex flex-row gap-3 items-center">
-                      <div class="border bg-green-800 border-green-800 text-white rounded-full">
+                    </div>
+                  {:else}
+                    <div class="flex flex-row flex-grow gap-2 justify-between items-center">
+                      <Button
+                        pill
+                        size="xs"
+                        class="border border-amber-900 bg-gradient-to-t from-amber-900 to-amber-800 text-white hover:from-amber-800 hover:to-amber-700"
+                        on:click={loadCanvasClasses}
+                        on:touchstart={loadCanvasClasses}
+                      >
+                        {#if loadingCanvasClasses}<Spinner
+                            color="white"
+                            class="w-4 h-4 me-2"
+                          />{:else}<LinkOutline class="w-4 h-4 me-2" />{/if}Load your classes</Button
+                      >
+                      <Button
+                        pill
+                        size="xs"
+                        class="border border-amber-900 hover:bg-amber-900 text-amber-900 hover:bg-gradient-to-t hover:from-amber-800 hover:to-amber-700 hover:text-white"
+                        disabled={removingCanvasConnection || syncingCanvasClass || $updatingApiKey}
+                        on:click={() => removeCanvasConnection(false)}
+                        on:touchstart={() => removeCanvasConnection(false)}
+                      >
                         {#if removingCanvasConnection}<Spinner
                             color="custom"
-                            customColor="fill-green-800"
+                            customColor="fill-amber-900"
                             class="w-4 h-4 me-2"
-                          />{:else}<UserRemoveSolid class="w-4 h-4 me-2" />{/if}
-                      </div>
-                      Disconnect Canvas account
-                    </div></DropdownItem
+                          />{:else}<UserRemoveSolid class="w-4 h-4 me-2" />{/if}Disconnect Canvas
+                        account</Button
+                      >
+                    </div>
+                  {/if}
+                </div>
+              </div>
+            </Alert>
+          {:else if data.class.lms_status === 'authorized'}
+            <Alert color="yellow" defaultClass="p-4 gap-3 text-sm border-2">
+              <div class="p-1.5">
+                <div class="flex items-center gap-3">
+                  <CanvasLogo size="5" />
+                  <span class="text-lg font-medium">Canvas Sync setup in process</span>
+                </div>
+                <p class="mt-2 text-sm">
+                  {data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
+                  with this group. Once they have selected a course to sync with this group, PingPong
+                  will automatically sync the course's roster.
+                </p>
+                <p class="mt-2 mb-4 text-sm">
+                  Need to link your own account? You can disconnect their Canvas account from this
+                  PingPong group.
+                </p>
+                <div class="flex gap-2">
+                  <Button
+                    pill
+                    size="xs"
+                    class="border border-amber-900 hover:bg-amber-900 text-amber-900 hover:bg-gradient-to-t hover:from-amber-800 hover:to-amber-700 hover:text-white"
+                    disabled={removingCanvasConnection}
+                    on:click={() => removeCanvasConnection(false)}
+                    on:touchstart={() => removeCanvasConnection(false)}
                   >
-                  <Modal bind:open={disconnectCanvas} size="sm" autoclose>
-                    <CanvasDisconnectModal
-                      canvasCourseCode={data.class.lms_class?.course_code || ''}
-                      on:keep={() => removeCanvasConnection(true)}
-                      on:remove={() => removeCanvasConnection(false)}
-                    />
-                  </Modal>
-                  <Modal bind:open={disconnectClass} size="sm" autoclose>
-                    <CanvasDisconnectModal
-                      canvasCourseCode={data.class.lms_class?.course_code || ''}
-                      on:keep={() => deleteClassSync(true)}
-                      on:remove={() => deleteClassSync(false)}
-                    />
-                  </Modal>
-                </Dropdown>
+                    {#if removingCanvasConnection}<Spinner
+                        color="custom"
+                        customColor="fill-amber-900"
+                        class="w-4 h-4 me-2"
+                      />{:else}<UserRemoveSolid class="w-4 h-4 me-2" />{/if}Disconnect Canvas
+                    account</Button
+                  >
+                </div>
               </div>
-            </div>
-          </Alert>
-        {:else if data.class.lms_status === 'linked'}
-          <Alert color="green" defaultClass="p-4 gap-3 text-sm border-2">
-            <div class="p-1.5">
-              <div class="flex items-center gap-3">
-                <div class="animate-pulse"><CanvasLogo size="5" /></div>
-                <span class="text-lg font-medium">Canvas Sync is active</span>
+            </Alert>
+          {:else if data.class.lms_status === 'linked' && data.class.lms_user?.id && data.me.user?.id === data.class.lms_user?.id}
+            <Alert color="green" defaultClass="p-4 gap-3 text-sm border-2">
+              <div class="p-1.5">
+                <div class="flex items-center gap-3">
+                  <div class="animate-pulse"><CanvasLogo size="5" /></div>
+                  <span class="text-lg font-medium">Canvas Sync is active</span>
+                </div>
+                <p class="mt-2 text-sm">
+                  This PingPong group is linked to <span class="font-semibold"
+                    >{canvasLinkedClass?.course_code}: {canvasLinkedClass?.name}</span
+                  >
+                  on Canvas. The class roster is automatically synced with this group's user list about
+                  once every hour. Use the Sync button below to request an immediate sync. Users are
+                  not notified when they get added to this group though Canvas Sync.
+                </p>
+                <p class="mt-2 mb-4 text-sm">
+                  Last sync: {data.class.lms_last_synced
+                    ? dayjs.utc(data.class.lms_last_synced).fromNow()
+                    : 'never'}
+                </p>
+                <div class="flex flex-row justify-between items-center">
+                  <Button
+                    pill
+                    size="xs"
+                    class="border border-green-900 bg-gradient-to-t from-green-800 to-green-700 text-white hover:from-green-700 hover:to-green-600"
+                    on:click={syncClass}
+                    on:touchstart={syncClass}
+                    disabled={syncingCanvasClass || $updatingApiKey}
+                  >
+                    {#if syncingCanvasClass}<Spinner color="white" class="w-4 h-4 me-2" />Syncing
+                      roster...{:else}<RefreshOutline class="w-4 h-4 me-2" />Sync roster{/if}</Button
+                  >
+                  <Button
+                    pill
+                    size="xs"
+                    class="border border-green-900 hover:bg-green-900 text-green-900 hover:bg-gradient-to-t hover:from-green-800 hover:to-green-700 hover:text-white"
+                    disabled={syncingCanvasClass || $updatingApiKey}
+                  >
+                    <AdjustmentsHorizontalOutline class="w-4 h-4 me-2" />Edit Canvas Sync</Button
+                  >
+                  <Dropdown bind:open={editDropdownOpen}>
+                    <DropdownItem on:click={() => (disconnectClass = true)}
+                      ><div class="flex flex-row gap-2 items-center">
+                        <div
+                          class="border bg-green-800 border-green-800 text-white rounded-full w-8 h-8 flex items-center justify-center"
+                        >
+                          <SortHorizontalOutline class="w-4 h-4 m-2" />
+                        </div>
+                        Sync another class
+                      </div></DropdownItem
+                    >
+                    <DropdownItem on:click={() => (disconnectCanvas = true)}
+                      ><div class="flex flex-row gap-2 items-center">
+                        {#if removingCanvasConnection}<div
+                            class="w-8 h-8 flex items-center justify-center"
+                          >
+                            <Spinner color="custom" customColor="fill-green-800" class="w-5 h-5" />
+                          </div>{:else}<div
+                            class="border bg-green-800 border-green-800 text-white rounded-full w-8 h-8 flex items-center justify-center"
+                          >
+                            <UserRemoveSolid class="w-4 h-4 ms-1" />
+                          </div>{/if}
+                        Disconnect Canvas account
+                      </div></DropdownItem
+                    >
+                    <Modal bind:open={disconnectCanvas} size="sm" autoclose>
+                      <CanvasDisconnectModal
+                        canvasCourseCode={data.class.lms_class?.course_code || ''}
+                        on:keep={() => removeCanvasConnection(true)}
+                        on:remove={() => removeCanvasConnection(false)}
+                      />
+                    </Modal>
+                    <Modal bind:open={disconnectClass} size="sm" autoclose>
+                      <CanvasDisconnectModal
+                        canvasCourseCode={data.class.lms_class?.course_code || ''}
+                        on:keep={() => deleteClassSync(true)}
+                        on:remove={() => deleteClassSync(false)}
+                      />
+                    </Modal>
+                  </Dropdown>
+                </div>
               </div>
-              <p class="mt-2 text-sm">
-                This PingPong group is linked to <span class="font-semibold"
-                  >{canvasLinkedClass?.course_code}: {canvasLinkedClass?.name}</span
-                > on Canvas. The class roster is automatically synced with this group's user list about
-                once every hour.
-              </p>
-              <p class="mt-2 mb-2 text-sm">
-                Last sync: {data.class.lms_last_synced
-                  ? dayjs.utc(data.class.lms_last_synced).fromNow()
-                  : 'never'}
-              </p>
-              <p class="mt-2 mb-4 text-sm">
-                {data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
-                with this group. Need to link your own account? You can disconnect their Canvas account
-                from this PingPong group.
-                <span class="font-bold"
-                  >This action is irreversible and will delete all imported users from Canvas.</span
-                >
-              </p>
-              <div class="flex gap-2">
-                <Button
-                  pill
-                  size="xs"
-                  class="border border-green-900 bg-gradient-to-t from-green-800 to-green-700 text-white hover:from-green-700 hover:to-green-600"
-                  on:click={syncClass}
-                  on:touchstart={syncClass}
-                  disabled={syncingCanvasClass || $updatingApiKey}
-                >
-                  {#if syncingCanvasClass}<Spinner color="white" class="w-4 h-4 me-2" />Syncing
-                    roster...{:else}<RefreshOutline class="w-4 h-4 me-2" />Sync roster{/if}</Button
-                >
-                <Button
-                  pill
-                  size="xs"
-                  class="border border-green-900 hover:bg-green-900 text-green-900 hover:bg-gradient-to-t hover:from-green-800 hover:to-green-700 hover:text-white"
-                  disabled={removingCanvasConnection}
-                  on:click={() => (disconnectCanvas = true)}
-                  on:touchstart={() => (disconnectCanvas = true)}
-                >
-                  {#if removingCanvasConnection}<Spinner
-                      color="custom"
-                      customColor="fill-green-900"
-                      class="w-4 h-4 me-2"
-                    />{:else}<UserRemoveSolid class="w-4 h-4 me-2" />{/if}Disconnect Canvas account</Button
-                >
+            </Alert>
+          {:else if data.class.lms_status === 'linked'}
+            <Alert color="green" defaultClass="p-4 gap-3 text-sm border-2">
+              <div class="p-1.5">
+                <div class="flex items-center gap-3">
+                  <div class="animate-pulse"><CanvasLogo size="5" /></div>
+                  <span class="text-lg font-medium">Canvas Sync is active</span>
+                </div>
+                <p class="mt-2 text-sm">
+                  This PingPong group is linked to <span class="font-semibold"
+                    >{canvasLinkedClass?.course_code}: {canvasLinkedClass?.name}</span
+                  > on Canvas. The class roster is automatically synced with this group's user list about
+                  once every hour.
+                </p>
+                <p class="mt-2 mb-2 text-sm">
+                  Last sync: {data.class.lms_last_synced
+                    ? dayjs.utc(data.class.lms_last_synced).fromNow()
+                    : 'never'}
+                </p>
+                <p class="mt-2 mb-4 text-sm">
+                  {data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
+                  with this group. Need to link your own account? You can disconnect their Canvas account
+                  from this PingPong group.
+                  <span class="font-bold"
+                    >This action is irreversible and will delete all imported users from Canvas.</span
+                  >
+                </p>
+                <div class="flex gap-2">
+                  <Button
+                    pill
+                    size="xs"
+                    class="border border-green-900 bg-gradient-to-t from-green-800 to-green-700 text-white hover:from-green-700 hover:to-green-600"
+                    on:click={syncClass}
+                    on:touchstart={syncClass}
+                    disabled={syncingCanvasClass || $updatingApiKey}
+                  >
+                    {#if syncingCanvasClass}<Spinner color="white" class="w-4 h-4 me-2" />Syncing
+                      roster...{:else}<RefreshOutline class="w-4 h-4 me-2" />Sync roster{/if}</Button
+                  >
+                  <Button
+                    pill
+                    size="xs"
+                    class="border border-green-900 hover:bg-green-900 text-green-900 hover:bg-gradient-to-t hover:from-green-800 hover:to-green-700 hover:text-white"
+                    disabled={removingCanvasConnection}
+                    on:click={() => (disconnectCanvas = true)}
+                    on:touchstart={() => (disconnectCanvas = true)}
+                  >
+                    {#if removingCanvasConnection}<Spinner
+                        color="custom"
+                        customColor="fill-green-900"
+                        class="w-4 h-4 me-2"
+                      />{:else}<UserRemoveSolid class="w-4 h-4 me-2" />{/if}Disconnect Canvas
+                    account</Button
+                  >
+                </div>
+                <Modal bind:open={disconnectCanvas} size="sm" autoclose>
+                  <CanvasDisconnectModal
+                    canvasCourseCode={data.class.lms_class?.course_code || ''}
+                    on:keep={() => removeCanvasConnection(true)}
+                    on:remove={() => removeCanvasConnection(false)}
+                  />
+                </Modal>
               </div>
-              <Modal bind:open={disconnectCanvas} size="sm" autoclose>
-                <CanvasDisconnectModal
-                  canvasCourseCode={data.class.lms_class?.course_code || ''}
-                  on:keep={() => removeCanvasConnection(true)}
-                  on:remove={() => removeCanvasConnection(false)}
-                />
-              </Modal>
-            </div>
-          </Alert>
-        {:else if data.class.lms_status === 'error' && data.class.lms_user?.id && data.me.user?.id === data.class.lms_user?.id}
-          <Alert color="red" defaultClass="p-4 gap-3 text-sm border-2">
-            <div class="p-1.5">
-              <div class="flex items-center gap-3">
-                <CanvasLogo size="5" />
-                <span class="text-lg font-medium">Important: Reconnect your Canvas account</span>
+            </Alert>
+          {:else if data.class.lms_status === 'error' && data.class.lms_user?.id && data.me.user?.id === data.class.lms_user?.id}
+            <Alert color="red" defaultClass="p-4 gap-3 text-sm border-2">
+              <div class="p-1.5">
+                <div class="flex items-center gap-3">
+                  <CanvasLogo size="5" />
+                  <span class="text-lg font-medium">Important: Reconnect your Canvas account</span>
+                </div>
+                <p class="mt-2 text-sm">
+                  We faced an issue when trying to get the class roster from your Canvas account.
+                  Use the reconnection button below to reauthorize Pingpong to access your Canvas
+                  account and ensure uninterrupted syncing of your class roster.
+                </p>
+                <p class="mt-2 mb-4 text-sm">
+                  Last sync: {data.class.lms_last_synced
+                    ? dayjs.utc(data.class.lms_last_synced).fromNow()
+                    : 'never'}
+                </p>
+                <div class="flex flex-row justify-between items-center">
+                  <Button
+                    pill
+                    size="xs"
+                    class="border border-red-900 bg-gradient-to-t from-red-800 to-red-700 text-white hover:from-red-700 hover:to-red-600"
+                    disabled={removingCanvasConnection}
+                    on:click={reconnectCanvasAccount}
+                    on:touchstart={reconnectCanvasAccount}
+                  >
+                    <RefreshOutline class="w-4 h-4 me-2" />Reconnect Canvas account</Button
+                  >
+                  <Button
+                    pill
+                    size="xs"
+                    class="border border-red-900 hover:bg-red-900 text-red-900 hover:bg-gradient-to-t hover:from-red-800 hover:to-red-700 hover:text-white"
+                    disabled={removingCanvasConnection}
+                    on:click={() => (disconnectCanvas = true)}
+                    on:touchstart={() => (disconnectCanvas = true)}
+                  >
+                    {#if removingCanvasConnection}<Spinner
+                        color="custom"
+                        customColor="fill-red-900"
+                        class="w-4 h-4 me-2"
+                      />{:else}<UserRemoveSolid class="w-4 h-4 me-2" />{/if}Disconnect Canvas
+                    account</Button
+                  >
+                </div>
+                <Modal bind:open={disconnectCanvas} size="sm" autoclose>
+                  <CanvasDisconnectModal
+                    canvasCourseCode={data.class.lms_class?.course_code || ''}
+                    on:keep={() => removeCanvasConnection(true)}
+                    on:remove={() => removeCanvasConnection(false)}
+                  />
+                </Modal>
               </div>
-              <p class="mt-2 text-sm">
-                We faced an issue when trying to get the class roster from your Canvas account. Use
-                the reconnection button below to reauthorize Pingpong to access your Canvas account
-                and ensure uninterrupted syncing of your class roster.
-              </p>
-              <p class="mt-2 mb-4 text-sm">
-                Last sync: {data.class.lms_last_synced
-                  ? dayjs.utc(data.class.lms_last_synced).fromNow()
-                  : 'never'}
-              </p>
-              <div class="flex flex-row justify-between items-center">
-                <Button
-                  pill
-                  size="xs"
-                  class="border border-red-900 bg-gradient-to-t from-red-800 to-red-700 text-white hover:from-red-700 hover:to-red-600"
-                  disabled={removingCanvasConnection}
-                  on:click={reconnectCanvasAccount}
-                  on:touchstart={reconnectCanvasAccount}
-                >
-                  <RefreshOutline class="w-4 h-4 me-2" />Reconnect Canvas account</Button
-                >
-                <Button
-                  pill
-                  size="xs"
-                  class="border border-red-900 hover:bg-red-900 text-red-900 hover:bg-gradient-to-t hover:from-red-800 hover:to-red-700 hover:text-white"
-                  disabled={removingCanvasConnection}
-                  on:click={() => (disconnectCanvas = true)}
-                  on:touchstart={() => (disconnectCanvas = true)}
-                >
-                  {#if removingCanvasConnection}<Spinner
-                      color="custom"
-                      customColor="fill-red-900"
-                      class="w-4 h-4 me-2"
-                    />{:else}<UserRemoveSolid class="w-4 h-4 me-2" />{/if}Disconnect Canvas account</Button
-                >
+            </Alert>
+          {:else if data.class.lms_status === 'error'}
+            <Alert color="red" defaultClass="p-4 gap-3 text-sm border-2">
+              <div class="p-1.5">
+                <div class="flex items-center gap-3">
+                  <CanvasLogo size="5" />
+                  <span class="text-lg font-medium"
+                    >Important: Error connecting to Canvas account</span
+                  >
+                </div>
+                <p class="mt-2 text-sm">
+                  {data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
+                  with this group. However, we faced an issue when trying to connect to their Canvas
+                  account. Ask {data.class.lms_user?.name || 'them'} to reauthorize Pingpong to access
+                  your Canvas account through this page and ensure uninterrupted syncing of your class
+                  roster.
+                </p>
+                <p class="mt-2 mb-4 text-sm">
+                  Last sync: {data.class.lms_last_synced
+                    ? dayjs.utc(data.class.lms_last_synced).fromNow()
+                    : 'never'}
+                </p>
+                <p class="mt-2 mb-4 text-sm">
+                  {data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
+                  with this group. Need to link your own account? You can disconnect their Canvas account
+                  from this PingPong group.
+                  <span class="font-bold"
+                    >This action is irreversible and will delete all imported users from Canvas.</span
+                  >
+                </p>
+                <div class="flex gap-2">
+                  <Button
+                    pill
+                    size="xs"
+                    class="border border-green-900 hover:bg-green-900 text-green-900 hover:bg-gradient-to-t hover:from-green-800 hover:to-green-700 hover:text-white"
+                    disabled={removingCanvasConnection}
+                    on:click={() => (disconnectCanvas = true)}
+                    on:touchstart={() => (disconnectCanvas = true)}
+                  >
+                    {#if removingCanvasConnection}<Spinner
+                        color="custom"
+                        customColor="fill-green-900"
+                        class="w-4 h-4 me-2"
+                      />{:else}<UserRemoveSolid class="w-4 h-4 me-2" />{/if}Disconnect Canvas
+                    account</Button
+                  >
+                </div>
+                <Modal bind:open={disconnectCanvas} size="sm" autoclose>
+                  <CanvasDisconnectModal
+                    canvasCourseCode={data.class.lms_class?.course_code || ''}
+                    on:keep={() => removeCanvasConnection(true)}
+                    on:remove={() => removeCanvasConnection(false)}
+                  />
+                </Modal>
               </div>
-              <Modal bind:open={disconnectCanvas} size="sm" autoclose>
-                <CanvasDisconnectModal
-                  canvasCourseCode={data.class.lms_class?.course_code || ''}
-                  on:keep={() => removeCanvasConnection(true)}
-                  on:remove={() => removeCanvasConnection(false)}
-                />
-              </Modal>
-            </div>
-          </Alert>
-        {:else if data.class.lms_status === 'error'}
-          <Alert color="red" defaultClass="p-4 gap-3 text-sm border-2">
-            <div class="p-1.5">
-              <div class="flex items-center gap-3">
-                <CanvasLogo size="5" />
-                <span class="text-lg font-medium"
-                  >Important: Error connecting to Canvas account</span
-                >
-              </div>
-              <p class="mt-2 text-sm">
-                {data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
-                with this group. However, we faced an issue when trying to connect to their Canvas account.
-                Ask {data.class.lms_user?.name || 'them'} to reauthorize Pingpong to access your Canvas
-                account through this page and ensure uninterrupted syncing of your class roster.
-              </p>
-              <p class="mt-2 mb-4 text-sm">
-                Last sync: {data.class.lms_last_synced
-                  ? dayjs.utc(data.class.lms_last_synced).fromNow()
-                  : 'never'}
-              </p>
-              <p class="mt-2 mb-4 text-sm">
-                {data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
-                with this group. Need to link your own account? You can disconnect their Canvas account
-                from this PingPong group.
-                <span class="font-bold"
-                  >This action is irreversible and will delete all imported users from Canvas.</span
-                >
-              </p>
-              <div class="flex gap-2">
-                <Button
-                  pill
-                  size="xs"
-                  class="border border-green-900 hover:bg-green-900 text-green-900 hover:bg-gradient-to-t hover:from-green-800 hover:to-green-700 hover:text-white"
-                  disabled={removingCanvasConnection}
-                  on:click={() => (disconnectCanvas = true)}
-                  on:touchstart={() => (disconnectCanvas = true)}
-                >
-                  {#if removingCanvasConnection}<Spinner
-                      color="custom"
-                      customColor="fill-green-900"
-                      class="w-4 h-4 me-2"
-                    />{:else}<UserRemoveSolid class="w-4 h-4 me-2" />{/if}Disconnect Canvas account</Button
-                >
-              </div>
-              <Modal bind:open={disconnectCanvas} size="sm" autoclose>
-                <CanvasDisconnectModal
-                  canvasCourseCode={data.class.lms_class?.course_code || ''}
-                  on:keep={() => removeCanvasConnection(true)}
-                  on:remove={() => removeCanvasConnection(false)}
-                />
-              </Modal>
-            </div>
-          </Alert>
+            </Alert>
+          {/if}
         {/if}
         <div class="mb-4">
           <!-- Update the user view when we finish batch adding users. -->
