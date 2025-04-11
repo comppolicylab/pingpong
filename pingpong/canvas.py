@@ -120,7 +120,6 @@ class CanvasCourseClient(ABC):
         self.sync_without_sso_ids = (
             sync_without_sso_ids or not canvas_backend_config.require_sso
         )
-        print(canvas_backend_config.require_sso)
 
     async def __aenter__(self):
         self.http_session = aiohttp.ClientSession()

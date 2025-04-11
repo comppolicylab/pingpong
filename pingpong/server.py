@@ -1261,7 +1261,6 @@ async def verify_canvas_class_permissions(
     class_id: str, tenant: str, canvas_class_id: str, request: Request
 ):
     canvas_settings = get_canvas_config(tenant)
-    print(canvas_settings)
     async with LightweightCanvasClient(
         canvas_settings,
         int(class_id),
