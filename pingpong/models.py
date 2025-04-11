@@ -1968,6 +1968,8 @@ class Class(Base):
     api_key_obj = relationship("APIKey", back_populates="classes", lazy="selectin")
     private = Column(Boolean, default=False)
     lms_status = Column(SQLEnum(schemas.LMSStatus), default=schemas.LMSStatus.NONE)
+    lms_tenant = Column(String, nullable=True)
+    lms_type = Column(SQLEnum(schemas.LMSType), nullable=True)
     lms_class_id = Column(Integer, ForeignKey("lms_classes.id"), nullable=True)
     lms_class = relationship("LMSClass", back_populates="classes", lazy="selectin")
     lms_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -2184,6 +2186,8 @@ class Class(Base):
         refresh_token: str | None = None,
         user_id: int | None = None,
         refresh: bool = False,
+        lms_tenant: str | None = None,
+        lms_type: schemas.LMSType | None = None,
     ) -> None:
         """Update LMS authentication token. When refreshed, there's no need to provide a new refresh token; the same one can be reused."""
         stmt = (
@@ -2200,6 +2204,8 @@ class Class(Base):
                 if not refresh
                 else Class.lms_status,
                 lms_token_added_at=func.now(),
+                lms_tenant=lms_tenant if lms_tenant is not None else Class.lms_tenant,
+                lms_type=lms_type if lms_type is not None else Class.lms_type,
             )
         )
         await session.execute(stmt)
@@ -2270,6 +2276,9 @@ class Class(Base):
                 lms_expires_in=None,
                 lms_token_added_at=None,
                 lms_last_synced=None,
+                lms_user_id=None,
+                lms_tenant=None,
+                lms_type=None,
             )
         )
         await session.execute(stmt)
@@ -2286,7 +2295,12 @@ class Class(Base):
 
     @classmethod
     async def update_lms_class(
-        cls, session: AsyncSession, class_id: int, lms_id: int
+        cls,
+        session: AsyncSession,
+        class_id: int,
+        lms_id: int,
+        tenant: str,
+        lms_type: schemas.LMSType,
     ) -> None:
         """Update the LMS linked Class ID."""
         stmt = select(Class).where(Class.id == class_id)
@@ -2301,6 +2315,8 @@ class Class(Base):
             class_instance.lms_class_id = lms_id
 
         class_instance.lms_status = schemas.LMSStatus.LINKED
+        class_instance.lms_tenant = tenant
+        class_instance.lms_type = lms_type
         await session.flush()
 
     @classmethod
@@ -2316,6 +2332,38 @@ class Class(Base):
             .values(lms_last_synced=func.now(), updated=Class.updated)
         )
         await session.execute(stmt)
+
+    @classmethod
+    async def get_linked_courses_with_no_tenant_info(
+        cls,
+        session: AsyncSession,
+    ) -> AsyncGenerator["Class", None]:
+        """Return linked courses with no tenant information."""
+        stmt = select(Class).where(
+            and_(
+                Class.lms_status != schemas.LMSStatus.NONE,
+                Class.lms_tenant.is_(None),
+            )
+        )
+        result = await session.execute(stmt)
+        for row in result.scalars():
+            yield row
+
+    @classmethod
+    async def get_linked_courses_with_no_lms_type_info(
+        cls,
+        session: AsyncSession,
+    ) -> AsyncGenerator["Class", None]:
+        """Return linked courses with no LMS type information."""
+        stmt = select(Class).where(
+            and_(
+                Class.lms_status != schemas.LMSStatus.NONE,
+                Class.lms_type.is_(None),
+            )
+        )
+        result = await session.execute(stmt)
+        for row in result.scalars():
+            yield row
 
     @classmethod
     async def get_all_to_sync(
@@ -2386,6 +2434,9 @@ class Class(Base):
             class_instance.lms_expires_in = None
             class_instance.lms_token_added_at = None
             class_instance.lms_status = schemas.LMSStatus.NONE
+            class_instance.lms_tenant = None
+            class_instance.lms_type = None
+            class_instance.lms_user_id = None
 
         user_ids = []
         if not keep_users:

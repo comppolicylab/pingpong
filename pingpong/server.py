@@ -1151,7 +1151,7 @@ async def delete_class(class_id: str, request: Request):
 
 
 @v1.get(
-    "/class/{class_id}/canvas/{tenant}/link",
+    "/class/{class_id}/lms/canvas/{tenant}/link",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.CanvasRedirect,
 )
@@ -1166,7 +1166,7 @@ async def get_canvas_link(class_id: str, tenant: str, request: Request):
 
 
 @v1.post(
-    "/class/{class_id}/canvas/{tenant}/sync/dismiss",
+    "/class/{class_id}/lms/canvas/sync/dismiss",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
@@ -1176,7 +1176,7 @@ async def dismiss_canvas_sync(class_id: str, request: Request):
 
 
 @v1.post(
-    "/class/{class_id}/canvas/{tenant}/sync/enable",
+    "/class/{class_id}/lms/canvas/sync/enable",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
@@ -1186,7 +1186,20 @@ async def enable_canvas_sync(class_id: str, request: Request):
 
 
 @v1.get(
-    "/class/{class_id}/canvas/{tenant}/classes",
+    "/class/{class_id}/lms/{lms_type}",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.LMSInstances,
+)
+async def get_available_lms_instances(class_id: str, lms_type: str, request: Request):
+    return {
+        "instances": [
+            tenant for tenant in config.lms.lms_instances if tenant.type == lms_type
+        ]
+    }
+
+
+@v1.get(
+    "/class/{class_id}/lms/canvas/{tenant}/classes",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.LMSClasses,
 )
@@ -1240,7 +1253,7 @@ async def get_canvas_classes(class_id: str, tenant: str, request: Request):
 
 
 @v1.post(
-    "/class/{class_id}/canvas/{tenant}/classes/{canvas_class_id}/verify",
+    "/class/{class_id}/lms/canvas/{tenant}/classes/{canvas_class_id}/verify",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
@@ -1248,6 +1261,7 @@ async def verify_canvas_class_permissions(
     class_id: str, tenant: str, canvas_class_id: str, request: Request
 ):
     canvas_settings = get_canvas_config(tenant)
+    print(canvas_settings)
     async with LightweightCanvasClient(
         canvas_settings,
         int(class_id),
@@ -1313,7 +1327,7 @@ async def verify_canvas_class_permissions(
 
 
 @v1.post(
-    "/class/{class_id}/canvas/{tenant}/classes/{canvas_class_id}",
+    "/class/{class_id}/lms/canvas/{tenant}/classes/{canvas_class_id}",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
@@ -1375,7 +1389,7 @@ async def update_canvas_class(
 
 
 @v1.post(
-    "/class/{class_id}/canvas/{tenant}/sync",
+    "/class/{class_id}/lms/canvas/{tenant}/sync",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
@@ -1433,7 +1447,7 @@ async def sync_canvas_class(
 
 
 @v1.delete(
-    "/class/{class_id}/canvas/{tenant}/sync",
+    "/class/{class_id}/lms/canvas/{tenant}/sync",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
@@ -1456,7 +1470,7 @@ async def unlink_canvas_class(
 
 
 @v1.delete(
-    "/class/{class_id}/canvas/{tenant}/account",
+    "/class/{class_id}/lms/canvas/{tenant}/account",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )

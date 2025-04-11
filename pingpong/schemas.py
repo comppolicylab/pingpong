@@ -758,6 +758,23 @@ class LMSStatus(StrEnum):
     ERROR = auto()
 
 
+class LMSInstance(BaseModel):
+    tenant: str
+    tenant_friendly_name: str
+    type: LMSType
+    base_url: str
+
+    class Config:
+        from_attributes = True
+
+
+class LMSInstances(BaseModel):
+    instances: list[LMSInstance]
+
+    class Config:
+        from_attributes = True
+
+
 class CreateUserClassRoles(BaseModel):
     roles: list[CreateUserClassRole]
     silent: bool = False
@@ -873,6 +890,8 @@ class Class(BaseModel):
     updated: datetime | None
     private: bool | None = None
     lms_user: LMSUser | None = None
+    lms_type: LMSType | None = None
+    lms_tenant: str | None = None
     lms_status: LMSStatus | None = None
     lms_class: LMSClass | None = None
     lms_last_synced: datetime | None = None

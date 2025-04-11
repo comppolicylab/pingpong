@@ -35,6 +35,7 @@ from pingpong.merge import (
     merge,
 )
 from pingpong.now import _get_next_run_time, croner, utcnow
+from pingpong.schemas import LMSType
 from pingpong.summary import send_class_summary_for_class
 
 from .auth import encode_auth_token
@@ -488,6 +489,36 @@ def clear_rate_limit_logs(before: Optional[str], after: Optional[str]) -> None:
             logger.info("Done!")
 
     asyncio.run(_clear_rate_limit_logs())
+
+
+@db.command("migrate_lms_tenants")
+@click.argument("default_tenant")
+def migrate_lms_tenants(default_tenant: str) -> None:
+    async def _migrate_lms_tenants() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Migrating LMS tenants...")
+            async for class_ in Class.get_linked_courses_with_no_tenant_info(session):
+                class_.lms_tenant = default_tenant
+                session.add(class_)
+                await session.commit()
+            logger.info("Done!")
+
+    asyncio.run(_migrate_lms_tenants())
+
+
+@db.command("migrate_lms_type")
+@click.argument("default_type", type=LMSType)
+def migrate_lms_type(default_type: LMSType) -> None:
+    async def _migrate_lms_type() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Migrating LMS types...")
+            async for class_ in Class.get_linked_courses_with_no_lms_type_info(session):
+                class_.lms_type = default_type
+                session.add(class_)
+                await session.commit()
+            logger.info("Done!")
+
+    asyncio.run(_migrate_lms_type())
 
 
 @db.command("migrate_external_providers")
