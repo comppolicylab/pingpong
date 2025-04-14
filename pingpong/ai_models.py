@@ -56,12 +56,75 @@ async def update_model_on_openai(
 KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     # ----------------- Latest Models -----------------
     #
-    # -----------------   o* Family   -----------------
-    "o1": {
-        "name": "o1",
-        "sort_order": 4,
+    # --------------   GPT-4.1 Family   ---------------
+    #
+    "gpt-4.1": {
+        "name": "GPT-4.1",
+        "sort_order": 0.1,
         "type": "chat",
         "is_new": True,
+        "highlight": True,
+        "is_latest": True,
+        "supports_vision": True,
+        "supports_file_search": True,
+        "supports_code_interpreter": True,
+        "supports_temperature": True,
+        "supports_reasoning": False,
+        "description": "Flagship model with enhanced capabilities for complex tasks. It is well suited for problem solving across domains.",
+    },
+    "gpt-4.1-mini": {
+        "name": "GPT-4.1 mini",
+        "sort_order": 0.2,
+        "type": "chat",
+        "is_new": True,
+        "highlight": False,
+        "is_latest": True,
+        "supports_vision": True,
+        "supports_file_search": True,
+        "supports_code_interpreter": True,
+        "supports_temperature": True,
+        "supports_reasoning": False,
+        "description": "Provides a balance between intelligence and speed that makes it an attractive model for many use cases.",
+    },
+    "gpt-4.1-nano": {
+        "name": "GPT-4.1 nano",
+        "sort_order": 0.3,
+        "type": "chat",
+        "is_new": True,
+        "highlight": False,
+        "is_latest": True,
+        "supports_vision": True,
+        "supports_file_search": True,
+        "supports_code_interpreter": True,
+        "supports_temperature": True,
+        "supports_reasoning": False,
+        "description": "Fastest, most cost-effective GPT 4.1 model.",
+    },
+    #
+    # -----------------   gpt-4.5 Family   -----------------
+    #
+    "gpt-4.5-preview": {
+        "name": "GPT-4.5",
+        "sort_order": 1.1,
+        "type": "chat",
+        "is_new": False,
+        "highlight": False,
+        "is_latest": True,
+        "supports_vision": True,
+        "supports_file_search": True,
+        "supports_code_interpreter": True,
+        "supports_temperature": True,
+        "supports_reasoning": False,
+        "description": "Excels at tasks that benefit from creative, open-ended thinking and conversation, such as writing, learning, or exploring new ideas.",
+    },
+    #
+    # -----------------   o* Family   -----------------
+    #
+    "o1": {
+        "name": "o1",
+        "sort_order": 2.1,
+        "type": "chat",
+        "is_new": False,
         "highlight": False,
         "is_latest": True,
         "supports_vision": False,
@@ -73,9 +136,9 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "o3-mini": {
         "name": "o3 mini",
-        "sort_order": 3,
+        "sort_order": 2.2,
         "type": "chat",
-        "is_new": True,
+        "is_new": False,
         "highlight": False,
         "is_latest": True,
         "supports_vision": False,
@@ -86,31 +149,14 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "description": "Faster reasoning model particularly good at coding, math, and science. Limited capabilities.",
     },
     #
-    # -----------------   gpt-4.5 Family   -----------------
-    #
-    "gpt-4.5-preview": {
-        "name": "GPT-4.5",
-        "sort_order": 2,
-        "type": "chat",
-        "is_new": True,
-        "highlight": False,
-        "is_latest": True,
-        "supports_vision": True,
-        "supports_file_search": True,
-        "supports_code_interpreter": True,
-        "supports_temperature": True,
-        "supports_reasoning": False,
-        "description": "Excels at tasks that benefit from creative, open-ended thinking and conversation, such as writing, learning, or exploring new ideas.",
-    },
-    #
     # -----------------   gpt-4o Family   -----------------
     #
     "gpt-4o": {
         "name": "GPT-4o",
-        "sort_order": 0,
+        "sort_order": 3.1,
         "type": "chat",
         "is_new": False,
-        "highlight": True,
+        "highlight": False,
         "is_latest": True,
         "supports_vision": True,
         "supports_file_search": True,
@@ -121,7 +167,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-4o-mini": {
         "name": "GPT-4o mini",
-        "sort_order": 1,
+        "sort_order": 3.2,
         "type": "chat",
         "is_new": False,
         "highlight": False,
@@ -138,7 +184,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     #
     "gpt-4-turbo": {
         "name": "GPT-4 Turbo",
-        "sort_order": 5,
+        "sort_order": 4.1,
         "type": "chat",
         "is_new": False,
         "highlight": False,
@@ -152,7 +198,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-4-turbo-preview": {
         "name": "GPT-4 Turbo preview",
-        "sort_order": 6,
+        "sort_order": 4.2,
         "type": "chat",
         "is_new": False,
         "highlight": False,
@@ -169,7 +215,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     #
     "gpt-3.5-turbo": {
         "name": "GPT-3.5 Turbo",
-        "sort_order": 7,
+        "sort_order": 5.1,
         "type": "chat",
         "is_new": False,
         "highlight": False,
@@ -184,7 +230,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     # gpt-3.5-turbo equivalent model in Azure
     "gpt-35-turbo": {
         "name": "GPT-3.5 Turbo",
-        "sort_order": 7,
+        "sort_order": 5.2,
         "type": "chat",
         "is_new": False,
         "highlight": False,
@@ -201,7 +247,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     #
     "gpt-4o-realtime-preview": {
         "name": "GPT-4o Realtime",
-        "sort_order": 1,
+        "sort_order": 0.1,
         "type": "voice",
         "is_new": False,
         "highlight": True,
@@ -215,7 +261,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-4o-mini-realtime-preview": {
         "name": "GPT-4o mini Realtime",
-        "sort_order": 1,
+        "sort_order": 0.2,
         "type": "voice",
         "is_new": False,
         "highlight": False,
@@ -230,41 +276,11 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     #
     # ----------------- Pinned Models -----------------
     #
-    # -----------------   o* Family   -----------------
-    "o3-mini-2025-01-31": {
-        "name": "o3-mini-2025-01-31",
-        "sort_order": 9,
-        "type": "chat",
-        "is_new": True,
-        "highlight": False,
-        "is_latest": False,
-        "supports_vision": False,
-        "supports_file_search": False,
-        "supports_code_interpreter": False,
-        "supports_temperature": False,
-        "supports_reasoning": True,
-        "description": "o3 mini initial release version. Limited capabilities.",
-    },
-    "o1-2024-12-17": {
-        "name": "o1-2024-12-17",
-        "sort_order": 10,
-        "type": "chat",
-        "is_new": True,
-        "highlight": False,
-        "is_latest": False,
-        "supports_vision": False,
-        "supports_file_search": False,
-        "supports_code_interpreter": False,
-        "supports_temperature": False,
-        "supports_reasoning": True,
-        "description": "o1 initial release version. Limited capabilities.",
-    },
+    # --------------   GPT-4.1 Family   ---------------
     #
-    # -----------------   gpt-4.5 Family   -----------------
-    #
-    "gpt-4.5-preview-2025-02-27": {
-        "name": "gpt-4.5-preview-2025-02-27",
-        "sort_order": 8,
+    "gpt-4.1-2025-04-14": {
+        "name": "gpt-4.1-2025-04-14",
+        "sort_order": 0.1,
         "type": "chat",
         "is_new": True,
         "highlight": False,
@@ -274,12 +290,88 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_code_interpreter": True,
         "supports_temperature": True,
         "supports_reasoning": False,
+        "description": "GPT-4.1 initial release version.",
+    },
+    "gpt-4.1-mini-2025-04-14": {
+        "name": "gpt-4.1-mini-2025-04-14",
+        "sort_order": 0.2,
+        "type": "chat",
+        "is_new": True,
+        "highlight": False,
+        "is_latest": False,
+        "supports_vision": True,
+        "supports_file_search": True,
+        "supports_code_interpreter": True,
+        "supports_temperature": True,
+        "supports_reasoning": False,
+        "description": "GPT-4.1 mini initial release version.",
+    },
+    "gpt-4.1-nano-2025-04-14": {
+        "name": "gpt-4.1-nano-2025-04-14",
+        "sort_order": 0.3,
+        "type": "chat",
+        "is_new": True,
+        "highlight": False,
+        "is_latest": False,
+        "supports_vision": True,
+        "supports_file_search": True,
+        "supports_code_interpreter": True,
+        "supports_temperature": True,
+        "supports_reasoning": False,
+        "description": "GPT-4.1 nano initial release version.",
+    },
+    #
+    # -----------------   gpt-4.5 Family   -----------------
+    #
+    "gpt-4.5-preview-2025-02-27": {
+        "name": "gpt-4.5-preview-2025-02-27",
+        "sort_order": 1.1,
+        "type": "chat",
+        "is_new": False,
+        "highlight": False,
+        "is_latest": False,
+        "supports_vision": True,
+        "supports_file_search": True,
+        "supports_code_interpreter": True,
+        "supports_temperature": True,
+        "supports_reasoning": False,
         "description": "GPT-4.5 initial research preview release version.",
+    },
+    #
+    # -----------------   o* Family   -----------------
+    #
+    "o1-2024-12-17": {
+        "name": "o1-2024-12-17",
+        "sort_order": 2.1,
+        "type": "chat",
+        "is_new": False,
+        "highlight": False,
+        "is_latest": False,
+        "supports_vision": False,
+        "supports_file_search": False,
+        "supports_code_interpreter": False,
+        "supports_temperature": False,
+        "supports_reasoning": True,
+        "description": "o1 initial release version. Limited capabilities.",
+    },
+    "o3-mini-2025-01-31": {
+        "name": "o3-mini-2025-01-31",
+        "sort_order": 2.2,
+        "type": "chat",
+        "is_new": False,
+        "highlight": False,
+        "is_latest": False,
+        "supports_vision": False,
+        "supports_file_search": False,
+        "supports_code_interpreter": False,
+        "supports_temperature": False,
+        "supports_reasoning": True,
+        "description": "o3 mini initial release version. Limited capabilities.",
     },
     # -----------------   gpt-4o Family   -----------------
     "gpt-4o-2024-11-20": {
         "name": "gpt-4o-2024-11-20",
-        "sort_order": 11,
+        "sort_order": 3.1,
         "type": "chat",
         "is_latest": False,
         "is_new": False,
@@ -293,7 +385,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-4o-2024-08-06": {
         "name": "gpt-4o-2024-08-06",
-        "sort_order": 12,
+        "sort_order": 3.2,
         "type": "chat",
         "is_latest": False,
         "is_new": False,
@@ -307,7 +399,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-4o-2024-05-13": {
         "name": "gpt-4o-2024-05-13",
-        "sort_order": 14,
+        "sort_order": 3.3,
         "type": "chat",
         "is_latest": False,
         "is_new": False,
@@ -321,7 +413,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-4o-mini-2024-07-18": {
         "name": "gpt-4o-mini-2024-07-18",
-        "sort_order": 13,
+        "sort_order": 3.4,
         "type": "chat",
         "is_latest": False,
         "is_new": False,
@@ -336,7 +428,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     # -----------------   gpt-4 Family   -----------------
     "gpt-4-turbo-2024-04-09": {
         "name": "gpt-4-turbo-2024-04-09",
-        "sort_order": 15,
+        "sort_order": 4.1,
         "type": "chat",
         "is_latest": False,
         "is_new": False,
@@ -350,7 +442,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-4-0125-preview": {
         "name": "gpt-4-0125-preview",
-        "sort_order": 16,
+        "sort_order": 4.2,
         "type": "chat",
         "is_latest": False,
         "is_new": False,
@@ -365,7 +457,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     # Azure model equivalent
     "gpt-4-0125-Preview": {
         "name": "gpt-4-0125-Preview",
-        "sort_order": 16,
+        "sort_order": 4.2,
         "type": "chat",
         "is_latest": False,
         "is_new": False,
@@ -379,7 +471,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-4-1106-preview": {
         "name": "gpt-4-1106-preview",
-        "sort_order": 17,
+        "sort_order": 4.3,
         "type": "chat",
         "is_latest": False,
         "is_new": False,
@@ -394,7 +486,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     # Azure model equivalent
     "gpt-4-1106-Preview": {
         "name": "gpt-4-1106-Preview",
-        "sort_order": 17,
+        "sort_order": 4.4,
         "type": "chat",
         "is_latest": False,
         "is_new": False,
@@ -409,7 +501,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     # -----------------   gpt-3.5 Family   -----------------
     "gpt-3.5-turbo-0125": {
         "name": "gpt-3.5-turbo-0125",
-        "sort_order": 18,
+        "sort_order": 5.1,
         "type": "chat",
         "is_latest": False,
         "is_new": False,
@@ -424,7 +516,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     # Azure model equivalent
     "gpt-35-turbo-0125": {
         "name": "gpt-35-turbo-0125",
-        "sort_order": 18,
+        "sort_order": 5.1,
         "type": "chat",
         "is_latest": False,
         "is_new": False,
@@ -438,7 +530,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-3.5-turbo-1106": {
         "name": "gpt-3.5-turbo-1106",
-        "sort_order": 19,
+        "sort_order": 5.2,
         "type": "chat",
         "is_latest": False,
         "is_new": False,
@@ -453,7 +545,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     # Azure model equivalent
     "gpt-35-turbo-1106": {
         "name": "gpt-35-turbo-1106",
-        "sort_order": 19,
+        "sort_order": 5.2,
         "type": "chat",
         "is_latest": False,
         "is_new": False,
@@ -470,7 +562,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     #
     "gpt-4o-realtime-preview-2024-12-17": {
         "name": "gpt-4o-realtime-preview-2024-12-17",
-        "sort_order": 1,
+        "sort_order": 0.1,
         "type": "voice",
         "is_new": False,
         "highlight": False,
@@ -484,7 +576,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-4o-realtime-preview-2024-10-01": {
         "name": "gpt-4o-realtime-preview-2024-10-01",
-        "sort_order": 2,
+        "sort_order": 0.2,
         "type": "voice",
         "is_new": False,
         "highlight": False,
@@ -498,7 +590,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-4o-mini-realtime-preview-2024-12-17": {
         "name": "gpt-4o-mini-realtime-preview-2024-12-17",
-        "sort_order": 3,
+        "sort_order": 0.3,
         "type": "voice",
         "is_new": False,
         "highlight": False,
@@ -558,4 +650,6 @@ AZURE_UNAVAILABLE_MODELS = [
     "gpt-4o-realtime-preview-2024-12-17",
     "gpt-4o-realtime-preview-2024-10-01",
     "gpt-4o-mini-realtime-preview-2024-12-17",
+    "gpt-4.1",
+    "gpt-4.1-2025-04-14",
 ]

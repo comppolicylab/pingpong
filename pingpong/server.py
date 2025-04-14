@@ -2023,7 +2023,7 @@ async def list_class_models(
         filtered.append(
             {
                 "id": "gpt-4-turbo",
-                "created": 0,
+                "created": 4.1,
                 "owner": "",
                 "name": "GPT-4 Turbo",
                 "sort_order": 4,
@@ -2045,7 +2045,7 @@ async def list_class_models(
         filtered.append(
             {
                 "id": "gpt-4-turbo-preview",
-                "created": 0,
+                "created": 4.2,
                 "owner": "",
                 "name": "GPT-4 Turbo preview",
                 "sort_order": 5,
