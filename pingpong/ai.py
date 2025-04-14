@@ -234,7 +234,7 @@ async def validate_api_key(
         )
         try:
             response = await cli.models.with_raw_response.list()
-            _region = response.headers.get("x-ms-region")
+            _region = response.headers.get("x-ms-region", None)
             # NOTE: For the async client: this will become a coroutine in the next major version.
             response.parse()
             return APIKeyValidationResponse(
