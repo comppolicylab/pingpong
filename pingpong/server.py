@@ -1905,12 +1905,13 @@ async def update_class_api_key(
             "api_key": schemas.ApiKey(api_key=existing_key.api_key, provider="openai")
         }
     elif not existing_key.api_key_obj and not existing_key.api_key:
-        if not await validate_api_key(
+        response = await validate_api_key(
             update.api_key,
             update.provider.value,
             update.endpoint,
             update.api_version,
-        ):
+        )
+        if not response.valid:
             raise HTTPException(
                 status_code=400,
                 detail="Invalid API connection information provided. Please try again.",
@@ -1922,6 +1923,7 @@ async def update_class_api_key(
             provider=update.provider,
             endpoint=update.endpoint if update.provider == "azure" else None,
             api_version=update.api_version if update.provider == "azure" else None,
+            region=response.region if update.provider == "azure" else None,
             available_as_default=False,
         )
         await request.state.authz.write_safe(
