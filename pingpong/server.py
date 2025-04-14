@@ -2023,10 +2023,10 @@ async def list_class_models(
         filtered.append(
             {
                 "id": "gpt-4-turbo",
-                "created": 4.1,
+                "created": 0,
                 "owner": "",
                 "name": "GPT-4 Turbo",
-                "sort_order": 4,
+                "sort_order": 4.1,
                 "type": "chat",
                 "is_new": False,
                 "highlight": False,
@@ -2045,10 +2045,10 @@ async def list_class_models(
         filtered.append(
             {
                 "id": "gpt-4-turbo-preview",
-                "created": 4.2,
+                "created": 0,
                 "owner": "",
                 "name": "GPT-4 Turbo preview",
-                "sort_order": 5,
+                "sort_order": 4.2,
                 "type": "chat",
                 "is_new": False,
                 "highlight": False,
