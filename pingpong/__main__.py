@@ -17,6 +17,7 @@ from pingpong.ai import (
     GetOpenAIClientException,
     export_class_threads_with_emails,
     get_openai_client_by_class_id,
+    validate_api_key,
 )
 from pingpong.api_keys import (
     get_process_redacted_project_api_keys,
@@ -43,6 +44,7 @@ from .bg import get_server
 from .canvas import canvas_sync_all
 from .config import config
 from .models import (
+    APIKey,
     Base,
     ExternalLogin,
     ScheduledJob,
@@ -519,6 +521,32 @@ def migrate_lms_type(default_type: LMSType) -> None:
             logger.info("Done!")
 
     asyncio.run(_migrate_lms_type())
+
+
+@db.command("migrate_azure_api_keys_add_region")
+def migrate_azure_api_keys_add_region() -> None:
+    async def _migrate_azure_api_keys_add_region() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Migrating Azure API keys to add region...")
+            async for key in APIKey.get_azure_keys_with_no_region_info(session):
+                try:
+                    response = await validate_api_key(
+                        key.api_key, key.provider, key.endpoint
+                    )
+                    if not response.valid:
+                        logger.warning(
+                            f"API key {key.id} is invalid. Skipping migration."
+                        )
+                        continue
+                except Exception as e:
+                    logger.exception(f"Error validating API key {key.id}: {e}")
+                    continue
+                key.region = response.region
+                session.add(key)
+                await session.commit()
+            logger.info("Done!")
+
+    asyncio.run(_migrate_azure_api_keys_add_region())
 
 
 @db.command("migrate_external_providers")

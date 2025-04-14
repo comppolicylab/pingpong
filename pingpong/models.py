@@ -1911,6 +1911,7 @@ class APIKey(Base):
     classes = relationship("Class", back_populates="api_key_obj")
     endpoint = Column(String, nullable=True)
     api_version = Column(String, nullable=True)
+    region = Column(String, nullable=True)
     available_as_default = Column(Boolean, default=False)
 
     @classmethod
@@ -1921,6 +1922,7 @@ class APIKey(Base):
         provider: str,
         endpoint: str | None = None,
         api_version: str | None = None,
+        region: str | None = None,
         available_as_default: bool = False,
     ) -> "APIKey":
         stmt = (
@@ -1930,12 +1932,14 @@ class APIKey(Base):
                 provider=provider,
                 endpoint=endpoint,
                 api_version=api_version,
+                region=region,
                 available_as_default=available_as_default,
             )
             .on_conflict_do_update(
                 constraint="_key_provider_uc",
                 set_=dict(
                     api_version=api_version,
+                    region=region,
                     available_as_default=APIKey.available_as_default
                     or available_as_default,
                 ),
@@ -1949,6 +1953,20 @@ class APIKey(Base):
         stmt = select(APIKey).where(APIKey.available_as_default.is_(True))
         result = await session.execute(stmt)
         return [row[0] for row in result]
+
+    @classmethod
+    async def get_azure_keys_with_no_region_info(
+        cls, session: AsyncSession
+    ) -> AsyncGenerator["APIKey", None]:
+        """Get all Azure keys with no region info."""
+        stmt = (
+            select(APIKey)
+            .where(APIKey.provider == "azure")
+            .where(APIKey.region.is_(None))
+        )
+        result = await session.execute(stmt)
+        for row in result:
+            yield row[0]
 
 
 class Class(Base):
@@ -2059,6 +2077,7 @@ class Class(Base):
         provider: str,
         endpoint: str | None,
         api_version: str | None,
+        region: str | None,
         available_as_default: bool,
     ) -> "APIKey":
         api_key_obj = await APIKey.create_or_update(
@@ -2067,6 +2086,7 @@ class Class(Base):
             provider=provider,
             endpoint=endpoint,
             api_version=api_version,
+            region=region,
             available_as_default=available_as_default,
         )
 

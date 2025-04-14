@@ -964,6 +964,11 @@ class ApiKey(BaseModel):
         from_attributes = True
 
 
+class APIKeyValidationResponse(BaseModel):
+    valid: bool
+    region: str | None = None
+
+
 class APIKeyResponse(BaseModel):
     api_key: ApiKey | None = None
 

@@ -10,7 +10,12 @@ import orjson
 from pingpong.auth import encode_auth_token
 from pingpong.invite import send_export_download
 import pingpong.models as models
-from pingpong.schemas import ThreadName, NewThreadMessage, InteractionMode
+from pingpong.schemas import (
+    APIKeyValidationResponse,
+    ThreadName,
+    NewThreadMessage,
+    InteractionMode,
+)
 
 from datetime import datetime, timezone
 from openai.types.beta.assistant_stream_event import (
@@ -214,7 +219,7 @@ async def validate_api_key(
     provider: Literal["azure", "openai"] = "openai",
     endpoint: str | None = None,
     api_version: str | None = None,
-) -> bool:
+) -> APIKeyValidationResponse:
     """Validate an OpenAI API key.
 
     :param key: API key to validate
@@ -227,13 +232,34 @@ async def validate_api_key(
             endpoint=endpoint,
             api_version=api_version,
         )
+        try:
+            response = await cli.models.with_raw_response.list()
+            _region = response.headers.get("x-ms-region", None)
+            if not _region:
+                logger.exception(
+                    f"No region found in response headers in Azure API key validation. Response: {response.headers}"
+                )
+            # NOTE: For the async client: this will become a coroutine in the next major version.
+            response.parse()
+            return APIKeyValidationResponse(
+                valid=True,
+                region=_region,
+            )
+        except openai.AuthenticationError:
+            return APIKeyValidationResponse(
+                valid=False,
+            )
     elif provider == "openai":
         cli = get_openai_client(api_key=api_key, provider=provider)
-    try:
-        await cli.models.list()
-        return True
-    except openai.AuthenticationError:
-        return False
+        try:
+            await cli.models.list()
+            return APIKeyValidationResponse(
+                valid=True,
+            )
+        except openai.AuthenticationError:
+            return APIKeyValidationResponse(
+                valid=False,
+            )
 
 
 async def get_ci_messages_from_step(
