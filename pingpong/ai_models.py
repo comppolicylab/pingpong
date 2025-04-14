@@ -651,5 +651,9 @@ AZURE_UNAVAILABLE_MODELS = [
     "gpt-4o-realtime-preview-2024-10-01",
     "gpt-4o-mini-realtime-preview-2024-12-17",
     "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4.1-nano",
     "gpt-4.1-2025-04-14",
+    "gpt-4.1-mini-2025-04-14",
+    "gpt-4.1-nano-2025-04-14",
 ]
