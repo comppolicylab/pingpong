@@ -1018,7 +1018,7 @@ class AssistantModel(BaseModel):
 
 class AssistantModelDict(TypedDict):
     name: str
-    sort_order: int
+    sort_order: float
     is_latest: bool
     is_new: bool
     highlight: bool
