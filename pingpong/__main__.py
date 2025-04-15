@@ -582,7 +582,9 @@ def get_assistant_description_stats() -> None:
     async def _get_assistant_description_stats() -> None:
         async with config.db.driver.async_session() as session:
             logger.info("Getting assistant description stats...")
-            all = await session.execute(select(func.count()).select_from(Assistant))
+            all_assistants = await session.execute(
+                select(func.count()).select_from(Assistant)
+            )
             with_description = await session.execute(
                 select(func.count())
                 .where(
@@ -592,7 +594,7 @@ def get_assistant_description_stats() -> None:
             )
 
             logger.info(
-                f"Total assistants: {all.scalar()}, Assistants with description: {with_description.scalar()}"
+                f"Total assistants: {all_assistants.scalar()}, Assistants with description: {with_description.scalar()}"
             )
 
     asyncio.run(_get_assistant_description_stats())
