@@ -10,7 +10,7 @@ import alembic.command
 import alembic.config
 
 from datetime import datetime, timedelta
-from sqlalchemy import text
+from sqlalchemy import and_, func, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from pingpong.ai import (
@@ -45,6 +45,7 @@ from .canvas import canvas_sync_all
 from .config import config
 from .models import (
     APIKey,
+    Assistant,
     Base,
     ExternalLogin,
     ScheduledJob,
@@ -574,6 +575,27 @@ def check_for_missing_providers() -> None:
             logger.info("Done!")
 
     asyncio.run(_check_for_missing_providers())
+
+
+@db.command("get_assistant_description_stats")
+def get_assistant_description_stats() -> None:
+    async def _get_assistant_description_stats() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Getting assistant description stats...")
+            all = await session.execute(select(func.count()).select_from(Assistant))
+            with_description = await session.execute(
+                select(func.count())
+                .where(
+                    and_(Assistant.description.isnot(None), Assistant.description != "")
+                )
+                .select_from(Assistant)
+            )
+
+            logger.info(
+                f"Total assistants: {all.scalar()}, Assistants with description: {with_description.scalar()}"
+            )
+
+    asyncio.run(_get_assistant_description_stats())
 
 
 async def _lms_sync_all(
