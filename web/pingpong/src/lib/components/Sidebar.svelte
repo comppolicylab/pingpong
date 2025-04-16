@@ -14,7 +14,10 @@
     EyeOutline,
     UserCircleSolid,
     FileLinesOutline,
-    MicrophoneOutline
+    MicrophoneOutline,
+    UserOutline,
+    BadgeCheckOutline,
+    UsersOutline
   } from 'flowbite-svelte-icons';
 
   import {
@@ -27,7 +30,8 @@
     SidebarWrapper,
     SidebarItem,
     SidebarGroup,
-    NavBrand
+    NavBrand,
+    Tooltip
   } from 'flowbite-svelte';
   import PingPongLogo from '$lib/components/PingPongLogo.svelte';
   import dayjs from '$lib/time';
@@ -38,6 +42,17 @@
   import { onMount } from 'svelte';
 
   export let data: LayoutData;
+
+  // Get info about assistant provenance
+  const getAssistantMetadata = (assistant: api.Assistant) => {
+    const isCourseAssistant = assistant.endorsed;
+    const isMyAssistant = assistant.creator_id === data.me.user!.id;
+    return {
+      creator: isCourseAssistant ? 'Moderation Team' : data.me.user!.name,
+      isCourseAssistant,
+      isMyAssistant
+    };
+  };
 
   $: nonAuthed = data.isPublicPage && !data?.me?.user;
   $: avatar = data?.me?.profile?.image_url;
@@ -52,7 +67,40 @@
   );
   $: threads = ($page.data.threads || []) as api.Thread[];
   $: currentClassId = parseInt($page.params.classId, 10);
-  $: currentAssistantId = $page.data.threadData?.thread?.assistant_id;
+  $: currentAssistantIdQuery = parseInt($page.url.searchParams.get('assistant') || '0', 10);
+  $: currentAssistantId = $page.data.threadData?.thread?.assistant_id || currentAssistantIdQuery;
+  $: assistants = ($page.data.assistants || []) as api.Assistant[];
+  $: assistants.sort((a, b) => {
+    // First sort by endorsement.
+    if (a.endorsed && !b.endorsed) return -1;
+    if (!a.endorsed && b.endorsed) return 1;
+    // Then sort by whether the assistant was created by the current user.
+    if (a.creator_id === data.me.user!.id && b.creator_id !== data.me.user!.id) return -1;
+    if (a.creator_id !== data.me.user!.id && b.creator_id === data.me.user!.id) return 1;
+    // Finally, sort alphabetically by name.
+    return a.name.localeCompare(b.name);
+  });
+  let assistantsToShow: api.Assistant[] = [];
+  // Offer the top 4 assistants. If the current assistant is not in the top 4, add it to the top and remove the 4th one.
+  $: if (assistants.length > 4) {
+    assistantsToShow = assistants.slice(0, 4);
+    if (currentAssistantId && !assistantsToShow.some((a) => a.id === currentAssistantId)) {
+      const foundAssistant = assistants.find((a) => a.id === currentAssistantIdQuery);
+      if (foundAssistant) {
+        assistantsToShow.unshift(foundAssistant);
+        assistantsToShow.pop();
+      }
+    }
+  } else {
+    assistantsToShow = assistants;
+  }
+  $: assistantMetadata = assistants.reduce(
+    (acc: Record<number, ReturnType<typeof getAssistantMetadata>>, assistant) => {
+      acc[assistant.id] = getAssistantMetadata(assistant);
+      return acc;
+    },
+    {}
+  );
   $: onNewChatPage = $page.url.pathname === `/group/${currentClassId}`;
 
   // Toggle whether menu is open.
@@ -117,7 +165,7 @@
       </div>
     </SidebarGroup>
 
-    <SidebarGroup class="mt-6 mb-10">
+    <SidebarGroup class="mt-6">
       <SidebarItem
         href={nonAuthed
           ? '/login'
@@ -161,7 +209,54 @@
         />
       </SidebarGroup>
     {:else}
-      <SidebarGroup ulClass="flex flex-wrap justify-between gap-2 items-center">
+      <SidebarGroup ulClass="flex flex-wrap justify-between gap-2 items-center mt-4">
+        <span class="flex-1 truncate text-white">Group Assistants</span>
+        <a
+          href={`/group/${currentClassId}/assistant`}
+          class="text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap justify-between gap-2 items-center"
+        >
+          <span class="text-xs">View All</span><ArrowRightOutline
+            size="md"
+            class="text-white inline-block p-0.5 ml-1 rounded-full bg-blue-dark-30"
+          />
+        </a>
+      </SidebarGroup>
+      <SidebarGroup border class="border-blue-dark-40 border-t-3 pt-1 mt-1" ulClass="space-y-0">
+        {#each assistantsToShow as assistant}
+          <SidebarItem
+            class={`text-sm text-white hover:bg-blue-dark-30 p-2 rounded-lg flex flex-wrap gap-2 truncate` +
+              (currentAssistantIdQuery === assistant.id ? ' bg-blue-dark-40' : '')}
+            spanClass="flex-1 truncate"
+            href={`/group/${currentClassId}?assistant=${assistant.id}`}
+            label={assistant.name || 'New Conversation'}
+            activeClass="bg-blue-dark-40"
+          >
+            <svelte:fragment slot="icon">
+              {#if assistantMetadata[assistant.id].isCourseAssistant}
+                <BadgeCheckOutline size="sm" class="text-white" />
+                <Tooltip>Group assistant</Tooltip>
+              {:else if assistantMetadata[assistant.id].isMyAssistant}
+                <UserOutline size="sm" class="text-white" />
+                <Tooltip>Created by you</Tooltip>
+              {:else}
+                <UsersOutline size="sm" class="text-white" />
+                <Tooltip>Shared by {assistantMetadata[assistant.id].creator}</Tooltip>
+              {/if}
+              {#if assistant.interaction_mode === 'voice'}
+                <MicrophoneOutline size="sm" class="text-white" />
+                <Tooltip>Voice mode assistant</Tooltip>
+              {/if}
+            </svelte:fragment>
+          </SidebarItem>
+        {/each}
+        {#if !assistantsToShow.length}
+          <div class="text-sm text-white p-2 rounded flex flex-wrap gap-2">
+            No assistants configured
+          </div>
+        {/if}
+      </SidebarGroup>
+
+      <SidebarGroup ulClass="flex flex-wrap justify-between gap-2 items-center mt-4">
         <span class="flex-1 truncate text-white">Recent Threads</span>
         <a
           href={`/threads`}
@@ -173,10 +268,14 @@
           />
         </a>
       </SidebarGroup>
-      <SidebarGroup border class="overflow-y-auto border-blue-dark-40 border-t-3 pt-1">
+      <SidebarGroup
+        border
+        class="overflow-y-auto border-blue-dark-40 border-t-3 pt-1 mt-1"
+        ulClass="space-y-0"
+      >
         {#each threads as thread}
           <SidebarItem
-            class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2"
+            class="text-sm text-white hover:bg-blue-dark-30 p-2 rounded flex flex-wrap gap-2 rounded-lg"
             spanClass="flex-1 truncate"
             href={`/group/${thread.class_id}/thread/${thread.id}`}
             label={thread.name || 'New Conversation'}
