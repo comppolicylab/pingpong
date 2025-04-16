@@ -17,7 +17,8 @@
     MicrophoneOutline,
     UserOutline,
     BadgeCheckOutline,
-    UsersOutline
+    UsersOutline,
+    InboxOutline
   } from 'flowbite-svelte-icons';
 
   import {
@@ -260,19 +261,20 @@
 
       <SidebarGroup ulClass="flex flex-wrap justify-between gap-2 items-center mt-4">
         <span class="flex-1 truncate text-white">Recent Threads</span>
-        <a
+        <Button
           href={`/threads`}
           class="text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap justify-between gap-2 items-center"
+          disabled={threads.length === 0}
         >
           <span class="text-xs">View All</span><ArrowRightOutline
             size="md"
             class="text-white inline-block p-0.5 ml-1 rounded-full bg-blue-dark-30"
           />
-        </a>
+        </Button>
       </SidebarGroup>
       <SidebarGroup
         border
-        class="overflow-y-auto border-blue-dark-40 border-t-3 pt-1 mt-1"
+        class="overflow-y-auto h-full border-blue-dark-40 border-t-3 pt-1 mt-1"
         ulClass="space-y-0"
       >
         {#each threads as thread}
@@ -313,8 +315,12 @@
           </SidebarItem>
         {/each}
         {#if !threads.length}
-          <div class="text-sm text-white font-light p-2 rounded flex flex-wrap gap-2">
-            No conversations available
+          <div
+            class="h-full text-sm text-white p-2 shrink-0 flex flex-col items-center justify-center"
+          >
+            <InboxOutline class="text-white mb-2 w-16 h-16" strokeWidth="1" />
+            <span class="text-center font-medium text-lg">No recent threads</span>
+            <span class="text-center font-light">Start a new chat to get started</span>
           </div>
         {/if}
       </SidebarGroup>
