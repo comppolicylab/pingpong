@@ -31,7 +31,8 @@
     SidebarItem,
     SidebarGroup,
     NavBrand,
-    Tooltip
+    Tooltip,
+    Button
   } from 'flowbite-svelte';
   import PingPongLogo from '$lib/components/PingPongLogo.svelte';
   import dayjs from '$lib/time';
@@ -211,15 +212,16 @@
     {:else}
       <SidebarGroup ulClass="flex flex-wrap justify-between gap-2 items-center mt-4">
         <span class="flex-1 truncate text-white">Group Assistants</span>
-        <a
+        <Button
           href={`/group/${currentClassId}/assistant`}
           class="text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap justify-between gap-2 items-center"
+          disabled={!currentClassId}
         >
           <span class="text-xs">View All</span><ArrowRightOutline
             size="md"
             class="text-white inline-block p-0.5 ml-1 rounded-full bg-blue-dark-30"
           />
-        </a>
+        </Button>
       </SidebarGroup>
       <SidebarGroup border class="border-blue-dark-40 border-t-3 pt-1 mt-1" ulClass="space-y-0">
         {#each assistantsToShow as assistant}
@@ -250,8 +252,8 @@
           </SidebarItem>
         {/each}
         {#if !assistantsToShow.length}
-          <div class="text-sm text-white p-2 rounded flex flex-wrap gap-2">
-            No assistants configured
+          <div class="text-sm font-light text-white p-2 rounded flex flex-wrap gap-2">
+            {currentClassId ? 'No assistants available' : 'No group selected'}
           </div>
         {/if}
       </SidebarGroup>
@@ -311,8 +313,8 @@
           </SidebarItem>
         {/each}
         {#if !threads.length}
-          <div class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2">
-            No conversations yet!
+          <div class="text-sm text-white font-light p-2 rounded flex flex-wrap gap-2">
+            No conversations available
           </div>
         {/if}
       </SidebarGroup>
