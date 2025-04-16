@@ -239,6 +239,7 @@
           {/if}
         </div>
         {#if assistant.interaction_mode === 'voice'}
+          <div class="h-[5%] max-h-8"></div>
           {#if $isFirefox}
             <div class="bg-blue-light-50 p-3 rounded-lg">
               <MicrophoneSlashOutline size="xl" class="text-blue-dark-40" />
