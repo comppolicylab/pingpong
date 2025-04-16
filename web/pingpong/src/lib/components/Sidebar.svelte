@@ -224,15 +224,16 @@
           />
         </Button>
       </SidebarGroup>
-      <SidebarGroup border class="border-blue-dark-40 border-t-3 pt-1 mt-1" ulClass="space-y-0">
+      <SidebarGroup border class={'border-blue-dark-40 border-t-3 pt-1 mt-1'} ulClass="space-y-0">
         {#each assistantsToShow as assistant}
           <SidebarItem
-            class={`text-sm text-white hover:bg-blue-dark-30 p-2 rounded-lg flex flex-wrap gap-2 truncate` +
-              (currentAssistantIdQuery === assistant.id ? ' bg-blue-dark-40' : '')}
+            class={'text-sm text-white p-2 rounded-lg flex flex-wrap gap-2 truncate ' +
+              (currentAssistantIdQuery === assistant.id
+                ? 'bg-orange-dark hover:bg-orange'
+                : 'hover:bg-blue-dark-30')}
             spanClass="flex-1 truncate"
             href={`/group/${currentClassId}?assistant=${assistant.id}`}
-            label={assistant.name || 'New Conversation'}
-            activeClass="bg-blue-dark-40"
+            label={assistant.name || 'Unknown Assistant'}
           >
             <svelte:fragment slot="icon">
               {#if assistantMetadata[assistant.id].isCourseAssistant}
