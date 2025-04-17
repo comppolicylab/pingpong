@@ -225,7 +225,10 @@ def ws_with_realtime_connection(func):
                         "temperature": assistant.temperature,
                         "tool_choice": "none",
                         "voice": "alloy",
-                        "turn_detection": {"type": "server_vad"},
+                        "turn_detection": {
+                            "type": "semantic_vad",
+                            "eagerness": "medium",
+                        },
                         "instructions": conversation_instructions,
                     }
                 )
