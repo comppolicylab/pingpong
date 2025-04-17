@@ -15,10 +15,14 @@ def escape_latex_within_span(text):
         content = content.replace("\\)", "")
         content = content.replace("\\[", "")
         content = content.replace("\\]", "")
+        # Remove newline characters
+        content = content.replace("\n", "")
         # Fix special characters
-        content = content.replace("&gt;", "\gt")
-        content = content.replace("<", "\lt")
-        content = content.replace(">", "\gt")
+        content = content.replace("&gt;", " \gt ")
+        content = content.replace("<", " \lt ")
+        content = content.replace(">", " \gt ")
+        content = content.replace("u2264", " leq ")
+        content = content.replace("u2265", " geq ")
         # Escape special characters
         content = re.sub(r"\\", r"\\\\", content)
         content = re.sub(r'"', r'\\"', content)
@@ -27,14 +31,30 @@ def escape_latex_within_span(text):
         else:
             return rf"<span class=\"katex\" style=\"font-size: 0.9em;white-space: nowrap;\">{content}{match.group(3)}"
 
-    text = re.sub(pattern, escape, text)
+    text = re.sub(pattern, escape, text, flags=re.DOTALL)
     return text
 
 
 def escape_non_span(text):
     text = text.replace("\n", "<br>")
+    text = text.replace("\%", "&#37;")
+    text = text.replace("\\u2265", "&ge;")
+    text = text.replace("\u2265", "&ge;")
+    text = text.replace("\\u2264", "&le;")
+    text = text.replace("\u2264", "&le;")
     text = re.sub(r" {2,}", lambda m: "&nbsp;" * len(m.group(0)), text)
     text = re.sub(r'(?<!\\)"', r'\\"', text)
+    return text
+
+
+def escape_non_span_options(text):
+    text = text.replace("\n", "<br>")
+    text = text.replace("\%", "&#37;")
+    text = text.replace("\\u2265", "&ge;")
+    text = text.replace("\u2265", "&ge;")
+    text = text.replace("\\u2264", "&le;")
+    text = text.replace("\u2264", "&le;")
+    text = re.sub(r" {2,}", lambda m: "&nbsp;" * len(m.group(0)), text)
     return text
 
 
@@ -49,22 +69,26 @@ def escape_latex_within_span_options(text):
         content = content.replace("\\)", "")
         content = content.replace("\\[", "")
         content = content.replace("\\]", "")
+        # Remove newline characters
+        content = content.replace("\n", "")
         # Fix special characters
-        content = content.replace("&gt;", "\\gt")
-        content = content.replace("<", "\\lt")
-        content = content.replace(">", "\\gt")
+        content = content.replace("&gt;", " \\gt ")
+        content = content.replace("<", " \\lt ")
+        content = content.replace(">", " \\gt ")
+        content = content.replace("u2264", " leq ")
+        content = content.replace("u2265", " geq ")
         return f'<span class="katex" style="font-size: 0.9em;white-space: nowrap;">{content}{match.group(3)}'
 
-    text = re.sub(pattern, escape, text)
+    text = re.sub(pattern, escape, text, flags=re.DOTALL)
     return text
 
 
 def escape_text(text):
     pattern = r"(<span\s+class=\"katex\">.*?</span>)"
-    segments = re.split(pattern, text)
+    segments = re.split(pattern, text, flags=re.DOTALL)
 
     for i, seg in enumerate(segments):
-        if re.fullmatch(pattern, seg):
+        if re.fullmatch(pattern, seg, flags=re.DOTALL):
             segments[i] = escape_latex_within_span(seg)
         else:
             segments[i] = escape_non_span(seg)
@@ -80,7 +104,7 @@ def escape_option_text(text):
         if re.fullmatch(pattern, seg):
             segments[i] = escape_latex_within_span_options(seg)
         else:
-            segments[i] = seg
+            segments[i] = escape_non_span_options(seg)
 
     return "".join(segments)
 
