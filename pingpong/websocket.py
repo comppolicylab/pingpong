@@ -227,7 +227,7 @@ def ws_with_realtime_connection(func):
                         "voice": "alloy",
                         "turn_detection": {
                             "type": "semantic_vad",
-                            "eagerness": "medium",
+                            "eagerness": "high",
                         },
                         "instructions": conversation_instructions,
                     }
