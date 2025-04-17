@@ -4,22 +4,24 @@
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
   import {
     Button,
+    Span,
+    Modal,
     Dropdown,
     DropdownItem,
-    Heading,
-    Badge,
     DropdownDivider,
-    Span,
-    Modal
+    Tooltip
   } from 'flowbite-svelte';
   import {
     EyeSlashOutline,
-    ChevronDownOutline,
-    ArrowRightOutline,
     LockSolid,
     MicrophoneOutline,
     CirclePlusSolid,
-    MicrophoneSlashOutline
+    MicrophoneSlashOutline,
+    BadgeCheckOutline,
+    UsersOutline,
+    ChevronSortOutline,
+    CheckCircleSolid,
+    UserOutline
   } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
@@ -27,6 +29,7 @@
   import type { Assistant, FileUploadPurpose } from '$lib/api';
   import { loading, isFirefox } from '$lib/stores/general';
   import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
+  import Logo from '$lib/components/Logo.svelte';
 
   /**
    * Application data.
@@ -78,7 +81,10 @@
   $: assistants = data?.assistants || [];
   $: teachers = data?.supervisors || [];
   $: courseAssistants = assistants.filter((asst) => asst.endorsed);
-  $: otherAssistants = assistants.filter((asst) => !asst.endorsed);
+  $: myAssistantsAll = assistants.filter((asst) => asst.creator_id === data.me.user?.id);
+  $: myAssistants = myAssistantsAll.filter((asst) => !asst.endorsed);
+  $: otherAssistantsAll = assistants.filter((asst) => asst.creator_id !== data.me.user?.id);
+  $: otherAssistants = otherAssistantsAll.filter((asst) => !asst.endorsed);
   $: assistant = data?.assistants[0] || {};
   $: assistantMeta = getAssistantMetadata(assistant);
   // Whether billing is set up for the class (which controls everything).
@@ -217,7 +223,6 @@
     assistantDropdownOpen = false;
     await goto(`/group/${data.class.id}/?assistant=${asst.id}`);
   };
-
   const showModeratorsModal = () => {
     showModerators = true;
   };
@@ -229,123 +234,182 @@
     class:opacity-0={$loading}
   >
     {#if isConfigured}
-      <!-- Only show a picker if there are multiple assistants. -->
-      {#if assistants.length > 1}
-        <div class="pt-2 mt-4 relative flex items-center gap-2">
-          <p class="eyebrow eyebrow-dark">Change Assistant</p>
+      <Modal title="Group Moderators" bind:open={showModerators} autoclose outsideclose>
+        <ModeratorsTable moderators={teachers} />
+      </Modal>
+      <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+        <div class="flex flex-col items-center gap-2 lg:w-1/2 md:w-2/3 w-full text-center">
+          <div
+            class="mb-1 border rounded-full border-blue-light-30 p-2 bg-blue-light-50 w-16 h-16 flex items-center justify-center"
+          >
+            <Logo size={8} />
+          </div>
+          <div class="text-3xl font-medium">{assistant.name}</div>
+          <div class="flex flex-row gap-1 text-gray-400 text-sm font-normal items-center">
+            {#if assistantMeta.isCourseAssistant}
+              <BadgeCheckOutline size="sm" />
+              <span>Group assistant</span>
+            {:else if assistantMeta.isMyAssistant}
+              <UserOutline />
+              <span>Created by you</span>
+            {:else}
+              <UsersOutline />
+              <span>Created by {assistantMeta.creator}</span>
+            {/if}
+          </div>
+          {#if assistant.description}
+            <div class="text-gray-700 text-sm">{assistant.description}</div>
+          {/if}
           <Button
             pill
-            class="bg-blue-light-50 text-xs uppercase tracking-wide font-medium text-black border-solid border border-blue-dark-40"
-            >{assistant.name} <ChevronDownOutline class="w-3 h-3 ms-2" /></Button
+            class={'flex flex-row py-1 px-3 gap-0.5 border border-gray-300 text-gray-600 text-xs hover:bg-gray-50 transition-all items-center' +
+              (assistantDropdownOpen ? ' bg-gray-50' : '')}
+            type="button"
           >
-
-          <Dropdown class="max-h-60 overflow-y-auto w-60" bind:open={assistantDropdownOpen}>
+            <span class="text-xs font-normal text-center"> Change assistant </span>
+            <ChevronSortOutline class="text-gray-500" size="xs" />
+          </Button>
+          <Dropdown
+            class="p-3 h-full"
+            classContainer="rounded-3xl lg:w-1/3 md:w-1/2 w-2/3 border border-gray-100 max-h-[40%] overflow-y-auto"
+            bind:open={assistantDropdownOpen}
+          >
             <!-- Show course assistants first -->
+            {#if courseAssistants.length > 0}
+              <DropdownItem
+                class="normal-case tracking-tight font-normal hover:bg-none pointer-events-none select-none text-gray-400 pb-1"
+              >
+                Group assistants
+              </DropdownItem>
+            {/if}
+
             {#each courseAssistants as asst}
               <DropdownItem
                 on:click={() => selectAi(asst)}
                 on:touchstart={() => selectAi(asst)}
-                class="uppercase tracking-wide font-medium"
+                class="normal-case tracking-tight font-normal rounded rounded-lg hover:bg-gray-100 select-none max-w-full group"
               >
-                {#if !asst.published}
-                  <EyeSlashOutline size="sm" class="inline-block mr-2 text-gray-400" />
-                {/if}
-                {asst.name}
-                <div>
-                  <Badge class="bg-blue-light-50 mt-1 text-blue-dark-30 text-xs normal-case"
-                    >Group assistant</Badge
-                  >
+                <div class="flex flex-row justify-between gap-5 max-w-full items-center">
+                  <div class="flex flex-col gap-1 w-10/12">
+                    <div class="text-sm leading-snug">
+                      {#if asst.interaction_mode === 'voice'}
+                        <MicrophoneOutline
+                          size="sm"
+                          class="inline align-text-bottom text-gray-400"
+                        />
+                        <Tooltip>Voice mode assistant</Tooltip>
+                      {/if}
+                      {asst.name}
+                    </div>
+                    {#if asst.description}
+                      <div class="text-xs text-gray-500 truncate">
+                        {asst.description}
+                      </div>
+                    {/if}
+                  </div>
+
+                  {#if assistant.id === asst.id}
+                    <CheckCircleSolid size="md" class="text-blue-dark-40 group-hover:hidden" />
+                  {/if}
                 </div>
               </DropdownItem>
             {/each}
 
             <!-- Show a divider if necessary -->
-            {#if otherAssistants.length > 0 && courseAssistants.length > 0}
+            {#if myAssistants.length > 0 && courseAssistants.length > 0}
               <DropdownDivider />
             {/if}
 
-            <!-- Show non-course assistants -->
-            {#each otherAssistants as asst}
-              {@const meta = getAssistantMetadata(asst)}
+            <!-- Show the user's assistants -->
+            {#if myAssistants.length > 0}
               <DropdownItem
-                on:click={() => selectAi(asst)}
-                on:touchstart={() => selectAi(asst)}
-                class="uppercase tracking-wide font-medium"
+                class="normal-case tracking-tight font-normal hover:bg-none pointer-events-none select-none text-gray-400 pb-1"
               >
-                {#if !asst.published}
-                  <EyeSlashOutline size="sm" class="inline-block mr-2 text-gray-400" />
-                {/if}
-                {asst.name}
-                <div>
-                  {#if meta.isCourseAssistant}
-                    <Badge class="bg-blue-light-50 mt-1 text-blue-dark-30 text-xs normal-case"
-                      >Group assistant</Badge
-                    >
-                  {:else if meta.isMyAssistant}
-                    <Badge class="bg-blue-light-50 mt-1 text-blue-dark-30 text-xs normal-case"
-                      >My assistant</Badge
-                    >
-                  {:else}
-                    <Badge class="bg-blue-light-50 mt-1 text-blue-dark-30 text-xs normal-case"
-                      >{meta.creator}</Badge
-                    >
-                  {/if}
-                </div>
+                Your assistants
               </DropdownItem>
-            {/each}
+
+              {#each myAssistants as asst}
+                <DropdownItem
+                  on:click={() => selectAi(asst)}
+                  on:touchstart={() => selectAi(asst)}
+                  class="normal-case tracking-tight font-normal rounded rounded-lg hover:bg-gray-100 select-none max-w-full group"
+                >
+                  <div class="flex flex-row justify-between gap-5 max-w-full items-center">
+                    <div class="flex flex-col gap-1 w-10/12">
+                      <div class="text-sm leading-snug">
+                        {#if asst.interaction_mode === 'voice'}
+                          <MicrophoneOutline
+                            size="sm"
+                            class="inline align-text-bottom text-gray-400"
+                          />
+                          <Tooltip>Voice mode assistant</Tooltip>
+                        {/if}
+                        {asst.name}
+                      </div>
+                      {#if asst.description}
+                        <div class="text-xs text-gray-500 truncate">
+                          {asst.description}
+                        </div>
+                      {/if}
+                    </div>
+
+                    {#if assistant.id === asst.id}
+                      <CheckCircleSolid size="md" class="text-blue-dark-40 group-hover:hidden" />
+                    {/if}
+                  </div>
+                </DropdownItem>
+              {/each}
+            {/if}
+            <!-- Show a divider if necessary -->
+            {#if otherAssistants.length > 0 && (myAssistants.length > 0 || courseAssistants.length > 0)}
+              <DropdownDivider />
+            {/if}
+
+            <!-- Show the user's assistants -->
+            {#if otherAssistants.length > 0}
+              <DropdownItem
+                class="normal-case tracking-tight font-normal hover:bg-none pointer-events-none select-none text-gray-400 pb-1"
+              >
+                Other assistants
+              </DropdownItem>
+
+              {#each otherAssistants as asst}
+                <DropdownItem
+                  on:click={() => selectAi(asst)}
+                  on:touchstart={() => selectAi(asst)}
+                  class="normal-case tracking-tight font-normal rounded rounded-lg hover:bg-gray-100 select-none max-w-full group"
+                >
+                  <div class="flex flex-row justify-between gap-5 max-w-full items-center">
+                    <div class="flex flex-col gap-1 w-10/12">
+                      <div class="text-sm leading-snug">
+                        {#if asst.interaction_mode === 'voice'}
+                          <MicrophoneOutline
+                            size="sm"
+                            class="inline align-text-bottom text-gray-400"
+                          />
+                          <Tooltip>Voice mode assistant</Tooltip>
+                        {/if}
+                        {asst.name}
+                      </div>
+                      {#if asst.description}
+                        <div class="text-xs text-gray-500 truncate">
+                          {asst.description}
+                        </div>
+                      {/if}
+                    </div>
+
+                    {#if assistant.id === asst.id}
+                      <CheckCircleSolid size="md" class="text-blue-dark-40 group-hover:hidden" />
+                    {/if}
+                  </div>
+                </DropdownItem>
+              {/each}
+            {/if}
           </Dropdown>
         </div>
-      {/if}
-
-      <div class="relative bg-blue-light-40 rounded-2xl my-8 max-w-md mb-auto">
-        <div class="min-h-0 overflow-y-auto bg-blue-light-50 p-6 rounded-2xl">
-          <div>
-            <p class="eyebrow eyebrow-dark">Current assistant</p>
-            <Heading tag="h3" class="font-normal tracking-wide text-3xl mb-1"
-              >{assistant.name}</Heading
-            >
-          </div>
-          <div class="mb-6">
-            {#if assistantMeta.isCourseAssistant}
-              <Badge class="bg-blue-light-40 mt-1 text-blue-dark-30 text-xs normal-case"
-                >Group assistant</Badge
-              >
-            {:else if assistantMeta.isMyAssistant}
-              <Badge class="bg-blue-light-40 mt-1 text-blue-dark-30 text-xs normal-case"
-                >My assistant</Badge
-              >
-            {:else}
-              <Badge class="bg-blue-light-40 mt-1 text-blue-dark-30 text-xs normal-case"
-                >{assistantMeta.creator}</Badge
-              >
-            {/if}
-          </div>
-          {#if assistant.description}
-            <div class="dark:text-white text-gray-500 eyebrow eyebrow-dark">
-              Notes for this assistant
-            </div>
-            <div class="pb-12 overflow-y-auto">{assistant.description}</div>
-          {/if}
-        </div>
-        {#if assistants.length > 1}
-          <div class="absolute bottom-5 right-4">
-            <a
-              href={`/group/${data.class.id}/assistant`}
-              class="bg-orange-light text-orange-dark rounded rounded-2xl p-2 text-xs px-4 pr-2 hover:bg-orange-dark hover:text-orange-light transition-all"
-              >View all assistants <ArrowRightOutline
-                size="md"
-                class="text-orange-dark inline-block ml-1"
-              /></a
-            >
-          </div>
-        {/if}
-      </div>
-      <Modal title="Group Moderators" bind:open={showModerators} autoclose outsideclose>
-        <ModeratorsTable moderators={teachers} />
-      </Modal>
-      {#if assistant.interaction_mode === 'voice'}
-        {#if $isFirefox}
-          <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+        {#if assistant.interaction_mode === 'voice'}
+          <div class="h-[5%] max-h-8"></div>
+          {#if $isFirefox}
             <div class="bg-blue-light-50 p-3 rounded-lg">
               <MicrophoneSlashOutline size="xl" class="text-blue-dark-40" />
             </div>
@@ -358,9 +422,7 @@
                 experience, please use Safari, Chrome, or Edge in the meantime.
               </p>
             </div>
-          </div>
-        {:else}
-          <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+          {:else}
             <div class="bg-blue-light-50 p-3 rounded-lg">
               <MicrophoneOutline size="xl" class="text-blue-dark-40" />
             </div>
@@ -381,44 +443,46 @@
                 <span class="text-sm font-normal text-center"> Create session </span>
               </Button>
             </div>
+          {/if}
+        {:else if assistant.interaction_mode === 'chat'}
+          <div class="h-[8%] max-h-16"></div>
+          <div class="flex flex-col items-center w-full lg:w-3/5 md:w-3/4">
+            <ChatInput
+              mimeType={data.uploadInfo.mimeType}
+              maxSize={data.uploadInfo.private_file_max_size}
+              loading={$loading || !!$navigating}
+              canSubmit={true}
+              visionAcceptedFiles={supportsVision && allowVisionUpload
+                ? data.uploadInfo.fileTypes({
+                    file_search: false,
+                    code_interpreter: false,
+                    vision: true
+                  })
+                : null}
+              {visionSupportOverride}
+              {useImageDescriptions}
+              fileSearchAcceptedFiles={supportsFileSearch
+                ? data.uploadInfo.fileTypes({
+                    file_search: true,
+                    code_interpreter: false,
+                    vision: false
+                  })
+                : null}
+              codeInterpreterAcceptedFiles={supportsCodeInterpreter
+                ? data.uploadInfo.fileTypes({
+                    file_search: false,
+                    code_interpreter: true,
+                    vision: false
+                  })
+                : null}
+              upload={handleUpload}
+              remove={handleRemove}
+              on:submit={handleSubmit}
+            />
           </div>
         {/if}
-      {/if}
+      </div>
       <div class="shrink-0 grow-0">
-        {#if assistant.interaction_mode === 'chat'}
-          <ChatInput
-            mimeType={data.uploadInfo.mimeType}
-            maxSize={data.uploadInfo.private_file_max_size}
-            loading={$loading || !!$navigating}
-            canSubmit={true}
-            visionAcceptedFiles={supportsVision && allowVisionUpload
-              ? data.uploadInfo.fileTypes({
-                  file_search: false,
-                  code_interpreter: false,
-                  vision: true
-                })
-              : null}
-            {visionSupportOverride}
-            {useImageDescriptions}
-            fileSearchAcceptedFiles={supportsFileSearch
-              ? data.uploadInfo.fileTypes({
-                  file_search: true,
-                  code_interpreter: false,
-                  vision: false
-                })
-              : null}
-            codeInterpreterAcceptedFiles={supportsCodeInterpreter
-              ? data.uploadInfo.fileTypes({
-                  file_search: false,
-                  code_interpreter: true,
-                  vision: false
-                })
-              : null}
-            upload={handleUpload}
-            remove={handleRemove}
-            on:submit={handleSubmit}
-          />
-        {/if}
         <input type="hidden" name="assistant_id" bind:value={assistant.id} />
         <input type="hidden" name="parties" bind:value={parties} />
         <div class="my-3">
