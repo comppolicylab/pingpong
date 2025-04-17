@@ -2,7 +2,15 @@
   import { afterNavigate, goto } from '$app/navigation';
   import { navigating, page } from '$app/stores';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
-  import { Button, Span, Modal } from 'flowbite-svelte';
+  import {
+    Button,
+    Span,
+    Modal,
+    Dropdown,
+    DropdownItem,
+    DropdownDivider,
+    Tooltip
+  } from 'flowbite-svelte';
   import {
     EyeSlashOutline,
     LockSolid,
@@ -10,7 +18,10 @@
     CirclePlusSolid,
     MicrophoneSlashOutline,
     BadgeCheckOutline,
-    UsersOutline
+    UsersOutline,
+    ChevronSortOutline,
+    CheckCircleSolid,
+    UserOutline
   } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
@@ -69,6 +80,11 @@
   // Currently selected assistant.
   $: assistants = data?.assistants || [];
   $: teachers = data?.supervisors || [];
+  $: courseAssistants = assistants.filter((asst) => asst.endorsed);
+  $: myAssistantsAll = assistants.filter((asst) => asst.creator_id === data.me.user?.id);
+  $: myAssistants = myAssistantsAll.filter((asst) => !asst.endorsed);
+  $: otherAssistantsAll = assistants.filter((asst) => asst.creator_id !== data.me.user?.id);
+  $: otherAssistants = otherAssistantsAll.filter((asst) => !asst.endorsed);
   $: assistant = data?.assistants[0] || {};
   $: assistantMeta = getAssistantMetadata(assistant);
   // Whether billing is set up for the class (which controls everything).
@@ -201,6 +217,12 @@
     }
   };
 
+  let assistantDropdownOpen = false;
+  // Set the new assistant selection.
+  const selectAi = async (asst: Assistant) => {
+    assistantDropdownOpen = false;
+    await goto(`/group/${data.class.id}/?assistant=${asst.id}`);
+  };
   const showModeratorsModal = () => {
     showModerators = true;
   };
@@ -228,15 +250,162 @@
               <BadgeCheckOutline size="sm" />
               <span>Group assistant</span>
             {:else if assistantMeta.isMyAssistant}
+              <UserOutline />
               <span>Created by you</span>
             {:else}
               <UsersOutline />
-              Created by {assistantMeta.creator}
+              <span>Created by {assistantMeta.creator}</span>
             {/if}
           </div>
           {#if assistant.description}
             <div class="text-gray-700 text-sm">{assistant.description}</div>
           {/if}
+          <Button
+            pill
+            class={'flex flex-row py-1 px-3 gap-0.5 border border-gray-300 text-gray-600 text-xs hover:bg-gray-50 transition-all items-center' +
+              (assistantDropdownOpen ? ' bg-gray-50' : '')}
+            type="button"
+          >
+            <span class="text-xs font-normal text-center"> Change assistant </span>
+            <ChevronSortOutline class="text-gray-500" size="xs" />
+          </Button>
+          <Dropdown
+            class="p-3 h-full"
+            classContainer="rounded-3xl lg:w-1/3 md:w-1/2 w-2/3 border border-gray-100 max-h-[40%] overflow-y-auto"
+            bind:open={assistantDropdownOpen}
+          >
+            <!-- Show course assistants first -->
+            {#if courseAssistants.length > 0}
+              <DropdownItem
+                class="normal-case tracking-tight font-normal hover:bg-none pointer-events-none select-none text-gray-400 pb-1"
+              >
+                Group assistants
+              </DropdownItem>
+            {/if}
+
+            {#each courseAssistants as asst}
+              <DropdownItem
+                on:click={() => selectAi(asst)}
+                on:touchstart={() => selectAi(asst)}
+                class="normal-case tracking-tight font-normal rounded rounded-lg hover:bg-gray-100 select-none max-w-full group"
+              >
+                <div class="flex flex-row justify-between gap-5 max-w-full items-center">
+                  <div class="flex flex-col gap-1 w-10/12">
+                    <div class="text-sm leading-snug">
+                      {#if asst.interaction_mode === 'voice'}
+                        <MicrophoneOutline
+                          size="sm"
+                          class="inline align-text-bottom text-gray-400"
+                        />
+                        <Tooltip>Voice mode assistant</Tooltip>
+                      {/if}
+                      {asst.name}
+                    </div>
+                    {#if asst.description}
+                      <div class="text-xs text-gray-500 truncate">
+                        {asst.description}
+                      </div>
+                    {/if}
+                  </div>
+
+                  {#if assistant.id === asst.id}
+                    <CheckCircleSolid size="md" class="text-blue-dark-40 group-hover:hidden" />
+                  {/if}
+                </div>
+              </DropdownItem>
+            {/each}
+
+            <!-- Show a divider if necessary -->
+            {#if myAssistants.length > 0 && courseAssistants.length > 0}
+              <DropdownDivider />
+            {/if}
+
+            <!-- Show the user's assistants -->
+            {#if myAssistants.length > 0}
+              <DropdownItem
+                class="normal-case tracking-tight font-normal hover:bg-none pointer-events-none select-none text-gray-400 pb-1"
+              >
+                Your assistants
+              </DropdownItem>
+
+              {#each myAssistants as asst}
+                <DropdownItem
+                  on:click={() => selectAi(asst)}
+                  on:touchstart={() => selectAi(asst)}
+                  class="normal-case tracking-tight font-normal rounded rounded-lg hover:bg-gray-100 select-none max-w-full group"
+                >
+                  <div class="flex flex-row justify-between gap-5 max-w-full items-center">
+                    <div class="flex flex-col gap-1 w-10/12">
+                      <div class="text-sm leading-snug">
+                        {#if asst.interaction_mode === 'voice'}
+                          <MicrophoneOutline
+                            size="sm"
+                            class="inline align-text-bottom text-gray-400"
+                          />
+                          <Tooltip>Voice mode assistant</Tooltip>
+                        {/if}
+                        {asst.name}
+                      </div>
+                      {#if asst.description}
+                        <div class="text-xs text-gray-500 truncate">
+                          {asst.description}
+                        </div>
+                      {/if}
+                    </div>
+
+                    {#if assistant.id === asst.id}
+                      <CheckCircleSolid size="md" class="text-blue-dark-40 group-hover:hidden" />
+                    {/if}
+                  </div>
+                </DropdownItem>
+              {/each}
+            {/if}
+            <!-- Show a divider if necessary -->
+            {#if otherAssistants.length > 0 && (myAssistants.length > 0 || courseAssistants.length > 0)}
+              <DropdownDivider />
+            {/if}
+
+            <!-- Show the user's assistants -->
+            {#if otherAssistants.length > 0}
+              <DropdownItem
+                class="normal-case tracking-tight font-normal hover:bg-none pointer-events-none select-none text-gray-400 pb-1"
+              >
+                Other assistants
+              </DropdownItem>
+
+              {#each otherAssistants as asst}
+                <DropdownItem
+                  on:click={() => selectAi(asst)}
+                  on:touchstart={() => selectAi(asst)}
+                  class="normal-case tracking-tight font-normal rounded rounded-lg hover:bg-gray-100 select-none max-w-full group"
+                >
+                  <div class="flex flex-row justify-between gap-5 max-w-full items-center">
+                    <div class="flex flex-col gap-1 w-10/12">
+                      <div class="text-sm leading-snug">
+                        {#if asst.interaction_mode === 'voice'}
+                          <MicrophoneOutline
+                            size="sm"
+                            class="inline align-text-bottom text-gray-400"
+                          />
+                          <Tooltip>Voice mode assistant</Tooltip>
+                        {/if}
+                        {asst.name}
+                      </div>
+                      {#if asst.description}
+                        <div class="text-xs text-gray-500 truncate">
+                          {asst.description}
+                        </div>
+                      {/if}
+                    </div>
+
+                    {#if assistant.id === asst.id}
+                      <CheckCircleSolid size="md" class="text-blue-dark-40 group-hover:hidden" />
+                    {/if}
+                  </div>
+                </DropdownItem>
+              {/each}
+            {/if}
+          </Dropdown>
         </div>
         {#if assistant.interaction_mode === 'voice'}
           <div class="h-[5%] max-h-8"></div>
