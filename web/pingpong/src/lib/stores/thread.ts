@@ -507,7 +507,7 @@ export class ThreadManager {
         { type: 'text', text: { value: optimisticMessageContent, annotations: [] } },
         ...optimisticImageContent
       ],
-      created_at: Date.now(),
+      created_at: Math.floor(Date.now() / 1000),
       metadata: { user_id: fromUserId, is_current_user: true },
       assistant_id: '',
       thread_id: '',
@@ -634,7 +634,7 @@ export class ThreadManager {
                   // will be sequential to the optimistic messages.
                   // When the thread is reloaded, the real timestamps will be
                   // somewhat different.
-                  created_at: Date.now()
+                  created_at: Math.floor(Date.now() / 1000)
                 }
               ]
             }
@@ -699,7 +699,7 @@ export class ThreadManager {
         d.data?.messages.push({
           role: 'assistant',
           content: [],
-          created_at: Date.now(),
+          created_at: Math.floor(Date.now() / 1000),
           id: `optimistic-${(Math.random() + 1).toString(36).substring(2)}`,
           assistant_id: '',
           thread_id: '',
