@@ -15,7 +15,8 @@
     DropdownItem,
     Modal,
     Span,
-    Spinner
+    Spinner,
+    Tooltip
   } from 'flowbite-svelte';
   import { DoubleBounce } from 'svelte-loading-spinners';
   import Markdown from '$lib/components/Markdown.svelte';
@@ -47,6 +48,7 @@
   import { isFirefox } from '$lib/stores/general';
   export let data;
 
+  $: userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   $: classId = parseInt($page.params.classId);
   $: threadId = parseInt($page.params.threadId);
   $: threadMgr = new ThreadManager(
@@ -151,6 +153,29 @@
     }
   }
   let showModerators = false;
+
+  const getShortMessageTimestamp = (timestamp: number) => {
+    return new Intl.DateTimeFormat('en-US', {
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: true,
+      timeZone: userTimezone
+    }).format(new Date(timestamp * 1000));
+  };
+
+  const getMessageTimestamp = (timestamp: number) => {
+    return new Intl.DateTimeFormat('en-US', {
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      hour12: true,
+      timeZoneName: 'short',
+      timeZone: userTimezone
+    }).format(new Date(timestamp * 1000));
+  };
 
   let currentMessageAttachments: api.ServerFile[] = [];
   // Get the name of the participant in the chat thread.
@@ -674,7 +699,17 @@
           {/if}
         </div>
         <div class="max-w-full w-full">
-          <div class="font-semibold text-blue-dark-40 mb-2 mt-1">{getName(message.data)}</div>
+          <div class="font-semibold text-blue-dark-40 mb-2 mt-1">
+            {getName(message.data)}
+            <span
+              class="text-gray-500 text-xs font-normal ml-1 hover:underline"
+              id={`short-timestamp-${message.data.id}`}
+              >{getShortMessageTimestamp(message.data.created_at)}</span
+            >
+          </div>
+          <Tooltip triggeredBy={`#short-timestamp-${message.data.id}`}>
+            {getMessageTimestamp(message.data.created_at)}
+          </Tooltip>
           {#each message.data.content as content}
             {#if content.type === 'text'}
               {@const { clean_string, images } = processString(content.text.value)}

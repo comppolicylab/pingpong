@@ -500,6 +500,7 @@ export class ThreadManager {
     }
 
     const optimisticMessageContent = message + visionImageDescriptionsString;
+    const optimisticTimestamp = Date.now();
     const optimistic: api.OpenAIMessage = {
       id: optimisticMsgId,
       role: 'user',
@@ -507,7 +508,7 @@ export class ThreadManager {
         { type: 'text', text: { value: optimisticMessageContent, annotations: [] } },
         ...optimisticImageContent
       ],
-      created_at: Date.now(),
+      created_at: Math.floor(optimisticTimestamp / 1000),
       metadata: { user_id: fromUserId, is_current_user: true },
       assistant_id: '',
       thread_id: '',
@@ -634,7 +635,7 @@ export class ThreadManager {
                   // will be sequential to the optimistic messages.
                   // When the thread is reloaded, the real timestamps will be
                   // somewhat different.
-                  created_at: Date.now()
+                  created_at: Math.floor(Date.now() / 1000)
                 }
               ]
             }
