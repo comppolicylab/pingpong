@@ -145,7 +145,7 @@
 </script>
 
 <Sidebar
-  asideClass="absolute top-0 left-0 z-0 w-[90%] px-2 h-[100dvh] lg:static lg:h-full lg:w-full"
+  asideClass="absolute top-0 left-0 z-0 w-[90%] px-2 h-full lg:static lg:h-full lg:w-full"
   activeUrl={$page.url.pathname}
 >
   <SidebarWrapper class="bg-transparent h-full flex flex-col">
@@ -211,119 +211,121 @@
         />
       </SidebarGroup>
     {:else}
-      <SidebarGroup ulClass="flex flex-wrap justify-between gap-2 items-center mt-4">
-        <span class="flex-1 truncate text-white">Group Assistants</span>
-        <Button
-          href={`/group/${currentClassId}/assistant`}
-          class="text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap justify-between gap-2 items-center"
-          disabled={!currentClassId}
-        >
-          <span class="text-xs">View All</span><ArrowRightOutline
-            size="md"
-            class="text-white inline-block p-0.5 ml-1 rounded-full bg-blue-dark-30"
-          />
-        </Button>
-      </SidebarGroup>
-      <SidebarGroup border class={'border-blue-dark-40 border-t-3 pt-1 mt-1'} ulClass="space-y-0">
-        {#each assistantsToShow as assistant}
-          <SidebarItem
-            class={'text-sm text-white p-2 rounded-lg flex flex-wrap gap-2 truncate ' +
-              (currentAssistantIdQuery === assistant.id
-                ? 'bg-orange-dark hover:bg-orange'
-                : 'hover:bg-blue-dark-30')}
-            spanClass="flex-1 truncate"
-            href={`/group/${currentClassId}?assistant=${assistant.id}`}
-            label={assistant.name || 'Unknown Assistant'}
+      <SidebarGroup class="flex flex-col overflow-y-auto mt-6 pr-3" ulClass="flex-1">
+        <SidebarGroup ulClass="flex flex-wrap justify-between gap-2 items-center mt-4">
+          <span class="flex-1 truncate text-white">Group Assistants</span>
+          <Button
+            href={`/group/${currentClassId}/assistant`}
+            class="text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap justify-between gap-2 items-center"
+            disabled={!currentClassId}
           >
-            <svelte:fragment slot="icon">
-              {#if assistantMetadata[assistant.id].isCourseAssistant}
-                <BadgeCheckOutline size="sm" class="text-white" />
-                <Tooltip>Group assistant</Tooltip>
-              {:else if assistantMetadata[assistant.id].isMyAssistant}
-                <UserOutline size="sm" class="text-white" />
-                <Tooltip>Created by you</Tooltip>
-              {:else}
-                <UsersOutline size="sm" class="text-white" />
-                <Tooltip>Shared by {assistantMetadata[assistant.id].creator}</Tooltip>
-              {/if}
-              {#if assistant.interaction_mode === 'voice'}
-                <MicrophoneOutline size="sm" class="text-white" />
-                <Tooltip>Voice mode assistant</Tooltip>
-              {/if}
-            </svelte:fragment>
-          </SidebarItem>
-        {/each}
-        {#if !assistantsToShow.length}
-          <div class="text-sm font-light text-white p-2 rounded flex flex-wrap gap-2">
-            {currentClassId ? 'No assistants available' : 'No group selected'}
-          </div>
-        {/if}
-      </SidebarGroup>
+            <span class="text-xs">View All</span><ArrowRightOutline
+              size="md"
+              class="text-white inline-block p-0.5 ml-1 rounded-full bg-blue-dark-30"
+            />
+          </Button>
+        </SidebarGroup>
+        <SidebarGroup border class={'border-blue-dark-40 border-t-3 pt-1 mt-1'} ulClass="space-y-0">
+          {#each assistantsToShow as assistant}
+            <SidebarItem
+              class={'text-sm text-white p-2 rounded-lg flex flex-wrap gap-2 truncate ' +
+                (currentAssistantIdQuery === assistant.id
+                  ? 'bg-orange-dark hover:bg-orange'
+                  : 'hover:bg-blue-dark-30')}
+              spanClass="flex-1 truncate"
+              href={`/group/${currentClassId}?assistant=${assistant.id}`}
+              label={assistant.name || 'Unknown Assistant'}
+            >
+              <svelte:fragment slot="icon">
+                {#if assistantMetadata[assistant.id].isCourseAssistant}
+                  <BadgeCheckOutline size="sm" class="text-white" />
+                  <Tooltip>Group assistant</Tooltip>
+                {:else if assistantMetadata[assistant.id].isMyAssistant}
+                  <UserOutline size="sm" class="text-white" />
+                  <Tooltip>Created by you</Tooltip>
+                {:else}
+                  <UsersOutline size="sm" class="text-white" />
+                  <Tooltip>Shared by {assistantMetadata[assistant.id].creator}</Tooltip>
+                {/if}
+                {#if assistant.interaction_mode === 'voice'}
+                  <MicrophoneOutline size="sm" class="text-white" />
+                  <Tooltip>Voice mode assistant</Tooltip>
+                {/if}
+              </svelte:fragment>
+            </SidebarItem>
+          {/each}
+          {#if !assistantsToShow.length}
+            <div class="text-sm font-light text-white p-2 rounded flex flex-wrap gap-2">
+              {currentClassId ? 'No assistants available' : 'No group selected'}
+            </div>
+          {/if}
+        </SidebarGroup>
 
-      <SidebarGroup ulClass="flex flex-wrap justify-between gap-2 items-center mt-4">
-        <span class="flex-1 truncate text-white">Recent Threads</span>
-        <Button
-          href={`/threads`}
-          class="text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap justify-between gap-2 items-center"
-          disabled={threads.length === 0}
+        <SidebarGroup ulClass="flex flex-wrap justify-between gap-2 items-center mt-4">
+          <span class="flex-1 truncate text-white">Recent Threads</span>
+          <Button
+            href={`/threads`}
+            class="text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap justify-between gap-2 items-center"
+            disabled={threads.length === 0}
+          >
+            <span class="text-xs">View All</span><ArrowRightOutline
+              size="md"
+              class="text-white inline-block p-0.5 ml-1 rounded-full bg-blue-dark-30"
+            />
+          </Button>
+        </SidebarGroup>
+        <SidebarGroup
+          border
+          class="flex flex-col flex-1 border-blue-dark-40 border-t-3 pt-1 mt-1"
+          ulClass="space-y-0 flex-1"
         >
-          <span class="text-xs">View All</span><ArrowRightOutline
-            size="md"
-            class="text-white inline-block p-0.5 ml-1 rounded-full bg-blue-dark-30"
-          />
-        </Button>
-      </SidebarGroup>
-      <SidebarGroup
-        border
-        class="overflow-y-auto h-full border-blue-dark-40 border-t-3 pt-1 mt-1"
-        ulClass="space-y-0"
-      >
-        {#each threads as thread}
-          <SidebarItem
-            class="text-sm text-white hover:bg-blue-dark-30 p-2 rounded flex flex-wrap gap-2 rounded-lg"
-            spanClass="flex-1 truncate"
-            href={`/group/${thread.class_id}/thread/${thread.id}`}
-            label={thread.name || 'New Conversation'}
-            activeClass="bg-blue-dark-40"
-          >
-            <svelte:fragment slot="icon">
-              <span class="eyebrow w-full"
-                ><div class="flex flex-row gap-1">
-                  <h4 class="shrink-0">
-                    {classesById[thread.class_id].name}
-                  </h4>
-                  <h4 class="shrink-0">|</h4>
-                  <h4 class="shrink truncate">
-                    {Object.values(thread.assistant_names || { 1: 'Unknown Assistant' }).join(', ')}
-                  </h4>
-                </div></span
-              >
-              {#if thread.private}
-                <EyeSlashOutline size="sm" class="text-white" />
-              {:else}
-                <EyeOutline size="sm" class="text-white" />
-              {/if}
-              {#if thread.interaction_mode === 'voice'}
-                <MicrophoneOutline size="sm" class="text-white" />
-              {/if}
-            </svelte:fragment>
+          {#each threads as thread}
+            <SidebarItem
+              class="text-sm text-white hover:bg-blue-dark-30 p-2 rounded flex flex-wrap gap-2 rounded-lg"
+              spanClass="flex-1 truncate"
+              href={`/group/${thread.class_id}/thread/${thread.id}`}
+              label={thread.name || 'New Conversation'}
+              activeClass="bg-blue-dark-40"
+            >
+              <svelte:fragment slot="icon">
+                <span class="eyebrow w-full"
+                  ><div class="flex flex-row gap-1">
+                    <h4 class="shrink-0">
+                      {classesById[thread.class_id].name}
+                    </h4>
+                    <h4 class="shrink-0">|</h4>
+                    <h4 class="shrink truncate">
+                      {Object.values(thread.assistant_names || { 1: 'Unknown Assistant' }).join(
+                        ', '
+                      )}
+                    </h4>
+                  </div></span
+                >
+                {#if thread.private}
+                  <EyeSlashOutline size="sm" class="text-white" />
+                {:else}
+                  <EyeOutline size="sm" class="text-white" />
+                {/if}
+                {#if thread.interaction_mode === 'voice'}
+                  <MicrophoneOutline size="sm" class="text-white" />
+                {/if}
+              </svelte:fragment>
 
-            <svelte:fragment slot="subtext">
-              <span class="text-xs text-gray-400 w-full"
-                >{dayjs.utc(thread.last_activity).fromNow()}</span
-              >
-            </svelte:fragment>
-          </SidebarItem>
-        {/each}
-        {#if !threads.length}
-          <div
-            class="h-full text-sm text-white p-2 shrink-0 flex flex-col items-center justify-center"
-          >
-            <InboxOutline class="text-white mb-2 w-16 h-16" strokeWidth="1" />
-            <span class="text-center font-medium text-lg">No recent threads</span>
-            <span class="text-center font-light">Start a new chat to get started</span>
-          </div>
-        {/if}
+              <svelte:fragment slot="subtext">
+                <span class="text-xs text-gray-400 w-full"
+                  >{dayjs.utc(thread.last_activity).fromNow()}</span
+                >
+              </svelte:fragment>
+            </SidebarItem>
+          {/each}
+          {#if !threads.length}
+            <div class="flex-1 flex flex-col items-center justify-center text-sm text-white p-2">
+              <InboxOutline class="text-white mb-2 w-16 h-16" strokeWidth="1" />
+              <span class="text-center font-medium text-lg">No recent threads</span>
+              <span class="text-center font-light">Start a new chat to get started</span>
+            </div>
+          {/if}
+        </SidebarGroup>
       </SidebarGroup>
 
       <SidebarGroup class="mt-auto border-blue-dark-40 border-t-3" border>
