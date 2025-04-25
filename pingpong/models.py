@@ -1673,6 +1673,7 @@ class Assistant(Base):
     model = Column(String)
     temperature = Column(Float, nullable=True)
     reasoning_effort = Column(Integer, nullable=True)
+    assistant_should_message_first = Column(Boolean, server_default="false")
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="assistants", foreign_keys=[class_id])
     threads = relationship("Thread", back_populates="assistant")

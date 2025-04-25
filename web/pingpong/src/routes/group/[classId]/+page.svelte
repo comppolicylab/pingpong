@@ -21,7 +21,8 @@
     UsersOutline,
     ChevronSortOutline,
     CheckCircleSolid,
-    UserOutline
+    UserOutline,
+    PaperPlaneOutline
   } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
@@ -154,6 +155,40 @@
         await api.createAudioThread(fetch, data.class.id, {
           assistant_id: assistant.id,
           parties: partyIds
+        })
+      );
+      data.threads = [newThread as api.Thread, ...data.threads];
+      $loading = false;
+      await goto(`/group/${$page.params.classId}/thread/${newThread.id}`);
+    } catch (e) {
+      $loading = false;
+      sadToast(
+        `Failed to create thread. Error: ${errorMessage(e, "Something went wrong while creating your conversation. If the issue persists, check PingPong's status page for updates.")}`
+      );
+    }
+  };
+
+  const handleChatThreadCreate = async (e: Event) => {
+    $loading = true;
+    const partyIds = parties ? parties.split(',').map((id) => parseInt(id, 10)) : [];
+    const tools: api.Tool[] = [];
+    if (supportsFileSearch) {
+      tools.push({ type: 'file_search' });
+    }
+    if (supportsCodeInterpreter) {
+      tools.push({ type: 'code_interpreter' });
+    }
+    try {
+      const newThread = api.explodeResponse(
+        await api.createThread(fetch, data.class.id, {
+          assistant_id: assistant.id,
+          parties: partyIds,
+          message: null,
+          tools_available: tools,
+          code_interpreter_file_ids: [],
+          file_search_file_ids: [],
+          vision_file_ids: [],
+          vision_image_descriptions: []
         })
       );
       data.threads = [newThread as api.Thread, ...data.threads];
@@ -446,7 +481,7 @@
               </Button>
             </div>
           {/if}
-        {:else if assistant.interaction_mode === 'chat'}
+        {:else if assistant.interaction_mode === 'chat' && !(assistant.assistant_should_message_first ?? false)}
           <div class="h-[8%] max-h-16"></div>
           <div class="flex flex-col items-center w-full lg:w-3/5 md:w-3/4">
             <ChatInput
@@ -481,6 +516,24 @@
               remove={handleRemove}
               on:submit={handleSubmit}
             />
+          </div>
+        {:else if assistant.interaction_mode === 'chat' && (assistant.assistant_should_message_first ?? false)}
+          <div class="h-[5%] max-h-8"></div>
+          <div class="flex flex-col items-center min-w-2/5">
+            <p class="text-md font-base text-gray-600 text-center">
+              The assistant will send the first message.<br />Start a new conversation to begin.
+            </p>
+          </div>
+          <div class="flex flex-row p-1.5">
+            <Button
+              class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all"
+              on:click={handleChatThreadCreate}
+              on:touchstart={handleChatThreadCreate}
+              type="button"
+            >
+              <PaperPlaneOutline size="sm" />
+              <span class="text-sm font-normal text-center"> Start conversation </span>
+            </Button>
           </div>
         {/if}
       </div>

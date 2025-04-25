@@ -243,6 +243,15 @@
 
   $: fileSearchToolSelect = initialTools.includes('file_search');
   $: codeInterpreterToolSelect = initialTools.includes('code_interpreter');
+  $: assistantShouldMessageFirstData = assistant?.assistant_should_message_first;
+  let assistantShouldMessageFirst = false;
+  $: if (
+    assistantShouldMessageFirstData !== undefined &&
+    assistantShouldMessageFirstData !== null &&
+    !assistantShouldMessageFirst
+  ) {
+    assistantShouldMessageFirst = assistantShouldMessageFirstData;
+  }
 
   // Handle updates from the file upload component.
   const handleFSPrivateFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
@@ -537,6 +546,7 @@
       use_latex: body.use_latex?.toString() === 'on',
       use_image_descriptions: body.use_image_descriptions?.toString() === 'on',
       hide_prompt: body.hide_prompt?.toString() === 'on',
+      assistant_should_message_first: assistantShouldMessageFirst,
       deleted_private_files: [...$trashPrivateFileIds, ...fileSearchCodeInterpreterUnusedFiles]
     };
     return params;
@@ -1163,25 +1173,40 @@
             </div></span
           >
           <div class="flex flex-col gap-4 px-1">
+            <div class="col-span-2 mb-1">
+              <Checkbox
+                id="assistant_should_message_first"
+                name="assistant_should_message_first"
+                disabled={preventEdits}
+                bind:checked={assistantShouldMessageFirst}>Assistant Should Message First</Checkbox
+              >
+              <Helper
+                >Control whether the assistant should initiate the conversation. When checked, users
+                will be able to send their first message after the assistant responds.</Helper
+              >
+            </div>
+
             {#if supportsTemperature}
-              <Label for="temperature">Temperature</Label>
-              {#if interactionMode === 'chat'}
-                <Helper class="pb-1"
-                  >Select the model's "temperature," a setting from 0 to 2 that controls how
-                  creative or predictable the assistant's responses are. For reliable, focused
-                  answers, choose a temperature closer to 0.2. For more varied or creative
-                  responses, try a setting closer to 1. Avoid setting the temperature much above 1
-                  unless you need very experimental responses, as it may lead to less predictable
-                  and more random answers. You can change this setting anytime.</Helper
-                >
-              {:else if interactionMode === 'voice'}
-                <Helper class="pb-1"
-                  >Select the model's "temperature," a setting from 0.6 to 1.2 that controls how
-                  creative or predictable the assistant's responses are. For audio models, a
-                  temperature of 0.8 is highly recommended for best performance. You can change this
-                  setting anytime.</Helper
-                >
-              {/if}
+              <div class="flex flex-col">
+                <Label for="temperature">Temperature</Label>
+                {#if interactionMode === 'chat'}
+                  <Helper class="pb-1"
+                    >Select the model's "temperature," a setting from 0 to 2 that controls how
+                    creative or predictable the assistant's responses are. For reliable, focused
+                    answers, choose a temperature closer to 0.2. For more varied or creative
+                    responses, try a setting closer to 1. Avoid setting the temperature much above 1
+                    unless you need very experimental responses, as it may lead to less predictable
+                    and more random answers. You can change this setting anytime.</Helper
+                  >
+                {:else if interactionMode === 'voice'}
+                  <Helper class="pb-1"
+                    >Select the model's "temperature," a setting from 0.6 to 1.2 that controls how
+                    creative or predictable the assistant's responses are. For audio models, a
+                    temperature of 0.8 is highly recommended for best performance. You can change
+                    this setting anytime.</Helper
+                  >
+                {/if}
+              </div>
               <div class="mt-2 flex flex-row justify-between">
                 <div class="flex flex-row gap-1 items-center text-sm">
                   <ArrowLeftOutline />
@@ -1288,20 +1313,22 @@
               {/if}
             {/if}
             {#if supportsReasoning}
-              <Label for="reasoning-effort">Reasoning effort</Label>
-              <Helper class="pb-1"
-                >Select your desired reasoning effort, which gives the model guidance on how much
-                time it should spend "reasoning" before creating a response to the prompt. You can
-                specify one of <span class="font-mono">low</span>,
-                <span class="font-mono">medium</span>, or
-                <span class="font-mono">high</span>
-                for this setting, where <span class="font-mono">low</span> will favor speed, and
-                <span class="font-mono">high</span>
-                will favor more complete reasoning at the cost of slower responses. The default value
-                is
-                <span class="font-mono">medium</span>, which is a balance between speed and
-                reasoning accuracy. You can change this setting anytime.</Helper
-              >
+              <div class="flex flex-col">
+                <Label for="reasoning-effort">Reasoning effort</Label>
+                <Helper class="pb-1"
+                  >Select your desired reasoning effort, which gives the model guidance on how much
+                  time it should spend "reasoning" before creating a response to the prompt. You can
+                  specify one of <span class="font-mono">low</span>,
+                  <span class="font-mono">medium</span>, or
+                  <span class="font-mono">high</span>
+                  for this setting, where <span class="font-mono">low</span> will favor speed, and
+                  <span class="font-mono">high</span>
+                  will favor more complete reasoning at the cost of slower responses. The default value
+                  is
+                  <span class="font-mono">medium</span>, which is a balance between speed and
+                  reasoning accuracy. You can change this setting anytime.</Helper
+                >
+              </div>
               <Range
                 id="reasoning-effort"
                 name="reasoning-effort"

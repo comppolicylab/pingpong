@@ -334,6 +334,7 @@ class Assistant(BaseModel):
     class_id: int
     creator_id: int
     locked: bool = False
+    assistant_should_message_first: bool | None = None
     use_latex: bool | None
     use_image_descriptions: bool | None
     hide_prompt: bool | None
@@ -371,6 +372,7 @@ class CreateAssistant(BaseModel):
     use_latex: bool = False
     use_image_descriptions: bool = False
     hide_prompt: bool = False
+    assistant_should_message_first: bool = False
     deleted_private_files: list[int] = []
 
     _temperature_check = model_validator(mode="after")(temperature_validator)
@@ -390,6 +392,7 @@ class UpdateAssistant(BaseModel):
     published: bool | None = None
     use_latex: bool | None = None
     hide_prompt: bool | None = None
+    assistant_should_message_first: bool | None = None
     use_image_descriptions: bool | None = None
     deleted_private_files: list[int] = []
 
@@ -449,7 +452,7 @@ class ImageProxy(BaseModel):
 
 class CreateThread(BaseModel):
     parties: list[int] = []
-    message: str = Field(..., min_length=1)
+    message: str | None = None
     code_interpreter_file_ids: list[str] = Field([])
     file_search_file_ids: list[str] = Field([])
     vision_file_ids: list[str] = Field([])
