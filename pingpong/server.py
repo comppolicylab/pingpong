@@ -3592,7 +3592,6 @@ async def update_assistant(
     asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
     grants = list[Relation]()
     revokes = list[Relation]()
-    print(f"Updating assistant {asst.id} with request: {req.model_dump()}")
 
     # Users without publish permission can't toggle the published status of assistants.
     if "published" in req.model_fields_set and asst.published != req.published:
