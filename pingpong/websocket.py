@@ -232,6 +232,8 @@ def ws_with_realtime_connection(func):
                         "instructions": conversation_instructions,
                     }
                 )
+                if assistant.assistant_should_message_first:
+                    await realtime_connection.response.create()
                 await func(browser_connection, *args, **kwargs)
         except Exception as e:
             openai_connection_logger.exception(f"Error in Realtime connection: {e}")
