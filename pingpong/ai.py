@@ -189,10 +189,12 @@ async def get_thread_conversation_name(
 async def get_initial_thread_conversation_name(
     cli: openai.AsyncClient,
     session: AsyncSession,
-    message: str,
+    message: str | None,
     vision_files: list[str],
     class_id: str,
 ) -> str | None:
+    if not message:
+        return None
     message_str = f"USER: {message}\n"
     for _ in vision_files:
         message_str += "USER: Uploaded an image file\n"

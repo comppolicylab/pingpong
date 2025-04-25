@@ -2162,7 +2162,7 @@ async def get_thread(
             "Anonymous User" if thread.private else pseudonym(thread, users[user_id])
         )
     placeholder_ci_calls = []
-    if "code_interpreter" in thread.tools_available:
+    if "code_interpreter" in thread.tools_available and messages.data:
         placeholder_ci_calls = await get_placeholder_ci_calls(
             request.state.db,
             messages.data[0].assistant_id if messages.data[0].assistant_id else "None",
@@ -2702,6 +2702,34 @@ async def create_thread(
     vector_store_object_id = None
     tool_resources: ToolResources = {}
 
+    assistant = await models.Assistant.get_by_id(request.state.db, req.assistant_id)
+
+    if not assistant:
+        raise HTTPException(
+            status_code=404,
+            detail="Could not find the assistant you specified. Please try again.",
+        )
+
+    if assistant.assistant_should_message_first and req.message:
+        raise HTTPException(
+            status_code=400,
+            detail="The assistant you selected is configured to message first. Please do not include a message in your request.",
+        )
+
+    if not assistant.assistant_should_message_first and not req.message:
+        raise HTTPException(
+            status_code=400,
+            detail="Please include a message in your request.",
+        )
+
+    if not req.message and (
+        req.vision_file_ids or req.file_search_file_ids or req.code_interpreter_file_ids
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="You must provide a message if you are uploading files or images.",
+        )
+
     if req.file_search_file_ids:
         vector_store_id, vector_store_object_id = await create_vector_store(
             request.state.db,
@@ -2721,7 +2749,7 @@ async def create_thread(
     messageContent: MessageContentPartParam = [
         {
             "type": "text",
-            "text": req.message + (vision_image_descriptions or ""),
+            "text": (req.message or "") + (vision_image_descriptions or ""),
         }
     ]
 
@@ -2757,7 +2785,9 @@ async def create_thread(
                         "content": messageContent,
                         "attachments": attachments,
                     }
-                ],
+                ]
+                if req.message
+                else [],
                 tool_resources=tool_resources,
             ),
             models.User.get_all_by_id(request.state.db, req.parties),
@@ -3339,7 +3369,7 @@ async def list_assistants(class_id: str, request: Request):
 
     ret_assistants = list[schemas.Assistant]()
     for asst in assts:
-        cur_asst = schemas.Assistant.from_orm(asst)
+        cur_asst = schemas.Assistant.model_validate(asst)
         has_elevated_permissions = await request.state.authz.test(
             f"user:{request.state.session.user.id}", "can_edit", f"assistant:{asst.id}"
         )
@@ -3787,6 +3817,12 @@ async def update_assistant(
 
     if "hide_prompt" in req.model_fields_set and req.hide_prompt is not None:
         asst.hide_prompt = req.hide_prompt
+
+    if (
+        "assistant_should_message_first" in req.model_fields_set
+        and req.assistant_should_message_first is not None
+    ):
+        asst.assistant_should_message_first = req.assistant_should_message_first
 
     if "instructions" in req.model_fields_set and req.instructions is not None:
         update_instructions = True

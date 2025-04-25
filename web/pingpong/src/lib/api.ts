@@ -1138,6 +1138,7 @@ export type Assistant = {
   use_image_descriptions: boolean | null;
   hide_prompt: boolean | null;
   locked: boolean | null;
+  assistant_should_message_first: boolean | null;
   endorsed: boolean | null;
   created: string;
   updated: string | null;
@@ -1212,6 +1213,7 @@ export type CreateAssistantRequest = {
   use_image_descriptions?: boolean;
   hide_prompt?: boolean;
   deleted_private_files?: number[];
+  assistant_should_message_first?: boolean;
 };
 
 /**
@@ -1233,6 +1235,7 @@ export type UpdateAssistantRequest = {
   use_image_descriptions?: boolean;
   hide_prompt?: boolean;
   deleted_private_files?: number[];
+  assistant_should_message_first?: boolean;
 };
 
 /**
@@ -1672,7 +1675,7 @@ export const exportThreads = async (f: Fetcher, classId: number) => {
 export type CreateThreadRequest = {
   assistant_id: number;
   parties?: number[];
-  message: string;
+  message: string | null;
   tools_available: Tool[];
   file_search_file_ids?: string[];
   code_interpreter_file_ids?: string[];
