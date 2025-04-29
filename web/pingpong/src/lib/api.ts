@@ -2015,6 +2015,7 @@ export type NewThreadMessageRequest = {
   code_interpreter_file_ids?: string[];
   vision_file_ids?: string[];
   vision_image_descriptions?: ImageProxy[];
+  timezone?: string;
 };
 
 /**
@@ -2202,11 +2203,28 @@ export const postMessage = async (
 };
 
 /**
+ * Parameters for getting a thread run.
+ */
+export type CreateThreadRunParams = {
+  timezone?: string;
+};
+/**
  * Create a new thread run.
  */
-export const createThreadRun = async (f: Fetcher, classId: number, threadId: number) => {
+export const createThreadRun = async (
+  f: Fetcher,
+  classId: number,
+  threadId: number,
+  data: CreateThreadRunParams
+) => {
   const url = `class/${classId}/thread/${threadId}/run`;
-  const res = await _fetch(f, 'POST', url);
+  const res = await _fetch(
+    f,
+    'POST',
+    url,
+    { 'Content-Type': 'application/json' },
+    JSON.stringify(data)
+  );
   return streamThreadChunks(res);
 };
 
