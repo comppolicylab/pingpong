@@ -468,6 +468,10 @@ class CreateAudioThread(BaseModel):
     assistant_id: int
 
 
+class CreateRun(BaseModel):
+    timezone: str | None = None
+
+
 class ThreadName(BaseModel):
     name: str | None
     can_generate: bool
@@ -568,6 +572,7 @@ class NewThreadMessage(BaseModel):
     file_search_file_ids: list[str] = Field([])
     vision_file_ids: list[str] = Field([])
     vision_image_descriptions: list[ImageProxy] = Field([])
+    timezone: str | None = None
 
     _file_check = model_validator(mode="after")(file_validator)
 

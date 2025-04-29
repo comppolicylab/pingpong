@@ -105,6 +105,11 @@ export class ThreadManager {
    */
   error: Readable<ErrorWithSent | null>;
 
+  /**
+   * The user's timezone.
+   */
+  timezone?: string;
+
   #data: Writable<ThreadManagerState>;
   #fetcher: api.Fetcher;
 
@@ -116,12 +121,14 @@ export class ThreadManager {
     classId: number,
     threadId: number,
     threadData: BaseResponse & (ThreadWithMeta | Error | api.ValidationError),
-    interactionMode: 'chat' | 'voice' = 'chat'
+    interactionMode: 'chat' | 'voice' = 'chat',
+    timezone?: string
   ) {
     const expanded = api.expandResponse(threadData);
     this.#fetcher = fetcher;
     this.classId = classId;
     this.threadId = threadId;
+    this.timezone = timezone;
     this.#data = writable({
       data: expanded.data || null,
       error: expanded.error ? { detail: expanded.error?.detail, wasSent: true } : null,
@@ -221,7 +228,12 @@ export class ThreadManager {
     }
 
     this.#data.update((d) => ({ ...d, submitting: true }));
-    const chunks = await api.createThreadRun(this.#fetcher, this.classId, this.threadId);
+    const chunks = await api.createThreadRun(
+      this.#fetcher,
+      this.classId,
+      this.threadId,
+      this.timezone ? JSON.stringify({ timezone: this.timezone }) : undefined
+    );
     try {
       await this.#handleStreamChunks(chunks);
     } catch (e) {
@@ -535,7 +547,8 @@ export class ThreadManager {
       file_search_file_ids,
       code_interpreter_file_ids,
       vision_file_ids,
-      vision_image_descriptions
+      vision_image_descriptions,
+      timezone: this.timezone
     });
 
     this.attachments = derived(this.#data, ($data) => {

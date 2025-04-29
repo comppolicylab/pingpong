@@ -37,7 +37,7 @@ from pingpong.schemas import CodeInterpreterMessage, DownloadExport
 from pingpong.config import config
 from typing import Dict, Literal, Union, overload
 from sqlalchemy.ext.asyncio import AsyncSession
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -415,6 +415,7 @@ async def run_thread(
     vector_store_id: str | None = None,
     file_search_file_ids: list[str] | None = None,
     code_interpreter_file_ids: list[str] | None = None,
+    instructions: str | None = None,
 ):
     try:
         if message:
@@ -460,6 +461,7 @@ async def run_thread(
             thread_id=thread_id,
             assistant_id=assistant_id,
             event_handler=handler,
+            instructions=instructions,
         ) as run:
             async for event in run:
                 if (
@@ -648,14 +650,29 @@ def format_instructions(
             """
         )
 
+    return instructions
+
+
+def inject_timestamp_to_instructions(
+    instructions: str, timezone: str | None = None
+) -> str:
+    """Inject a timestamp into the instructions for the assistant."""
     # Inject the current time into the instructions
-    instructions += (
+    if timezone:
+        try:
+            tz = ZoneInfo(timezone)
+        except ZoneInfoNotFoundError:
+            logger.warning(f"Invalid timezone: {timezone}. Using UTC instead.")
+            tz = ZoneInfo("UTC")
+    else:
+        tz = ZoneInfo("UTC")
+
+    dt = datetime.now(tz)
+    return instructions + (
         "\n---Other context---\n"
         "The current date and time is "
-        f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} (UTC)."
+        f"{dt.strftime('%Y-%m-%d %H:%M:%S')} ({dt.tzname()})."
     )
-
-    return instructions
 
 
 def generate_user_hash(class_: models.Class, user: models.User) -> str:

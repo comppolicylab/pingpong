@@ -64,6 +64,7 @@ from .ai import (
     get_original_model_name_by_azure_equivalent,
     get_thread_conversation_name,
     get_initial_thread_conversation_name,
+    inject_timestamp_to_instructions,
     run_thread,
     validate_api_key,
     get_ci_messages_from_step,
@@ -2842,6 +2843,12 @@ async def create_thread(
         "tools_available": json.dumps(tools_export["tools_available"] or []),
         "version": 2,
         "last_activity": func.now(),
+        "instructions": format_instructions(
+            assistant.instructions,
+            assistant.use_latex,
+            assistant.use_image_descriptions,
+            assistant.interaction_mode,
+        ),
     }
 
     result: None | models.Thread = None
@@ -2876,6 +2883,7 @@ async def create_thread(
 async def create_run(
     class_id: str,
     thread_id: str,
+    req: schemas.CreateRun,
     request: Request,
     openai_client: OpenAIClient,
 ):
@@ -2900,6 +2908,18 @@ async def create_run(
             message=[],
             file_names=file_names,
             vector_store_id=vector_store_id,
+            instructions=inject_timestamp_to_instructions(thread.instructions)
+            if thread.instructions
+            # Compatibility with existing threads
+            else inject_timestamp_to_instructions(
+                format_instructions(
+                    asst.instructions,
+                    asst.use_latex,
+                    asst.use_image_descriptions,
+                    asst.interaction_mode,
+                ),
+                req.timezone,
+            ),
         )
     except Exception as e:
         logger.exception("Error running thread")
@@ -3069,6 +3089,18 @@ async def send_message(
             file_search_file_ids=data.file_search_file_ids,
             code_interpreter_file_ids=data.code_interpreter_file_ids,
             vector_store_id=vector_store_id_,
+            instructions=inject_timestamp_to_instructions(thread.instructions)
+            if thread.instructions
+            # Compatibility with existing threads
+            else inject_timestamp_to_instructions(
+                format_instructions(
+                    asst.instructions,
+                    asst.use_latex,
+                    asst.use_image_descriptions,
+                    asst.interaction_mode,
+                ),
+                data.timezone,
+            ),
         )
     except Exception:
         logger.exception("Error running thread")

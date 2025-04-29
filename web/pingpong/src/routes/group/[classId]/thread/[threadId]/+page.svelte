@@ -48,7 +48,7 @@
   import { isFirefox } from '$lib/stores/general';
   export let data;
 
-  $: userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   $: classId = parseInt($page.params.classId);
   $: threadId = parseInt($page.params.threadId);
   $: threadMgr = new ThreadManager(
@@ -56,7 +56,8 @@
     classId,
     threadId,
     data.threadData,
-    data.threadInteractionMode || 'chat'
+    data.threadInteractionMode || 'chat',
+    userTimezone
   );
   $: isPrivate = data.class.private || false;
   $: teachers = data?.supervisors || [];
