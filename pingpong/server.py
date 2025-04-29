@@ -10,6 +10,7 @@ import openai
 import humanize
 from fastapi import (
     BackgroundTasks,
+    Body,
     Depends,
     FastAPI,
     Form,
@@ -2883,9 +2884,9 @@ async def create_thread(
 async def create_run(
     class_id: str,
     thread_id: str,
-    req: schemas.CreateThreadRunRequest,
     request: Request,
     openai_client: OpenAIClient,
+    req: schemas.CreateThreadRunRequest = Body(default=None),
 ):
     try:
         thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
@@ -2926,7 +2927,7 @@ async def create_run(
             file_names=file_names,
             vector_store_id=vector_store_id,
             instructions=inject_timestamp_to_instructions(
-                thread.instructions, req.timezone
+                thread.instructions, req.timezone if req else None
             ),
         )
     except Exception as e:
