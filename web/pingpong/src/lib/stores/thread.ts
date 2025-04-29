@@ -228,12 +228,9 @@ export class ThreadManager {
     }
 
     this.#data.update((d) => ({ ...d, submitting: true }));
-    const chunks = await api.createThreadRun(
-      this.#fetcher,
-      this.classId,
-      this.threadId,
-      this.timezone ? JSON.stringify({ timezone: this.timezone }) : undefined
-    );
+    const chunks = await api.createThreadRun(this.#fetcher, this.classId, this.threadId, {
+      timezone: this.timezone
+    });
     try {
       await this.#handleStreamChunks(chunks);
     } catch (e) {

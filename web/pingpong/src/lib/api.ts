@@ -2203,16 +2203,28 @@ export const postMessage = async (
 };
 
 /**
+ * Parameters for getting a thread run.
+ */
+export type CreateThreadRunParams = {
+  timezone?: string;
+};
+/**
  * Create a new thread run.
  */
 export const createThreadRun = async (
   f: Fetcher,
   classId: number,
   threadId: number,
-  timezone?: string
+  data: CreateThreadRunParams
 ) => {
   const url = `class/${classId}/thread/${threadId}/run`;
-  const res = await _fetch(f, 'POST', url, undefined, JSON.stringify({ timezone }));
+  const res = await _fetch(
+    f,
+    'POST',
+    url,
+    { 'Content-Type': 'application/json' },
+    JSON.stringify(data)
+  );
   return streamThreadChunks(res);
 };
 

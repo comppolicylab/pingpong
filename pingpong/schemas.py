@@ -468,7 +468,7 @@ class CreateAudioThread(BaseModel):
     assistant_id: int
 
 
-class CreateRun(BaseModel):
+class CreateThreadRunRequest(BaseModel):
     timezone: str | None = None
 
 

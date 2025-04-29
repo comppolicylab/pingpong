@@ -2883,7 +2883,7 @@ async def create_thread(
 async def create_run(
     class_id: str,
     thread_id: str,
-    req: schemas.CreateRun,
+    req: schemas.CreateThreadRunRequest,
     request: Request,
     openai_client: OpenAIClient,
 ):
@@ -2900,6 +2900,23 @@ async def create_run(
             if thread.vector_store_id
             else None
         )
+
+        # One-time migration for threads that don't have instructions set
+        if not thread.instructions:
+            logger.info(
+                "Thread %s does not have instructions set, migrating from assistant instructions",
+                thread.id,
+            )
+            thread.instructions = format_instructions(
+                asst.instructions,
+                asst.use_latex,
+                asst.use_image_descriptions,
+                asst.interaction_mode,
+            )
+            request.state.db.add(thread)
+            await request.state.db.flush()
+            await request.state.db.refresh(thread)
+
         stream = run_thread(
             openai_client,
             class_id=class_id,
@@ -2908,17 +2925,8 @@ async def create_run(
             message=[],
             file_names=file_names,
             vector_store_id=vector_store_id,
-            instructions=inject_timestamp_to_instructions(thread.instructions)
-            if thread.instructions
-            # Compatibility with existing threads
-            else inject_timestamp_to_instructions(
-                format_instructions(
-                    asst.instructions,
-                    asst.use_latex,
-                    asst.use_image_descriptions,
-                    asst.interaction_mode,
-                ),
-                req.timezone,
+            instructions=inject_timestamp_to_instructions(
+                thread.instructions, req.timezone
             ),
         )
     except Exception as e:
@@ -3058,7 +3066,24 @@ async def send_message(
 
         thread.last_activity = func.now()
         thread.user_message_ct += 1
-        request.state.db.add(thread)
+
+        # One-time migration for threads that don't have instructions set
+        if not thread.instructions:
+            logger.info(
+                "Thread %s does not have instructions set, migrating from assistant instructions",
+                thread.id,
+            )
+            thread.instructions = format_instructions(
+                asst.instructions,
+                asst.use_latex,
+                asst.use_image_descriptions,
+                asst.interaction_mode,
+            )
+            request.state.db.add(thread)
+            await request.state.db.flush()
+            await request.state.db.refresh(thread)
+        else:
+            request.state.db.add(thread)
 
         metrics.inbound_messages.inc(
             app=config.public_url,
@@ -3089,17 +3114,8 @@ async def send_message(
             file_search_file_ids=data.file_search_file_ids,
             code_interpreter_file_ids=data.code_interpreter_file_ids,
             vector_store_id=vector_store_id_,
-            instructions=inject_timestamp_to_instructions(thread.instructions)
-            if thread.instructions
-            # Compatibility with existing threads
-            else inject_timestamp_to_instructions(
-                format_instructions(
-                    asst.instructions,
-                    asst.use_latex,
-                    asst.use_image_descriptions,
-                    asst.interaction_mode,
-                ),
-                data.timezone,
+            instructions=inject_timestamp_to_instructions(
+                thread.instructions, data.timezone
             ),
         )
     except Exception:
