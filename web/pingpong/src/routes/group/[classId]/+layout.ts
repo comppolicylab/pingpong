@@ -47,6 +47,7 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
   }
 
   const models = modelsResponse.error ? [] : modelsResponse.data.models;
+  const defaultPrompts = modelsResponse.error ? [] : (modelsResponse.data.default_prompts ?? []);
 
   const supervisors = teachersResponse.error ? [] : teachersResponse.data.users;
 
@@ -63,6 +64,7 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
     isSupervisor: grants.isSupervisor,
     models,
     hasAPIKey,
-    supervisors
+    supervisors,
+    defaultPrompts
   };
 };

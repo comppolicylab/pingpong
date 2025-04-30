@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum, StrEnum, auto
-from typing import Generic, Literal, TypeVar, Union, TypedDict
+from typing import Generic, Literal, NotRequired, TypeVar, Union, TypedDict
 
 from openai.types.beta.assistant_tool import AssistantTool as Tool
 from openai.types.beta.threads import Message as OpenAIMessage
@@ -1034,6 +1034,7 @@ class AssistantModel(BaseModel):
     owner: str
     name: str
     description: str
+    default_prompt_id: str | None = None
     type: InteractionMode
     is_latest: bool
     is_new: bool
@@ -1060,10 +1061,17 @@ class AssistantModelDict(TypedDict):
     supports_temperature: bool
     supports_reasoning: bool
     description: str
+    default_prompt_id: NotRequired[str]
+
+
+class AssistantDefaultPrompt(BaseModel):
+    id: str
+    prompt: str
 
 
 class AssistantModels(BaseModel):
     models: list[AssistantModel]
+    default_prompts: list[AssistantDefaultPrompt] = []
 
 
 class Classes(BaseModel):

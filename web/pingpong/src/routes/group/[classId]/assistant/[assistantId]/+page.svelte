@@ -396,9 +396,25 @@
     _temperatureValue = assistant.temperature;
   }
 
-  const changeTemperatureInteractionMode = (evt: Event) => {
+  const setDefaultModelPrompt = (model: string) => {
+    const matchingModels = data.models.filter((m) => m.id === model);
+    let found = false;
+    matchingModels.forEach((m) => {
+      if (m.default_prompt_id) {
+        instructions = data.defaultPrompts.find((p) => p.id === m.default_prompt_id)?.prompt || '';
+        hasSetInstructions = true;
+        found = true;
+      }
+    });
+    if (!found) {
+      instructions = '';
+      hasSetInstructions = true;
+    }
+  };
+
+  const changeInteractionMode = (evt: Event) => {
     const target = evt.target as HTMLInputElement;
-    const mode = target.value;
+    const mode = target.value as 'chat' | 'voice';
     if (
       assistant?.interaction_mode === mode &&
       assistant?.temperature !== undefined &&
@@ -412,6 +428,16 @@
     } else if (mode === 'chat') {
       temperatureValue = defaultChatTemperature;
       _temperatureValue = defaultChatTemperature;
+    }
+    if (
+      assistant?.interaction_mode === mode &&
+      assistant?.instructions !== undefined &&
+      assistant?.instructions !== null
+    ) {
+      instructions = assistant.instructions;
+      hasSetInstructions = true;
+    } else {
+      setDefaultModelPrompt(selectedModel);
     }
   };
   let reasoningEffortValue: number;
@@ -862,7 +888,7 @@
             value="chat"
             bind:group={interactionMode}
             disabled={preventEdits}
-            on:change={changeTemperatureInteractionMode}
+            on:change={changeInteractionMode}
             class={`${preventEdits ? 'hover:bg-transparent' : ''} select-none`}
             ><div class="flex flex-row gap-2 items-center">
               {#if interactionMode === 'chat'}<MessageDotsSolid
@@ -876,7 +902,7 @@
             value="voice"
             bind:group={interactionMode}
             disabled={preventEdits}
-            on:change={changeTemperatureInteractionMode}
+            on:change={changeInteractionMode}
             class={`${preventEdits ? 'hover:bg-transparent' : ''} select-none`}
             ><div class="flex flex-row gap-2 items-center">
               {#if interactionMode === 'voice'}<MicrophoneSolid
