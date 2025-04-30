@@ -2625,6 +2625,7 @@ class Thread(Base):
         server_default=schemas.InteractionMode.CHAT,
     )
     instructions = Column(String, nullable=True)
+    timezone = Column(String, nullable=True)
     private = Column(Boolean)
     user_message_ct = Column(Integer, server_default="1")
     users = relationship(

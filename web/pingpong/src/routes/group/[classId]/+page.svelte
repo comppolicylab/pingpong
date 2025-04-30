@@ -77,6 +77,7 @@
     };
   };
 
+  let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   $: isPrivate = data.class.private || false;
   // Currently selected assistant.
   $: assistants = data?.assistants || [];
@@ -154,7 +155,8 @@
       const newThread = api.explodeResponse(
         await api.createAudioThread(fetch, data.class.id, {
           assistant_id: assistant.id,
-          parties: partyIds
+          parties: partyIds,
+          timezone: userTimezone
         })
       );
       data.threads = [newThread as api.Thread, ...data.threads];
@@ -188,7 +190,8 @@
           code_interpreter_file_ids: [],
           file_search_file_ids: [],
           vision_file_ids: [],
-          vision_image_descriptions: []
+          vision_image_descriptions: [],
+          timezone: userTimezone
         })
       );
       data.threads = [newThread as api.Thread, ...data.threads];

@@ -459,6 +459,7 @@ class CreateThread(BaseModel):
     vision_image_descriptions: list[ImageProxy] = Field([])
     tools_available: list[Tool]
     assistant_id: int
+    timezone: str | None = None
 
     _file_check = model_validator(mode="after")(file_validator)
 
@@ -482,6 +483,7 @@ class PromptRandomBlock(BaseModel):
 class CreateAudioThread(BaseModel):
     parties: list[int] = []
     assistant_id: int
+    timezone: str | None = None
 
 
 class CreateThreadRunRequest(BaseModel):

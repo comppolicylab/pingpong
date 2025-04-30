@@ -1681,11 +1681,13 @@ export type CreateThreadRequest = {
   code_interpreter_file_ids?: string[];
   vision_file_ids?: string[];
   vision_image_descriptions?: ImageProxy[];
+  timezone?: string | null;
 };
 
 export type CreateAudioThreadRequest = {
   assistant_id: number;
   parties?: number[];
+  timezone?: string | null;
 };
 /**
  * Thread information.

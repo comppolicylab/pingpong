@@ -6,8 +6,8 @@ from jwt import PyJWTError
 from pingpong import models, schemas
 from pingpong.ai import (
     OpenAIClientType,
-    format_instructions,
     get_openai_client_by_class_id,
+    inject_timestamp_to_instructions,
 )
 from pingpong.auth import TimeException, decode_session_token
 from .config import config
@@ -194,10 +194,11 @@ def ws_with_thread_assistant_prompt(func):
             int(thread_id),
         )
         browser_connection.state.assistant = browser_connection.state.thread.assistant
-        browser_connection.state.conversation_instructions = format_instructions(
-            browser_connection.state.assistant.instructions,
-            interaction_mode=schemas.InteractionMode.VOICE,
-            thread_id=thread_id,
+        browser_connection.state.conversation_instructions = (
+            inject_timestamp_to_instructions(
+                browser_connection.state.thread.instructions,
+                browser_connection.state.thread.timezone,
+            )
         )
         return await func(browser_connection, class_id, thread_id, *args, **kwargs)
 

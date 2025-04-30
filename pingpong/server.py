@@ -2629,13 +2629,14 @@ async def create_audio_thread(
     parties = list[models.User]()
     thread = None
     try:
-        thread, parties = await asyncio.gather(
+        thread, parties, assistant = await asyncio.gather(
             openai_client.beta.threads.create(
                 metadata={
                     "user_id": str(request.state.session.user.id),
                 },
             ),
             models.User.get_all_by_id(request.state.db, req.parties),
+            models.Assistant.get_by_id(request.state.db, req.assistant_id),
         )
     except openai.InternalServerError:
         logger.exception("Error creating thread")
@@ -2652,6 +2653,13 @@ async def create_audio_thread(
         raise HTTPException(
             status_code=400,
             detail="Something went wrong while creating your conversation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+        )
+    if not assistant:
+        if thread:
+            await openai_client.beta.threads.delete(thread.id)
+        raise HTTPException(
+            status_code=404,
+            detail="Could not find the assistant you specified. Please try again.",
         )
 
     if not thread:
@@ -2674,6 +2682,14 @@ async def create_audio_thread(
         "tools_available": json.dumps([]),
         "version": 2,
         "last_activity": func.now(),
+        "instructions": format_instructions(
+            assistant.instructions,
+            assistant.use_latex,
+            assistant.use_image_descriptions,
+            assistant.interaction_mode,
+            thread_id=thread.id,
+        ),
+        "timezone": req.timezone,
     }
 
     result: None | models.Thread = None
@@ -2860,6 +2876,7 @@ async def create_thread(
             assistant.interaction_mode,
             thread_id=thread.id,
         ),
+        "timezone": req.timezone,
     }
 
     result: None | models.Thread = None
@@ -2938,7 +2955,7 @@ async def create_run(
             file_names=file_names,
             vector_store_id=vector_store_id,
             instructions=inject_timestamp_to_instructions(
-                thread.instructions, req.timezone if req else None
+                thread.instructions, req.timezone if req else thread.timezone
             ),
         )
     except Exception as e:
@@ -3128,7 +3145,7 @@ async def send_message(
             code_interpreter_file_ids=data.code_interpreter_file_ids,
             vector_store_id=vector_store_id_,
             instructions=inject_timestamp_to_instructions(
-                thread.instructions, data.timezone
+                thread.instructions, data.timezone if data.timezone else thread.timezone
             ),
         )
     except Exception:
