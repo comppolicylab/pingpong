@@ -470,6 +470,7 @@ class PromptRandomOption(BaseModel):
 
 
 class PromptRandomBlock(BaseModel):
+    id: str
     options: list[PromptRandomOption] = []
     count: int = 1
     allow_repeat: bool = False
