@@ -97,6 +97,7 @@ def create_db_schema() -> None:
         async with engine.connect() as conn:
             await conn.execute(text("CREATE SCHEMA IF NOT EXISTS authz"))
         await engine.dispose()
+        logger.info("Done!")
 
     asyncio.run(_make_db_schema())
 
@@ -118,7 +119,8 @@ def make_root(email: str) -> None:
             async with config.authz.driver.get_client() as c:
                 await c.create_root_user(user.id)
 
-            print(f"User {user.id} promoted to root")
+            logger.info(f"User {user.id} promoted to root")
+            logger.info("Done!")
 
     asyncio.run(_make_root())
 
@@ -126,8 +128,10 @@ def make_root(email: str) -> None:
 @auth.command("update_model")
 def update_model() -> None:
     async def _update_model() -> None:
+        logger.info("Updating authz model...")
         await config.authz.driver.init()
         await config.authz.driver.update_model()
+        logger.info("Done!")
 
     asyncio.run(_update_model())
 
@@ -160,10 +164,11 @@ def login(email: str, redirect: str, super_user: bool) -> None:
     user_id = asyncio.run(_get_or_create(email))
     tok = encode_auth_token(str(user_id))
     url = config.url(f"/api/v1/auth?token={tok}&redirect={redirect}")
-    print(f"Magic auth link: {url}")
+    logger.info(f"Magic auth link: {url}")
 
     # Open the URL in the default browser
     webbrowser.open(url)
+    logger.info("Done!")
 
 
 # This command lists all explicitly granted permissions for a user
@@ -173,8 +178,10 @@ def list_permissions(user_id: int) -> None:
     async def _list_permissions() -> None:
         await config.authz.driver.init()
         async with config.authz.driver.get_client() as c:
+            logger.info(f"Listing permissions for user {user_id}...")
             perms = await list_all_permissions(c, user_id)
             logger.info(f"Permissions for user {user_id}: {perms}")
+            logger.info("Done!")
 
     asyncio.run(_list_permissions())
 
@@ -193,6 +200,7 @@ def users_merge_permissions() -> None:
                         f"Merging permissions for {row.merged_user_id} into {row.current_user_id}"
                     )
                     await merge_permissions(c, row.current_user_id, row.merged_user_id)
+                logger.info("Done!")
 
     asyncio.run(_users_merge_permissions())
 
@@ -232,9 +240,13 @@ def merge_users(new_user_id: int, old_user_id: int) -> None:
     async def _merge_users() -> None:
         await config.authz.driver.init()
         async with config.db.driver.async_session() as session:
+            logger.info(
+                f"Merging permissions from user {old_user_id} into user {new_user_id}..."
+            )
             async with config.authz.driver.get_client() as c:
                 await merge(session, c, new_user_id, old_user_id)
             await session.commit()
+            logger.info("Done!")
 
     asyncio.run(_merge_users())
 
@@ -327,6 +339,7 @@ def db_migrate(revision: str, downgrade: bool, alembic_config: str) -> None:
     else:
         logger.info(f"Upgrading to revision {revision}")
         alembic.command.upgrade(al_cfg, revision)
+    logger.info("Done!")
 
 
 @db.command("migrate-api-keys")
@@ -390,9 +403,11 @@ def db_set_version(version: str, alembic_config: str) -> None:
 def migrate_oai_keys(admin_key: str, project_id: str, new_api_key: str) -> None:
     async def _migrate_oai_keys() -> None:
         async with config.db.driver.async_session() as session:
+            logger.info("Migrating OpenAI keys to new API key...")
             await get_process_redacted_project_api_keys(
                 session, admin_key, project_id, new_api_key
             )
+            logger.info("Done!")
 
     asyncio.run(_migrate_oai_keys())
 
@@ -621,6 +636,7 @@ async def _lms_sync_all(
                         )
                     case _:
                         raise NotImplementedError(f"Unsupported LMS type: {lms.type}")
+            logger.info("Done!")
 
 
 @lms.command("sync-all")
@@ -667,6 +683,7 @@ def sync_pingpong_with_lms(crontime: str, host: str, port: int) -> None:
 def export_threads(class_id: int, user_email: str) -> None:
     async def _export_threads() -> None:
         async with config.db.driver.async_session() as session:
+            logger.info(f"Exporting threads for class {class_id} with emails...")
             user = await User.get_by_email(session, user_email)
             if not user:
                 raise ValueError(f"User with email {user_email} not found")
@@ -679,6 +696,7 @@ def export_threads(class_id: int, user_email: str) -> None:
             await export_class_threads_with_emails(
                 openai_client, str(class_id), user.id
             )
+            logger.info("Done!")
 
     asyncio.run(_export_threads())
 
