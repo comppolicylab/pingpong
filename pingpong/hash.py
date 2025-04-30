@@ -3,6 +3,7 @@ import mmh3
 # Maximum value it's possible to represent as a 64-bit unsigned int, as a float.
 MAX_UINT64_F = float(0xFFFFFFFFFFFFFFFF)
 
+
 def hash_id(s: str) -> float:
     """Compute the hash of the given ID as a float.
 
