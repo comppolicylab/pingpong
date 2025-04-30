@@ -60,8 +60,10 @@
   $: canPublish = data.grants.canPublishAssistants;
 
   let assistantName = '';
-  $: if (assistant?.name !== undefined && assistant?.name !== null && !assistantName) {
+  let hasSetAssistantName = false;
+  $: if (assistant?.name !== undefined && assistant?.name !== null && !hasSetAssistantName) {
     assistantName = assistant.name;
+    hasSetAssistantName = true;
   }
   let interactionMode: 'chat' | 'voice';
   $: if (
@@ -80,16 +82,24 @@
     interactionMode = 'chat';
   }
   let description = '';
-  $: if (assistant?.description !== undefined && assistant?.description !== null && !description) {
+  let hasSetDescription = false;
+  $: if (
+    assistant?.description !== undefined &&
+    assistant?.description !== null &&
+    !hasSetDescription
+  ) {
     description = assistant.description;
+    hasSetDescription = true;
   }
   let instructions = '';
+  let hasSetInstructions = false;
   $: if (
     assistant?.instructions !== undefined &&
     assistant?.instructions !== null &&
-    !instructions
+    !hasSetInstructions
   ) {
     instructions = assistant.instructions;
+    hasSetInstructions = true;
   }
   let hidePrompt = false;
   let hasSetHidePrompt = false;
