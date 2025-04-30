@@ -339,7 +339,9 @@ def db_migrate(revision: str, downgrade: bool, alembic_config: str) -> None:
     else:
         logger.info(f"Upgrading to revision {revision}")
         alembic.command.upgrade(al_cfg, revision)
-    logger.info("Done!")
+    print(
+        f"Database migration to revision {revision} {'completed' if not downgrade else 'rolled back'} successfully."
+    )
 
 
 @db.command("migrate-api-keys")
