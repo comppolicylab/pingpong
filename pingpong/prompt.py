@@ -27,7 +27,7 @@ def replace_random_blocks(prompt: str, thread_id: str) -> str:
         allow_repeat = (
             random_attrs.get("allow-repeat", "false").strip().lower() == "true"
         )
-        custom_index = random_attrs.get("id", str(index + 1))
+        id = random_attrs.get("id", str(index + 1))
 
         # Parse <option> elements
         options = []
@@ -43,7 +43,7 @@ def replace_random_blocks(prompt: str, thread_id: str) -> str:
             options.append(PromptRandomOption(text=text, weight=weight))
 
         block = PromptRandomBlock(
-            options=options, count=count, allow_repeat=allow_repeat, index=custom_index
+            options=options, count=count, allow_repeat=allow_repeat, id=id
         )
 
         if not options:
@@ -96,7 +96,7 @@ def _pick_with_replacement(
     total_w = block.total_weight
     for i in range(block.count):
         # Generate a unique seed for each selection
-        u = hash_id(f"{seed}_{block.index}_{i}") * total_w
+        u = hash_id(f"{seed}_{block.id}_{i}") * total_w
 
         cumulative_weight = 0.0
         for option in block.options:
@@ -117,7 +117,7 @@ def _pick_without_replacement(
     """
     priority_list = []
     for option in block.options:
-        u = hash_id(f"{seed}_{block.index}_{option.text}") or 1e-16
+        u = hash_id(f"{seed}_{block.id}_{option.text}") or 1e-16
         key = u ** (1.0 / option.weight)
         priority_list.append((key, option))
 
