@@ -12,6 +12,7 @@
     Button,
     Card,
     Dropdown,
+    DropdownDivider,
     DropdownItem,
     Modal,
     Span,
@@ -71,6 +72,7 @@
   $: threadManagerError = $error?.detail || null;
   $: assistantId = threadMgr.assistantId;
   $: isCurrentUser = $participants.user.includes('Me');
+  $: threadInstructions = threadMgr.instructions;
   let trashThreadFiles = writable<string[]>([]);
   $: threadAttachments = threadMgr.attachments;
   $: allFiles = Object.fromEntries(
@@ -154,6 +156,8 @@
     }
   }
   let showModerators = false;
+  let showAssistantPrompt = false;
+  let settingsOpen = false;
 
   const getShortMessageTimestamp = (timestamp: number) => {
     return new Intl.DateTimeFormat('en-US', {
@@ -828,6 +832,9 @@
   <Modal title="Group Moderators" bind:open={showModerators} autoclose outsideclose
     ><ModeratorsTable moderators={teachers} /></Modal
   >
+  <Modal title="Assistant Prompt" size="lg" bind:open={showAssistantPrompt} autoclose outsideclose
+    ><span class="whitespace-pre-line text-gray-700">{$threadInstructions}</span></Modal
+  >
   {#if !$loading}
     {#if data.threadInteractionMode === 'voice' && !microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'voice'}
       {#if $isFirefox}
@@ -1090,7 +1097,15 @@
           {#if !(data.threadInteractionMode === 'voice' && $messages.length === 0 && assistantInteractionMode === 'voice')}
             <div class="shrink-0 grow-0 h-auto">
               <CogOutline class="dark:text-white cursor-pointer w-6 h-4 font-light" size="lg" />
-              <Dropdown>
+              <Dropdown bind:open={settingsOpen}>
+                {#if $threadInstructions}
+                  <DropdownItem
+                    on:click={() => ((showAssistantPrompt = true), (settingsOpen = false))}
+                  >
+                    <span>Prompt</span>
+                  </DropdownItem>
+                  <DropdownDivider />
+                {/if}
                 <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
                   <span class:text-gray-300={!canPublishThread}>
                     {#if $published}

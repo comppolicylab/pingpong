@@ -463,6 +463,22 @@ class CreateThread(BaseModel):
     _file_check = model_validator(mode="after")(file_validator)
 
 
+class PromptRandomOption(BaseModel):
+    text: str
+    weight: int = 1
+
+
+class PromptRandomBlock(BaseModel):
+    options: list[PromptRandomOption] = []
+    count: int = 1
+    allow_repeat: bool = False
+
+    @property
+    def total_weight(self) -> int:
+        """Calculate the total weight of all options."""
+        return sum(option.weight for option in self.options)
+
+
 class CreateAudioThread(BaseModel):
     parties: list[int] = []
     assistant_id: int
@@ -1163,6 +1179,7 @@ class ThreadWithMeta(BaseModel):
     limit: int
     ci_messages: list[CodeInterpreterMessage] | None
     attachments: dict[str, File] | None
+    instructions: str | None
 
     class Config:
         from_attributes = True
