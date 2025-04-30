@@ -1,6 +1,6 @@
 import re
 import logging
-
+import xml.etree.ElementTree as ET
 from .hash import hash_id
 from .schemas import PromptRandomBlock, PromptRandomOption
 
@@ -8,31 +8,37 @@ logger = logging.getLogger(__name__)
 
 
 def replace_random_blocks(prompt: str, thread_id: str) -> str:
-    random_pattern = re.compile(r"<random\b([^>]*)>(.*?)</random>", re.DOTALL)
-    option_pattern = re.compile(
-        r'<option(?:\s+weight="(\d+)")?>(.*?)</option>', re.DOTALL
-    )
+    random_pattern = re.compile(r"<random\b[^>]*>.*?</random>", re.DOTALL)
 
     replacements = []
     new_prompt = prompt
     for random_match in random_pattern.finditer(prompt):
-        random_attrs = random_match.group(1)
-        inner_content = random_match.group(2)
+        try:
+            root = ET.fromstring(random_match.group(0))
+        except ET.ParseError:
+            continue
 
-        # Parse attributes of <random>
-        count_match = re.search(r'count="(\d+)"', random_attrs)
-        repeat_match = re.search(r'allow-repeat="(true|false)"', random_attrs)
-
-        count = int(count_match.group(1)) if count_match else 1
+        random_attrs = root.attrib
+        count = 1
+        try:
+            count = int(random_attrs.get("count", 1))
+        except ValueError:
+            pass
         allow_repeat = (
-            repeat_match.group(1).lower() == "true" if repeat_match else False
+            random_attrs.get("allow-repeat", "false").strip().lower() == "true"
         )
 
         # Parse <option> elements
         options = []
-        for opt_match in option_pattern.finditer(inner_content):
-            weight = int(opt_match.group(1)) if opt_match.group(1) else 1
-            text = opt_match.group(2).strip()
+        for child in root:
+            if child.tag != "option":
+                continue
+            weight = 1
+            try:
+                weight = int(child.attrib.get("weight", 1))
+            except ValueError:
+                pass
+            text = child.text or ""
             options.append(PromptRandomOption(text=text, weight=weight))
 
         block = PromptRandomBlock(
