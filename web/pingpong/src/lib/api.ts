@@ -1904,6 +1904,7 @@ export type ThreadWithMeta = {
   messages: OpenAIMessage[];
   ci_messages: OpenAIMessage[];
   attachments: Record<string, ServerFile>;
+  instructions: string | null;
 };
 
 /**

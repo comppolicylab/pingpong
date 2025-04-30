@@ -197,6 +197,7 @@ def ws_with_thread_assistant_prompt(func):
         browser_connection.state.conversation_instructions = format_instructions(
             browser_connection.state.assistant.instructions,
             interaction_mode=schemas.InteractionMode.VOICE,
+            thread_id=thread_id,
         )
         return await func(browser_connection, class_id, thread_id, *args, **kwargs)
 

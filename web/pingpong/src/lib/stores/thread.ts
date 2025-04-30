@@ -19,6 +19,7 @@ export type ThreadManagerState = {
   supportsFileSearch: boolean;
   supportsCodeInterpreter: boolean;
   attachments: Record<string, api.ServerFile>;
+  instructions?: string | null;
 };
 
 export type ErrorWithSent = {
@@ -110,6 +111,11 @@ export class ThreadManager {
    */
   timezone?: string;
 
+  /**
+   * The thread instructions, if any.
+   */
+  instructions: Readable<string | null>;
+
   #data: Writable<ThreadManagerState>;
   #fetcher: api.Fetcher;
 
@@ -141,7 +147,8 @@ export class ThreadManager {
       loading: false,
       waiting: false,
       submitting: false,
-      attachments: expanded.data?.attachments || {}
+      attachments: expanded.data?.attachments || {},
+      instructions: expanded.data?.instructions || null
     });
 
     if (interactionMode === 'chat') {
@@ -202,6 +209,10 @@ export class ThreadManager {
 
     this.attachments = derived(this.#data, ($data) => {
       return $data?.attachments || {};
+    });
+
+    this.instructions = derived(this.#data, ($data) => {
+      return $data?.instructions || null;
     });
   }
 

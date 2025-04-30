@@ -2179,6 +2179,14 @@ async def get_thread(
         thread.assistant_names = {0: "Deleted Assistant"}
     thread.user_names = user_names(thread, request.state.session.user.id)
 
+    can_view_prompt = False
+    if thread.instructions and assistant:
+        can_view_prompt = await request.state.authz.test(
+            f"user:{request.state.session.user.id}",
+            "can_edit",
+            f"assistant:{assistant.id}",
+        )
+
     return {
         "thread": thread,
         "model": assistant.model if assistant else "None",
@@ -2188,6 +2196,7 @@ async def get_thread(
         "limit": 20,
         "ci_messages": placeholder_ci_calls,
         "attachments": all_files,
+        "instructions": thread.instructions if can_view_prompt else None,
     }
 
 
@@ -2849,6 +2858,7 @@ async def create_thread(
             assistant.use_latex,
             assistant.use_image_descriptions,
             assistant.interaction_mode,
+            thread_id=thread.id,
         ),
     }
 
@@ -2913,6 +2923,7 @@ async def create_run(
                 asst.use_latex,
                 asst.use_image_descriptions,
                 asst.interaction_mode,
+                thread_id=thread.thread_id,
             )
             request.state.db.add(thread)
             await request.state.db.flush()
@@ -3079,6 +3090,7 @@ async def send_message(
                 asst.use_latex,
                 asst.use_image_descriptions,
                 asst.interaction_mode,
+                thread_id=thread.thread_id,
             )
             request.state.db.add(thread)
             await request.state.db.flush()

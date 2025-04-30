@@ -10,6 +10,7 @@ import orjson
 from pingpong.auth import encode_auth_token
 from pingpong.invite import send_export_download
 import pingpong.models as models
+from pingpong.prompt import replace_random_blocks
 from pingpong.schemas import (
     APIKeyValidationResponse,
     ThreadName,
@@ -564,6 +565,7 @@ def format_instructions(
     use_latex: bool = False,
     use_image_descriptions: bool = False,
     interaction_mode: InteractionMode = InteractionMode.CHAT,
+    thread_id: str | None = None,
 ) -> str:
     """Format instructions for a prompt."""
 
@@ -581,8 +583,8 @@ def format_instructions(
 
     if use_latex:
         instructions += (
-            "\n"
-            "---Formatting: LaTeX---"
+            "\n\n"
+            "---Formatting: LaTeX---\n"
             "Use LaTeX with math mode delimiters when outputting "
             "mathematical tokens. Use the single dollar sign $ with spaces "
             "surrounding it to delimit "
@@ -648,6 +650,13 @@ def format_instructions(
             - Assistant:
             "You've uploaded two images in total. Would you like more details on either one?"
             """
+        )
+
+    if thread_id:
+        logger.debug(f"Replacing random blocks in instructions for thread {thread_id}")
+        instructions = replace_random_blocks(instructions, thread_id)
+        logger.debug(
+            f"Instructions after replacing random blocks for thread {thread_id}: {instructions}"
         )
 
     return instructions
