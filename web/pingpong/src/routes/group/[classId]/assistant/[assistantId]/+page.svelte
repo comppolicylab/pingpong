@@ -245,12 +245,14 @@
   $: codeInterpreterToolSelect = initialTools.includes('code_interpreter');
   $: assistantShouldMessageFirstData = assistant?.assistant_should_message_first;
   let assistantShouldMessageFirst = false;
+  let hasSetAssistantShouldMessageFirst = false;
   $: if (
     assistantShouldMessageFirstData !== undefined &&
     assistantShouldMessageFirstData !== null &&
-    !assistantShouldMessageFirst
+    !hasSetAssistantShouldMessageFirst
   ) {
     assistantShouldMessageFirst = assistantShouldMessageFirstData;
+    hasSetAssistantShouldMessageFirst = true;
   }
 
   // Handle updates from the file upload component.
