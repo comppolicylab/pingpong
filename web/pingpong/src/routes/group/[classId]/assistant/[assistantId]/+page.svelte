@@ -59,6 +59,10 @@
   $: preventEdits = !!assistant?.locked;
   $: canPublish = data.grants.canPublishAssistants;
 
+  let assistantName = '';
+  $: if (assistant?.name !== undefined && assistant?.name !== null && !assistantName) {
+    assistantName = assistant.name;
+  }
   let interactionMode: 'chat' | 'voice';
   $: if (
     assistant?.interaction_mode !== undefined &&
@@ -74,6 +78,34 @@
       assistant?.interaction_mode === null)
   ) {
     interactionMode = 'chat';
+  }
+  let description = '';
+  $: if (assistant?.description !== undefined && assistant?.description !== null && !description) {
+    description = assistant.description;
+  }
+  let instructions = '';
+  $: if (
+    assistant?.instructions !== undefined &&
+    assistant?.instructions !== null &&
+    !instructions
+  ) {
+    instructions = assistant.instructions;
+  }
+  let hidePrompt = false;
+  let hasSetHidePrompt = false;
+  $: if (
+    assistant?.hide_prompt !== undefined &&
+    assistant?.hide_prompt !== null &&
+    !hasSetHidePrompt
+  ) {
+    hidePrompt = assistant?.hide_prompt;
+    hasSetHidePrompt = true;
+  }
+  let useLatex = false;
+  let hasSetUseLatex = false;
+  $: if (assistant?.use_latex !== undefined && assistant?.use_latex !== null && !hasSetUseLatex) {
+    useLatex = assistant?.use_latex;
+    hasSetUseLatex = true;
   }
 
   let selectedFileSearchFiles = writable(
@@ -241,17 +273,46 @@
     .filter(codeInterpreterFilter)
     .map((file) => ({ value: file.file_id, name: file.name }));
 
-  $: fileSearchToolSelect = initialTools.includes('file_search');
-  $: codeInterpreterToolSelect = initialTools.includes('code_interpreter');
-  $: assistantShouldMessageFirstData = assistant?.assistant_should_message_first;
+  let fileSearchToolSelect = false;
+  let hasSetFileSearchToolSelect = false;
+  $: if (initialTools !== undefined && initialTools !== null && !hasSetFileSearchToolSelect) {
+    fileSearchToolSelect = initialTools.includes('file_search');
+    hasSetFileSearchToolSelect = true;
+  }
+  let codeInterpreterToolSelect = false;
+  let hasSetCodeInterpreterToolSelect = false;
+  $: if (initialTools !== undefined && initialTools !== null && !hasSetCodeInterpreterToolSelect) {
+    codeInterpreterToolSelect = initialTools.includes('code_interpreter');
+    hasSetCodeInterpreterToolSelect = true;
+  }
+  let isPublished = false;
+  let hasSetIsPublished = false;
+  $: if (
+    assistant?.published !== undefined &&
+    assistant?.published !== null &&
+    !hasSetIsPublished
+  ) {
+    isPublished = !!assistant?.published;
+    hasSetIsPublished = true;
+  }
+  let useImageDescriptions = false;
+  let hasSetImageDescriptions = false;
+  $: if (
+    assistant?.use_image_descriptions !== undefined &&
+    assistant?.use_image_descriptions !== null &&
+    !hasSetImageDescriptions
+  ) {
+    useImageDescriptions = assistant?.use_image_descriptions;
+    hasSetImageDescriptions = true;
+  }
   let assistantShouldMessageFirst = false;
   let hasSetAssistantShouldMessageFirst = false;
   $: if (
-    assistantShouldMessageFirstData !== undefined &&
-    assistantShouldMessageFirstData !== null &&
+    assistant?.assistant_should_message_first !== undefined &&
+    assistant?.assistant_should_message_first !== null &&
     !hasSetAssistantShouldMessageFirst
   ) {
-    assistantShouldMessageFirst = assistantShouldMessageFirstData;
+    assistantShouldMessageFirst = assistant?.assistant_should_message_first;
     hasSetAssistantShouldMessageFirst = true;
   }
 
@@ -780,7 +841,7 @@
   <form on:submit={submitForm} bind:this={assistantForm}>
     <div class="mb-4">
       <Label class="pb-1" for="name">Name</Label>
-      <Input id="name" name="name" value={assistant?.name} disabled={preventEdits} />
+      <Input id="name" name="name" bind:value={assistantName} disabled={preventEdits} />
     </div>
     <div class="mb-4">
       <Label for="interactionMode">Interaction Mode</Label>
@@ -928,7 +989,7 @@
       <Textarea
         id="description"
         name="description"
-        value={assistant?.description || ''}
+        bind:value={description}
         disabled={preventEdits}
       />
     </div>
@@ -941,16 +1002,13 @@
         id="instructions"
         name="instructions"
         rows={6}
-        value={assistant?.instructions}
+        bind:value={instructions}
         disabled={preventEdits}
       />
     </div>
     <div class="col-span-2 mb-4">
-      <Checkbox
-        id="hide_prompt"
-        name="hide_prompt"
-        disabled={preventEdits}
-        checked={(assistant ? assistant.hide_prompt : false) || false}>Hide Prompt</Checkbox
+      <Checkbox id="hide_prompt" name="hide_prompt" disabled={preventEdits} checked={hidePrompt}
+        >Hide Prompt</Checkbox
       >
       <Helper
         >Hide the prompt from other users. When checked, only the moderation team and the
@@ -959,11 +1017,8 @@
     </div>
     <div class="col-span-2 mb-4">
       {#if interactionMode === 'chat'}
-        <Checkbox
-          id="use_latex"
-          name="use_latex"
-          disabled={preventEdits}
-          checked={(assistant ? assistant.use_latex : true) || false}>Use LaTeX</Checkbox
+        <Checkbox id="use_latex" name="use_latex" disabled={preventEdits} checked={useLatex}
+          >Use LaTeX</Checkbox
         >
         <Helper>Enable LaTeX formatting for assistant responses.</Helper>
       {:else}
@@ -1114,9 +1169,9 @@
     <div class="col-span-2 mb-4">
       <Checkbox
         id="published"
-        disabled={!canPublish && !assistant?.published}
+        disabled={!canPublish && !isPublished}
         name="published"
-        checked={!!assistant?.published}>Publish</Checkbox
+        checked={isPublished}>Publish</Checkbox
       >
       {#if !canPublish}
         <Helper
@@ -1137,7 +1192,7 @@
           id="use_image_descriptions"
           name="use_image_descriptions"
           class="mb-1"
-          checked={!!assistant?.use_image_descriptions}
+          checked={useImageDescriptions}
           ><div class="flex flex-row gap-1">
             <DropdownBadge
               extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
