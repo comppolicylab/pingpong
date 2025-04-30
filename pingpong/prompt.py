@@ -7,10 +7,6 @@ from .schemas import PromptRandomBlock, PromptRandomOption
 logger = logging.getLogger(__name__)
 
 
-def clean_for_xml(text: str) -> str:
-    return text.replace("&", "&amp;")
-
-
 def replace_random_blocks(prompt: str, thread_id: str) -> str:
     random_pattern = re.compile(r"<random\b[^>]*>.*?</random>", re.DOTALL)
 
@@ -18,7 +14,7 @@ def replace_random_blocks(prompt: str, thread_id: str) -> str:
     new_prompt = prompt
     for random_match in random_pattern.finditer(prompt):
         try:
-            root = ET.fromstring(clean_for_xml(random_match.group(0)))
+            root = ET.fromstring(random_match.group(0))
         except ET.ParseError:
             continue
 
