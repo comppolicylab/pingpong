@@ -833,7 +833,7 @@
     ><ModeratorsTable moderators={teachers} /></Modal
   >
   <Modal title="Assistant Prompt" size="lg" bind:open={showAssistantPrompt} autoclose outsideclose
-    ><span class="whitespace-pre-line text-gray-700">{$threadInstructions}</span></Modal
+    ><span class="whitespace-pre-wrap text-gray-700">{$threadInstructions}</span></Modal
   >
   {#if !$loading}
     {#if data.threadInteractionMode === 'voice' && !microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'voice'}
