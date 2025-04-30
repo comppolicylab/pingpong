@@ -985,6 +985,7 @@ export type AssistantModel = {
   supports_temperature: boolean;
   supports_reasoning: boolean;
   hide_in_model_selector?: boolean;
+  default_prompt_id?: string | null;
 };
 
 export type AssistantModelOptions = {
@@ -996,11 +997,17 @@ export type AssistantModelOptions = {
   highlight: boolean;
 };
 
+export type AssistantDefaultPrompt = {
+  id: string;
+  prompt: string;
+};
+
 /**
  * List of language models.
  */
 export type AssistantModels = {
   models: AssistantModel[];
+  default_prompts?: AssistantDefaultPrompt[];
 };
 
 /**

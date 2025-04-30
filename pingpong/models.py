@@ -1837,6 +1837,20 @@ class Assistant(Base):
         result = await session.execute(stmt)
         return [row.Assistant for row in result]
 
+    @classmethod
+    async def get_by_class_id_models(
+        cls, session: AsyncSession, class_id: int, models: list[str]
+    ) -> AsyncGenerator["Assistant", None]:
+        stmt = select(Assistant).where(
+            and_(
+                Assistant.class_id == class_id,
+                Assistant.model.in_(models),
+            )
+        )
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.Assistant
+
 
 class LMSClass(Base):
     __tablename__ = "lms_classes"
@@ -2539,6 +2553,22 @@ class Class(Base):
                 ),
             )
         stmt = select(Class).where(and_(*conditions))
+        result = await session.execute(stmt)
+
+        for row in result:
+            yield row.Class
+
+    @classmethod
+    async def get_all_classes_with_api_keys(
+        cls, session: AsyncSession, before: datetime | None = None
+    ) -> AsyncGenerator["Class", None]:
+        """Get all classes that have API keys."""
+        stmt = select(Class).where(
+            or_(
+                Class.api_key_id.isnot(None),
+                Class.api_key.isnot(None),
+            )
+        )
         result = await session.execute(stmt)
 
         for row in result:

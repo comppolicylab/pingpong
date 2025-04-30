@@ -19,6 +19,7 @@ from pingpong.ai import (
     get_openai_client_by_class_id,
     validate_api_key,
 )
+from pingpong.ai_models import DEFAULT_PROMPTS, KNOWN_MODELS
 from pingpong.api_keys import (
     get_process_redacted_project_api_keys,
     set_as_default_azure_api_key,
@@ -565,6 +566,77 @@ def migrate_azure_api_keys_add_region() -> None:
             logger.info("Done!")
 
     asyncio.run(_migrate_azure_api_keys_add_region())
+
+
+@db.command("migrate_default_prompts")
+def migrate_default_prompts() -> None:
+    async def _migrate_default_prompts() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Adding default prompts to existing assistant prompts...")
+            async for class_ in Class.get_all_classes_with_api_keys(session):
+                logger.info(f"Processing class {class_.id}...")
+                # Get the OpenAI client for the class
+                try:
+                    openai_client = await get_openai_client_by_class_id(
+                        session, class_.id
+                    )
+                except GetOpenAIClientException as e:
+                    logger.warning(f"Error getting OpenAI client: {e.detail}")
+                    continue
+
+                # Get models with default prompts
+                try:
+                    all_models = await openai_client.models.list()
+                except Exception as e:
+                    logger.warning(f"Error listing models: {e}")
+                    continue
+
+                models_with_default_prompts = [
+                    model.id
+                    for model in all_models.data
+                    if model.id in KNOWN_MODELS.keys()
+                    and KNOWN_MODELS[model.id].get("default_prompt_id")
+                ]
+
+                async for assistant in Assistant.get_by_class_id_models(
+                    session, class_id=class_.id, models=models_with_default_prompts
+                ):
+                    logger.info(f"Processing assistant {assistant.id}...")
+                    # Get the default prompt for the model
+                    default_prompt_id = KNOWN_MODELS[assistant.model].get(
+                        "default_prompt_id"
+                    )
+                    if not default_prompt_id:
+                        logger.warning(
+                            f"No default prompt found for model {assistant.model}"
+                        )
+                        continue
+
+                    default_prompt = DEFAULT_PROMPTS.get(default_prompt_id)
+                    if not default_prompt:
+                        logger.warning(
+                            f"No default prompt found for ID {default_prompt_id}"
+                        )
+                        continue
+
+                    # Check if the assistant already has this prompt
+                    if default_prompt.prompt in assistant.instructions:
+                        logger.info(
+                            f"Assistant {assistant.id} already contains prompt {default_prompt_id}. Skipping."
+                        )
+                        continue
+
+                    assistant.instructions = (
+                        default_prompt.prompt + "\n\n" + assistant.instructions
+                    )
+                    session.add(assistant)
+                    await session.commit()
+                    logger.info(
+                        f"Added default prompt {default_prompt_id} to assistant {assistant.id}"
+                    )
+            logger.info("Done!")
+
+    asyncio.run(_migrate_default_prompts())
 
 
 @db.command("migrate_external_providers")

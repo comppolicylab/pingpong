@@ -25,6 +25,7 @@ from pydantic import PositiveInt
 
 from pingpong.ai_models import (
     AZURE_UNAVAILABLE_MODELS,
+    DEFAULT_PROMPTS,
     upgrade_assistants_model,
     KNOWN_MODELS,
     ADMIN_ONLY_MODELS,
@@ -2003,6 +2004,7 @@ async def list_class_models(
             "id": m.id,
             "created": datetime.fromtimestamp(m.created or m.created_at or 0),
             "owner": m.owned_by or "",
+            "default_prompt_id": KNOWN_MODELS[m.id].get("default_prompt_id"),
             "name": KNOWN_MODELS[m.id]["name"],
             "sort_order": KNOWN_MODELS[m.id]["sort_order"],
             "type": KNOWN_MODELS[m.id]["type"],
@@ -2103,9 +2105,14 @@ async def list_class_models(
 
     filtered.sort(key=lambda x: x["sort_order"])
 
-    return {
-        "models": filtered,
-    }
+    default_prompt_ids = set(model.get("default_prompt_id") for model in filtered)
+    default_prompts = [
+        DEFAULT_PROMPTS.get(prompt_id)
+        for prompt_id in default_prompt_ids
+        if prompt_id in DEFAULT_PROMPTS
+    ]
+
+    return {"models": filtered, "default_prompts": default_prompts}
 
 
 @v1.websocket(
@@ -2686,7 +2693,6 @@ async def create_audio_thread(
             assistant.instructions,
             assistant.use_latex,
             assistant.use_image_descriptions,
-            assistant.interaction_mode,
             thread_id=thread.id,
         ),
         "timezone": req.timezone,
@@ -2873,7 +2879,6 @@ async def create_thread(
             assistant.instructions,
             assistant.use_latex,
             assistant.use_image_descriptions,
-            assistant.interaction_mode,
             thread_id=thread.id,
         ),
         "timezone": req.timezone,
@@ -2939,7 +2944,6 @@ async def create_run(
                 asst.instructions,
                 asst.use_latex,
                 asst.use_image_descriptions,
-                asst.interaction_mode,
                 thread_id=thread.thread_id,
             )
             request.state.db.add(thread)
@@ -3106,7 +3110,6 @@ async def send_message(
                 asst.instructions,
                 asst.use_latex,
                 asst.use_image_descriptions,
-                asst.interaction_mode,
                 thread_id=thread.thread_id,
             )
             request.state.db.add(thread)
@@ -3590,7 +3593,6 @@ async def create_assistant(
                 req.instructions,
                 use_latex=req.use_latex,
                 use_image_descriptions=req.use_image_descriptions,
-                interaction_mode=req.interaction_mode,
             ),
             model=_model,
             tools=req.tools,
