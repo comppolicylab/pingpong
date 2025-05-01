@@ -48,12 +48,19 @@ def replace_random_blocks(prompt: str, thread_id: str, user_id: int) -> str:
             options = []
             for opt_index, opt in enumerate(tag.find_all("option", recursive=False)):
                 try:
-                    weight = int(opt.get("weight", 1))
+                    weight = float(opt.get("weight", 1.0))
+                    if weight < 0:
+                        logger.warning(
+                            f"Invalid weight '{opt.get('weight')}' in <option> tag in thread {thread_id}. Using 1.0."
+                        )
+                        weight = 1.0
                 except ValueError:
-                    weight = 1
+                    weight = 1.0
                 text = opt.decode_contents(formatter=None)
-                id = opt.get("id", str(opt_index + 1))
-                options.append(PromptRandomOption(id=id, text=text, weight=weight))
+                option_id = opt.get("id", str(opt_index + 1))
+                options.append(
+                    PromptRandomOption(id=option_id, text=text, weight=weight)
+                )
 
             if not options:
                 logger.warning(

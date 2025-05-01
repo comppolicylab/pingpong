@@ -467,7 +467,7 @@ class CreateThread(BaseModel):
 class PromptRandomOption(BaseModel):
     id: str
     text: str
-    weight: int = 1
+    weight: float = 1.0
 
     def __str__(self) -> str:
         return f"{repr(self.text)} (id={self.id}, weight={self.weight})"
@@ -480,11 +480,6 @@ class PromptRandomBlock(BaseModel):
     count: int = 1
     allow_repeat: bool = False
     sep: str = "\n"
-
-    @property
-    def total_weight(self) -> int:
-        """Calculate the total weight of all options."""
-        return sum(option.weight for option in self.options)
 
     def __str__(self) -> str:
         options_str = ", ".join(str(option) for option in self.options)
