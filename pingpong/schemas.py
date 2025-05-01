@@ -479,6 +479,7 @@ class PromptRandomBlock(BaseModel):
     options: list[PromptRandomOption] = []
     count: int = 1
     allow_repeat: bool = False
+    sep: str = "\n"
 
     @property
     def total_weight(self) -> int:
@@ -487,7 +488,7 @@ class PromptRandomBlock(BaseModel):
 
     def __str__(self) -> str:
         options_str = ", ".join(str(option) for option in self.options)
-        return f"PromptRandomBlock(id={self.id}, options=[{options_str}], count={self.count}, allow_repeat={self.allow_repeat}, seed={self.seed})"
+        return f"PromptRandomBlock(id={self.id}, options=[{options_str}], count={self.count}, allow_repeat={self.allow_repeat}, seed={self.seed}, sep={repr(self.sep)})"
 
 
 class CreateAudioThread(BaseModel):
