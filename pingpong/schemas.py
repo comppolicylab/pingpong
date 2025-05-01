@@ -468,6 +468,9 @@ class PromptRandomOption(BaseModel):
     text: str
     weight: int = 1
 
+    def __str__(self) -> str:
+        return f'"{repr(self.text)}" (weight={self.weight})'
+
 
 class PromptRandomBlock(BaseModel):
     id: str
@@ -479,6 +482,10 @@ class PromptRandomBlock(BaseModel):
     def total_weight(self) -> int:
         """Calculate the total weight of all options."""
         return sum(option.weight for option in self.options)
+
+    def __str__(self) -> str:
+        options_str = ", ".join(str(option) for option in self.options)
+        return f"PromptRandomBlock(id={self.id}, options=[{options_str}], count={self.count}, allow_repeat={self.allow_repeat})"
 
 
 class CreateAudioThread(BaseModel):

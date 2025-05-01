@@ -1,11 +1,11 @@
 import logging
 
-from bs4 import BeautifulSoup, NavigableString
+from bs4 import BeautifulSoup
 
 from .hash import hash_id
 from .schemas import PromptRandomBlock, PromptRandomOption
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("prompt_randomizer")
 
 
 def replace_random_blocks(prompt: str, thread_id: str) -> str:
@@ -20,9 +20,16 @@ def replace_random_blocks(prompt: str, thread_id: str) -> str:
             break
 
         level += 1
-        leaves = [tag for tag in all_randoms if not tag.find("random")]
 
-        for index, tag in enumerate(leaves):
+        if level > 10:
+            logger.warning(
+                f"Too many nested <random> blocks in thread {thread_id}. Skipping replacements."
+            )
+            break
+
+        roots = [tag for tag in all_randoms if tag.find_parent("random") is None]
+
+        for index, tag in enumerate(roots):
             attrs = tag.attrs
             try:
                 count = int(attrs.get("count", 1))
@@ -37,7 +44,7 @@ def replace_random_blocks(prompt: str, thread_id: str) -> str:
                     weight = int(opt.get("weight", 1))
                 except ValueError:
                     weight = 1
-                text = opt.get_text(strip=True)
+                text = opt.decode_contents(formatter=None)
                 options.append(PromptRandomOption(text=text, weight=weight))
 
             if not options:
@@ -46,13 +53,14 @@ def replace_random_blocks(prompt: str, thread_id: str) -> str:
                 )
                 continue
 
-            print(f"Block ID: {block_id or f'{level}_{index + 1}'}")
             block = PromptRandomBlock(
                 options=options,
                 count=count,
                 allow_repeat=allow_repeat,
                 id=block_id or f"{level}_{index + 1}",
             )
+
+            logger.debug(f"Processing <random> block in thread {thread_id}: {block}")
 
             chosen = pick_options(block, thread_id)
 
@@ -64,8 +72,8 @@ def replace_random_blocks(prompt: str, thread_id: str) -> str:
                 continue
 
             replacement_text = "\n".join(opt.text for opt in chosen)
-
-            tag.replace_with(NavigableString(replacement_text))
+            fragment = BeautifulSoup(replacement_text, "html.parser")
+            tag.replace_with(*fragment.contents)
 
     return str(soup)
 
