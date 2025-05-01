@@ -49,6 +49,7 @@
   import DropdownFooter from '$lib/components/DropdownFooter.svelte';
   import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
   import DropdownBadge from '$lib/components/DropdownBadge.svelte';
+  import Sanitize from '$lib/components/Sanitize.svelte';
   export let data;
 
   // Flag indicating whether we should check for changes before navigating away.
@@ -668,6 +669,33 @@
     }
   };
 
+  let showAssistantInstructionsPreview = false;
+  let instructionsPreview = '';
+  /**
+   * Preview the assistant instructions.
+   */
+  const previewInstructions = async () => {
+    instructionsPreview = '';
+
+    const result = await api.previewAssistantInstructions(fetch, data.class.id, {
+      instructions,
+      use_latex: useLatex,
+      use_image_descriptions: useImageDescriptions
+    });
+    const expanded = api.expandResponse(result);
+
+    if (expanded.error) {
+      sadToast(
+        `Could not generate the assistant instructions:\n${expanded.error.detail || 'Unknown error'}`
+      );
+      return;
+    } else {
+      instructionsPreview = expanded.data.instructions_preview;
+      showAssistantInstructionsPreview = true;
+      return;
+    }
+  };
+
   /**
    * Delete the assistant.
    */
@@ -873,6 +901,15 @@
       </span>
     </div>
   {/if}
+  <Modal
+    title="Assistant Prompt Preview"
+    size="lg"
+    bind:open={showAssistantInstructionsPreview}
+    autoclose
+    outsideclose
+    ><span class="whitespace-pre-wrap text-gray-700"><Sanitize html={instructionsPreview} /></span
+    ></Modal
+  >
 
   <form on:submit={submitForm} bind:this={assistantForm}>
     <div class="mb-4">
@@ -1030,10 +1067,22 @@
       />
     </div>
     <div class="col-span-2 mb-4">
-      <Label for="instructions">Instructions</Label>
-      <Helper class="pb-1"
-        >This is the prompt the language model will use to generate responses.</Helper
-      >
+      <div class="flex flex-row justify-between items-end">
+        <div>
+          <Label for="instructions">Instructions</Label>
+          <Helper class="pb-1"
+            >This is the prompt the language model will use to generate responses.</Helper
+          >
+        </div>
+        <Button
+          class="flex flex-row items-center gap-x-2 py-0.5 px-2 mb-1 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit max-h-fit"
+          on:click={previewInstructions}
+          type="button"
+          disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}
+        >
+          Preview
+        </Button>
+      </div>
       <Textarea
         id="instructions"
         name="instructions"
