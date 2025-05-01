@@ -4,6 +4,7 @@ import logging
 import time
 from datetime import datetime, timedelta
 from typing import Annotated, Any, Optional, Union
+import uuid
 from aiohttp import ClientResponseError
 import jwt
 import openai
@@ -3676,7 +3677,7 @@ async def preview_assistant_instructions(
             use_latex=req.use_latex,
             use_image_descriptions=req.use_image_descriptions,
             user_id=request.state.session.user.id,
-            thread_id="thread",
+            thread_id=f"preview_{uuid.uuid4()}",
         )
     }
 
