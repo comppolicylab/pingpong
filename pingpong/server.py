@@ -3660,6 +3660,27 @@ async def create_assistant(
         raise e
 
 
+@v1.post(
+    "/class/{class_id}/assistant_instructions",
+    dependencies=[Depends(Authz("can_create_assistants", "class:{class_id}"))],
+    response_model=schemas.AssistantInstructionsPreviewResponse,
+)
+async def preview_assistant_instructions(
+    class_id: str,
+    req: schemas.AssistantInstructionsPreviewRequest,
+    request: Request,
+):
+    return {
+        "instructions_preview": format_instructions(
+            req.instructions,
+            use_latex=req.use_latex,
+            use_image_descriptions=req.use_image_descriptions,
+            user_id=request.state.session.user.id,
+            thread_id="thread",
+        )
+    }
+
+
 @v1.put(
     "/class/{class_id}/assistant/{assistant_id}",
     dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],

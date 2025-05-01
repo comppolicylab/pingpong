@@ -1270,6 +1270,32 @@ export const updateAssistant = async (
   return await PUT<UpdateAssistantRequest, Assistant>(f, url, data);
 };
 
+export type AssistantInstructionsPreviewResponse = {
+  instructions_preview: string;
+};
+
+export type AssistantInstructionsPreviewRequest = {
+  instructions: string;
+  use_latex: boolean;
+  use_image_descriptions: boolean;
+};
+
+/**
+ * Get a preview of an assistant's instructions.
+ */
+export const previewAssistantInstructions = async (
+  f: Fetcher,
+  classId: number,
+  data: AssistantInstructionsPreviewRequest
+) => {
+  const url = `class/${classId}/assistant_instructions`;
+  return await POST<AssistantInstructionsPreviewRequest, AssistantInstructionsPreviewResponse>(
+    f,
+    url,
+    data
+  );
+};
+
 /**
  * Publish an assistant.
  */

@@ -378,6 +378,19 @@ class CreateAssistant(BaseModel):
     _temperature_check = model_validator(mode="after")(temperature_validator)
 
 
+class AssistantInstructionsPreviewRequest(BaseModel):
+    instructions: str
+    use_latex: bool = False
+    use_image_descriptions: bool = False
+
+
+class AssistantInstructionsPreviewResponse(BaseModel):
+    instructions_preview: str
+
+    class Config:
+        from_attributes = True
+
+
 class UpdateAssistant(BaseModel):
     name: str | None = Field(None, min_length=3, max_length=100)
     code_interpreter_file_ids: list[str] | None = None
