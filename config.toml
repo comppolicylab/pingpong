@@ -10,6 +10,12 @@
 # The default is `INFO`.
 log_level = "DEBUG"
 
+# Realtime features logging level.
+realtime_log_level = "INFO"
+
+# Prompt randomizer features logging level.
+prompt_randomizer_log_level = "INFO"
+
 # The URL where the application can be accessed. This is used to generate
 # absolute URLs in emails and other places.
 # In development, this is the UI dev server (`pnpm dev`). In production it
