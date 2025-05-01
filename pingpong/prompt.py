@@ -8,8 +8,9 @@ from .schemas import PromptRandomBlock, PromptRandomOption
 logger = logging.getLogger("prompt_randomizer")
 
 
-def replace_random_blocks(prompt: str, thread_id: str) -> str:
+def replace_random_blocks(prompt: str, thread_id: str, user_id: int) -> str:
     soup = BeautifulSoup(prompt, "html.parser")
+    print(f"Original prompt: {prompt}")
 
     level = 0
 
@@ -29,23 +30,31 @@ def replace_random_blocks(prompt: str, thread_id: str) -> str:
 
         roots = [tag for tag in all_randoms if tag.find_parent("random") is None]
 
-        for index, tag in enumerate(roots):
+        block_index = 0
+        for tag in roots:
             attrs = tag.attrs
             try:
                 count = int(attrs.get("count", 1))
             except ValueError:
                 count = 1
             allow_repeat = str(attrs.get("allow-repeat", "")).lower() == "true"
-            block_id = attrs.get("id", "")
+            block_id = attrs.get("id", f"{level}_{block_index + 1}")
+            rand_level = attrs.get("level", "thread")
+            if rand_level not in {"thread", "user"}:
+                logger.warning(
+                    f"Invalid level '{rand_level}' in <random> block in thread {thread_id}. Using thread_id."
+                )
+                rand_level = "thread"
 
             options = []
-            for opt in tag.find_all("option", recursive=False):
+            for opt_index, opt in enumerate(tag.find_all("option", recursive=False)):
                 try:
                     weight = int(opt.get("weight", 1))
                 except ValueError:
                     weight = 1
                 text = opt.decode_contents(formatter=None)
-                options.append(PromptRandomOption(text=text, weight=weight))
+                id = opt.get("id", str(opt_index + 1))
+                options.append(PromptRandomOption(id=id, text=text, weight=weight))
 
             if not options:
                 logger.warning(
@@ -54,15 +63,16 @@ def replace_random_blocks(prompt: str, thread_id: str) -> str:
                 continue
 
             block = PromptRandomBlock(
+                seed=str(user_id) if rand_level == "user" else thread_id,
                 options=options,
                 count=count,
                 allow_repeat=allow_repeat,
-                id=block_id or f"{level}_{index + 1}",
+                id=block_id,
             )
 
             logger.debug(f"Processing <random> block in thread {thread_id}: {block}")
 
-            chosen = pick_options(block, thread_id)
+            chosen = pick_options(block)
 
             if not chosen:
                 logger.error(
@@ -75,53 +85,54 @@ def replace_random_blocks(prompt: str, thread_id: str) -> str:
             fragment = BeautifulSoup(replacement_text, "html.parser")
             tag.replace_with(*fragment.contents)
 
+            block_index += 1
+
     return str(soup)
 
 
-def pick_options(block: PromptRandomBlock, thread_id: str) -> list[PromptRandomOption]:
+def pick_options(block: PromptRandomBlock) -> list[PromptRandomOption]:
     """
     Pick options from a PromptRandomBlock based on its configuration.
     If allow_repeat is True, picks with replacement; otherwise, picks without replacement.
     """
     if block.allow_repeat:
-        return _pick_with_replacement(thread_id, block)
+        return _pick_with_replacement(block)
     else:
-        return _pick_without_replacement(thread_id, block)
+        return _pick_without_replacement(block)
 
 
-def _pick_with_replacement(
-    seed: str, block: PromptRandomBlock
-) -> list[PromptRandomOption]:
+def _pick_with_replacement(block: PromptRandomBlock) -> list[PromptRandomOption]:
     """
     Deterministically draw `block.count` items *with* replacement.
-    Similar to inverse transform sampling.
+    Similar to priority sampling.
     """
     picks: list[PromptRandomOption] = []
-    total_w = block.total_weight
-    for i in range(block.count):
-        # Generate a unique seed for each selection
-        u = hash_id(f"{seed}_{block.id}_{i}") * total_w
+    for pick_index in range(block.count):
+        best_score = -1.0
+        best_option: PromptRandomOption | None = None
 
-        cumulative_weight = 0.0
         for option in block.options:
-            cumulative_weight += option.weight
-            if u < cumulative_weight:
-                picks.append(option)
-                break
+            u = hash_id(f"{block.seed}_{block.id}_{option.id}_{pick_index}") or 1e-16
+            score = u ** (1.0 / option.weight)
+
+            if score > best_score:
+                best_score = score
+                best_option = option
+
+        if best_option is not None:
+            picks.append(best_option)
 
     return picks
 
 
-def _pick_without_replacement(
-    seed: str, block: PromptRandomBlock
-) -> list[PromptRandomOption]:
+def _pick_without_replacement(block: PromptRandomBlock) -> list[PromptRandomOption]:
     """
     Deterministically draw `block.count` items *without* replacement.
     Similar to priority sampling.
     """
     priority_list = []
     for option in block.options:
-        u = hash_id(f"{seed}_{block.id}_{option.text}") or 1e-16
+        u = hash_id(f"{block.seed}_{block.id}_{option.id}") or 1e-16
         key = u ** (1.0 / option.weight)
         priority_list.append((key, option))
 

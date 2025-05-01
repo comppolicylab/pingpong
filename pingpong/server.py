@@ -3111,6 +3111,7 @@ async def send_message(
                 asst.use_latex,
                 asst.use_image_descriptions,
                 thread_id=thread.thread_id,
+                user_id=request.state.session.user.id,
             )
             request.state.db.add(thread)
             await request.state.db.flush()

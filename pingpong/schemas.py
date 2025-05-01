@@ -465,15 +465,17 @@ class CreateThread(BaseModel):
 
 
 class PromptRandomOption(BaseModel):
+    id: str
     text: str
     weight: int = 1
 
     def __str__(self) -> str:
-        return f'"{repr(self.text)}" (weight={self.weight})'
+        return f"{repr(self.text)} (id={self.id}, weight={self.weight})"
 
 
 class PromptRandomBlock(BaseModel):
     id: str
+    seed: str
     options: list[PromptRandomOption] = []
     count: int = 1
     allow_repeat: bool = False

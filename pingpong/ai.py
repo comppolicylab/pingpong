@@ -564,6 +564,7 @@ def format_instructions(
     use_latex: bool = False,
     use_image_descriptions: bool = False,
     thread_id: str | None = None,
+    user_id: int | None = None,
 ) -> str:
     """Format instructions for a prompt."""
 
@@ -638,9 +639,9 @@ def format_instructions(
             """
         )
 
-    if thread_id:
+    if thread_id and user_id:
         logger.debug(f"Replacing random blocks in instructions for thread {thread_id}")
-        instructions = replace_random_blocks(instructions, thread_id)
+        instructions = replace_random_blocks(instructions, thread_id, user_id)
         logger.debug(
             f"Instructions after replacing random blocks for thread {thread_id}: {instructions}"
         )
