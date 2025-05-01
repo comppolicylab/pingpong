@@ -1,6 +1,7 @@
-import re
 import logging
-import xml.etree.ElementTree as ET
+
+from bs4 import BeautifulSoup, NavigableString
+
 from .hash import hash_id
 from .schemas import PromptRandomBlock, PromptRandomOption
 
@@ -8,70 +9,65 @@ logger = logging.getLogger(__name__)
 
 
 def replace_random_blocks(prompt: str, thread_id: str) -> str:
-    random_pattern = re.compile(r"<random\b[^>]*>.*?</random>", re.DOTALL)
+    soup = BeautifulSoup(prompt, "html.parser")
 
-    replacements = []
-    new_prompt = prompt
-    for index, random_match in enumerate(random_pattern.finditer(prompt)):
-        try:
-            root = ET.fromstring(random_match.group(0))
-        except ET.ParseError:
-            continue
+    level = 0
 
-        random_attrs = root.attrib
-        count = 1
-        try:
-            count = int(random_attrs.get("count", 1))
-        except ValueError:
-            pass
-        allow_repeat = (
-            random_attrs.get("allow-repeat", "false").strip().lower() == "true"
-        )
-        id = random_attrs.get("id", str(index + 1))
+    while True:
+        all_randoms = soup.find_all("random")
 
-        # Parse <option> elements
-        options = []
-        for child in root:
-            if child.tag != "option":
-                continue
-            weight = 1
+        if not all_randoms:
+            break
+
+        level += 1
+        leaves = [tag for tag in all_randoms if not tag.find("random")]
+
+        for index, tag in enumerate(leaves):
+            attrs = tag.attrs
             try:
-                weight = int(child.attrib.get("weight", 1))
+                count = int(attrs.get("count", 1))
             except ValueError:
-                pass
-            text = child.text or ""
-            options.append(PromptRandomOption(text=text, weight=weight))
+                count = 1
+            allow_repeat = str(attrs.get("allow-repeat", "")).lower() == "true"
+            block_id = attrs.get("id", "")
 
-        block = PromptRandomBlock(
-            options=options, count=count, allow_repeat=allow_repeat, id=id
-        )
+            options = []
+            for opt in tag.find_all("option", recursive=False):
+                try:
+                    weight = int(opt.get("weight", 1))
+                except ValueError:
+                    weight = 1
+                text = opt.get_text(strip=True)
+                options.append(PromptRandomOption(text=text, weight=weight))
 
-        if not options:
-            logger.warning(
-                f"No options found in <random> block in thread {thread_id}. Skipping replacement."
+            if not options:
+                logger.warning(
+                    f"No options found in <random> block in thread {thread_id}. Skipping replacement."
+                )
+                continue
+
+            print(f"Block ID: {block_id or f'{level}_{index + 1}'}")
+            block = PromptRandomBlock(
+                options=options,
+                count=count,
+                allow_repeat=allow_repeat,
+                id=block_id or f"{level}_{index + 1}",
             )
-            continue
 
-        chosen = pick_options(block, thread_id)
+            chosen = pick_options(block, thread_id)
 
-        if not chosen:
-            logger.error(
-                f"No options were chosen for <random> block in thread {thread_id}. Skipping replacement."
-            )
-            continue
-        replacements.append(
-            (
-                random_match.start(),
-                random_match.end(),
-                "\n".join([option.text for option in chosen]),
-            )
-        )
+            if not chosen:
+                logger.error(
+                    f"No options chosen for <random> block in thread {thread_id}; skipping."
+                )
+                tag.decompose()
+                continue
 
-    # Replace the <random> blocks with the chosen options
-    for start, end, options_text in reversed(replacements):
-        new_prompt = new_prompt[:start] + options_text + new_prompt[end:]
+            replacement_text = "\n".join(opt.text for opt in chosen)
 
-    return new_prompt
+            tag.replace_with(NavigableString(replacement_text))
+
+    return str(soup)
 
 
 def pick_options(block: PromptRandomBlock, thread_id: str) -> list[PromptRandomOption]:

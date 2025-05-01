@@ -47,6 +47,7 @@
   import { base64ToArrayBuffer, WavRecorder, WavStreamPlayer } from '$lib/wavtools/index';
   import type { ExtendedMediaDeviceInfo } from '$lib/wavtools/lib/wav_recorder';
   import { isFirefox } from '$lib/stores/general';
+  import Sanitize from '$lib/components/Sanitize.svelte';
   export let data;
 
   let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -833,7 +834,9 @@
     ><ModeratorsTable moderators={teachers} /></Modal
   >
   <Modal title="Assistant Prompt" size="lg" bind:open={showAssistantPrompt} autoclose outsideclose
-    ><span class="whitespace-pre-wrap text-gray-700">{$threadInstructions}</span></Modal
+    ><span class="whitespace-pre-wrap text-gray-700"
+      ><Sanitize html={$threadInstructions ?? ''} /></span
+    ></Modal
   >
   {#if !$loading}
     {#if data.threadInteractionMode === 'voice' && !microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'voice'}

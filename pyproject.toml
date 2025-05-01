@@ -48,6 +48,7 @@ humanize = "^4.10.0"
 aioboto3 = "^13.1.1"
 uvicorn-worker = "^0.2.0"
 email-validator = "^2.2.0"
+beautifulsoup4 = "^4.13.4"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.2"
