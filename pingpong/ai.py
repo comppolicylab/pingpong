@@ -639,7 +639,7 @@ def format_instructions(
             """
         )
 
-    if thread_id and user_id:
+    if thread_id is not None and user_id is not None:
         logger.debug(f"Replacing random blocks in instructions for thread {thread_id}")
         instructions = replace_random_blocks(instructions, thread_id, user_id)
         logger.debug(

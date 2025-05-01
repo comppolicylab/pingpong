@@ -63,7 +63,7 @@ def replace_random_blocks(prompt: str, thread_id: str, user_id: int) -> str:
                 continue
 
             block = PromptRandomBlock(
-                seed=str(user_id) if rand_level == "user" else thread_id,
+                seed=f"user_{user_id}" if rand_level == "user" else thread_id,
                 options=options,
                 count=count,
                 allow_repeat=allow_repeat,

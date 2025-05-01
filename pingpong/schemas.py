@@ -487,7 +487,7 @@ class PromptRandomBlock(BaseModel):
 
     def __str__(self) -> str:
         options_str = ", ".join(str(option) for option in self.options)
-        return f"PromptRandomBlock(id={self.id}, options=[{options_str}], count={self.count}, allow_repeat={self.allow_repeat})"
+        return f"PromptRandomBlock(id={self.id}, options=[{options_str}], count={self.count}, allow_repeat={self.allow_repeat}, seed={self.seed})"
 
 
 class CreateAudioThread(BaseModel):
