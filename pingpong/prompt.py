@@ -30,8 +30,7 @@ def replace_random_blocks(prompt: str, thread_id: str, user_id: int) -> str:
 
         roots = [tag for tag in all_randoms if tag.find_parent("random") is None]
 
-        block_index = 0
-        for tag in roots:
+        for block_index, tag in enumerate(roots):
             attrs = tag.attrs
             try:
                 count = int(attrs.get("count", 1))
@@ -84,8 +83,6 @@ def replace_random_blocks(prompt: str, thread_id: str, user_id: int) -> str:
             replacement_text = "\n".join(opt.text for opt in chosen)
             fragment = BeautifulSoup(replacement_text, "html.parser")
             tag.replace_with(*fragment.contents)
-
-            block_index += 1
 
     return str(soup)
 
