@@ -10,7 +10,6 @@ logger = logging.getLogger("prompt_randomizer")
 
 def replace_random_blocks(prompt: str, thread_id: str, user_id: int) -> str:
     soup = BeautifulSoup(prompt, "html.parser")
-    print(f"Original prompt: {prompt}")
 
     level = 0
 
