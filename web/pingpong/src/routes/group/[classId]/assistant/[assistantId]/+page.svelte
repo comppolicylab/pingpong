@@ -678,9 +678,7 @@
     instructionsPreview = '';
 
     const result = await api.previewAssistantInstructions(fetch, data.class.id, {
-      instructions,
-      use_latex: useLatex,
-      use_image_descriptions: useImageDescriptions
+      instructions
     });
     const expanded = api.expandResponse(result);
 
