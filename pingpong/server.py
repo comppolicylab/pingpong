@@ -2694,6 +2694,7 @@ async def create_audio_thread(
             assistant.use_latex,
             assistant.use_image_descriptions,
             thread_id=thread.id,
+            user_id=request.state.session.user.id,
         ),
         "timezone": req.timezone,
     }
@@ -2880,6 +2881,7 @@ async def create_thread(
             assistant.use_latex,
             assistant.use_image_descriptions,
             thread_id=thread.id,
+            user_id=request.state.session.user.id,
         ),
         "timezone": req.timezone,
     }
@@ -2945,6 +2947,7 @@ async def create_run(
                 asst.use_latex,
                 asst.use_image_descriptions,
                 thread_id=thread.thread_id,
+                user_id=request.state.session.user.id,
             )
             request.state.db.add(thread)
             await request.state.db.flush()
@@ -3111,6 +3114,7 @@ async def send_message(
                 asst.use_latex,
                 asst.use_image_descriptions,
                 thread_id=thread.thread_id,
+                user_id=request.state.session.user.id,
             )
             request.state.db.add(thread)
             await request.state.db.flush()
