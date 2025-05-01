@@ -380,8 +380,6 @@ class CreateAssistant(BaseModel):
 
 class AssistantInstructionsPreviewRequest(BaseModel):
     instructions: str
-    use_latex: bool = False
-    use_image_descriptions: bool = False
 
 
 class AssistantInstructionsPreviewResponse(BaseModel):

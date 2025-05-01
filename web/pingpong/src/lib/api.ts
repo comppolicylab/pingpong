@@ -1276,8 +1276,6 @@ export type AssistantInstructionsPreviewResponse = {
 
 export type AssistantInstructionsPreviewRequest = {
   instructions: string;
-  use_latex: boolean;
-  use_image_descriptions: boolean;
 };
 
 /**
