@@ -38,6 +38,7 @@ def replace_random_blocks(prompt: str, thread_id: str, user_id: int) -> str:
             allow_repeat = str(attrs.get("allow-repeat", "")).lower() == "true"
             block_id = attrs.get("id", f"{level}_{block_index + 1}")
             scope = attrs.get("scope", "thread")
+            sep = attrs.get("sep", "\n")
             if scope not in {"thread", "user"}:
                 logger.warning(
                     f"Invalid scope '{scope}' in <random> block in thread {thread_id}. Using thread_id."
@@ -66,6 +67,7 @@ def replace_random_blocks(prompt: str, thread_id: str, user_id: int) -> str:
                 count=count,
                 allow_repeat=allow_repeat,
                 id=block_id,
+                sep=sep,
             )
 
             logger.debug(f"Processing <random> block in thread {thread_id}: {block}")
@@ -79,7 +81,7 @@ def replace_random_blocks(prompt: str, thread_id: str, user_id: int) -> str:
                 tag.decompose()
                 continue
 
-            replacement_text = "\n".join(opt.text for opt in chosen)
+            replacement_text = f"{block.sep}".join(opt.text for opt in chosen)
             fragment = BeautifulSoup(replacement_text, "html.parser")
             tag.replace_with(*fragment.contents)
 
