@@ -57,8 +57,10 @@ def replace_random_blocks(prompt: str, thread_id: str, user_id: int) -> str:
                     )
                     weight = 1.0
                 text = opt.decode_contents(formatter=None)
-                id = opt.get("id", str(opt_index + 1))
-                options.append(PromptRandomOption(id=id, text=text, weight=weight))
+                option_id = opt.get("id", str(opt_index + 1))
+                options.append(
+                    PromptRandomOption(id=option_id, text=text, weight=weight)
+                )
 
             if not options:
                 logger.warning(
