@@ -37,12 +37,12 @@ def replace_random_blocks(prompt: str, thread_id: str, user_id: int) -> str:
                 count = 1
             allow_repeat = str(attrs.get("allow-repeat", "")).lower() == "true"
             block_id = attrs.get("id", f"{level}_{block_index + 1}")
-            rand_level = attrs.get("level", "thread")
-            if rand_level not in {"thread", "user"}:
+            scope = attrs.get("scope", "thread")
+            if scope not in {"thread", "user"}:
                 logger.warning(
-                    f"Invalid level '{rand_level}' in <random> block in thread {thread_id}. Using thread_id."
+                    f"Invalid scope '{scope}' in <random> block in thread {thread_id}. Using thread_id."
                 )
-                rand_level = "thread"
+                scope = "thread"
 
             options = []
             for opt_index, opt in enumerate(tag.find_all("option", recursive=False)):
@@ -61,7 +61,7 @@ def replace_random_blocks(prompt: str, thread_id: str, user_id: int) -> str:
                 continue
 
             block = PromptRandomBlock(
-                seed=f"user_{user_id}" if rand_level == "user" else thread_id,
+                seed=f"user_{user_id}" if scope == "user" else thread_id,
                 options=options,
                 count=count,
                 allow_repeat=allow_repeat,
