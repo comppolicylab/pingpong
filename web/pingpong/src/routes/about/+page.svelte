@@ -116,23 +116,33 @@
     <P class="ml-0.5 mt-4"
       >PingPong is a tool for using large language models (LLMs) for teaching and learning. You can
       use it to create and share custom bots for specific tasks, like serving as a virtual teaching
-      assistant with access to course documents.</P
+      assistant with access to course documents. PingPong is built on top of OpenAI's latest text-
+      and voice-based models. We've designed the platform from the ground up with teachers and
+      students in mind. For example:</P
     >
-    <P class="ml-0.5 mt-4"
-      >PingPong is built on top of <a
-        href="https://openai.com/index/hello-gpt-4o/"
-        rel="noopener noreferrer"
-        target="_blank">GPT-4o</a
-      >, a large language model developed by
-      <a class="underline" href="https://openai.com" rel="noopener noreffer" target="_blank"
-        >OpenAI</a
-      >. But there are several advantages of using PingPong over ChatGPT. First, moderators can view
-      de-identified chats, which helps instructors understand how their students are using the tool
-      and potentially tailor class content accordingly. Second, none of the information entered on
-      PingPong will be used by OpenAI to train their models, ensuring user data is kept private.
-      Finally, PingPong is integrated into Canvas, making it easy for faculty and students to get up
-      and running quickly.</P
-    >
+    <ul class="list-disc ml-7">
+      <li class="my-2">
+        Each week, instructors get an AI-generated summary of how students are using the bots in
+        their courses, which can help to tailor class content. Instructors can also view individual,
+        de-identified chats, to gain further insights.
+      </li>
+      <li class="my-2">
+        We make it straightforward to create real-time, voice-based bots. These bots can be used,
+        for example, to quiz students on their understanding of the course material.
+      </li>
+      <li class="my-2">
+        Bot instructions can be randomized, both to facilitate experimentation and to ensure
+        variation across interactions (e.g., so bot-administered "quizzes" are not all the same).
+      </li>
+      <li class="my-2">
+        None of the information entered on PingPong will be used by OpenAI to train their models,
+        ensuring user data are kept private.
+      </li>
+      <li class="my-2">
+        PingPong is integrated into Canvas, making it easy for faculty and students to get up and
+        running quickly.
+      </li>
+    </ul>
   </div>
   {#if nonAuthed}
     <div class="px-14"><PingPongDemoCarousel /></div>
