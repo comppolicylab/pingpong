@@ -3,6 +3,7 @@ import base64
 from functools import partial
 import json
 import logging
+import time
 from typing import cast
 from fastapi import WebSocket, WebSocketDisconnect
 from openai import OpenAIError
@@ -19,6 +20,7 @@ from pingpong.ai import (
     OpenAIClientType,
 )
 from pingpong.models import Thread
+from pingpong.realtime_recorder import RealtimeRecorder
 from pingpong.websocket import (
     ws_auth_middleware,
     ws_check_realtime_permissions,
@@ -75,7 +77,9 @@ async def add_message_to_thread(
 
 
 async def handle_browser_messages(
-    browser_connection: WebSocket, realtime_connection: AsyncRealtimeConnection
+    browser_connection: WebSocket,
+    realtime_connection: AsyncRealtimeConnection,
+    realtime_recorder: RealtimeRecorder,
 ):
     try:
         while True:
@@ -95,6 +99,9 @@ async def handle_browser_messages(
                 audio_chunk = message["bytes"]
                 await realtime_connection.input_audio_buffer.append(
                     audio=base64.b64encode(cast(bytes, audio_chunk)).decode("utf-8")
+                )
+                realtime_recorder.add_user_audio(
+                    audio_chunk=audio_chunk, timestamp=time.monotonic()
                 )
             else:
                 browser_connection_logger.exception(
@@ -117,6 +124,7 @@ async def handle_openai_events(
     openai_client: OpenAIClientType,
     thread: Thread,
     openai_task_queue: asyncio.Queue,
+    realtime_recorder: RealtimeRecorder,
 ):
     try:
         async for event in realtime_connection:
@@ -176,6 +184,11 @@ async def handle_openai_events(
                             "item_id": event.item_id,
                         }
                     )
+                    realtime_recorder.add_assistant_audio(
+                        b64_audio_chunk=delta_audio_b64,
+                        timestamp=time.monotonic(),
+                        item_id=event.item_id,
+                    )
                 case "input_audio_buffer.speech_started":
                     await browser_connection.send_json(
                         {
@@ -183,6 +196,8 @@ async def handle_openai_events(
                             "message": "User speech detected.",
                         }
                     )
+                    current_time = time.monotonic()
+                    realtime_recorder.stop_assistant_response(current_time)
                 case (
                     "conversation.created"
                     | "conversation.item.created"
@@ -237,6 +252,16 @@ async def process_openai_tasks(openai_task_queue: asyncio.Queue):
         openai_connection_logger.debug("Task queue processor was cancelled.")
 
 
+async def handle_saving_buffer(realtime_recorder: RealtimeRecorder):
+    try:
+        while True:
+            await asyncio.sleep(50)
+            await realtime_recorder.save_buffer()
+    except asyncio.CancelledError:
+        await realtime_recorder.save_buffer()
+        raise
+
+
 @ws_auth_middleware
 @ws_db_middleware
 @ws_parse_session_token
@@ -255,8 +280,11 @@ async def browser_realtime_websocket(
 
     openai_task_queue: asyncio.Queue = asyncio.Queue()
 
+    realtime_recorder = RealtimeRecorder()
     browser_task = asyncio.create_task(
-        handle_browser_messages(browser_connection, realtime_connection)
+        handle_browser_messages(
+            browser_connection, realtime_connection, realtime_recorder
+        )
     )
     openai_task = asyncio.create_task(
         handle_openai_events(
@@ -265,14 +293,17 @@ async def browser_realtime_websocket(
             openai_client,
             thread,
             openai_task_queue,
+            realtime_recorder,
         )
     )
     openai_queue_processor = asyncio.create_task(
         process_openai_tasks(openai_task_queue)
     )
 
+    recording_task = asyncio.create_task(handle_saving_buffer(realtime_recorder))
+
     _, pending = await asyncio.wait(
-        [browser_task, openai_task],
+        [browser_task, openai_task, recording_task],
         return_when=asyncio.FIRST_COMPLETED,
     )
 
