@@ -114,11 +114,14 @@
   <div class="px-12">
     <Heading tag="h3" class="my-4">What is it?</Heading>
     <P class="ml-0.5 mt-4"
-      >PingPong is a tool for using large language models (LLMs) for teaching and learning. You can
-      use it to create and share custom bots for specific tasks, like serving as a virtual teaching
-      assistant with access to course documents. PingPong is built on top of OpenAI's latest text-
-      and voice-based models. We've designed the platform from the ground up with teachers and
-      students in mind. For example:</P
+      >PingPong is a platform for using large language models (LLMs) for teaching and learning. You
+      can use it to create and share custom bots for specific tasks, like serving as a virtual
+      teaching assistant with access to course documents. PingPong has been used by thousands of
+      students in dozens of colleges across the United States.</P
+    >
+    <P class="ml-0.5 mt-4"
+      >PingPong is built on top of OpenAI's latest text- and voice-based models. We've designed the
+      platform from the ground up with teachers and students in mind. For example:</P
     >
     <ul class="list-disc ml-7">
       <li class="my-2">
