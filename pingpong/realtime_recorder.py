@@ -38,6 +38,9 @@ class RealtimeRecorder:
         self.end_timestamp = time.monotonic()
 
     def add_user_audio(self, audio_chunk: bytes, timestamp: float):
+        """
+        Adds the user audio chunk and records the timestamp when it was received from the browser.
+        """
         self.user_audio.append(
             AudioChunk(
                 audio=AudioSegment(
@@ -51,6 +54,7 @@ class RealtimeRecorder:
         )
 
     def add_assistant_audio(self, b64_audio_chunk: str, timestamp: float, item_id: str):
+        # Create an AudioSegment from the base64-encoded audio chunk
         audio_chunk = AudioSegment(
             data=base64.b64decode(b64_audio_chunk),
             sample_width=2,
@@ -58,8 +62,10 @@ class RealtimeRecorder:
             channels=1,
         )
 
+        ## Store the audio chunk in the assistant responses
         ## CASE 1: First Assistant response in the block
         if not self.latest_active_assistant_response_item_id:
+            # Create a new AssistantResponse object
             self.assistant_responses[item_id] = AssistantResponse(
                 item_id=item_id,
                 starts_at=timestamp,
@@ -69,7 +75,7 @@ class RealtimeRecorder:
             )
             self.latest_active_assistant_response_item_id = item_id
         else:
-            ## CASE 2: Adding to an already active response
+            ## CASE 2: Adding to an active response
             if (
                 item_id == self.latest_active_assistant_response_item_id
                 and not self.assistant_responses[item_id].complete
@@ -78,7 +84,9 @@ class RealtimeRecorder:
                     item_id
                 ].duration += audio_chunk.duration_seconds
                 self.assistant_responses[item_id].audio_chunks.append(audio_chunk)
+
             ## CASE 3: A new response has been received
+            ## which is not the active one
             elif item_id != self.latest_active_assistant_response_item_id:
                 self.assistant_responses[
                     self.latest_active_assistant_response_item_id
@@ -104,6 +112,8 @@ class RealtimeRecorder:
             self.assistant_responses[
                 self.latest_active_assistant_response_item_id
             ].complete = True
+            # Timestamp is the time when we stopped playing the
+            # assistant response
             self.assistant_responses[
                 self.latest_active_assistant_response_item_id
             ].completed_at = timestamp
@@ -133,11 +143,9 @@ class RealtimeRecorder:
                 if resp.starts_at <= prev_response.starts_at
             ]
 
-            # Remove them from the dict
             for resp in extracted_responses:
                 self.assistant_responses.pop(resp.item_id, None)
 
-            # Sort the extracted responses by starts_at
             extracted_responses.sort(key=lambda r: r.starts_at)
 
             if prev_response.completed_at and (
@@ -148,7 +156,6 @@ class RealtimeRecorder:
             else:
                 end_of_prev_response = prev_response.starts_at + prev_response.duration
 
-            # Extract user audio where timestamp < prev_response.starts_at
             extracted_user_audio = [
                 chunk
                 for chunk in self.user_audio
@@ -156,7 +163,6 @@ class RealtimeRecorder:
                 < prev_response.starts_at
             ]
 
-            # Remove them from the list
             self.user_audio = [
                 chunk
                 for chunk in self.user_audio
@@ -164,7 +170,6 @@ class RealtimeRecorder:
                 >= prev_response.starts_at
             ]
 
-            # Sort the extracted audio by timestamp
             extracted_user_audio.sort(key=lambda c: c.timestamp)
 
             new_clip_duration = end_of_prev_response - self.end_timestamp
@@ -172,7 +177,6 @@ class RealtimeRecorder:
             if new_clip_duration <= 0:
                 return
 
-            # Create a new audio segment with the new clip duration
             new_audio_segment = AudioSegment.silent(
                 duration=new_clip_duration * 1000, frame_rate=24000
             )
@@ -218,7 +222,6 @@ class RealtimeRecorder:
                         )
                         duration_so_far += audio_chunk.duration_seconds
 
-            # Save the new audio segment to a file
             new_audio_segment.export(f"output_{self.end_timestamp}.wav", format="wav")
             self.end_timestamp = end_of_prev_response
             realtime_recorder_logger.info(
