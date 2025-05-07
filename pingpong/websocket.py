@@ -231,6 +231,7 @@ def ws_with_realtime_connection(func):
                             "type": "semantic_vad",
                             "eagerness": "high",
                         },
+                        "input_audio_noise_reduction": {"type": "far_field"},
                         "instructions": conversation_instructions,
                     }
                 )
