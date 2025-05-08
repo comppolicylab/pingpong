@@ -516,7 +516,7 @@ class CanvasCourseClient(ABC):
                     and not user.get(self.config.sso_target)
                     and not self.sync_without_sso_ids
                 ):
-                    logger.exception(
+                    logger.warning(
                         f"User {user.get('id', '(unknown ID)')} does not have an SSO ID in the Canvas response. Full response: {user}"
                     )
                     raise CanvasException(
@@ -526,7 +526,7 @@ class CanvasCourseClient(ABC):
                 if not user.get("email"):
                     if self.sync_with_incomplete_profiles:
                         continue
-                    logger.exception(
+                    logger.warning(
                         f"User {user.get('id', '(unknown ID)')} does not have an email in the Canvas response. Full response: {user}"
                     )
                     raise CanvasException(
@@ -536,7 +536,7 @@ class CanvasCourseClient(ABC):
                 if not (user.get("enrollments") and len(user["enrollments"]) > 0):
                     if self.sync_with_incomplete_profiles:
                         continue
-                    logger.exception(
+                    logger.warning(
                         f"User {user.get('id', '(unknown ID)')} does not have enrollment information in the Canvas response. Full response: {user}"
                     )
                     raise CanvasException(
