@@ -172,6 +172,7 @@ class CanvasSettings(BaseSettings):
     sso_target: str | None = Field(None)
     sso_tenant: str | None = Field(None)
     require_sso: bool = Field(True)
+    ignore_incomplete_profiles: bool = Field(False)
     sync_wait: int = Field(60 * 10)  # 10 mins
     auth_token_expiry: int = Field(60 * 60)  # 1 hour
 
