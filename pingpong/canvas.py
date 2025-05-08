@@ -120,6 +120,9 @@ class CanvasCourseClient(ABC):
         self.sync_without_sso_ids = (
             sync_without_sso_ids or not canvas_backend_config.require_sso
         )
+        self.sync_with_incomplete_profiles = (
+            canvas_backend_config.ignore_incomplete_profiles
+        )
 
     async def __aenter__(self):
         self.http_session = aiohttp.ClientSession()
@@ -520,9 +523,9 @@ class CanvasCourseClient(ABC):
                         code=403,
                         detail="You do not have permission to access SIS information for at least one user in this class. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
                     )
-                if not user.get("email") or not (
-                    user.get("enrollments") and len(user["enrollments"]) > 0
-                ):
+                if not user.get("email"):
+                    if self.sync_with_incomplete_profiles:
+                        continue
                     logger.exception(
                         f"User {user.get('id', '(unknown ID)')} does not have an email in the Canvas response. Full response: {user}"
                     )
@@ -531,6 +534,8 @@ class CanvasCourseClient(ABC):
                         detail="You do not have permission to access email information for at least one user in this class. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
                     )
                 if not (user.get("enrollments") and len(user["enrollments"]) > 0):
+                    if self.sync_with_incomplete_profiles:
+                        continue
                     logger.exception(
                         f"User {user.get('id', '(unknown ID)')} does not have enrollment information in the Canvas response. Full response: {user}"
                     )
@@ -637,7 +642,9 @@ class CanvasCourseClient(ABC):
             if not user.get("email") or not (
                 user.get("enrollments") and len(user["enrollments"]) > 0
             ):
-                logging.exception(
+                if self.sync_with_incomplete_profiles:
+                    continue
+                logging.warning(
                     f"User {user.get('id', '(unknown ID)')} does not have email or enrollment information in the Canvas response. Marking class as having a sync error. Full response: {user}"
                 )
                 self.missing_user_information = True
@@ -649,7 +656,7 @@ class CanvasCourseClient(ABC):
                 and not user.get(self.config.sso_target)
                 and not self.sync_without_sso_ids
             ):
-                logging.exception(
+                logging.warning(
                     f"User {user.get('id', '(unknown ID)')} does not have an SSO ID in the Canvas response. Marking class as having a sync error. Full response: {user}"
                 )
                 self.missing_sso_ids = True
