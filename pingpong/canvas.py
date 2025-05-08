@@ -513,21 +513,30 @@ class CanvasCourseClient(ABC):
                     and not user.get(self.config.sso_target)
                     and not self.sync_without_sso_ids
                 ):
+                    logger.exception(
+                        f"User {user.get('id', '(unknown ID)')} does not have an SSO ID in the Canvas response. Full response: {user}"
+                    )
                     raise CanvasException(
                         code=403,
-                        detail="You do not have permission to access SIS information for this class. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
+                        detail="You do not have permission to access SIS information for at least one user in this class. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
                     )
                 if not user.get("email") or not (
                     user.get("enrollments") and len(user["enrollments"]) > 0
                 ):
-                    raise CanvasException(
-                        code=403,
-                        detail="You do not have permission to access email or enrollment information for this class. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
+                    logger.exception(
+                        f"User {user.get('id', '(unknown ID)')} does not have an email in the Canvas response. Full response: {user}"
                     )
-                if not user.get("enrollments"):
                     raise CanvasException(
                         code=403,
-                        detail="You do not have permission to access enrollment information for this class. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
+                        detail="You do not have permission to access email information for at least one user in this class. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
+                    )
+                if not (user.get("enrollments") and len(user["enrollments"]) > 0):
+                    logger.exception(
+                        f"User {user.get('id', '(unknown ID)')} does not have enrollment information in the Canvas response. Full response: {user}"
+                    )
+                    raise CanvasException(
+                        code=403,
+                        detail="You do not have permission to access enrollment information for at least one user in this class. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
                     )
         return True
 
@@ -628,8 +637,8 @@ class CanvasCourseClient(ABC):
             if not user.get("email") or not (
                 user.get("enrollments") and len(user["enrollments"]) > 0
             ):
-                logging.warning(
-                    f"User {user['id']} does not have an email or enrollment information in the Canvas response. Marking class as having a sync error."
+                logging.exception(
+                    f"User {user.get('id', '(unknown ID)')} does not have an email or enrollment information in the Canvas response. Marking class as having a sync error. Full response: {user}"
                 )
                 self.missing_user_information = True
                 break
@@ -640,8 +649,8 @@ class CanvasCourseClient(ABC):
                 and not user.get(self.config.sso_target)
                 and not self.sync_without_sso_ids
             ):
-                logging.warning(
-                    f"User {user['email']} does not have an SSO ID in the Canvas response. Marking class as having a sync error."
+                logging.exception(
+                    f"User {user.get('id', '(unknown ID)')} does not have an SSO ID in the Canvas response. Marking class as having a sync error. Full response: {user}"
                 )
                 self.missing_sso_ids = True
                 if not self.sync_without_sso_ids:
