@@ -638,7 +638,7 @@ class CanvasCourseClient(ABC):
                 user.get("enrollments") and len(user["enrollments"]) > 0
             ):
                 logging.exception(
-                    f"User {user.get('id', '(unknown ID)')} does not have an email or enrollment information in the Canvas response. Marking class as having a sync error. Full response: {user}"
+                    f"User {user.get('id', '(unknown ID)')} does not have email or enrollment information in the Canvas response. Marking class as having a sync error. Full response: {user}"
                 )
                 self.missing_user_information = True
                 break
