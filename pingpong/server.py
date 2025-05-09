@@ -3454,11 +3454,18 @@ async def list_assistants(class_id: str, request: Request):
     endorsed_creators = {id_ for id_, perm in zip(creator_ids, creator_perms) if perm}
 
     ret_assistants = list[schemas.Assistant]()
-    for asst in assts:
+    has_elevated_perm_check = await request.state.authz.check(
+        [
+            (
+                f"user:{request.state.session.user.id}",
+                "can_edit",
+                f"assistant:{asst.id}",
+            )
+            for asst in assts
+        ]
+    )
+    for asst, has_elevated_permissions in zip(assts, has_elevated_perm_check):
         cur_asst = schemas.Assistant.model_validate(asst)
-        has_elevated_permissions = await request.state.authz.test(
-            f"user:{request.state.session.user.id}", "can_edit", f"assistant:{asst.id}"
-        )
         if asst.hide_prompt and not has_elevated_permissions:
             cur_asst.instructions = ""
 
