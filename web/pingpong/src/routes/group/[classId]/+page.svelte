@@ -108,16 +108,17 @@
   $: supportsCodeInterpreter = assistant.tools?.includes('code_interpreter') || false;
   let supportsVision = false;
   $: {
-    const supportVisionModels = (data.models.filter((model) => model.supports_vision) || []).map(
+    const supportVisionModels = (data.modelInfo.filter((model) => model.supports_vision) || []).map(
       (model) => model.id
     );
     supportsVision = supportVisionModels.includes(assistant.model);
   }
   let visionSupportOverride: boolean | undefined;
   $: {
-    visionSupportOverride = data.models.find(
-      (model) => model.id === assistant.model
-    )?.vision_support_override;
+    visionSupportOverride =
+      data.class.ai_provider === 'azure'
+        ? data.modelInfo.find((model) => model.id === assistant.model)?.azure_supports_vision
+        : undefined;
   }
   $: allowVisionUpload = true;
   let showModerators = false;

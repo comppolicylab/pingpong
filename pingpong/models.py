@@ -2168,6 +2168,7 @@ class Class(Base):
             .options(joinedload(Class.institution))
             .options(joinedload(Class.lms_user))
             .options(joinedload(Class.lms_class))
+            .options(joinedload(Class.api_key_obj))
             .where(Class.id == int(id_))
         )
         return await session.scalar(stmt)
