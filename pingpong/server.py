@@ -1017,6 +1017,11 @@ async def get_class(class_id: str, request: Request):
     class_.download_link_expiration = convert_seconds(
         config.artifact_store.download_link_expiration
     )
+    class_.ai_provider = (
+        class_.api_key_obj.provider
+        if class_.api_key_obj
+        else ("openai" if class_.api_key else None)
+    )
     return class_
 
 
@@ -1970,6 +1975,21 @@ async def get_class_api_key(class_id: str, request: Request):
         )
 
     return {"api_key": response}
+
+
+@v1.get(
+    "/models",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.AssistantModelLiteResponse,
+)
+async def list_model_capabilities(request: Request):
+    lite_models = [
+        schemas.AssistantModelLite(
+            id=model_id, supports_vision=model_data["supports_vision"]
+        )
+        for model_id, model_data in KNOWN_MODELS.items()
+    ]
+    return schemas.AssistantModelLiteResponse(models=lite_models)
 
 
 @v1.get(

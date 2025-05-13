@@ -923,6 +923,11 @@ class CreateUpdateCanvasClass(BaseModel):
         from_attributes = True
 
 
+class AIProvider(StrEnum):
+    OPENAI = "openai"
+    AZURE = "azure"
+
+
 class Class(BaseModel):
     id: int
     name: str
@@ -944,6 +949,7 @@ class Class(BaseModel):
     any_can_upload_class_file: bool | None = None
     download_link_expiration: str | None = None
     last_rate_limited_at: datetime | None = None
+    ai_provider: AIProvider | None = None
 
     class Config:
         from_attributes = True
@@ -968,11 +974,6 @@ class UpdateClass(BaseModel):
     any_can_publish_assistant: bool | None = None
     any_can_publish_thread: bool | None = None
     any_can_upload_class_file: bool | None = None
-
-
-class AIProvider(StrEnum):
-    OPENAI = "openai"
-    AZURE = "azure"
 
 
 class APIKeyCheck(BaseModel):
@@ -1063,6 +1064,19 @@ class AssistantModel(BaseModel):
     supports_temperature: bool
     supports_reasoning: bool
     hide_in_model_selector: bool | None = None
+
+
+class AssistantModelLite(BaseModel):
+    id: str
+    supports_vision: bool
+    azure_supports_vision: bool = False  # For future use
+
+
+class AssistantModelLiteResponse(BaseModel):
+    models: list[AssistantModelLite]
+
+    class Config:
+        from_attributes = True
 
 
 class AssistantModelDict(TypedDict):

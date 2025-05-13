@@ -14,7 +14,6 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
     filesResponse,
     uploadInfoResponse,
     grants,
-    modelsResponse,
     teachersResponse,
     hasAPIKeyResponse
   ] = await Promise.all([
@@ -30,7 +29,6 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
         relation: 'supervisor'
       }
     }),
-    api.getModels(fetch, classId).then(api.expandResponse),
     api.getSupervisors(fetch, classId).then(api.expandResponse),
     api.hasAPIKey(fetch, classId).then(api.expandResponse)
   ]);
@@ -46,9 +44,6 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
     assistantCreators = assistantsResponse.data.creators;
   }
 
-  const models = modelsResponse.error ? [] : modelsResponse.data.models;
-  const defaultPrompts = modelsResponse.error ? [] : (modelsResponse.data.default_prompts ?? []);
-
   const supervisors = teachersResponse.error ? [] : teachersResponse.data.users;
 
   const hasAPIKey = hasAPIKeyResponse.error ? false : hasAPIKeyResponse.data.has_api_key;
@@ -62,9 +57,7 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
     uploadInfo: uploadInfoResponse,
     canManage: grants.canManage,
     isSupervisor: grants.isSupervisor,
-    models,
     hasAPIKey,
-    supervisors,
-    defaultPrompts
+    supervisors
   };
 };

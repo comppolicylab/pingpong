@@ -84,8 +84,9 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   let threads: api.Thread[] = [];
   let institutions: api.Institution[] = [];
   let canCreateInstitution = false;
+  let modelInfo: api.AssistantModelLite[] = [];
   if (authed) {
-    [classes, threads, canCreateInstitution, institutions] = await Promise.all([
+    [classes, threads, canCreateInstitution, institutions, modelInfo] = await Promise.all([
       api
         .getMyClasses(fetch)
         .then(api.explodeResponse)
@@ -103,7 +104,11 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
       api
         .getInstitutions(fetch, 'can_create_class')
         .then(api.explodeResponse)
-        .then((i) => i.institutions)
+        .then((i) => i.institutions),
+      api
+        .getModelsLite(fetch)
+        .then(api.explodeResponse)
+        .then((m) => m.models)
     ]);
   }
 
@@ -122,6 +127,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
     authed,
     classes,
     threads,
-    admin
+    admin,
+    modelInfo
   };
 };
