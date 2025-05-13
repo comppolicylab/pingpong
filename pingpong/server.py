@@ -1985,7 +1985,9 @@ async def get_class_api_key(class_id: str, request: Request):
 async def list_model_capabilities(request: Request):
     lite_models = [
         schemas.AssistantModelLite(
-            id=model_id, supports_vision=model_data["supports_vision"]
+            id=model_id,
+            supports_vision=model_data["supports_vision"],
+            azure_supports_vision=False,
         )
         for model_id, model_data in KNOWN_MODELS.items()
     ]
