@@ -11,10 +11,18 @@
   onMount(() => {
     detectBrowser();
   });
+
+  $: showSidebar =
+    (data.me &&
+      data.me.user &&
+      !data.needsOnboarding &&
+      (!data.needsAgreements || !data.doNotShowSidebar)) ||
+    (data.isPublicPage && !data.doNotShowSidebar);
+  $: showStatusPage = data.me?.user;
 </script>
 
 <SvelteToast />
-{#if data.me && data.me.user && !data.needsOnboarding && (!data.needsAgreements || !data.doNotShowSidebar)}
+{#if showSidebar}
   <div class=" w-full flex h-full lg:gap-4 md:h-[calc(100vh-3rem)]">
     <div class="basis-[320px] shrink-0 grow-0 min-w-0">
       <Sidebar {data} />
@@ -25,7 +33,7 @@
       </Main>
     </div>
   </div>
-  {#if data.me && data.me.user}
+  {#if showStatusPage}
     <script src="https://pingpong-hks.statuspage.io/embed/script.js"></script>
   {/if}
 {:else}
