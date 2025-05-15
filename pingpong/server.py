@@ -1017,6 +1017,11 @@ async def get_class(class_id: str, request: Request):
     class_.download_link_expiration = convert_seconds(
         config.artifact_store.download_link_expiration
     )
+    class_.ai_provider = (
+        class_.api_key_obj.provider
+        if class_.api_key_obj
+        else ("openai" if class_.api_key else None)
+    )
     return class_
 
 
@@ -1970,6 +1975,23 @@ async def get_class_api_key(class_id: str, request: Request):
         )
 
     return {"api_key": response}
+
+
+@v1.get(
+    "/models",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.AssistantModelLiteResponse,
+)
+async def list_model_capabilities(request: Request):
+    lite_models = [
+        schemas.AssistantModelLite(
+            id=model_id,
+            supports_vision=model_data["supports_vision"],
+            azure_supports_vision=False,
+        )
+        for model_id, model_data in KNOWN_MODELS.items()
+    ]
+    return schemas.AssistantModelLiteResponse(models=lite_models)
 
 
 @v1.get(
@@ -3454,11 +3476,18 @@ async def list_assistants(class_id: str, request: Request):
     endorsed_creators = {id_ for id_, perm in zip(creator_ids, creator_perms) if perm}
 
     ret_assistants = list[schemas.Assistant]()
-    for asst in assts:
+    has_elevated_perm_check = await request.state.authz.check(
+        [
+            (
+                f"user:{request.state.session.user.id}",
+                "can_edit",
+                f"assistant:{asst.id}",
+            )
+            for asst in assts
+        ]
+    )
+    for asst, has_elevated_permissions in zip(assts, has_elevated_perm_check):
         cur_asst = schemas.Assistant.model_validate(asst)
-        has_elevated_permissions = await request.state.authz.test(
-            f"user:{request.state.session.user.id}", "can_edit", f"assistant:{asst.id}"
-        )
         if asst.hide_prompt and not has_elevated_permissions:
             cur_asst.instructions = ""
 

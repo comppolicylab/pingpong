@@ -221,7 +221,7 @@ def ws_with_realtime_connection(func):
                 await realtime_connection.session.update(
                     session={
                         "input_audio_transcription": {
-                            "model": "gpt-4o-transcribe",
+                            "model": "whisper-1",
                             "language": "en",
                         },
                         "temperature": assistant.temperature,
@@ -231,6 +231,7 @@ def ws_with_realtime_connection(func):
                             "type": "semantic_vad",
                             "eagerness": "high",
                         },
+                        "input_audio_noise_reduction": {"type": "far_field"},
                         "instructions": conversation_instructions,
                     }
                 )

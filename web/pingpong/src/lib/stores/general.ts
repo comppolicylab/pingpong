@@ -1,3 +1,4 @@
+import type { AssistantModels } from '$lib/api';
 import { writable } from 'svelte/store';
 
 /**
@@ -22,3 +23,5 @@ export function detectBrowser() {
     isFirefox.set(navigator.userAgent.toLowerCase().includes('firefox'));
   }
 }
+
+export const modelsPromptsStore = writable<Record<number, AssistantModels>>({});

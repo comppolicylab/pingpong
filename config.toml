@@ -125,6 +125,14 @@ sso_target = "key"
 # you can set this to false.
 # Defaults to true.
 require_sso = true
+# Whether to ignore incomplete profiles (email or enrollment information)
+# when syncing users from the LMS.
+# This is useful for ensuring that a user has permissions to view the SSO
+# information of users enrolled in the course.
+# If you know that an LMS instance will not have SSO attributes for all users,
+# you can set this to true.
+# Defaults to false.
+ignore_incomplete_profiles = false
 # The URL where the application should send Canvas API requests to.
 # For local development, this should be the default localhost Canvas URL
 # if you follow their Quick Start guide.

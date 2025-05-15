@@ -123,16 +123,17 @@
 
   let supportsVision = false;
   $: {
-    const supportVisionModels = (data.models.filter((model) => model.supports_vision) || []).map(
+    const supportVisionModels = (data.modelInfo.filter((model) => model.supports_vision) || []).map(
       (model) => model.id
     );
     supportsVision = supportVisionModels.includes(data.threadModel);
   }
   let visionSupportOverride: boolean | undefined;
   $: {
-    visionSupportOverride = data.models.find(
-      (model) => model.id === data.threadModel
-    )?.vision_support_override;
+    visionSupportOverride =
+      data.class.ai_provider === 'azure'
+        ? data.modelInfo.find((model) => model.id === data.threadModel)?.azure_supports_vision
+        : undefined;
   }
   $: submitting = threadMgr.submitting;
   $: waiting = threadMgr.waiting;

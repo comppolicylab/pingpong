@@ -631,6 +631,7 @@ export type Class = {
   any_can_upload_class_file: boolean | null;
   download_link_expiration: string | null;
   last_rate_limited_at: string | null;
+  ai_provider: 'openai' | 'azure' | null;
 };
 
 /**
@@ -1010,12 +1011,27 @@ export type AssistantModels = {
   default_prompts?: AssistantDefaultPrompt[];
 };
 
+export type AssistantModelLite = {
+  id: string;
+  supports_vision: boolean;
+  azure_supports_vision: boolean;
+};
+
+export type AssistantModelLiteResponse = {
+  models: AssistantModelLite[];
+};
+
 /**
  * Get models available with the api key for the class.
  */
 export const getModels = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/models`;
   return await GET<never, AssistantModels>(f, url);
+};
+
+export const getModelsLite = async (f: Fetcher) => {
+  const url = `models`;
+  return await GET<never, AssistantModelLiteResponse>(f, url);
 };
 
 /**
