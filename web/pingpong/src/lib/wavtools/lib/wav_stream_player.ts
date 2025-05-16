@@ -30,8 +30,14 @@
 import { StreamProcessorSrc } from './worklets/stream_processor';
 import { AudioAnalysis, type AudioAnalysisOutputType } from './analysis/audio_analysis';
 
+export type OnAudioPartStartedProcessor = (data: {
+  trackId: string;
+  eventId: string;
+  timestamp: number;
+}) => void;
 interface WavStreamPlayerOptions {
   sampleRate?: number;
+  onAudioPartStarted?: OnAudioPartStartedProcessor;
 }
 
 interface TrackSampleOffset {
@@ -52,13 +58,14 @@ export class WavStreamPlayer {
   private analyser: AnalyserNode | null;
   private trackSampleOffsets: Record<string, TrackSampleOffset>;
   private interruptedTrackIds: Record<string, boolean>;
+  private onAudioPartStarted: OnAudioPartStartedProcessor | null;
 
   /**
    * Creates a new WavStreamPlayer instance
-   * @param {{sampleRate?: number}} options
+   * @param {{sampleRate?: number, onAudioPartStarted?: OnAudioPartStartedProcessor}} options
    * @returns {WavStreamPlayer}
    */
-  constructor({ sampleRate = 44100 }: WavStreamPlayerOptions = {}) {
+  constructor({ sampleRate = 44100, onAudioPartStarted }: WavStreamPlayerOptions = {}) {
     this.scriptSrc = StreamProcessorSrc;
     this.sampleRate = sampleRate;
     this.context = null;
@@ -66,6 +73,7 @@ export class WavStreamPlayer {
     this.analyser = null;
     this.trackSampleOffsets = {};
     this.interruptedTrackIds = {};
+    this.onAudioPartStarted = onAudioPartStarted || null;
   }
 
   /**
@@ -116,6 +124,17 @@ export class WavStreamPlayer {
   }
 
   /**
+   * Returns the set sample rate of the audio context
+   * @returns {number}
+   */
+  getSampleRate(): number {
+    if (!this.context) {
+      throw new Error('Not connected, please call .connect() first');
+    }
+    return this.context.sampleRate;
+  }
+
+  /**
    * Starts audio streaming
    * @private
    * @returns {true}
@@ -135,6 +154,12 @@ export class WavStreamPlayer {
         const { requestId, trackId, offset } = e.data;
         const currentTime = offset / this.sampleRate;
         this.trackSampleOffsets[requestId] = { trackId, offset, currentTime };
+      } else if (event === 'audio_part_started') {
+        const { trackId, eventId, timestamp } = e.data;
+        console.log('Audio part started', trackId, eventId, timestamp);
+        if (this.onAudioPartStarted) {
+          this.onAudioPartStarted({ trackId, eventId, timestamp });
+        }
       }
     };
     if (this.analyser) {
@@ -150,9 +175,14 @@ export class WavStreamPlayer {
    * You can add chunks beyond the current play point and they will be queued for play
    * @param {ArrayBuffer|Int16Array} arrayBuffer
    * @param {string} [trackId]
+   * @param {string} [eventId]
    * @returns {Int16Array}
    */
-  add16BitPCM(arrayBuffer: ArrayBuffer | Int16Array, trackId = 'default'): Int16Array | undefined {
+  add16BitPCM(
+    arrayBuffer: ArrayBuffer | Int16Array,
+    trackId = 'default',
+    eventId = 'default'
+  ): Int16Array | undefined {
     if (typeof trackId !== 'string') {
       throw new Error(`trackId must be a string`);
     } else if (this.interruptedTrackIds[trackId]) {
@@ -169,7 +199,8 @@ export class WavStreamPlayer {
     } else {
       throw new Error(`argument must be Int16Array or ArrayBuffer`);
     }
-    this.stream?.port.postMessage({ event: 'write', buffer, trackId });
+    console.log('Adding PCM data', trackId, eventId);
+    this.stream?.port.postMessage({ event: 'write', buffer, trackId, eventId });
     return buffer;
   }
 

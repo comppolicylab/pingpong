@@ -3,6 +3,7 @@ import base64
 from functools import partial
 import json
 import logging
+import struct
 import time
 from typing import cast
 from fastapi import WebSocket, WebSocketDisconnect
@@ -88,21 +89,69 @@ async def handle_browser_messages(
             if "text" in message:
                 try:
                     data = json.loads(message["text"])
-                    browser_connection_logger.exception(
-                        f"Received unexpected message: {data}"
-                    )
+                    type = data.get("type")
+                    if not type:
+                        browser_connection_logger.exception(
+                            f"Received unexpected message: {data}"
+                        )
+                    elif type == "conversation.item.truncate":
+                        item_id = data.get("item_id")
+                        audio_end_ms = data.get("audio_end_ms")
+                        if item_id is None or audio_end_ms is None:
+                            browser_connection_logger.exception(
+                                "Received conversation.item.truncate message without item_id or audio_end_ms"
+                            )
+                            continue
+                        # Truncate the audio buffer for the specified item
+                        await realtime_connection.conversation.item.truncate(
+                            audio_end_ms=audio_end_ms,
+                            content_index=0,
+                            item_id=item_id,
+                        )
+                        await realtime_recorder.stopped_playing_assistant_response(
+                            item_id=item_id, final_duration_ms=audio_end_ms
+                        )
+                    elif type == "response.audio.delta.started":
+                        item_id = data.get("item_id")
+                        event_id = data.get("event_id")
+                        started_playing_at_ms = data.get("started_playing_at")
+                        if (
+                            item_id is None
+                            or event_id is None
+                            or started_playing_at_ms is None
+                        ):
+                            browser_connection_logger.exception(
+                                f"Received response.audio.delta.started message without item_id, event_id, or started_playing_at {data}"
+                            )
+                            continue
+                        else:
+                            await realtime_recorder.started_playing_assistant_response_delta(
+                                item_id=item_id,
+                                event_id=event_id,
+                                started_playing_at_ms=started_playing_at_ms,
+                            )
+
                 except json.JSONDecodeError as e:
                     browser_connection_logger.exception(
                         f"Failed to decode unexpected message JSON: {e}"
                     )
             elif "bytes" in message:
-                audio_chunk = message["bytes"]
-                await realtime_connection.input_audio_buffer.append(
-                    audio=base64.b64encode(cast(bytes, audio_chunk)).decode("utf-8")
-                )
-                realtime_recorder.add_user_audio(
-                    audio_chunk=audio_chunk, timestamp=time.monotonic()
-                )
+                buffer = message["bytes"]
+
+                timestamp_size = 8
+                if len(buffer) >= timestamp_size:
+                    timestamp = struct.unpack(">d", buffer[:8])[0]
+                    audio_chunk = buffer[8:]
+                    await realtime_connection.input_audio_buffer.append(
+                        audio=base64.b64encode(cast(bytes, audio_chunk)).decode("utf-8")
+                    )
+                    await realtime_recorder.add_user_audio(
+                        audio_chunk=audio_chunk, timestamp=timestamp
+                    )
+                else:
+                    browser_connection_logger.exception(
+                        f"Received insufficient data for timestamp and audio: {len(buffer)} bytes"
+                    )
             else:
                 browser_connection_logger.exception(
                     f"Received unexpected message: {message}"
@@ -182,12 +231,14 @@ async def handle_openai_events(
                             "type": "response.audio.delta",
                             "audio": delta_audio_b64,
                             "item_id": event.item_id,
+                            "event_id": event.event_id,
                         }
                     )
-                    realtime_recorder.add_assistant_audio(
+                    await realtime_recorder.add_assistant_response_delta(
                         b64_audio_chunk=delta_audio_b64,
-                        timestamp=time.monotonic(),
+                        event_id=event.event_id,
                         item_id=event.item_id,
+                        current_time=time.monotonic(),
                     )
                 case "input_audio_buffer.speech_started":
                     await browser_connection.send_json(
@@ -196,8 +247,6 @@ async def handle_openai_events(
                             "message": "User speech detected.",
                         }
                     )
-                    current_time = time.monotonic()
-                    realtime_recorder.stop_assistant_response(current_time)
                 case (
                     "conversation.created"
                     | "conversation.item.created"
