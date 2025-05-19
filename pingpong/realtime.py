@@ -34,6 +34,8 @@ from pingpong.websocket import (
 browser_connection_logger = logging.getLogger("realtime_browser")
 openai_connection_logger = logging.getLogger("realtime_openai")
 realtime_recorder_logger = logging.getLogger("audio_recorder")
+general_websocket_logger = logging.getLogger(__name__)
+general_websocket_logger.setLevel(browser_connection_logger.level)
 
 
 async def add_message_to_thread(
@@ -422,14 +424,23 @@ async def browser_realtime_websocket(
         assistant_audio_queue.join(),
     )
 
-    openai_queue_processor.cancel()
-    user_audio_queue_processor.cancel()
-    assistant_audio_queue_processor.cancel()
-    try:
-        asyncio.gather(
-            openai_queue_processor,
-            user_audio_queue_processor,
-            assistant_audio_queue_processor,
-        )
-    except asyncio.CancelledError:
-        pass
+    # Cancel the worker tasks
+    for task in [
+        openai_queue_processor,
+        user_audio_queue_processor,
+        assistant_audio_queue_processor,
+    ]:
+        task.cancel()
+
+    results = await asyncio.gather(
+        openai_queue_processor,
+        user_audio_queue_processor,
+        assistant_audio_queue_processor,
+        return_exceptions=True,
+    )
+
+    for result in results:
+        if isinstance(result, Exception) and not isinstance(
+            result, asyncio.CancelledError
+        ):
+            general_websocket_logger.exception("Queue worker exception: %r", result)
