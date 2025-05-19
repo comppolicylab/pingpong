@@ -1,20 +1,20 @@
 import asyncio
 import base64
 import logging
-import time
-import uuid
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydub import AudioSegment
 
 realtime_recorder_logger = logging.getLogger("audio_recorder")
 
+AUDIO_SAMPLE_WIDTH = 2
+AUDIO_FRAME_RATE = 24000
+AUDIO_CHANNELS = 1
+
 
 class UserAudioChunk(BaseModel):
-    id: str
     audio: AudioSegment
     ends_at: float
-    prev: str | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -29,11 +29,11 @@ class AssistantAudioChunk(BaseModel):
 
 class AssistantResponse(BaseModel):
     item_id: str
-    starts_at: float
+    starts_at: float | None = None
     duration: float
     complete: bool
     first_audio_chunk_event_id: str
-    audio_chunks: dict[str, AssistantAudioChunk] = {}
+    audio_chunks: dict[str, AssistantAudioChunk] = Field(default_factory=dict)
     prev: str | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -43,12 +43,11 @@ class RealtimeRecorder:
     def __init__(self):
         self.user_audio: list[UserAudioChunk] = []
         self.user_audio_lock = asyncio.Lock()
-        self.latest_user_audio_chunk_id: str | None = None
         self.assistant_responses: dict[str, AssistantResponse] = {}
         self.latest_active_assistant_response_item_id: str | None = None
         self.closed = False
         self.assistant_responses_lock = asyncio.Lock()
-        self.end_timestamp = time.monotonic()
+        self.end_timestamp: float | None = None
 
     async def add_user_audio(self, audio_chunk: bytes, timestamp: float):
         """
@@ -56,51 +55,25 @@ class RealtimeRecorder:
         """
         if self.closed:
             return
-        
-        # realtime_recorder_logger.info(
-        #     f"Adding user audio chunk of length {len(audio_chunk)} at timestamp {timestamp}"
-        # )
 
-        user_audio_chunk_id = str(uuid.uuid4())
-        async with self.user_audio_lock:
-            if self.latest_user_audio_chunk_id:
-                self.user_audio.append(
-                    UserAudioChunk(
-                        id=user_audio_chunk_id,
-                        audio=AudioSegment(
-                            data=audio_chunk,
-                            sample_width=2,
-                            frame_rate=24000,
-                            channels=1,
-                        ),
-                        ends_at=timestamp,
-                        prev=self.latest_user_audio_chunk_id,
-                    )
-                )
-                self.latest_user_audio_chunk_id = user_audio_chunk_id
-            else:
-                self.user_audio.append(
-                    UserAudioChunk(
-                        id=user_audio_chunk_id,
-                        audio=AudioSegment(
-                            data=audio_chunk,
-                            sample_width=2,
-                            frame_rate=24000,
-                            channels=1,
-                        ),
-                        ends_at=timestamp,
-                    )
-                )
-                self.latest_user_audio_chunk_id = user_audio_chunk_id
+        self.user_audio.append(
+            UserAudioChunk(
+                audio=AudioSegment(
+                    data=audio_chunk,
+                    sample_width=AUDIO_SAMPLE_WIDTH,
+                    frame_rate=AUDIO_FRAME_RATE,
+                    channels=AUDIO_CHANNELS,
+                ),
+                ends_at=timestamp,
+            )
+        )
 
     async def stopped_playing_assistant_response(
         self, item_id: str, final_duration_ms: float
     ):
         if self.closed:
             return
-        realtime_recorder_logger.info(
-            f"Stopped playing assistant response for item_id {item_id} with duration {final_duration_ms}"
-        )
+
         async with self.assistant_responses_lock:
             self.assistant_responses[item_id].complete = True
             self.assistant_responses[item_id].duration = final_duration_ms
@@ -110,9 +83,7 @@ class RealtimeRecorder:
     ):
         if self.closed:
             return
-        realtime_recorder_logger.info(
-            f"Started playing assistant response delta for item_id {item_id} and event_id {event_id} at {started_playing_at_ms}"
-        )
+
         if not self.assistant_responses.get(item_id):
             realtime_recorder_logger.exception(
                 f"Started playing assistant response delta for item_id {item_id} but no such response exists."
@@ -131,26 +102,31 @@ class RealtimeRecorder:
                 self.assistant_responses[item_id].starts_at = started_playing_at_ms
 
     async def add_assistant_response_delta(
-        self, b64_audio_chunk: str, event_id: str, item_id: str, current_time: float
+        self, b64_audio_chunk: str, event_id: str, item_id: str
     ):
         if self.closed:
             return
+
         # Create an AudioSegment from the base64-encoded audio chunk
         audio_chunk = AudioSegment(
             data=base64.b64decode(b64_audio_chunk),
-            sample_width=2,
-            frame_rate=24000,
-            channels=1,
+            sample_width=AUDIO_SAMPLE_WIDTH,
+            frame_rate=AUDIO_FRAME_RATE,
+            channels=AUDIO_CHANNELS,
         )
+
         async with self.assistant_responses_lock:
             ## Store the audio chunk in the assistant responses
             ## CASE 1: First Assistant response in the block
             if not self.latest_active_assistant_response_item_id:
                 # Create a new AssistantResponse object
+                realtime_recorder_logger.debug(
+                    f"Adding first assistant response delta for item_id {item_id} and event_id {event_id}"
+                )
                 self.assistant_responses[item_id] = AssistantResponse(
                     item_id=item_id,
-                    starts_at=current_time,
-                    duration=audio_chunk.duration_seconds,
+                    starts_at=None,
+                    duration=len(audio_chunk),
                     complete=False,
                     audio_chunks={
                         event_id: AssistantAudioChunk(
@@ -166,9 +142,10 @@ class RealtimeRecorder:
                     item_id == self.latest_active_assistant_response_item_id
                     and not self.assistant_responses[item_id].complete
                 ):
-                    self.assistant_responses[
-                        item_id
-                    ].duration += audio_chunk.duration_seconds
+                    realtime_recorder_logger.debug(
+                        f"Adding assistant response delta to active response for item_id {item_id} and event_id {event_id}"
+                    )
+                    self.assistant_responses[item_id].duration += len(audio_chunk)
                     self.assistant_responses[item_id].audio_chunks[event_id] = (
                         AssistantAudioChunk(
                             audio=audio_chunk, event_id=event_id, starts_at=None
@@ -177,18 +154,23 @@ class RealtimeRecorder:
 
                 ## CASE 3: A new response has been received
                 ## which is not the active one
+                ## This means that the assistant has started a new response
+                ## and the previous one is now complete
                 elif (
                     item_id != self.latest_active_assistant_response_item_id
                     and item_id not in self.assistant_responses
                 ):
+                    realtime_recorder_logger.debug(
+                        f"Received new assistant response delta for item_id {item_id} and event_id {event_id} while another response with item_id {self.latest_active_assistant_response_item_id} is active."
+                    )
                     self.assistant_responses[
                         self.latest_active_assistant_response_item_id
                     ].complete = True
 
                     self.assistant_responses[item_id] = AssistantResponse(
                         item_id=item_id,
-                        starts_at=current_time,
-                        duration=audio_chunk.duration_seconds,
+                        starts_at=None,
+                        duration=len(audio_chunk),
                         complete=False,
                         audio_chunks={
                             event_id: AssistantAudioChunk(
@@ -199,126 +181,220 @@ class RealtimeRecorder:
                         first_audio_chunk_event_id=event_id,
                     )
                     self.latest_active_assistant_response_item_id = item_id
+                else:
+                    realtime_recorder_logger.exception(
+                        f"Received assistant response delta for item_id {item_id} but no such response exists."
+                    )
+                    return
+
+    async def finalize(self):
+        """
+        Finalizes the current assistant response and saves the buffer.
+        """
+        if self.closed:
+            return
+
+        async with self.assistant_responses_lock:
+            item_id = self.latest_active_assistant_response_item_id
+            if not item_id:
+                # No current assistant response to finalize.
+                return
+
+            response = self.assistant_responses.get(item_id)
+            if not response:
+                # Item id does not correspond to an existing response.
+                return
+
+            # Mark as complete.
+            response.complete = True
+
+            # Only retain played audio chunks.
+            response.audio_chunks = {
+                k: v
+                for k, v in response.audio_chunks.items()
+                if v.starts_at is not None
+            }
 
     async def save_buffer(self):
+        """
+        Saves the completed part of the buffer to a file.
+        """
         if self.closed:
             return
 
         async with self.assistant_responses_lock:
             async with self.user_audio_lock:
+                # Check if we have a current assistant response
+                if not self.latest_active_assistant_response_item_id:
+                    # If we don't have a current assistant response,
+                    # we can't save anything.
+                    return
+                realtime_recorder_logger.debug(
+                    f"Latest active assistant response item ID: {self.latest_active_assistant_response_item_id}"
+                )
                 current_assistant_response = self.assistant_responses.get(
                     self.latest_active_assistant_response_item_id
                 )
                 if not current_assistant_response:
+                    # If we haven't received a single assistant response yet,
+                    # we can't save anything.
                     return
 
                 if (
                     not current_assistant_response.prev
                     and not current_assistant_response.complete
                 ):
-                    # If the current response is not complete and has no previous
-                    # response, we can't save anything yet.
+                    # If the current response is not complete and there's no
+                    # previous response, we can't save anything yet.
                     return
 
+                # The last assistant response we will save to the file
                 last_assistant_response: AssistantResponse | None = None
                 if current_assistant_response.complete:
                     last_assistant_response = current_assistant_response
-                else:
+                elif current_assistant_response.prev:
                     last_assistant_response = self.assistant_responses.get(
                         current_assistant_response.prev
                     )
                 if not last_assistant_response:
                     return
 
+                realtime_recorder_logger.debug(
+                    f"Last assistant response item ID: {last_assistant_response.item_id}"
+                )
+
+                if not last_assistant_response.starts_at:
+                    # If we don't have a start time for the last assistant response,
+                    # we can't save anything.
+                    # This can happen if the assistant response is not complete
+                    # and we haven't received the first audio chunk yet.
+                    return
+
                 last_assistant_response_ends_at = (
                     last_assistant_response.starts_at + last_assistant_response.duration
                 )
 
-                extracted_responses = [
+                assistance_responses_to_save = [
                     resp
                     for _, resp in list(self.assistant_responses.items())
-                    if resp.starts_at <= last_assistant_response.starts_at
+                    if resp.starts_at is not None
+                    and resp.starts_at <= last_assistant_response.starts_at
                 ]
 
-                for resp in extracted_responses:
+                for resp in assistance_responses_to_save:
                     self.assistant_responses.pop(resp.item_id, None)
 
-                extracted_responses.sort(key=lambda r: r.starts_at)
+                assistance_responses_to_save.sort(
+                    key=lambda r: r.starts_at
+                    if r.starts_at is not None
+                    else float("inf")
+                )
 
-                extracted_user_audio = [
+                user_audio_chunks_to_save = [
                     chunk
                     for chunk in self.user_audio
                     if chunk.ends_at <= last_assistant_response_ends_at
                 ]
 
                 # List is sorted by timestamp
-                self.user_audio = self.user_audio[len(extracted_user_audio) :]
-                final_user_audio_chunk = self.user_audio.pop(0)
+                self.user_audio = self.user_audio[len(user_audio_chunks_to_save) :]
 
-                user_response_starts_at = (
-                    final_user_audio_chunk.ends_at
-                    - final_user_audio_chunk.audio.duration_seconds * 1000
-                )
-                user_response_duration_needed = (
-                    last_assistant_response_ends_at - user_response_starts_at
-                )
-
-                self.user_audio.insert(
-                    0,
-                    UserAudioChunk(
-                        id=final_user_audio_chunk.id,
-                        audio=final_user_audio_chunk.audio[
-                            user_response_duration_needed:
-                        ],
-                        ends_at=user_response_starts_at,
-                    ),
-                )
-                extracted_user_audio.append(
-                    UserAudioChunk(
-                        id=final_user_audio_chunk.id,
-                        audio=final_user_audio_chunk.audio[
-                            :user_response_duration_needed
-                        ],
-                        ends_at=last_assistant_response_ends_at,
+                if self.user_audio:
+                    next_user_audio_chunk_starts_at = self.user_audio[0].ends_at - len(
+                        self.user_audio[0].audio
                     )
+
+                    # If the last assistant response ends after the next user audio chunk starts,
+                    # we need to retrieve part of the user audio chunk to fit in the gap.
+                    if (
+                        last_assistant_response_ends_at
+                        > next_user_audio_chunk_starts_at
+                    ):
+                        user_response_duration_needed = int(
+                            last_assistant_response_ends_at
+                            - next_user_audio_chunk_starts_at
+                        )
+                        final_user_audio_chunk_to_save = self.user_audio.pop(0)
+                        self.user_audio.insert(
+                            0,
+                            UserAudioChunk(
+                                audio=final_user_audio_chunk_to_save.audio[
+                                    user_response_duration_needed:
+                                ],
+                                ends_at=next_user_audio_chunk_starts_at
+                                + user_response_duration_needed,
+                            ),
+                        )
+                        user_audio_chunks_to_save.append(
+                            UserAudioChunk(
+                                audio=final_user_audio_chunk_to_save.audio[
+                                    :user_response_duration_needed
+                                ],
+                                ends_at=last_assistant_response_ends_at,
+                            )
+                        )
+
+                # If this is the first time we are saving the buffer,
+                # set the end timestamp to start of the earliest
+                # (user or assistant) audio chunk
+                if not self.end_timestamp:
+                    self.end_timestamp = min(
+                        assistance_responses_to_save[0].starts_at
+                        if assistance_responses_to_save[0].starts_at
+                        else float("inf"),
+                        user_audio_chunks_to_save[0].ends_at
+                        - len(user_audio_chunks_to_save[0].audio),
+                    )
+
+                # Calculate how long the buffer to save is
+                buffer_to_save_duration = (
+                    last_assistant_response_ends_at - self.end_timestamp
                 )
 
-                new_clip_duration = last_assistant_response_ends_at - self.end_timestamp
-
-                if new_clip_duration <= 0:
+                if buffer_to_save_duration <= 0:
                     return
 
                 new_audio_segment = AudioSegment.silent(
-                    duration=new_clip_duration, frame_rate=24000
+                    duration=buffer_to_save_duration, frame_rate=24000
                 )
 
-                for audio_chunk in extracted_user_audio:
+                # Overlay the user audio chunks on top of the silent audio segment
+                for audio_chunk in user_audio_chunks_to_save:
                     new_audio_segment = new_audio_segment.overlay(
                         audio_chunk.audio,
                         position=(
                             audio_chunk.ends_at
-                            - audio_chunk.audio.duration_seconds * 1000
+                            - len(audio_chunk.audio)
                             - self.end_timestamp
                         ),
                     )
 
-                for response in extracted_responses:
+                # Overlay the assistant audio chunks on top of the audio segment
+                for response in assistance_responses_to_save:
+                    if response.starts_at is None:
+                        continue
                     duration_so_far = 0.0
+                    # Sort the audio chunks by their start time
                     for audio_chunk in sorted(
                         [
                             x
                             for x in list(response.audio_chunks.values())
                             if x.starts_at is not None
                         ],
-                        key=lambda x: x.starts_at,
+                        key=lambda x: x.starts_at
+                        if x.starts_at is not None
+                        else float("inf"),
                     ):
-                        if (
-                            duration_so_far + audio_chunk.audio.duration_seconds * 1000
-                            > response.duration
-                        ):
-                            clipped_length = response.duration - duration_so_far
+                        if not audio_chunk.starts_at:
+                            realtime_recorder_logger.exception(
+                                f"Audio chunk {audio_chunk.event_id} has no start time."
+                            )
+                            continue
+                        if duration_so_far + len(audio_chunk.audio) > response.duration:
+                            # Assistant response was interrupted during this chunk
+                            clipped_length = int(response.duration - duration_so_far)
 
-                            clipped_audio_chunk = audio_chunk[:clipped_length]
+                            clipped_audio_chunk = audio_chunk.audio[:clipped_length]
                             new_audio_segment = new_audio_segment.overlay(
                                 clipped_audio_chunk,
                                 position=(audio_chunk.starts_at - self.end_timestamp),
@@ -326,15 +402,19 @@ class RealtimeRecorder:
                             break
                         else:
                             new_audio_segment = new_audio_segment.overlay(
-                                audio_chunk,
+                                audio_chunk.audio,
                                 position=(audio_chunk.starts_at - self.end_timestamp),
                             )
-                            duration_so_far += audio_chunk.duration_seconds * 1000
+                            duration_so_far += len(audio_chunk.audio)
 
-                new_audio_segment.export(
-                    f"output_{self.end_timestamp}.wav", format="wav"
-                )
-                self.end_timestamp = last_assistant_response_ends_at
-                realtime_recorder_logger.info(
-                    f"Saved {len(extracted_user_audio)} user audio chunks and {len(extracted_responses)} assistant audio chunks"
-                )
+                # Export the audio segment to a file
+                try:
+                    new_audio_segment.export(
+                        f"output_{self.end_timestamp}.wav", format="wav"
+                    )
+                    self.end_timestamp = last_assistant_response_ends_at
+                    realtime_recorder_logger.debug(
+                        f"Saved {len(user_audio_chunks_to_save)} user audio chunks and {len(assistance_responses_to_save)} assistant audio chunks"
+                    )
+                except Exception as e:
+                    realtime_recorder_logger.exception(f"Failed to save buffer: {e}")

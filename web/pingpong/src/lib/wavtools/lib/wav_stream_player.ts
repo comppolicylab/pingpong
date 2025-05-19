@@ -156,7 +156,6 @@ export class WavStreamPlayer {
         this.trackSampleOffsets[requestId] = { trackId, offset, currentTime };
       } else if (event === 'audio_part_started') {
         const { trackId, eventId, timestamp } = e.data;
-        console.log('Audio part started', trackId, eventId, timestamp);
         if (this.onAudioPartStarted) {
           this.onAudioPartStarted({ trackId, eventId, timestamp });
         }
@@ -199,7 +198,6 @@ export class WavStreamPlayer {
     } else {
       throw new Error(`argument must be Int16Array or ArrayBuffer`);
     }
-    console.log('Adding PCM data', trackId, eventId);
     this.stream?.port.postMessage({ event: 'write', buffer, trackId, eventId });
     return buffer;
   }

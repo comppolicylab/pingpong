@@ -327,6 +327,9 @@ logging.getLogger("realtime_browser").setLevel(
 logging.getLogger("realtime_openai").setLevel(
     config.realtime_log_level or config.log_level
 )
+logging.getLogger("audio_recorder").setLevel(
+    config.realtime_log_level or config.log_level
+)
 logging.getLogger("prompt_randomizer").setLevel(
     config.prompt_randomizer_log_level or config.log_level
 )
