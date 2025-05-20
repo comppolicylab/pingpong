@@ -34,8 +34,6 @@ from pingpong.websocket import (
 browser_connection_logger = logging.getLogger("realtime_browser")
 openai_connection_logger = logging.getLogger("realtime_openai")
 realtime_recorder_logger = logging.getLogger("audio_recorder")
-general_websocket_logger = logging.getLogger(__name__)
-general_websocket_logger.setLevel(browser_connection_logger.level)
 
 
 async def add_message_to_thread(
