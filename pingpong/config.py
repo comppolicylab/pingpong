@@ -248,6 +248,9 @@ class Config(BaseSettings):
 
     log_level: str = Field("INFO", env="LOG_LEVEL")
     realtime_log_level: str | None = Field(None, env="REALTIME_LOG_LEVEL")
+    realtime_recorder_log_level: str | None = Field(
+        None, env="REALTIME_LOGGER_LOG_LEVEL"
+    )
     prompt_randomizer_log_level: str | None = Field(
         None, env="PROMPT_RANDOMIZER_LOG_LEVEL"
     )
@@ -255,7 +258,12 @@ class Config(BaseSettings):
     reload: int = Field(0)
     public_url: str = Field("http://localhost:8000")
     development: bool = Field(False, env="DEVELOPMENT")
-    artifact_store: ArtifactStoreSettings = LocalStoreSettings(save_target="uploads")
+    artifact_store: ArtifactStoreSettings = LocalStoreSettings(
+        save_target="pingpong/local_exports/thread_exports"
+    )
+    audio_store: ArtifactStoreSettings = LocalStoreSettings(
+        save_target="pingpong/local_exports/voice_mode_recordings"
+    )
     db: DbSettings
     auth: AuthSettings
     authz: AuthzSettings
@@ -328,7 +336,7 @@ logging.getLogger("realtime_openai").setLevel(
     config.realtime_log_level or config.log_level
 )
 logging.getLogger("audio_recorder").setLevel(
-    config.realtime_log_level or config.log_level
+    config.realtime_recorder_log_level or config.realtime_log_level or config.log_level
 )
 logging.getLogger("prompt_randomizer").setLevel(
     config.prompt_randomizer_log_level or config.log_level

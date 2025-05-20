@@ -197,4 +197,4 @@ saml/**/*.key
 saml/**/*.crt
 
 # Local artifact store
-uploads/
+pingpong/local_exports

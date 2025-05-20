@@ -329,7 +329,7 @@ async def browser_realtime_websocket(
 
     openai_task_queue: NamedQueue = NamedQueue("openai_task_queue")
 
-    realtime_recorder = RealtimeRecorder()
+    realtime_recorder = RealtimeRecorder(thread_id=thread.thread_id)
     browser_task = asyncio.create_task(
         handle_browser_messages(
             browser_connection,
@@ -351,7 +351,9 @@ async def browser_realtime_websocket(
         process_queue_tasks(openai_task_queue, openai_connection_logger)
     )
 
-    recording_task = asyncio.create_task(realtime_recorder.handle_saving_buffer())
+    recording_task = asyncio.create_task(
+        realtime_recorder.handle_saving_buffer(every=50)
+    )
 
     _, pending = await asyncio.wait(
         [browser_task, openai_task, recording_task],

@@ -75,13 +75,14 @@ def not_closed(func):
 
 
 class RealtimeRecorder:
-    def __init__(self):
+    def __init__(self, thread_id: str):
         self.user_audio: list[UserAudioChunk] = []
         self.save_lock = asyncio.Lock()
         self.assistant_responses: dict[str, AssistantResponse] = {}
         self.latest_active_assistant_response_item_id: str | None = None
         self.closed = False
         self.end_timestamp: int | None = None
+        self.file_name = f"voice_mode_recording_{thread_id}.wav"
 
     @not_closed
     async def add_user_audio(self, audio_chunk: bytes, timestamp: int):
@@ -429,10 +430,10 @@ class RealtimeRecorder:
         except Exception as e:
             realtime_recorder_logger.exception(f"Failed to save buffer: {e}")
 
-    async def handle_saving_buffer(self):
+    async def handle_saving_buffer(self, every: int = 60):
         try:
             while True:
-                await asyncio.sleep(60)
+                await asyncio.sleep(every)
                 try:
                     await self.save_buffer()
                 except Exception as e:
