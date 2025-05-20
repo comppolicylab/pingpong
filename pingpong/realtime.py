@@ -83,8 +83,6 @@ async def handle_browser_messages(
     browser_connection: WebSocket,
     realtime_connection: AsyncRealtimeConnection,
     realtime_recorder: RealtimeRecorder,
-    user_audio_queue: asyncio.Queue,
-    assistant_audio_queue: asyncio.Queue,
 ):
     try:
         while True:
@@ -112,12 +110,9 @@ async def handle_browser_messages(
                             content_index=0,
                             item_id=item_id,
                         )
-                        await assistant_audio_queue.put(
-                            partial(
-                                realtime_recorder.stopped_playing_assistant_response,
-                                item_id=item_id,
-                                final_duration_ms=audio_end_ms,
-                            )
+                        await realtime_recorder.stopped_playing_assistant_response(
+                            item_id=item_id,
+                            final_duration_ms=audio_end_ms,
                         )
                     elif type == "response.audio.delta.started":
                         item_id = data.get("item_id")
@@ -133,13 +128,10 @@ async def handle_browser_messages(
                             )
                             continue
                         else:
-                            await assistant_audio_queue.put(
-                                partial(
-                                    realtime_recorder.started_playing_assistant_response_delta,
-                                    item_id=item_id,
-                                    event_id=event_id,
-                                    started_playing_at_ms=started_playing_at_ms,
-                                )
+                            await realtime_recorder.started_playing_assistant_response_delta(
+                                item_id=item_id,
+                                event_id=event_id,
+                                started_playing_at_ms=started_playing_at_ms,
                             )
 
                 except json.JSONDecodeError as e:
@@ -156,12 +148,9 @@ async def handle_browser_messages(
                     await realtime_connection.input_audio_buffer.append(
                         audio=base64.b64encode(cast(bytes, audio_chunk)).decode("utf-8")
                     )
-                    await user_audio_queue.put(
-                        partial(
-                            realtime_recorder.add_user_audio,
-                            audio_chunk=audio_chunk,
-                            timestamp=timestamp,
-                        )
+                    await realtime_recorder.add_user_audio(
+                        audio_chunk=audio_chunk,
+                        timestamp=timestamp,
                     )
                 else:
                     browser_connection_logger.exception(
@@ -189,7 +178,6 @@ async def handle_openai_events(
     thread: Thread,
     openai_task_queue: asyncio.Queue,
     realtime_recorder: RealtimeRecorder,
-    assistant_audio_queue: asyncio.Queue,
 ):
     try:
         async for event in realtime_connection:
@@ -250,13 +238,10 @@ async def handle_openai_events(
                             "event_id": event.event_id,
                         }
                     )
-                    await assistant_audio_queue.put(
-                        partial(
-                            realtime_recorder.add_assistant_response_delta,
-                            b64_audio_chunk=delta_audio_b64,
-                            event_id=event.event_id,
-                            item_id=event.item_id,
-                        )
+                    await realtime_recorder.add_assistant_response_delta(
+                        b64_audio_chunk=delta_audio_b64,
+                        event_id=event.event_id,
+                        item_id=event.item_id,
                     )
                 case "input_audio_buffer.speech_started":
                     await browser_connection.send_json(
@@ -328,27 +313,6 @@ async def process_queue_tasks(
         task_logger.debug("Task queue processor was cancelled.")
 
 
-async def handle_saving_buffer(realtime_recorder: RealtimeRecorder):
-    try:
-        while True:
-            await asyncio.sleep(60)
-            try:
-                await realtime_recorder.save_buffer()
-            except Exception as e:
-                realtime_recorder_logger.exception("Error in save_buffer: %s", e)
-    except asyncio.CancelledError:
-        try:
-            realtime_recorder_logger.info(
-                "Received task cancellation signal. Saving buffer before closing."
-            )
-            await realtime_recorder.finalize()
-            await realtime_recorder.save_buffer()
-        except Exception as e:
-            realtime_recorder_logger.exception("Error in save_buffer: %s", e)
-        finally:
-            raise
-
-
 @ws_auth_middleware
 @ws_db_middleware
 @ws_parse_session_token
@@ -366,8 +330,6 @@ async def browser_realtime_websocket(
     thread: Thread = browser_connection.state.thread
 
     openai_task_queue: NamedQueue = NamedQueue("openai_task_queue")
-    user_audio_queue: NamedQueue = NamedQueue("user_audio_queue")
-    assistant_audio_queue: NamedQueue = NamedQueue("assistant_audio_queue")
 
     realtime_recorder = RealtimeRecorder()
     browser_task = asyncio.create_task(
@@ -375,8 +337,6 @@ async def browser_realtime_websocket(
             browser_connection,
             realtime_connection,
             realtime_recorder,
-            user_audio_queue,
-            assistant_audio_queue,
         )
     )
     openai_task = asyncio.create_task(
@@ -387,23 +347,13 @@ async def browser_realtime_websocket(
             thread,
             openai_task_queue,
             realtime_recorder,
-            assistant_audio_queue,
         )
     )
     openai_queue_processor = asyncio.create_task(
         process_queue_tasks(openai_task_queue, openai_connection_logger)
     )
-    user_audio_queue_processor = asyncio.create_task(
-        process_queue_tasks(
-            user_audio_queue,
-            realtime_recorder_logger,
-        )
-    )
-    assistant_audio_queue_processor = asyncio.create_task(
-        process_queue_tasks(assistant_audio_queue, realtime_recorder_logger)
-    )
 
-    recording_task = asyncio.create_task(handle_saving_buffer(realtime_recorder))
+    recording_task = asyncio.create_task(realtime_recorder.handle_saving_buffer())
 
     _, pending = await asyncio.wait(
         [browser_task, openai_task, recording_task],
@@ -417,30 +367,11 @@ async def browser_realtime_websocket(
         except asyncio.CancelledError:
             pass
 
-    # Wait for the task queues to finish processing
-    await asyncio.gather(
-        openai_task_queue.join(),
-        user_audio_queue.join(),
-        assistant_audio_queue.join(),
-    )
+    # Make sure to wait for the task queue to finish processing
+    await openai_task_queue.join()
 
-    # Cancel the worker tasks
-    for task in [
-        openai_queue_processor,
-        user_audio_queue_processor,
-        assistant_audio_queue_processor,
-    ]:
-        task.cancel()
-
-    results = await asyncio.gather(
-        openai_queue_processor,
-        user_audio_queue_processor,
-        assistant_audio_queue_processor,
-        return_exceptions=True,
-    )
-
-    for result in results:
-        if isinstance(result, Exception) and not isinstance(
-            result, asyncio.CancelledError
-        ):
-            general_websocket_logger.exception("Queue worker exception: %r", result)
+    openai_queue_processor.cancel()
+    try:
+        await openai_queue_processor
+    except asyncio.CancelledError:
+        pass
