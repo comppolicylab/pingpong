@@ -370,7 +370,7 @@ async def browser_realtime_websocket(
 
     if realtime_recorder:
         realtime_tasks.append(
-            asyncio.create_task(realtime_recorder.handle_saving_buffer(every=50))
+            asyncio.create_task(realtime_recorder.handle_saving_buffer(every=10))
         )
 
     _, pending = await asyncio.wait(
