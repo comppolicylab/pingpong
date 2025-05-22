@@ -33,7 +33,6 @@ from pingpong.websocket import (
 
 browser_connection_logger = logging.getLogger("realtime_browser")
 openai_connection_logger = logging.getLogger("realtime_openai")
-realtime_recorder_logger = logging.getLogger("audio_recorder")
 
 
 async def add_message_to_thread(
@@ -103,6 +102,8 @@ async def handle_browser_messages(
                             )
                             continue
                         # Truncate the audio buffer for the specified item
+                        # NOTE: This does not impact the transcription process,
+                        # which might affect the quality of the transcription.
                         await realtime_connection.conversation.item.truncate(
                             audio_end_ms=audio_end_ms,
                             content_index=0,
