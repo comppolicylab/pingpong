@@ -293,10 +293,10 @@ class Config(BaseSettings):
     public_url: str = Field("http://localhost:8000")
     development: bool = Field(False, env="DEVELOPMENT")
     artifact_store: ArtifactStoreSettings = LocalStoreSettings(
-        save_target="pingpong/local_exports/thread_exports"
+        save_target="local_exports/thread_exports"
     )
     audio_store: AudioStoreSettings = LocalAudioStoreSettings(
-        save_target="pingpong/local_exports/voice_mode_recordings"
+        save_target="local_exports/voice_mode_recordings"
     )
     db: DbSettings
     auth: AuthSettings
