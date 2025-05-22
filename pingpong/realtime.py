@@ -80,7 +80,7 @@ async def add_message_to_thread(
 async def handle_browser_messages(
     browser_connection: WebSocket,
     realtime_connection: AsyncRealtimeConnection,
-    realtime_recorder: RealtimeRecorder,
+    realtime_recorder: RealtimeRecorder | None = None,
 ):
     try:
         while True:
@@ -108,11 +108,14 @@ async def handle_browser_messages(
                             content_index=0,
                             item_id=item_id,
                         )
-                        await realtime_recorder.stopped_playing_assistant_response(
-                            item_id=item_id,
-                            final_duration_ms=audio_end_ms,
-                        )
+                        if realtime_recorder:
+                            await realtime_recorder.stopped_playing_assistant_response(
+                                item_id=item_id,
+                                final_duration_ms=audio_end_ms,
+                            )
                     elif type == "response.audio.delta.started":
+                        if not realtime_recorder:
+                            continue
                         item_id = data.get("item_id")
                         event_id = data.get("event_id")
                         started_playing_at_ms = data.get("started_playing_at")
@@ -146,10 +149,11 @@ async def handle_browser_messages(
                     await realtime_connection.input_audio_buffer.append(
                         audio=base64.b64encode(cast(bytes, audio_chunk)).decode("utf-8")
                     )
-                    await realtime_recorder.add_user_audio(
-                        audio_chunk=audio_chunk,
-                        timestamp=timestamp,
-                    )
+                    if realtime_recorder:
+                        await realtime_recorder.add_user_audio(
+                            audio_chunk=audio_chunk,
+                            timestamp=timestamp,
+                        )
                 else:
                     browser_connection_logger.exception(
                         f"Received insufficient data for timestamp and audio: {len(buffer)} bytes"
@@ -175,7 +179,7 @@ async def handle_openai_events(
     openai_client: OpenAIClientType,
     thread: Thread,
     openai_task_queue: asyncio.Queue,
-    realtime_recorder: RealtimeRecorder,
+    realtime_recorder: RealtimeRecorder | None = None,
 ):
     try:
         async for event in realtime_connection:
@@ -236,11 +240,12 @@ async def handle_openai_events(
                             "event_id": event.event_id,
                         }
                     )
-                    await realtime_recorder.add_assistant_response_delta(
-                        b64_audio_chunk=delta_audio_b64,
-                        event_id=event.event_id,
-                        item_id=event.item_id,
-                    )
+                    if realtime_recorder:
+                        await realtime_recorder.add_assistant_response_delta(
+                            b64_audio_chunk=delta_audio_b64,
+                            event_id=event.event_id,
+                            item_id=event.item_id,
+                        )
                 case "input_audio_buffer.speech_started":
                     await browser_connection.send_json(
                         {
@@ -319,7 +324,10 @@ async def process_queue_tasks(
 @ws_with_thread_assistant_prompt
 @ws_with_realtime_connection
 async def browser_realtime_websocket(
-    browser_connection: WebSocket, class_id: str, thread_id: str
+    browser_connection: WebSocket,
+    class_id: str,
+    thread_id: str,
+    should_record_session: bool,
 ):
     realtime_connection: AsyncRealtimeConnection = (
         browser_connection.state.realtime_connection
@@ -329,34 +337,44 @@ async def browser_realtime_websocket(
 
     openai_task_queue: NamedQueue = NamedQueue("openai_task_queue")
 
-    realtime_recorder = RealtimeRecorder(thread_id=thread.thread_id)
-    browser_task = asyncio.create_task(
-        handle_browser_messages(
-            browser_connection,
-            realtime_connection,
-            realtime_recorder,
+    realtime_recorder: RealtimeRecorder | None = None
+    if should_record_session:
+        realtime_recorder = await RealtimeRecorder.create(thread_id=thread.thread_id)
+
+    realtime_tasks: list[asyncio.Task] = []
+
+    realtime_tasks.append(
+        asyncio.create_task(
+            handle_browser_messages(
+                browser_connection,
+                realtime_connection,
+                realtime_recorder,
+            )
         )
     )
-    openai_task = asyncio.create_task(
-        handle_openai_events(
-            browser_connection,
-            realtime_connection,
-            openai_client,
-            thread,
-            openai_task_queue,
-            realtime_recorder,
+    realtime_tasks.append(
+        asyncio.create_task(
+            handle_openai_events(
+                browser_connection,
+                realtime_connection,
+                openai_client,
+                thread,
+                openai_task_queue,
+                realtime_recorder,
+            )
         )
     )
     openai_queue_processor = asyncio.create_task(
         process_queue_tasks(openai_task_queue, openai_connection_logger)
     )
 
-    recording_task = asyncio.create_task(
-        realtime_recorder.handle_saving_buffer(every=50)
-    )
+    if realtime_recorder:
+        realtime_tasks.append(
+            asyncio.create_task(realtime_recorder.handle_saving_buffer(every=50))
+        )
 
     _, pending = await asyncio.wait(
-        [browser_task, openai_task, recording_task],
+        realtime_tasks,
         return_when=asyncio.FIRST_COMPLETED,
     )
 

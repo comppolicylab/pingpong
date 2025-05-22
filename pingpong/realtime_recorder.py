@@ -3,9 +3,14 @@ import base64
 from bisect import bisect
 from functools import wraps
 import inspect
+from io import BytesIO
 import logging
 import sys
+from typing import Union
 
+from pingpong.audio_store import LocalAudioUploadObject, S3AudioUploadObject
+
+from .config import config
 from pydantic import BaseModel, ConfigDict, Field
 from pydub import AudioSegment
 
@@ -14,6 +19,9 @@ realtime_recorder_logger = logging.getLogger("audio_recorder")
 AUDIO_SAMPLE_WIDTH = 2
 AUDIO_FRAME_RATE = 24000
 AUDIO_CHANNELS = 1
+AUDIO_APPLICATION = "voip"
+MIN_AUDIO_CHUNK_SIZE = 5 * 1024 * 1024  # S3 multipart minimum (except last)
+AUDIO_SIZE_TO_READ = 64_000
 
 
 class UserAudioChunk(BaseModel):
@@ -75,14 +83,84 @@ def not_closed(func):
 
 
 class RealtimeRecorder:
-    def __init__(self, thread_id: str):
+    def __init__(
+        self,
+        audio_store_obj: Union[LocalAudioUploadObject, S3AudioUploadObject],
+    ):
         self.user_audio: list[UserAudioChunk] = []
         self.save_lock = asyncio.Lock()
         self.assistant_responses: dict[str, AssistantResponse] = {}
         self.latest_active_assistant_response_item_id: str | None = None
         self.closed = False
         self.end_timestamp: int | None = None
-        self.file_name = f"voice_mode_recording_{thread_id}.wav"
+        self.audio_store_obj = audio_store_obj
+        self.ffmpeg: asyncio.subprocess.Process | None = None
+        self.upload_task: asyncio.Task | None = None
+
+    @classmethod
+    async def create(
+        cls,
+        thread_id: str,
+    ) -> "RealtimeRecorder":
+        """
+        Creates a new RealtimeRecorder instance.
+        """
+        audio_store_obj = await config.audio_store.store.create_upload(
+            name=f"realtime_recorder_{thread_id}.webm",
+            content_type="audio/webm",
+        )
+        self = cls(audio_store_obj=audio_store_obj)
+
+        self.ffmpeg = await asyncio.create_subprocess_exec(
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "s16le",
+            "-ar",
+            str(AUDIO_FRAME_RATE),
+            "-ac",
+            str(AUDIO_CHANNELS),
+            "-i",
+            "pipe:0",
+            "-c:a",
+            "libopus",
+            "-application",
+            AUDIO_APPLICATION,
+            "-f",
+            "webm",
+            "-live",
+            "1",
+            "-cluster_time_limit",
+            "1000",
+            "pipe:1",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        self.upload_task = asyncio.create_task(self._upload_ffmpeg_output())
+        return self
+
+    async def _upload_ffmpeg_output(self) -> None:
+        """
+        Reads FFmpeg stdout, buffers ≥5 MiB, and uploads each as one part.
+        """
+        buf = bytearray()
+        if not self.ffmpeg or not self.ffmpeg.stdout:
+            raise RuntimeError("FFmpeg process is not running.")
+        try:
+            while True:
+                data = await self.ffmpeg.stdout.read(AUDIO_SIZE_TO_READ)
+                if not data:
+                    break
+                buf.extend(data)
+                if len(buf) >= MIN_AUDIO_CHUNK_SIZE:
+                    await self.audio_store_obj.upload_part(content=BytesIO(buf))
+                    buf.clear()
+        finally:
+            if buf:
+                await self.audio_store_obj.upload_part(content=BytesIO(buf))
 
     @not_closed
     async def add_user_audio(self, audio_chunk: bytes, timestamp: int):
@@ -221,7 +299,7 @@ class RealtimeRecorder:
         """
         Finalizes the current assistant response and saves the buffer.
         """
-        async with self.assistant_responses_lock:
+        async with self.save_lock:
             item_id = self.latest_active_assistant_response_item_id
             if not item_id:
                 # No current assistant response to finalize.
@@ -299,7 +377,7 @@ class RealtimeRecorder:
             )
 
             assistant_responses_to_save: list[AssistantResponse] = []
-            for item_id, item in self.assistant_responses.items():
+            for item_id, item in list(self.assistant_responses.items()):
                 if (
                     item.starts_at is None
                     or item.starts_at > last_assistant_response.starts_at
@@ -422,15 +500,46 @@ class RealtimeRecorder:
 
         # Export the audio segment to a file
         try:
-            new_audio_segment.export(f"output_{self.end_timestamp}.wav", format="wav")
+            if not self.ffmpeg or not self.ffmpeg.stdin:
+                raise RuntimeError("FFmpeg process is not running.")
+
+            # Write the audio segment to FFmpeg's stdin
+            self.ffmpeg.stdin.write(new_audio_segment.raw_data)
+            await self.ffmpeg.stdin.drain()
+
+            # Update the end timestamp to the last assistant response ends at
             self.end_timestamp = last_assistant_response_ends_at
-            realtime_recorder_logger.debug(
+
+            realtime_recorder_logger.info(
                 f"Saved {len(user_audio_chunks_to_save)} user audio chunks and {len(assistant_responses_to_save)} assistant audio chunks"
             )
         except Exception as e:
             realtime_recorder_logger.exception(f"Failed to save buffer: {e}")
 
-    async def handle_saving_buffer(self, every: int = 60):
+    @not_closed
+    async def complete_audio_upload(self):
+        """
+        Completes the audio upload.
+        """
+        # Finish bundling any responses or user audio still in RAM
+        await self.finalize()
+        await self.save_buffer()
+
+        # Close FFmpeg's stdin so it processes the remaining clusters
+        if not self.ffmpeg or not self.ffmpeg.stdin:
+            raise RuntimeError("FFmpeg process is not running.")
+        self.ffmpeg.stdin.close()
+        await self.ffmpeg.wait()
+
+        # Wait for the upload task to upload any tail data
+        if self.upload_task:
+            await self.upload_task
+
+        # Complete the upload on S3
+        await self.audio_store_obj.complete_upload()
+        self.closed = True
+
+    async def handle_saving_buffer(self, every: int = 5):
         try:
             while True:
                 await asyncio.sleep(every)
@@ -440,11 +549,10 @@ class RealtimeRecorder:
                     realtime_recorder_logger.exception("Error in save_buffer: %s", e)
         except asyncio.CancelledError:
             try:
-                realtime_recorder_logger.info(
+                realtime_recorder_logger.debug(
                     "Received task cancellation signal. Saving buffer before closing."
                 )
-                await self.finalize()
-                await self.save_buffer()
+                await self.complete_audio_upload()
             except Exception as e:
                 realtime_recorder_logger.exception("Error in save_buffer: %s", e)
             finally:
