@@ -7,16 +7,13 @@ RUN apt-get update \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-ARG SENTRY_RELEASE=""
-
 ENV PYTHONFAULTHANDLER=1 \
       PYTHONUNBUFFERED=1 \
       PYTHONHASHSEED=random \
       PIP_NO_CACHE_DIR=off \
       PIP_DISABLE_PIP_VERSION_CHECK=on \
       PIP_DEFAULT_TIMEOUT=100 \
-      POETRY_VIRTUALENVS_CREATE=false \
-      SENTRY_RELEASE=$SENTRY_RELEASE
+      POETRY_VIRTUALENVS_CREATE=false
 
 # Set up poetry
 RUN pip install poetry==2.1.3
