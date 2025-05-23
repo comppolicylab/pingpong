@@ -19,7 +19,7 @@ ENV PYTHONFAULTHANDLER=1 \
       SENTRY_RELEASE=$SENTRY_RELEASE
 
 # Set up poetry
-RUN pip install poetry==2.1.1
+RUN pip install poetry==1.8.5
 
 WORKDIR /code
 
