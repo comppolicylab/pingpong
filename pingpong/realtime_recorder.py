@@ -1,5 +1,4 @@
 import asyncio
-import base64
 from bisect import bisect
 from functools import wraps
 import inspect
@@ -7,6 +6,8 @@ from io import BytesIO
 import logging
 import sys
 from typing import Union
+
+import pybase64
 
 from pingpong.audio_store import LocalAudioUploadObject, S3AudioUploadObject
 
@@ -21,7 +22,8 @@ AUDIO_FRAME_RATE = 24000
 AUDIO_CHANNELS = 1
 AUDIO_APPLICATION = "voip"
 MIN_AUDIO_CHUNK_SIZE = 5 * 1024 * 1024  # S3 multipart minimum (except last)
-AUDIO_SIZE_TO_READ = 64_000
+AUDIO_SIZE_TO_READ = 4_096
+STDIN_CHUNK_SIZE = 32_768
 
 
 class UserAudioChunk(BaseModel):
@@ -53,8 +55,8 @@ class AssistantResponse(BaseModel):
 
 def not_closed(func):
     """
-    Decorator that skips the wrapped method if `self.closed` is True.
-    Supports both sync and async methods.
+    Decorator that skips the function if the recorder is closed,
+    ffmpeg is not running, or audio_store_obj is not set.
     """
     if inspect.iscoroutinefunction(func):
 
@@ -63,6 +65,16 @@ def not_closed(func):
             if getattr(self, "closed", False):
                 realtime_recorder_logger.warning(
                     f"Skipping {func.__name__} because the recorder is closed."
+                )
+                return None
+            if getattr(self, "ffmpeg", None) is None:
+                realtime_recorder_logger.exception(
+                    f"Skipping {func.__name__} because ffmpeg is not running."
+                )
+                return None
+            if getattr(self, "audio_store_obj", None) is None:
+                realtime_recorder_logger.exception(
+                    f"Skipping {func.__name__} because audio_store_obj is not set."
                 )
                 return None
             return await func(self, *args, **kwargs)
@@ -142,11 +154,12 @@ class RealtimeRecorder:
         self.upload_task = asyncio.create_task(self._upload_ffmpeg_output())
         return self
 
+    @not_closed
     async def _upload_ffmpeg_output(self) -> None:
         """
         Reads FFmpeg stdout, buffers ≥5 MiB, and uploads each as one part.
         """
-        buf = bytearray()
+        buf = BytesIO()
         if not self.ffmpeg or not self.ffmpeg.stdout:
             raise RuntimeError("FFmpeg process is not running.")
         try:
@@ -154,14 +167,25 @@ class RealtimeRecorder:
                 data = await self.ffmpeg.stdout.read(AUDIO_SIZE_TO_READ)
                 if not data:
                     break
-                buf.extend(data)
-                if len(buf) >= MIN_AUDIO_CHUNK_SIZE:
-                    await asyncio.sleep(0)  # Yield control to the event loop
-                    await self.audio_store_obj.upload_part(content=BytesIO(buf))
-                    buf.clear()
+                buf.write(data)
+                if buf.tell() >= MIN_AUDIO_CHUNK_SIZE:
+                    await self.audio_store_obj.upload_part(content=buf)
+                    buf.truncate(0)
+                    buf.seek(0)
         finally:
-            if buf:
-                await self.audio_store_obj.upload_part(content=BytesIO(buf))
+            if buf.tell() > 0:
+                await self.audio_store_obj.upload_part(content=buf)
+
+    @not_closed
+    async def _write_to_ffmpeg(self, data: bytes) -> None:
+        if not self.ffmpeg or not self.ffmpeg.stdin:
+            raise RuntimeError("FFmpeg process is not running.")
+
+        view = memoryview(data)
+        for pos in range(0, len(view), STDIN_CHUNK_SIZE):
+            self.ffmpeg.stdin.write(view[pos : pos + STDIN_CHUNK_SIZE])
+            await self.ffmpeg.stdin.drain()
+            await asyncio.sleep(0)
 
     @not_closed
     async def add_user_audio(self, audio_chunk: bytes, timestamp: int):
@@ -217,7 +241,7 @@ class RealtimeRecorder:
     ):
         # Create an AudioSegment from the base64-encoded audio chunk
         audio_chunk = AudioSegment(
-            data=base64.b64decode(b64_audio_chunk),
+            data=pybase64.b64decode(b64_audio_chunk),
             sample_width=AUDIO_SAMPLE_WIDTH,
             frame_rate=AUDIO_FRAME_RATE,
             channels=AUDIO_CHANNELS,
@@ -397,15 +421,19 @@ class RealtimeRecorder:
             )
 
             assistant_responses_to_save: list[AssistantResponse] = []
-            for item_id, item in list(self.assistant_responses.items()):
+            item_ids_to_pop: list[str] = []
+            for item_id, item in self.assistant_responses.items():
                 if (
                     item.starts_at is None
                     or item.starts_at > last_assistant_response.starts_at
                 ):
                     continue
 
-                self.assistant_responses.pop(item_id)
+                item_ids_to_pop.append(item_id)
                 assistant_responses_to_save.append(item)
+
+            for item_id in item_ids_to_pop:
+                self.assistant_responses.pop(item_id)
 
             assistant_responses_to_save.sort(key=lambda x: x.starts_at)
 
@@ -519,12 +547,8 @@ class RealtimeRecorder:
 
         # Export the audio segment to a file
         try:
-            if not self.ffmpeg or not self.ffmpeg.stdin:
-                raise RuntimeError("FFmpeg process is not running.")
-
             # Write the audio segment to FFmpeg's stdin
-            self.ffmpeg.stdin.write(new_audio_segment.raw_data)
-            await self.ffmpeg.stdin.drain()
+            await self._write_to_ffmpeg(new_audio_segment.raw_data)
 
             # Update the end timestamp to the last assistant response ends at
             self.end_timestamp = last_assistant_response_ends_at
