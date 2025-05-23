@@ -461,7 +461,10 @@
    */
   const handleSessionSetup = async () => {
     wavRecorder = new WavRecorder({ sampleRate: 24000, debug: true });
-    wavStreamPlayer = new WavStreamPlayer({ sampleRate: 24000 });
+    wavStreamPlayer = new WavStreamPlayer({
+      sampleRate: 24000,
+      onAudioPartStarted: onAudioPartStartedProcessor
+    });
     try {
       await wavStreamPlayer.connect();
     } catch (error) {
@@ -510,7 +513,33 @@
     if (!socket || !audioSessionStarted) {
       return;
     }
-    socket.send(data.mono);
+    const audio = new Uint8Array(data.mono);
+    const buffer = new ArrayBuffer(8 + audio.length);
+    const view = new DataView(buffer);
+    view.setFloat64(0, Date.now());
+    new Uint8Array(buffer, 8).set(audio);
+    socket.send(buffer);
+  };
+
+  /**
+   * Handle the beginning of a new assistant message playback.
+   * @param data The data associated with the new message.
+   * @param data.trackId The ID of the track.
+   * @param data.timestamp The timestamp of when the message started.
+   */
+  const onAudioPartStartedProcessor = (data: {
+    trackId: string;
+    eventId: string;
+    timestamp: number;
+  }) => {
+    socket?.send(
+      JSON.stringify({
+        type: 'response.audio.delta.started',
+        item_id: data.trackId,
+        event_id: data.eventId,
+        started_playing_at: data.timestamp
+      })
+    );
   };
 
   /**
@@ -579,24 +608,43 @@
           startingAudioSession = false;
           audioSessionStarted = true;
           break;
-        case 'input_audio_buffer.speech_started':
+        case 'input_audio_buffer.speech_started': {
           if (!wavStreamPlayer) {
             sadToast('Failed to set up audio output to your speakers.');
             return;
           }
           await wavStreamPlayer.interrupt();
-          // TODO: Inform the server that we've stopped playing the audio.
-          // const trackSampleOffset = await wavStreamPlayer.interrupt();
-          // if (trackSampleOffset?.trackId) {
-          //   const { trackId, offset } = trackSampleOffset;
-          // }
+          const trackSampleOffset = await wavStreamPlayer.interrupt();
+          if (trackSampleOffset?.trackId) {
+            const { trackId, offset } = trackSampleOffset;
+            if (!socket) {
+              sadToast('Error connecting with the server.');
+              return;
+            }
+            if (!wavRecorder) {
+              sadToast('Failed to set up audio output to your speakers.');
+              return;
+            }
+            socket.send(
+              JSON.stringify({
+                type: 'conversation.item.truncate',
+                item_id: trackId,
+                audio_end_ms: Math.floor((offset / wavStreamPlayer.getSampleRate()) * 1000)
+              })
+            );
+          }
           break;
+        }
         case 'response.audio.delta':
           if (!wavStreamPlayer) {
             sadToast('Failed to set up audio output to your speakers.');
             return;
           }
-          wavStreamPlayer.add16BitPCM(base64ToArrayBuffer(message.audio), message.item_id);
+          wavStreamPlayer.add16BitPCM(
+            base64ToArrayBuffer(message.audio),
+            message.item_id,
+            message.event_id
+          );
           break;
         case 'error':
           if (message.error.type === 'invalid_request_error') {

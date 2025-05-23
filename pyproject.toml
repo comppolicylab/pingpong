@@ -49,6 +49,8 @@ aioboto3 = "^13.1.1"
 uvicorn-worker = "^0.2.0"
 email-validator = "^2.2.0"
 beautifulsoup4 = "^4.13.4"
+pydub = "^0.25.1"
+pybase64 = "^1.4.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.2"

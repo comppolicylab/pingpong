@@ -11,6 +11,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 from pingpong.artifacts import LocalArtifactStore, S3ArtifactStore
+from pingpong.audio_store import LocalAudioStore, S3AudioStore
 from pingpong.log_filters import IgnoreHealthEndpoint
 from .authz import OpenFgaAuthzDriver
 from .email import AzureEmailSender, GmailEmailSender, MockEmailSender, SmtpEmailSender
@@ -229,7 +230,7 @@ class S3StoreSettings(BaseSettings):
 
 
 class LocalStoreSettings(BaseSettings):
-    """Settings for S3 storage."""
+    """Settings for local storage."""
 
     type: Literal["local"] = "local"
     save_target: str
@@ -243,19 +244,60 @@ class LocalStoreSettings(BaseSettings):
 ArtifactStoreSettings = Union[S3StoreSettings, LocalStoreSettings]
 
 
+class S3AudioStoreSettings(BaseSettings):
+    """Settings for S3 storage."""
+
+    type: Literal["s3"] = "s3"
+    save_target: str
+
+    @cached_property
+    def store(self):
+        return S3AudioStore(self.save_target)
+
+
+class LocalAudioStoreSettings(BaseSettings):
+    """Settings for local storage."""
+
+    type: Literal["local"] = "local"
+    save_target: str
+
+    @cached_property
+    def store(self):
+        return LocalAudioStore(self.save_target)
+
+
+AudioStoreSettings = Union[S3AudioStoreSettings, LocalAudioStoreSettings]
+
+
+class FeatureFlags(BaseSettings):
+    """Feature flags for the application."""
+
+    # Feature flags
+    enable_realtime_recorder: bool = Field(False)
+
+
 class Config(BaseSettings):
     """Stats Chat Bot config."""
 
     log_level: str = Field("INFO", env="LOG_LEVEL")
     realtime_log_level: str | None = Field(None, env="REALTIME_LOG_LEVEL")
+    realtime_recorder_log_level: str | None = Field(
+        None, env="REALTIME_LOGGER_LOG_LEVEL"
+    )
     prompt_randomizer_log_level: str | None = Field(
         None, env="PROMPT_RANDOMIZER_LOG_LEVEL"
     )
+    feature_flags: FeatureFlags = Field(FeatureFlags())
 
     reload: int = Field(0)
     public_url: str = Field("http://localhost:8000")
     development: bool = Field(False, env="DEVELOPMENT")
-    artifact_store: ArtifactStoreSettings = LocalStoreSettings(save_target="uploads")
+    artifact_store: ArtifactStoreSettings = LocalStoreSettings(
+        save_target="local_exports/thread_exports"
+    )
+    audio_store: AudioStoreSettings = LocalAudioStoreSettings(
+        save_target="local_exports/voice_mode_recordings"
+    )
     db: DbSettings
     auth: AuthSettings
     authz: AuthzSettings
@@ -326,6 +368,9 @@ logging.getLogger("realtime_browser").setLevel(
 )
 logging.getLogger("realtime_openai").setLevel(
     config.realtime_log_level or config.log_level
+)
+logging.getLogger("audio_recorder").setLevel(
+    config.realtime_recorder_log_level or config.realtime_log_level or config.log_level
 )
 logging.getLogger("prompt_randomizer").setLevel(
     config.prompt_randomizer_log_level or config.log_level
