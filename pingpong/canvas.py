@@ -402,7 +402,13 @@ class CanvasCourseClient(ABC):
     ) -> Generator[CanvasClassSchema, None, None]:
         """Process the JSON response of the Canvas courses API."""
         for course in data:
-            yield self._process_course(course)
+            try:
+                yield self._process_course(course)
+            except (KeyError, TypeError):
+                logger.warning(
+                    f"Error processing course data: {course} for {self.class_id}. Missing required fields."
+                )
+                continue
 
     def _process_course(self, data: dict) -> CanvasClassSchema:
         """Process the JSON response of the Canvas course API.
