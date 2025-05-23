@@ -461,7 +461,7 @@ def generate_summary_html_from_assistant_summaries(
             """
             for item in summary.topics:
                 summary_html += f"""
-                <li><b>{item.topic_label}</b>: {item.challenge} {item.confusion_example or ''}</li>
+                <li><b>{item.topic_label}</b>: {item.challenge} {item.confusion_example or ""}</li>
                 """
                 if item.relevant_thread_urls:
                     summary_html += """

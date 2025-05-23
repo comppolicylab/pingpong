@@ -4,6 +4,7 @@ version = "2.3.4"
 description = "A software platform carefully designed for AI-driven learning."
 authors = ["Joe Nudell <jnudell@hks.harvard.edu>", "Evangelos Kassos <github@evangeloskassos.com>"]
 readme = "README.md"
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.10"
