@@ -404,9 +404,9 @@ class CanvasCourseClient(ABC):
         for course in data:
             try:
                 yield self._process_course(course)
-            except (KeyError, TypeError):
+            except (KeyError, TypeError) as e:
                 logger.warning(
-                    f"Error processing course data: {course} for {self.class_id}. Missing required elds."
+                    f"Error processing course data: {course} for {self.class_id}. Missing required fields: {e}"
                 )
                 continue
 
