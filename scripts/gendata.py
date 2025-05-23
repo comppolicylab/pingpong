@@ -69,9 +69,10 @@ async def _create_threads(n: int, class_id: int, assistant_id: int, parties: lis
 
     for i in range(n):
         logger.info(f"Creating thread {i + 1} of {n} ...")
-        async with config.db.driver.async_session_with_args(
-            pool_pre_ping=True
-        )() as db, config.authz.driver.get_client() as authz:
+        async with (
+            config.db.driver.async_session_with_args(pool_pre_ping=True)() as db,
+            config.authz.driver.get_client() as authz,
+        ):
             try:
                 await _create_thread(db, authz, class_id, assistant_id, parties)
                 await db.commit()
