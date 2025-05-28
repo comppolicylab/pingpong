@@ -57,6 +57,7 @@
     ArrowRightOutline,
     RectangleListOutline,
     EnvelopeOpenSolid,
+    FileCopyOutline,
     ChevronSortOutline
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
@@ -75,6 +76,7 @@
   import AzureLogo from '$lib/components/AzureLogo.svelte';
   import OpenAiLogo from '$lib/components/OpenAILogo.svelte';
   import DropdownBadge from '$lib/components/DropdownBadge.svelte';
+  import CloneClassModal from '$lib/components/CloneClassModal.svelte';
 
   /**
    * Application data.
@@ -192,6 +194,7 @@
     };
   };
   let deleteModal = false;
+  let cloneModal = true;
   let exportThreadsModal = false;
   let customSummaryModal = false;
   let defaultDaysToSummarize = 7;
@@ -808,6 +811,15 @@
           {/if}
         {/if}
         <DropdownItem
+          on:touchstart={() => (cloneModal = true)}
+          on:click={() => (cloneModal = true)}
+          class="tracking-wide flex flex-row items-center gap-2 text-blue-dark-40"
+        >
+          <FileCopyOutline />
+          <div>Clone group</div>
+        </DropdownItem>
+
+        <DropdownItem
           on:touchstart={() => (deleteModal = true)}
           on:click={() => (deleteModal = true)}
           class="tracking-wide flex flex-row items-center gap-2 text-red-700"
@@ -847,6 +859,18 @@
           confirmButtonText="Delete group"
           on:confirm={deleteClass}
           on:cancel={() => (deleteModal = false)}
+        />
+      </Modal>
+      <Modal bind:open={cloneModal} size="md">
+        <CloneClassModal
+          warningTitle={`Delete ${data?.class.name || 'this group'}?`}
+          warningDescription="All assistants, threads and files associated with this group will be deleted."
+          warningMessage="This action cannot be undone."
+          cancelButtonText="Cancel"
+          confirmText="delete"
+          confirmButtonText="Delete group"
+          on:confirm={deleteClass}
+          on:cancel={() => (cloneModal = false)}
         />
       </Modal>
     </div>
