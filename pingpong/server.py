@@ -2146,7 +2146,9 @@ async def audio_stream(
     class_id: str,
     thread_id: str,
 ):
-    await browser_realtime_websocket(websocket, class_id, thread_id)
+    await browser_realtime_websocket(
+        websocket, class_id, thread_id, config.feature_flags.enable_realtime_recorder
+    )
 
 
 @v1.get(

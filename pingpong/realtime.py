@@ -3,6 +3,7 @@ import base64
 from functools import partial
 import json
 import logging
+import struct
 from typing import cast
 from fastapi import WebSocket, WebSocketDisconnect
 from openai import OpenAIError
@@ -19,6 +20,7 @@ from pingpong.ai import (
     OpenAIClientType,
 )
 from pingpong.models import Thread
+from pingpong.realtime_recorder import RealtimeRecorder
 from pingpong.websocket import (
     ws_auth_middleware,
     ws_check_realtime_permissions,
@@ -75,7 +77,9 @@ async def add_message_to_thread(
 
 
 async def handle_browser_messages(
-    browser_connection: WebSocket, realtime_connection: AsyncRealtimeConnection
+    browser_connection: WebSocket,
+    realtime_connection: AsyncRealtimeConnection,
+    realtime_recorder: RealtimeRecorder | None = None,
 ):
     try:
         while True:
@@ -84,18 +88,77 @@ async def handle_browser_messages(
             if "text" in message:
                 try:
                     data = json.loads(message["text"])
-                    browser_connection_logger.exception(
-                        f"Received unexpected message: {data}"
-                    )
+                    type = data.get("type")
+                    if not type:
+                        browser_connection_logger.exception(
+                            f"Received unexpected message: {data}"
+                        )
+                    elif type == "conversation.item.truncate":
+                        item_id = data.get("item_id")
+                        audio_end_ms = data.get("audio_end_ms")
+                        if item_id is None or audio_end_ms is None:
+                            browser_connection_logger.exception(
+                                "Received conversation.item.truncate message without item_id or audio_end_ms"
+                            )
+                            continue
+                        # Truncate the audio buffer for the specified item
+                        # NOTE: This does not impact the transcription process,
+                        # which might affect the quality of the transcription.
+                        await realtime_connection.conversation.item.truncate(
+                            audio_end_ms=audio_end_ms,
+                            content_index=0,
+                            item_id=item_id,
+                        )
+                        if realtime_recorder:
+                            await realtime_recorder.stopped_playing_assistant_response(
+                                item_id=item_id,
+                                final_duration_ms=audio_end_ms,
+                            )
+                    elif type == "response.audio.delta.started":
+                        if not realtime_recorder:
+                            continue
+                        item_id = data.get("item_id")
+                        event_id = data.get("event_id")
+                        started_playing_at_ms = data.get("started_playing_at")
+                        if (
+                            item_id is None
+                            or event_id is None
+                            or started_playing_at_ms is None
+                        ):
+                            browser_connection_logger.exception(
+                                f"Received response.audio.delta.started message without item_id, event_id, or started_playing_at {data}"
+                            )
+                            continue
+                        else:
+                            await realtime_recorder.started_playing_assistant_response_delta(
+                                item_id=item_id,
+                                event_id=event_id,
+                                started_playing_at_ms=started_playing_at_ms,
+                            )
+
                 except json.JSONDecodeError as e:
                     browser_connection_logger.exception(
                         f"Failed to decode unexpected message JSON: {e}"
                     )
             elif "bytes" in message:
-                audio_chunk = message["bytes"]
-                await realtime_connection.input_audio_buffer.append(
-                    audio=base64.b64encode(cast(bytes, audio_chunk)).decode("utf-8")
-                )
+                buffer = message["bytes"]
+
+                timestamp_size = 8
+                if len(buffer) >= timestamp_size:
+                    timestamp = struct.unpack(">d", buffer[:8])[0]
+                    audio_chunk = buffer[8:]
+                    await realtime_connection.input_audio_buffer.append(
+                        audio=base64.b64encode(cast(bytes, audio_chunk)).decode("utf-8")
+                    )
+                    if realtime_recorder:
+                        await realtime_recorder.add_user_audio(
+                            audio_chunk=audio_chunk,
+                            timestamp=timestamp,
+                        )
+                else:
+                    browser_connection_logger.exception(
+                        f"Received insufficient data for timestamp and audio: {len(buffer)} bytes"
+                    )
             else:
                 browser_connection_logger.exception(
                     f"Received unexpected message: {message}"
@@ -117,6 +180,7 @@ async def handle_openai_events(
     openai_client: OpenAIClientType,
     thread: Thread,
     openai_task_queue: asyncio.Queue,
+    realtime_recorder: RealtimeRecorder | None = None,
 ):
     try:
         async for event in realtime_connection:
@@ -174,8 +238,15 @@ async def handle_openai_events(
                             "type": "response.audio.delta",
                             "audio": delta_audio_b64,
                             "item_id": event.item_id,
+                            "event_id": event.event_id,
                         }
                     )
+                    if realtime_recorder:
+                        await realtime_recorder.add_assistant_response_delta(
+                            b64_audio_chunk=delta_audio_b64,
+                            event_id=event.event_id,
+                            item_id=event.item_id,
+                        )
                 case "input_audio_buffer.speech_started":
                     await browser_connection.send_json(
                         {
@@ -224,17 +295,26 @@ async def handle_openai_events(
         openai_connection_logger.exception(f"Error handling OpenAI event: {e}")
 
 
-async def process_openai_tasks(openai_task_queue: asyncio.Queue):
+class NamedQueue(asyncio.Queue):
+    def __init__(self, name, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.name = name
+
+
+async def process_queue_tasks(
+    task_queue: NamedQueue,
+    task_logger: logging.Logger,
+):
     try:
         while True:
-            task_func = await openai_task_queue.get()
+            task_func = await task_queue.get()
             try:
                 await task_func()
             except Exception as e:
-                openai_connection_logger.exception(f"Error processing OpenAI task: {e}")
-            openai_task_queue.task_done()
+                task_logger.exception(f"Error processing {task_queue.name} task: {e}")
+            task_queue.task_done()
     except asyncio.CancelledError:
-        openai_connection_logger.debug("Task queue processor was cancelled.")
+        task_logger.debug("Task queue processor was cancelled.")
 
 
 @ws_auth_middleware
@@ -245,7 +325,10 @@ async def process_openai_tasks(openai_task_queue: asyncio.Queue):
 @ws_with_thread_assistant_prompt
 @ws_with_realtime_connection
 async def browser_realtime_websocket(
-    browser_connection: WebSocket, class_id: str, thread_id: str
+    browser_connection: WebSocket,
+    class_id: str,
+    thread_id: str,
+    should_record_session: bool,
 ):
     realtime_connection: AsyncRealtimeConnection = (
         browser_connection.state.realtime_connection
@@ -253,26 +336,46 @@ async def browser_realtime_websocket(
     openai_client: OpenAIClientType = browser_connection.state.openai_client
     thread: Thread = browser_connection.state.thread
 
-    openai_task_queue: asyncio.Queue = asyncio.Queue()
+    openai_task_queue: NamedQueue = NamedQueue("openai_task_queue")
 
-    browser_task = asyncio.create_task(
-        handle_browser_messages(browser_connection, realtime_connection)
+    realtime_recorder: RealtimeRecorder | None = None
+    if should_record_session:
+        realtime_recorder = await RealtimeRecorder.create(thread_id=thread.thread_id)
+
+    realtime_tasks: list[asyncio.Task] = []
+
+    realtime_tasks.append(
+        asyncio.create_task(
+            handle_browser_messages(
+                browser_connection,
+                realtime_connection,
+                realtime_recorder,
+            )
+        )
     )
-    openai_task = asyncio.create_task(
-        handle_openai_events(
-            browser_connection,
-            realtime_connection,
-            openai_client,
-            thread,
-            openai_task_queue,
+    realtime_tasks.append(
+        asyncio.create_task(
+            handle_openai_events(
+                browser_connection,
+                realtime_connection,
+                openai_client,
+                thread,
+                openai_task_queue,
+                realtime_recorder,
+            )
         )
     )
     openai_queue_processor = asyncio.create_task(
-        process_openai_tasks(openai_task_queue)
+        process_queue_tasks(openai_task_queue, openai_connection_logger)
     )
 
+    if realtime_recorder:
+        realtime_tasks.append(
+            asyncio.create_task(realtime_recorder.handle_saving_buffer(every=10))
+        )
+
     _, pending = await asyncio.wait(
-        [browser_task, openai_task],
+        realtime_tasks,
         return_when=asyncio.FIRST_COMPLETED,
     )
 

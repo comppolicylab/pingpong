@@ -38,7 +38,7 @@ class LoadTestResultSummary:
             f"Failed: {self.failures},",
             f"Exceptions: {self.exceptions}",
         )
-        print("Average duration:" f"{self.avg_duration:.2f} seconds")
+        print(f"Average duration:{self.avg_duration:.2f} seconds")
 
         # Print success rate
         print(f"Success rate: {self.success_rate:.2%}")
