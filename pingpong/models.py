@@ -1325,6 +1325,14 @@ file_vector_store_association = Table(
     Index("file_vector_store_idx", "file_id", "vector_store_id", unique=True),
 )
 
+file_class_association = Table(
+    "file_classes",
+    Base.metadata,
+    Column("file_id", Integer, ForeignKey("files.id", ondelete="CASCADE")),
+    Column("class_id", Integer, ForeignKey("classes.id", ondelete="CASCADE")),
+    Index("file_class_idx", "file_id", "class_id", unique=True),
+)
+
 
 class File(Base):
     __tablename__ = "files"
@@ -1339,6 +1347,9 @@ class File(Base):
     )
     private = Column(Boolean, default=False)
     class_ = relationship("Class", back_populates="files")
+    classes = relationship(
+        "Class", secondary=file_class_association, back_populates="files"
+    )
     assistants_v2 = relationship(
         "Assistant",
         secondary=code_interpreter_file_assistant_association,
@@ -1362,11 +1373,19 @@ class File(Base):
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     @classmethod
-    async def create(cls, session: AsyncSession, data: dict) -> "File":
+    async def create(cls, session: AsyncSession, data: dict, class_id: int) -> "File":
         file = File(**data)
         session.add(file)
         await session.flush()
         await session.refresh(file)
+        stmt = (
+            _get_upsert_stmt(session)(file_class_association)
+            .values(class_id=class_id, file_id=file.id)
+            .on_conflict_do_nothing(
+                index_elements=["file_id", "class_id"],
+            )
+        )
+        await session.execute(stmt)
         return file
 
     @classmethod
@@ -1442,6 +1461,42 @@ class File(Base):
         result = await session.execute(stmt)
         for row in result:
             yield row
+
+    @classmethod
+    async def assistant_count_using_file(
+        cls, session: AsyncSession, id_: int, class_id: int
+    ) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(file_vector_store_association)
+            .join(
+                VectorStore,
+                file_vector_store_association.c.vector_store_id == VectorStore.id,
+            )
+            .join(Assistant, Assistant.vector_store_id == VectorStore.id)
+            .where(file_vector_store_association.c.file_id == id_)
+            .where(Assistant.class_id == class_id)
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def remove_file_from_class(
+        cls, session: AsyncSession, file_id: int, class_id: int
+    ) -> None:
+        stmt = delete(file_class_association).where(
+            file_class_association.c.class_id == class_id,
+            file_class_association.c.file_id == file_id,
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def class_count_using_file(cls, session: AsyncSession, id_: int) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(file_class_association)
+            .where(file_class_association.c.file_id == id_)
+        )
+        return await session.scalar(stmt)
 
 
 class VectorStore(Base):
@@ -2021,7 +2076,12 @@ class Class(Base):
         "UserClassRole",
         back_populates="class_",
     )
-    files: Mapped[List["File"]] = relationship("File", back_populates="class_")
+    files = relationship(
+        "File",
+        secondary=file_class_association,
+        back_populates="classes",
+        lazy="selectin",
+    )
     threads = relationship("Thread", back_populates="class_")
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())

@@ -357,6 +357,41 @@
     return;
   };
 
+  const cloneClass = async (evt: CustomEvent<api.CopyClassRequestInfo>) => {
+    evt.preventDefault();
+    cloneModal = false;
+    $loading = true;
+    const requestInfo = evt.detail;
+
+    if (!data.class.id) {
+      $loading = false;
+      sadToast(`Error: Group ID not found.`);
+      return;
+    }
+
+    const copyOptions: api.CopyClassRequest = {
+      name: requestInfo.groupName.toString(),
+      term: requestInfo.groupSession.toString(),
+      any_can_publish_thread: requestInfo.anyCanPublishThread,
+      private: makePrivate,
+      copy_assistants: requestInfo.assistantCopy,
+      copy_users: requestInfo.userCopy,
+      ...parseAssistantPermissions(requestInfo.assistantPermissions)
+    };
+
+    const result = await api.copyClass(fetch, data.class.id, copyOptions);
+    const response = api.expandResponse(result);
+    if (response.error) {
+      sadToast(response.error.detail || 'An unknown error occurred');
+    } else {
+      happyToast(
+        "We've started creating your cloned group. You'll receive an email when the new group is ready.",
+        5000
+      );
+    }
+    $loading = false;
+  };
+
   const updatingApiKey = writable(false);
   // Handle API key update
   const submitUpdateApiKey = async (evt: SubmitEvent) => {
@@ -863,13 +898,13 @@
       </Modal>
       <Modal bind:open={cloneModal} size="md">
         <CloneClassModal
-          warningTitle={`Delete ${data?.class.name || 'this group'}?`}
-          warningDescription="All assistants, threads and files associated with this group will be deleted."
-          warningMessage="This action cannot be undone."
-          cancelButtonText="Cancel"
-          confirmText="delete"
-          confirmButtonText="Delete group"
-          on:confirm={deleteClass}
+          groupName={data?.class.name || ''}
+          groupSession={data?.class.term || ''}
+          {makePrivate}
+          aiProvider={apiProvider}
+          {anyCanPublishThread}
+          {assistantPermissions}
+          on:confirm={cloneClass}
           on:cancel={() => (cloneModal = false)}
         />
       </Modal>

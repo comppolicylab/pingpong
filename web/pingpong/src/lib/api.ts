@@ -707,6 +707,28 @@ export type UpdateClassRequest = {
   any_can_upload_class_file?: boolean;
 };
 
+export type CopyClassRequestInfo = {
+  groupName: string;
+  groupSession: string;
+  makePrivate: boolean;
+  anyCanPublishThread: boolean;
+  assistantPermissions: string;
+  assistantCopy: 'moderators' | 'all';
+  userCopy: 'moderators' | 'all';
+};
+
+export type CopyClassRequest = {
+  name: string;
+  term: string;
+  private: boolean;
+  any_can_create_assistant: boolean;
+  any_can_publish_assistant: boolean;
+  any_can_publish_thread: boolean;
+  any_can_upload_class_file: boolean;
+  copy_assistants: 'moderators' | 'all';
+  copy_users: 'moderators' | 'all';
+};
+
 /**
  * Create a new class.
  */
@@ -729,6 +751,14 @@ export const updateClass = async (f: Fetcher, classId: number, data: UpdateClass
 export const deleteClass = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}`;
   return await DELETE<never, GenericStatus>(f, url);
+};
+
+/**
+ * Copy a class.
+ */
+export const copyClass = async (f: Fetcher, classId: number, data: CopyClassRequest) => {
+  const url = `class/${classId}/copy`;
+  return await POST<CopyClassRequest, Class>(f, url, data);
 };
 
 /**

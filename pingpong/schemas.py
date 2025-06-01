@@ -955,6 +955,18 @@ class Class(BaseModel):
         from_attributes = True
 
 
+class CopyClassRequest(BaseModel):
+    name: str = Field(..., min_length=3, max_length=100)
+    term: str = Field(..., min_length=1, max_length=100)
+    private: bool = False
+    any_can_create_assistant: bool = False
+    any_can_publish_assistant: bool = False
+    any_can_publish_thread: bool = False
+    any_can_upload_class_file: bool = False
+    copy_assistants: Literal["moderators", "all"] = "moderators"
+    copy_users: Literal["moderators", "all"] = "moderators"
+
+
 class CreateClass(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
     term: str = Field(..., min_length=1, max_length=100)

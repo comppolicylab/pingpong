@@ -34,6 +34,7 @@ from pingpong.ai_models import (
 )
 from pingpong.artifacts import ArtifactStoreError
 from pingpong.bg_tasks import safe_task
+from pingpong.copy import copy_group
 from pingpong.emails import (
     parse_addresses,
     revalidate_email_addresses,
@@ -2286,6 +2287,40 @@ async def export_class_threads(
 
 
 @v1.post(
+    "/class/{class_id}/copy",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.GenericStatus,
+)
+async def copy_class(
+    class_id: str,
+    copy_options: schemas.CopyClassRequest,
+    request: Request,
+    tasks: BackgroundTasks,
+    openai_client: OpenAIClient,
+):
+    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    if not class_:
+        raise HTTPException(status_code=404, detail="Class not found")
+    if (
+        copy_options.copy_assistants == "all"
+        and copy_options.copy_users == "moderators"
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot copy only moderators when copying all assistants.",
+        )
+    tasks.add_task(
+        safe_task,
+        copy_group,
+        copy_options,
+        openai_client,
+        class_id,
+        request.state.session.user.id,
+    )
+    return {"status": "ok"}
+
+
+@v1.post(
     "/admin/migrate/assistants/model",
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.GenericStatus,
@@ -3391,7 +3426,11 @@ async def delete_file(
 ):
     try:
         await handle_delete_file(
-            request.state.db, request.state.authz, openai_client, int(file_id)
+            request.state.db,
+            request.state.authz,
+            openai_client,
+            int(file_id),
+            int(class_id),
         )
     except FileNotFoundException:
         raise HTTPException(404, "File not found!")
@@ -3414,7 +3453,11 @@ async def delete_user_file(
 ):
     try:
         await handle_delete_file(
-            request.state.db, request.state.authz, openai_client, int(file_id)
+            request.state.db,
+            request.state.authz,
+            openai_client,
+            int(file_id),
+            int(class_id),
         )
     except FileNotFoundException:
         raise HTTPException(404, "File not found!")
@@ -3658,6 +3701,7 @@ async def create_assistant(
             request.state.authz,
             openai_client,
             req.deleted_private_files,
+            class_id=int(class_id),
         )
 
         del req.deleted_private_files
@@ -4058,6 +4102,7 @@ async def update_assistant(
                 request.state.authz,
                 openai_client,
                 req.deleted_private_files,
+                class_id=int(class_id),
             )
         except Exception as e:
             raise HTTPException(500, f"Error removing private files: {e}")
