@@ -1439,12 +1439,12 @@ class File(Base):
         await session.execute(stmt)
 
     @classmethod
-    async def get_all_by_ids_that_exist_in_class(
-        cls, session: AsyncSession, ids: list[int], class_id: int
+    async def get_all_by_ids_if_exist(
+        cls, session: AsyncSession, ids: list[int]
     ) -> List["File"]:
         if not ids:
             return []
-        stmt = select(File).where(and_(File.id.in_(ids), File.class_id == class_id))
+        stmt = select(File).where(File.id.in_(ids))
         result = await session.execute(stmt)
         return [row.File for row in result]
 
