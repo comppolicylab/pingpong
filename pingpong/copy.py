@@ -131,7 +131,7 @@ async def copy_shared_files(
     new_grants = []
     for file in files:
         new_grants.extend(_file_grants(file, target_class_id))
-    print(f"New grants for files: {new_grants}")
+
     await client.write_safe(grant=new_grants)
 
 
