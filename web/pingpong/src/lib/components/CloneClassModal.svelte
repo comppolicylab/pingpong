@@ -6,7 +6,6 @@
     Checkbox,
     Input,
     Label,
-    Modal,
     Radio,
     Select
   } from 'flowbite-svelte';

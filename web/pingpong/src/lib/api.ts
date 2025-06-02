@@ -425,7 +425,6 @@ export type ServerFile = {
   code_interpreter_file_id: string | null;
   vision_file_id: string | null;
   content_type: string;
-  class_id: number;
   private: boolean | null;
   uploader_id: number | null;
   created: string;
