@@ -82,14 +82,14 @@ async def send_clone_group_notification(
     message = message_template.substitute(
         {
             "title": "Your new cloned group is ready.",
-            "subtitle": "We have successfully copied over configuration settings, assistants and users from the original group as you requested. You can now start using your new group.",
-            "type": "notification",
+            "subtitle": "We have successfully copied over configuration settings, assistants and users from the original group as you requested. You can now start using your new group. Use the link below to access it.",
+            "type": "link",
             "cta": "Go to your new group",
             "underline": "PingPong is a tool for using large language models in a group setting. It&#8217;s built on top of models developed by OpenAI.",
             "link": invite.link,
             "email": invite.email,
             "expires": convert_seconds(expires),
-            "legal_text": "because you requested a new group to be created on PingPong",
+            "legal_text": "because you requested for a new group to be created on PingPong",
         }
     )
     await sender.send(invite.email, subject, message)
