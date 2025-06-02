@@ -1344,7 +1344,7 @@ class File(Base):
     name = Column(String)
     content_type = Column(String)
     file_id = Column(String)
-    class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"))
+    class_id = Column(Integer, ForeignKey("classes.id"))
     uploader_id = Column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, default=None
     )
@@ -1379,8 +1379,8 @@ class File(Base):
     async def get_all_generator(
         cls, session: AsyncSession
     ) -> AsyncGenerator["File", None]:
-        """Returns an async generator of all files in the database."""
-        stmt = select(File)
+        """Returns an async generator of all shared files in the database."""
+        stmt = select(File).where(File.private.is_(False))
         result = await session.execute(stmt)
         for row in result:
             yield row.File

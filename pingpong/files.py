@@ -69,6 +69,7 @@ async def handle_delete_file(
 
     # 2) Remove the single row from the association table
     await File.remove_file_from_class(session, int_file_id, class_id)
+    await authz.write_safe(revoke=_file_grants(file, class_id))
 
     # 3) Count how many classes still refer to this file
     remaining = await File.class_count_using_file(session, int_file_id)
@@ -76,7 +77,6 @@ async def handle_delete_file(
     # 4) If none remain, do the actual delete
     if remaining == 0:
         await File.delete(session, int_file_id)
-        await authz.write(revoke=_file_grants(file, class_id))
         await oai_client.files.delete(remote_file_id)
     return GenericStatus(status="ok")
 

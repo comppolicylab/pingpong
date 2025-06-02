@@ -131,6 +131,7 @@ async def copy_shared_files(
     new_grants = []
     for file in files:
         new_grants.extend(_file_grants(file, target_class_id))
+
     await client.write_safe(grant=new_grants)
 
 
@@ -229,16 +230,26 @@ async def copy_all_users(
 
 async def copy_vector_store(
     session: AsyncSession,
+    client: OpenFgaAuthzClient,
     cli: openai.AsyncClient,
     target_class_id: int,
     old_vector_store_id: int,
 ) -> tuple[str, int]:
-    file_obj_ids = await models.VectorStore.get_file_obj_ids_by_id(
-        session, old_vector_store_id
-    )
+    files = await models.VectorStore.get_files_by_id(session, old_vector_store_id)
     vector_store_obj_id, vector_store_id = await create_vector_store(
-        session, cli, str(target_class_id), file_obj_ids, type=VectorStoreType.ASSISTANT
+        session,
+        cli,
+        str(target_class_id),
+        [f.file_id for f in files],
+        type=VectorStoreType.ASSISTANT,
     )
+
+    new_grants: list[Relation] = []
+
+    for f in files:
+        new_grants.extend(_file_grants(f, target_class_id))
+
+    await client.write_safe(grant=new_grants)
 
     return vector_store_obj_id, vector_store_id
 
@@ -247,14 +258,13 @@ async def copy_assistant(
     session: AsyncSession,
     client: OpenFgaAuthzClient,
     cli: openai.AsyncClient,
-    source_class_id: int,
     target_class_id: int,
     assistant: models.Assistant,
 ):
     new_vector_store_id, new_vector_store_obj_id = None, None
     if assistant.vector_store_id:
         new_vector_store_obj_id, new_vector_store_id = await copy_vector_store(
-            session, cli, target_class_id, assistant.vector_store_id
+            session, client, cli, target_class_id, assistant.vector_store_id
         )
 
     tool_resources: ToolResources = {}
@@ -379,7 +389,6 @@ async def copy_moderator_published_assistants(
             session,
             client,
             cli,
-            source_class_id,
             target_class_id,
             assistant,
         )
@@ -399,7 +408,6 @@ async def copy_all_published_assistants(
             session,
             client,
             cli,
-            source_class_id,
             target_class_id,
             assistant,
         )
