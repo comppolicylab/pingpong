@@ -122,9 +122,13 @@ async def copy_shared_files(
         "class_file",
     )
 
-    await models.File.add_files_to_class(session, target_class_id, shared_file_ids)
+    files = await models.File.get_all_by_ids_that_exist_in_class(
+        session, shared_file_ids, source_class_id
+    )
 
-    files = await models.File.get_all_by_id(session, shared_file_ids)
+    await models.File.add_files_to_class(
+        session, target_class_id, [f.id for f in files]
+    )
 
     new_grants = []
     for file in files:
