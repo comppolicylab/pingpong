@@ -1439,6 +1439,16 @@ class File(Base):
         await session.execute(stmt)
 
     @classmethod
+    async def get_all_by_ids_if_exist(
+        cls, session: AsyncSession, ids: list[int]
+    ) -> List["File"]:
+        if not ids:
+            return []
+        stmt = select(File).where(File.id.in_(ids))
+        result = await session.execute(stmt)
+        return [row.File for row in result]
+
+    @classmethod
     async def get_all_by_id(cls, session: AsyncSession, ids: list[int]) -> list["File"]:
         if not ids:
             return []
