@@ -247,7 +247,6 @@ class File(BaseModel):
     file_search_file_id: str | None = None
     code_interpreter_file_id: str | None = None
     vision_file_id: str | None = None
-    class_id: int
     private: bool | None
     uploader_id: int | None
     created: datetime
@@ -711,6 +710,12 @@ class DownloadExport(BaseModel):
     class_name: str
 
 
+class ClonedGroupNotification(BaseModel):
+    link: str
+    email: str = Field(..., min_length=3, max_length=100)
+    class_name: str = Field(..., min_length=3, max_length=100)
+
+
 class MultipleClassThreadExportRequest(BaseModel):
     class_ids: list[int]
     user_emails: list[str] | None = None
@@ -953,6 +958,18 @@ class Class(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class CopyClassRequest(BaseModel):
+    name: str = Field(..., min_length=3, max_length=100)
+    term: str = Field(..., min_length=1, max_length=100)
+    private: bool = False
+    any_can_create_assistant: bool = False
+    any_can_publish_assistant: bool = False
+    any_can_publish_thread: bool = False
+    any_can_upload_class_file: bool = False
+    copy_assistants: Literal["moderators", "all"] = "moderators"
+    copy_users: Literal["moderators", "all"] = "moderators"
 
 
 class CreateClass(BaseModel):

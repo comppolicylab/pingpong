@@ -57,6 +57,7 @@
     ArrowRightOutline,
     RectangleListOutline,
     EnvelopeOpenSolid,
+    FileCopyOutline,
     ChevronSortOutline
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
@@ -75,6 +76,7 @@
   import AzureLogo from '$lib/components/AzureLogo.svelte';
   import OpenAiLogo from '$lib/components/OpenAILogo.svelte';
   import DropdownBadge from '$lib/components/DropdownBadge.svelte';
+  import CloneClassModal from '$lib/components/CloneClassModal.svelte';
 
   /**
    * Application data.
@@ -192,6 +194,7 @@
     };
   };
   let deleteModal = false;
+  let cloneModal = false;
   let exportThreadsModal = false;
   let customSummaryModal = false;
   let defaultDaysToSummarize = 7;
@@ -352,6 +355,41 @@
     happyToast('Group deleted');
     await goto(`/`, { invalidateAll: true });
     return;
+  };
+
+  const cloneClass = async (evt: CustomEvent<api.CopyClassRequestInfo>) => {
+    evt.preventDefault();
+    cloneModal = false;
+    $loading = true;
+    const requestInfo = evt.detail;
+
+    if (!data.class.id) {
+      $loading = false;
+      sadToast(`Error: Group ID not found.`);
+      return;
+    }
+
+    const copyOptions: api.CopyClassRequest = {
+      name: requestInfo.groupName.toString(),
+      term: requestInfo.groupSession.toString(),
+      any_can_publish_thread: requestInfo.anyCanPublishThread,
+      private: makePrivate,
+      copy_assistants: requestInfo.assistantCopy,
+      copy_users: requestInfo.userCopy,
+      ...parseAssistantPermissions(requestInfo.assistantPermissions)
+    };
+
+    const result = await api.copyClass(fetch, data.class.id, copyOptions);
+    const response = api.expandResponse(result);
+    if (response.error) {
+      sadToast(response.error.detail || 'An unknown error occurred');
+    } else {
+      happyToast(
+        "We've started creating your cloned group. You'll receive an email when the new group is ready.",
+        5000
+      );
+    }
+    $loading = false;
   };
 
   const updatingApiKey = writable(false);
@@ -808,6 +846,15 @@
           {/if}
         {/if}
         <DropdownItem
+          on:touchstart={() => (cloneModal = true)}
+          on:click={() => (cloneModal = true)}
+          class="tracking-wide flex flex-row items-center gap-2 text-blue-dark-40"
+        >
+          <FileCopyOutline />
+          <div>Clone group</div>
+        </DropdownItem>
+
+        <DropdownItem
           on:touchstart={() => (deleteModal = true)}
           on:click={() => (deleteModal = true)}
           class="tracking-wide flex flex-row items-center gap-2 text-red-700"
@@ -847,6 +894,18 @@
           confirmButtonText="Delete group"
           on:confirm={deleteClass}
           on:cancel={() => (deleteModal = false)}
+        />
+      </Modal>
+      <Modal bind:open={cloneModal} size="md">
+        <CloneClassModal
+          groupName={data?.class.name || ''}
+          groupSession={data?.class.term || ''}
+          {makePrivate}
+          aiProvider={apiProvider}
+          {anyCanPublishThread}
+          {assistantPermissions}
+          on:confirm={cloneClass}
+          on:cancel={() => (cloneModal = false)}
         />
       </Modal>
     </div>

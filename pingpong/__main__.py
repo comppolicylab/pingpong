@@ -36,6 +36,9 @@ from pingpong.merge import (
     merge_permissions,
     merge,
 )
+from pingpong.migrations.m01_file_class_id_to_assoc_table import (
+    migrate_file_class_id_to_assoc_table,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType
 from pingpong.summary import send_class_summary_for_class
@@ -664,6 +667,18 @@ def check_for_missing_providers() -> None:
             logger.info("Done!")
 
     asyncio.run(_check_for_missing_providers())
+
+
+@db.command("m01_file_class_id_to_assoc_table")
+def m01_file_class_id_to_assoc_table() -> None:
+    async def _m01_file_class_id_to_assoc_table() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Migrating file_class_id to file_classes association table...")
+            await migrate_file_class_id_to_assoc_table(session)
+            await session.commit()
+            logger.info("Done!")
+
+    asyncio.run(_m01_file_class_id_to_assoc_table())
 
 
 @db.command("get_assistant_description_stats")

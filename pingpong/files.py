@@ -19,11 +19,11 @@ logger = logging.getLogger(__name__)
 OpenAIClientType = Union[openai.AsyncClient, openai.AsyncAzureOpenAI]
 
 
-def _file_grants(file: File) -> list[Relation]:
+def _file_grants(file: File, class_id: int) -> list[Relation]:
     target_type = "user_file" if file.private else "class_file"
     target = f"{target_type}:{file.id}"
     return [
-        (f"class:{file.class_id}", "parent", target),
+        (f"class:{class_id}", "parent", target),
         (f"user:{file.uploader_id}", "owner", target),
     ]
 
@@ -37,6 +37,7 @@ async def handle_delete_file(
     authz: AuthzClient,
     oai_client: openai.AsyncClient,
     file_id: int,
+    class_id: int,
 ) -> GenericStatus:
     """Handle file deletion.
 
@@ -55,15 +56,28 @@ async def handle_delete_file(
         raise FileNotFoundException()
     remote_file_id = file.file_id
 
-    try:
-        await File.delete(session, int_file_id)
-        await authz.write(revoke=_file_grants(file))
-    except IntegrityError:
+    # 1) Ensure that the file is not in use by any assistants
+    nr_of_assistants = await File.assistant_count_using_file(
+        session, int_file_id, class_id
+    )
+
+    if nr_of_assistants > 0:
         raise HTTPException(
             status_code=403,
             detail=f"{file.name} is in use. Remove it from all assistants before deleting!",
         )
-    await oai_client.files.delete(remote_file_id)
+
+    # 2) Remove the single row from the association table
+    await File.remove_file_from_class(session, int_file_id, class_id)
+
+    # 3) Count how many classes still refer to this file
+    remaining = await File.class_count_using_file(session, int_file_id)
+
+    # 4) If none remain, do the actual delete
+    if remaining == 0:
+        await File.delete(session, int_file_id)
+        await authz.write(revoke=_file_grants(file, class_id))
+        await oai_client.files.delete(remote_file_id)
     return GenericStatus(status="ok")
 
 
@@ -72,6 +86,7 @@ async def handle_delete_files(
     authz: AuthzClient,
     oai_client: openai.AsyncClient,
     file_ids: list[int],
+    class_id: int,
 ) -> GenericStatus:
     """Handle file deletion for multiple files.
 
@@ -84,11 +99,46 @@ async def handle_delete_files(
     Returns:
         GenericStatus: Status of the operation
     """
+    if not file_ids:
+        return GenericStatus(status="ok")
+
+    files: list[File] = await File.get_all_by_id(session, file_ids)
+    file_map = {file.id: file for file in files}
+    file_ids_found = list(file_map.keys())
+    missing_ids = [file_id for file_id in file_ids if file_id not in file_ids_found]
+    if missing_ids:
+        logger.warning(
+            f"Could not find the following files for deletion: {missing_ids}"
+        )
+
+    usage_rows = await File.assistant_count_using_files(
+        session, file_ids_found, class_id
+    )
+    usage_counts = {row[0]: row[1] for row in usage_rows}
+
+    in_use_files = [file for file in files if usage_counts.get(file.id, 0) > 0]
+    if in_use_files:
+        file_names = ", ".join(file.name for file in in_use_files)
+        raise HTTPException(
+            status_code=403,
+            detail=f"The following files are in use by assistants: {file_names}. "
+            "Remove them from all assistants before deleting!",
+        )
+
+    await File.remove_files_from_class(session, file_ids_found, class_id)
+
+    remaining_rows = await File.class_count_using_files(session, file_ids_found)
+    remaining_counts = {row[0]: row[1] for row in remaining_rows}
+    file_ids_to_delete = [
+        file_id for file_id in file_ids_found if remaining_counts.get(file_id, 0) == 0
+    ]
     try:
-        deleted_files, missing_ids = await File.delete_multiple(session, file_ids)
+        deleted_files, missing_ids = await File.delete_multiple(
+            session, file_ids_to_delete
+        )
         revoked_grants = []
-        for file in deleted_files:
-            revoked_grants.extend(_file_grants(file))
+        for file in files:
+            revoked_grants.extend(_file_grants(file, class_id))
         await authz.write(revoke=revoked_grants)
 
         if missing_ids:
@@ -215,7 +265,6 @@ async def handle_create_single_purpose_file(
 
     data = {
         "file_id": new_f.id,
-        "class_id": int(class_id),
         "private": private,
         "uploader_id": int(uploader_id),
         "name": upload.filename,
@@ -223,8 +272,8 @@ async def handle_create_single_purpose_file(
     }
 
     try:
-        f = await File.create(session, data)
-        await authz.write(grant=_file_grants(f))
+        f = await File.create(session, data, class_id=class_id)
+        await authz.write(grant=_file_grants(f, class_id))
 
         return FileSchema(
             id=f.id,
@@ -240,7 +289,7 @@ async def handle_create_single_purpose_file(
             vision_file_id=f.file_id
             if _is_vision_supported(content_type) and purpose == "vision"
             else None,
-            class_id=f.class_id,
+            class_id=class_id,
             private=f.private,
             uploader_id=f.uploader_id,
             created=f.created,
@@ -248,7 +297,7 @@ async def handle_create_single_purpose_file(
         )
     except Exception as e:
         await oai_client.files.delete(new_f.id)
-        await authz.write(revoke=_file_grants(f))
+        await authz.write(revoke=_file_grants(f, class_id))
         raise e
 
 
@@ -383,10 +432,10 @@ async def handle_multimodal_upload(
         except Exception as e:
             if new_v_file:
                 await oai_client.files.delete(new_v_file.file_id)
-                await authz.write(revoke=_file_grants(new_v_file))
+                await authz.write(revoke=_file_grants(new_v_file, class_id))
             if new_f_file:
                 await oai_client.files.delete(new_f_file.file_id)
-                await authz.write(revoke=_file_grants(new_f_file))
+                await authz.write(revoke=_file_grants(new_f_file, class_id))
             raise e
 
     primary_file = new_f_file or new_v_file
@@ -408,7 +457,7 @@ async def handle_multimodal_upload(
         if _is_ci_supported(content_type) and "ci" in purpose
         else None,
         vision_file_id=new_v_file.file_id if new_v_file else None,
-        class_id=primary_file.class_id,
+        class_id=class_id,
         private=primary_file.private,
         uploader_id=primary_file.uploader_id,
         created=primary_file.created,
