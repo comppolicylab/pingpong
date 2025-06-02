@@ -9,8 +9,11 @@ from sqlalchemy import (
     DateTime,
     Float,
     UniqueConstraint,
+    distinct,
+    literal,
     not_,
     or_,
+    union_all,
 )
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
@@ -1373,6 +1376,16 @@ class File(Base):
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     @classmethod
+    async def get_all_generator(
+        cls, session: AsyncSession
+    ) -> AsyncGenerator["File", None]:
+        """Returns an async generator of all files in the database."""
+        stmt = select(File)
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.File
+
+    @classmethod
     async def create(cls, session: AsyncSession, data: dict, class_id: int) -> "File":
         file = File(**data)
         session.add(file)
@@ -1468,16 +1481,75 @@ class File(Base):
     ) -> int:
         stmt = (
             select(func.count())
-            .select_from(file_vector_store_association)
+            .select_from(Assistant)
+            .join(
+                code_interpreter_file_assistant_association,
+                code_interpreter_file_assistant_association.c.assistant_id
+                == Assistant.id,
+                isouter=True,
+            )
+            .join(
+                VectorStore, VectorStore.id == Assistant.vector_store_id, isouter=True
+            )
+            .join(
+                file_vector_store_association,
+                file_vector_store_association.c.vector_store_id == VectorStore.id,
+                isouter=True,
+            )
+            .where(
+                or_(
+                    file_vector_store_association.c.file_id == id_,
+                    code_interpreter_file_assistant_association.c.file_id == id_,
+                )
+            )
+            .where(Assistant.class_id == class_id)
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def assistant_count_using_files(
+        cls, session: AsyncSession, ids: list[int], class_id: int
+    ) -> List[tuple[int, int]]:
+        vs_path = (
+            select(
+                file_vector_store_association.c.file_id.label("file_id"),
+                Assistant.id.label("assistant_id"),
+            )
             .join(
                 VectorStore,
                 file_vector_store_association.c.vector_store_id == VectorStore.id,
             )
             .join(Assistant, Assistant.vector_store_id == VectorStore.id)
-            .where(file_vector_store_association.c.file_id == id_)
-            .where(Assistant.class_id == class_id)
+            .where(
+                file_vector_store_association.c.file_id.in_(ids),
+                Assistant.class_id == class_id,
+            )
         )
-        return await session.scalar(stmt)
+
+        ci_path = (
+            select(
+                code_interpreter_file_assistant_association.c.file_id.label("file_id"),
+                Assistant.id.label("assistant_id"),
+            )
+            .join(
+                Assistant,
+                code_interpreter_file_assistant_association.c.assistant_id
+                == Assistant.id,
+            )
+            .where(
+                code_interpreter_file_assistant_association.c.file_id.in_(ids),
+                Assistant.class_id == class_id,
+            )
+        )
+
+        files_and_assistants = union_all(vs_path, ci_path).subquery()
+
+        stmt = select(
+            files_and_assistants.c.file_id,
+            func.count(distinct(files_and_assistants.c.assistant_id)),
+        ).group_by(files_and_assistants.c.file_id)
+        result = await session.execute(stmt)
+        return result.all()
 
     @classmethod
     async def remove_file_from_class(
@@ -1490,6 +1562,18 @@ class File(Base):
         await session.execute(stmt)
 
     @classmethod
+    async def remove_files_from_class(
+        cls, session: AsyncSession, file_ids: List[int], class_id: int
+    ) -> None:
+        if not file_ids:
+            return
+        stmt = delete(file_class_association).where(
+            file_class_association.c.class_id == class_id,
+            file_class_association.c.file_id.in_(file_ids),
+        )
+        await session.execute(stmt)
+
+    @classmethod
     async def class_count_using_file(cls, session: AsyncSession, id_: int) -> int:
         stmt = (
             select(func.count())
@@ -1497,6 +1581,38 @@ class File(Base):
             .where(file_class_association.c.file_id == id_)
         )
         return await session.scalar(stmt)
+
+    @classmethod
+    async def class_count_using_files(
+        cls, session: AsyncSession, ids: list[int]
+    ) -> List[tuple[int, int]]:
+        if not ids:
+            return []
+        stmt = (
+            select(file_class_association.c.file_id, func.count())
+            .group_by(file_class_association.c.file_id)
+            .select_from(file_class_association)
+            .where(file_class_association.c.file_id.in_(ids))
+        )
+        result = await session.execute(stmt)
+        return result.all()
+
+    @classmethod
+    async def add_files_to_class(
+        cls, session: AsyncSession, class_id: int, file_ids: list[int]
+    ) -> None:
+        if not file_ids:
+            return
+        file_class_pairs = [(file_id, class_id) for file_id in file_ids]
+
+        stmt = (
+            _get_upsert_stmt(session)(file_class_association)
+            .values(file_class_pairs)
+            .on_conflict_do_nothing(
+                index_elements=["file_id", "class_id"],
+            )
+        )
+        await session.execute(stmt)
 
 
 class VectorStore(Base):
@@ -1588,6 +1704,14 @@ class VectorStore(Base):
         if not vector_store:
             return []
         return vector_store.files
+
+    @classmethod
+    async def get_file_obj_ids_by_id(cls, session: AsyncSession, id_: int) -> List[str]:
+        stmt = select(VectorStore).where(VectorStore.id == int(id_))
+        vector_store = await session.scalar(stmt)
+        if not vector_store:
+            return []
+        return [file.file_id for file in vector_store.files]
 
     @classmethod
     async def get_file_ids_by_id(
@@ -1905,6 +2029,61 @@ class Assistant(Base):
         result = await session.execute(stmt)
         for row in result:
             yield row.Assistant
+
+    @classmethod
+    async def async_get_published(
+        cls, session: AsyncSession, class_id: int, user_ids: list[int] | None = None
+    ) -> AsyncGenerator["Assistant", None]:
+        condition = [Assistant.published.is_not(None)]
+        if user_ids:
+            condition.append(Assistant.creator_id.in_(user_ids))
+
+        stmt = select(Assistant).where(
+            and_(
+                Assistant.class_id == class_id,
+                *condition,
+            )
+        )
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.Assistant
+
+    @classmethod
+    async def copy_code_interpreter_files(
+        cls, session: AsyncSession, old_assistant_id: int, new_assistant_id: int
+    ) -> None:
+        """Copy code interpreter files from one API key to another."""
+        source_rows = select(
+            code_interpreter_file_assistant_association.c.file_id,
+            literal(new_assistant_id).label("assistant_id"),
+        ).where(
+            code_interpreter_file_assistant_association.c.assistant_id
+            == old_assistant_id
+        )
+
+        stmt = (
+            _get_upsert_stmt(session)(code_interpreter_file_assistant_association)
+            .from_select(["file_id", "assistant_id"], source_rows)
+            .on_conflict_do_nothing(
+                index_elements=["file_id", "assistant_id"],
+            )
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def get_code_interpreter_file_obj_ids_by_assistant_id(
+        cls, session: AsyncSession, assistant_id: int
+    ) -> list[str]:
+        stmt = (
+            select(File.file_id)
+            .join(code_interpreter_file_assistant_association)
+            .where(
+                code_interpreter_file_assistant_association.c.assistant_id
+                == assistant_id
+            )
+        )
+        result = await session.execute(stmt)
+        return [row[0] for row in result]
 
 
 class LMSClass(Base):

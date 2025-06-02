@@ -194,7 +194,7 @@
     };
   };
   let deleteModal = false;
-  let cloneModal = true;
+  let cloneModal = false;
   let exportThreadsModal = false;
   let customSummaryModal = false;
   let defaultDaysToSummarize = 7;

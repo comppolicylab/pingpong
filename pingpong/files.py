@@ -71,7 +71,7 @@ async def handle_delete_file(
     await File.remove_file_from_class(session, int_file_id, class_id)
 
     # 3) Count how many classes still refer to this file
-    remaining = await File.count_classes_using_file(session, int_file_id)
+    remaining = await File.class_count_using_file(session, int_file_id)
 
     # 4) If none remain, do the actual delete
     if remaining == 0:
@@ -99,10 +99,45 @@ async def handle_delete_files(
     Returns:
         GenericStatus: Status of the operation
     """
+    if not file_ids:
+        return GenericStatus(status="ok")
+
+    files: list[File] = await File.get_all_by_id(session, file_ids)
+    file_map = {file.id: file for file in files}
+    file_ids_found = list(file_map.keys())
+    missing_ids = [file_id for file_id in file_ids if file_id not in file_ids_found]
+    if missing_ids:
+        logger.warning(
+            f"Could not find the following files for deletion: {missing_ids}"
+        )
+
+    usage_rows = await File.assistant_count_using_files(
+        session, file_ids_found, class_id
+    )
+    usage_counts = {row[0]: row[1] for row in usage_rows}
+
+    in_use_files = [file for file in files if usage_counts.get(file.id, 0) > 0]
+    if in_use_files:
+        file_names = ", ".join(file.name for file in in_use_files)
+        raise HTTPException(
+            status_code=403,
+            detail=f"The following files are in use by assistants: {file_names}. "
+            "Remove them from all assistants before deleting!",
+        )
+
+    await File.remove_files_from_class(session, file_ids_found, class_id)
+
+    remaining_rows = await File.class_count_using_files(session, file_ids_found)
+    remaining_counts = {row[0]: row[1] for row in remaining_rows}
+    file_ids_to_delete = [
+        file_id for file_id in file_ids_found if remaining_counts.get(file_id, 0) == 0
+    ]
     try:
-        deleted_files, missing_ids = await File.delete_multiple(session, file_ids)
+        deleted_files, missing_ids = await File.delete_multiple(
+            session, file_ids_to_delete
+        )
         revoked_grants = []
-        for file in deleted_files:
+        for file in files:
             revoked_grants.extend(_file_grants(file, class_id))
         await authz.write(revoke=revoked_grants)
 
@@ -254,7 +289,7 @@ async def handle_create_single_purpose_file(
             vision_file_id=f.file_id
             if _is_vision_supported(content_type) and purpose == "vision"
             else None,
-            class_id=f.class_id,
+            class_id=class_id,
             private=f.private,
             uploader_id=f.uploader_id,
             created=f.created,

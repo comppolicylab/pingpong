@@ -247,7 +247,6 @@ class File(BaseModel):
     file_search_file_id: str | None = None
     code_interpreter_file_id: str | None = None
     vision_file_id: str | None = None
-    class_id: int
     private: bool | None
     uploader_id: int | None
     created: datetime
@@ -709,6 +708,12 @@ class DownloadExport(BaseModel):
     link: str
     email: str
     class_name: str
+
+
+class ClonedGroupNotification(BaseModel):
+    link: str
+    email: str = Field(..., min_length=3, max_length=100)
+    class_name: str = Field(..., min_length=3, max_length=100)
 
 
 class MultipleClassThreadExportRequest(BaseModel):
