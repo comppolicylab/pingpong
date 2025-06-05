@@ -1191,6 +1191,7 @@ export type Assistant = {
   hide_prompt: boolean | null;
   locked: boolean | null;
   assistant_should_message_first: boolean | null;
+  should_record_user_information: boolean | null;
   endorsed: boolean | null;
   created: string;
   updated: string | null;
@@ -1266,6 +1267,7 @@ export type CreateAssistantRequest = {
   hide_prompt?: boolean;
   deleted_private_files?: number[];
   assistant_should_message_first?: boolean;
+  should_record_user_information?: boolean;
 };
 
 /**
@@ -1288,6 +1290,7 @@ export type UpdateAssistantRequest = {
   hide_prompt?: boolean;
   deleted_private_files?: number[];
   assistant_should_message_first?: boolean;
+  should_record_user_information?: boolean;
 };
 
 /**

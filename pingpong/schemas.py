@@ -334,6 +334,7 @@ class Assistant(BaseModel):
     creator_id: int
     locked: bool = False
     assistant_should_message_first: bool | None = None
+    should_record_user_information: bool | None = None
     use_latex: bool | None
     use_image_descriptions: bool | None
     hide_prompt: bool | None
@@ -372,6 +373,7 @@ class CreateAssistant(BaseModel):
     use_image_descriptions: bool = False
     hide_prompt: bool = False
     assistant_should_message_first: bool = False
+    should_record_user_information: bool = False
     deleted_private_files: list[int] = []
 
     _temperature_check = model_validator(mode="after")(temperature_validator)
@@ -403,6 +405,7 @@ class UpdateAssistant(BaseModel):
     use_latex: bool | None = None
     hide_prompt: bool | None = None
     assistant_should_message_first: bool | None = None
+    should_record_user_information: bool | None = None
     use_image_descriptions: bool | None = None
     deleted_private_files: list[int] = []
 

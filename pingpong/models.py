@@ -1863,6 +1863,7 @@ class Assistant(Base):
     temperature = Column(Float, nullable=True)
     reasoning_effort = Column(Integer, nullable=True)
     assistant_should_message_first = Column(Boolean, server_default="false")
+    should_record_user_information = Column(Boolean, server_default="false")
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="assistants", foreign_keys=[class_id])
     threads = relationship("Thread", back_populates="assistant")
@@ -2904,6 +2905,7 @@ class Thread(Base):
         SQLEnum(schemas.InteractionMode),
         server_default=schemas.InteractionMode.CHAT,
     )
+    display_user_info = Column(Boolean, default=False)
     instructions = Column(String, nullable=True)
     timezone = Column(String, nullable=True)
     private = Column(Boolean)

@@ -327,6 +327,17 @@
     hasSetAssistantShouldMessageFirst = true;
   }
 
+  let shouldRecordNameOrVoice = false;
+  let hasSetShouldRecordNameOrVoice = false;
+  $: if (
+    assistant?.should_record_user_information !== undefined &&
+    assistant?.should_record_user_information !== null &&
+    !hasSetShouldRecordNameOrVoice
+  ) {
+    shouldRecordNameOrVoice = assistant?.should_record_user_information;
+    hasSetShouldRecordNameOrVoice = true;
+  }
+
   // Handle updates from the file upload component.
   const handleFSPrivateFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
     privateUploadFSFileInfo = e.detail;
@@ -1323,6 +1334,33 @@
               <Helper
                 >Control whether the assistant should initiate the conversation. When checked, users
                 will be able to send their first message after the assistant responds.</Helper
+              >
+            </div>
+
+            <div class="col-span-2 mb-1">
+              <Checkbox
+                id="should_record_user_information"
+                name="should_record_user_information"
+                disabled={preventEdits}
+                bind:checked={shouldRecordNameOrVoice}
+                >{#if interactionMode === 'chat'}Record User Name{:else}Record User Name and
+                  Conversation{/if}</Checkbox
+              >
+              <Helper
+                >{#if interactionMode === 'chat'}Control whether moderators should be able to view
+                  the user's name when viewing a thread. When checked, users will be given a notice
+                  that their name will be visible to moderators. Published threads will display
+                  pseudonyms to members. Only threads <span class="font-extrabold"
+                    >created while this option is enabled</span
+                  > will show the user's name.{:else}Control whether moderators should be able to
+                  view the user's name and listen to a recording of their conversation when viewing
+                  a thread. When checked, users will be given a notice that their name will be
+                  visible to moderators and that their conversation will be recorded. Published
+                  threads will still display pseudonyms to members. Members cannot listen to
+                  recordings of published threads. Only threads <span class="font-extrabold"
+                    >created while this option is enabled</span
+                  > will show the user's name and be recorded.
+                {/if}</Helper
               >
             </div>
 
