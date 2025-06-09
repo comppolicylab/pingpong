@@ -334,6 +334,7 @@ class Assistant(BaseModel):
     creator_id: int
     locked: bool = False
     assistant_should_message_first: bool | None = None
+    should_record_user_information: bool | None = None
     use_latex: bool | None
     use_image_descriptions: bool | None
     hide_prompt: bool | None
@@ -372,6 +373,7 @@ class CreateAssistant(BaseModel):
     use_image_descriptions: bool = False
     hide_prompt: bool = False
     assistant_should_message_first: bool = False
+    should_record_user_information: bool = False
     deleted_private_files: list[int] = []
 
     _temperature_check = model_validator(mode="after")(temperature_validator)
@@ -403,6 +405,7 @@ class UpdateAssistant(BaseModel):
     use_latex: bool | None = None
     hide_prompt: bool | None = None
     assistant_should_message_first: bool | None = None
+    should_record_user_information: bool | None = None
     use_image_descriptions: bool | None = None
     deleted_private_files: list[int] = []
 
@@ -435,6 +438,7 @@ class Thread(BaseModel):
     user_names: list[str] = []
     created: datetime
     last_activity: datetime
+    display_user_info: bool
 
     class Config:
         from_attributes = True
@@ -1228,6 +1232,14 @@ class ThreadMessages(BaseModel):
     ci_messages: list[CodeInterpreterMessage] | None
 
 
+class VoiceModeRecording(BaseModel):
+    recording_id: str
+    duration: int
+
+    class Config:
+        from_attributes = True
+
+
 class ThreadWithMeta(BaseModel):
     thread: Thread
     model: str
@@ -1238,6 +1250,7 @@ class ThreadWithMeta(BaseModel):
     ci_messages: list[CodeInterpreterMessage] | None
     attachments: dict[str, File] | None
     instructions: str | None
+    recording: VoiceModeRecording | None = None
 
     class Config:
         from_attributes = True

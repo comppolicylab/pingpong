@@ -291,6 +291,7 @@ async def copy_assistant(
         vector_store_id=new_vector_store_id,
         creator_id=assistant.creator_id,
         published=assistant.published,
+        should_record_user_information=assistant.should_record_user_information,
     )
 
     session.add(new_assistant)

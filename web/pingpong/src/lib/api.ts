@@ -1191,6 +1191,7 @@ export type Assistant = {
   hide_prompt: boolean | null;
   locked: boolean | null;
   assistant_should_message_first: boolean | null;
+  should_record_user_information: boolean | null;
   endorsed: boolean | null;
   created: string;
   updated: string | null;
@@ -1266,6 +1267,7 @@ export type CreateAssistantRequest = {
   hide_prompt?: boolean;
   deleted_private_files?: number[];
   assistant_should_message_first?: boolean;
+  should_record_user_information?: boolean;
 };
 
 /**
@@ -1288,6 +1290,7 @@ export type UpdateAssistantRequest = {
   hide_prompt?: boolean;
   deleted_private_files?: number[];
   assistant_should_message_first?: boolean;
+  should_record_user_information?: boolean;
 };
 
 /**
@@ -1765,6 +1768,63 @@ export type CreateAudioThreadRequest = {
   parties?: number[];
   timezone?: string | null;
 };
+
+export type VoiceModeRecordingInfo = {
+  recording_id: string;
+  duration: number;
+};
+
+/**
+ * Stream chunks from a thread recording.
+ */
+const streamThreadRecordingChunks = async (res: Response) => {
+  if (res.status !== 200) {
+    try {
+      const errorData = await res.clone().json();
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield {
+            type: 'error',
+            detail: errorData.detail || 'We encountered an unexpected error.'
+          };
+        }
+      };
+    } catch {
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield {
+            type: 'error',
+            detail: 'Failed to download audio. We encountered an unexpected error.'
+          };
+        }
+      };
+    }
+  }
+  if (!res.body) {
+    throw new Error('No response body');
+  }
+  const reader = res.body.getReader();
+
+  return {
+    async *[Symbol.asyncIterator]() {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        yield value!;
+      }
+    }
+  };
+};
+
+/**
+ * Get a thread Voice Mode recording.
+ */
+export const getThreadRecording = async (f: Fetcher, classId: number, threadId: number) => {
+  const url = `class/${classId}/thread/${threadId}/recording`;
+  const res = await _fetch(f, 'GET', url);
+  return streamThreadRecordingChunks(res);
+};
+
 /**
  * Thread information.
  */
@@ -1781,6 +1841,7 @@ export type Thread = {
   user_names?: string[];
   created: string;
   last_activity: string;
+  display_user_info?: boolean;
 };
 
 /**
@@ -1983,6 +2044,7 @@ export type ThreadWithMeta = {
   ci_messages: OpenAIMessage[];
   attachments: Record<string, ServerFile>;
   instructions: string | null;
+  recording: VoiceModeRecordingInfo | null;
 };
 
 /**

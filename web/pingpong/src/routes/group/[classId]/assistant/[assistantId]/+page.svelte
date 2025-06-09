@@ -59,6 +59,7 @@
   $: assistant = data.assistant;
   $: preventEdits = !!assistant?.locked;
   $: canPublish = data.grants.canPublishAssistants;
+  $: isClassPrivate = data.class?.private || false;
 
   let assistantName = '';
   let hasSetAssistantName = false;
@@ -325,6 +326,17 @@
   ) {
     assistantShouldMessageFirst = assistant?.assistant_should_message_first;
     hasSetAssistantShouldMessageFirst = true;
+  }
+
+  let shouldRecordNameOrVoice = false;
+  let hasSetShouldRecordNameOrVoice = false;
+  $: if (
+    assistant?.should_record_user_information !== undefined &&
+    assistant?.should_record_user_information !== null &&
+    !hasSetShouldRecordNameOrVoice
+  ) {
+    shouldRecordNameOrVoice = assistant?.should_record_user_information;
+    hasSetShouldRecordNameOrVoice = true;
   }
 
   // Handle updates from the file upload component.
@@ -647,7 +659,8 @@
       use_image_descriptions: body.use_image_descriptions?.toString() === 'on',
       hide_prompt: body.hide_prompt?.toString() === 'on',
       assistant_should_message_first: assistantShouldMessageFirst,
-      deleted_private_files: [...$trashPrivateFileIds, ...fileSearchCodeInterpreterUnusedFiles]
+      deleted_private_files: [...$trashPrivateFileIds, ...fileSearchCodeInterpreterUnusedFiles],
+      should_record_user_information: shouldRecordNameOrVoice
     };
     return params;
   };
@@ -1323,6 +1336,39 @@
               <Helper
                 >Control whether the assistant should initiate the conversation. When checked, users
                 will be able to send their first message after the assistant responds.</Helper
+              >
+            </div>
+
+            <div class="col-span-2 mb-1">
+              <Checkbox
+                id="should_record_user_information"
+                name="should_record_user_information"
+                disabled={preventEdits || isClassPrivate}
+                bind:checked={shouldRecordNameOrVoice}
+                ><div class="flex flex-row gap-1">
+                  <div>
+                    {#if interactionMode === 'chat'}Record User Name{:else}Record User Name and
+                      Conversation{/if}
+                  </div>
+                  {#if isClassPrivate}<div>&middot;</div>
+                    <div>Unavailable for Private Groups</div>{/if}
+                </div></Checkbox
+              >
+              <Helper
+                >{#if interactionMode === 'chat'}Control whether moderators should be able to view
+                  the user's name when viewing a thread. When checked, users will be given a notice
+                  that their name will be visible to moderators. Published threads will display
+                  pseudonyms to members. Only threads <span class="font-extrabold"
+                    >created while this option is enabled</span
+                  > will show the user's name.{:else}Control whether moderators should be able to
+                  view the user's name and listen to a recording of their conversation when viewing
+                  a thread. When checked, users will be given a notice that their name will be
+                  visible to moderators and that their conversation will be recorded. Published
+                  threads will still display pseudonyms to members. Members cannot listen to
+                  recordings of published threads. Only threads <span class="font-extrabold"
+                    >created while this option is enabled</span
+                  > will show the user's name and be recorded.
+                {/if}</Helper
               >
             </div>
 

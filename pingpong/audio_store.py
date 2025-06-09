@@ -3,7 +3,7 @@ import aioboto3
 import logging
 
 from abc import ABC, abstractmethod
-from typing import IO, TypedDict
+from typing import IO, AsyncGenerator, TypedDict
 
 from aiohttp import ClientError
 
@@ -62,6 +62,18 @@ class BaseAudioStore(ABC):
         """Complete the multipart upload."""
         ...
 
+    @abstractmethod
+    async def delete_file(self, key: str, upload_id: str):
+        """Delete a file from the store."""
+        ...
+
+    @abstractmethod
+    async def get_file(
+        self, key: str, chunk_size: int = 1024 * 1024
+    ) -> AsyncGenerator[bytes, None]:
+        """Get a file from the store."""
+        yield b""
+
 
 class S3AudioUploadObject(BaseAudioUploadObject):
     """Object to hold S3 multipart upload information."""
@@ -104,6 +116,16 @@ class S3AudioUploadObject(BaseAudioUploadObject):
             upload_id=self.multipart_upload["UploadId"],
         )
 
+    async def delete_file(self):
+        """Delete the file from S3."""
+        if not self.multipart_upload:
+            raise AudioStoreError(code=400, detail="Multipart upload not initiated")
+
+        await self.store.delete_file(
+            key=self.multipart_upload["Key"],
+            upload_id=self.multipart_upload["UploadId"],
+        )
+
 
 class LocalAudioUploadObject(BaseAudioUploadObject):
     """Object to hold the local upload information."""
@@ -139,6 +161,16 @@ class LocalAudioUploadObject(BaseAudioUploadObject):
 
         # No action needed for local storage
         pass
+
+    async def delete_file(self):
+        """Delete the file from local storage."""
+        if not self.file_path:
+            raise AudioStoreError(code=400, detail="File path not set")
+
+        await self.store.delete_file(
+            key=self.file_path.name,
+            upload_id="",  # Not applicable for local storage
+        )
 
 
 class S3AudioStore(BaseAudioStore):
@@ -203,6 +235,37 @@ class S3AudioStore(BaseAudioStore):
                     code=500, detail=f"Error completing multipart upload: {str(e)}"
                 )
 
+    async def delete_file(self, key: str, upload_id):
+        """Delete a file from S3."""
+        async with aioboto3.Session().client("s3") as s3_client:
+            try:
+                await s3_client.abort_multipart_upload(
+                    Bucket=self.__bucket,
+                    Key=key,
+                    UploadId=upload_id,
+                )
+                await s3_client.delete_object(
+                    Bucket=self.__bucket,
+                    Key=key,
+                )
+            except ClientError as e:
+                logger.exception(f"Error deleting file: {e}")
+
+    async def get_file(
+        self, key: str, chunk_size: int = 1024 * 1024
+    ) -> AsyncGenerator[bytes, None]:
+        """Get a file from S3."""
+        async with aioboto3.Session().client("s3") as s3_client:
+            try:
+                s3_object = await s3_client.get_object(Bucket=self.__bucket, Key=key)
+                async for chunk in s3_object["Body"].iter_chunks(chunk_size=chunk_size):
+                    yield chunk
+            except ClientError as e:
+                logger.exception(f"Error streaming file {key}: {e}")
+                raise AudioStoreError(
+                    code=500, detail=f"Error downloading Voice mode recording: {str(e)}"
+                )
+
 
 class LocalAudioStore(BaseAudioStore):
     """Local audio store for development and testing."""
@@ -247,3 +310,27 @@ class LocalAudioStore(BaseAudioStore):
         # No action needed for local storage
         logger.debug("Added the following parts to the file: %s", parts)
         pass
+
+    async def delete_file(self, key: str, upload_id: str):
+        """Delete a file from local storage."""
+        file_path = self._directory / key
+        try:
+            file_path.unlink(missing_ok=True)
+        except Exception as e:
+            logger.exception(f"Error deleting file: {e}")
+
+    async def get_file(
+        self, key: str, chunk_size: int = 1024 * 1024
+    ) -> AsyncGenerator[bytes, None]:
+        """Get a file from local storage."""
+        file_path = self._directory / key
+        if not file_path.exists():
+            raise AudioStoreError(code=404, detail="File not found")
+
+        try:
+            with open(file_path, "rb") as f:
+                while chunk := f.read(chunk_size):
+                    yield chunk
+        except Exception as e:
+            logger.exception(f"Error reading file {key}: {e}")
+            raise AudioStoreError(code=500, detail=f"Error reading file: {str(e)}")

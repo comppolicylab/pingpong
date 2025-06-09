@@ -10,10 +10,12 @@ from typing import Union
 import pybase64
 
 from pingpong.audio_store import LocalAudioUploadObject, S3AudioUploadObject
+from pingpong.models import VoiceModeRecording
 
 from .config import config
 from pydantic import BaseModel, ConfigDict, Field
 from pydub import AudioSegment
+from sqlalchemy.ext.asyncio import AsyncSession
 
 realtime_recorder_logger = logging.getLogger("audio_recorder")
 
@@ -98,6 +100,9 @@ class RealtimeRecorder:
     def __init__(
         self,
         audio_store_obj: Union[LocalAudioUploadObject, S3AudioUploadObject],
+        audio_recording_id: str,
+        thread_id: int,
+        session: AsyncSession,
     ):
         self.user_audio: list[UserAudioChunk] = []
         self.save_lock = asyncio.Lock()
@@ -105,23 +110,36 @@ class RealtimeRecorder:
         self.latest_active_assistant_response_item_id: str | None = None
         self.closed = False
         self.end_timestamp: int | None = None
+        self.audio_duration: int = 0
         self.audio_store_obj = audio_store_obj
+        self.audio_recording_id = audio_recording_id
         self.ffmpeg: asyncio.subprocess.Process | None = None
         self.upload_task: asyncio.Task | None = None
+        self.thread_id = thread_id
+        self.session = session
+        self.should_save_audio = False
 
     @classmethod
     async def create(
         cls,
-        thread_id: str,
+        thread_id: int,
+        thread_obj_id: str,
+        session: AsyncSession,
     ) -> "RealtimeRecorder":
         """
         Creates a new RealtimeRecorder instance.
         """
+        audio_recording_id = f"realtime_recorder_{thread_obj_id}.webm"
         audio_store_obj = await config.audio_store.store.create_upload(
-            name=f"realtime_recorder_{thread_id}.webm",
+            name=audio_recording_id,
             content_type="audio/webm",
         )
-        self = cls(audio_store_obj=audio_store_obj)
+        self = cls(
+            audio_store_obj=audio_store_obj,
+            audio_recording_id=audio_recording_id,
+            thread_id=thread_id,
+            session=session,
+        )
 
         self.ffmpeg = await asyncio.create_subprocess_exec(
             "ffmpeg",
@@ -552,6 +570,7 @@ class RealtimeRecorder:
 
             # Update the end timestamp to the last assistant response ends at
             self.end_timestamp = last_assistant_response_ends_at
+            self.audio_duration += buffer_to_save_duration
 
             realtime_recorder_logger.debug(
                 f"Saved {len(user_audio_chunks_to_save)} user audio chunks and {len(assistant_responses_to_save)} assistant audio chunks"
@@ -564,6 +583,16 @@ class RealtimeRecorder:
         """
         Completes the audio upload.
         """
+        # If we haven't added any messages to the thread,
+        # we should delete the file from the audio store
+        if not self.should_save_audio:
+            realtime_recorder_logger.warning(
+                "No audio to save, deleting the file from the audio store."
+            )
+            await self.audio_store_obj.delete_file()
+            self.closed = True
+            return
+
         # Finish bundling any responses or user audio still in RAM
         await self.finalize()
         await self.save_buffer()
@@ -578,8 +607,23 @@ class RealtimeRecorder:
         if self.upload_task:
             await self.upload_task
 
-        # Complete the upload on S3
+        # Complete the upload
         await self.audio_store_obj.complete_upload()
+
+        # Save the recording metadata to the database
+        try:
+            await VoiceModeRecording.create(
+                session=self.session,
+                data={
+                    "recording_id": self.audio_recording_id,
+                    "thread_id": self.thread_id,
+                    "duration": self.audio_duration,
+                },
+            )
+        except Exception as e:
+            realtime_recorder_logger.exception("Error saving VoiceModeRecording: %s", e)
+            await self.audio_store_obj.delete_file()
+
         self.closed = True
 
     async def handle_saving_buffer(self, every: int = 5):

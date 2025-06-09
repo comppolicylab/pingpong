@@ -36,7 +36,8 @@
     PlaySolid,
     StopSolid,
     CheckOutline,
-    MicrophoneSlashOutline
+    MicrophoneSlashOutline,
+    UsersSolid
   } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
@@ -48,6 +49,7 @@
   import type { ExtendedMediaDeviceInfo } from '$lib/wavtools/lib/wav_recorder';
   import { isFirefox } from '$lib/stores/general';
   import Sanitize from '$lib/components/Sanitize.svelte';
+  import AudioPlayer from '$lib/components/AudioPlayer.svelte';
   export let data;
 
   let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -74,6 +76,8 @@
   $: assistantId = threadMgr.assistantId;
   $: isCurrentUser = $participants.user.includes('Me');
   $: threadInstructions = threadMgr.instructions;
+  $: threadRecording = data.threadRecording;
+  $: displayUserInfo = data.threadDisplayUserInfo;
   let trashThreadFiles = writable<string[]>([]);
   $: threadAttachments = threadMgr.attachments;
   $: allFiles = Object.fromEntries(
@@ -727,6 +731,24 @@
     showModerators = true;
   };
 
+  let showPlayer = false;
+  let audioUrl: string | null = null;
+  const fetchRecording = async () => {
+    const res = await api.getThreadRecording(fetch, classId, threadId);
+    const chunks: Uint8Array[] = [];
+
+    for await (const chunk of await res) {
+      if ((chunk as { type: string }).type === 'error') {
+        return;
+      }
+      chunks.push(chunk as Uint8Array);
+    }
+
+    const blob = new Blob(chunks, { type: 'audio/webm' });
+    audioUrl = URL.createObjectURL(blob);
+    showPlayer = true;
+  };
+
   onNavigate(async () => {
     await resetAudioSession();
   });
@@ -958,6 +980,23 @@
               </p>
             {/if}
           </div>
+          {#if !isPrivate && displayUserInfo}
+            <div
+              class="flex flex-col gap-1 border border-red-600 px-3 py-2 rounded-2xl max-w-sm items-center justify-center text-center my-5"
+            >
+              <UsersSolid class="h-10 w-10 text-red-600" />
+              <span class="text-gray-700 text-sm font-normal"
+                ><Button
+                  class="p-0 text-gray-700 text-sm underline font-normal"
+                  on:click={showModeratorsModal}
+                  on:touchstart={showModeratorsModal}>Moderators</Button
+                > can see this thread,
+                <span class="font-semibold"
+                  >your full name, and listen to a recording of your conversation</span
+                >.</span
+              >
+            </div>
+          {/if}
           <div class="w-full flex justify-center">
             <div
               class="bg-gray-100 flex flex-row gap-2 items-center justify-center shadow-xl rounded-xl px-2 py-1.5 w-fit h-fit"
@@ -1075,6 +1114,35 @@
             on:dismissError={handleDismissError}
           />
         {:else if data.threadInteractionMode === 'voice' && ($messages.length > 0 || assistantInteractionMode === 'chat')}
+          {#if threadRecording && $messages.length > 0 && assistantInteractionMode === 'voice'}
+            <div
+              class="border relative flex gap-2 flex-wrap z-10 px-3.5 text-blue-dark-40 border-gray-500 bg-gray-100 -mb-3 rounded-t-2xl border-b-0 pb-5 pt-2.5"
+            >
+              <div class="w-full">
+                {#if showPlayer && audioUrl}
+                  <AudioPlayer bind:src={audioUrl} duration={threadRecording.duration} />
+                {:else}
+                  <div class="flex w-full flex-col items-center md:flex-row gap-2">
+                    <div class="text-danger-000 flex flex-row items-center gap-2 md:w-full">
+                      <div class="flex flex-col w-fit">
+                        <div class="text-xs uppercase font-semibold">Recording available</div>
+                        <div class="text-sm">
+                          You can listen to a recording of this conversation.
+                        </div>
+                      </div>
+                    </div>
+                    <Button
+                      class="text-white bg-gradient-to-b from-blue-dark-30 to-blue-dark-40 py-1 px-2 rounded-lg w-fit shrink-0 hover:from-blue-dark-40 hover:to-blue-dark-50 transition-all text-xs font-normal"
+                      on:click={fetchRecording}
+                    >
+                      Load Recording
+                    </Button>
+                  </div>
+                {/if}
+              </div>
+            </div>
+          {/if}
+
           <div
             class="flex flex-col bg-seasalt gap-2 border border-melon pl-4 py-2.5 pr-3 items-stretch transition-all duration-200 relative shadow-[0_0.25rem_1.25rem_rgba(254,184,175,0.15)] focus-within:shadow-[0_0.25rem_1.25rem_rgba(253,148,134,0.25)] hover:border-coral-pink focus-within:border-coral-pink z-20 rounded-2xl"
           >
@@ -1106,7 +1174,7 @@
         {/if}
         <div class="flex gap-2 items-center w-full text-sm justify-between grow my-3">
           <div class="flex gap-2 grow shrink min-w-0">
-            {#if !$published && isPrivate}
+            {#if !$published && isPrivate && !displayUserInfo}
               <LockSolid size="sm" class="text-orange" />
               <Span class="text-gray-600 text-xs font-normal"
                 ><Button
@@ -1122,26 +1190,80 @@
                 {/if}Assistants can make mistakes. Check important info.</Span
               >
             {:else if !$published}
-              <EyeSlashOutline size="sm" class="text-orange" />
-              <Span class="text-gray-600 text-xs font-normal"
-                ><Button
-                  class="p-0 text-gray-600 text-xs underline font-normal"
-                  on:click={showModeratorsModal}
-                  on:touchstart={showModeratorsModal}>Moderators</Button
-                > can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
-                {#if isCurrentUser}For more information, please review <a
-                    href="/privacy-policy"
-                    rel="noopener noreferrer"
-                    class="underline">PingPong's privacy statement</a
-                  >.
-                {/if}Assistants can make mistakes. Check important info.</Span
-              >
+              {#if displayUserInfo}
+                {#if data.threadInteractionMode === 'voice'}
+                  <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
+                    <UsersSolid size="sm" class="text-orange pt-0" />
+                    <Span class="text-gray-600 text-xs font-normal"
+                      ><Button
+                        class="p-0 text-gray-600 text-xs underline font-normal"
+                        on:click={showModeratorsModal}
+                        on:touchstart={showModeratorsModal}>Moderators</Button
+                      > can see this thread,
+                      <span class="font-semibold"
+                        >{isCurrentUser ? 'your' : "the user's"} full name, and listen to a recording
+                        of {isCurrentUser ? 'your' : 'the'} conversation</span
+                      >. For more information, please review
+                      <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
+                        >PingPong's privacy statement</a
+                      >. Assistants can make mistakes. Check important info.</Span
+                    >
+                  </div>
+                {:else}
+                  <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
+                    <UsersSolid size="sm" class="text-orange pt-0" />
+                    <Span class="text-gray-600 text-xs font-normal"
+                      ><Button
+                        class="p-0 text-gray-600 text-xs underline font-normal"
+                        on:click={showModeratorsModal}
+                        on:touchstart={showModeratorsModal}>Moderators</Button
+                      > can see this thread and
+                      <span class="font-semibold"
+                        >{isCurrentUser ? 'your' : "the user's"} full name</span
+                      >. For more information, please review
+                      <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
+                        >PingPong's privacy statement</a
+                      >. Assistants can make mistakes. Check important info.</Span
+                    >
+                  </div>
+                {/if}
+              {:else}
+                <EyeSlashOutline size="sm" class="text-orange" />
+                <Span class="text-gray-600 text-xs font-normal"
+                  ><Button
+                    class="p-0 text-gray-600 text-xs underline font-normal"
+                    on:click={showModeratorsModal}
+                    on:touchstart={showModeratorsModal}>Moderators</Button
+                  > can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
+                  {#if isCurrentUser}For more information, please review <a
+                      href="/privacy-policy"
+                      rel="noopener noreferrer"
+                      class="underline">PingPong's privacy statement</a
+                    >.
+                  {/if}Assistants can make mistakes. Check important info.</Span
+                >
+              {/if}
             {:else}
               <EyeOutline size="sm" class="text-orange" />
               <Span class="text-gray-600 text-xs font-normal"
                 >Everyone in this group can see this thread but not {isCurrentUser
                   ? 'your'
-                  : "the user's"} name. Assistants can make mistakes. Check important info.</Span
+                  : "the user's"} name. {#if displayUserInfo}{#if data.threadInteractionMode === 'voice'}<Button
+                      class="p-0 text-gray-600 text-xs underline font-normal"
+                      on:click={showModeratorsModal}
+                      on:touchstart={showModeratorsModal}>Moderators</Button
+                    > can see this thread,
+                    <span class="font-semibold"
+                      >{isCurrentUser ? 'your' : "the user's"} full name, and listen to a recording of
+                      {isCurrentUser ? 'your' : 'the'} conversation</span
+                    >.{:else}<Button
+                      class="p-0 text-gray-600 text-xs underline font-normal"
+                      on:click={showModeratorsModal}
+                      on:touchstart={showModeratorsModal}>Moderators</Button
+                    > can see this thread and
+                    <span class="font-semibold"
+                      >{isCurrentUser ? 'your' : "the user's"} full name</span
+                    >.{/if}{/if} Assistants can make mistakes. Check important info.</Span
               >
             {/if}
           </div>

@@ -33,6 +33,7 @@ from pingpong.ai_models import (
     HIDDEN_MODELS,
 )
 from pingpong.artifacts import ArtifactStoreError
+from pingpong.audio_store import AudioStoreError
 from pingpong.bg_tasks import safe_task
 from pingpong.copy import copy_group
 from pingpong.emails import (
@@ -43,7 +44,7 @@ from pingpong.emails import (
 from pingpong.realtime import browser_realtime_websocket
 from pingpong.stats import get_statistics
 from pingpong.summary import send_class_summary_to_user_task
-from .animal_hash import process_threads, pseudonym, user_names
+from .animal_hash import name, process_threads, pseudonym, user_names
 from jwt.exceptions import PyJWTError
 from openai.types.beta.assistant_create_params import ToolResources
 from openai.types.beta.threads.message_create_params import Attachment
@@ -2147,9 +2148,7 @@ async def audio_stream(
     class_id: str,
     thread_id: str,
 ):
-    await browser_realtime_websocket(
-        websocket, class_id, thread_id, config.feature_flags.enable_realtime_recorder
-    )
+    await browser_realtime_websocket(websocket, class_id, thread_id)
 
 
 @v1.get(
@@ -2165,11 +2164,25 @@ async def get_thread(
     class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
-    messages, [assistant, file_names, all_files], runs_result = await asyncio.gather(
+    (
+        messages,
+        [assistant, file_names, all_files],
+        is_supervisor_check,
+        runs_result,
+    ) = await asyncio.gather(
         openai_client.beta.threads.messages.list(
             thread.thread_id, limit=20, order="desc"
         ),
         models.Thread.get_thread_components(request.state.db, thread.id),
+        request.state.authz.check(
+            [
+                (
+                    f"user:{request.state.session.user.id}",
+                    "supervisor",
+                    f"class:{class_id}",
+                ),
+            ]
+        ),
         openai_client.beta.threads.runs.list(thread.thread_id, limit=1, order="desc"),
     )
     last_run = [r async for r in runs_result]
@@ -2181,6 +2194,8 @@ async def get_thread(
     if messages.data:
         users = {str(u.id): u for u in thread.users}
 
+    is_supervisor = is_supervisor_check[0]
+    is_current_user = False
     for message in messages.data:
         for content in message.content:
             if content.type == "text" and content.text.annotations:
@@ -2192,9 +2207,17 @@ async def get_thread(
         user_id = message.metadata.pop("user_id", None)
         if not user_id:
             continue
-        message.metadata["is_current_user"] = int(user_id) in current_user_ids
+        if int(user_id) in current_user_ids:
+            is_current_user = True
+            message.metadata["is_current_user"] = True
+        else:
+            message.metadata["is_current_user"] = False
         message.metadata["name"] = (
-            "Anonymous User" if thread.private else pseudonym(thread, users[user_id])
+            name(users[user_id])
+            if thread.display_user_info and is_supervisor
+            else "Anonymous User"
+            if thread.private
+            else pseudonym(thread, users[user_id])
         )
     placeholder_ci_calls = []
     if "code_interpreter" in thread.tools_available and messages.data:
@@ -2210,7 +2233,7 @@ async def get_thread(
         thread.assistant_names = {assistant.id: assistant.name}
     else:
         thread.assistant_names = {0: "Deleted Assistant"}
-    thread.user_names = user_names(thread, request.state.session.user.id)
+    thread.user_names = user_names(thread, request.state.session.user.id, is_supervisor)
 
     can_view_prompt = False
     if thread.instructions and assistant:
@@ -2230,7 +2253,72 @@ async def get_thread(
         "ci_messages": placeholder_ci_calls,
         "attachments": all_files,
         "instructions": thread.instructions if can_view_prompt else None,
+        "recording": thread.voice_mode_recording
+        if is_supervisor or is_current_user
+        else None,
     }
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/recording",
+    dependencies=[
+        Depends(
+            Authz("can_view", "thread:{thread_id}"),
+        )
+    ],
+    response_class=StreamingResponse,
+)
+async def get_thread_recording(
+    class_id: str,
+    thread_id: str,
+    request: Request,
+):
+    user_id = request.state.session.user.id
+    thread, is_supervisor_check = await asyncio.gather(
+        models.Thread.get_by_id(request.state.db, int(thread_id)),
+        request.state.authz.check(
+            [
+                (
+                    f"user:{user_id}",
+                    "supervisor",
+                    f"class:{class_id}",
+                ),
+            ]
+        ),
+    )
+
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if not thread.voice_mode_recording:
+        raise HTTPException(
+            status_code=404,
+            detail="This thread does not have a recording.",
+        )
+    is_participant = user_id in [u.id for u in thread.users]
+    if not (is_supervisor_check[0] or is_participant):
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to view this recording.",
+        )
+    try:
+        return StreamingResponse(
+            config.audio_store.store.get_file(thread.voice_mode_recording.recording_id),
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": f'attachment; filename="{thread.voice_mode_recording}"'
+            },
+        )
+    except AudioStoreError:
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to retrieve the recording. It may not exist or has been deleted.",
+        )
+    except Exception:
+        logger.exception("get_thread_recording: Exception occurred")
+        raise HTTPException(
+            status_code=500,
+            detail="An internal error occurred while retrieving the recording.",
+        )
 
 
 @v1.get(
@@ -2421,10 +2509,25 @@ async def list_thread_messages(
     limit = min(limit, 100)
 
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
-    messages = await openai_client.beta.threads.messages.list(
+    messages_task = openai_client.beta.threads.messages.list(
         thread.thread_id, limit=limit, order="asc", before=before
     )
-    file_names = await models.Thread.get_file_search_files(request.state.db, thread.id)
+    file_names_task = models.Thread.get_file_search_files(request.state.db, thread.id)
+    is_supervisor_check_task = request.state.authz.check(
+        [
+            (
+                f"user:{request.state.session.user.id}",
+                "supervisor",
+                f"class:{class_id}",
+            ),
+        ]
+    )
+
+    messages, file_names, is_supervisor_check = await asyncio.gather(
+        messages_task,
+        file_names_task,
+        is_supervisor_check_task,
+    )
 
     if messages.data:
         users = {u.id: u.created for u in thread.users}
@@ -2444,7 +2547,11 @@ async def list_thread_messages(
             request.state.session.user.id
         )
         message.metadata["name"] = (
-            "Anonymous User" if thread.private else pseudonym(thread, users[user_id])
+            name(users[user_id])
+            if thread.display_user_info and is_supervisor_check[0]
+            else "Anonymous User"
+            if thread.private
+            else pseudonym(thread, users[user_id])
         )
 
     placeholder_ci_calls = []
@@ -2554,8 +2661,27 @@ async def list_recent_threads(
         limit,
         before=current_latest_time,
     )
+    if not threads:
+        return {"threads": []}
 
-    return {"threads": process_threads(threads, request.state.session.user.id)}
+    class_ids = set(t.class_id for t in threads if t.class_id is not None)
+
+    is_supervisor_in_class_check = await request.state.authz.check(
+        [
+            (f"user:{request.state.session.user.id}", "supervisor", f"class:{class_id}")
+            for class_id in class_ids
+        ]
+    )
+    is_supervisor_dict = {
+        class_id: is_supervisor
+        for class_id, is_supervisor in zip(class_ids, is_supervisor_in_class_check)
+    }
+
+    return {
+        "threads": process_threads(
+            threads, request.state.session.user.id, is_supervisor_dict
+        )
+    }
 
 
 @v1.get(
@@ -2639,7 +2765,27 @@ async def list_all_threads(
             class_id=class_id,
         )
 
-    return {"threads": process_threads(threads, request.state.session.user.id)}
+    if not threads:
+        return {"threads": []}
+
+    class_ids = set(t.class_id for t in threads if t.class_id is not None)
+
+    is_supervisor_in_class_check = await request.state.authz.check(
+        [
+            (f"user:{request.state.session.user.id}", "supervisor", f"class:{class_id}")
+            for class_id in class_ids
+        ]
+    )
+    is_supervisor_dict = {
+        class_id: is_supervisor
+        for class_id, is_supervisor in zip(class_ids, is_supervisor_in_class_check)
+    }
+
+    return {
+        "threads": process_threads(
+            threads, request.state.session.user.id, is_supervisor_dict
+        )
+    }
 
 
 @v1.get(
@@ -2679,7 +2825,27 @@ async def list_threads(
         before=current_latest_time,
     )
 
-    return {"threads": process_threads(threads, request.state.session.user.id)}
+    if not threads:
+        return {"threads": []}
+
+    class_ids = set(t.class_id for t in threads if t.class_id is not None)
+
+    is_supervisor_in_class_check = await request.state.authz.check(
+        [
+            (f"user:{request.state.session.user.id}", "supervisor", f"class:{class_id}")
+            for class_id in class_ids
+        ]
+    )
+    is_supervisor_dict = {
+        class_id: is_supervisor
+        for class_id, is_supervisor in zip(class_ids, is_supervisor_in_class_check)
+    }
+
+    return {
+        "threads": process_threads(
+            threads, request.state.session.user.id, is_supervisor_dict
+        )
+    }
 
 
 @v1.post(
@@ -2696,12 +2862,13 @@ async def create_audio_thread(
     parties = list[models.User]()
     thread = None
     try:
-        thread, parties, assistant = await asyncio.gather(
+        thread, class_, parties, assistant = await asyncio.gather(
             openai_client.beta.threads.create(
                 metadata={
                     "user_id": str(request.state.session.user.id),
                 },
             ),
+            models.Class.get_by_id(request.state.db, int(class_id)),
             models.User.get_all_by_id(request.state.db, req.parties),
             models.Assistant.get_by_id(request.state.db, req.assistant_id),
         )
@@ -2727,6 +2894,14 @@ async def create_audio_thread(
         raise HTTPException(
             status_code=404,
             detail="Could not find the assistant you specified. Please try again.",
+        )
+
+    if not class_:
+        if thread:
+            await openai_client.beta.threads.delete(thread.id)
+        raise HTTPException(
+            status_code=404,
+            detail="Class not found",
         )
 
     if not thread:
@@ -2757,6 +2932,8 @@ async def create_audio_thread(
             user_id=request.state.session.user.id,
         ),
         "timezone": req.timezone,
+        "display_user_info": assistant.should_record_user_information
+        and not class_.private,
     }
 
     result: None | models.Thread = None
@@ -2822,6 +2999,13 @@ async def create_thread(
         raise HTTPException(
             status_code=400,
             detail="You must provide a message if you are uploading files or images.",
+        )
+
+    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    if not class_:
+        raise HTTPException(
+            status_code=404,
+            detail="Class not found",
         )
 
     if req.file_search_file_ids:
@@ -2944,6 +3128,8 @@ async def create_thread(
             user_id=request.state.session.user.id,
         ),
         "timezone": req.timezone,
+        "display_user_info": assistant.should_record_user_information
+        and not class_.private,
     }
 
     result: None | models.Thread = None
@@ -3608,6 +3794,25 @@ async def create_assistant(
         ):
             raise HTTPException(403, "You lack permission to publish an assistant.")
 
+        class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+
+    class_ = await models.Class.get_by_id(request.state.db, class_id_int)
+    if not class_:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Associated class {class_id} not found.",
+        )
+
+    # Check that the class is not private if user information should be recorded
+    if class_.private and (
+        "should_record_user_information" in req.model_fields_set
+        and req.should_record_user_information
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="This class is private and does not allow recording user information.",
+        )
+
     tool_resources: ToolResources = {}
     vector_store_object_id = None
     uses_voice = req.interaction_mode == schemas.InteractionMode.VOICE
@@ -3801,6 +4006,23 @@ async def update_assistant(
                 "This assistant is locked and cannot be edited. Please create a new assistant if you need to make changes.",
             )
 
+    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    if not class_:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Associated class {class_id} not found.",
+        )
+
+    # Check that the class is not private if user information should be recorded
+    if class_.private and (
+        "should_record_user_information" in req.model_fields_set
+        and req.should_record_user_information is not None
+        and req.should_record_user_information
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="This class is private and does not allow recording user information.",
+        )
     openai_update: dict[str, Any] = {}
     tool_resources: ToolResources = {}
     update_tool_resources = False
@@ -4022,6 +4244,12 @@ async def update_assistant(
     if "temperature" in req.model_fields_set:
         openai_update["temperature"] = req.temperature
         asst.temperature = req.temperature
+
+    if (
+        "should_record_user_information" in req.model_fields_set
+        and req.should_record_user_information is not None
+    ):
+        asst.should_record_user_information = req.should_record_user_information
 
     if "reasoning_effort" in req.model_fields_set:
         reasoning_effort = (

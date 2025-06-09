@@ -1863,6 +1863,7 @@ class Assistant(Base):
     temperature = Column(Float, nullable=True)
     reasoning_effort = Column(Integer, nullable=True)
     assistant_should_message_first = Column(Boolean, server_default="false")
+    should_record_user_information = Column(Boolean, server_default="false")
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="assistants", foreign_keys=[class_id])
     threads = relationship("Thread", back_populates="assistant")
@@ -2094,6 +2095,17 @@ class Assistant(Base):
         )
         result = await session.execute(stmt)
         return [row[0] for row in result]
+
+    @classmethod
+    async def update_all_assistants_private_class(
+        cls, session: AsyncSession, class_id: int
+    ) -> None:
+        stmt = (
+            update(Assistant)
+            .where(Assistant.class_id == class_id)
+            .values(should_record_user_information=False)
+        )
+        await session.execute(stmt)
 
 
 class LMSClass(Base):
@@ -2390,6 +2402,14 @@ class Class(Base):
             and existing_class.private is True
         ):
             raise ValueError("Update failed: Cannot change a private group to public.")
+
+        if (
+            "private" in update_data
+            and update_data["private"] is True
+            and existing_class.private is False
+        ):
+            # If changing to private, ensure no assistants are set to record user information
+            await Assistant.update_all_assistants_private_class(session, id_)
 
         # Proceed with the update
         stmt = update(Class).where(Class.id == int(id_)).values(**update_data)
@@ -2889,6 +2909,31 @@ class CodeInterpreterCall(Base):
             yield row.CodeInterpreterCall
 
 
+class VoiceModeRecording(Base):
+    __tablename__ = "voice_mode_recordings"
+
+    id = Column(Integer, primary_key=True)
+    thread_id = Column(Integer, ForeignKey("threads.id", ondelete="CASCADE"))
+    thread = relationship(
+        "Thread", back_populates="voice_mode_recording", uselist=False
+    )
+    recording_id = Column(String, unique=True)
+    duration = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> "VoiceModeRecording":
+        recording = VoiceModeRecording(**data)
+        session.add(recording)
+        await session.flush()
+        return recording
+
+
 class Thread(Base):
     __tablename__ = "threads"
 
@@ -2903,6 +2948,13 @@ class Thread(Base):
     interaction_mode = Column(
         SQLEnum(schemas.InteractionMode),
         server_default=schemas.InteractionMode.CHAT,
+    )
+    display_user_info = Column(Boolean, server_default="false")
+    voice_mode_recording = relationship(
+        "VoiceModeRecording",
+        back_populates="thread",
+        uselist=False,
+        lazy="selectin",
     )
     instructions = Column(String, nullable=True)
     timezone = Column(String, nullable=True)
