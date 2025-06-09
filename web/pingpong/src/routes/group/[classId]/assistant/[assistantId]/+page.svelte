@@ -59,6 +59,7 @@
   $: assistant = data.assistant;
   $: preventEdits = !!assistant?.locked;
   $: canPublish = data.grants.canPublishAssistants;
+  $: isClassPrivate = data.class?.private || false;
 
   let assistantName = '';
   let hasSetAssistantName = false;
@@ -658,7 +659,8 @@
       use_image_descriptions: body.use_image_descriptions?.toString() === 'on',
       hide_prompt: body.hide_prompt?.toString() === 'on',
       assistant_should_message_first: assistantShouldMessageFirst,
-      deleted_private_files: [...$trashPrivateFileIds, ...fileSearchCodeInterpreterUnusedFiles]
+      deleted_private_files: [...$trashPrivateFileIds, ...fileSearchCodeInterpreterUnusedFiles],
+      should_record_user_information: shouldRecordNameOrVoice
     };
     return params;
   };
@@ -1341,10 +1343,16 @@
               <Checkbox
                 id="should_record_user_information"
                 name="should_record_user_information"
-                disabled={preventEdits}
+                disabled={preventEdits || isClassPrivate}
                 bind:checked={shouldRecordNameOrVoice}
-                >{#if interactionMode === 'chat'}Record User Name{:else}Record User Name and
-                  Conversation{/if}</Checkbox
+                ><div class="flex flex-row gap-1">
+                  <div>
+                    {#if interactionMode === 'chat'}Record User Name{:else}Record User Name and
+                      Conversation{/if}
+                  </div>
+                  {#if isClassPrivate}<div>&middot;</div>
+                    <div>Unavailable for Private Groups</div>{/if}
+                </div></Checkbox
               >
               <Helper
                 >{#if interactionMode === 'chat'}Control whether moderators should be able to view

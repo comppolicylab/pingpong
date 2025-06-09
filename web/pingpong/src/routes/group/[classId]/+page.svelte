@@ -22,7 +22,8 @@
     ChevronSortOutline,
     CheckCircleSolid,
     UserOutline,
-    PaperPlaneOutline
+    PaperPlaneOutline,
+    UsersSolid
   } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
@@ -70,10 +71,14 @@
     const isCourseAssistant = assistant.endorsed;
     const isMyAssistant = assistant.creator_id === data.me.user!.id;
     const creator = data.assistantCreators[assistant.creator_id]?.name || 'Unknown creator';
+    const willDisplayUserInfo = data.class.private
+      ? false
+      : (assistant.should_record_user_information ?? false);
     return {
       creator: isCourseAssistant ? 'Moderation Team' : creator,
       isCourseAssistant,
-      isMyAssistant
+      isMyAssistant,
+      willDisplayUserInfo
     };
   };
 
@@ -487,6 +492,20 @@
           {/if}
         {:else if assistant.interaction_mode === 'chat' && !(assistant.assistant_should_message_first ?? false)}
           <div class="h-[8%] max-h-16"></div>
+          {#if !isPrivate && assistantMeta.willDisplayUserInfo}
+            <div
+              class="flex flex-row gap-2 border border-red-600 px-3 py-1 items-stretch transition-all duration-200 rounded-2xl"
+            >
+              <UsersSolid size="sm" class="text-red-600 pt-0" />
+              <Span class="text-gray-700 text-xs font-normal"
+                ><Button
+                  class="p-0 text-gray-700 text-xs underline font-normal"
+                  on:click={showModeratorsModal}
+                  on:touchstart={showModeratorsModal}>Moderators</Button
+                > can see this thread and <span class="font-semibold">your full name</span>.</Span
+              >
+            </div>
+          {/if}
           <div class="flex flex-col items-center w-full lg:w-3/5 md:w-3/4">
             <ChatInput
               mimeType={data.uploadInfo.mimeType}
@@ -560,6 +579,40 @@
                 >. Assistants can make mistakes. Check important info.</Span
               >
             </div>
+          {:else if assistantMeta.willDisplayUserInfo}
+            {#if assistant.interaction_mode === 'voice'}
+              <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
+                <UsersSolid size="sm" class="text-orange pt-0" />
+                <Span class="text-gray-600 text-xs font-normal"
+                  ><Button
+                    class="p-0 text-gray-600 text-xs underline font-normal"
+                    on:click={showModeratorsModal}
+                    on:touchstart={showModeratorsModal}>Moderators</Button
+                  > can see this thread,
+                  <span class="font-semibold"
+                    >your full name, and listen to a recording of your conversation</span
+                  >. For more information, please review
+                  <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
+                    >PingPong's privacy statement</a
+                  >. Assistants can make mistakes. Check important info.</Span
+                >
+              </div>
+            {:else}
+              <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
+                <UsersSolid size="sm" class="text-orange pt-0" />
+                <Span class="text-gray-600 text-xs font-normal"
+                  ><Button
+                    class="p-0 text-gray-600 text-xs underline font-normal"
+                    on:click={showModeratorsModal}
+                    on:touchstart={showModeratorsModal}>Moderators</Button
+                  > can see this thread and <span class="font-semibold">your full name</span>. For
+                  more information, please review
+                  <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
+                    >PingPong's privacy statement</a
+                  >. Assistants can make mistakes. Check important info.</Span
+                >
+              </div>
+            {/if}
           {:else}
             <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
               <EyeSlashOutline size="sm" class="text-orange pt-0" />

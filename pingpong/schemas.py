@@ -438,6 +438,7 @@ class Thread(BaseModel):
     user_names: list[str] = []
     created: datetime
     last_activity: datetime
+    display_user_info: bool
 
     class Config:
         from_attributes = True
@@ -1231,6 +1232,14 @@ class ThreadMessages(BaseModel):
     ci_messages: list[CodeInterpreterMessage] | None
 
 
+class VoiceModeRecording(BaseModel):
+    recording_id: str
+    duration: int
+
+    class Config:
+        from_attributes = True
+
+
 class ThreadWithMeta(BaseModel):
     thread: Thread
     model: str
@@ -1241,6 +1250,7 @@ class ThreadWithMeta(BaseModel):
     ci_messages: list[CodeInterpreterMessage] | None
     attachments: dict[str, File] | None
     instructions: str | None
+    recording: VoiceModeRecording | None = None
 
     class Config:
         from_attributes = True

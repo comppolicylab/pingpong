@@ -273,7 +273,6 @@ class FeatureFlags(BaseSettings):
     """Feature flags for the application."""
 
     # Feature flags
-    enable_realtime_recorder: bool = Field(False)
 
 
 class Config(BaseSettings):

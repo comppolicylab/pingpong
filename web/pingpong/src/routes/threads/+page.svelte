@@ -104,7 +104,7 @@
                 {dayjs.utc(thread.last_activity).fromNow()}
               </div>
               <div class="text-gray-400 text-xs uppercase tracking-wide">
-                {thread.private
+                {thread.private && !thread.display_user_info
                   ? allUsersLen != otherUsersLen
                     ? `me${
                         otherUsersLen > 0

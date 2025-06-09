@@ -26,7 +26,9 @@ def pseudonym(thread: Thread, user: User) -> str:
     return animal_hash(f"{thread.id}-{user.id}-{user.created}")
 
 
-def process_threads(threads: list[Thread], user_id: int) -> list[ThreadSchema]:
+def process_threads(
+    threads: list[Thread], user_id: int, is_supervisor_dict: dict[int, bool]
+) -> list[ThreadSchema]:
     for new_thread in threads:
         if new_thread.assistant_id:
             new_thread.assistant_names = {
@@ -34,14 +36,28 @@ def process_threads(threads: list[Thread], user_id: int) -> list[ThreadSchema]:
             }
         else:
             new_thread.assistant_names = {0: "Deleted Assistant"}
-        new_thread.user_names = user_names(new_thread, user_id)
+        new_thread.user_names = user_names(
+            new_thread, user_id, is_supervisor_dict.get(new_thread.class_id, False)
+        )
     return threads
 
 
-def user_names(new_thread: Thread, user_id: int) -> list[str]:
+def name(user: User) -> str:
+    """Return some kind of name for the user."""
+    if user.display_name:
+        return user.display_name
+    parts = [name for name in [user.first_name, user.last_name] if name]
+    if not parts:
+        return user.email
+    return " ".join(parts)
+
+
+def user_names(new_thread: Thread, user_id: int, is_supervisor=False) -> list[str]:
     return [
         "Me"
         if u.id == user_id
+        else name(u)
+        if is_supervisor and new_thread.display_user_info
         else pseudonym(new_thread, u)
         if not new_thread.private
         else "Anonymous User"

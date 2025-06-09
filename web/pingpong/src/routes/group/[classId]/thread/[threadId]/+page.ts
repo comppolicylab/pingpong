@@ -17,11 +17,15 @@ export const load: PageLoad = async ({ fetch, params }) => {
   let threadModel = '';
   let threadTools = '';
   let threadInteractionMode: 'chat' | 'voice' | null = null;
+  let threadRecording: api.VoiceModeRecordingInfo | null = null;
+  let threadDisplayUserInfo = false;
   let assistantGrants = { canViewAssistant: false };
   if (!expanded.error) {
     threadTools = expanded.data.tools_available || '';
     threadModel = expanded.data.model || '';
     threadInteractionMode = expanded.data.thread.interaction_mode || 'chat';
+    threadRecording = expanded.data.recording || null;
+    threadDisplayUserInfo = expanded.data.thread.display_user_info || false;
     if (expanded.data.thread.assistant_id) {
       assistantGrants = await api.grants(fetch, {
         canViewAssistant: {
@@ -40,6 +44,8 @@ export const load: PageLoad = async ({ fetch, params }) => {
     availableTools: threadTools,
     canDeleteThread: threadGrants.canDelete,
     canPublishThread: threadGrants.canPublish,
-    canViewAssistant: assistantGrants.canViewAssistant
+    canViewAssistant: assistantGrants.canViewAssistant,
+    threadRecording,
+    threadDisplayUserInfo
   };
 };

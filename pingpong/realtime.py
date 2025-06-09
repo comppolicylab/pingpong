@@ -41,6 +41,7 @@ async def add_message_to_thread(
     thread: Thread,
     event: ConversationItemInputAudioTranscriptionCompletedEvent
     | ResponseAudioTranscriptDoneEvent,
+    realtime_recorder: RealtimeRecorder | None = None,
     is_user_message: bool = False,
 ):
     try:
@@ -56,6 +57,9 @@ async def add_message_to_thread(
             content=event.transcript,
             metadata=metadata,
         )
+
+        if realtime_recorder and not realtime_recorder.should_save_audio:
+            realtime_recorder.should_save_audio = True
     except OpenAIError as e:
         openai_connection_logger.exception(
             f"Failed to send message to OpenAI: {e}, {event}"
@@ -193,6 +197,7 @@ async def handle_openai_events(
                             browser_connection,
                             thread,
                             event,
+                            realtime_recorder=realtime_recorder,
                             is_user_message=False,
                         )
                     )
@@ -228,6 +233,7 @@ async def handle_openai_events(
                             browser_connection,
                             thread,
                             event,
+                            realtime_recorder=realtime_recorder,
                             is_user_message=True,
                         )
                     )
@@ -328,7 +334,6 @@ async def browser_realtime_websocket(
     browser_connection: WebSocket,
     class_id: str,
     thread_id: str,
-    should_record_session: bool,
 ):
     realtime_connection: AsyncRealtimeConnection = (
         browser_connection.state.realtime_connection
@@ -339,8 +344,12 @@ async def browser_realtime_websocket(
     openai_task_queue: NamedQueue = NamedQueue("openai_task_queue")
 
     realtime_recorder: RealtimeRecorder | None = None
-    if should_record_session:
-        realtime_recorder = await RealtimeRecorder.create(thread_id=thread.thread_id)
+    if thread.display_user_info:
+        realtime_recorder = await RealtimeRecorder.create(
+            thread_id=thread.id,
+            thread_obj_id=thread.thread_id,
+            session=browser_connection.state.db,
+        )
 
     realtime_tasks: list[asyncio.Task] = []
 

@@ -2890,6 +2890,31 @@ class CodeInterpreterCall(Base):
             yield row.CodeInterpreterCall
 
 
+class VoiceModeRecording(Base):
+    __tablename__ = "voice_mode_recordings"
+
+    id = Column(Integer, primary_key=True)
+    thread_id = Column(Integer, ForeignKey("threads.id", ondelete="CASCADE"))
+    thread = relationship(
+        "Thread", back_populates="voice_mode_recording", uselist=False
+    )
+    recording_id = Column(String, unique=True)
+    duration = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> "VoiceModeRecording":
+        recording = VoiceModeRecording(**data)
+        session.add(recording)
+        await session.flush()
+        return recording
+
+
 class Thread(Base):
     __tablename__ = "threads"
 
@@ -2905,7 +2930,13 @@ class Thread(Base):
         SQLEnum(schemas.InteractionMode),
         server_default=schemas.InteractionMode.CHAT,
     )
-    display_user_info = Column(Boolean, default=False)
+    display_user_info = Column(Boolean, server_default="false")
+    voice_mode_recording = relationship(
+        "VoiceModeRecording",
+        back_populates="thread",
+        uselist=False,
+        lazy="selectin",
+    )
     instructions = Column(String, nullable=True)
     timezone = Column(String, nullable=True)
     private = Column(Boolean)
