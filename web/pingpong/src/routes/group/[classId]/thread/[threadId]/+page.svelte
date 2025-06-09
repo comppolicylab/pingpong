@@ -1174,7 +1174,7 @@
         {/if}
         <div class="flex gap-2 items-center w-full text-sm justify-between grow my-3">
           <div class="flex gap-2 grow shrink min-w-0">
-            {#if !$published && isPrivate}
+            {#if !$published && isPrivate && !displayUserInfo}
               <LockSolid size="sm" class="text-orange" />
               <Span class="text-gray-600 text-xs font-normal"
                 ><Button

@@ -2096,6 +2096,17 @@ class Assistant(Base):
         result = await session.execute(stmt)
         return [row[0] for row in result]
 
+    @classmethod
+    async def update_all_assistants_private_class(
+        cls, session: AsyncSession, class_id: int
+    ) -> None:
+        stmt = (
+            update(Assistant)
+            .where(Assistant.class_id == class_id)
+            .values(should_record_user_information=False)
+        )
+        await session.execute(stmt)
+
 
 class LMSClass(Base):
     __tablename__ = "lms_classes"
@@ -2391,6 +2402,14 @@ class Class(Base):
             and existing_class.private is True
         ):
             raise ValueError("Update failed: Cannot change a private group to public.")
+
+        if (
+            "private" in update_data
+            and update_data["private"] is True
+            and existing_class.private is False
+        ):
+            # If changing to private, ensure no assistants are set to record user information
+            await Assistant.update_all_assistants_private_class(session, id_)
 
         # Proceed with the update
         stmt = update(Class).where(Class.id == int(id_)).values(**update_data)
