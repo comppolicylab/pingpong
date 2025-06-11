@@ -1850,7 +1850,7 @@ class Assistant(Base):
     instructions = Column(String)
     interaction_mode = Column(
         SQLEnum(schemas.InteractionMode),
-        server_default=schemas.InteractionMode.CHAT,
+        server_default=schemas.InteractionMode.CHAT.name,
     )
     description = Column(String)
     assistant_id = Column(String)
@@ -2947,7 +2947,7 @@ class Thread(Base):
     assistant = relationship("Assistant", back_populates="threads", uselist=False)
     interaction_mode = Column(
         SQLEnum(schemas.InteractionMode),
-        server_default=schemas.InteractionMode.CHAT,
+        server_default=schemas.InteractionMode.CHAT.name,
     )
     display_user_info = Column(Boolean, server_default="false")
     voice_mode_recording = relationship(
