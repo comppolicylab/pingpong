@@ -2933,6 +2933,11 @@ class VoiceModeRecording(Base):
         await session.flush()
         return recording
 
+    @classmethod
+    async def delete(cls, session: AsyncSession, id_: int) -> None:
+        stmt = delete(VoiceModeRecording).where(VoiceModeRecording.id == id_)
+        await session.execute(stmt)
+
 
 class Thread(Base):
     __tablename__ = "threads"

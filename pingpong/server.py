@@ -3523,6 +3523,21 @@ async def delete_thread(
             (f"class:{class_id}#member", "can_view", f"thread:{thread.id}"),
         )
 
+    if thread.voice_mode_recording:
+        try:
+            await config.audio_store.store.delete_file(
+                key=thread.voice_mode_recording.recording_id
+            )
+            await models.VoiceModeRecording.delete(
+                request.state.db, thread.voice_mode_recording.id
+            )
+        except Exception as e:
+            logger.exception(
+                "Error deleting voice mode recording for thread %s: %s",
+                thread.id,
+                e,
+            )
+
     # Keep the OAI thread ID for deletion
     await thread.delete(request.state.db)
 
