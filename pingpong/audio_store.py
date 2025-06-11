@@ -63,7 +63,7 @@ class BaseAudioStore(ABC):
         ...
 
     @abstractmethod
-    async def delete_file(self, key: str, upload_id: str):
+    async def delete_file(self, key: str, upload_id: str | None = None):
         """Delete a file from the store."""
         ...
 
@@ -235,15 +235,16 @@ class S3AudioStore(BaseAudioStore):
                     code=500, detail=f"Error completing multipart upload: {str(e)}"
                 )
 
-    async def delete_file(self, key: str, upload_id):
+    async def delete_file(self, key: str, upload_id: str | None = None):
         """Delete a file from S3."""
         async with aioboto3.Session().client("s3") as s3_client:
             try:
-                await s3_client.abort_multipart_upload(
-                    Bucket=self.__bucket,
-                    Key=key,
-                    UploadId=upload_id,
-                )
+                if upload_id:
+                    await s3_client.abort_multipart_upload(
+                        Bucket=self.__bucket,
+                        Key=key,
+                        UploadId=upload_id,
+                    )
                 await s3_client.delete_object(
                     Bucket=self.__bucket,
                     Key=key,
@@ -311,7 +312,7 @@ class LocalAudioStore(BaseAudioStore):
         logger.debug("Added the following parts to the file: %s", parts)
         pass
 
-    async def delete_file(self, key: str, upload_id: str):
+    async def delete_file(self, key: str, upload_id: str | None = None):
         """Delete a file from local storage."""
         file_path = self._directory / key
         try:

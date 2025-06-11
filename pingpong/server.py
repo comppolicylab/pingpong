@@ -3539,6 +3539,17 @@ async def delete_thread(
             400, get_details_from_api_error(e, "OpenAI rejected this request")
         )
 
+    if thread.voice_mode_recording:
+        try:
+            await config.audio_store.store.delete_file(
+                key=thread.voice_mode_recording.recording_id
+            )
+        except Exception as e:
+            logger.exception(
+                "Error deleting voice mode recording for thread %s: %s",
+                thread.id,
+                e,
+            )
     # clean up grants
     await request.state.authz.write_safe(revoke=revokes)
     return {"status": "ok"}
