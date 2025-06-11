@@ -494,7 +494,7 @@
           <div class="h-[8%] max-h-16"></div>
           {#if !isPrivate && assistantMeta.willDisplayUserInfo}
             <div
-              class="flex flex-row gap-2 border border-red-600 px-3 py-1 items-stretch transition-all duration-200 rounded-2xl"
+              class="flex flex-row gap-2 border border-red-600 px-3 py-1 items-stretch transition-all duration-200 rounded-2xl w-full lg:w-3/5 md:w-3/4"
             >
               <UsersSolid size="sm" class="text-red-600 pt-0" />
               <Span class="text-gray-700 text-xs font-normal"
@@ -502,7 +502,8 @@
                   class="p-0 text-gray-700 text-xs underline font-normal"
                   on:click={showModeratorsModal}
                   on:touchstart={showModeratorsModal}>Moderators</Button
-                > can see this thread and <span class="font-semibold">your full name</span>.</Span
+                > have enabled a setting for this thread only that allows them to see
+                <span class="font-semibold">your full name</span> and its content.</Span
               >
             </div>
           {/if}

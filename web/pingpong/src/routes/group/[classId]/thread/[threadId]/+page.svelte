@@ -990,7 +990,7 @@
                   class="p-0 text-gray-700 text-sm underline font-normal"
                   on:click={showModeratorsModal}
                   on:touchstart={showModeratorsModal}>Moderators</Button
-                > can see this thread,
+                > have enabled a setting for this thread only that allows them to see the thread,
                 <span class="font-semibold"
                   >your full name, and listen to a recording of your conversation</span
                 >.</span
