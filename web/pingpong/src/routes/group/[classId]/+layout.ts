@@ -1,6 +1,8 @@
 import * as api from '$lib/api';
 import { error } from '@sveltejs/kit';
 import type { LayoutLoad } from './$types';
+import { anonymousSessionToken } from '$lib/stores/general';
+import { get } from 'svelte/store';
 
 /**
  * Load data needed for class layout.
@@ -11,6 +13,14 @@ export const load: LayoutLoad = async ({ fetch, params, parent }) => {
 
   const shareToken = parentData.shareToken;
   const shareTokenInfo = shareToken ? { share_token: parentData.shareToken } : undefined;
+  const anonymousSessionTokenValue = get(anonymousSessionToken);
+  console.log('Anonymous session token:', anonymousSessionTokenValue);
+  let headers: Record<string, string> = {};
+  if (anonymousSessionTokenValue) {
+    headers = {
+      'X-Anonymous-Thread-Session': anonymousSessionTokenValue
+    };
+  }
   const [
     classDataResponse,
     assistantsResponse,
@@ -34,7 +44,7 @@ export const load: LayoutLoad = async ({ fetch, params, parent }) => {
           relation: 'supervisor'
         }
       },
-      shareTokenInfo
+      shareTokenInfo, headers
     ),
     api.getSupervisors(fetch, classId, shareTokenInfo).then(api.expandResponse),
     api.hasAPIKey(fetch, classId, shareTokenInfo).then(api.expandResponse)

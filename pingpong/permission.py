@@ -94,7 +94,12 @@ class Not(Expression):
 
 class LoggedIn(Expression):
     async def test(self, request: Request) -> bool:
-        return request.state.auth_user is not None
+        test_result = request.state.auth_user is not None
+        if test_result:
+            logger.info("User is logged in")
+        else:
+            logger.info("User is not logged in")
+        return test_result
 
     def __str__(self):
         return "LoggedIn()"
@@ -113,6 +118,14 @@ class Authz(Expression):
                 target = target.format_map(request.path_params or {})
             else:
                 target = request.state.authz.root
+
+            if request.state.is_anonymous:
+                logger.info(
+                    "Anonymous user, skipping authz check for relation %s on target %s",
+                    self.relation,
+                    target,
+                )
+                return True
             return await request.state.authz.test(
                 request.state.auth_user,
                 self.relation,

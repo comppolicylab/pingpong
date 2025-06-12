@@ -187,7 +187,7 @@
       tools.push({ type: 'code_interpreter' });
     }
     try {
-      const newThread = api.explodeResponse(
+      const newThreadOpts = api.explodeResponse(
         await api.createThread(fetch, data.class.id, {
           assistant_id: assistant.id,
           parties: partyIds,
@@ -200,9 +200,9 @@
           timezone: userTimezone
         })
       );
-      data.threads = [newThread as api.Thread, ...data.threads];
+      data.threads = [newThreadOpts.thread as api.Thread, ...data.threads];
       $loading = false;
-      await goto(`/group/${$page.params.classId}/thread/${newThread.id}`);
+      await goto(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`);
     } catch (e) {
       $loading = false;
       sadToast(
@@ -235,7 +235,7 @@
     }
 
     try {
-      const newThread = api.explodeResponse(
+      const newThreadOpts = api.explodeResponse(
         await api.createThread(fetch, data.class.id, {
           assistant_id: assistant.id,
           parties: partyIds,
@@ -247,10 +247,10 @@
           vision_image_descriptions: form.visionFileImageDescriptions
         })
       );
-      data.threads = [newThread as api.Thread, ...data.threads];
+      data.threads = [newThreadOpts.thread as api.Thread, ...data.threads];
       $loading = false;
       form.callback({ success: true, errorMessage: null, message_sent: true });
-      await goto(`/group/${$page.params.classId}/thread/${newThread.id}`);
+      await goto(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`);
     } catch (e) {
       $loading = false;
       form.callback({

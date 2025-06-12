@@ -18,6 +18,8 @@ export const loadingMessage = writable('');
 
 export const isFirefox = writable(false);
 
+export const anonymousSessionToken = writable<string | null>(null);
+
 export function detectBrowser() {
   if (typeof window !== 'undefined') {
     isFirefox.set(navigator.userAgent.toLowerCase().includes('firefox'));

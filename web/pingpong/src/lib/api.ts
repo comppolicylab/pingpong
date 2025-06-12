@@ -184,6 +184,7 @@ const _fetchJSON = async <R extends BaseData>(
   headers?: Record<string, string>,
   body?: string | FormData
 ): Promise<(R | Error | ValidationError) & BaseResponse> => {
+  console.log(`Fetching ${method} ${path} with headers:`, headers);
   const res = await _fetch(f, method, path, headers, body);
 
   let data: BaseData = {};
@@ -193,6 +194,7 @@ const _fetchJSON = async <R extends BaseData>(
   } catch {
     // Do nothing
   }
+  console.log(`Response from ${method} ${path}:`, res.status);
 
   return { $status: res.status, ...data } as (R | Error) & BaseResponse;
 };
@@ -204,14 +206,15 @@ const _qmethod = async <T extends BaseData, R extends BaseData>(
   f: Fetcher,
   method: 'GET' | 'DELETE',
   path: string,
-  data?: T
+  data?: T,
+  headers?: Record<string, string>
 ) => {
   // Treat args the same as when passed in the body.
   // Specifically, we want to remove "undefined" values.
   const filtered = data && (JSON.parse(JSON.stringify(data)) as Record<string, string>);
   const params = new URLSearchParams(filtered);
   path = `${path}?${params}`;
-  return await _fetchJSON<R>(f, method, path);
+  return await _fetchJSON<R>(f, method, path, headers);
 };
 
 /**
@@ -222,10 +225,11 @@ const _bmethod = async <T extends BaseData, R extends BaseData>(
   method: 'POST' | 'PUT' | 'PATCH',
   path: string,
   data?: T,
-  query?: Record<string, string>
+  query?: Record<string, string>,
+  headersCustom?: Record<string, string>
 ) => {
   const body = JSON.stringify(data);
-  const headers = { 'Content-Type': 'application/json' };
+  const headers = { 'Content-Type': 'application/json', ...headersCustom };
   if (query) {
     const params = new URLSearchParams(query);
     path = `${path}?${params}`;
@@ -236,8 +240,13 @@ const _bmethod = async <T extends BaseData, R extends BaseData>(
 /**
  * Query with GET.
  */
-const GET = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T) => {
-  return await _qmethod<T, R>(f, 'GET', path, data);
+const GET = async <T extends BaseData, R extends BaseData>(
+  f: Fetcher,
+  path: string,
+  data?: T,
+  headers?: Record<string, string>
+) => {
+  return await _qmethod<T, R>(f, 'GET', path, data, headers);
 };
 
 /**
@@ -254,15 +263,15 @@ const DELETE = async <T extends BaseData, R extends BaseData>(
 /**
  * Query with POST.
  */
-const POST = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T) => {
-  return await _bmethod<T, R>(f, 'POST', path, data);
+const POST = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T, headers?: Record<string, string>) => {
+  return await _bmethod<T, R>(f, 'POST', path, data, undefined, headers);
 };
 
 /**
  * Query with PUT.
  */
-const PUT = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T) => {
-  return await _bmethod<T, R>(f, 'PUT', path, data);
+const PUT = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T, headers?: Record<string, string>) => {
+  return await _bmethod<T, R>(f, 'PUT', path, data, undefined, headers);
 };
 
 /**
@@ -271,9 +280,10 @@ const PUT = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: str
 const PATCH = async <T extends BaseData, R extends BaseData>(
   f: Fetcher,
   path: string,
-  data?: T
+  data?: T,
+  headers?: Record<string, string>
 ) => {
-  return await _bmethod<T, R>(f, 'PATCH', path, data);
+  return await _bmethod<T, R>(f, 'PATCH', path, data, undefined, headers);
 };
 
 /**
@@ -520,7 +530,8 @@ export type NamedGrants = {
 export const grants = async <T extends NamedGrantsQuery>(
   f: Fetcher,
   query: T,
-  shareTokenInfo?: ShareTokenInfo
+  shareTokenInfo?: ShareTokenInfo,
+  headers?: Record<string, string>
 ): Promise<{ [name in keyof T]: boolean }> => {
   const grantNames = Object.keys(query);
   const grants = grantNames.map((name) => query[name]);
@@ -528,7 +539,8 @@ export const grants = async <T extends NamedGrantsQuery>(
   if (shareTokenInfo && shareTokenInfo.share_token) {
     url += `?share_token=${shareTokenInfo.share_token}`;
   }
-  const results = await POST<GrantsQuery, Grants>(f, url, { grants });
+  console.log(`Headers for grants request:`, headers);
+  const results = await POST<GrantsQuery, Grants>(f, url, { grants }, headers);
   const expanded = expandResponse(results);
   if (expanded.error) {
     throw expanded.error;
@@ -1866,6 +1878,11 @@ export type Thread = {
   display_user_info?: boolean;
 };
 
+export type ThreadWithOptionalToken = {
+  thread: Thread;
+  session_token?: string | null;
+};
+
 /**
  * Create a new conversation thread.
  */
@@ -1879,7 +1896,7 @@ export const createThread = async (
   if (shareTokenInfo && shareTokenInfo.share_token) {
     url += `?share_token=${shareTokenInfo.share_token}`;
   }
-  return await POST<CreateThreadRequest, Thread>(f, url, data);
+  return await POST<CreateThreadRequest, ThreadWithOptionalToken>(f, url, data);
 };
 
 /**
@@ -2080,9 +2097,14 @@ export type ThreadWithMeta = {
 /**
  * Get a thread by ID.
  */
-export const getThread = async (f: Fetcher, classId: number, threadId: number) => {
+export const getThread = async (
+  f: Fetcher,
+  classId: number,
+  threadId: number,
+  headers?: Record<string, string>
+) => {
   const url = `class/${classId}/thread/${threadId}`;
-  return await GET<never, ThreadWithMeta>(f, url);
+  return await GET<never, ThreadWithMeta>(f, url, undefined, headers);
 };
 
 export type CodeInterpreterMessages = {

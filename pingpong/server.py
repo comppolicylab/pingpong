@@ -166,6 +166,7 @@ async def parse_session_token(request: Request, call_next):
         anonymous_thread_session_token = request.headers.get(
             "X-Anonymous-Thread-Session"
         )
+        logger.info(f"Anonymous token: {anonymous_token}, Thread session token: {anonymous_thread_session_token} for request {request.url.path}")
         if anonymous_token or anonymous_thread_session_token:
             auth_user = (
                 f"anonymous_link:{anonymous_token}"
@@ -184,6 +185,7 @@ async def parse_session_token(request: Request, call_next):
                 user = await models.User.get_by_session_token(
                     request.state.db, anonymous_thread_session_token
                 )
+                request.state.anonymous_share_token = user.anonymous_link.share_token if user else None
             if not user:
                 raise UserNotFoundException(
                     "We couldn't find the anonymous user.",
@@ -3012,7 +3014,7 @@ async def create_audio_thread(
 @v1.post(
     "/class/{class_id}/thread",
     dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
-    response_model=schemas.Thread,
+    response_model=schemas.ThreadWithOptionalToken,
 )
 async def create_thread(
     class_id: str,
@@ -3220,7 +3222,7 @@ async def create_thread(
                 [
                     (
                         f"anonymous_user:{anonymous_session.session_token}",
-                        "party",
+                        "anonymous_party",
                         f"thread:{result.id}",
                     ),
                     (
@@ -3232,7 +3234,12 @@ async def create_thread(
             )
         await request.state.authz.write_safe(grant=grants)
 
-        return result
+        return {
+            "thread": result,
+            "session_token": anonymous_session.session_token
+            if anonymous_session
+            else None,
+        }
     except Exception as e:
         logger.exception("Error creating thread: %s", e)
         if vector_store_id:

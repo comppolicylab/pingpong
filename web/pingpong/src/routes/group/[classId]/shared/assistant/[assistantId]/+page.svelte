@@ -29,7 +29,7 @@
   import * as api from '$lib/api';
   import { errorMessage } from '$lib/errors';
   import type { Assistant, FileUploadPurpose } from '$lib/api';
-  import { loading, isFirefox } from '$lib/stores/general';
+  import { loading, isFirefox, anonymousSessionToken } from '$lib/stores/general';
   import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
   import Logo from '$lib/components/Logo.svelte';
 
@@ -159,7 +159,7 @@
       tools.push({ type: 'code_interpreter' });
     }
     try {
-      const newThread = api.explodeResponse(
+      const newThreadOpts = api.explodeResponse(
         await api.createThread(
           fetch,
           data.class.id,
@@ -177,9 +177,10 @@
           data.shareTokenInfo
         )
       );
-      data.threads = [newThread as api.Thread, ...data.threads];
+      data.threads = [newThreadOpts.thread as api.Thread, ...data.threads];
+      anonymousSessionToken.set(newThreadOpts.session_token || null);
       $loading = false;
-      await goto(`/group/${$page.params.classId}/thread/${newThread.id}`);
+      await goto(`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}`);
     } catch (e) {
       $loading = false;
       sadToast(
@@ -212,7 +213,7 @@
     }
 
     try {
-      const newThread = api.explodeResponse(
+      const newThreadOpts = api.explodeResponse(
         await api.createThread(
           fetch,
           data.class.id,
@@ -229,10 +230,11 @@
           data.shareTokenInfo
         )
       );
-      data.threads = [newThread as api.Thread, ...data.threads];
+      data.threads = [newThreadOpts.thread as api.Thread, ...data.threads];
+      anonymousSessionToken.set(newThreadOpts.session_token || null);
       $loading = false;
       form.callback({ success: true, errorMessage: null, message_sent: true });
-      await goto(`/group/${$page.params.classId}/thread/${newThread.id}`);
+      await goto(`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}`);
     } catch (e) {
       $loading = false;
       form.callback({

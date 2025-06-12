@@ -504,24 +504,43 @@
         "party": {
           "this": {}
         },
+        "anonymous_party": {
+          "this": {}
+        },
         "can_view": {
-          "intersection": {
+          "union": {
             "child": [
               {
-                "union": {
+                "intersection": {
                   "child": [
                     {
-                      "this": {}
-                    },
-                    {
-                      "computedUserset": {
-                        "relation": "party"
+                      "union": {
+                        "child": [
+                          {
+                            "this": {}
+                          },
+                          {
+                            "computedUserset": {
+                              "relation": "party"
+                            }
+                          },
+                          {
+                            "tupleToUserset": {
+                              "computedUserset": {
+                                "relation": "can_manage_threads"
+                              },
+                              "tupleset": {
+                                "relation": "parent"
+                              }
+                            }
+                          }
+                        ]
                       }
                     },
                     {
                       "tupleToUserset": {
                         "computedUserset": {
-                          "relation": "can_manage_threads"
+                          "relation": "member"
                         },
                         "tupleset": {
                           "relation": "parent"
@@ -532,34 +551,40 @@
                 }
               },
               {
-                "tupleToUserset": {
-                  "computedUserset": {
-                    "relation": "member"
-                  },
-                  "tupleset": {
-                    "relation": "parent"
-                  }
+                "computedUserset": {
+                  "relation": "anonymous_party"
                 }
               }
             ]
           }
         },
         "can_participate": {
-          "intersection": {
+          "union": {
             "child": [
               {
-                "computedUserset": {
-                  "relation": "party"
+                "intersection": {
+                  "child": [
+                    {
+                      "computedUserset": {
+                        "relation": "party"
+                      }
+                    },
+                    {
+                      "tupleToUserset": {
+                        "computedUserset": {
+                          "relation": "member"
+                        },
+                        "tupleset": {
+                          "relation": "parent"
+                        }
+                      }
+                    }
+                  ]
                 }
               },
               {
-                "tupleToUserset": {
-                  "computedUserset": {
-                    "relation": "member"
-                  },
-                  "tupleset": {
-                    "relation": "parent"
-                  }
+                "computedUserset": {
+                  "relation": "anonymous_party"
                 }
               }
             ]
@@ -581,6 +606,11 @@
                   "tupleset": {
                     "relation": "parent"
                   }
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "anonymous_party"
                 }
               }
             ]
@@ -669,7 +699,11 @@
             "directly_related_user_types": [
               {
                 "type": "user"
-              },
+              }
+            ]
+          },
+          "anonymous_party": {
+            "directly_related_user_types": [
               {
                 "type": "anonymous_user"
               }

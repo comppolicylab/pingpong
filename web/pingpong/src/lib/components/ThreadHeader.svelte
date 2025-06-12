@@ -9,7 +9,7 @@
   export let isOnClassPage: boolean;
   export let current: api.Class | null = null;
   export let canManage: boolean = false;
-  export let isSharedAssistantPage: boolean = false;
+  export let isSharedPage: boolean = false;
 
   $: sortedClasses = classes.sort((a: api.Class, b: api.Class) => a.name.localeCompare(b.name));
   let searchTerm = '';
@@ -24,7 +24,7 @@
   };
 </script>
 
-{#if isSharedAssistantPage}
+{#if isSharedPage}
   <PageHeader>
     <div slot="left">
       <div class="eyebrow eyebrow-dark ml-4 mb-2">Shared Access</div>

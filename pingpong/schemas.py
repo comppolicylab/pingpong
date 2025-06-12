@@ -453,6 +453,14 @@ class Thread(BaseModel):
         from_attributes = True
 
 
+class ThreadWithOptionalToken(BaseModel):
+    thread: Thread
+    session_token: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
 def file_validator(self):
     if (
         len(
