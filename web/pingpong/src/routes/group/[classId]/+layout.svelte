@@ -28,6 +28,7 @@
       classes={data.classes}
       canManage={data.canManage}
       {isOnClassPage}
+      isSharedAssistantPage={data.isSharedAssistantPage}
     />
   </div>
   <slot />

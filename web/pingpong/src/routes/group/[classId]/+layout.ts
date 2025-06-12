@@ -5,9 +5,11 @@ import type { LayoutLoad } from './$types';
 /**
  * Load data needed for class layout.
  */
-export const load: LayoutLoad = async ({ fetch, params }) => {
+export const load: LayoutLoad = async ({ fetch, params, parent }) => {
   const classId = parseInt(params.classId, 10);
+  const parentData = await parent();
 
+  const shareTokenInfo = { share_token: parentData.shareToken };
   const [
     classDataResponse,
     assistantsResponse,
@@ -17,10 +19,10 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
     teachersResponse,
     hasAPIKeyResponse
   ] = await Promise.all([
-    api.getClass(fetch, classId).then(api.expandResponse),
-    api.getAssistants(fetch, classId).then(api.expandResponse),
+    api.getClass(fetch, classId, shareTokenInfo).then(api.expandResponse),
+    api.getAssistants(fetch, classId, shareTokenInfo).then(api.expandResponse),
     api.getClassFiles(fetch, classId).then(api.expandResponse),
-    api.getClassUploadInfo(fetch, classId),
+    api.getClassUploadInfo(fetch, classId, shareTokenInfo),
     api.grants(fetch, {
       canManage: { target_type: 'class', target_id: classId, relation: 'supervisor' },
       isSupervisor: {
@@ -28,9 +30,9 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
         target_id: classId,
         relation: 'supervisor'
       }
-    }),
-    api.getSupervisors(fetch, classId).then(api.expandResponse),
-    api.hasAPIKey(fetch, classId).then(api.expandResponse)
+    }, shareTokenInfo),
+    api.getSupervisors(fetch, classId, shareTokenInfo).then(api.expandResponse),
+    api.hasAPIKey(fetch, classId, shareTokenInfo).then(api.expandResponse)
   ]);
 
   if (classDataResponse.error) {

@@ -7,6 +7,16 @@
       "metadata": null
     },
     {
+      "type": "anonymous_user",
+      "relations": {},
+      "metadata": null
+    },
+    {
+      "type": "anonymous_link",
+      "relations": {},
+      "metadata": null
+    },
+    {
       "type": "root",
       "relations": {
         "admin": {
@@ -203,8 +213,17 @@
           }
         },
         "can_view": {
-          "computedUserset": {
-            "relation": "member"
+          "union": {
+            "child": [
+              {
+                "this": {}
+              },
+              {
+                "computedUserset": {
+                  "relation": "member"
+                }
+              }
+            ]
           }
         },
         "can_view_users": {
@@ -247,8 +266,22 @@
           }
         },
         "can_create_thread": {
+          "union": {
+            "child": [
+              {
+                "this": {}
+              },
+              {
+                "computedUserset": {
+                  "relation": "member"
+                }
+              }
+            ]
+          }
+        },
+        "can_view_assistants": {
           "computedUserset": {
-            "relation": "member"
+            "relation": "can_view"
           }
         },
         "can_create_assistants": {
@@ -357,7 +390,11 @@
             "directly_related_user_types": []
           },
           "can_view": {
-            "directly_related_user_types": []
+            "directly_related_user_types": [
+              {
+                "type": "anonymous_link"
+              }
+            ]
           },
           "can_view_users": {
             "directly_related_user_types": []
@@ -379,6 +416,13 @@
             "directly_related_user_types": []
           },
           "can_create_thread": {
+            "directly_related_user_types": [
+              {
+                "type": "anonymous_link"
+              }
+            ]
+          },
+          "can_view_assistants": {
             "directly_related_user_types": []
           },
           "can_create_assistants": {
@@ -612,6 +656,9 @@
             "directly_related_user_types": [
               {
                 "type": "user"
+              },
+              {
+                "type": "anonymous_user"
               }
             ]
           },
@@ -859,6 +906,9 @@
               {
                 "type": "class",
                 "relation": "member"
+              },
+              {
+                "type": "anonymous_link"
               }
             ]
           },
@@ -949,6 +999,9 @@
             "directly_related_user_types": [
               {
                 "type": "user"
+              },
+              {
+                "type": "anonymous_user"
               }
             ]
           },

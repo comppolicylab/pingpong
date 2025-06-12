@@ -1288,6 +1288,7 @@ class SessionToken(BaseModel):
 
 class SessionStatus(StrEnum):
     VALID = auto()
+    ANONYMOUS = auto()
     MISSING = auto()
     INVALID = auto()
     ERROR = auto()
@@ -1295,6 +1296,7 @@ class SessionStatus(StrEnum):
 
 class SessionState(BaseModel):
     status: SessionStatus
+    auth_user: str | None = None
     error: str | None = None
     token: SessionToken | None = None
     user: User | None = None

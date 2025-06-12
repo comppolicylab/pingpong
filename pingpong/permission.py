@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 class Expression:
     async def __call__(self, request: Request):
-        if request.state.session.status != SessionStatus.VALID:
+        if request.state.session.auth_user is None:
             raise HTTPException(
                 status_code=403,
                 detail=f"Missing valid session token: {request.state.session.status.value}",
@@ -18,7 +18,7 @@ class Expression:
 
         if not await self.test_with_cache(request):
             logger.warning(
-                f"Permission denied for user {request.state.session.user.id} on {self}"
+                f"Permission denied for user {request.state.session.auth_user} on {self}"
             )
             raise HTTPException(status_code=403, detail="Missing required role")
 
@@ -95,8 +95,7 @@ class Not(Expression):
 
 class LoggedIn(Expression):
     async def test(self, request: Request) -> bool:
-        return request.state.session.status == SessionStatus.VALID
-
+        return request.state.session.auth_user is not None
     def __str__(self):
         return "LoggedIn()"
 
@@ -115,7 +114,7 @@ class Authz(Expression):
             else:
                 target = request.state.authz.root
             return await request.state.authz.test(
-                f"user:{request.state.session.user.id}",
+                request.state.session.auth_user,
                 self.relation,
                 target,
             )

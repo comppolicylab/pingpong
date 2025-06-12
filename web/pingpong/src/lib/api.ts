@@ -1,5 +1,6 @@
 import { browser } from '$app/environment';
 import { TextLineStream, JSONStream } from '$lib/streams';
+import type { S } from 'vitest/dist/reporters-w_64AS5f.js';
 
 /**
  * HTTP methods.
@@ -220,10 +221,15 @@ const _bmethod = async <T extends BaseData, R extends BaseData>(
   f: Fetcher,
   method: 'POST' | 'PUT' | 'PATCH',
   path: string,
-  data?: T
+  data?: T,
+  query?: Record<string, string>
 ) => {
   const body = JSON.stringify(data);
   const headers = { 'Content-Type': 'application/json' };
+  if (query) {
+    const params = new URLSearchParams(query);
+    path = `${path}?${params}`;
+  }
   return await _fetchJSON<R>(f, method, path, headers, body);
 };
 
@@ -268,6 +274,13 @@ const PATCH = async <T extends BaseData, R extends BaseData>(
   data?: T
 ) => {
   return await _bmethod<T, R>(f, 'PATCH', path, data);
+};
+
+/**
+ * Share token information.
+ */
+export type ShareTokenInfo = {
+  share_token?: string | null;
 };
 
 /**
@@ -506,11 +519,16 @@ export type NamedGrants = {
  */
 export const grants = async <T extends NamedGrantsQuery>(
   f: Fetcher,
-  query: T
+  query: T,
+  shareTokenInfo?: ShareTokenInfo
 ): Promise<{ [name in keyof T]: boolean }> => {
   const grantNames = Object.keys(query);
   const grants = grantNames.map((name) => query[name]);
-  const results = await POST<GrantsQuery, Grants>(f, 'me/grants', { grants });
+  let url = 'me/grants';
+  if (shareTokenInfo && shareTokenInfo.share_token) {
+    url += `?share_token=${shareTokenInfo.share_token}`;
+  }
+  const results = await POST<GrantsQuery, Grants>(f, url, { grants });
   const expanded = expandResponse(results);
   if (expanded.error) {
     throw expanded.error;
@@ -990,9 +1008,9 @@ export type ApiKeyCheck = {
   has_api_key: boolean;
 };
 
-export const hasAPIKey = async (f: Fetcher, classId: number) => {
+export const hasAPIKey = async (f: Fetcher, classId: number, shareTokenInfo?: ShareTokenInfo) => {
   const url = `class/${classId}/api_key/check`;
-  return await GET<never, ApiKeyCheck>(f, url);
+  return await GET<ShareTokenInfo, ApiKeyCheck>(f, url, shareTokenInfo);
 };
 
 /**
@@ -1066,9 +1084,13 @@ export const getModelsLite = async (f: Fetcher) => {
 /**
  * Fetch a class by ID.
  */
-export const getClass = async (f: Fetcher, classId: number) => {
+export const getClass = async (
+  f: Fetcher,
+  classId: number,
+  opts?: ShareTokenInfo
+) => {
   const url = `class/${classId}`;
-  return await GET<never, Class>(f, url);
+  return await GET<ShareTokenInfo, Class>(f, url, opts);
 };
 
 /**
@@ -1215,9 +1237,9 @@ export type Assistants = {
 /**
  * Fetch all assistants for a class.
  */
-export const getAssistants = async (f: Fetcher, classId: number) => {
+export const getAssistants = async (f: Fetcher, classId: number, opts?: ShareTokenInfo) => {
   const url = `class/${classId}/assistants`;
-  return await GET<never, Assistants>(f, url);
+  return await GET<ShareTokenInfo, Assistants>(f, url, opts);
 };
 
 /**
@@ -1633,9 +1655,9 @@ export type SupervisorUser = {
  * Fetch teachers in a class.
  *
  */
-export const getSupervisors = async (f: Fetcher, classId: number) => {
+export const getSupervisors = async (f: Fetcher, classId: number, shareTokenInfo?: ShareTokenInfo) => {
   const url = `class/${classId}/supervisors`;
-  return await GET<never, ClassSupervisors>(f, url);
+  return await GET<ShareTokenInfo, ClassSupervisors>(f, url, shareTokenInfo);
 };
 
 /**
@@ -2671,9 +2693,9 @@ export type GetFileSupportFilter = (
 /**
  * Get information about uploading files.
  */
-export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
+export const getClassUploadInfo = async (f: Fetcher, classId: number, shareTokenInfo?: ShareTokenInfo) => {
   const url = `class/${classId}/upload_info`;
-  const infoResponse = expandResponse(await GET<never, UploadInfo>(f, url));
+  const infoResponse = expandResponse(await GET<ShareTokenInfo, UploadInfo>(f, url, shareTokenInfo));
 
   const info = infoResponse.data || {
     types: [],

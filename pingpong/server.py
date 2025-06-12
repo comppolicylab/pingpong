@@ -160,12 +160,46 @@ async def parse_session_token(request: Request, call_next):
     try:
         session_token = request.cookies["session"]
     except KeyError:
-        request.state.session = schemas.SessionState(
-            status=schemas.SessionStatus.MISSING,
-        )
+        # If the session cookie is not present,
+        # we check for an anonymous session token.
+        anonymous_token = request.query_params.get("share_token")
+        anonymous_session_token = request.headers.get("X-Anonymous-Session")
+        if anonymous_token or anonymous_session_token:
+            auth_user = (
+                f"anonymous_link:{anonymous_token}"
+                if anonymous_token
+                else f"anonymous_user:{anonymous_session_token}"
+            )
+            request.state.session = schemas.SessionState(
+                status=schemas.SessionStatus.ANONYMOUS,
+                auth_user=auth_user,
+            )
+        else:
+            request.state.session = schemas.SessionState(
+                status=schemas.SessionStatus.MISSING,
+            )
     else:
         try:
-            token = decode_session_token(session_token, nowfn=get_now_fn(request))
+            try:
+                token = decode_session_token(session_token, nowfn=get_now_fn(request))
+            except:
+                # If the session token is invalid,
+                # we check for an anonymous session token.
+                anonymous_token = request.query_params.get("share_token")
+                anonymous_session_token = request.headers.get("X-Anonymous-Session")
+                if anonymous_token or anonymous_session_token:
+                    auth_user = (
+                        f"anonymous_link:{anonymous_token}"
+                        if anonymous_token
+                        else f"anonymous_user:{anonymous_session_token}"
+                    )
+                    request.state.session = schemas.SessionState(
+                        status=schemas.SessionStatus.ANONYMOUS,
+                        auth_user=auth_user,
+                    )
+                    return await call_next(request)
+                else:
+                    raise
             user_id = int(token.sub)
             user = await models.User.get_by_id(request.state.db, user_id)
             if not user:
@@ -190,6 +224,7 @@ async def parse_session_token(request: Request, call_next):
             request.state.session = schemas.SessionState(
                 token=token,
                 status=schemas.SessionStatus.VALID,
+                auth_user=f"user:{user_id}",
                 error=None,
                 user=user,
                 profile=schemas.Profile.from_email(user.email),
@@ -2968,6 +3003,23 @@ async def create_thread(
     request: Request,
     openai_client: OpenAIClient,
 ):
+    # This endpoint is deprecated and will be removed in the future.
+    try:
+        await request.state.authz.write_safe(grant=[
+            (request.state.session.auth_user, "can_view", f"class:{class_id}"),
+            (request.state.session.auth_user, "can_create_thread", f"class:{class_id}"),
+            (request.state.session.auth_user, "can_view", f"assistant:1")
+        ])
+    except Exception as e:
+        logger.exception("Error writing authz grants: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while setting up permissions for the class.",
+        )
+    raise HTTPException(
+        status_code=501,
+        detail=f"This endpoint is deprecated. Please use the /class/{class_id}/thread/audio endpoint instead.",
+    )
     parties = list[models.User]()
     vector_store_id = None
     vector_store_object_id = None
@@ -3687,7 +3739,7 @@ async def list_files(class_id: str, request: Request):
 
 @v1.get(
     "/class/{class_id}/assistants",
-    dependencies=[Depends(Authz("member", "class:{class_id}"))],
+    dependencies=[Depends(Authz("can_view_assistants", "class:{class_id}"))],
     response_model=schemas.Assistants,
 )
 async def list_assistants(class_id: str, request: Request):
@@ -3698,7 +3750,7 @@ async def list_assistants(class_id: str, request: Request):
     filters = await request.state.authz.check(
         [
             (
-                f"user:{request.state.session.user.id}",
+                request.state.session.auth_user,
                 "can_view",
                 f"assistant:{a.id}",
             )
@@ -3725,7 +3777,7 @@ async def list_assistants(class_id: str, request: Request):
     has_elevated_perm_check = await request.state.authz.check(
         [
             (
-                f"user:{request.state.session.user.id}",
+                request.state.session.auth_user,
                 "can_edit",
                 f"assistant:{asst.id}",
             )
@@ -4733,11 +4785,10 @@ async def get_grants_list(rel: str, obj: str, request: Request):
 )
 async def get_grants(query: schemas.GrantsQuery, request: Request):
     checks = list[Relation]()
-    user_id = f"user:{request.state.session.user.id}"
     for grant in query.grants:
         target = f"{grant.target_type}:{grant.target_id}"
         checks.append(
-            (user_id, grant.relation, target),
+            (request.state.session.auth_user, grant.relation, target),
         )
 
     results = await request.state.authz.check(checks)

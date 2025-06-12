@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, Dropdown, DropdownItem, Search } from 'flowbite-svelte';
+  import { Button, Dropdown, DropdownItem, Search, Span } from 'flowbite-svelte';
   import { ChevronDownOutline, ArrowRightOutline, CogSolid } from 'flowbite-svelte-icons';
   import * as api from '$lib/api';
   import PageHeader, { mainTextClass } from './PageHeader.svelte';
@@ -9,6 +9,7 @@
   export let isOnClassPage: boolean;
   export let current: api.Class | null = null;
   export let canManage: boolean = false;
+  export let isSharedAssistantPage: boolean = false;
 
   $: sortedClasses = classes.sort((a: api.Class, b: api.Class) => a.name.localeCompare(b.name));
   let searchTerm = '';
@@ -23,6 +24,27 @@
   };
 </script>
 
+{#if isSharedAssistantPage}
+<PageHeader>
+  <div slot="left">
+    <div class="eyebrow eyebrow-dark ml-4 mb-2">Shared Access</div>
+    <Span class={mainTextClass}
+      >{current?.name || 'no class'}
+      </Span>
+  </div>
+  <div slot="right" class="flex flex-col items-end gap-2">
+    {#if current}
+        <div class="eyebrow eyebrow-dark ml-4 mr-4">Requires Login</div>
+
+    <a
+          href={`/group/${current.id}/assistant`}
+          class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all"
+          >View Group Page <ArrowRightOutline size="md" class="text-orange inline-block ml-1" /></a
+        >
+    {/if}
+  </div>
+</PageHeader>
+{:else}
 <PageHeader>
   <div slot="left">
     <div class="eyebrow eyebrow-dark ml-4">Select group</div>
@@ -51,7 +73,7 @@
         <a
           href={`/group/${current.id}/assistant`}
           class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all"
-          >View group page <ArrowRightOutline size="md" class="text-orange inline-block ml-1" /></a
+          >View Group Page <ArrowRightOutline size="md" class="text-orange inline-block ml-1" /></a
         >
       {:else if canManage}
         <a
@@ -66,3 +88,5 @@
     {/if}
   </div>
 </PageHeader>
+
+{/if}
