@@ -1029,6 +1029,13 @@ class User(Base):
     lms_syncs: Mapped[List["Class"]] = relationship(
         "Class", back_populates="lms_user", lazy="selectin"
     )
+    anonymous_link_id = Column(Integer, ForeignKey("anonymous_links.id"), nullable=True)
+    anonymous_link = relationship(
+        "AnonymousLink", back_populates="user", lazy="selectin", uselist=False
+    )
+    anonymous_sessions = relationship(
+        "AnonymousSession", back_populates="user", lazy="selectin"
+    )
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
     # Do Not Add - Activity Summaries - Groups I Join
@@ -1038,6 +1045,16 @@ class User(Base):
     acceptances = relationship(
         "AgreementAcceptance", back_populates="user", lazy="selectin"
     )
+
+    @classmethod
+    async def create_anonymous_user(
+        cls, session: AsyncSession, anonymous_link_id: int
+    ) -> "User":
+        user = User(anonymous_link_id=anonymous_link_id)
+        session.add(user)
+        await session.flush()
+        await session.refresh(user)
+        return user
 
     @classmethod
     async def update_info(
@@ -1176,6 +1193,28 @@ class User(Base):
     @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "User":
         stmt = select(User).where(User.id == int(id_))
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_share_token(
+        cls, session: AsyncSession, share_token: str
+    ) -> "User":
+        stmt = (
+            select(User)
+            .join(AnonymousLink)
+            .where(AnonymousLink.share_token == share_token)
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_session_token(
+        cls, session: AsyncSession, session_token: str
+    ) -> "User":
+        stmt = (
+            select(User)
+            .join(AnonymousSession)
+            .where(AnonymousSession.session_token == session_token)
+        )
         return await session.scalar(stmt)
 
     @classmethod
@@ -1334,6 +1373,14 @@ file_class_association = Table(
     Column("file_id", Integer, ForeignKey("files.id", ondelete="CASCADE")),
     Column("class_id", Integer, ForeignKey("classes.id", ondelete="CASCADE")),
     Index("file_class_idx", "file_id", "class_id", unique=True),
+)
+
+assistant_link_association = Table(
+    "assistant_anonymous_links",
+    Base.metadata,
+    Column("assistant_id", Integer, ForeignKey("assistants.id", ondelete="CASCADE")),
+    Column("link_id", Integer, ForeignKey("anonymous_links.id", ondelete="CASCADE")),
+    Index("assistant_link_idx", "assistant_id", "link_id", unique=True),
 )
 
 
@@ -1841,6 +1888,49 @@ class VectorStore(Base):
             yield row.VectorStore.id
 
 
+class AnonymousLink(Base):
+    __tablename__ = "anonymous_links"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name = Column(String, nullable=True)
+    share_token = Column(String, unique=True, nullable=False)
+    assistant = relationship(
+        "Assistant",
+        secondary=assistant_link_association,
+        back_populates="anonymous_links",
+    )
+    user = relationship("User", back_populates="anonymous_link")
+    active = Column(Boolean, default=True)
+    activated_at = Column(DateTime(timezone=True), nullable=True)
+    deactivated_at = Column(DateTime(timezone=True), nullable=True)
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        share_token: str,
+        assistant_id: int,
+    ) -> "AnonymousLink":
+        link = AnonymousLink(
+            share_token=share_token, active=True, activated_at=func.now()
+        )
+        session.add(link)
+        await session.flush()
+        await session.refresh(link)
+
+        stmt = (
+            _get_upsert_stmt(session)(assistant_link_association)
+            .values(assistant_id=assistant_id, link_id=link.id)
+            .on_conflict_do_nothing(
+                index_elements=["assistant_id", "link_id"],
+            )
+        )
+        await session.execute(stmt)
+        return link
+
+
 class Assistant(Base):
     __tablename__ = "assistants"
 
@@ -1881,6 +1971,11 @@ class Assistant(Base):
     )
     vector_store = relationship(
         "VectorStore", back_populates="assistants", uselist=False
+    )
+    anonymous_links = relationship(
+        "AnonymousLink",
+        secondary=assistant_link_association,
+        back_populates="assistant",
     )
     creator_id = Column(Integer, ForeignKey("users.id"))
     creator = relationship("User", back_populates="assistants")
@@ -2939,6 +3034,43 @@ class VoiceModeRecording(Base):
         await session.execute(stmt)
 
 
+class AnonymousSession(Base):
+    __tablename__ = "anonymous_sessions"
+
+    id = Column(Integer, primary_key=True)
+    session_token = Column(String, unique=True, nullable=False)
+    thread_id = Column(
+        Integer, ForeignKey("threads.id", ondelete="cascade"), nullable=True
+    )
+    thread = relationship("Thread", back_populates="anonymous_sessions", uselist=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="cascade"), nullable=True)
+    user = relationship("User", back_populates="anonymous_sessions", uselist=False)
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        session_token: str,
+        thread_id: int | None = None,
+        user_id: int | None = None,
+    ) -> "AnonymousSession":
+        session_obj = AnonymousSession(
+            session_token=session_token,
+            thread_id=thread_id,
+            user_id=user_id,
+        )
+        session.add(session_obj)
+        await session.flush()
+        await session.refresh(session_obj)
+        return session_obj
+
+
 class Thread(Base):
     __tablename__ = "threads"
 
@@ -2993,6 +3125,11 @@ class Thread(Base):
         ForeignKey("vector_stores.id", name="fk_threads_vector_store_id_vector_store"),
     )
     vector_store = relationship("VectorStore", back_populates="threads", uselist=False)
+    anonymous_sessions = relationship(
+        "AnonymousSession",
+        back_populates="thread",
+        lazy="selectin",
+    )
     last_activity = Column(
         DateTime(timezone=True), index=True, nullable=False, default=func.now()
     )

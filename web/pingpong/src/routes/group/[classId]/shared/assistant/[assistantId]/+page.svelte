@@ -68,7 +68,7 @@
   $: assistantMeta = getAssistantMetadata(assistant);
   // Whether billing is set up for the class (which controls everything).
   $: isConfigured = data?.hasAssistants && data?.hasAPIKey;
-  $: parties = data.me.user?.id ? `${data.me.user.id}` : '';
+  $: parties = data.me.status === 'anonymous' ? '' : data.me.user?.id ? `${data.me.user.id}` : '';
   // The assistant ID from the URL.
   $: linkedAssistant = parseInt($page.url.searchParams.get('assistant') || '0', 10);
   let useImageDescriptions = false;
@@ -160,17 +160,22 @@
     }
     try {
       const newThread = api.explodeResponse(
-        await api.createThread(fetch, data.class.id, {
-          assistant_id: assistant.id,
-          parties: partyIds,
-          message: null,
-          tools_available: tools,
-          code_interpreter_file_ids: [],
-          file_search_file_ids: [],
-          vision_file_ids: [],
-          vision_image_descriptions: [],
-          timezone: userTimezone
-        })
+        await api.createThread(
+          fetch,
+          data.class.id,
+          {
+            assistant_id: assistant.id,
+            parties: partyIds,
+            message: null,
+            tools_available: tools,
+            code_interpreter_file_ids: [],
+            file_search_file_ids: [],
+            vision_file_ids: [],
+            vision_image_descriptions: [],
+            timezone: userTimezone
+          },
+          data.shareTokenInfo
+        )
       );
       data.threads = [newThread as api.Thread, ...data.threads];
       $loading = false;
@@ -208,16 +213,21 @@
 
     try {
       const newThread = api.explodeResponse(
-        await api.createThread(fetch, data.class.id, {
-          assistant_id: assistant.id,
-          parties: partyIds,
-          message: form.message,
-          tools_available: tools,
-          code_interpreter_file_ids: form.code_interpreter_file_ids,
-          file_search_file_ids: form.file_search_file_ids,
-          vision_file_ids: form.vision_file_ids,
-          vision_image_descriptions: form.visionFileImageDescriptions
-        })
+        await api.createThread(
+          fetch,
+          data.class.id,
+          {
+            assistant_id: assistant.id,
+            parties: partyIds,
+            message: form.message,
+            tools_available: tools,
+            code_interpreter_file_ids: form.code_interpreter_file_ids,
+            file_search_file_ids: form.file_search_file_ids,
+            vision_file_ids: form.vision_file_ids,
+            vision_image_descriptions: form.visionFileImageDescriptions
+          },
+          data.shareTokenInfo
+        )
       );
       data.threads = [newThread as api.Thread, ...data.threads];
       $loading = false;

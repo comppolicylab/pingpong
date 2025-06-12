@@ -9,7 +9,8 @@ export const load: LayoutLoad = async ({ fetch, params, parent }) => {
   const classId = parseInt(params.classId, 10);
   const parentData = await parent();
 
-  const shareTokenInfo = { share_token: parentData.shareToken };
+  const shareToken = parentData.shareToken;
+  const shareTokenInfo = shareToken ? { share_token: parentData.shareToken } : undefined;
   const [
     classDataResponse,
     assistantsResponse,
@@ -23,14 +24,18 @@ export const load: LayoutLoad = async ({ fetch, params, parent }) => {
     api.getAssistants(fetch, classId, shareTokenInfo).then(api.expandResponse),
     api.getClassFiles(fetch, classId).then(api.expandResponse),
     api.getClassUploadInfo(fetch, classId, shareTokenInfo),
-    api.grants(fetch, {
-      canManage: { target_type: 'class', target_id: classId, relation: 'supervisor' },
-      isSupervisor: {
-        target_type: 'class',
-        target_id: classId,
-        relation: 'supervisor'
-      }
-    }, shareTokenInfo),
+    api.grants(
+      fetch,
+      {
+        canManage: { target_type: 'class', target_id: classId, relation: 'supervisor' },
+        isSupervisor: {
+          target_type: 'class',
+          target_id: classId,
+          relation: 'supervisor'
+        }
+      },
+      shareTokenInfo
+    ),
     api.getSupervisors(fetch, classId, shareTokenInfo).then(api.expandResponse),
     api.hasAPIKey(fetch, classId, shareTokenInfo).then(api.expandResponse)
   ]);
@@ -60,6 +65,7 @@ export const load: LayoutLoad = async ({ fetch, params, parent }) => {
     canManage: grants.canManage,
     isSupervisor: grants.isSupervisor,
     hasAPIKey,
-    supervisors
+    supervisors,
+    shareTokenInfo
   };
 };

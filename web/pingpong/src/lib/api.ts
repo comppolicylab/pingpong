@@ -298,7 +298,7 @@ export type Institution = {
 /**
  * Overall status of the session.
  */
-export type SessionStatus = 'valid' | 'invalid' | 'missing' | 'error';
+export type SessionStatus = 'valid' | 'invalid' | 'missing' | 'error' | 'anonymous';
 
 /**
  * Token information.
@@ -1084,11 +1084,7 @@ export const getModelsLite = async (f: Fetcher) => {
 /**
  * Fetch a class by ID.
  */
-export const getClass = async (
-  f: Fetcher,
-  classId: number,
-  opts?: ShareTokenInfo
-) => {
+export const getClass = async (f: Fetcher, classId: number, opts?: ShareTokenInfo) => {
   const url = `class/${classId}`;
   return await GET<ShareTokenInfo, Class>(f, url, opts);
 };
@@ -1655,7 +1651,11 @@ export type SupervisorUser = {
  * Fetch teachers in a class.
  *
  */
-export const getSupervisors = async (f: Fetcher, classId: number, shareTokenInfo?: ShareTokenInfo) => {
+export const getSupervisors = async (
+  f: Fetcher,
+  classId: number,
+  shareTokenInfo?: ShareTokenInfo
+) => {
   const url = `class/${classId}/supervisors`;
   return await GET<ShareTokenInfo, ClassSupervisors>(f, url, shareTokenInfo);
 };
@@ -1869,8 +1869,16 @@ export type Thread = {
 /**
  * Create a new conversation thread.
  */
-export const createThread = async (f: Fetcher, classId: number, data: CreateThreadRequest) => {
-  const url = `class/${classId}/thread`;
+export const createThread = async (
+  f: Fetcher,
+  classId: number,
+  data: CreateThreadRequest,
+  shareTokenInfo?: ShareTokenInfo
+) => {
+  let url = `class/${classId}/thread`;
+  if (shareTokenInfo && shareTokenInfo.share_token) {
+    url += `?share_token=${shareTokenInfo.share_token}`;
+  }
   return await POST<CreateThreadRequest, Thread>(f, url, data);
 };
 
@@ -2693,9 +2701,15 @@ export type GetFileSupportFilter = (
 /**
  * Get information about uploading files.
  */
-export const getClassUploadInfo = async (f: Fetcher, classId: number, shareTokenInfo?: ShareTokenInfo) => {
+export const getClassUploadInfo = async (
+  f: Fetcher,
+  classId: number,
+  shareTokenInfo?: ShareTokenInfo
+) => {
   const url = `class/${classId}/upload_info`;
-  const infoResponse = expandResponse(await GET<ShareTokenInfo, UploadInfo>(f, url, shareTokenInfo));
+  const infoResponse = expandResponse(
+    await GET<ShareTokenInfo, UploadInfo>(f, url, shareTokenInfo)
+  );
 
   const info = infoResponse.data || {
     types: [],

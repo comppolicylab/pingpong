@@ -132,13 +132,13 @@ class Profile(BaseModel):
             name=None,
             email=email,
             gravatar_id=hashed,
-            image_url=get_gravatar_image(email),
+            image_url=get_gravatar_image(email) if email else "",
         )
 
     @classmethod
     def from_user(cls, user: "User") -> "Profile":
         """Return a profile from an email address and name."""
-        hashed = get_email_hash(user.email)
+        hashed = get_email_hash(user.email) if user.email else ""
         name = (
             user.display_name
             if user.display_name
@@ -148,7 +148,7 @@ class Profile(BaseModel):
             name=name,
             email=user.email,
             gravatar_id=hashed,
-            image_url=get_gravatar_image(user.email),
+            image_url=get_gravatar_image(user.email) if user.email else "",
         )
 
 
@@ -159,7 +159,7 @@ class UserState(Enum):
 
 
 class UserNameMixin:
-    email: str
+    email: str | None
     first_name: str | None
     last_name: str | None
     display_name: str | None
@@ -172,7 +172,7 @@ class UserNameMixin:
             return self.display_name
         parts = [name for name in [self.first_name, self.last_name] if name]
         if not parts:
-            return self.email
+            return self.email or "Unknown User"
         return " ".join(parts)
 
     @computed_field  # type: ignore
@@ -318,6 +318,15 @@ class VectorStoreType(Enum):
 class InteractionMode(StrEnum):
     CHAT = "chat"
     VOICE = "voice"
+
+
+class AnonymousLink(BaseModel):
+    id: int
+    name: str | None
+    share_token: str
+    active: bool
+    activated_at: datetime | None
+    deactivated_at: datetime | None
 
 
 class Assistant(BaseModel):
@@ -1296,7 +1305,6 @@ class SessionStatus(StrEnum):
 
 class SessionState(BaseModel):
     status: SessionStatus
-    auth_user: str | None = None
     error: str | None = None
     token: SessionToken | None = None
     user: User | None = None

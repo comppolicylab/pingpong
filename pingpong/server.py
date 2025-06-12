@@ -4,7 +4,7 @@ import logging
 import time
 from datetime import datetime, timedelta
 from typing import Annotated, Any, Optional, Union
-import uuid
+import uuid_utils as uuid
 from aiohttp import ClientResponseError
 import jwt
 import openai
@@ -163,16 +163,35 @@ async def parse_session_token(request: Request, call_next):
         # If the session cookie is not present,
         # we check for an anonymous session token.
         anonymous_token = request.query_params.get("share_token")
-        anonymous_session_token = request.headers.get("X-Anonymous-Session")
-        if anonymous_token or anonymous_session_token:
+        anonymous_thread_session_token = request.headers.get(
+            "X-Anonymous-Thread-Session"
+        )
+        if anonymous_token or anonymous_thread_session_token:
             auth_user = (
                 f"anonymous_link:{anonymous_token}"
                 if anonymous_token
-                else f"anonymous_user:{anonymous_session_token}"
+                else f"anonymous_user:{anonymous_thread_session_token}"
             )
+            request.state.auth_user = auth_user
+            request.state.anonymous_share_token = anonymous_token
+            request.state.anonymous_session_token = anonymous_thread_session_token
+            request.state.is_anonymous = True
+            if anonymous_token:
+                user = await models.User.get_by_share_token(
+                    request.state.db, anonymous_token
+                )
+            else:
+                user = await models.User.get_by_session_token(
+                    request.state.db, anonymous_thread_session_token
+                )
+            if not user:
+                raise UserNotFoundException(
+                    "We couldn't find the anonymous user.",
+                    anonymous_thread_session_token or anonymous_token,
+                )
             request.state.session = schemas.SessionState(
                 status=schemas.SessionStatus.ANONYMOUS,
-                auth_user=auth_user,
+                user=user,
             )
         else:
             request.state.session = schemas.SessionState(
@@ -180,26 +199,7 @@ async def parse_session_token(request: Request, call_next):
             )
     else:
         try:
-            try:
-                token = decode_session_token(session_token, nowfn=get_now_fn(request))
-            except:
-                # If the session token is invalid,
-                # we check for an anonymous session token.
-                anonymous_token = request.query_params.get("share_token")
-                anonymous_session_token = request.headers.get("X-Anonymous-Session")
-                if anonymous_token or anonymous_session_token:
-                    auth_user = (
-                        f"anonymous_link:{anonymous_token}"
-                        if anonymous_token
-                        else f"anonymous_user:{anonymous_session_token}"
-                    )
-                    request.state.session = schemas.SessionState(
-                        status=schemas.SessionStatus.ANONYMOUS,
-                        auth_user=auth_user,
-                    )
-                    return await call_next(request)
-                else:
-                    raise
+            token = decode_session_token(session_token, nowfn=get_now_fn(request))
             user_id = int(token.sub)
             user = await models.User.get_by_id(request.state.db, user_id)
             if not user:
@@ -224,35 +224,52 @@ async def parse_session_token(request: Request, call_next):
             request.state.session = schemas.SessionState(
                 token=token,
                 status=schemas.SessionStatus.VALID,
-                auth_user=f"user:{user_id}",
                 error=None,
                 user=user,
                 profile=schemas.Profile.from_email(user.email),
                 agreement_id=agreement_id,
             )
-
-        except TimeException as e:
-            request.state.session = schemas.SessionState(
-                status=schemas.SessionStatus.INVALID,
-                error=e.detail,
-            )
-        except UserNotFoundException as e:
-            logger.warning(f"parse_session_token: User not found: {e.user_id}")
-            request.state.session = schemas.SessionState(
-                status=schemas.SessionStatus.ERROR,
-                error=e.detail,
-            )
-        except PyJWTError as e:
-            request.state.session = schemas.SessionState(
-                status=schemas.SessionStatus.INVALID,
-                error=str(e),
-            )
+            request.state.auth_user = f"user:{user_id}"
+            request.state.is_anonymous = False
         except Exception as e:
-            logger.exception("Error parsing session token: %s", e)
-            request.state.session = schemas.SessionState(
-                status=schemas.SessionStatus.ERROR,
-                error=str(e),
+            # If the session token is invalid,
+            # we check for an anonymous session token.
+            anonymous_token = request.query_params.get("share_token")
+            anonymous_thread_session_token = request.headers.get(
+                "X-Anonymous-Thread-Session"
             )
+            if anonymous_token or anonymous_thread_session_token:
+                auth_user = (
+                    f"anonymous_link:{anonymous_token}"
+                    if anonymous_token
+                    else f"anonymous_user:{anonymous_thread_session_token}"
+                )
+                request.state.auth_user = auth_user
+                request.state.is_anonymous = True
+                request.state.anonymous_share_token = anonymous_token
+                request.state.anonymous_session_token = anonymous_thread_session_token
+                request.state.session = schemas.SessionState(
+                    status=schemas.SessionStatus.ANONYMOUS,
+                )
+                return await call_next(request)
+            else:
+                if isinstance(e, PyJWTError) or isinstance(e, TimeException):
+                    request.state.session = schemas.SessionState(
+                        status=schemas.SessionStatus.INVALID,
+                        error=e.detail if isinstance(e, TimeException) else str(e),
+                    )
+                elif isinstance(e, UserNotFoundException):
+                    logger.warning(f"parse_session_token: User not found: {e.user_id}")
+                    request.state.session = schemas.SessionState(
+                        status=schemas.SessionStatus.ERROR,
+                        error=e.detail,
+                    )
+                else:
+                    logger.exception("Error parsing session token: %s", e)
+                    request.state.session = schemas.SessionState(
+                        status=schemas.SessionStatus.ERROR,
+                        error=str(e),
+                    )
 
     return await call_next(request)
 
@@ -3003,23 +3020,6 @@ async def create_thread(
     request: Request,
     openai_client: OpenAIClient,
 ):
-    # This endpoint is deprecated and will be removed in the future.
-    try:
-        await request.state.authz.write_safe(grant=[
-            (request.state.session.auth_user, "can_view", f"class:{class_id}"),
-            (request.state.session.auth_user, "can_create_thread", f"class:{class_id}"),
-            (request.state.session.auth_user, "can_view", f"assistant:1")
-        ])
-    except Exception as e:
-        logger.exception("Error writing authz grants: %s", e)
-        raise HTTPException(
-            status_code=500,
-            detail="An error occurred while setting up permissions for the class.",
-        )
-    raise HTTPException(
-        status_code=501,
-        detail=f"This endpoint is deprecated. Please use the /class/{class_id}/thread/audio endpoint instead.",
-    )
     parties = list[models.User]()
     vector_store_id = None
     vector_store_object_id = None
@@ -3104,13 +3104,33 @@ async def create_thread(
             messageContent.append({"type": "image_file", "image_file": {"file_id": id}})
             for id in req.vision_file_ids
         ]
+
     thread = None
+
+    anonymous_session: models.AnonymousSession | None = None
+    anonymous_user: models.User | None = None
+    if request.state.is_anonymous:
+        anonymous_session = await models.AnonymousSession.create(
+            request.state.db, str(uuid.uuid7()), user_id=request.state.session.user.id
+        )
+        anonymous_user = anonymous_session.user
+
     try:
         thread, parties, thread_name = await asyncio.gather(
             openai_client.beta.threads.create(
                 messages=[
                     {
-                        "metadata": {"user_id": str(request.state.session.user.id)},
+                        "metadata": {
+                            "user_id": str(request.state.session.user.id),
+                            "share_token": str(request.state.anonymous_share_token)
+                            if request.state.is_anonymous
+                            else None,
+                            "anonymous_session_token": str(
+                                anonymous_session.session_token
+                            )
+                            if anonymous_session
+                            else None,
+                        },
                         "role": "user",
                         "content": messageContent,
                         "attachments": attachments,
@@ -3159,12 +3179,16 @@ async def create_thread(
             status_code=500,
             detail="We faced an error while creating your conversation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
         )
+    all_parties = parties or []
+    if anonymous_user:
+        all_parties.append(anonymous_user)
     new_thread = {
         "name": thread_name,
         "class_id": int(class_id),
-        "private": True if parties else False,
-        "users": parties or [],
+        "private": True if all_parties else False,
+        "users": all_parties,
         "thread_id": thread.id,
+        "anonymous_sessions": [anonymous_session] if anonymous_session else [],
         "assistant_id": req.assistant_id,
         "vector_store_id": vector_store_object_id,
         "code_interpreter_file_ids": req.code_interpreter_file_ids or [],
@@ -3191,7 +3215,22 @@ async def create_thread(
         grants = [
             (f"class:{class_id}", "parent", f"thread:{result.id}"),
         ] + [(f"user:{p.id}", "party", f"thread:{result.id}") for p in parties]
-        await request.state.authz.write(grant=grants)
+        if anonymous_session:
+            grants.extend(
+                [
+                    (
+                        f"anonymous_user:{anonymous_session.session_token}",
+                        "party",
+                        f"thread:{result.id}",
+                    ),
+                    (
+                        f"anonymous_user:{anonymous_session.session_token}",
+                        "can_upload_user_files",
+                        f"class:{class_id}",
+                    ),
+                ]
+            )
+        await request.state.authz.write_safe(grant=grants)
 
         return result
     except Exception as e:
@@ -3750,7 +3789,7 @@ async def list_assistants(class_id: str, request: Request):
     filters = await request.state.authz.check(
         [
             (
-                request.state.session.auth_user,
+                request.state.auth_user,
                 "can_view",
                 f"assistant:{a.id}",
             )
@@ -3777,7 +3816,7 @@ async def list_assistants(class_id: str, request: Request):
     has_elevated_perm_check = await request.state.authz.check(
         [
             (
-                request.state.session.auth_user,
+                request.state.auth_user,
                 "can_edit",
                 f"assistant:{asst.id}",
             )
@@ -4027,6 +4066,70 @@ async def preview_assistant_instructions(
             thread_id=f"preview_{uuid.uuid4()}",
         )
     }
+
+
+@v1.post(
+    "/class/{class_id}/assistant/{assistant_id}/share",
+    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    response_model=schemas.AnonymousLink,
+)
+async def share_assistant(
+    class_id: str,
+    assistant_id: str,
+    request: Request,
+):
+    """
+    Create an anonymous share of an assistant with the class.
+    """
+    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    if not asst:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Assistant {assistant_id} not found.",
+        )
+
+    if not asst.published:
+        raise HTTPException(
+            status_code=400,
+            detail="This assistant is not published and cannot be shared.",
+        )
+
+    # Create a new anonymous link for the assistant
+    share_link = await models.AnonymousLink.create(
+        request.state.db,
+        share_token=str(uuid.uuid7()),
+        assistant_id=asst.id,
+    )
+
+    await models.User.create_anonymous_user(
+        request.state.db,
+        anonymous_link_id=share_link.id,
+    )
+
+    auth_user = f"anonymous_link:{share_link.share_token}"
+    print(
+        [
+            (auth_user, "can_view", f"class:{class_id}"),
+            (
+                auth_user,
+                "can_create_thread",
+                f"class:{class_id}",
+            ),
+            (auth_user, "can_view", f"assistant:{assistant_id}"),
+        ]
+    )
+    await request.state.authz.write_safe(
+        grant=[
+            (auth_user, "can_view", f"class:{class_id}"),
+            (
+                auth_user,
+                "can_create_thread",
+                f"class:{class_id}",
+            ),
+            (auth_user, "can_view", f"assistant:{assistant_id}"),
+        ]
+    )
+    return share_link
 
 
 @v1.put(
@@ -4788,7 +4891,7 @@ async def get_grants(query: schemas.GrantsQuery, request: Request):
     for grant in query.grants:
         target = f"{grant.target_type}:{grant.target_id}"
         checks.append(
-            (request.state.session.auth_user, grant.relation, target),
+            (request.state.auth_user, grant.relation, target),
         )
 
     results = await request.state.authz.check(checks)
