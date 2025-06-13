@@ -10,7 +10,6 @@ export const load: LayoutLoad = async ({ fetch, params, parent }) => {
   const parentData = await parent();
 
   const shareToken = parentData.shareToken;
-  const shareTokenInfo = shareToken ? { share_token: parentData.shareToken } : undefined;
   const [
     classDataResponse,
     assistantsResponse,
@@ -20,10 +19,10 @@ export const load: LayoutLoad = async ({ fetch, params, parent }) => {
     teachersResponse,
     hasAPIKeyResponse
   ] = await Promise.all([
-    api.getClass(fetch, classId, shareTokenInfo).then(api.expandResponse),
-    api.getAssistants(fetch, classId, shareTokenInfo).then(api.expandResponse),
+    api.getClass(fetch, classId, shareToken).then(api.expandResponse),
+    api.getAssistants(fetch, classId, shareToken).then(api.expandResponse),
     api.getClassFiles(fetch, classId).then(api.expandResponse),
-    api.getClassUploadInfo(fetch, classId, shareTokenInfo),
+    api.getClassUploadInfo(fetch, classId, shareToken),
     api.grants(
       fetch,
       {
@@ -34,10 +33,10 @@ export const load: LayoutLoad = async ({ fetch, params, parent }) => {
           relation: 'supervisor'
         }
       },
-      shareTokenInfo
+      shareToken
     ),
-    api.getSupervisors(fetch, classId, shareTokenInfo).then(api.expandResponse),
-    api.hasAPIKey(fetch, classId, shareTokenInfo).then(api.expandResponse)
+    api.getSupervisors(fetch, classId, shareToken).then(api.expandResponse),
+    api.hasAPIKey(fetch, classId, shareToken).then(api.expandResponse)
   ]);
 
   if (classDataResponse.error) {
@@ -66,6 +65,6 @@ export const load: LayoutLoad = async ({ fetch, params, parent }) => {
     isSupervisor: grants.isSupervisor,
     hasAPIKey,
     supervisors,
-    shareTokenInfo
+    shareToken
   };
 };

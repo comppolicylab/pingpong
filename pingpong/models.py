@@ -1418,6 +1418,24 @@ class File(Base):
         secondary=image_file_thread_association,
         back_populates="image_files",
     )
+    anonymous_session_id = Column(
+        Integer, ForeignKey("anonymous_sessions.id", ondelete="CASCADE"), nullable=True
+    )
+    anonymous_session = relationship(
+        "AnonymousSession",
+        back_populates="files",
+        lazy="selectin",
+        uselist=False,
+    )
+    anonymous_link_id = Column(
+        Integer, ForeignKey("anonymous_links.id", ondelete="SET NULL"), nullable=True
+    )
+    anonymous_link = relationship(
+        "AnonymousLink",
+        back_populates="files",
+        lazy="selectin",
+        uselist=False,
+    )
 
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
@@ -1900,6 +1918,11 @@ class AnonymousLink(Base):
         back_populates="anonymous_links",
     )
     user = relationship("User", back_populates="anonymous_link")
+    files = relationship(
+        "File",
+        back_populates="anonymous_link",
+        lazy="selectin",
+    )
     active = Column(Boolean, default=True)
     activated_at = Column(DateTime(timezone=True), nullable=True)
     deactivated_at = Column(DateTime(timezone=True), nullable=True)
@@ -3045,6 +3068,11 @@ class AnonymousSession(Base):
     thread = relationship("Thread", back_populates="anonymous_sessions", uselist=False)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="cascade"), nullable=True)
     user = relationship("User", back_populates="anonymous_sessions", uselist=False)
+    files = relationship(
+        "File",
+        back_populates="anonymous_session",
+        lazy="selectin",
+    )
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(
         DateTime(timezone=True),

@@ -193,7 +193,7 @@
   const getName = (message: api.OpenAIMessage) => {
     if (message.role === 'user') {
       if (message?.metadata?.is_current_user) {
-        return data?.me?.user?.name || data?.me?.user?.email || 'Anonymous User';
+        return data?.me?.user?.name || data?.me?.user?.email || 'Me';
       }
       return (message?.metadata?.name as string | undefined) || 'Anonymous User';
     } else {

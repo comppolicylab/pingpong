@@ -113,13 +113,14 @@
       f,
       { onProgress },
       purpose,
-      useImageDescriptions
+      useImageDescriptions,
+      data.shareToken
     );
   };
 
   // Handle file removal
   const handleRemove = async (fileId: number) => {
-    const result = await api.deleteUserFile(fetch, data.class.id, data.me.user!.id, fileId);
+    const result = await api.deleteUserFile(fetch, data.class.id, data.me.user!.id, fileId, data.shareToken);
     if (api.isErrorResponse(result)) {
       sadToast(`Failed to delete file. Error: ${result.detail || 'unknown error'}`);
       throw new Error(result.detail || 'unknown error');
@@ -174,7 +175,7 @@
             vision_image_descriptions: [],
             timezone: userTimezone
           },
-          data.shareTokenInfo
+          data.shareToken
         )
       );
       data.threads = [newThreadOpts.thread as api.Thread, ...data.threads];
@@ -227,7 +228,7 @@
             vision_file_ids: form.vision_file_ids,
             vision_image_descriptions: form.visionFileImageDescriptions
           },
-          data.shareTokenInfo
+          data.shareToken
         )
       );
       data.threads = [newThreadOpts.thread as api.Thread, ...data.threads];

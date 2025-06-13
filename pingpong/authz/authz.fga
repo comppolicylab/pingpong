@@ -42,7 +42,7 @@ type class
     define can_manage_threads: [class#supervisor]
     define can_publish_threads: [class#student] or can_manage_threads
     define can_upload_class_files: [class#student] or supervisor
-    define can_upload_user_files: [anonymous_user] or can_create_thread
+    define can_upload_user_files: can_create_thread
     define can_receive_summaries: teacher
 
 type thread

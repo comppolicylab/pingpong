@@ -166,13 +166,13 @@ class UserNameMixin:
 
     @computed_field  # type: ignore
     @property
-    def name(self) -> str:
+    def name(self) -> str | None:
         """Return some kind of name for the user."""
         if self.display_name:
             return self.display_name
         parts = [name for name in [self.first_name, self.last_name] if name]
         if not parts:
-            return self.email or "Unknown User"
+            return self.email
         return " ".join(parts)
 
     @computed_field  # type: ignore

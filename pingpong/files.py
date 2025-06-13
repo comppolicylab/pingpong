@@ -19,13 +19,30 @@ logger = logging.getLogger(__name__)
 OpenAIClientType = Union[openai.AsyncClient, openai.AsyncAzureOpenAI]
 
 
-def _file_grants(file: File, class_id: int) -> list[Relation]:
+def _file_grants(
+    file: File,
+    class_id: int,
+    is_anonymous_upload: bool = False,
+    anonymous_user_id: str | None = None,
+) -> list[Relation]:
     target_type = "user_file" if file.private else "class_file"
     target = f"{target_type}:{file.id}"
-    return [
-        (f"class:{class_id}", "parent", target),
-        (f"user:{file.uploader_id}", "owner", target),
-    ]
+
+    if is_anonymous_upload:
+        if anonymous_user_id:
+            return [
+                (f"anonymous_user:{anonymous_user_id}", "owner", target),
+                (f"class:{class_id}", "parent", target),
+            ]
+        else:
+            return [
+                (f"class:{class_id}", "parent", target),
+            ]
+    else:
+        return [
+            (f"class:{class_id}", "parent", target),
+            (f"user:{file.uploader_id}", "owner", target),
+        ]
 
 
 class FileNotFoundException(Exception):
@@ -183,6 +200,8 @@ async def handle_create_single_purpose_file(
     content_type: str,
     is_azure_client: bool,
     use_image_descriptions: bool,
+    is_anonymous_upload: bool = False,
+    anonymous_user_id: str | None = None,
 ) -> "FileSchema":
     """
     Creates a file for a single purpose (assistants or vision)
@@ -273,7 +292,9 @@ async def handle_create_single_purpose_file(
 
     try:
         f = await File.create(session, data, class_id=class_id)
-        await authz.write(grant=_file_grants(f, class_id))
+        await authz.write(
+            grant=_file_grants(f, class_id, is_anonymous_upload, anonymous_user_id)
+        )
 
         return FileSchema(
             id=f.id,
@@ -297,7 +318,9 @@ async def handle_create_single_purpose_file(
         )
     except Exception as e:
         await oai_client.files.delete(new_f.id)
-        await authz.write(revoke=_file_grants(f, class_id))
+        await authz.write(
+            revoke=_file_grants(f, class_id, is_anonymous_upload, anonymous_user_id)
+        )
         raise e
 
 
@@ -313,6 +336,8 @@ async def handle_multimodal_upload(
     content_type: str,
     is_azure_client: bool,
     use_image_descriptions: bool,
+    is_anonymous_upload: bool = False,
+    anonymous_user_id: str | None = None,
 ) -> "FileSchema":
     """
     Handles multimodal file creation by creating separate files (e.g. vision and
@@ -350,6 +375,8 @@ async def handle_multimodal_upload(
             content_type,
             is_azure_client,
             use_image_descriptions,
+            is_anonymous_upload,
+            anonymous_user_id,
         )
 
     if _is_vision_supported(content_type) and not is_azure_client:
@@ -370,6 +397,8 @@ async def handle_multimodal_upload(
             content_type,
             is_azure_client,
             use_image_descriptions,
+            is_anonymous_upload,
+            anonymous_user_id,
         )
 
     if can_upload_as_document:
@@ -402,6 +431,8 @@ async def handle_multimodal_upload(
                     content_type,
                     is_azure_client,
                     use_image_descriptions,
+                    is_anonymous_upload,
+                    anonymous_user_id,
                 )
 
                 # We can run these tasks concurrently,
@@ -428,14 +459,24 @@ async def handle_multimodal_upload(
                     content_type,
                     is_azure_client,
                     use_image_descriptions,
+                    is_anonymous_upload,
+                    anonymous_user_id,
                 )
         except Exception as e:
             if new_v_file:
                 await oai_client.files.delete(new_v_file.file_id)
-                await authz.write(revoke=_file_grants(new_v_file, class_id))
+                await authz.write(
+                    revoke=_file_grants(
+                        new_v_file, class_id, is_anonymous_upload, anonymous_user_id
+                    )
+                )
             if new_f_file:
                 await oai_client.files.delete(new_f_file.file_id)
-                await authz.write(revoke=_file_grants(new_f_file, class_id))
+                await authz.write(
+                    revoke=_file_grants(
+                        new_f_file, class_id, is_anonymous_upload, anonymous_user_id
+                    )
+                )
             raise e
 
     primary_file = new_f_file or new_v_file
@@ -477,6 +518,8 @@ async def handle_create_file(
     private: bool,
     purpose: FileUploadPurpose = "assistants",
     use_image_descriptions: bool = False,
+    is_anonymous_upload: bool = False,
+    anonymous_user_id: str | None = None,
 ) -> "FileSchema":
     """
     Main entry point for file creation.
@@ -506,6 +549,8 @@ async def handle_create_file(
             content_type,
             is_azure_client,
             use_image_descriptions,
+            is_anonymous_upload,
+            anonymous_user_id,
         )
     else:
         return await handle_create_single_purpose_file(
@@ -520,6 +565,8 @@ async def handle_create_file(
             content_type,
             is_azure_client,
             use_image_descriptions,
+            is_anonymous_upload,
+            anonymous_user_id,
         )
 
 

@@ -16,9 +16,6 @@ class Expression:
             )
 
         if not await self.test_with_cache(request):
-            logger.warning(
-                f"Permission denied for user {request.state.auth_user} on {self}"
-            )
             raise HTTPException(status_code=403, detail="Missing required role")
 
     async def test_with_cache(self, request: Request) -> bool:
@@ -94,12 +91,7 @@ class Not(Expression):
 
 class LoggedIn(Expression):
     async def test(self, request: Request) -> bool:
-        test_result = request.state.auth_user is not None
-        if test_result:
-            logger.info("User is logged in")
-        else:
-            logger.info("User is not logged in")
-        return test_result
+        return request.state.auth_user is not None
 
     def __str__(self):
         return "LoggedIn()"
@@ -119,13 +111,31 @@ class Authz(Expression):
             else:
                 target = request.state.authz.root
 
+            # If the user is anonymous, check their anonymous permissions.
             if request.state.is_anonymous:
-                logger.info(
-                    "Anonymous user, skipping authz check for relation %s on target %s",
-                    self.relation,
-                    target,
-                )
-                return True
+                grants_to_check = []
+                if request.state.anonymous_share_token:
+                    grants_to_check.append(
+                        (
+                            f"anonymous_link:{request.state.anonymous_share_token}",
+                            self.relation,
+                            target,
+                        )
+                    )
+                if request.state.anonymous_session_token:
+                    grants_to_check.append(
+                        (
+                            f"anonymous_user:{request.state.anonymous_session_token}",
+                            self.relation,
+                            target,
+                        )
+                    )
+                if not grants_to_check:
+                    return False
+                results = await request.state.authz.check(grants_to_check)
+                return any(results)
+
+            # If the user is logged in, check their permissions.
             return await request.state.authz.test(
                 request.state.auth_user,
                 self.relation,

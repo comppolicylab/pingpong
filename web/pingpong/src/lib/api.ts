@@ -234,12 +234,16 @@ const _qmethod = async <T extends BaseData, R extends BaseData>(
   f: Fetcher,
   method: 'GET' | 'DELETE',
   path: string,
-  data?: T
+  data?: T,
+  shareToken?: string | null
 ) => {
   // Treat args the same as when passed in the body.
   // Specifically, we want to remove "undefined" values.
   const filtered = data && (JSON.parse(JSON.stringify(data)) as Record<string, string>);
-  const params = new URLSearchParams(filtered);
+  let params = new URLSearchParams(filtered);
+  if (shareToken) {
+    params.set('share_token', shareToken);
+  }
   path = `${path}?${params}`;
   return await _fetchJSON<R>(f, method, path);
 };
@@ -251,9 +255,14 @@ const _bmethod = async <T extends BaseData, R extends BaseData>(
   f: Fetcher,
   method: 'POST' | 'PUT' | 'PATCH',
   path: string,
-  data?: T
+  data?: T,
+  shareToken?: string | null
 ) => {
   const body = JSON.stringify(data);
+  if (shareToken) {
+    // Add as query parameter if we have a share token.
+    path = `${path}?share_token=${encodeURIComponent(shareToken)}`;
+  }
   const headers = { 'Content-Type': 'application/json' };
   return await _fetchJSON<R>(f, method, path, headers, body);
 };
@@ -261,8 +270,8 @@ const _bmethod = async <T extends BaseData, R extends BaseData>(
 /**
  * Query with GET.
  */
-const GET = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T) => {
-  return await _qmethod<T, R>(f, 'GET', path, data);
+const GET = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T, shareToken?: string | null) => {
+  return await _qmethod<T, R>(f, 'GET', path, data, shareToken);
 };
 
 /**
@@ -271,23 +280,24 @@ const GET = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: str
 const DELETE = async <T extends BaseData, R extends BaseData>(
   f: Fetcher,
   path: string,
-  data?: T
+  data?: T,
+  shareToken?: string | null
 ) => {
-  return await _qmethod<T, R>(f, 'DELETE', path, data);
+  return await _qmethod<T, R>(f, 'DELETE', path, data, shareToken);
 };
 
 /**
  * Query with POST.
  */
-const POST = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T) => {
-  return await _bmethod<T, R>(f, 'POST', path, data);
+const POST = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T, shareToken?: string | null) => {
+  return await _bmethod<T, R>(f, 'POST', path, data, shareToken);
 };
 
 /**
  * Query with PUT.
  */
-const PUT = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T) => {
-  return await _bmethod<T, R>(f, 'PUT', path, data);
+const PUT = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T, shareToken?: string | null) => {
+  return await _bmethod<T, R>(f, 'PUT', path, data, shareToken);
 };
 
 /**
@@ -296,17 +306,12 @@ const PUT = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: str
 const PATCH = async <T extends BaseData, R extends BaseData>(
   f: Fetcher,
   path: string,
-  data?: T
+  data?: T,
+  shareToken?: string | null
 ) => {
-  return await _bmethod<T, R>(f, 'PATCH', path, data);
+  return await _bmethod<T, R>(f, 'PATCH', path, data, shareToken);
 };
 
-/**
- * Share token information.
- */
-export type ShareTokenInfo = {
-  share_token?: string | null;
-};
 
 /**
  * Information about an institution.
@@ -545,21 +550,17 @@ export type NamedGrants = {
 export const grants = async <T extends NamedGrantsQuery>(
   f: Fetcher,
   query: T,
-  shareTokenInfo?: ShareTokenInfo
+  shareToken?: string | null
 ): Promise<{ [name in keyof T]: boolean }> => {
   const grantNames = Object.keys(query);
   const grants = grantNames.map((name) => query[name]);
 
-  let url = 'me/grants';
-  if (shareTokenInfo && shareTokenInfo.share_token) {
-    url += `?share_token=${shareTokenInfo.share_token}`;
-  }
-
-  const results = await POST<GrantsQuery, Grants>(f, url, { grants });
+  const results = await POST<GrantsQuery, Grants>(f, 'me/grants', { grants }, shareToken);
   const expanded = expandResponse(results);
   if (expanded.error) {
     throw expanded.error;
   }
+  
   const verdicts: NamedGrants = {};
   for (let i = 0; i < grantNames.length; i++) {
     verdicts[grantNames[i]] = expanded.data.grants[i].verdict;
@@ -1035,9 +1036,9 @@ export type ApiKeyCheck = {
   has_api_key: boolean;
 };
 
-export const hasAPIKey = async (f: Fetcher, classId: number, shareTokenInfo?: ShareTokenInfo) => {
+export const hasAPIKey = async (f: Fetcher, classId: number, shareToken?: string | null) => {
   const url = `class/${classId}/api_key/check`;
-  return await GET<ShareTokenInfo, ApiKeyCheck>(f, url, shareTokenInfo);
+  return await GET<never, ApiKeyCheck>(f, url, undefined, shareToken);
 };
 
 /**
@@ -1111,17 +1112,17 @@ export const getModelsLite = async (f: Fetcher) => {
 /**
  * Fetch a class by ID.
  */
-export const getClass = async (f: Fetcher, classId: number, opts?: ShareTokenInfo) => {
+export const getClass = async (f: Fetcher, classId: number, shareToken?: string | null) => {
   const url = `class/${classId}`;
-  return await GET<ShareTokenInfo, Class>(f, url, opts);
+  return await GET<never, Class>(f, url, undefined, shareToken);
 };
 
 /**
  * Fetch all files for a class.
  */
-export const getClassFiles = async (f: Fetcher, classId: number) => {
+export const getClassFiles = async (f: Fetcher, classId: number, shareToken?: string | null) => {
   const url = `class/${classId}/files`;
-  return await GET<never, ServerFiles>(f, url);
+  return await GET<never, ServerFiles>(f, url, undefined, shareToken);
 };
 
 /**
@@ -1260,9 +1261,9 @@ export type Assistants = {
 /**
  * Fetch all assistants for a class.
  */
-export const getAssistants = async (f: Fetcher, classId: number, opts?: ShareTokenInfo) => {
+export const getAssistants = async (f: Fetcher, classId: number, shareToken?: string | null) => {
   const url = `class/${classId}/assistants`;
-  return await GET<ShareTokenInfo, Assistants>(f, url, opts);
+  return await GET<never, Assistants>(f, url, undefined, shareToken);
 };
 
 /**
@@ -1442,10 +1443,11 @@ export const uploadUserFile = (
   file: File,
   opts?: UploadOptions,
   purpose: FileUploadPurpose = 'assistants',
-  useImageDescriptions: boolean = false
+  useImageDescriptions: boolean = false,
+  shareToken?: string | null
 ) => {
   const url = fullPath(`class/${classId}/user/${userId}/file`);
-  return _doUpload(url, file, opts, purpose, useImageDescriptions);
+  return _doUpload(url, file, opts, purpose, useImageDescriptions, shareToken);
 };
 
 /**
@@ -1500,7 +1502,8 @@ const _doUpload = (
   file: File,
   opts?: UploadOptions,
   purpose: FileUploadPurpose = 'assistants',
-  useImageDescriptions: boolean = false
+  useImageDescriptions: boolean = false,
+  shareToken?: string | null
 ): FileUploadInfo => {
   if (!browser) {
     throw new Error('File uploads are not supported in this environment.');
@@ -1525,6 +1528,10 @@ const _doUpload = (
       }
     }
   };
+
+  if (shareToken) {
+    url += `?share_token=${shareToken}`;
+  }
 
   // Don't use the normal fetch because this only works with xhr, and we want
   // to be able to track progress.
@@ -1593,10 +1600,11 @@ export const deleteUserFile = async (
   f: Fetcher,
   classId: number,
   userId: number,
-  fileId: number
+  fileId: number,
+  shareToken?: string | null
 ) => {
   const url = `class/${classId}/user/${userId}/file/${fileId}`;
-  return await DELETE<never, GenericStatus>(f, url);
+  return await DELETE<never, GenericStatus>(f, url, undefined, shareToken);
 };
 
 /**
@@ -1681,10 +1689,10 @@ export type SupervisorUser = {
 export const getSupervisors = async (
   f: Fetcher,
   classId: number,
-  shareTokenInfo?: ShareTokenInfo
+  shareToken?: string | null
 ) => {
   const url = `class/${classId}/supervisors`;
-  return await GET<ShareTokenInfo, ClassSupervisors>(f, url, shareTokenInfo);
+  return await GET<never, ClassSupervisors>(f, url, undefined, shareToken);
 };
 
 /**
@@ -1905,13 +1913,10 @@ export const createThread = async (
   f: Fetcher,
   classId: number,
   data: CreateThreadRequest,
-  shareTokenInfo?: ShareTokenInfo
+  shareToken?: string | null
 ) => {
   let url = `class/${classId}/thread`;
-  if (shareTokenInfo && shareTokenInfo.share_token) {
-    url += `?share_token=${shareTokenInfo.share_token}`;
-  }
-  return await POST<CreateThreadRequest, ThreadWithOptionalToken>(f, url, data);
+  return await POST<CreateThreadRequest, ThreadWithOptionalToken>(f, url, data, shareToken);
 };
 
 /**
@@ -2736,11 +2741,11 @@ export type GetFileSupportFilter = (
 export const getClassUploadInfo = async (
   f: Fetcher,
   classId: number,
-  shareTokenInfo?: ShareTokenInfo
+  shareToken?: string | null,
 ) => {
   const url = `class/${classId}/upload_info`;
   const infoResponse = expandResponse(
-    await GET<ShareTokenInfo, UploadInfo>(f, url, shareTokenInfo)
+    await GET<never, UploadInfo>(f, url, undefined, shareToken)
   );
 
   const info = infoResponse.data || {
