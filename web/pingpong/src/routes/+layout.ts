@@ -1,7 +1,6 @@
 import { redirect, error } from '@sveltejs/kit';
 import * as api from '$lib/api';
 import type { LayoutLoad } from './$types';
-import { anonymousSessionToken } from '$lib/stores/general';
 import { get } from 'svelte/store';
 
 const LOGIN = '/login';
@@ -51,12 +50,6 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   const sharedThreadPattern = /\/group\/(\d+)\/shared\/thread\/(\d+)/;
   const isSharedAssistantPage = sharedAssistantPattern.test(url.pathname);
   const isSharedThreadPage = sharedThreadPattern.test(url.pathname);
-  let anonymousSessionTokenValue: string | null = null;
-  if (isSharedAssistantPage || isSharedThreadPage) {
-    // If the user is not logged in and the URL has a share token,
-    // allow access to the shared assistant or thread page.
-    anonymousSessionTokenValue = get(anonymousSessionToken);
-  }
 
   if (url.pathname === LOGIN) {
     // If the user is logged in, go to the forward page.
@@ -71,7 +64,11 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
         // If the user is not logged in and tries to access the root path, go to the About page.
         redirect(302, ABOUT);
       }
-    } else if (!authed && (t || anonymousSessionTokenValue) && (isSharedAssistantPage || isSharedThreadPage)) {
+    } else if (
+      !authed &&
+      (t || api.hasAnonymousSessionToken()) &&
+      (isSharedAssistantPage || isSharedThreadPage)
+    ) {
       // If the user is not logged in and the URL has a share token,
       // allow access to the shared assistant or thread page.
       doNotShowSidebar = true;

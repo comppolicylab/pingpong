@@ -1,27 +1,16 @@
 import * as api from '$lib/api';
-import { anonymousSessionToken } from '$lib/stores/general';
-import { get } from 'svelte/store';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ fetch, params }) => {
   const classId = parseInt(params.classId, 10);
   const threadId = parseInt(params.threadId, 10);
 
-  const anonymousSessionTokenValue = get(anonymousSessionToken);
-  console.log('Anonymous session token:', anonymousSessionTokenValue);
-  let headers: Record<string, string> = {};
-  if (anonymousSessionTokenValue) {
-    headers = {
-      'X-Anonymous-Thread-Session': anonymousSessionTokenValue
-    };
-  }
-
   const [threadData, threadGrants] = await Promise.all([
-    api.getThread(fetch, classId, threadId, headers),
+    api.getThread(fetch, classId, threadId),
     api.grants(fetch, {
       canDelete: { target_type: 'thread', target_id: threadId, relation: 'can_delete' },
       canPublish: { target_type: 'thread', target_id: threadId, relation: 'can_publish' }
-    }, undefined, headers)
+    })
   ]);
 
   const expanded = api.expandResponse(threadData);
@@ -44,7 +33,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
           target_id: expanded.data.thread.assistant_id,
           relation: 'can_view'
         }
-      }, headers);
+      });
     }
   }
 

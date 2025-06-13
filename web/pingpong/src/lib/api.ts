@@ -1,6 +1,5 @@
 import { browser } from '$app/environment';
 import { TextLineStream, JSONStream } from '$lib/streams';
-import type { S } from 'vitest/dist/reporters-w_64AS5f.js';
 
 /**
  * HTTP methods.
@@ -155,6 +154,23 @@ export const fullPath = (path: string) => {
 };
 
 /**
+ * Session token for anonymous threads.
+ */
+let anonymousSessionToken: string | null = null;
+
+export const setAnonymousSessionToken = (token: string | null) => {
+  anonymousSessionToken = token;
+};
+
+export const resetAnonymousSessionToken = () => {
+  anonymousSessionToken = null;
+};
+
+export const hasAnonymousSessionToken = () => {
+  return anonymousSessionToken !== null;
+};
+
+/**
  * Common fetch method.
  */
 const _fetch = async (
@@ -165,6 +181,13 @@ const _fetch = async (
   body?: string | FormData
 ) => {
   const full = fullPath(path);
+  if (anonymousSessionToken) {
+    // If we have a session token for anonymous threads, add it to the headers.
+    headers = {
+      ...headers,
+      'X-Anonymous-Thread-Session': anonymousSessionToken
+    };
+  }
   return f(full, {
     method,
     headers,
@@ -184,7 +207,13 @@ const _fetchJSON = async <R extends BaseData>(
   headers?: Record<string, string>,
   body?: string | FormData
 ): Promise<(R | Error | ValidationError) & BaseResponse> => {
-  console.log(`Fetching ${method} ${path} with headers:`, headers);
+  if (anonymousSessionToken) {
+    // If we have a session token for anonymous threads, add it to the headers.
+    headers = {
+      ...headers,
+      'X-Anonymous-Thread-Session': anonymousSessionToken
+    };
+  }
   const res = await _fetch(f, method, path, headers, body);
 
   let data: BaseData = {};
@@ -194,7 +223,6 @@ const _fetchJSON = async <R extends BaseData>(
   } catch {
     // Do nothing
   }
-  console.log(`Response from ${method} ${path}:`, res.status);
 
   return { $status: res.status, ...data } as (R | Error) & BaseResponse;
 };
@@ -206,15 +234,14 @@ const _qmethod = async <T extends BaseData, R extends BaseData>(
   f: Fetcher,
   method: 'GET' | 'DELETE',
   path: string,
-  data?: T,
-  headers?: Record<string, string>
+  data?: T
 ) => {
   // Treat args the same as when passed in the body.
   // Specifically, we want to remove "undefined" values.
   const filtered = data && (JSON.parse(JSON.stringify(data)) as Record<string, string>);
   const params = new URLSearchParams(filtered);
   path = `${path}?${params}`;
-  return await _fetchJSON<R>(f, method, path, headers);
+  return await _fetchJSON<R>(f, method, path);
 };
 
 /**
@@ -224,29 +251,18 @@ const _bmethod = async <T extends BaseData, R extends BaseData>(
   f: Fetcher,
   method: 'POST' | 'PUT' | 'PATCH',
   path: string,
-  data?: T,
-  query?: Record<string, string>,
-  headersCustom?: Record<string, string>
+  data?: T
 ) => {
   const body = JSON.stringify(data);
-  const headers = { 'Content-Type': 'application/json', ...headersCustom };
-  if (query) {
-    const params = new URLSearchParams(query);
-    path = `${path}?${params}`;
-  }
+  const headers = { 'Content-Type': 'application/json' };
   return await _fetchJSON<R>(f, method, path, headers, body);
 };
 
 /**
  * Query with GET.
  */
-const GET = async <T extends BaseData, R extends BaseData>(
-  f: Fetcher,
-  path: string,
-  data?: T,
-  headers?: Record<string, string>
-) => {
-  return await _qmethod<T, R>(f, 'GET', path, data, headers);
+const GET = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T) => {
+  return await _qmethod<T, R>(f, 'GET', path, data);
 };
 
 /**
@@ -263,15 +279,15 @@ const DELETE = async <T extends BaseData, R extends BaseData>(
 /**
  * Query with POST.
  */
-const POST = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T, headers?: Record<string, string>) => {
-  return await _bmethod<T, R>(f, 'POST', path, data, undefined, headers);
+const POST = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T) => {
+  return await _bmethod<T, R>(f, 'POST', path, data);
 };
 
 /**
  * Query with PUT.
  */
-const PUT = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T, headers?: Record<string, string>) => {
-  return await _bmethod<T, R>(f, 'PUT', path, data, undefined, headers);
+const PUT = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T) => {
+  return await _bmethod<T, R>(f, 'PUT', path, data);
 };
 
 /**
@@ -280,10 +296,9 @@ const PUT = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: str
 const PATCH = async <T extends BaseData, R extends BaseData>(
   f: Fetcher,
   path: string,
-  data?: T,
-  headers?: Record<string, string>
+  data?: T
 ) => {
-  return await _bmethod<T, R>(f, 'PATCH', path, data, undefined, headers);
+  return await _bmethod<T, R>(f, 'PATCH', path, data);
 };
 
 /**
@@ -530,17 +545,17 @@ export type NamedGrants = {
 export const grants = async <T extends NamedGrantsQuery>(
   f: Fetcher,
   query: T,
-  shareTokenInfo?: ShareTokenInfo,
-  headers?: Record<string, string>
+  shareTokenInfo?: ShareTokenInfo
 ): Promise<{ [name in keyof T]: boolean }> => {
   const grantNames = Object.keys(query);
   const grants = grantNames.map((name) => query[name]);
+
   let url = 'me/grants';
   if (shareTokenInfo && shareTokenInfo.share_token) {
     url += `?share_token=${shareTokenInfo.share_token}`;
   }
-  console.log(`Headers for grants request:`, headers);
-  const results = await POST<GrantsQuery, Grants>(f, url, { grants }, headers);
+
+  const results = await POST<GrantsQuery, Grants>(f, url, { grants });
   const expanded = expandResponse(results);
   if (expanded.error) {
     throw expanded.error;
@@ -2097,14 +2112,9 @@ export type ThreadWithMeta = {
 /**
  * Get a thread by ID.
  */
-export const getThread = async (
-  f: Fetcher,
-  classId: number,
-  threadId: number,
-  headers?: Record<string, string>
-) => {
+export const getThread = async (f: Fetcher, classId: number, threadId: number) => {
   const url = `class/${classId}/thread/${threadId}`;
-  return await GET<never, ThreadWithMeta>(f, url, undefined, headers);
+  return await GET<never, ThreadWithMeta>(f, url);
 };
 
 export type CodeInterpreterMessages = {
