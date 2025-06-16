@@ -33,10 +33,10 @@
       <b>honorarium of $1,000</b> will be provided to all participating instructors.</P
     >
     <P class="mt-4"
-      >The study is underway for the spring 2025 semester and we are <b
-        >now considering applications for summer and fall 2025 courses</b
-      >. To participate, complete a short (5-question) survey to <b>confirm your eligibility</b>.
-      Our team will be in touch in late spring 2025 to confirm summer course participation.
+      >We are now considering applications for fall 2025 courses. <b
+        >To participate, complete the application linked below to confirm your eligibility.</b
+      >Our team will be in touch on a rolling basis to confirm participation for the Fall 2025
+      semester.
     </P>
   </div>
   <div
@@ -44,12 +44,12 @@
   >
     <Button
       pill
-      href="https://harvard.az1.qualtrics.com/jfe/form/SV_3xRMxp1g44nnjka"
+      href="https://harvard.az1.qualtrics.com/jfe/form/SV_1Sr6Sa6kM7Z4VMO"
       rel="noopener noreferrer"
       target="_blank"
       class="text-white inline-flex justify-center text-lg items-center px-5 font-medium text-lg bg-blue-dark-40 hover:bg-blue-dark-50 shadow-md"
     >
-      <span class="w-full ms-3">Express your interest for PingPong Edu Access</span>
+      <span class="w-full ms-3">Confirm your eligibility to participate</span>
       <ArrowRightOutline class="w-6 h-6 ms-2" />
     </Button>
   </div>
