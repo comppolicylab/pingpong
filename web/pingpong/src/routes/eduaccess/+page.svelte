@@ -165,10 +165,10 @@
         to indicate your interest. Our team will follow up in late spring 2025 to confirm eligibility
         for summer 2025 courses.<br /><br />For further questions, please contact
         <a
-          href="mailto:pingpongedu@hks.harvard.edu"
+          href="mailto:support@pingpong-hks.atlassian.net"
           rel="noopener noreferrer"
           class="underline"
-          target="_blank">pingpongedu@hks.harvard.edu</a
+          target="_blank">support@pingpong-hks.atlassian.net</a
         >.
       </span>
     </figure>
@@ -184,10 +184,10 @@
       IRB. If you need a copy of the approval letter or additional documentation, please contact us directly
       at
       <a
-        href="mailto:pingpongedu@hks.harvard.edu"
+        href="mailto:support@pingpong-hks.atlassian.net"
         rel="noopener noreferrer"
         class="underline"
-        target="_blank">pingpongedu@hks.harvard.edu</a
+        target="_blank">support@pingpong-hks.atlassian.net</a
       >.
     </li>
     <li class="my-2">
