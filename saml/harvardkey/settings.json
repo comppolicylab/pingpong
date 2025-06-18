@@ -16,7 +16,7 @@
         "privateKey": ""
     },
     "idp": {
-        "entityId": "http://www.okta.com/exk1wke39z0ihzTFJ1d8",
+        "entityId": "https://www.okta.com/exk1wke39z0ihzTFJ1d8",
         "singleSignOnService": {
             "url": "https://login.harvard.edu/app/harvard_hkspingpong_1/exk1wke39z0ihzTFJ1d8/sso/saml",
             "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
