@@ -16,7 +16,7 @@
         "privateKey": ""
     },
     "idp": {
-        "entityId": "https://www.okta.com/exk1wke39z0ihzTFJ1d8",
+        "entityId": "http://www.okta.com/exk1wke39z0ihzTFJ1d8",
         "singleSignOnService": {
             "url": "https://login.harvard.edu/app/harvard_hkspingpong_1/exk1wke39z0ihzTFJ1d8/sso/saml",
             "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
@@ -25,7 +25,7 @@
             "url": "https://login.harvard.edu/app/harvard_hkspingpong_1/exk1wke39z0ihzTFJ1d8/slo/saml",
             "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
         },
-        "x509cert": "MIIDnjCCAoagAwIBAgIGAZd+3QC+MA0GCSqGSIb3DQEBCwUAMIGPMQswCQYDVQQGEwJVUzETMBEG\nA1UECAwKQ2FsaWZvcm5pYTEWMBQGA1UEBwwNU2FuIEZyYW5jaXNjbzENMAsGA1UECgwET2t0YTEU\nMBIGA1UECwwLU1NPUHJvdmlkZXIxEDAOBgNVBAMMB2hhcnZhcmQxHDAaBgkqhkiG9w0BCQEWDWlu\nZm9Ab2t0YS5jb20wHhcNMjUwNjE3MTcwNzIyWhcNMzUwNjE3MTcwODIyWjCBjzELMAkGA1UEBhMC\nVVMxEzARBgNVBAgMCkNhbGlmb3JuaWExFjAUBgNVBAcMDVNhbiBGcmFuY2lzY28xDTALBgNVBAoM\nBE9rdGExFDASBgNVBAsMC1NTT1Byb3ZpZGVyMRAwDgYDVQQDDAdoYXJ2YXJkMRwwGgYJKoZIhvcN\nAQkBFg1pbmZvQG9rdGEuY29tMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxLXnc7Mo\ncZqcw2SoJ4qQLiTgDDXhA97qeIkUFaakqpqGbTAWDz2rtJvVxefrabHvN5K9pUdcyS5N+YPamSb1\nFYcVexUPHaIxbBSt5KGTLgwahnSjZ4QB1C0rP+Oi+yDZIkmikdCLE4vsXzTSKXYSdBpUmuxfxItB\nljaybYbarKwRhdcoj29+hu0dBkBKw6C8gTtb1Vqg+DXhYHuRZpqOLml2mYYdZfNUmwX+yhjzmyAn\njpLZtchgtApHRkK2vloD/SQcXf2Dy8zn5DRq1bJ3LLJyMpTLyHV+8ZQtbIAIujD8h9qmFoFmee+9\nvHZDnjqslFylcZ1gyr27OQKU8B2vhwIDAQABMA0GCSqGSIb3DQEBCwUAA4IBAQCXLN0HZ9CTGouS\n8LoWkTwvCrGXLmEiyCSiOoQ7XZi0njNcJxWsGU2F/cNxa6jYI/9gx1Z3mUsOCHLM2uYLdqrJK1+1\nJsG8JERzG2iP76m2g1vIxADSF7QjklzwljbFbIaU3Uq3xt9NY3JctW91oQTvsoEecEkF18hmud6m\nBAdFO4w73z2LoO5CjcpDa8hw4rto6qv+G0vcfDncodWfv+x1bsZ2p7D5qzQWX4YT/KWtQATzDDlV\n9hgzbsRhuFRUTmgnt16yxsZvsAebGQH6fchONXJwnWg1LdoF3u5CMRGdHqYMGf8hX7uB2oeF1xEf\n7MF9o/i7gDW3nxouUZGYRo7i"
+        "x509cert": "MIIDnjCCAoagAwIBAgIGAZd+3QC+MA0GCSqGSIb3DQEBCwUAMIGPMQswCQYDVQQGEwJVUzETMBEGA1UECAwKQ2FsaWZvcm5pYTEWMBQGA1UEBwwNU2FuIEZyYW5jaXNjbzENMAsGA1UECgwET2t0YTEUMBIGA1UECwwLU1NPUHJvdmlkZXIxEDAOBgNVBAMMB2hhcnZhcmQxHDAaBgkqhkiG9w0BCQEWDWluZm9Ab2t0YS5jb20wHhcNMjUwNjE3MTcwNzIyWhcNMzUwNjE3MTcwODIyWjCBjzELMAkGA1UEBhMCVVMxEzARBgNVBAgMCkNhbGlmb3JuaWExFjAUBgNVBAcMDVNhbiBGcmFuY2lzY28xDTALBgNVBAoMBE9rdGExFDASBgNVBAsMC1NTT1Byb3ZpZGVyMRAwDgYDVQQDDAdoYXJ2YXJkMRwwGgYJKoZIhvcNAQkBFg1pbmZvQG9rdGEuY29tMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxLXnc7MocZqcw2SoJ4qQLiTgDDXhA97qeIkUFaakqpqGbTAWDz2rtJvVxefrabHvN5K9pUdcyS5N+YPamSb1FYcVexUPHaIxbBSt5KGTLgwahnSjZ4QB1C0rP+Oi+yDZIkmikdCLE4vsXzTSKXYSdBpUmuxfxItBljaybYbarKwRhdcoj29+hu0dBkBKw6C8gTtb1Vqg+DXhYHuRZpqOLml2mYYdZfNUmwX+yhjzmyAnjpLZtchgtApHRkK2vloD/SQcXf2Dy8zn5DRq1bJ3LLJyMpTLyHV+8ZQtbIAIujD8h9qmFoFmee+9vHZDnjqslFylcZ1gyr27OQKU8B2vhwIDAQABMA0GCSqGSIb3DQEBCwUAA4IBAQCXLN0HZ9CTGouS8LoWkTwvCrGXLmEiyCSiOoQ7XZi0njNcJxWsGU2F/cNxa6jYI/9gx1Z3mUsOCHLM2uYLdqrJK1+1JsG8JERzG2iP76m2g1vIxADSF7QjklzwljbFbIaU3Uq3xt9NY3JctW91oQTvsoEecEkF18hmud6mBAdFO4w73z2LoO5CjcpDa8hw4rto6qv+G0vcfDncodWfv+x1bsZ2p7D5qzQWX4YT/KWtQATzDDlV9hgzbsRhuFRUTmgnt16yxsZvsAebGQH6fchONXJwnWg1LdoF3u5CMRGdHqYMGf8hX7uB2oeF1xEf7MF9o/i7gDW3nxouUZGYRo7i"
     },
     "security": {
         "nameIdEncrypted": false,
