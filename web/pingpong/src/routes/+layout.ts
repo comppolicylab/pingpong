@@ -44,6 +44,9 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   // Check if we have a share token in the URL.
   // If so, we will allow access to the page without authentication.
   const t = url.searchParams.get('share_token');
+  if (t) {
+    api.setAnonymousShareToken(t);
+  }
 
   // Check if the url has format /group/[classId]/shared/assistant/[assistantId]
   const sharedAssistantPattern = /\/group\/(\d+)\/shared\/assistant\/(\d+)/;
@@ -66,8 +69,8 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
       }
     } else if (
       !authed &&
-      (t || api.hasAnonymousSessionToken()) &&
-      (isSharedAssistantPage || isSharedThreadPage)
+      ((t && isSharedAssistantPage) ||
+      (api.hasAnonymousSessionToken() && isSharedThreadPage))
     ) {
       // If the user is not logged in and the URL has a share token,
       // allow access to the shared assistant or thread page.

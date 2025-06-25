@@ -171,6 +171,23 @@ export const hasAnonymousSessionToken = () => {
 };
 
 /**
+ * Share token for anonymous assistant access.
+ */
+let anonymousShareToken: string | null = null;
+
+export const setAnonymousShareToken = (token: string | null) => {
+  anonymousShareToken = token;
+};
+
+export const resetAnonymousShareToken = () => {
+  anonymousShareToken = null;
+};
+
+export const hasAnonymousShareToken = () => {
+  return anonymousShareToken !== null;
+};
+
+/**
  * Common fetch method.
  */
 const _fetch = async (
@@ -241,8 +258,8 @@ const _qmethod = async <T extends BaseData, R extends BaseData>(
   // Specifically, we want to remove "undefined" values.
   const filtered = data && (JSON.parse(JSON.stringify(data)) as Record<string, string>);
   let params = new URLSearchParams(filtered);
-  if (shareToken) {
-    params.set('share_token', shareToken);
+  if (anonymousShareToken) {
+    params.set('share_token', anonymousShareToken);
   }
   path = `${path}?${params}`;
   return await _fetchJSON<R>(f, method, path);
@@ -259,9 +276,9 @@ const _bmethod = async <T extends BaseData, R extends BaseData>(
   shareToken?: string | null
 ) => {
   const body = JSON.stringify(data);
-  if (shareToken) {
+  if (anonymousShareToken) {
     // Add as query parameter if we have a share token.
-    path = `${path}?share_token=${encodeURIComponent(shareToken)}`;
+    path = `${path}?share_token=${encodeURIComponent(anonymousShareToken)}`;
   }
   const headers = { 'Content-Type': 'application/json' };
   return await _fetchJSON<R>(f, method, path, headers, body);
@@ -558,6 +575,7 @@ export const grants = async <T extends NamedGrantsQuery>(
   const results = await POST<GrantsQuery, Grants>(f, 'me/grants', { grants }, shareToken);
   const expanded = expandResponse(results);
   if (expanded.error) {
+    console.debug('expandResponse', expanded);
     throw expanded.error;
   }
   
