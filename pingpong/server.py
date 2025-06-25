@@ -159,13 +159,6 @@ async def parse_session_token(request: Request, call_next):
     """Parse the session token from the cookie and add it to the request state."""
     try:
         session_token = request.cookies["session"]
-        anonymous_token = request.query_params.get("share_token")
-        anonymous_thread_session_token = request.headers.get(
-            "X-Anonymous-Thread-Session"
-        )
-        logger.error(
-            f"Got anonymous token: {anonymous_token} and thread session token: {anonymous_thread_session_token}"
-        )
     except KeyError:
         # If the session cookie is not present,
         # we check for an anonymous session token.
@@ -174,14 +167,6 @@ async def parse_session_token(request: Request, call_next):
             "X-Anonymous-Thread-Session"
         )
         if anonymous_token or anonymous_thread_session_token:
-            request.state.anonymous_share_token_auth = (
-                f"anonymous_link:{anonymous_token}" if anonymous_token else None
-            )
-            request.state.anonymous_session_token_auth = (
-                f"anonymous_user:{anonymous_thread_session_token}"
-                if anonymous_thread_session_token
-                else None
-            )
             request.state.anonymous_share_token = anonymous_token
             request.state.anonymous_session_token = anonymous_thread_session_token
 
@@ -199,6 +184,16 @@ async def parse_session_token(request: Request, call_next):
             if not user:
                 raise UserNotFoundException("Please log in.")
             request.state.is_anonymous = True
+            request.state.anonymous_share_token_auth = (
+                f"anonymous_link:{request.state.anonymous_share_token}"
+                if request.state.anonymous_share_token
+                else None
+            )
+            request.state.anonymous_session_token_auth = (
+                f"anonymous_user:{request.state.anonymous_session_token}"
+                if request.state.anonymous_session_token
+                else None
+            )
             request.state.session = schemas.SessionState(
                 status=schemas.SessionStatus.ANONYMOUS,
                 user=user,
@@ -249,16 +244,6 @@ async def parse_session_token(request: Request, call_next):
                 "X-Anonymous-Thread-Session"
             )
             if anonymous_token or anonymous_thread_session_token:
-                request.state.anonymous_share_token_auth = (
-                    f"anonymous_link:{anonymous_token}"
-                    if anonymous_token
-                    else f"anonymous_user:{anonymous_thread_session_token}"
-                )
-                request.state.anonymous_session_token_auth = (
-                    f"anonymous_user:{anonymous_thread_session_token}"
-                    if anonymous_thread_session_token
-                    else None
-                )
                 request.state.anonymous_share_token = anonymous_token
                 request.state.anonymous_session_token = anonymous_thread_session_token
                 if anonymous_token:
@@ -275,6 +260,16 @@ async def parse_session_token(request: Request, call_next):
                 if not user:
                     raise UserNotFoundException("Please log in.")
                 request.state.is_anonymous = True
+                request.state.anonymous_share_token_auth = (
+                    f"anonymous_link:{request.state.anonymous_share_token}"
+                    if request.state.anonymous_share_token
+                    else None
+                )
+                request.state.anonymous_session_token_auth = (
+                    f"anonymous_user:{request.state.anonymous_session_token}"
+                    if request.state.anonymous_session_token
+                    else None
+                )
                 request.state.session = schemas.SessionState(
                     status=schemas.SessionStatus.ANONYMOUS,
                     user=user,
@@ -3143,22 +3138,22 @@ async def create_thread(
         )
         anonymous_user = anonymous_session.user
 
+    metadata: dict[str, str | int] = {
+        "user_id": str(request.state.session.user.id),
+    }
+    if (
+        hasattr(request.state, "anonymous_share_token")
+        and request.state.anonymous_share_token is not None
+    ):
+        metadata["share_token"] = str(request.state.anonymous_share_token)
+    if anonymous_session is not None:
+        metadata["anonymous_session_token"] = str(anonymous_session.session_token)
     try:
         thread, parties, thread_name = await asyncio.gather(
             openai_client.beta.threads.create(
                 messages=[
                     {
-                        "metadata": {
-                            "user_id": str(request.state.session.user.id),
-                            "share_token": str(request.state.anonymous_share_token)
-                            if request.state.is_anonymous
-                            else None,
-                            "anonymous_session_token": str(
-                                anonymous_session.session_token
-                            )
-                            if anonymous_session
-                            else None,
-                        },
+                        "metadata": metadata,
                         "role": "user",
                         "content": messageContent,
                         "attachments": attachments,
@@ -3382,6 +3377,7 @@ async def send_message(
             ]
         )
     )[0]:
+        print(request.state.anonymous_share_token_auth)
         raise HTTPException(
             status_code=403,
             detail="You do not have permission to interact with this assistant.",
@@ -3515,9 +3511,15 @@ async def send_message(
         metadata: dict[str, str | int] = {
             "user_id": str(request.state.session.user.id),
         }
-        if request.state.anonymous_share_token:
+        if (
+            hasattr(request.state, "anonymous_share_token")
+            and request.state.anonymous_share_token is not None
+        ):
             metadata["share_token"] = str(request.state.anonymous_share_token)
-        if request.state.anonymous_session_token:
+        if (
+            hasattr(request.state, "anonymous_session_token")
+            and request.state.anonymous_session_token is not None
+        ):
             metadata["anonymous_session_token"] = str(
                 request.state.anonymous_session_token
             )
