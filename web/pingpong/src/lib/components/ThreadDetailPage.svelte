@@ -127,16 +127,17 @@
 
   let supportsVision = false;
   $: {
-    const supportVisionModels = (data.modelInfo.filter((model) => model.supports_vision) || []).map(
-      (model) => model.id
-    );
+    const supportVisionModels = (
+      data.modelInfo.filter((model: api.AssistantModelLite) => model.supports_vision) || []
+    ).map((model: api.AssistantModelLite) => model.id);
     supportsVision = supportVisionModels.includes(data.threadModel);
   }
   let visionSupportOverride: boolean | undefined;
   $: {
     visionSupportOverride =
       data.class.ai_provider === 'azure'
-        ? data.modelInfo.find((model) => model.id === data.threadModel)?.azure_supports_vision
+        ? data.modelInfo.find((model: api.AssistantModelLite) => model.id === data.threadModel)
+            ?.azure_supports_vision
         : undefined;
   }
   $: submitting = threadMgr.submitting;
@@ -152,7 +153,9 @@
   let useImageDescriptions = false;
   let assistantInteractionMode: 'voice' | 'chat' | null = null;
   $: {
-    const assistant = data.assistants.find((assistant) => assistant.id === $assistantId);
+    const assistant = data.assistants.find(
+      (assistant: api.Assistant) => assistant.id === $assistantId
+    );
     if (assistant) {
       useLatex = assistant.use_latex || false;
       useImageDescriptions = assistant.use_image_descriptions || false;

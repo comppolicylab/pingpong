@@ -257,7 +257,7 @@ const _qmethod = async <T extends BaseData, R extends BaseData>(
   // Treat args the same as when passed in the body.
   // Specifically, we want to remove "undefined" values.
   const filtered = data && (JSON.parse(JSON.stringify(data)) as Record<string, string>);
-  let params = new URLSearchParams(filtered);
+  const params = new URLSearchParams(filtered);
   if (anonymousShareToken) {
     params.set('share_token', anonymousShareToken);
   }
@@ -1943,7 +1943,7 @@ export const createThread = async (
   data: CreateThreadRequest,
   shareToken?: string | null
 ) => {
-  let url = `class/${classId}/thread`;
+  const url = `class/${classId}/thread`;
   return await POST<CreateThreadRequest, ThreadWithOptionalToken>(f, url, data, shareToken);
 };
 
