@@ -159,6 +159,13 @@ async def parse_session_token(request: Request, call_next):
     """Parse the session token from the cookie and add it to the request state."""
     try:
         session_token = request.cookies["session"]
+        anonymous_token = request.query_params.get("share_token")
+        anonymous_thread_session_token = request.headers.get(
+            "X-Anonymous-Thread-Session"
+        )
+        logger.error(
+            f"Got anonymous token: {anonymous_token} and thread session token: {anonymous_thread_session_token}"
+        )
     except KeyError:
         # If the session cookie is not present,
         # we check for an anonymous session token.
@@ -167,16 +174,17 @@ async def parse_session_token(request: Request, call_next):
             "X-Anonymous-Thread-Session"
         )
         if anonymous_token or anonymous_thread_session_token:
-            # Share token takes precedence over thread session token.
-            auth_user = (
-                f"anonymous_link:{anonymous_token}"
-                if anonymous_token
-                else f"anonymous_user:{anonymous_thread_session_token}"
+            request.state.anonymous_share_token_auth = (
+                f"anonymous_link:{anonymous_token}" if anonymous_token else None
             )
-            request.state.auth_user = auth_user
+            request.state.anonymous_session_token_auth = (
+                f"anonymous_user:{anonymous_thread_session_token}"
+                if anonymous_thread_session_token
+                else None
+            )
             request.state.anonymous_share_token = anonymous_token
             request.state.anonymous_session_token = anonymous_thread_session_token
-            request.state.is_anonymous = True
+
             if anonymous_token:
                 user = await models.User.get_by_share_token(
                     request.state.db, anonymous_token
@@ -190,6 +198,7 @@ async def parse_session_token(request: Request, call_next):
                 )
             if not user:
                 raise UserNotFoundException("Please log in.")
+            request.state.is_anonymous = True
             request.state.session = schemas.SessionState(
                 status=schemas.SessionStatus.ANONYMOUS,
                 user=user,
@@ -240,15 +249,18 @@ async def parse_session_token(request: Request, call_next):
                 "X-Anonymous-Thread-Session"
             )
             if anonymous_token or anonymous_thread_session_token:
-                auth_user = (
+                request.state.anonymous_share_token_auth = (
                     f"anonymous_link:{anonymous_token}"
                     if anonymous_token
                     else f"anonymous_user:{anonymous_thread_session_token}"
                 )
-                request.state.auth_user = auth_user
+                request.state.anonymous_session_token_auth = (
+                    f"anonymous_user:{anonymous_thread_session_token}"
+                    if anonymous_thread_session_token
+                    else None
+                )
                 request.state.anonymous_share_token = anonymous_token
                 request.state.anonymous_session_token = anonymous_thread_session_token
-                request.state.is_anonymous = True
                 if anonymous_token:
                     user = await models.User.get_by_share_token(
                         request.state.db, anonymous_token
@@ -262,6 +274,7 @@ async def parse_session_token(request: Request, call_next):
                     )
                 if not user:
                     raise UserNotFoundException("Please log in.")
+                request.state.is_anonymous = True
                 request.state.session = schemas.SessionState(
                     status=schemas.SessionStatus.ANONYMOUS,
                     user=user,
@@ -3362,7 +3375,7 @@ async def send_message(
                 (
                     request.state.auth_user
                     if not request.state.is_anonymous
-                    else f"anonymous_link:{request.state.anonymous_share_token}",
+                    else request.state.anonymous_share_token_auth,
                     "can_view",
                     f"assistant:{thread.assistant_id}",
                 ),
@@ -3738,7 +3751,7 @@ async def create_user_file(
         purpose=purpose,
         use_image_descriptions=use_image_descriptions,
         is_anonymous_upload=request.state.is_anonymous,
-        anonymous_link_id=request.state.session.user
+        anonymous_link_id=request.state.session.user,
     )
 
 
@@ -3825,7 +3838,7 @@ async def list_assistants(class_id: str, request: Request):
             (
                 request.state.auth_user
                 if not request.state.is_anonymous
-                else f"anonymous_link:{request.state.anonymous_share_token}",
+                else request.state.anonymous_share_token_auth,
                 "can_view",
                 f"assistant:{a.id}",
             )
@@ -3854,7 +3867,7 @@ async def list_assistants(class_id: str, request: Request):
             (
                 request.state.auth_user
                 if not request.state.is_anonymous
-                else f"anonymous_link:{request.state.anonymous_share_token}",
+                else request.state.anonymous_share_token_auth,
                 "can_edit",
                 f"assistant:{asst.id}",
             )
@@ -4915,30 +4928,33 @@ async def get_grants_list(rel: str, obj: str, request: Request):
 )
 async def get_grants(query: schemas.GrantsQuery, request: Request):
     checks = list[Relation]()
-    check_both_anonymous_tokens = (
-        request.state.is_anonymous and request.state.anonymous_session_token is not None
-    )
+    user_names = list[str]()
+
+    if request.state.is_anonymous:
+        if request.state.anonymous_share_token_auth is not None:
+            user_names.append(
+                request.state.anonymous_share_token_auth,
+            )
+        if request.state.anonymous_session_token_auth is not None:
+            user_names.append(
+                request.state.anonymous_session_token_auth,
+            )
+    else:
+        user_names.append(request.state.auth_user)
+
+    check_both_anonymous_tokens = len(user_names) == 2
     for grant in query.grants:
         target = f"{grant.target_type}:{grant.target_id}"
-        if check_both_anonymous_tokens:
-            checks.extend(
-                [
-                    (
-                        f"anonymous_link:{request.state.anonymous_share_token}",
-                        grant.relation,
-                        target,
-                    ),
-                    (
-                        f"anonymous_user:{request.state.anonymous_session_token}",
-                        grant.relation,
-                        target,
-                    ),
-                ]
-            )
-        else:
-            checks.append(
-                (request.state.auth_user, grant.relation, target),
-            )
+        checks.extend(
+            [
+                (
+                    user_name,
+                    grant.relation,
+                    target,
+                )
+                for user_name in user_names
+            ]
+        )
 
     results = await request.state.authz.check(checks)
     return {

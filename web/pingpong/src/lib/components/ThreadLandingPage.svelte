@@ -87,11 +87,13 @@
   // Currently selected assistant.
   $: assistants = data?.assistants || [];
   $: teachers = data?.supervisors || [];
-  $: courseAssistants = assistants.filter((asst) => asst.endorsed);
-  $: myAssistantsAll = assistants.filter((asst) => asst.creator_id === data.me.user?.id);
-  $: myAssistants = myAssistantsAll.filter((asst) => !asst.endorsed);
-  $: otherAssistantsAll = assistants.filter((asst) => asst.creator_id !== data.me.user?.id);
-  $: otherAssistants = otherAssistantsAll.filter((asst) => !asst.endorsed);
+  $: courseAssistants = assistants.filter((asst: Assistant) => asst.endorsed);
+  $: myAssistantsAll = assistants.filter((asst: Assistant) => asst.creator_id === data.me.user?.id);
+  $: myAssistants = myAssistantsAll.filter((asst: Assistant) => !asst.endorsed);
+  $: otherAssistantsAll = assistants.filter(
+    (asst: Assistant) => asst.creator_id !== data.me.user?.id
+  );
+  $: otherAssistants = otherAssistantsAll.filter((asst: Assistant) => !asst.endorsed);
   $: assistant = data?.assistants[0] || {};
   $: assistantMeta = getAssistantMetadata(assistant);
   // Whether billing is set up for the class (which controls everything).
@@ -102,7 +104,9 @@
   let useImageDescriptions = false;
   $: {
     if (linkedAssistant && assistants) {
-      const selectedAssistant = (assistants || []).find((asst) => asst.id === linkedAssistant);
+      const selectedAssistant = (assistants || []).find(
+        (asst: Assistant) => asst.id === linkedAssistant
+      );
       if (selectedAssistant) {
         assistant = selectedAssistant;
         useImageDescriptions = assistant.use_image_descriptions || false;
@@ -113,16 +117,17 @@
   $: supportsCodeInterpreter = assistant.tools?.includes('code_interpreter') || false;
   let supportsVision = false;
   $: {
-    const supportVisionModels = (data.modelInfo.filter((model) => model.supports_vision) || []).map(
-      (model) => model.id
-    );
+    const supportVisionModels = (
+      data.modelInfo.filter((model: api.AssistantModelLite) => model.supports_vision) || []
+    ).map((model: api.AssistantModelLite) => model.id);
     supportsVision = supportVisionModels.includes(assistant.model);
   }
   let visionSupportOverride: boolean | undefined;
   $: {
     visionSupportOverride =
       data.class.ai_provider === 'azure'
-        ? data.modelInfo.find((model) => model.id === assistant.model)?.azure_supports_vision
+        ? data.modelInfo.find((model: api.AssistantModelLite) => model.id === assistant.model)
+            ?.azure_supports_vision
         : undefined;
   }
   $: allowVisionUpload = true;
@@ -201,7 +206,7 @@
         })
       );
       data.threads = [newThreadOpts.thread as api.Thread, ...data.threads];
-        api.setAnonymousSessionToken(newThreadOpts.session_token || null);
+      api.setAnonymousSessionToken(newThreadOpts.session_token || null);
       $loading = false;
       if (api.hasAnonymousSessionToken()) {
         await goto(`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}`);

@@ -9,7 +9,9 @@ logger = logging.getLogger(__name__)
 
 class Expression:
     async def __call__(self, request: Request):
-        if not hasattr(request.state, "auth_user") or request.state.auth_user is None:
+        if (
+            not hasattr(request.state, "auth_user") or request.state.auth_user is None
+        ) and not request.state.is_anonymous:
             raise HTTPException(
                 status_code=403,
                 detail=f"Missing valid session token: {request.state.session.status.value}",
@@ -91,7 +93,9 @@ class Not(Expression):
 
 class LoggedIn(Expression):
     async def test(self, request: Request) -> bool:
-        return request.state.auth_user is not None
+        return (
+            hasattr(request.state, "auth_user") and request.state.auth_user is not None
+        ) or request.state.is_anonymous
 
     def __str__(self):
         return "LoggedIn()"
@@ -114,18 +118,18 @@ class Authz(Expression):
             # If the user is anonymous, check their anonymous permissions.
             if request.state.is_anonymous:
                 grants_to_check = []
-                if request.state.anonymous_share_token:
+                if request.state.anonymous_share_token_auth:
                     grants_to_check.append(
                         (
-                            f"anonymous_link:{request.state.anonymous_share_token}",
+                            request.state.anonymous_share_token_auth,
                             self.relation,
                             target,
                         )
                     )
-                if request.state.anonymous_session_token:
+                if request.state.anonymous_session_token_auth:
                     grants_to_check.append(
                         (
-                            f"anonymous_user:{request.state.anonymous_session_token}",
+                            request.state.anonymous_session_token_auth,
                             self.relation,
                             target,
                         )

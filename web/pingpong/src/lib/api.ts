@@ -287,7 +287,12 @@ const _bmethod = async <T extends BaseData, R extends BaseData>(
 /**
  * Query with GET.
  */
-const GET = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T, shareToken?: string | null) => {
+const GET = async <T extends BaseData, R extends BaseData>(
+  f: Fetcher,
+  path: string,
+  data?: T,
+  shareToken?: string | null
+) => {
   return await _qmethod<T, R>(f, 'GET', path, data, shareToken);
 };
 
@@ -306,14 +311,24 @@ const DELETE = async <T extends BaseData, R extends BaseData>(
 /**
  * Query with POST.
  */
-const POST = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T, shareToken?: string | null) => {
+const POST = async <T extends BaseData, R extends BaseData>(
+  f: Fetcher,
+  path: string,
+  data?: T,
+  shareToken?: string | null
+) => {
   return await _bmethod<T, R>(f, 'POST', path, data, shareToken);
 };
 
 /**
  * Query with PUT.
  */
-const PUT = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T, shareToken?: string | null) => {
+const PUT = async <T extends BaseData, R extends BaseData>(
+  f: Fetcher,
+  path: string,
+  data?: T,
+  shareToken?: string | null
+) => {
   return await _bmethod<T, R>(f, 'PUT', path, data, shareToken);
 };
 
@@ -328,7 +343,6 @@ const PATCH = async <T extends BaseData, R extends BaseData>(
 ) => {
   return await _bmethod<T, R>(f, 'PATCH', path, data, shareToken);
 };
-
 
 /**
  * Information about an institution.
@@ -578,7 +592,7 @@ export const grants = async <T extends NamedGrantsQuery>(
     console.debug('expandResponse', expanded);
     throw expanded.error;
   }
-  
+
   const verdicts: NamedGrants = {};
   for (let i = 0; i < grantNames.length; i++) {
     verdicts[grantNames[i]] = expanded.data.grants[i].verdict;
@@ -1704,11 +1718,7 @@ export type SupervisorUser = {
  * Fetch teachers in a class.
  *
  */
-export const getSupervisors = async (
-  f: Fetcher,
-  classId: number,
-  shareToken?: string | null
-) => {
+export const getSupervisors = async (f: Fetcher, classId: number, shareToken?: string | null) => {
   const url = `class/${classId}/supervisors`;
   return await GET<never, ClassSupervisors>(f, url, undefined, shareToken);
 };
@@ -2759,12 +2769,10 @@ export type GetFileSupportFilter = (
 export const getClassUploadInfo = async (
   f: Fetcher,
   classId: number,
-  shareToken?: string | null,
+  shareToken?: string | null
 ) => {
   const url = `class/${classId}/upload_info`;
-  const infoResponse = expandResponse(
-    await GET<never, UploadInfo>(f, url, undefined, shareToken)
-  );
+  const infoResponse = expandResponse(await GET<never, UploadInfo>(f, url, undefined, shareToken));
 
   const info = infoResponse.data || {
     types: [],

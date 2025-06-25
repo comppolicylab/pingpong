@@ -69,8 +69,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
       }
     } else if (
       !authed &&
-      ((t && isSharedAssistantPage) ||
-      (api.hasAnonymousSessionToken() && isSharedThreadPage))
+      ((t && isSharedAssistantPage) || (api.hasAnonymousSessionToken() && isSharedThreadPage))
     ) {
       // If the user is not logged in and the URL has a share token,
       // allow access to the shared assistant or thread page.
