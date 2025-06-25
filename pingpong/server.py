@@ -395,9 +395,18 @@ async def inspect_authz(request: Request, subj: str, obj: str, rel: str):
             result = schemas.InspectAuthzListResult(
                 list=ids,
             )
-        elif obj_id_ and subj_type_ == "user":
+        elif obj_id_ and (subj_type_ == "user"):
             ids = await request.state.authz.list_entities(obj, rel, subj_type_)
             result = schemas.InspectAuthzListResult(
+                list=ids,
+            )
+        elif obj_id_ and (
+            subj_type_ == "anonymous_user" or subj_type_ == "anonymous_link"
+        ):
+            ids = await request.state.authz.list_entities_permissive(
+                obj, rel, subj_type_
+            )
+            result = schemas.InspectAuthzListResultPermissive(
                 list=ids,
             )
         else:
@@ -3253,6 +3262,21 @@ async def create_thread(
                     ),
                 ]
             )
+            if req.file_search_file_ids or req.code_interpreter_file_ids:
+                all_file_ids = (req.file_search_file_ids or []) + (
+                    req.code_interpreter_file_ids or []
+                )
+                file_ids = await models.File.get_all_by_file_id(
+                    request.state.db, all_file_ids
+                )
+                for file_id in file_ids:
+                    grants.append(
+                        (
+                            f"anonymous_user:{anonymous_session.session_token}",
+                            "owner",
+                            f"user_file:{file_id.id}",
+                        )
+                    )
         await request.state.authz.write_safe(grant=grants)
 
         return {
@@ -3753,7 +3777,9 @@ async def create_user_file(
         purpose=purpose,
         use_image_descriptions=use_image_descriptions,
         is_anonymous_upload=request.state.is_anonymous,
-        anonymous_link_id=request.state.session.user,
+        anonymous_user_auth=request.state.anonymous_session_token_auth
+        if hasattr(request.state, "anonymous_session_token_auth")
+        else None,
     )
 
 

@@ -1561,8 +1561,8 @@ const _doUpload = (
     }
   };
 
-  if (shareToken) {
-    url += `?share_token=${shareToken}`;
+  if (anonymousShareToken) {
+    url += `?share_token=${anonymousShareToken}`;
   }
 
   // Don't use the normal fetch because this only works with xhr, and we want
@@ -1570,6 +1570,9 @@ const _doUpload = (
   const promise = new Promise<FileUploadResult>((resolve, reject) => {
     xhr.open('POST', url, true);
     xhr.setRequestHeader('Accept', 'application/json');
+    if (anonymousSessionToken) {
+      xhr.setRequestHeader('X-Anonymous-Thread-Session', anonymousSessionToken);
+    };
     xhr.upload.onprogress = onProgress;
     xhr.onreadystatechange = () => {
       if (xhr.readyState === 4) {

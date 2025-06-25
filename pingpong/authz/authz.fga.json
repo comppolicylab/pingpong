@@ -347,17 +347,8 @@
           }
         },
         "can_upload_user_files": {
-          "union": {
-            "child": [
-              {
-                "this": {}
-              },
-              {
-                "computedUserset": {
-                  "relation": "can_create_thread"
-                }
-              }
-            ]
+          "computedUserset": {
+            "relation": "can_create_thread"
           }
         },
         "can_receive_summaries": {
@@ -483,11 +474,7 @@
             ]
           },
           "can_upload_user_files": {
-            "directly_related_user_types": [
-              {
-                "type": "anonymous_user"
-              }
-            ]
+            "directly_related_user_types": []
           },
           "can_receive_summaries": {
             "directly_related_user_types": []

@@ -73,7 +73,7 @@ class ManageAuthzRequest(BaseModel):
 
 
 class AuthzEntity(BaseModel):
-    id: int | None = None
+    id: str | int | None = None
     type: str
 
 
@@ -87,13 +87,21 @@ class InspectAuthzListResult(BaseModel):
     list: list[int]
 
 
+class InspectAuthzListResultPermissive(BaseModel):
+    test: Literal["list"] = "list"
+    list: list[int | str]
+
+
 class InspectAuthzErrorResult(BaseModel):
     test: Literal["error"] = "error"
     error: str
 
 
 InspectAuthzResult = Union[
-    InspectAuthzTestResult, InspectAuthzListResult, InspectAuthzErrorResult
+    InspectAuthzTestResult,
+    InspectAuthzListResult,
+    InspectAuthzListResultPermissive,
+    InspectAuthzErrorResult,
 ]
 
 
