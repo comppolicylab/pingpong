@@ -3188,6 +3188,7 @@ class Thread(Base):
         back_populates="thread",
         lazy="selectin",
     )
+    conversation_id = Column(String, nullable=True)
     last_activity = Column(
         DateTime(timezone=True), index=True, nullable=False, default=func.now()
     )

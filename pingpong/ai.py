@@ -920,10 +920,14 @@ async def export_class_threads(
             )
             assistant_name = assistant.name if assistant else "Deleted Assistant"
 
-            user_hashes = [
-                generate_user_hash(class_, user) for user in thread.users
-            ] or ["Unknown user"]
-            user_hashes_str = ", ".join(user_hashes)
+            user_hashes_str = ""
+            if thread.conversation_id:
+                user_hashes_str = thread.conversation_id
+            else:
+                user_hashes = [
+                    generate_user_hash(class_, user) for user in thread.users
+                ] or ["Unknown user"]
+                user_hashes_str = ", ".join(user_hashes)
 
             user_emails_str = "REDACTED"
             if include_user_emails:
