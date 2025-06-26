@@ -37,7 +37,7 @@
    * Application data.
    */
   export let data;
-  const conversationId = $page.url.searchParams.get('conversation_id');
+  $: conversationId = $page.url.searchParams.get('conversation_id');
 
   const errorMessages: Record<number, string> = {
     1: 'We faced an issue when trying to sync with Canvas.'
