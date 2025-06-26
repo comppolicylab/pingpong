@@ -589,7 +589,6 @@ export const grants = async <T extends NamedGrantsQuery>(
   const results = await POST<GrantsQuery, Grants>(f, 'me/grants', { grants }, shareToken);
   const expanded = expandResponse(results);
   if (expanded.error) {
-    console.debug('expandResponse', expanded);
     throw expanded.error;
   }
 
@@ -1248,6 +1247,15 @@ export const getAllThreads = async (f: Fetcher, opts?: GetAllThreadsOpts) => {
   return getThreads(f, 'threads', opts);
 };
 
+export type AnonymousLink = {
+  id: number;
+  name: string | null;
+  share_token: string;
+  active: boolean;
+  activated_at: string | null;
+  revoked_at: string | null;
+};
+
 /**
  * Information about an assistant.
  */
@@ -1273,6 +1281,7 @@ export type Assistant = {
   endorsed: boolean | null;
   created: string;
   updated: string | null;
+  share_links: AnonymousLink[] | null;
 };
 
 /**
@@ -1444,6 +1453,40 @@ export const deleteAssistant = async (f: Fetcher, classId: number, assistantId: 
   return await DELETE<never, GenericStatus>(f, url);
 };
 
+export const createAssistantShareLink = async (
+  f: Fetcher,
+  classId: number,
+  assistantId: number
+) => {
+  const url = `class/${classId}/assistant/${assistantId}/share`;
+  return await POST<never, GenericStatus>(f, url);
+};
+
+export type UpdateAssistantShareLinkNameRequest = {
+  name: string;
+};
+
+export const updateAssistantShareLinkName = async (
+  f: Fetcher,
+  classId: number,
+  assistantId: number,
+  shareLinkId: number,
+  data: UpdateAssistantShareLinkNameRequest
+) => {
+  const url = `class/${classId}/assistant/${assistantId}/share/${shareLinkId}`;
+  return await PUT<UpdateAssistantShareLinkNameRequest, GenericStatus>(f, url, data);
+};
+
+export const deleteAssistantShareLink = async (
+  f: Fetcher,
+  classId: number,
+  assistantId: number,
+  shareLinkId: number
+) => {
+  const url = `class/${classId}/assistant/${assistantId}/share/${shareLinkId}`;
+  return await DELETE<never, GenericStatus>(f, url);
+};
+
 /**
  * file upload options.
  */
@@ -1572,7 +1615,7 @@ const _doUpload = (
     xhr.setRequestHeader('Accept', 'application/json');
     if (anonymousSessionToken) {
       xhr.setRequestHeader('X-Anonymous-Thread-Session', anonymousSessionToken);
-    };
+    }
     xhr.upload.onprogress = onProgress;
     xhr.onreadystatechange = () => {
       if (xhr.readyState === 4) {

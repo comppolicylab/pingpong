@@ -1916,6 +1916,8 @@ class AnonymousLink(Base):
         "Assistant",
         secondary=assistant_link_association,
         back_populates="anonymous_links",
+        uselist=False,
+        lazy="selectin",
     )
     user = relationship("User", back_populates="anonymous_link")
     files = relationship(
@@ -1925,7 +1927,7 @@ class AnonymousLink(Base):
     )
     active = Column(Boolean, default=True)
     activated_at = Column(DateTime(timezone=True), nullable=True)
-    deactivated_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
@@ -1952,6 +1954,34 @@ class AnonymousLink(Base):
         )
         await session.execute(stmt)
         return link
+
+    @classmethod
+    async def get_by_assistant_id(
+        cls, session: AsyncSession, assistant_id: int
+    ) -> List["AnonymousLink"]:
+        stmt = (
+            select(AnonymousLink)
+            .join(assistant_link_association)
+            .where(assistant_link_association.c.assistant_id == assistant_id)
+        )
+        result = await session.execute(stmt)
+        return [row.AnonymousLink for row in result]
+
+    @classmethod
+    async def get_by_id(cls, session: AsyncSession, id_: int) -> "AnonymousLink":
+        stmt = select(AnonymousLink).where(AnonymousLink.id == int(id_))
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def revoke(cls, session: AsyncSession, id_: int) -> "AnonymousLink":
+        stmt = (
+            update(AnonymousLink)
+            .where(AnonymousLink.id == int(id_))
+            .values(active=False, revoked_at=func.now())
+            .returning(AnonymousLink)
+        )
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
 
 
 class Assistant(Base):

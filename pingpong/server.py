@@ -166,7 +166,7 @@ async def parse_session_token(request: Request, call_next):
         anonymous_thread_session_token = request.headers.get(
             "X-Anonymous-Thread-Session"
         )
-        if anonymous_token or anonymous_thread_session_token:
+        if anonymous_token is not None or anonymous_thread_session_token is not None:
             request.state.anonymous_share_token = anonymous_token
             request.state.anonymous_session_token = anonymous_thread_session_token
 
@@ -182,7 +182,10 @@ async def parse_session_token(request: Request, call_next):
                     user.anonymous_link.share_token if user else None
                 )
             if not user:
-                raise UserNotFoundException("Please log in.")
+                request.state.session = schemas.SessionState(
+                    status=schemas.SessionStatus.MISSING,
+                )
+                return await call_next(request)
             request.state.is_anonymous = True
             request.state.anonymous_share_token_auth = (
                 f"anonymous_link:{request.state.anonymous_share_token}"
@@ -258,7 +261,10 @@ async def parse_session_token(request: Request, call_next):
                         user.anonymous_link.share_token if user else None
                     )
                 if not user:
-                    raise UserNotFoundException("Please log in.")
+                    request.state.session = schemas.SessionState(
+                        status=schemas.SessionStatus.MISSING,
+                    )
+                    return await call_next(request)
                 request.state.is_anonymous = True
                 request.state.anonymous_share_token_auth = (
                     f"anonymous_link:{request.state.anonymous_share_token}"
@@ -3902,6 +3908,11 @@ async def list_assistants(class_id: str, request: Request):
             for asst in assts
         ]
     )
+    is_class_supervisor = await request.state.authz.test(
+        f"user:{request.state.session.user.id}",
+        "supervisor",
+        f"class:{class_id}",
+    )
     for asst, has_elevated_permissions in zip(assts, has_elevated_perm_check):
         cur_asst = schemas.Assistant.model_validate(asst)
         if asst.hide_prompt and not has_elevated_permissions:
@@ -3915,6 +3926,11 @@ async def list_assistants(class_id: str, request: Request):
         # https://github.com/stanford-policylab/pingpong/issues/226
         if asst.published and asst.creator_id in endorsed_creators:
             cur_asst.endorsed = True
+
+        if is_class_supervisor:
+            cur_asst.share_links = await models.AnonymousLink.get_by_assistant_id(
+                request.state.db, asst.id
+            )
 
         ret_assistants.append(cur_asst)
 
@@ -4150,7 +4166,7 @@ async def preview_assistant_instructions(
 @v1.post(
     "/class/{class_id}/assistant/{assistant_id}/share",
     dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
-    response_model=schemas.AnonymousLink,
+    response_model=schemas.GenericStatus,
 )
 async def share_assistant(
     class_id: str,
@@ -4197,7 +4213,99 @@ async def share_assistant(
             (auth_user, "can_view", f"assistant:{assistant_id}"),
         ]
     )
-    return share_link
+    return {"status": "ok"}
+
+
+@v1.delete(
+    "/class/{class_id}/assistant/{assistant_id}/share/{share_id}",
+    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def unshare_assistant(
+    class_id: str,
+    assistant_id: str,
+    share_id: str,
+    request: Request,
+):
+    """
+    Remove an anonymous share of an assistant with the class.
+    """
+    asst, share_link = await asyncio.gather(
+        models.Assistant.get_by_id(request.state.db, int(assistant_id)),
+        models.AnonymousLink.get_by_id(request.state.db, int(share_id)),
+    )
+    if not asst:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Assistant {assistant_id} not found.",
+        )
+
+    if not share_link:
+        raise HTTPException(
+            status_code=404,
+            detail="Share link not found.",
+        )
+
+    if share_link.assistant.id != asst.id:
+        raise HTTPException(
+            status_code=400,
+            detail="This share link does not belong to the specified assistant.",
+        )
+
+    if not share_link.active:
+        raise HTTPException(
+            status_code=400,
+            detail="This share link is already inactive.",
+        )
+
+    auth_user = f"anonymous_link:{share_link.share_token}"
+
+    await models.AnonymousLink.revoke(
+        request.state.db,
+        share_link.id,
+    )
+    await request.state.authz.write_safe(
+        revoke=[
+            (auth_user, "can_view", f"class:{class_id}"),
+            (
+                auth_user,
+                "can_create_thread",
+                f"class:{class_id}",
+            ),
+            (auth_user, "can_view", f"assistant:{assistant_id}"),
+        ]
+    )
+    return {"status": "ok"}
+
+
+@v1.put(
+    "/class/{class_id}/assistant/{assistant_id}/share/{share_id}",
+    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def update_assistant_share_name(
+    class_id: str,
+    assistant_id: str,
+    share_id: str,
+    req: schemas.UpdateAssistantShareNameRequest,
+    request: Request,
+):
+    """
+    Update the name of an anonymous share of an assistant with the class.
+    """
+    share_link = await models.AnonymousLink.get_by_id(request.state.db, int(share_id))
+
+    if not share_link:
+        raise HTTPException(
+            status_code=404,
+            detail="Share link not found.",
+        )
+
+    share_link.name = req.name
+    request.state.db.add(share_link)
+    await request.state.db.flush()
+
+    return {"status": "ok"}
 
 
 @v1.put(

@@ -28,7 +28,7 @@ def upgrade() -> None:
         sa.Column("share_token", sa.String(), nullable=False),
         sa.Column("active", sa.Boolean(), nullable=True),
         sa.Column("activated_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("deactivated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "created",
             sa.DateTime(timezone=True),

@@ -11,7 +11,9 @@ class Expression:
     async def __call__(self, request: Request):
         if (
             not hasattr(request.state, "auth_user") or request.state.auth_user is None
-        ) and not request.state.is_anonymous:
+        ) and (
+            not hasattr(request.state, "is_anonymous") or not request.state.is_anonymous
+        ):
             raise HTTPException(
                 status_code=403,
                 detail=f"Missing valid session token: {request.state.session.status.value}",

@@ -334,7 +334,14 @@ class AnonymousLink(BaseModel):
     share_token: str
     active: bool
     activated_at: datetime | None
-    deactivated_at: datetime | None
+    revoked_at: datetime | None
+
+
+class AnonymousLinkResponse(BaseModel):
+    link: AnonymousLink
+
+    class Config:
+        from_attributes = True
 
 
 class Assistant(BaseModel):
@@ -359,6 +366,7 @@ class Assistant(BaseModel):
     endorsed: bool | None = None
     created: datetime
     updated: datetime | None
+    share_links: list[AnonymousLink] | None = None
 
     class Config:
         from_attributes = True
@@ -405,6 +413,10 @@ class AssistantInstructionsPreviewResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class UpdateAssistantShareNameRequest(BaseModel):
+    name: str
 
 
 class UpdateAssistant(BaseModel):
