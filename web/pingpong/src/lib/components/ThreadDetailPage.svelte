@@ -758,7 +758,12 @@
 </script>
 
 <div class="w-full flex flex-col justify-between grow min-h-0 relative">
-  <div class="overflow-y-auto pb-4 px-2 lg:px-4" use:scroll={$messages}>
+  <div
+    class={`overflow-y-auto pb-4 px-2 lg:px-4 ${
+      data.isSharedAssistantPage || data.isSharedThreadPage ? 'pt-10' : ''
+    }`}
+    use:scroll={$messages}
+  >
     {#if $canFetchMore}
       <div class="flex justify-center grow">
         <Button size="sm" class="text-sky-600 hover:text-sky-800" on:click={fetchMoreMessages}>

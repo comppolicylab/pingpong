@@ -309,18 +309,20 @@
             <Logo size={8} />
           </div>
           <div class="text-3xl font-medium">{assistant.name}</div>
-          <div class="flex flex-row gap-1 text-gray-400 text-sm font-normal items-center">
-            {#if assistantMeta.isCourseAssistant}
-              <BadgeCheckOutline size="sm" />
-              <span>Group assistant</span>
-            {:else if assistantMeta.isMyAssistant}
-              <UserOutline />
-              <span>Created by you</span>
-            {:else}
-              <UsersOutline />
-              <span>Created by {assistantMeta.creator}</span>
-            {/if}
-          </div>
+          {#if !(data.isSharedAssistantPage || data.isSharedThreadPage)}
+            <div class="flex flex-row gap-1 text-gray-400 text-sm font-normal items-center">
+              {#if assistantMeta.isCourseAssistant}
+                <BadgeCheckOutline size="sm" />
+                <span>Group assistant</span>
+              {:else if assistantMeta.isMyAssistant}
+                <UserOutline />
+                <span>Created by you</span>
+              {:else}
+                <UsersOutline />
+                <span>Created by {assistantMeta.creator}</span>
+              {/if}
+            </div>
+          {/if}
           {#if assistant.description}
             <div class="text-gray-700 text-sm">{assistant.description}</div>
           {/if}

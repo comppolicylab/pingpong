@@ -22,14 +22,16 @@
 </script>
 
 <div class="relative h-full w-full flex flex-col">
-  <div bind:this={headerEl}>
-    <ThreadHeader
-      current={data.class}
-      classes={data.classes}
-      canManage={data.canManage}
-      {isOnClassPage}
-      isSharedPage={data.isSharedAssistantPage || data.isSharedThreadPage}
-    />
-  </div>
+  {#if !(data.isSharedAssistantPage || data.isSharedThreadPage)}
+    <div bind:this={headerEl}>
+      <ThreadHeader
+        current={data.class}
+        classes={data.classes}
+        canManage={data.canManage}
+        {isOnClassPage}
+        isSharedPage={data.isSharedAssistantPage || data.isSharedThreadPage}
+      />
+    </div>
+  {/if}
   <slot />
 </div>
