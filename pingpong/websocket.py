@@ -49,9 +49,46 @@ def ws_parse_session_token(func):
         try:
             session_token = websocket.cookies["session"]
         except KeyError:
-            websocket.state.session = schemas.SessionState(
-                status=schemas.SessionStatus.MISSING,
-            )
+            if (
+                websocket.state.anonymous_share_token is not None
+                or websocket.state.anonymous_session_token is not None
+            ):
+                if websocket.state.anonymous_share_token:
+                    user = await models.User.get_by_share_token(
+                        websocket.state.db, websocket.state.anonymous_share_token
+                    )
+                else:
+                    user = await models.User.get_by_session_token(
+                        websocket.state.db, websocket.state.anonymous_session_token
+                    )
+                    websocket.state.anonymous_share_token = (
+                        user.anonymous_link.share_token if user else None
+                    )
+                if not user:
+                    websocket.state.session = schemas.SessionState(
+                        status=schemas.SessionStatus.MISSING,
+                    )
+                    await func(websocket, *args, **kwargs)
+                    return
+                websocket.state.is_anonymous = True
+                websocket.state.anonymous_share_token_auth = (
+                    f"anonymous_link:{websocket.state.anonymous_share_token}"
+                    if websocket.state.anonymous_share_token
+                    else None
+                )
+                websocket.state.anonymous_session_token_auth = (
+                    f"anonymous_user:{websocket.state.anonymous_session_token}"
+                    if websocket.state.anonymous_session_token
+                    else None
+                )
+                websocket.state.session = schemas.SessionState(
+                    status=schemas.SessionStatus.ANONYMOUS,
+                    user=user,
+                )
+            else:
+                websocket.state.session = schemas.SessionState(
+                    status=schemas.SessionStatus.MISSING,
+                )
         else:
             try:
                 token = decode_session_token(session_token)
@@ -89,32 +126,72 @@ def ws_parse_session_token(func):
                     agreement_id=agreement_id,
                 )
 
-            except TimeException as e:
-                websocket.state.session = schemas.SessionState(
-                    status=schemas.SessionStatus.INVALID,
-                    error=e.detail,
-                )
-            except UserNotFoundException as e:
-                browser_connection_logger.warning(
-                    f"parse_session_token: User not found: {e.user_id}"
-                )
-                websocket.state.session = schemas.SessionState(
-                    status=schemas.SessionStatus.ERROR,
-                    error=e.detail,
-                )
-            except PyJWTError as e:
-                websocket.state.session = schemas.SessionState(
-                    status=schemas.SessionStatus.INVALID,
-                    error=str(e),
-                )
+                websocket.state.auth_user = f"user:{user_id}"
+                websocket.state.is_anonymous = False
+
             except Exception as e:
-                browser_connection_logger.exception(
-                    "Error parsing session token: %s", e
-                )
-                websocket.state.session = schemas.SessionState(
-                    status=schemas.SessionStatus.ERROR,
-                    error=str(e),
-                )
+                # If the session token is invalid,
+                # we check for an anonymous session token.
+                if (
+                    websocket.state.anonymous_share_token is not None
+                    or websocket.state.anonymous_session_token is not None
+                ):
+                    if websocket.state.anonymous_share_token:
+                        user = await models.User.get_by_share_token(
+                            websocket.state.db, websocket.state.anonymous_share_token
+                        )
+                    else:
+                        user = await models.User.get_by_session_token(
+                            websocket.state.db, websocket.state.anonymous_session_token
+                        )
+                        websocket.state.anonymous_share_token = (
+                            user.anonymous_link.share_token if user else None
+                        )
+                    if not user:
+                        websocket.state.session = schemas.SessionState(
+                            status=schemas.SessionStatus.MISSING,
+                        )
+                        await func(websocket, *args, **kwargs)
+                        return
+                    websocket.state.is_anonymous = True
+                    websocket.state.anonymous_share_token_auth = (
+                        f"anonymous_link:{websocket.state.anonymous_share_token}"
+                        if websocket.state.anonymous_share_token
+                        else None
+                    )
+                    websocket.state.anonymous_session_token_auth = (
+                        f"anonymous_user:{websocket.state.anonymous_session_token}"
+                        if websocket.state.anonymous_session_token
+                        else None
+                    )
+                    websocket.state.session = schemas.SessionState(
+                        status=schemas.SessionStatus.ANONYMOUS,
+                        user=user,
+                    )
+                    await func(websocket, *args, **kwargs)
+                    return
+                else:
+                    if isinstance(e, PyJWTError) or isinstance(e, TimeException):
+                        websocket.state.session = schemas.SessionState(
+                            status=schemas.SessionStatus.INVALID,
+                            error=e.detail if isinstance(e, TimeException) else str(e),
+                        )
+                    elif isinstance(e, UserNotFoundException):
+                        browser_connection_logger.warning(
+                            f"parse_session_token: User not found: {e.user_id}"
+                        )
+                        websocket.state.session = schemas.SessionState(
+                            status=schemas.SessionStatus.ERROR,
+                            error=e.detail,
+                        )
+                    else:
+                        browser_connection_logger.exception(
+                            "Error parsing session token: %s", e
+                        )
+                        websocket.state.session = schemas.SessionState(
+                            status=schemas.SessionStatus.ERROR,
+                            error=str(e),
+                        )
         finally:
             return await func(websocket, *args, **kwargs)
 
@@ -122,9 +199,35 @@ def ws_parse_session_token(func):
 
 
 async def check_realtime_permissions(ws: WebSocket, thread_id: str):
-    if ws.state.session.status != schemas.SessionStatus.VALID:
+    if not (
+        ws.state.session.status == schemas.SessionStatus.VALID
+        or ws.state.session.status == schemas.SessionStatus.ANONYMOUS
+    ):
         raise ValueError("Your session token is invalid. Try logging in again.")
-    if not await ws.state.authz.test(
+    if hasattr(ws.state, "is_anonymous") and ws.state.is_anonymous:
+        grants_to_check = []
+        if ws.state.anonymous_share_token_auth:
+            grants_to_check.append(
+                (
+                    ws.state.anonymous_share_token_auth,
+                    "can_participate",
+                    f"thread:{thread_id}",
+                )
+            )
+        if ws.state.anonymous_session_token_auth:
+            grants_to_check.append(
+                (
+                    ws.state.anonymous_session_token_auth,
+                    "can_participate",
+                    f"thread:{thread_id}",
+                )
+            )
+        if not grants_to_check:
+            raise ValueError("You are not allowed to participate in this thread.")
+        results = await ws.state.authz.check(grants_to_check)
+        if not any(results):
+            raise ValueError("You are not allowed to participate in this thread.")
+    elif not await ws.state.authz.test(
         f"user:{ws.state.session.user.id}", "can_participate", f"thread:{thread_id}"
     ):
         raise ValueError("You are not allowed to participate in this thread.")

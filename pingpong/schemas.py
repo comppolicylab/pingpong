@@ -73,7 +73,7 @@ class ManageAuthzRequest(BaseModel):
 
 
 class AuthzEntity(BaseModel):
-    id: int | None = None
+    id: str | int | None = None
     type: str
 
 
@@ -87,13 +87,21 @@ class InspectAuthzListResult(BaseModel):
     list: list[int]
 
 
+class InspectAuthzListResultPermissive(BaseModel):
+    test: Literal["list"] = "list"
+    list: list[int | str]
+
+
 class InspectAuthzErrorResult(BaseModel):
     test: Literal["error"] = "error"
     error: str
 
 
 InspectAuthzResult = Union[
-    InspectAuthzTestResult, InspectAuthzListResult, InspectAuthzErrorResult
+    InspectAuthzTestResult,
+    InspectAuthzListResult,
+    InspectAuthzListResultPermissive,
+    InspectAuthzErrorResult,
 ]
 
 
@@ -132,13 +140,13 @@ class Profile(BaseModel):
             name=None,
             email=email,
             gravatar_id=hashed,
-            image_url=get_gravatar_image(email),
+            image_url=get_gravatar_image(email) if email else "",
         )
 
     @classmethod
     def from_user(cls, user: "User") -> "Profile":
         """Return a profile from an email address and name."""
-        hashed = get_email_hash(user.email)
+        hashed = get_email_hash(user.email) if user.email else ""
         name = (
             user.display_name
             if user.display_name
@@ -148,7 +156,7 @@ class Profile(BaseModel):
             name=name,
             email=user.email,
             gravatar_id=hashed,
-            image_url=get_gravatar_image(user.email),
+            image_url=get_gravatar_image(user.email) if user.email else "",
         )
 
 
@@ -159,14 +167,14 @@ class UserState(Enum):
 
 
 class UserNameMixin:
-    email: str
+    email: str | None
     first_name: str | None
     last_name: str | None
     display_name: str | None
 
     @computed_field  # type: ignore
     @property
-    def name(self) -> str:
+    def name(self) -> str | None:
         """Return some kind of name for the user."""
         if self.display_name:
             return self.display_name
@@ -320,6 +328,22 @@ class InteractionMode(StrEnum):
     VOICE = "voice"
 
 
+class AnonymousLink(BaseModel):
+    id: int
+    name: str | None
+    share_token: str
+    active: bool
+    activated_at: datetime | None
+    revoked_at: datetime | None
+
+
+class AnonymousLinkResponse(BaseModel):
+    link: AnonymousLink
+
+    class Config:
+        from_attributes = True
+
+
 class Assistant(BaseModel):
     id: int
     name: str
@@ -342,6 +366,7 @@ class Assistant(BaseModel):
     endorsed: bool | None = None
     created: datetime
     updated: datetime | None
+    share_links: list[AnonymousLink] | None = None
 
     class Config:
         from_attributes = True
@@ -388,6 +413,10 @@ class AssistantInstructionsPreviewResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class UpdateAssistantShareNameRequest(BaseModel):
+    name: str
 
 
 class UpdateAssistant(BaseModel):
@@ -439,6 +468,14 @@ class Thread(BaseModel):
     created: datetime
     last_activity: datetime
     display_user_info: bool
+
+    class Config:
+        from_attributes = True
+
+
+class ThreadWithOptionalToken(BaseModel):
+    thread: Thread
+    session_token: str | None = None
 
     class Config:
         from_attributes = True
@@ -1288,6 +1325,7 @@ class SessionToken(BaseModel):
 
 class SessionStatus(StrEnum):
     VALID = auto()
+    ANONYMOUS = auto()
     MISSING = auto()
     INVALID = auto()
     ERROR = auto()

@@ -7,6 +7,16 @@
       "metadata": null
     },
     {
+      "type": "anonymous_user",
+      "relations": {},
+      "metadata": null
+    },
+    {
+      "type": "anonymous_link",
+      "relations": {},
+      "metadata": null
+    },
+    {
       "type": "root",
       "relations": {
         "admin": {
@@ -203,8 +213,17 @@
           }
         },
         "can_view": {
-          "computedUserset": {
-            "relation": "member"
+          "union": {
+            "child": [
+              {
+                "this": {}
+              },
+              {
+                "computedUserset": {
+                  "relation": "member"
+                }
+              }
+            ]
           }
         },
         "can_view_users": {
@@ -247,8 +266,22 @@
           }
         },
         "can_create_thread": {
+          "union": {
+            "child": [
+              {
+                "this": {}
+              },
+              {
+                "computedUserset": {
+                  "relation": "member"
+                }
+              }
+            ]
+          }
+        },
+        "can_view_assistants": {
           "computedUserset": {
-            "relation": "member"
+            "relation": "can_view"
           }
         },
         "can_create_assistants": {
@@ -314,8 +347,17 @@
           }
         },
         "can_upload_user_files": {
-          "computedUserset": {
-            "relation": "can_create_thread"
+          "union": {
+            "child": [
+              {
+                "this": {}
+              },
+              {
+                "computedUserset": {
+                  "relation": "can_create_thread"
+                }
+              }
+            ]
           }
         },
         "can_receive_summaries": {
@@ -357,7 +399,11 @@
             "directly_related_user_types": []
           },
           "can_view": {
-            "directly_related_user_types": []
+            "directly_related_user_types": [
+              {
+                "type": "anonymous_link"
+              }
+            ]
           },
           "can_view_users": {
             "directly_related_user_types": []
@@ -379,6 +425,13 @@
             "directly_related_user_types": []
           },
           "can_create_thread": {
+            "directly_related_user_types": [
+              {
+                "type": "anonymous_link"
+              }
+            ]
+          },
+          "can_view_assistants": {
             "directly_related_user_types": []
           },
           "can_create_assistants": {
@@ -430,7 +483,11 @@
             ]
           },
           "can_upload_user_files": {
-            "directly_related_user_types": []
+            "directly_related_user_types": [
+              {
+                "type": "anonymous_user"
+              }
+            ]
           },
           "can_receive_summaries": {
             "directly_related_user_types": []
@@ -447,24 +504,43 @@
         "party": {
           "this": {}
         },
+        "anonymous_party": {
+          "this": {}
+        },
         "can_view": {
-          "intersection": {
+          "union": {
             "child": [
               {
-                "union": {
+                "intersection": {
                   "child": [
                     {
-                      "this": {}
-                    },
-                    {
-                      "computedUserset": {
-                        "relation": "party"
+                      "union": {
+                        "child": [
+                          {
+                            "this": {}
+                          },
+                          {
+                            "computedUserset": {
+                              "relation": "party"
+                            }
+                          },
+                          {
+                            "tupleToUserset": {
+                              "computedUserset": {
+                                "relation": "can_manage_threads"
+                              },
+                              "tupleset": {
+                                "relation": "parent"
+                              }
+                            }
+                          }
+                        ]
                       }
                     },
                     {
                       "tupleToUserset": {
                         "computedUserset": {
-                          "relation": "can_manage_threads"
+                          "relation": "member"
                         },
                         "tupleset": {
                           "relation": "parent"
@@ -475,34 +551,40 @@
                 }
               },
               {
-                "tupleToUserset": {
-                  "computedUserset": {
-                    "relation": "member"
-                  },
-                  "tupleset": {
-                    "relation": "parent"
-                  }
+                "computedUserset": {
+                  "relation": "anonymous_party"
                 }
               }
             ]
           }
         },
         "can_participate": {
-          "intersection": {
+          "union": {
             "child": [
               {
-                "computedUserset": {
-                  "relation": "party"
+                "intersection": {
+                  "child": [
+                    {
+                      "computedUserset": {
+                        "relation": "party"
+                      }
+                    },
+                    {
+                      "tupleToUserset": {
+                        "computedUserset": {
+                          "relation": "member"
+                        },
+                        "tupleset": {
+                          "relation": "parent"
+                        }
+                      }
+                    }
+                  ]
                 }
               },
               {
-                "tupleToUserset": {
-                  "computedUserset": {
-                    "relation": "member"
-                  },
-                  "tupleset": {
-                    "relation": "parent"
-                  }
+                "computedUserset": {
+                  "relation": "anonymous_party"
                 }
               }
             ]
@@ -524,6 +606,11 @@
                   "tupleset": {
                     "relation": "parent"
                   }
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "anonymous_party"
                 }
               }
             ]
@@ -612,6 +699,13 @@
             "directly_related_user_types": [
               {
                 "type": "user"
+              }
+            ]
+          },
+          "anonymous_party": {
+            "directly_related_user_types": [
+              {
+                "type": "anonymous_user"
               }
             ]
           },
@@ -859,6 +953,9 @@
               {
                 "type": "class",
                 "relation": "member"
+              },
+              {
+                "type": "anonymous_link"
               }
             ]
           },
@@ -949,6 +1046,9 @@
             "directly_related_user_types": [
               {
                 "type": "user"
+              },
+              {
+                "type": "anonymous_user"
               }
             ]
           },

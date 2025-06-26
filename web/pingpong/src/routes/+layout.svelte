@@ -19,6 +19,7 @@
       (!data.needsAgreements || !data.doNotShowSidebar)) ||
     (data.isPublicPage && !data.doNotShowSidebar);
   $: showStatusPage = data.me?.user;
+  $: showBackground = data.isSharedAssistantPage || data.isSharedThreadPage;
 </script>
 
 <SvelteToast />
@@ -36,6 +37,10 @@
   {#if showStatusPage}
     <script src="https://pingpong-hks.statuspage.io/embed/script.js"></script>
   {/if}
+{:else if showBackground}
+  <Main>
+    <slot />
+  </Main>
 {:else}
   <slot />
 {/if}

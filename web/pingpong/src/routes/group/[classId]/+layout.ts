@@ -5,8 +5,9 @@ import type { LayoutLoad } from './$types';
 /**
  * Load data needed for class layout.
  */
-export const load: LayoutLoad = async ({ fetch, params }) => {
+export const load: LayoutLoad = async ({ fetch, params, parent }) => {
   const classId = parseInt(params.classId, 10);
+  await parent();
 
   const [
     classDataResponse,

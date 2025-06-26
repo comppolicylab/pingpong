@@ -28,6 +28,11 @@ class AuthzClient(Protocol):
     ) -> List[int]: ...
 
     @abstractmethod
+    async def list_entities_permissive(
+        self, target: str, relation: str, type_: str
+    ) -> List[int | str]: ...
+
+    @abstractmethod
     async def expand(
         self, entity: str, relation: str, max_depth: int = 1
     ) -> List[RelatedObject]: ...

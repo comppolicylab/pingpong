@@ -51,6 +51,21 @@ async def add_message_to_thread(
         if is_user_message:
             metadata["user_id"] = str(browser_connection.state.session.user.id)
 
+        if (
+            hasattr(browser_connection.state, "anonymous_share_token")
+            and browser_connection.state.anonymous_share_token is not None
+        ):
+            metadata["share_token"] = str(
+                browser_connection.state.anonymous_share_token
+            )
+        if (
+            hasattr(browser_connection.state, "anonymous_session_token")
+            and browser_connection.state.anonymous_session_token is not None
+        ):
+            metadata["anonymous_session_token"] = str(
+                browser_connection.state.anonymous_session_token
+            )
+
         await openai_client.beta.threads.messages.create(
             thread_id=thread.thread_id,
             role="user" if is_user_message else "assistant",
