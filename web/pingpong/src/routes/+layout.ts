@@ -15,6 +15,13 @@ const LOGOUT = '/logout';
  * Load the current user and redirect if they are not logged in.
  */
 export const load: LayoutLoad = async ({ fetch, url }) => {
+  // Check if we have a share token in the URL.
+  // If so, we will allow access to the page without authentication.
+  const t = url.searchParams.get('share_token');
+  if (t) {
+    api.setAnonymousShareToken(t);
+  }
+
   // Fetch the current user
   const me = api.expandResponse(await api.me(fetch));
 
@@ -39,13 +46,6 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 
   // If the page is public, don't redirect to the login page.
   let isPublicPage = false;
-
-  // Check if we have a share token in the URL.
-  // If so, we will allow access to the page without authentication.
-  const t = url.searchParams.get('share_token');
-  if (t) {
-    api.setAnonymousShareToken(t);
-  }
 
   // Check if the url has format /group/[classId]/shared/assistant/[assistantId]
   const sharedAssistantPattern = /\/group\/(\d+)\/shared\/assistant\/(\d+)/;

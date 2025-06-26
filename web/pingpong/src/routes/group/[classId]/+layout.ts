@@ -7,9 +7,8 @@ import type { LayoutLoad } from './$types';
  */
 export const load: LayoutLoad = async ({ fetch, params, parent }) => {
   const classId = parseInt(params.classId, 10);
-  const parentData = await parent();
+  await parent();
 
-  const shareToken = parentData.shareToken;
   const [
     classDataResponse,
     assistantsResponse,
@@ -19,24 +18,20 @@ export const load: LayoutLoad = async ({ fetch, params, parent }) => {
     teachersResponse,
     hasAPIKeyResponse
   ] = await Promise.all([
-    api.getClass(fetch, classId, shareToken).then(api.expandResponse),
-    api.getAssistants(fetch, classId, shareToken).then(api.expandResponse),
+    api.getClass(fetch, classId).then(api.expandResponse),
+    api.getAssistants(fetch, classId).then(api.expandResponse),
     api.getClassFiles(fetch, classId).then(api.expandResponse),
-    api.getClassUploadInfo(fetch, classId, shareToken),
-    api.grants(
-      fetch,
-      {
-        canManage: { target_type: 'class', target_id: classId, relation: 'supervisor' },
-        isSupervisor: {
-          target_type: 'class',
-          target_id: classId,
-          relation: 'supervisor'
-        }
-      },
-      shareToken
-    ),
-    api.getSupervisors(fetch, classId, shareToken).then(api.expandResponse),
-    api.hasAPIKey(fetch, classId, shareToken).then(api.expandResponse)
+    api.getClassUploadInfo(fetch, classId),
+    api.grants(fetch, {
+      canManage: { target_type: 'class', target_id: classId, relation: 'supervisor' },
+      isSupervisor: {
+        target_type: 'class',
+        target_id: classId,
+        relation: 'supervisor'
+      }
+    }),
+    api.getSupervisors(fetch, classId).then(api.expandResponse),
+    api.hasAPIKey(fetch, classId).then(api.expandResponse)
   ]);
 
   if (classDataResponse.error) {
@@ -64,7 +59,6 @@ export const load: LayoutLoad = async ({ fetch, params, parent }) => {
     canManage: grants.canManage,
     isSupervisor: grants.isSupervisor,
     hasAPIKey,
-    supervisors,
-    shareToken
+    supervisors
   };
 };

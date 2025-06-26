@@ -251,8 +251,7 @@ const _qmethod = async <T extends BaseData, R extends BaseData>(
   f: Fetcher,
   method: 'GET' | 'DELETE',
   path: string,
-  data?: T,
-  shareToken?: string | null
+  data?: T
 ) => {
   // Treat args the same as when passed in the body.
   // Specifically, we want to remove "undefined" values.
@@ -272,8 +271,7 @@ const _bmethod = async <T extends BaseData, R extends BaseData>(
   f: Fetcher,
   method: 'POST' | 'PUT' | 'PATCH',
   path: string,
-  data?: T,
-  shareToken?: string | null
+  data?: T
 ) => {
   const body = JSON.stringify(data);
   if (anonymousShareToken) {
@@ -287,13 +285,8 @@ const _bmethod = async <T extends BaseData, R extends BaseData>(
 /**
  * Query with GET.
  */
-const GET = async <T extends BaseData, R extends BaseData>(
-  f: Fetcher,
-  path: string,
-  data?: T,
-  shareToken?: string | null
-) => {
-  return await _qmethod<T, R>(f, 'GET', path, data, shareToken);
+const GET = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T) => {
+  return await _qmethod<T, R>(f, 'GET', path, data);
 };
 
 /**
@@ -302,34 +295,23 @@ const GET = async <T extends BaseData, R extends BaseData>(
 const DELETE = async <T extends BaseData, R extends BaseData>(
   f: Fetcher,
   path: string,
-  data?: T,
-  shareToken?: string | null
+  data?: T
 ) => {
-  return await _qmethod<T, R>(f, 'DELETE', path, data, shareToken);
+  return await _qmethod<T, R>(f, 'DELETE', path, data);
 };
 
 /**
  * Query with POST.
  */
-const POST = async <T extends BaseData, R extends BaseData>(
-  f: Fetcher,
-  path: string,
-  data?: T,
-  shareToken?: string | null
-) => {
-  return await _bmethod<T, R>(f, 'POST', path, data, shareToken);
+const POST = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T) => {
+  return await _bmethod<T, R>(f, 'POST', path, data);
 };
 
 /**
  * Query with PUT.
  */
-const PUT = async <T extends BaseData, R extends BaseData>(
-  f: Fetcher,
-  path: string,
-  data?: T,
-  shareToken?: string | null
-) => {
-  return await _bmethod<T, R>(f, 'PUT', path, data, shareToken);
+const PUT = async <T extends BaseData, R extends BaseData>(f: Fetcher, path: string, data?: T) => {
+  return await _bmethod<T, R>(f, 'PUT', path, data);
 };
 
 /**
@@ -338,10 +320,9 @@ const PUT = async <T extends BaseData, R extends BaseData>(
 const PATCH = async <T extends BaseData, R extends BaseData>(
   f: Fetcher,
   path: string,
-  data?: T,
-  shareToken?: string | null
+  data?: T
 ) => {
-  return await _bmethod<T, R>(f, 'PATCH', path, data, shareToken);
+  return await _bmethod<T, R>(f, 'PATCH', path, data);
 };
 
 /**
@@ -580,13 +561,12 @@ export type NamedGrants = {
  */
 export const grants = async <T extends NamedGrantsQuery>(
   f: Fetcher,
-  query: T,
-  shareToken?: string | null
+  query: T
 ): Promise<{ [name in keyof T]: boolean }> => {
   const grantNames = Object.keys(query);
   const grants = grantNames.map((name) => query[name]);
 
-  const results = await POST<GrantsQuery, Grants>(f, 'me/grants', { grants }, shareToken);
+  const results = await POST<GrantsQuery, Grants>(f, 'me/grants', { grants });
   const expanded = expandResponse(results);
   if (expanded.error) {
     throw expanded.error;
@@ -1067,9 +1047,9 @@ export type ApiKeyCheck = {
   has_api_key: boolean;
 };
 
-export const hasAPIKey = async (f: Fetcher, classId: number, shareToken?: string | null) => {
+export const hasAPIKey = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/api_key/check`;
-  return await GET<never, ApiKeyCheck>(f, url, undefined, shareToken);
+  return await GET<never, ApiKeyCheck>(f, url);
 };
 
 /**
@@ -1143,17 +1123,17 @@ export const getModelsLite = async (f: Fetcher) => {
 /**
  * Fetch a class by ID.
  */
-export const getClass = async (f: Fetcher, classId: number, shareToken?: string | null) => {
+export const getClass = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}`;
-  return await GET<never, Class>(f, url, undefined, shareToken);
+  return await GET<never, Class>(f, url);
 };
 
 /**
  * Fetch all files for a class.
  */
-export const getClassFiles = async (f: Fetcher, classId: number, shareToken?: string | null) => {
+export const getClassFiles = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/files`;
-  return await GET<never, ServerFiles>(f, url, undefined, shareToken);
+  return await GET<never, ServerFiles>(f, url);
 };
 
 /**
@@ -1302,9 +1282,9 @@ export type Assistants = {
 /**
  * Fetch all assistants for a class.
  */
-export const getAssistants = async (f: Fetcher, classId: number, shareToken?: string | null) => {
+export const getAssistants = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/assistants`;
-  return await GET<never, Assistants>(f, url, undefined, shareToken);
+  return await GET<never, Assistants>(f, url);
 };
 
 /**
@@ -1518,11 +1498,10 @@ export const uploadUserFile = (
   file: File,
   opts?: UploadOptions,
   purpose: FileUploadPurpose = 'assistants',
-  useImageDescriptions: boolean = false,
-  shareToken?: string | null
+  useImageDescriptions: boolean = false
 ) => {
   const url = fullPath(`class/${classId}/user/${userId}/file`);
-  return _doUpload(url, file, opts, purpose, useImageDescriptions, shareToken);
+  return _doUpload(url, file, opts, purpose, useImageDescriptions);
 };
 
 /**
@@ -1577,8 +1556,7 @@ const _doUpload = (
   file: File,
   opts?: UploadOptions,
   purpose: FileUploadPurpose = 'assistants',
-  useImageDescriptions: boolean = false,
-  shareToken?: string | null
+  useImageDescriptions: boolean = false
 ): FileUploadInfo => {
   if (!browser) {
     throw new Error('File uploads are not supported in this environment.');
@@ -1678,11 +1656,10 @@ export const deleteUserFile = async (
   f: Fetcher,
   classId: number,
   userId: number,
-  fileId: number,
-  shareToken?: string | null
+  fileId: number
 ) => {
   const url = `class/${classId}/user/${userId}/file/${fileId}`;
-  return await DELETE<never, GenericStatus>(f, url, undefined, shareToken);
+  return await DELETE<never, GenericStatus>(f, url);
 };
 
 /**
@@ -1764,9 +1741,9 @@ export type SupervisorUser = {
  * Fetch teachers in a class.
  *
  */
-export const getSupervisors = async (f: Fetcher, classId: number, shareToken?: string | null) => {
+export const getSupervisors = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/supervisors`;
-  return await GET<never, ClassSupervisors>(f, url, undefined, shareToken);
+  return await GET<never, ClassSupervisors>(f, url);
 };
 
 /**
@@ -1983,14 +1960,9 @@ export type ThreadWithOptionalToken = {
 /**
  * Create a new conversation thread.
  */
-export const createThread = async (
-  f: Fetcher,
-  classId: number,
-  data: CreateThreadRequest,
-  shareToken?: string | null
-) => {
+export const createThread = async (f: Fetcher, classId: number, data: CreateThreadRequest) => {
   const url = `class/${classId}/thread`;
-  return await POST<CreateThreadRequest, ThreadWithOptionalToken>(f, url, data, shareToken);
+  return await POST<CreateThreadRequest, ThreadWithOptionalToken>(f, url, data);
 };
 
 /**
@@ -2812,13 +2784,9 @@ export type GetFileSupportFilter = (
 /**
  * Get information about uploading files.
  */
-export const getClassUploadInfo = async (
-  f: Fetcher,
-  classId: number,
-  shareToken?: string | null
-) => {
+export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
   const url = `class/${classId}/upload_info`;
-  const infoResponse = expandResponse(await GET<never, UploadInfo>(f, url, undefined, shareToken));
+  const infoResponse = expandResponse(await GET<never, UploadInfo>(f, url));
 
   const info = infoResponse.data || {
     types: [],
