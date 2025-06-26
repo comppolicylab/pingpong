@@ -1869,12 +1869,14 @@ export type CreateThreadRequest = {
   vision_file_ids?: string[];
   vision_image_descriptions?: ImageProxy[];
   timezone?: string | null;
+  conversation_id?: string | null;
 };
 
 export type CreateAudioThreadRequest = {
   assistant_id: number;
   parties?: number[];
   timezone?: string | null;
+  conversation_id?: string | null;
 };
 
 export type VoiceModeRecordingInfo = {

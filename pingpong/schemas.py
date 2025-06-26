@@ -511,6 +511,7 @@ class CreateThread(BaseModel):
     tools_available: list[Tool]
     assistant_id: int
     timezone: str | None = None
+    conversation_id: str | None = None
 
     _file_check = model_validator(mode="after")(file_validator)
 
@@ -541,6 +542,7 @@ class CreateAudioThread(BaseModel):
     parties: list[int] = []
     assistant_id: int
     timezone: str | None = None
+    conversation_id: str | None = None
 
 
 class CreateThreadRunRequest(BaseModel):

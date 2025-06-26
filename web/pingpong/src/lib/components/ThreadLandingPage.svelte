@@ -37,6 +37,7 @@
    * Application data.
    */
   export let data;
+  const conversationId = $page.url.searchParams.get('conversation_id');
 
   const errorMessages: Record<number, string> = {
     1: 'We faced an issue when trying to sync with Canvas.'
@@ -167,7 +168,9 @@
         await api.createAudioThread(fetch, data.class.id, {
           assistant_id: assistant.id,
           parties: partyIds,
-          timezone: userTimezone
+          timezone: userTimezone,
+          conversation_id:
+            data.isSharedAssistantPage || data.isSharedThreadPage ? conversationId : null
         })
       );
       data.threads = [newThreadOpts.thread as api.Thread, ...data.threads];
@@ -207,7 +210,9 @@
           file_search_file_ids: [],
           vision_file_ids: [],
           vision_image_descriptions: [],
-          timezone: userTimezone
+          timezone: userTimezone,
+          conversation_id:
+            data.isSharedAssistantPage || data.isSharedThreadPage ? conversationId : null
         })
       );
       data.threads = [newThreadOpts.thread as api.Thread, ...data.threads];
@@ -259,7 +264,9 @@
           code_interpreter_file_ids: form.code_interpreter_file_ids,
           file_search_file_ids: form.file_search_file_ids,
           vision_file_ids: form.vision_file_ids,
-          vision_image_descriptions: form.visionFileImageDescriptions
+          vision_image_descriptions: form.visionFileImageDescriptions,
+          conversation_id:
+            data.isSharedAssistantPage || data.isSharedThreadPage ? conversationId : null
         })
       );
       data.threads = [newThreadOpts.thread as api.Thread, ...data.threads];
