@@ -2002,7 +2002,7 @@ export const createAudioThread = async (
   data: CreateAudioThreadRequest
 ) => {
   const url = `class/${classId}/thread/audio`;
-  return await POST<CreateAudioThreadRequest, Thread>(f, url, data);
+  return await POST<CreateAudioThreadRequest, ThreadWithOptionalToken>(f, url, data);
 };
 
 /**
@@ -3072,6 +3072,13 @@ export const createAudioWebsocket = (classId: number, threadId: number): WebSock
   }
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const host = window.location.host;
-  const url = `${protocol}://${host}/api/v1/class/${classId}/thread/${threadId}/audio`;
+  const params = new URLSearchParams();
+  if (anonymousSessionToken) {
+    params.set('session_token', anonymousSessionToken);
+  }
+  if (anonymousShareToken) {
+    params.set('share_token', anonymousShareToken);
+  }
+  const url = `${protocol}://${host}/api/v1/class/${classId}/thread/${threadId}/audio?${params}`;
   return new WebSocket(url);
 };

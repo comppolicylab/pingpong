@@ -2237,7 +2237,11 @@ async def audio_stream(
     websocket: WebSocket,
     class_id: str,
     thread_id: str,
+    share_token: str | None = None,
+    session_token: str | None = None,
 ):
+    websocket.state.anonymous_share_token = share_token
+    websocket.state.anonymous_session_token = session_token
     await browser_realtime_websocket(websocket, class_id, thread_id)
 
 
@@ -2302,13 +2306,19 @@ async def get_thread(
             message.metadata["is_current_user"] = True
         else:
             message.metadata["is_current_user"] = False
-        message.metadata["name"] = (
-            name(users[user_id])
-            if thread.display_user_info and is_supervisor
-            else "Anonymous User"
-            if thread.private
-            else pseudonym(thread, users[user_id])
-        )
+        if user_id not in users:
+            if is_current_user:
+                message.metadata["name"] = "Me"
+            else:
+                message.metadata["name"] = "Unknown User"
+        else:
+            message.metadata["name"] = (
+                name(users[user_id])
+                if thread.display_user_info and is_supervisor
+                else "Anonymous User"
+                if thread.private
+                else pseudonym(thread, users[user_id])
+            )
     placeholder_ci_calls = []
     if "code_interpreter" in thread.tools_available and messages.data:
         placeholder_ci_calls = await get_placeholder_ci_calls(
@@ -2941,7 +2951,7 @@ async def list_threads(
 @v1.post(
     "/class/{class_id}/thread/audio",
     dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
-    response_model=schemas.Thread,
+    response_model=schemas.ThreadWithOptionalToken,
 )
 async def create_audio_thread(
     class_id: str,
@@ -2951,6 +2961,15 @@ async def create_audio_thread(
 ):
     parties = list[models.User]()
     thread = None
+
+    anonymous_session: models.AnonymousSession | None = None
+    anonymous_user: models.User | None = None
+    if request.state.is_anonymous:
+        anonymous_session = await models.AnonymousSession.create(
+            request.state.db, str(uuid.uuid7()), user_id=request.state.session.user.id
+        )
+        anonymous_user = anonymous_session.user
+
     try:
         thread, class_, parties, assistant = await asyncio.gather(
             openai_client.beta.threads.create(
@@ -3000,13 +3019,17 @@ async def create_audio_thread(
             detail="We faced an error while creating your conversation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
         )
 
+    all_parties = parties or []
+    if anonymous_user:
+        all_parties.append(anonymous_user)
     new_thread = {
         "name": "Audio Conversation",
         "class_id": int(class_id),
-        "private": True if parties else False,
+        "private": True if all_parties else False,
         "interaction_mode": "voice",
-        "users": parties or [],
+        "users": all_parties,
         "thread_id": thread.id,
+        "anonymous_sessions": [anonymous_session] if anonymous_session else [],
         "assistant_id": req.assistant_id,
         "vector_store_id": None,
         "code_interpreter_file_ids": [],
@@ -3033,9 +3056,29 @@ async def create_audio_thread(
         grants = [
             (f"class:{class_id}", "parent", f"thread:{result.id}"),
         ] + [(f"user:{p.id}", "party", f"thread:{result.id}") for p in parties]
+        if anonymous_session:
+            grants.extend(
+                [
+                    (
+                        f"anonymous_user:{anonymous_session.session_token}",
+                        "anonymous_party",
+                        f"thread:{result.id}",
+                    ),
+                    (
+                        f"anonymous_user:{anonymous_session.session_token}",
+                        "can_upload_user_files",
+                        f"class:{class_id}",
+                    ),
+                ]
+            )
         await request.state.authz.write(grant=grants)
 
-        return result
+        return {
+            "thread": result,
+            "session_token": anonymous_session.session_token
+            if anonymous_session
+            else None,
+        }
     except Exception as e:
         logger.exception("Error creating thread: %s", e)
         await openai_client.beta.threads.delete(thread.id)

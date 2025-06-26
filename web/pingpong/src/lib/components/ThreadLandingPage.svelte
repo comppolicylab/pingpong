@@ -163,16 +163,21 @@
     $loading = true;
     const partyIds = parties ? parties.split(',').map((id) => parseInt(id, 10)) : [];
     try {
-      const newThread = api.explodeResponse(
+      const newThreadOpts = api.explodeResponse(
         await api.createAudioThread(fetch, data.class.id, {
           assistant_id: assistant.id,
           parties: partyIds,
           timezone: userTimezone
         })
       );
-      data.threads = [newThread as api.Thread, ...data.threads];
+      data.threads = [newThreadOpts.thread as api.Thread, ...data.threads];
+      api.setAnonymousSessionToken(newThreadOpts.session_token || null);
       $loading = false;
-      await goto(`/group/${$page.params.classId}/thread/${newThread.id}`);
+      if (api.hasAnonymousSessionToken()) {
+        await goto(`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}`);
+      } else {
+        await goto(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`);
+      }
     } catch (e) {
       $loading = false;
       sadToast(
