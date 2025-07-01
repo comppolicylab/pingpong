@@ -763,6 +763,7 @@ class MultipleClassThreadExportRequest(BaseModel):
     class_ids: list[int]
     user_emails: list[str] | None = None
     user_ids: list[int] | None = None
+    include_user_emails: bool = False
 
 
 class CreateUserInviteConfig(BaseModel):
