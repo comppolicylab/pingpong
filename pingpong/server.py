@@ -2537,7 +2537,7 @@ async def export_class_threads_multiple_classes(
         export_threads_multiple_classes,
         data.class_ids,
         request.state.session.user.id,
-        False,
+        data.include_user_emails,
         data.user_ids,
         data.user_emails,
     )
