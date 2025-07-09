@@ -470,9 +470,17 @@ async def login_sso_saml_acs(provider: str, request: Request):
 
     attrs = get_saml2_attrs(sso_config, saml_client)
 
+    if not attrs.email:
+        raise HTTPException(
+            status_code=400, detail="SAML response does not contain an email address"
+        )
+
     # Create user if missing. Update if already exists.
     user = await models.User.get_by_email_sso(
-        request.state.db, attrs.email, provider, attrs.identifier
+        request.state.db,
+        attrs.email,
+        provider,
+        attrs.identifier if attrs.identifier else None,
     )
     if not user:
         user = models.User(
@@ -481,9 +489,12 @@ async def login_sso_saml_acs(provider: str, request: Request):
 
     # Update user info
     user.email = attrs.email
-    user.first_name = attrs.first_name
-    user.last_name = attrs.last_name
-    user.display_name = attrs.name
+    if attrs.first_name:
+        user.first_name = attrs.first_name
+    if attrs.last_name:
+        user.last_name = attrs.last_name
+    if attrs.name:
+        user.display_name = attrs.name
     user.state = schemas.UserState.VERIFIED
 
     # Save user to DB
@@ -491,17 +502,18 @@ async def login_sso_saml_acs(provider: str, request: Request):
     await request.state.db.flush()
     await request.state.db.refresh(user)
 
-    # Add external login and get accounts to merge
-    await models.ExternalLogin.create_or_update(
-        request.state.db, user.id, provider=provider, identifier=attrs.identifier
-    )
-    user_ids = await models.ExternalLogin.accounts_to_merge(
-        request.state.db, user.id, provider=provider, identifier=attrs.identifier
-    )
+    if attrs.identifier:
+        # Add external login and get accounts to merge
+        await models.ExternalLogin.create_or_update(
+            request.state.db, user.id, provider=provider, identifier=attrs.identifier
+        )
+        user_ids = await models.ExternalLogin.accounts_to_merge(
+            request.state.db, user.id, provider=provider, identifier=attrs.identifier
+        )
 
-    # Merge accounts
-    for uid in user_ids:
-        await merge(request.state.db, request.state.authz, user.id, uid)
+        # Merge accounts
+        for uid in user_ids:
+            await merge(request.state.db, request.state.authz, user.id, uid)
 
     url = "/"
     if "RelayState" in saml_client._request_data["get_data"]:
