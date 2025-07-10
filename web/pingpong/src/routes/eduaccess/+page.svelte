@@ -33,9 +33,9 @@
       <b>honorarium of $1,000</b> will be provided to all participating instructors.</P
     >
     <P class="mt-4"
-      >We are now considering applications for fall 2025 courses. <b
-        >To participate, complete the application linked below to confirm your eligibility.</b
-      >Our team will be in touch on a rolling basis to confirm participation for the Fall 2025
+      >We are now considering applications for Fall 2025 courses. <b
+        >To participate, complete the application linked below to confirm your eligibility.
+      </b>Our team will be in touch on a rolling basis to confirm participation for the Fall 2025
       semester.
     </P>
   </div>
@@ -44,7 +44,7 @@
   >
     <Button
       pill
-      href="https://harvard.az1.qualtrics.com/jfe/form/SV_1Sr6Sa6kM7Z4VMO"
+      href="https://pingpong.hks.harvard.edu/application"
       rel="noopener noreferrer"
       target="_blank"
       class="text-white inline-flex justify-center text-lg items-center px-5 font-medium text-lg bg-blue-dark-40 hover:bg-blue-dark-50 shadow-md"
@@ -126,8 +126,16 @@
       <h3 class="text-lg font-semibold">What does participation entail?</h3>
       <ol class="list-disc ml-7 font-light">
         <li class="my-2">
+          Agree that you and your students will not use other generative AI teaching tools — like
+          ChatGPT — for the duration of the study.
+        </li>
+        <li class="my-2">
           Administer a short (15 minute) online assessment for students at the beginning of the
           semester, as a part of your course's required assignments.
+        </li>
+        <li class="my-2">
+          Integrate PingPong into your courses if you are randomly selected to be in the treatment
+          group.
         </li>
         <li class="my-2">
           Administer a short (15 minute) online assessment for students at the end of the semester,
@@ -157,18 +165,19 @@
       <h3 class="text-lg font-semibold">How can I participate?</h3>
       <span class="my-2 font-light">
         Complete <a
-          href="https://harvard.az1.qualtrics.com/jfe/form/SV_3xRMxp1g44nnjka"
+          href="https://pingpong.hks.harvard.edu/application"
           rel="noopener noreferrer"
           class="underline"
-          target="_blank">this short (5-question) survey</a
+          target="_blank">this short (15-minute) survey</a
         >
-        to indicate your interest. Our team will follow up in late spring 2025 to confirm eligibility
-        for summer 2025 courses.<br /><br />For further questions, please contact
+        to confirm your eligibility. Our team will be in touch on a rolling basis to confirm participation
+        for the Fall 2025 semester.
+        <br /><br />For further questions, please contact
         <a
-          href="mailto:pingpongedu@hks.harvard.edu"
+          href="mailto:support@pingpong-hks.atlassian.net"
           rel="noopener noreferrer"
           class="underline"
-          target="_blank">pingpongedu@hks.harvard.edu</a
+          target="_blank">support@pingpong-hks.atlassian.net</a
         >.
       </span>
     </figure>
@@ -184,10 +193,10 @@
       IRB. If you need a copy of the approval letter or additional documentation, please contact us directly
       at
       <a
-        href="mailto:pingpongedu@hks.harvard.edu"
+        href="mailto:support@pingpong-hks.atlassian.net"
         rel="noopener noreferrer"
         class="underline"
-        target="_blank">pingpongedu@hks.harvard.edu</a
+        target="_blank">support@pingpong-hks.atlassian.net</a
       >.
     </li>
     <li class="my-2">
@@ -207,6 +216,10 @@
           anonymized and securely stored to protect student privacy. Students who do not consent to
           study participation will still receive access to PingPong (see below for access timing
           details).
+        </li>
+        <li class="my-2">
+          If admitted to the study, you agree that you and your students will not use other
+          generative AI teaching tools — like ChatGPT — for the duration of the study.
         </li>
       </ol>
     </li>
