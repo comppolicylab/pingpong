@@ -3,23 +3,23 @@ from abc import abstractmethod
 
 from fastapi import HTTPException, Request
 
-from .schemas import SessionStatus
 
 logger = logging.getLogger(__name__)
 
 
 class Expression:
     async def __call__(self, request: Request):
-        if request.state.session.status != SessionStatus.VALID:
+        if (
+            not hasattr(request.state, "auth_user") or request.state.auth_user is None
+        ) and (
+            not hasattr(request.state, "is_anonymous") or not request.state.is_anonymous
+        ):
             raise HTTPException(
                 status_code=403,
                 detail=f"Missing valid session token: {request.state.session.status.value}",
             )
 
         if not await self.test_with_cache(request):
-            logger.warning(
-                f"Permission denied for user {request.state.session.user.id} on {self}"
-            )
             raise HTTPException(status_code=403, detail="Missing required role")
 
     async def test_with_cache(self, request: Request) -> bool:
@@ -95,7 +95,9 @@ class Not(Expression):
 
 class LoggedIn(Expression):
     async def test(self, request: Request) -> bool:
-        return request.state.session.status == SessionStatus.VALID
+        return (
+            hasattr(request.state, "auth_user") and request.state.auth_user is not None
+        ) or request.state.is_anonymous
 
     def __str__(self):
         return "LoggedIn()"
@@ -114,8 +116,34 @@ class Authz(Expression):
                 target = target.format_map(request.path_params or {})
             else:
                 target = request.state.authz.root
+
+            # If the user is anonymous, check their anonymous permissions.
+            if request.state.is_anonymous:
+                grants_to_check = []
+                if request.state.anonymous_share_token_auth:
+                    grants_to_check.append(
+                        (
+                            request.state.anonymous_share_token_auth,
+                            self.relation,
+                            target,
+                        )
+                    )
+                if request.state.anonymous_session_token_auth:
+                    grants_to_check.append(
+                        (
+                            request.state.anonymous_session_token_auth,
+                            self.relation,
+                            target,
+                        )
+                    )
+                if not grants_to_check:
+                    return False
+                results = await request.state.authz.check(grants_to_check)
+                return any(results)
+
+            # If the user is logged in, check their permissions.
             return await request.state.authz.test(
-                f"user:{request.state.session.user.id}",
+                request.state.auth_user,
                 self.relation,
                 target,
             )

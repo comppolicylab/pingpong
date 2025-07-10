@@ -154,6 +154,40 @@ export const fullPath = (path: string) => {
 };
 
 /**
+ * Session token for anonymous threads.
+ */
+let anonymousSessionToken: string | null = null;
+
+export const setAnonymousSessionToken = (token: string | null) => {
+  anonymousSessionToken = token;
+};
+
+export const resetAnonymousSessionToken = () => {
+  anonymousSessionToken = null;
+};
+
+export const hasAnonymousSessionToken = () => {
+  return anonymousSessionToken !== null;
+};
+
+/**
+ * Share token for anonymous assistant access.
+ */
+let anonymousShareToken: string | null = null;
+
+export const setAnonymousShareToken = (token: string | null) => {
+  anonymousShareToken = token;
+};
+
+export const resetAnonymousShareToken = () => {
+  anonymousShareToken = null;
+};
+
+export const hasAnonymousShareToken = () => {
+  return anonymousShareToken !== null;
+};
+
+/**
  * Common fetch method.
  */
 const _fetch = async (
@@ -164,6 +198,13 @@ const _fetch = async (
   body?: string | FormData
 ) => {
   const full = fullPath(path);
+  if (anonymousSessionToken) {
+    // If we have a session token for anonymous threads, add it to the headers.
+    headers = {
+      ...headers,
+      'X-Anonymous-Thread-Session': anonymousSessionToken
+    };
+  }
   return f(full, {
     method,
     headers,
@@ -183,6 +224,13 @@ const _fetchJSON = async <R extends BaseData>(
   headers?: Record<string, string>,
   body?: string | FormData
 ): Promise<(R | Error | ValidationError) & BaseResponse> => {
+  if (anonymousSessionToken) {
+    // If we have a session token for anonymous threads, add it to the headers.
+    headers = {
+      ...headers,
+      'X-Anonymous-Thread-Session': anonymousSessionToken
+    };
+  }
   const res = await _fetch(f, method, path, headers, body);
 
   let data: BaseData = {};
@@ -209,6 +257,9 @@ const _qmethod = async <T extends BaseData, R extends BaseData>(
   // Specifically, we want to remove "undefined" values.
   const filtered = data && (JSON.parse(JSON.stringify(data)) as Record<string, string>);
   const params = new URLSearchParams(filtered);
+  if (anonymousShareToken) {
+    params.set('share_token', anonymousShareToken);
+  }
   path = `${path}?${params}`;
   return await _fetchJSON<R>(f, method, path);
 };
@@ -223,6 +274,10 @@ const _bmethod = async <T extends BaseData, R extends BaseData>(
   data?: T
 ) => {
   const body = JSON.stringify(data);
+  if (anonymousShareToken) {
+    // Add as query parameter if we have a share token.
+    path = `${path}?share_token=${encodeURIComponent(anonymousShareToken)}`;
+  }
   const headers = { 'Content-Type': 'application/json' };
   return await _fetchJSON<R>(f, method, path, headers, body);
 };
@@ -285,7 +340,7 @@ export type Institution = {
 /**
  * Overall status of the session.
  */
-export type SessionStatus = 'valid' | 'invalid' | 'missing' | 'error';
+export type SessionStatus = 'valid' | 'invalid' | 'missing' | 'error' | 'anonymous';
 
 /**
  * Token information.
@@ -510,11 +565,13 @@ export const grants = async <T extends NamedGrantsQuery>(
 ): Promise<{ [name in keyof T]: boolean }> => {
   const grantNames = Object.keys(query);
   const grants = grantNames.map((name) => query[name]);
+
   const results = await POST<GrantsQuery, Grants>(f, 'me/grants', { grants });
   const expanded = expandResponse(results);
   if (expanded.error) {
     throw expanded.error;
   }
+
   const verdicts: NamedGrants = {};
   for (let i = 0; i < grantNames.length; i++) {
     verdicts[grantNames[i]] = expanded.data.grants[i].verdict;
@@ -1170,6 +1227,15 @@ export const getAllThreads = async (f: Fetcher, opts?: GetAllThreadsOpts) => {
   return getThreads(f, 'threads', opts);
 };
 
+export type AnonymousLink = {
+  id: number;
+  name: string | null;
+  share_token: string;
+  active: boolean;
+  activated_at: string | null;
+  revoked_at: string | null;
+};
+
 /**
  * Information about an assistant.
  */
@@ -1195,6 +1261,7 @@ export type Assistant = {
   endorsed: boolean | null;
   created: string;
   updated: string | null;
+  share_links: AnonymousLink[] | null;
 };
 
 /**
@@ -1366,6 +1433,40 @@ export const deleteAssistant = async (f: Fetcher, classId: number, assistantId: 
   return await DELETE<never, GenericStatus>(f, url);
 };
 
+export const createAssistantShareLink = async (
+  f: Fetcher,
+  classId: number,
+  assistantId: number
+) => {
+  const url = `class/${classId}/assistant/${assistantId}/share`;
+  return await POST<never, GenericStatus>(f, url);
+};
+
+export type UpdateAssistantShareLinkNameRequest = {
+  name: string;
+};
+
+export const updateAssistantShareLinkName = async (
+  f: Fetcher,
+  classId: number,
+  assistantId: number,
+  shareLinkId: number,
+  data: UpdateAssistantShareLinkNameRequest
+) => {
+  const url = `class/${classId}/assistant/${assistantId}/share/${shareLinkId}`;
+  return await PUT<UpdateAssistantShareLinkNameRequest, GenericStatus>(f, url, data);
+};
+
+export const deleteAssistantShareLink = async (
+  f: Fetcher,
+  classId: number,
+  assistantId: number,
+  shareLinkId: number
+) => {
+  const url = `class/${classId}/assistant/${assistantId}/share/${shareLinkId}`;
+  return await DELETE<never, GenericStatus>(f, url);
+};
+
 /**
  * file upload options.
  */
@@ -1481,11 +1582,18 @@ const _doUpload = (
     }
   };
 
+  if (anonymousShareToken) {
+    url += `?share_token=${anonymousShareToken}`;
+  }
+
   // Don't use the normal fetch because this only works with xhr, and we want
   // to be able to track progress.
   const promise = new Promise<FileUploadResult>((resolve, reject) => {
     xhr.open('POST', url, true);
     xhr.setRequestHeader('Accept', 'application/json');
+    if (anonymousSessionToken) {
+      xhr.setRequestHeader('X-Anonymous-Thread-Session', anonymousSessionToken);
+    }
     xhr.upload.onprogress = onProgress;
     xhr.onreadystatechange = () => {
       if (xhr.readyState === 4) {
@@ -1761,12 +1869,14 @@ export type CreateThreadRequest = {
   vision_file_ids?: string[];
   vision_image_descriptions?: ImageProxy[];
   timezone?: string | null;
+  conversation_id?: string | null;
 };
 
 export type CreateAudioThreadRequest = {
   assistant_id: number;
   parties?: number[];
   timezone?: string | null;
+  conversation_id?: string | null;
 };
 
 export type VoiceModeRecordingInfo = {
@@ -1844,12 +1954,17 @@ export type Thread = {
   display_user_info?: boolean;
 };
 
+export type ThreadWithOptionalToken = {
+  thread: Thread;
+  session_token?: string | null;
+};
+
 /**
  * Create a new conversation thread.
  */
 export const createThread = async (f: Fetcher, classId: number, data: CreateThreadRequest) => {
   const url = `class/${classId}/thread`;
-  return await POST<CreateThreadRequest, Thread>(f, url, data);
+  return await POST<CreateThreadRequest, ThreadWithOptionalToken>(f, url, data);
 };
 
 /**
@@ -1861,7 +1976,7 @@ export const createAudioThread = async (
   data: CreateAudioThreadRequest
 ) => {
   const url = `class/${classId}/thread/audio`;
-  return await POST<CreateAudioThreadRequest, Thread>(f, url, data);
+  return await POST<CreateAudioThreadRequest, ThreadWithOptionalToken>(f, url, data);
 };
 
 /**
@@ -2927,6 +3042,13 @@ export const createAudioWebsocket = (classId: number, threadId: number): WebSock
   }
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const host = window.location.host;
-  const url = `${protocol}://${host}/api/v1/class/${classId}/thread/${threadId}/audio`;
+  const params = new URLSearchParams();
+  if (anonymousSessionToken) {
+    params.set('session_token', anonymousSessionToken);
+  }
+  if (anonymousShareToken) {
+    params.set('share_token', anonymousShareToken);
+  }
+  const url = `${protocol}://${host}/api/v1/class/${classId}/thread/${threadId}/audio?${params}`;
   return new WebSocket(url);
 };

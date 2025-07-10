@@ -3,6 +3,9 @@ model
 
 type user
 
+type anonymous_user
+type anonymous_link
+
 type root
   relations
     define admin: [user]
@@ -25,29 +28,31 @@ type class
     define student: [user]
     define supervisor: admin or teacher
     define member: admin or teacher or student
-    define can_view: member
+    define can_view: [anonymous_link] or member
     define can_view_users: supervisor
     define can_view_api_key: [user] or admin from parent
     define can_delete: supervisor
     define can_edit_info: supervisor
     define can_manage_users: supervisor
-    define can_create_thread: member
+    define can_create_thread: [anonymous_link] or member
+    define can_view_assistants: can_view
     define can_create_assistants: [class#student] or supervisor
     define can_manage_assistants: [class#supervisor]
     define can_publish_assistants: [class#student] or supervisor
     define can_manage_threads: [class#supervisor]
     define can_publish_threads: [class#student] or can_manage_threads
     define can_upload_class_files: [class#student] or supervisor
-    define can_upload_user_files: can_create_thread
+    define can_upload_user_files: [anonymous_user] or can_create_thread
     define can_receive_summaries: teacher
 
 type thread
   relations
     define parent: [class]
     define party: [user]
-    define can_view: ([class#member] or party or can_manage_threads from parent) and member from parent
-    define can_participate: party and member from parent
-    define can_delete: party or can_manage_threads from parent
+    define anonymous_party: [anonymous_user]
+    define can_view: (([class#member] or party or can_manage_threads from parent) and member from parent) or anonymous_party
+    define can_participate: (party and member from parent) or anonymous_party
+    define can_delete: party or can_manage_threads from parent or anonymous_party
     define can_publish: (party and (can_publish_threads from parent or supervisor from parent)) or (can_manage_threads from parent and can_publish_threads from parent)
 
 type assistant
@@ -56,14 +61,14 @@ type assistant
     define owner: [user]
     define can_edit: owner or can_manage_assistants from parent or (can_view and supervisor from parent)
     define can_delete: owner or can_manage_assistants from parent or (can_view and supervisor from parent)
-    define can_view: [class#member] or owner or can_manage_assistants from parent
+    define can_view: [class#member, anonymous_link] or owner or can_manage_assistants from parent
     define can_interact_with: can_view
     define can_publish: (owner and can_publish_assistants from parent) or (can_manage_assistants from parent and can_publish_assistants from parent) or (can_view and supervisor from parent)
 
 type user_file
   relations
     define parent: [class]
-    define owner: [user]
+    define owner: [user, anonymous_user]
     define thread: [thread]
     define can_delete: owner or can_manage_assistants from parent
     define can_view: owner or can_manage_assistants from parent or can_view from thread

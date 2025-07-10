@@ -139,7 +139,7 @@ class PingPongAssistantNonStudy(Model):
 
 
 class UserClassRole(Model):
-    email = F.LookupField[str]("Email (from User)")
+    email = F.TextField("Email (from User)", readonly=True)
     class_id = F.LookupField[str]("PingPong ID (from Class)")
     status = F.SelectField("Status")
     status_notes = F.TextField("Status Notes")

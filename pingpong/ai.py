@@ -743,7 +743,9 @@ async def export_threads_multiple_classes(
             header.append("User Email")
         header.extend(
             [
+                "Class ID",
                 "Class Name",
+                "Assistant ID",
                 "Assistant Name",
                 "Role",
                 "Thread ID",
@@ -771,6 +773,7 @@ async def export_threads_multiple_classes(
                 ) = await models.Thread.get_file_search_files_assistant(
                     session, thread.id
                 )
+                assistant_id = assistant.id if assistant else "Deleted Assistant"
                 assistant_name = assistant.name if assistant else "Deleted Assistant"
 
                 user_hashes = [
@@ -790,7 +793,9 @@ async def export_threads_multiple_classes(
                     prompt_row.append(user_emails_str)
                 prompt_row.extend(
                     [
+                        class_.id,
                         class_.name,
+                        assistant_id,
                         assistant_name,
                         "system_prompt",
                         thread.id,
@@ -820,7 +825,9 @@ async def export_threads_multiple_classes(
 
                         row.extend(
                             [
+                                class_.id,
                                 class_.name,
+                                assistant_id,
                                 assistant_name,
                                 message.role,
                                 thread.id,
@@ -902,7 +909,9 @@ async def export_class_threads(
             header.append("User Email")
         header.extend(
             [
+                "Class ID",
                 "Class Name",
+                "Assistant ID",
                 "Assistant Name",
                 "Role",
                 "Thread ID",
@@ -918,12 +927,17 @@ async def export_class_threads(
             assistant, file_names = await models.Thread.get_file_search_files_assistant(
                 session, thread.id
             )
+            assistant_id = assistant.id if assistant else "Deleted Assistant"
             assistant_name = assistant.name if assistant else "Deleted Assistant"
 
-            user_hashes = [
-                generate_user_hash(class_, user) for user in thread.users
-            ] or ["Unknown user"]
-            user_hashes_str = ", ".join(user_hashes)
+            user_hashes_str = ""
+            if thread.conversation_id:
+                user_hashes_str = thread.conversation_id
+            else:
+                user_hashes = [
+                    generate_user_hash(class_, user) for user in thread.users
+                ] or ["Unknown user"]
+                user_hashes_str = ", ".join(user_hashes)
 
             user_emails_str = "REDACTED"
             if include_user_emails:
@@ -935,7 +949,9 @@ async def export_class_threads(
                 prompt_row.append(user_emails_str)
             prompt_row.extend(
                 [
+                    class_.id,
                     class_.name,
+                    assistant_id,
                     assistant_name,
                     "system_prompt",
                     thread.id,
@@ -965,7 +981,9 @@ async def export_class_threads(
 
                     row.extend(
                         [
+                            class_.id,
                             class_.name,
+                            assistant_id,
                             assistant_name,
                             message.role,
                             thread.id,

@@ -120,7 +120,7 @@ async def add_student(
     user_roles = schemas.CreateUserClassRoles(
         roles=[
             schemas.CreateUserClassRole(
-                email=request.email[0],
+                email=request.email,
                 roles=schemas.ClassUserRoles(admin=False, teacher=False, student=True),
             )
         ],

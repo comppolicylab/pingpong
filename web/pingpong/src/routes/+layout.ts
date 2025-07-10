@@ -15,6 +15,13 @@ const LOGOUT = '/logout';
  * Load the current user and redirect if they are not logged in.
  */
 export const load: LayoutLoad = async ({ fetch, url }) => {
+  // Check if we have a share token in the URL.
+  // If so, we will allow access to the page without authentication.
+  const t = url.searchParams.get('share_token');
+  if (t) {
+    api.setAnonymousShareToken(t);
+  }
+
   // Fetch the current user
   const me = api.expandResponse(await api.me(fetch));
 
@@ -40,6 +47,12 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   // If the page is public, don't redirect to the login page.
   let isPublicPage = false;
 
+  // Check if the url has format /group/[classId]/shared/assistant/[assistantId]
+  const sharedAssistantPattern = /\/group\/(\d+)\/shared\/assistant\/(\d+)/;
+  const sharedThreadPattern = /\/group\/(\d+)\/shared\/thread\/(\d+)/;
+  const isSharedAssistantPage = sharedAssistantPattern.test(url.pathname);
+  const isSharedThreadPage = sharedThreadPattern.test(url.pathname);
+
   if (url.pathname === LOGIN) {
     // If the user is logged in, go to the forward page.
     if (authed) {
@@ -53,6 +66,13 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
         // If the user is not logged in and tries to access the root path, go to the About page.
         redirect(302, ABOUT);
       }
+    } else if (
+      !authed &&
+      ((t && isSharedAssistantPage) || (api.hasAnonymousSessionToken() && isSharedThreadPage))
+    ) {
+      // If the user is not logged in and the URL has a share token,
+      // allow access to the shared assistant or thread page.
+      doNotShowSidebar = true;
     } else if (!authed && url.pathname !== LOGOUT) {
       const destination = encodeURIComponent(`${url.pathname}${url.search}`);
       redirect(302, `${LOGIN}?forward=${destination}`);
@@ -128,6 +148,9 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
     classes,
     threads,
     admin,
-    modelInfo
+    modelInfo,
+    shareToken: t,
+    isSharedAssistantPage,
+    isSharedThreadPage
   };
 };
