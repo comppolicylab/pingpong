@@ -68,5 +68,4 @@ def user_names(new_thread: Thread, user_id: int, is_supervisor=False) -> list[st
         if not new_thread.private
         else "Anonymous User"
         for u in new_thread.users
-        if not u.anonymous_link_id
     ]
