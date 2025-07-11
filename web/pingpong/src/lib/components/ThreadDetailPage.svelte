@@ -162,6 +162,9 @@
       useImageDescriptions = assistant.use_image_descriptions || false;
       assistantInteractionMode = assistant.interaction_mode;
     } else {
+      useLatex = false;
+      useImageDescriptions = false;
+      assistantInteractionMode = null;
       if (data.threadData.anonymous_session) {
         console.warn(`Definition for assistant ${$assistantId} not found.`);
       }
