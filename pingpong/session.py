@@ -74,7 +74,7 @@ async def populate_anonymous_tokens(request):
             status=schemas.SessionStatus.ANONYMOUS,
             user=user,
         )
-    print(request.state.__dict__)
+
     return request
 
 
