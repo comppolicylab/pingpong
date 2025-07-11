@@ -47,6 +47,9 @@ async def populate_anonymous_tokens(request):
                 request.state.anonymous_session_id = (
                     anonymous_session.id if anonymous_session else None
                 )
+                request.state.anonymous_link_id = (
+                    user.anonymous_link.id if user else None
+                )
         else:
             user = await models.User.get_by_share_token(
                 request.state.db, request.state.anonymous_share_token
@@ -70,6 +73,7 @@ async def populate_anonymous_tokens(request):
             status=schemas.SessionStatus.ANONYMOUS,
             user=user,
         )
+    print(request.state.__dict__)
     return request
 
 
