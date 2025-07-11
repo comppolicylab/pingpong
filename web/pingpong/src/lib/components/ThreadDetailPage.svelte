@@ -783,7 +783,7 @@
     ) {
       if (
         !confirm(
-          `${data.me.state.status === 'anonymous' ? 'You will lose access to this thread.' : "You won't be able to edit this thread."}\n\nAre you sure you want to leave this page?`
+          `${data.me.status === 'anonymous' ? 'You will lose access to this thread.' : "You won't be able to edit this thread."}\n\nAre you sure you want to leave this page?`
         )
       ) {
         nav.cancel();
