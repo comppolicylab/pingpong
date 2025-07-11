@@ -117,7 +117,7 @@ class Authz(Expression):
             else:
                 target = request.state.authz.root
 
-            permission_checks = list[bool]()
+            permission_checks: list[bool] = []
             # If the user is anonymous, check their anonymous permissions.
             if request.state.is_anonymous:
                 grants_to_check = []

@@ -8,7 +8,7 @@ import type { LayoutLoad } from './$types';
 export const load: LayoutLoad = async ({ fetch, params, parent }) => {
   const { class: classData } = await parent();
   if (!classData) {
-    redirect(302, '/');
+    throw redirect(302, '/');
   }
 
   const classId = parseInt(params.classId, 10);

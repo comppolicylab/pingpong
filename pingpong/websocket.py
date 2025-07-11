@@ -57,7 +57,7 @@ async def check_realtime_permissions(ws: WebSocket, thread_id: str):
     ):
         raise ValueError("Your session token is invalid. Try logging in again.")
 
-    permission_checks = list[bool]()
+    permission_checks: list[bool] = []
     # If the user is anonymous, check their anonymous permissions.
     if ws.state.is_anonymous:
         grants_to_check = []
