@@ -233,7 +233,7 @@
       </SidebarGroup>
     {:else}
       <SidebarGroup class="flex flex-col overflow-y-auto mt-6 pr-3" ulClass="flex-1">
-        {#if !isSharedAssistantPage}
+        {#if !(isSharedAssistantPage && assistantsToShow.length === 0)}
           <SidebarGroup ulClass="flex flex-wrap justify-between gap-2 items-center mt-4">
             <span class="flex-1 truncate text-white">Group Assistants</span>
             <Button

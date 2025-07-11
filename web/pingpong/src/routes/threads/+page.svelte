@@ -87,7 +87,7 @@
           {@const otherUsers = thread.user_names?.filter((user_name) => user_name != 'Me') || []}
           {@const otherUsersLen = otherUsers.length}
           <a
-            href={thread.anonymous_session
+            href={thread.anonymous_session && isCurrentUserParticipant
               ? `/group/${thread.class_id}/shared/thread/${thread.id}`
               : `/group/${thread.class_id}/thread/${thread.id}`}
             class="border-b border-gray-200 pb-4 pt-4 transition-all duration-300 hover:bg-gray-100 hover:pl-4"
