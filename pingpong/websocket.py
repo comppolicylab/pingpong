@@ -59,7 +59,6 @@ async def check_realtime_permissions(ws: WebSocket, thread_id: str):
 
     permission_checks = list[bool]()
     # If the user is anonymous, check their anonymous permissions.
-    print(ws.state.__dict__)
     if ws.state.is_anonymous:
         grants_to_check = []
         if ws.state.anonymous_share_token_auth:

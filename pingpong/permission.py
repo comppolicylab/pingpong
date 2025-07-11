@@ -150,7 +150,6 @@ class Authz(Expression):
                         target,
                     )
                 )
-            print(f"Permission checks for {self}: {permission_checks}")
             return any(permission_checks)
         except Exception as e:
             logger.exception("Error evaluating expression %s: %s", self, e)
