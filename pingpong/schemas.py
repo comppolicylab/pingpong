@@ -468,6 +468,7 @@ class Thread(BaseModel):
     created: datetime
     last_activity: datetime
     display_user_info: bool
+    anonymous_session: bool = False
 
     class Config:
         from_attributes = True

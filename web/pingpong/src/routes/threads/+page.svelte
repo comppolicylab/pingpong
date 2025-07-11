@@ -81,16 +81,22 @@
         {#each threads as thread}
           {@const allUsers = thread.user_names || []}
           {@const allUsersLen = allUsers.length}
-          {@const otherUsers = thread.user_names?.filter((user_name) => user_name != 'Me') || []}
+          {@const otherUsers =
+            thread.user_names?.filter(
+              (user_name) => user_name != 'Me' && user_name != 'Anonymous Session User'
+            ) || []}
           {@const otherUsersLen = otherUsers.length}
           <a
-            href={`/group/${thread.class_id}/thread/${thread.id}`}
+            href={thread.anonymous_session
+              ? `/group/${thread.class_id}/shared/thread/${thread.id}`
+              : `/group/${thread.class_id}/thread/${thread.id}`}
             class="border-b border-gray-200 pb-4 pt-4 transition-all duration-300 hover:bg-gray-100 hover:pl-4"
           >
             <div>
               <div class="flex flex-row gap-1">
                 <h4 class="eyebrow eyebrow-dark shrink-0">
-                  {classNamesLookup[thread.class_id]?.name || 'Unknown Group'}
+                  {classNamesLookup[thread.class_id]?.name ||
+                    (thread.anonymous_session ? 'Anonymous Session' : 'Unknown Group')}
                 </h4>
                 <h4 class="eyebrow eyebrow-dark shrink-0">|</h4>
                 <h4 class="eyebrow eyebrow-dark shrink truncate">

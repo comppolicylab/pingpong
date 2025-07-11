@@ -17,7 +17,9 @@
       data.me.user &&
       !data.needsOnboarding &&
       (!data.needsAgreements || !data.doNotShowSidebar)) ||
-    (data.isPublicPage && !data.doNotShowSidebar);
+    (data.isPublicPage && !data.doNotShowSidebar) ||
+    data.isSharedAssistantPage ||
+    data.isSharedThreadPage;
   $: showStatusPage = data.me?.user;
   $: showBackground = data.isSharedAssistantPage || data.isSharedThreadPage;
 </script>

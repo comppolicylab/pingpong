@@ -4,12 +4,18 @@
   import { Pulse } from 'svelte-loading-spinners';
   import { blur } from 'svelte/transition';
   import { loading, loadingMessage } from '$lib/stores/general';
+  import { onMount } from 'svelte';
+
+  let inIframe = false;
+  onMount(() => {
+    inIframe = window.self !== window.top;
+  });
 </script>
 
 <div
-  class={`main-panel transition-all absolute left-0 top-24 z-10 w-[calc(100%-2rem)] ml-4 mr-4 h-[calc(100%-6rem)] lg:h-full overflow-hidden lg:static ${
+  class={`main-panel transition-all absolute left-0 top-24 z-10 w-[calc(100%-2rem)] ml-4 mr-4 h-[calc(100%-6rem)] overflow-hidden  ${
     $appMenuOpen ? 'left-[90%]' : ''
-  }`}
+  } ${!inIframe ? 'lg:h-full lg:static' : ''}`}
 >
   <div class="h-full flex-grow bg-white rounded-t-4xl overflow-hidden relative">
     {#if !!$navigating || $loading}

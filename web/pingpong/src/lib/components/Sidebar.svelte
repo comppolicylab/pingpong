@@ -56,7 +56,12 @@
     };
   };
 
-  $: nonAuthed = data.isPublicPage && !data?.me?.user;
+  $: sharedPage = data.isSharedAssistantPage || data.isSharedThreadPage;
+  $: isSharedAssistantPage = data.isSharedAssistantPage;
+  $: isSharedThreadPage = data.isSharedThreadPage;
+  $: shareToken = data.shareToken;
+  $: pathName = $page.url.pathname;
+  $: nonAuthed = (data.isPublicPage && !data?.me?.user) || data?.me?.status === 'anonymous';
   $: avatar = data?.me?.profile?.image_url;
   $: name = data?.me?.user?.name || data?.me?.user?.email;
   // Index classes by ID so we can look them up easier.
@@ -137,7 +142,9 @@
     await goto(destination);
   };
 
+  let inIframe = false;
   onMount(() => {
+    inIframe = window.self !== window.top;
     updatePlacement();
     window.addEventListener('resize', updatePlacement);
     return () => window.removeEventListener('resize', updatePlacement);
@@ -145,23 +152,25 @@
 </script>
 
 <Sidebar
-  asideClass="absolute top-0 left-0 z-0 w-[90%] px-2 h-full lg:static lg:h-full lg:w-full"
+  asideClass={`absolute top-0 left-0 z-0 w-[90%] px-2 h-full ${!inIframe ? 'lg:static lg:h-full lg:w-full' : ''}`}
   activeUrl={$page.url.pathname}
 >
   <SidebarWrapper class="bg-transparent h-full flex flex-col">
     <SidebarGroup class="mb-6">
       <div class="flex items-center" data-sveltekit-preload-data="off">
-        <button
-          class="menu-button bg-transparent border-none mr-3 mt-1 lg:hidden"
-          on:click={() => togglePanel()}
-        >
-          {#if $appMenuOpen}
-            <CloseOutline size="xl" class="text-white menu-close" />
-          {:else}
-            <BarsOutline size="xl" class="text-white menu-open" />
-          {/if}
-        </button>
-        <NavBrand href="/" class="">
+        {#if !(inIframe && sharedPage)}
+          <button
+            class="menu-button bg-transparent border-none mr-3 mt-1 lg:hidden"
+            on:click={() => togglePanel()}
+          >
+            {#if $appMenuOpen}
+              <CloseOutline size="xl" class="text-white menu-close" />
+            {:else}
+              <BarsOutline size="xl" class="text-white menu-open" />
+            {/if}
+          </button>
+        {/if}
+        <NavBrand href={inIframe && sharedPage ? undefined : '/'} class="">
           <PingPongLogo size={10} extraClass="fill-amber-600" />
         </NavBrand>
       </div>
@@ -170,15 +179,27 @@
     <SidebarGroup class="mt-6">
       <SidebarItem
         href={nonAuthed
-          ? '/login'
+          ? isSharedAssistantPage
+            ? `/login?forward=${pathName}%3Fshare_token=${shareToken}`
+            : isSharedThreadPage
+              ? `/group/${currentClassId}/shared/assistant/${currentAssistantId}?share_token=${api.getAnonymousShareToken()}`
+              : '/login'
           : onNewChatPage
             ? undefined
-            : currentClassId
-              ? `/group/${currentClassId}${
-                  currentAssistantId ? `?assistant=${currentAssistantId}` : ''
-                }`
-              : '/'}
-        label={nonAuthed ? 'Login' : 'Start a new chat'}
+            : sharedPage
+              ? `/`
+              : currentClassId
+                ? `/group/${currentClassId}${
+                    currentAssistantId ? `?assistant=${currentAssistantId}` : ''
+                  }`
+                : '/'}
+        label={nonAuthed
+          ? isSharedAssistantPage
+            ? 'Login to save this chat'
+            : isSharedThreadPage
+              ? 'Start a new chat'
+              : 'Login'
+          : 'Start a new chat'}
         class={`flex flex-row-reverse justify-between pr-4 text-white rounded-full ${
           onNewChatPage
             ? 'bg-blue-dark-40 hover:bg-blue-dark-40 cursor-default text-blue-dark-30 select-none'
@@ -186,7 +207,7 @@
         } ${onNewChatPage ? 'disabled' : ''}`}
       >
         <svelte:fragment slot="icon">
-          {#if nonAuthed}
+          {#if nonAuthed && !isSharedThreadPage}
             <UserCircleSolid size="sm" />
           {:else}
             <CirclePlusSolid size="sm" />
@@ -212,55 +233,60 @@
       </SidebarGroup>
     {:else}
       <SidebarGroup class="flex flex-col overflow-y-auto mt-6 pr-3" ulClass="flex-1">
-        <SidebarGroup ulClass="flex flex-wrap justify-between gap-2 items-center mt-4">
-          <span class="flex-1 truncate text-white">Group Assistants</span>
-          <Button
-            href={`/group/${currentClassId}/assistant`}
-            class="text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap justify-between gap-2 items-center"
-            disabled={!currentClassId}
-          >
-            <span class="text-xs">View All</span><ArrowRightOutline
-              size="md"
-              class="text-white inline-block p-0.5 ml-1 rounded-full bg-blue-dark-30"
-            />
-          </Button>
-        </SidebarGroup>
-        <SidebarGroup border class={'border-blue-dark-40 border-t-3 pt-1 mt-1'} ulClass="space-y-0">
-          {#each assistantsToShow as assistant}
-            <SidebarItem
-              class={'text-sm text-white p-2 rounded-lg flex flex-wrap gap-2 truncate ' +
-                (currentAssistantIdQuery === assistant.id
-                  ? 'bg-orange-dark hover:bg-orange'
-                  : 'hover:bg-blue-dark-30')}
-              spanClass="flex-1 truncate"
-              href={`/group/${currentClassId}?assistant=${assistant.id}`}
-              label={assistant.name || 'Unknown Assistant'}
+        {#if !isSharedAssistantPage}
+          <SidebarGroup ulClass="flex flex-wrap justify-between gap-2 items-center mt-4">
+            <span class="flex-1 truncate text-white">Group Assistants</span>
+            <Button
+              href={`/group/${currentClassId}/assistant`}
+              class="text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap justify-between gap-2 items-center"
+              disabled={!currentClassId}
             >
-              <svelte:fragment slot="icon">
-                {#if assistantMetadata[assistant.id].isCourseAssistant}
-                  <BadgeCheckOutline size="sm" class="text-white" />
-                  <Tooltip>Group assistant</Tooltip>
-                {:else if assistantMetadata[assistant.id].isMyAssistant}
-                  <UserOutline size="sm" class="text-white" />
-                  <Tooltip>Created by you</Tooltip>
-                {:else}
-                  <UsersOutline size="sm" class="text-white" />
-                  <Tooltip>Shared by {assistantMetadata[assistant.id].creator}</Tooltip>
-                {/if}
-                {#if assistant.interaction_mode === 'voice'}
-                  <MicrophoneOutline size="sm" class="text-white" />
-                  <Tooltip>Voice mode assistant</Tooltip>
-                {/if}
-              </svelte:fragment>
-            </SidebarItem>
-          {/each}
-          {#if !assistantsToShow.length}
-            <div class="text-sm font-light text-white p-2 rounded flex flex-wrap gap-2">
-              {currentClassId ? 'No assistants available' : 'No group selected'}
-            </div>
-          {/if}
-        </SidebarGroup>
-
+              <span class="text-xs">View All</span><ArrowRightOutline
+                size="md"
+                class="text-white inline-block p-0.5 ml-1 rounded-full bg-blue-dark-30"
+              />
+            </Button>
+          </SidebarGroup>
+          <SidebarGroup
+            border
+            class={'border-blue-dark-40 border-t-3 pt-1 mt-1'}
+            ulClass="space-y-0"
+          >
+            {#each assistantsToShow as assistant}
+              <SidebarItem
+                class={'text-sm text-white p-2 rounded-lg flex flex-wrap gap-2 truncate ' +
+                  (currentAssistantIdQuery === assistant.id
+                    ? 'bg-orange-dark hover:bg-orange'
+                    : 'hover:bg-blue-dark-30')}
+                spanClass="flex-1 truncate"
+                href={`/group/${currentClassId}?assistant=${assistant.id}`}
+                label={assistant.name || 'Unknown Assistant'}
+              >
+                <svelte:fragment slot="icon">
+                  {#if assistantMetadata[assistant.id].isCourseAssistant}
+                    <BadgeCheckOutline size="sm" class="text-white" />
+                    <Tooltip>Group assistant</Tooltip>
+                  {:else if assistantMetadata[assistant.id].isMyAssistant}
+                    <UserOutline size="sm" class="text-white" />
+                    <Tooltip>Created by you</Tooltip>
+                  {:else}
+                    <UsersOutline size="sm" class="text-white" />
+                    <Tooltip>Shared by {assistantMetadata[assistant.id].creator}</Tooltip>
+                  {/if}
+                  {#if assistant.interaction_mode === 'voice'}
+                    <MicrophoneOutline size="sm" class="text-white" />
+                    <Tooltip>Voice mode assistant</Tooltip>
+                  {/if}
+                </svelte:fragment>
+              </SidebarItem>
+            {/each}
+            {#if !assistantsToShow.length}
+              <div class="text-sm font-light text-white p-2 rounded flex flex-wrap gap-2">
+                {currentClassId ? 'No assistants available' : 'No group selected'}
+              </div>
+            {/if}
+          </SidebarGroup>
+        {/if}
         <SidebarGroup ulClass="flex flex-wrap justify-between gap-2 items-center mt-4">
           <span class="flex-1 truncate text-white">Recent Threads</span>
           <Button
@@ -283,7 +309,9 @@
             <SidebarItem
               class="text-sm text-white hover:bg-blue-dark-30 p-2 rounded flex flex-wrap gap-2 rounded-lg"
               spanClass="flex-1 truncate"
-              href={`/group/${thread.class_id}/thread/${thread.id}`}
+              href={thread.anonymous_session
+                ? `/group/${thread.class_id}/shared/thread/${thread.id}`
+                : `/group/${thread.class_id}/thread/${thread.id}`}
               label={thread.name || 'New Conversation'}
               activeClass="bg-blue-dark-40"
             >
@@ -291,7 +319,8 @@
                 <span class="eyebrow w-full"
                   ><div class="flex flex-row gap-1">
                     <h4 class="shrink-0">
-                      {classesById[thread.class_id].name}
+                      {classesById[thread.class_id]?.name ||
+                        (thread.anonymous_session ? 'Anonymous Session' : 'Unknown Group')}
                     </h4>
                     <h4 class="shrink-0">|</h4>
                     <h4 class="shrink truncate">

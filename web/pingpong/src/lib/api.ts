@@ -188,6 +188,13 @@ export const hasAnonymousShareToken = () => {
 };
 
 /**
+ * Get the current anonymous share token.
+ */
+export const getAnonymousShareToken = () => {
+  return anonymousShareToken;
+};
+
+/**
  * Common fetch method.
  */
 const _fetch = async (
@@ -1952,6 +1959,7 @@ export type Thread = {
   created: string;
   last_activity: string;
   display_user_info?: boolean;
+  anonymous_session?: boolean;
 };
 
 export type ThreadWithOptionalToken = {

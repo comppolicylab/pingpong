@@ -10,8 +10,9 @@ export const load: PageLoad = async ({ parent, url }) => {
   // Check for an error code in the URL and pass it along to the redirect.
   // We currently only use this when the Canvas token returned from OAuth2 is invalid.
   const errorCode = url.searchParams.get('error_code');
-  if (parentData.threads.length > 0) {
-    const latestThread = parentData.threads[0];
+  const userThreads = parentData.threads.filter((thread) => thread.anonymous_session !== true);
+  if (userThreads.length > 0) {
+    const latestThread = userThreads[0];
     const classId = latestThread.class_id;
     const asstId = latestThread.assistant_id;
     return redirect(

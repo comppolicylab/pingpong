@@ -1209,13 +1209,18 @@ class User(Base):
     @classmethod
     async def get_by_session_token(
         cls, session: AsyncSession, session_token: str
-    ) -> "User":
+    ) -> tuple["User", "AnonymousSession"] | tuple[None, None]:
         stmt = (
-            select(User)
+            select(User, AnonymousSession)
             .join(AnonymousSession)
             .where(AnonymousSession.session_token == session_token)
         )
-        return await session.scalar(stmt)
+        result = await session.execute(stmt)
+        row = result.first()
+        if row:
+            return row[0], row[1]
+        else:
+            return None, None
 
     @classmethod
     async def get_previous_ids_by_id(cls, session: AsyncSession, id: int) -> List[int]:
@@ -3097,7 +3102,9 @@ class AnonymousSession(Base):
     )
     thread = relationship("Thread", back_populates="anonymous_sessions", uselist=False)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="cascade"), nullable=True)
-    user = relationship("User", back_populates="anonymous_sessions", uselist=False)
+    user = relationship(
+        "User", back_populates="anonymous_sessions", uselist=False, lazy="selectin"
+    )
     files = relationship(
         "File",
         back_populates="anonymous_session",

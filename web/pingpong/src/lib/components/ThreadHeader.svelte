@@ -47,7 +47,7 @@
     <div slot="left">
       <div class="eyebrow eyebrow-dark ml-4">Select group</div>
       <Button class={mainTextClass}
-        >{current?.name || 'no class'}
+        >{current?.name || 'Anonymous Session'}
         <ChevronDownOutline
           size="sm"
           class="bg-white rounded-full ml-4 h-8 w-8 inline-block text-orange"
