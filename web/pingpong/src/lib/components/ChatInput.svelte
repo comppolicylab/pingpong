@@ -490,8 +490,8 @@
           : assistantDeleted
             ? 'Read-only thread: the assistant associated with this thread is deleted.'
             : canViewAssistant
-              ? 'Read-only thread: You no longer have permissions to interact with this assistant.'
-              : "You can't reply in this thread."}
+              ? "You can't reply in this thread."
+              : 'Read-only thread: You no longer have permissions to interact with this assistant.'}
         class:text-gray-700={disabled}
         class:animate-pulse={loading}
         disabled={loading || disabled || !canSubmit || assistantDeleted || !canViewAssistant}
