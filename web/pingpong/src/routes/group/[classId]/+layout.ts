@@ -7,7 +7,7 @@ import type { LayoutLoad } from './$types';
  */
 export const load: LayoutLoad = async ({ fetch, params, parent }) => {
   const classId = parseInt(params.classId, 10);
-  await parent();
+  const parentData = await parent();
 
   const [
     classDataResponse,
@@ -34,7 +34,10 @@ export const load: LayoutLoad = async ({ fetch, params, parent }) => {
     api.hasAPIKey(fetch, classId).then(api.expandResponse)
   ]);
 
-  if (classDataResponse.error) {
+  if (
+    classDataResponse.error &&
+    !(parentData.isSharedAssistantPage || parentData.isSharedThreadPage)
+  ) {
     error(classDataResponse.$status, classDataResponse.error.detail || 'Unknown error');
   }
 

@@ -22,27 +22,58 @@ OpenAIClientType = Union[openai.AsyncClient, openai.AsyncAzureOpenAI]
 def _file_grants(
     file: File,
     class_id: int,
-    is_anonymous_upload: bool = False,
+    user_auth: str | None = None,
+    anonymous_link_auth: str | None = None,
     anonymous_user_auth: str | None = None,
 ) -> list[Relation]:
     target_type = "user_file" if file.private else "class_file"
     target = f"{target_type}:{file.id}"
 
-    if is_anonymous_upload:
+    grants = [
+        (f"class:{class_id}", "parent", target),
+    ]
+
+    if file.private:
+        if user_auth:
+            grants.append((user_auth, "owner", target))
         if anonymous_user_auth:
-            return [
-                (anonymous_user_auth, "owner", target),
-                (f"class:{class_id}", "parent", target),
-            ]
-        else:
-            return [
-                (f"class:{class_id}", "parent", target),
-            ]
+            grants.append((anonymous_user_auth, "owner", target))
+        if anonymous_link_auth:
+            grants.append((anonymous_link_auth, "can_delete", target))
+
     else:
-        return [
-            (f"class:{class_id}", "parent", target),
-            (f"user:{file.uploader_id}", "owner", target),
-        ]
+        grants.append((f"user:{file.uploader_id}", "owner", target))
+
+    return grants
+
+
+def _file_grants_revoke(
+    file: File,
+    class_id: int,
+    class_only: bool = False,
+) -> list[Relation]:
+    target_type = "user_file" if file.private else "class_file"
+    target = f"{target_type}:{file.id}"
+
+    grants = [
+        (f"class:{class_id}", "parent", target),
+    ]
+
+    if class_only:
+        return grants
+
+    if file.anonymous_session:
+        grants.append(
+            (f"anonymous_user:{file.anonymous_session.session_token}", "owner", target)
+        )
+    if file.anonymous_link:
+        grants.append(
+            (f"anonymous_link:{file.anonymous_link.id}", "can_delete", target)
+        )
+
+    grants.append((f"user:{file.uploader_id}", "owner", target))
+
+    return grants
 
 
 class FileNotFoundException(Exception):
@@ -86,15 +117,28 @@ async def handle_delete_file(
 
     # 2) Remove the single row from the association table
     await File.remove_file_from_class(session, int_file_id, class_id)
-    await authz.write_safe(revoke=_file_grants(file, class_id))
+    revoke_class_only_grants = _file_grants_revoke(file, class_id, class_only=True)
+    # Revoke all grants for this file in the class
+    await authz.write_safe(revoke=revoke_class_only_grants)
 
-    # 3) Count how many classes still refer to this file
-    remaining = await File.class_count_using_file(session, int_file_id)
+    revoke_grants = _file_grants_revoke(
+        file,
+        class_id,
+    )
+    try:
+        # 3) Count how many classes still refer to this file
+        remaining = await File.class_count_using_file(session, int_file_id)
 
-    # 4) If none remain, do the actual delete
-    if remaining == 0:
-        await File.delete(session, int_file_id)
-        await oai_client.files.delete(remote_file_id)
+        # 4) If none remain, do the actual delete
+        if remaining == 0:
+            await File.delete(session, int_file_id)
+            await oai_client.files.delete(remote_file_id)
+            # 5) Revoke all grants for this file
+            await authz.write_safe(revoke=revoke_grants)
+    except Exception:
+        # If the delete fails, we need to ensure that the grants are restored
+        await authz.write_safe(grant=revoke_class_only_grants + revoke_grants)
+        raise
     return GenericStatus(status="ok")
 
 
@@ -144,6 +188,14 @@ async def handle_delete_files(
 
     await File.remove_files_from_class(session, file_ids_found, class_id)
 
+    revoked_grants_class_only = []
+    for file in files:
+        revoked_grants_class_only.extend(
+            _file_grants_revoke(file, class_id, class_only=True)
+        )
+    await authz.write_safe(revoke=revoked_grants_class_only)
+
+    revoked_grants = []
     remaining_rows = await File.class_count_using_files(session, file_ids_found)
     remaining_counts = {row[0]: row[1] for row in remaining_rows}
     file_ids_to_delete = [
@@ -153,16 +205,16 @@ async def handle_delete_files(
         deleted_files, missing_ids = await File.delete_multiple(
             session, file_ids_to_delete
         )
-        revoked_grants = []
         for file in files:
             revoked_grants.extend(_file_grants(file, class_id))
-        await authz.write(revoke=revoked_grants)
+        await authz.write_safe(revoke=revoked_grants)
 
         if missing_ids:
             logger.warning(
                 f"Could not find the following files for deletion: {missing_ids}"
             )
     except IntegrityError:
+        await authz.write_safe(grant=revoked_grants_class_only)
         raise HTTPException(
             status_code=403,
             detail="One or more files are still in use. Ensure that files aren't used by other assistants before deleting!",
@@ -174,6 +226,7 @@ async def handle_delete_files(
         if isinstance(result, openai.NotFoundError):
             logger.warning(f"Could not find file {file.file_id} for deletion, ignored.")
         elif isinstance(result, Exception):
+            await authz.write_safe(grant=revoked_grants + revoked_grants_class_only)
             raise result
 
     return GenericStatus(status="ok")
@@ -200,8 +253,11 @@ async def handle_create_single_purpose_file(
     content_type: str,
     is_azure_client: bool,
     use_image_descriptions: bool,
-    is_anonymous_upload: bool = False,
+    user_auth: str | None = None,
+    anonymous_link_auth: str | None = None,
     anonymous_user_auth: str | None = None,
+    anonymous_session_id: int | None = None,
+    anonymous_link_id: int | None = None,
 ) -> "FileSchema":
     """
     Creates a file for a single purpose (assistants or vision)
@@ -288,12 +344,16 @@ async def handle_create_single_purpose_file(
         "uploader_id": int(uploader_id),
         "name": upload.filename,
         "content_type": content_type,
+        "anonymous_session_id": anonymous_session_id,
+        "anonymous_link_id": anonymous_link_id,
     }
 
     try:
         f = await File.create(session, data, class_id=class_id)
         await authz.write(
-            grant=_file_grants(f, class_id, is_anonymous_upload, anonymous_user_auth)
+            grant=_file_grants(
+                f, class_id, user_auth, anonymous_link_auth, anonymous_user_auth
+            )
         )
 
         return FileSchema(
@@ -319,7 +379,9 @@ async def handle_create_single_purpose_file(
     except Exception as e:
         await oai_client.files.delete(new_f.id)
         await authz.write(
-            revoke=_file_grants(f, class_id, is_anonymous_upload, anonymous_user_auth)
+            revoke=_file_grants(
+                f, class_id, user_auth, anonymous_link_auth, anonymous_user_auth
+            )
         )
         raise e
 
@@ -336,8 +398,11 @@ async def handle_multimodal_upload(
     content_type: str,
     is_azure_client: bool,
     use_image_descriptions: bool,
-    is_anonymous_upload: bool = False,
+    user_auth: str | None = None,
+    anonymous_link_auth: str | None = None,
     anonymous_user_auth: str | None = None,
+    anonymous_session_id: int | None = None,
+    anonymous_link_id: int | None = None,
 ) -> "FileSchema":
     """
     Handles multimodal file creation by creating separate files (e.g. vision and
@@ -375,8 +440,11 @@ async def handle_multimodal_upload(
             content_type,
             is_azure_client,
             use_image_descriptions,
-            is_anonymous_upload,
+            user_auth,
+            anonymous_link_auth,
             anonymous_user_auth,
+            anonymous_session_id,
+            anonymous_link_id,
         )
 
     if _is_vision_supported(content_type) and not is_azure_client:
@@ -397,8 +465,11 @@ async def handle_multimodal_upload(
             content_type,
             is_azure_client,
             use_image_descriptions,
-            is_anonymous_upload,
+            user_auth,
+            anonymous_link_auth,
             anonymous_user_auth,
+            anonymous_session_id,
+            anonymous_link_id,
         )
 
     if can_upload_as_document:
@@ -431,8 +502,11 @@ async def handle_multimodal_upload(
                     content_type,
                     is_azure_client,
                     use_image_descriptions,
-                    is_anonymous_upload,
+                    user_auth,
+                    anonymous_link_auth,
                     anonymous_user_auth,
+                    anonymous_session_id,
+                    anonymous_link_id,
                 )
 
                 # We can run these tasks concurrently,
@@ -459,22 +533,25 @@ async def handle_multimodal_upload(
                     content_type,
                     is_azure_client,
                     use_image_descriptions,
-                    is_anonymous_upload,
+                    user_auth,
+                    anonymous_link_auth,
                     anonymous_user_auth,
+                    anonymous_session_id,
+                    anonymous_link_id,
                 )
         except Exception as e:
             if new_v_file:
                 await oai_client.files.delete(new_v_file.file_id)
                 await authz.write(
                     revoke=_file_grants(
-                        new_v_file, class_id, is_anonymous_upload, anonymous_user_auth
+                        new_v_file, class_id, user_auth, anonymous_user_auth
                     )
                 )
             if new_f_file:
                 await oai_client.files.delete(new_f_file.file_id)
                 await authz.write(
                     revoke=_file_grants(
-                        new_f_file, class_id, is_anonymous_upload, anonymous_user_auth
+                        new_f_file, class_id, user_auth, anonymous_user_auth
                     )
                 )
             raise e
@@ -518,8 +595,11 @@ async def handle_create_file(
     private: bool,
     purpose: FileUploadPurpose = "assistants",
     use_image_descriptions: bool = False,
-    is_anonymous_upload: bool = False,
+    user_auth: str | None = None,
+    anonymous_link_auth: str | None = None,
     anonymous_user_auth: str | None = None,
+    anonymous_session_id: int | None = None,
+    anonymous_link_id: int | None = None,
 ) -> "FileSchema":
     """
     Main entry point for file creation.
@@ -549,8 +629,11 @@ async def handle_create_file(
             content_type,
             is_azure_client,
             use_image_descriptions,
-            is_anonymous_upload,
+            user_auth,
+            anonymous_link_auth,
             anonymous_user_auth,
+            anonymous_session_id,
+            anonymous_link_id,
         )
     else:
         return await handle_create_single_purpose_file(
@@ -565,8 +648,11 @@ async def handle_create_file(
             content_type,
             is_azure_client,
             use_image_descriptions,
-            is_anonymous_upload,
+            user_auth,
+            anonymous_link_auth,
             anonymous_user_auth,
+            anonymous_session_id,
+            anonymous_link_id,
         )
 
 

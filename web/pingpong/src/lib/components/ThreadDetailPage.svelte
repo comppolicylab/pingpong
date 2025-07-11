@@ -1,6 +1,6 @@
 <script lang="ts">
   import { navigating, page } from '$app/stores';
-  import { goto, invalidateAll, onNavigate } from '$app/navigation';
+  import { beforeNavigate, goto, invalidateAll, onNavigate } from '$app/navigation';
   import * as api from '$lib/api';
   import { happyToast, sadToast } from '$lib/toast';
   import { errorMessage } from '$lib/errors';
@@ -63,7 +63,8 @@
     data.threadInteractionMode || 'chat',
     userTimezone
   );
-  $: isPrivate = data.class.private || false;
+  $: isPrivate = data.class?.private || false;
+  $: isAnonymousSession = data?.me?.status === 'anonymous';
   $: teachers = data?.supervisors || [];
   $: canDeleteThread = data.canDeleteThread;
   $: canPublishThread = data.canPublishThread;
@@ -135,7 +136,7 @@
   let visionSupportOverride: boolean | undefined;
   $: {
     visionSupportOverride =
-      data.class.ai_provider === 'azure'
+      data.class?.ai_provider === 'azure'
         ? data.modelInfo.find((model: api.AssistantModelLite) => model.id === data.threadModel)
             ?.azure_supports_vision
         : undefined;
@@ -161,7 +162,12 @@
       useImageDescriptions = assistant.use_image_descriptions || false;
       assistantInteractionMode = assistant.interaction_mode;
     } else {
-      console.warn(`Definition for assistant ${$assistantId} not found.`);
+      useLatex = false;
+      useImageDescriptions = false;
+      assistantInteractionMode = null;
+      if (data.threadData.anonymous_session) {
+        console.warn(`Definition for assistant ${$assistantId} not found.`);
+      }
     }
   }
   let showModerators = false;
@@ -398,6 +404,7 @@
     }
   };
 
+  let confirmNavigation = true;
   /**
    * Delete the thread.
    */
@@ -411,7 +418,19 @@
       }
       await threadMgr.delete();
       happyToast('Thread deleted.');
-      await goto(`/group/${classId}`, { invalidateAll: true });
+      confirmNavigation = false;
+      if (isAnonymousSession) {
+        if (api.hasAnonymousShareToken()) {
+          api.resetAnonymousSessionToken();
+          await goto(
+            `/group/${classId}/shared/assistant/${$assistantId}?share_token=${api.getAnonymousShareToken()}`
+          );
+        } else {
+          await goto(`/`, { invalidateAll: true });
+        }
+      } else {
+        await goto(`/group/${classId}`, { invalidateAll: true });
+      }
     } catch (e) {
       sadToast(
         `Failed to delete thread. Error: ${errorMessage(e, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
@@ -754,6 +773,23 @@
 
   onNavigate(async () => {
     await resetAudioSession();
+  });
+
+  beforeNavigate((nav) => {
+    if (
+      (data.isSharedAssistantPage || data.isSharedThreadPage) &&
+      isAnonymousSession &&
+      confirmNavigation
+    ) {
+      if (
+        !confirm(
+          `${data.me.status === 'anonymous' ? 'You will lose access to this thread.' : "You won't be able to edit this thread."}\n\nAre you sure you want to leave this page?`
+        )
+      ) {
+        nav.cancel();
+        return;
+      }
+    }
   });
 </script>
 

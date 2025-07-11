@@ -1,10 +1,16 @@
 import * as api from '$lib/api';
+import { redirect } from '@sveltejs/kit';
 import type { LayoutLoad } from './$types';
 
 /**
  * Load additional data needed for managing the class.
  */
-export const load: LayoutLoad = async ({ fetch, params }) => {
+export const load: LayoutLoad = async ({ fetch, params, parent }) => {
+  const { class: classData } = await parent();
+  if (!classData) {
+    throw redirect(302, '/');
+  }
+
   const classId = parseInt(params.classId, 10);
   const [grants, editable] = await Promise.all([
     api.grants(fetch, {
@@ -34,6 +40,7 @@ export const load: LayoutLoad = async ({ fetch, params }) => {
 
   return {
     grants,
+    class: classData,
     editableAssistants: new Set(editable)
   };
 };

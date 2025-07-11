@@ -81,16 +81,22 @@
         {#each threads as thread}
           {@const allUsers = thread.user_names || []}
           {@const allUsersLen = allUsers.length}
+          {@const isCurrentUserParticipant =
+            thread.is_current_user_participant || allUsers.includes('Me')}
+          {@const isAnonymousSession = thread.anonymous_session || false}
           {@const otherUsers = thread.user_names?.filter((user_name) => user_name != 'Me') || []}
           {@const otherUsersLen = otherUsers.length}
           <a
-            href={`/group/${thread.class_id}/thread/${thread.id}`}
+            href={thread.anonymous_session && isCurrentUserParticipant
+              ? `/group/${thread.class_id}/shared/thread/${thread.id}`
+              : `/group/${thread.class_id}/thread/${thread.id}`}
             class="border-b border-gray-200 pb-4 pt-4 transition-all duration-300 hover:bg-gray-100 hover:pl-4"
           >
             <div>
               <div class="flex flex-row gap-1">
                 <h4 class="eyebrow eyebrow-dark shrink-0">
-                  {classNamesLookup[thread.class_id]?.name || 'Unknown Group'}
+                  {classNamesLookup[thread.class_id]?.name ||
+                    (thread.anonymous_session ? 'Anonymous Session' : 'Unknown Group')}
                 </h4>
                 <h4 class="eyebrow eyebrow-dark shrink-0">|</h4>
                 <h4 class="eyebrow eyebrow-dark shrink truncate">
@@ -104,23 +110,31 @@
                 {dayjs.utc(thread.last_activity).fromNow()}
               </div>
               <div class="text-gray-400 text-xs uppercase tracking-wide">
-                {thread.private && !thread.display_user_info
-                  ? allUsersLen != otherUsersLen
-                    ? `me${
-                        otherUsersLen > 0
-                          ? otherUsersLen === 1
-                            ? ' & Anonymous User'
-                            : ' & ' + otherUsersLen + ' Anonymous Users'
-                          : ''
-                      }`
-                    : 'Anonymous User'
-                  : allUsersLen != otherUsersLen
-                    ? `me${
-                        otherUsersLen > 0
-                          ? otherUsers.map((user_name) => user_name || 'Anonymous User').join(', ')
-                          : ''
-                      }`
-                    : allUsers.map((user_name) => user_name || 'Anonymous User').join(', ')}
+                {allUsersLen > 0
+                  ? thread.private && !thread.display_user_info
+                    ? allUsersLen != otherUsersLen
+                      ? `me${
+                          otherUsersLen > 0
+                            ? otherUsersLen === 1
+                              ? ' & Anonymous User'
+                              : ' & ' + otherUsersLen + ' Anonymous Users'
+                            : ''
+                        }`
+                      : 'Anonymous User'
+                    : allUsersLen != otherUsersLen
+                      ? `me${
+                          otherUsersLen > 0
+                            ? otherUsers
+                                .map((user_name) => user_name || 'Anonymous User')
+                                .join(', ')
+                            : ''
+                        }`
+                      : allUsers.map((user_name) => user_name || 'Anonymous User').join(', ')
+                  : isCurrentUserParticipant
+                    ? 'Me'
+                    : isAnonymousSession
+                      ? 'Anonymous Session User'
+                      : 'Anonymous User'}
               </div>
             </div>
           </a>

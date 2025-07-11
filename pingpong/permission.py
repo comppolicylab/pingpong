@@ -117,6 +117,7 @@ class Authz(Expression):
             else:
                 target = request.state.authz.root
 
+            permission_checks: list[bool] = []
             # If the user is anonymous, check their anonymous permissions.
             if request.state.is_anonymous:
                 grants_to_check = []
@@ -136,17 +137,20 @@ class Authz(Expression):
                             target,
                         )
                     )
-                if not grants_to_check:
-                    return False
-                results = await request.state.authz.check(grants_to_check)
-                return any(results)
+                if grants_to_check:
+                    results = await request.state.authz.check(grants_to_check)
+                    permission_checks.extend(results)
 
             # If the user is logged in, check their permissions.
-            return await request.state.authz.test(
-                request.state.auth_user,
-                self.relation,
-                target,
-            )
+            if hasattr(request.state, "auth_user") and request.state.auth_user:
+                permission_checks.append(
+                    await request.state.authz.test(
+                        request.state.auth_user,
+                        self.relation,
+                        target,
+                    )
+                )
+            return any(permission_checks)
         except Exception as e:
             logger.exception("Error evaluating expression %s: %s", self, e)
             raise HTTPException(status_code=500, detail=str(e))

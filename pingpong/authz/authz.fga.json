@@ -706,6 +706,9 @@
             "directly_related_user_types": [
               {
                 "type": "anonymous_user"
+              },
+              {
+                "type": "user"
               }
             ]
           },
@@ -984,6 +987,9 @@
           "union": {
             "child": [
               {
+                "this": {}
+              },
+              {
                 "computedUserset": {
                   "relation": "owner"
                 }
@@ -1060,7 +1066,11 @@
             ]
           },
           "can_delete": {
-            "directly_related_user_types": []
+            "directly_related_user_types": [
+              {
+                "type": "anonymous_link"
+              }
+            ]
           },
           "can_view": {
             "directly_related_user_types": []

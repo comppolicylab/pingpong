@@ -407,7 +407,13 @@
           allFiles.update((f) => f.filter((x) => x !== file));
         })
         .catch(() => {
-          /* no-op */
+          allFiles.update((f) => {
+            const idx = f.indexOf(file);
+            if (idx >= 0) {
+              f[idx].state = 'success';
+            }
+            return f;
+          });
         });
     }
   };

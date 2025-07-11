@@ -119,9 +119,7 @@
       <TableHead class="bg-blue-light-40 p-1 text-blue-dark-50 tracking-wide rounded-2xl">
         <TableHeadCell>Description</TableHeadCell>
         <TableHeadCell>Status</TableHeadCell>
-        <TableHeadCell>Created</TableHeadCell>
-        <TableHeadCell>Disabled</TableHeadCell>
-        <TableHeadCell>Share Token</TableHeadCell>
+        <TableHeadCell>Last Updated</TableHeadCell>
         <TableHeadCell></TableHeadCell>
       </TableHead>
       <TableBody>
@@ -144,20 +142,11 @@
               {link.active ? 'Active' : 'Inactive'}
             </TableBodyCell>
             <TableBodyCell class="py-2 font-normal whitespace-normal">
-              {link.activated_at ? dayjs.utc(link.activated_at).fromNow() : ''}
-            </TableBodyCell>
-            <TableBodyCell class="py-2 font-normal whitespace-normal">
-              {link.revoked_at ? dayjs.utc(link.revoked_at).fromNow() : ''}
-            </TableBodyCell>
-            <TableBodyCell class="py-2 font-normal whitespace-normal truncate ">
-              <span class="text-blue-dark-50 font-mono text-sm"
-                >{link.share_token
-                  ? link.share_token.slice(0, 5) + '...' + link.share_token.slice(-5)
-                  : '(No token)'}</span
-              >
-              <Tooltip placement="top" class="text-xs font-light"
-                >{link.share_token || 'No share token available'}</Tooltip
-              >
+              {link.revoked_at
+                ? dayjs.utc(link.revoked_at).fromNow()
+                : link.activated_at
+                  ? dayjs.utc(link.activated_at).fromNow()
+                  : ''}
             </TableBodyCell>
 
             <TableBodyCell class="py-2">

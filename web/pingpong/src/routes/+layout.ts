@@ -72,7 +72,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
     ) {
       // If the user is not logged in and the URL has a share token,
       // allow access to the shared assistant or thread page.
-      doNotShowSidebar = true;
+      // doNotShowSidebar = true;
     } else if (!authed && url.pathname !== LOGOUT) {
       const destination = encodeURIComponent(`${url.pathname}${url.search}`);
       redirect(302, `${LOGIN}?forward=${destination}`);
