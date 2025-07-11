@@ -3752,8 +3752,8 @@ async def create_user_file(
         anonymous_session_id=request.state.anonymous_session_id
         if hasattr(request.state, "anonymous_session_id")
         else None,
-        anonymous_link_id=request.state.anonymous_share_token_id
-        if hasattr(request.state, "anonymous_share_token_id")
+        anonymous_link_id=request.state.anonymous_link_id
+        if hasattr(request.state, "anonymous_link_id")
         else None,
     )
 
