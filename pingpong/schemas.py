@@ -469,6 +469,7 @@ class Thread(BaseModel):
     last_activity: datetime
     display_user_info: bool
     anonymous_session: bool = False
+    is_current_user_participant: bool = False
 
     class Config:
         from_attributes = True

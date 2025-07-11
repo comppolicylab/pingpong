@@ -81,10 +81,10 @@
         {#each threads as thread}
           {@const allUsers = thread.user_names || []}
           {@const allUsersLen = allUsers.length}
-          {@const otherUsers =
-            thread.user_names?.filter(
-              (user_name) => user_name != 'Me' && user_name != 'Anonymous Session User'
-            ) || []}
+          {@const isCurrentUserParticipant =
+            thread.is_current_user_participant || allUsers.includes('Me')}
+          {@const isAnonymousSession = thread.anonymous_session || false}
+          {@const otherUsers = thread.user_names?.filter((user_name) => user_name != 'Me') || []}
           {@const otherUsersLen = otherUsers.length}
           <a
             href={thread.anonymous_session
@@ -110,23 +110,31 @@
                 {dayjs.utc(thread.last_activity).fromNow()}
               </div>
               <div class="text-gray-400 text-xs uppercase tracking-wide">
-                {thread.private && !thread.display_user_info
-                  ? allUsersLen != otherUsersLen
-                    ? `me${
-                        otherUsersLen > 0
-                          ? otherUsersLen === 1
-                            ? ' & Anonymous User'
-                            : ' & ' + otherUsersLen + ' Anonymous Users'
-                          : ''
-                      }`
-                    : 'Anonymous User'
-                  : allUsersLen != otherUsersLen
-                    ? `me${
-                        otherUsersLen > 0
-                          ? otherUsers.map((user_name) => user_name || 'Anonymous User').join(', ')
-                          : ''
-                      }`
-                    : allUsers.map((user_name) => user_name || 'Anonymous User').join(', ')}
+                {allUsersLen > 0
+                  ? thread.private && !thread.display_user_info
+                    ? allUsersLen != otherUsersLen
+                      ? `me${
+                          otherUsersLen > 0
+                            ? otherUsersLen === 1
+                              ? ' & Anonymous User'
+                              : ' & ' + otherUsersLen + ' Anonymous Users'
+                            : ''
+                        }`
+                      : 'Anonymous User'
+                    : allUsersLen != otherUsersLen
+                      ? `me${
+                          otherUsersLen > 0
+                            ? otherUsers
+                                .map((user_name) => user_name || 'Anonymous User')
+                                .join(', ')
+                            : ''
+                        }`
+                      : allUsers.map((user_name) => user_name || 'Anonymous User').join(', ')
+                  : isCurrentUserParticipant
+                    ? 'Me'
+                    : isAnonymousSession
+                      ? 'Anonymous Session User'
+                      : 'Anonymous User'}
               </div>
             </div>
           </a>

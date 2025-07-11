@@ -1960,6 +1960,7 @@ export type Thread = {
   last_activity: string;
   display_user_info?: boolean;
   anonymous_session?: boolean;
+  is_current_user_participant?: boolean;
 };
 
 export type ThreadWithOptionalToken = {

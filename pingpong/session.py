@@ -1,4 +1,3 @@
-
 from fastapi import Request
 from jwt import PyJWTError
 from pingpong import models, schemas
@@ -7,15 +6,18 @@ from .now import NowFn, utcnow
 from pingpong.users import UserNotFoundException
 
 import logging
+
 logger = logging.getLogger(__name__)
+
 
 def get_now_fn(req: Request) -> NowFn:
     """Get the current time function for the request."""
     return getattr(req.app.state, "now", utcnow)
 
+
 async def populate_anonymous_tokens(request):
     isRequest = isinstance(request, Request)
-    
+
     # Default values for anonymous session state
     request.state.is_anonymous = False
     request.state.anonymous_share_token_auth = None
@@ -26,9 +28,14 @@ async def populate_anonymous_tokens(request):
 
     if isRequest:
         request.state.anonymous_share_token = request.query_params.get("share_token")
-        request.state.anonymous_session_token = request.headers.get("X-Anonymous-Thread-Session")
+        request.state.anonymous_session_token = request.headers.get(
+            "X-Anonymous-Thread-Session"
+        )
 
-    if request.state.anonymous_share_token is None and request.state.anonymous_session_token is None:
+    if (
+        request.state.anonymous_share_token is None
+        and request.state.anonymous_session_token is None
+    ):
         return request
     else:
         if request.state.anonymous_session_token:

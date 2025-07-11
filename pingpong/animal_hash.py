@@ -41,6 +41,10 @@ def process_threads(
         )
         if len(new_thread.anonymous_sessions) > 0:
             new_thread.anonymous_session = True
+        new_thread.is_current_user_participant = False
+        for user in new_thread.users:
+            if user.id == user_id:
+                new_thread.is_current_user_participant = True
     return threads
 
 
@@ -62,8 +66,7 @@ def user_names(new_thread: Thread, user_id: int, is_supervisor=False) -> list[st
         if is_supervisor and new_thread.display_user_info
         else pseudonym(new_thread, u)
         if not new_thread.private
-        else "Anonymous Session User"
-        if u.anonymous_link_id
         else "Anonymous User"
         for u in new_thread.users
+        if not u.anonymous_link_id
     ]
