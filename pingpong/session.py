@@ -17,6 +17,7 @@ def get_now_fn(req: Request) -> NowFn:
 
 async def populate_anonymous_tokens(request):
     isRequest = isinstance(request, Request)
+    user: models.User | None = None
 
     # Default values for anonymous session state
     request.state.is_anonymous = False
