@@ -30,7 +30,7 @@
       math, economics, statistics and/or computer science, to participate in a randomized
       large-scale study. Initial access to PingPong will be provided to half of the participating
       instructors, with access provided to all instructors in the following semester. An
-      <b>honorarium of $1,000</b> will be provided to all participating instructors.</P
+      <b>honorarium of $1,000</b> will be available to all eligible participating instructors.</P
     >
     <P class="mt-4"
       >We are now considering applications for Fall 2025 courses. <b
