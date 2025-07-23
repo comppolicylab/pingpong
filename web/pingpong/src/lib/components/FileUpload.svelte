@@ -96,6 +96,7 @@
         type: string,
         detail: { file: File; message: string } | Writable<FileUploadInfo[]>
       ) => void;
+      resetOnSubmit?: boolean;
     }
   ) => {
     const reset = () => {
@@ -108,7 +109,9 @@
     const form = el.form;
     if (form) {
       form.addEventListener('reset', reset);
-      form.addEventListener('submit', reset);
+      if (options.resetOnSubmit) {
+        form.addEventListener('submit', reset);
+      }
     }
 
     return {
@@ -117,7 +120,9 @@
           return;
         }
         form.removeEventListener('reset', reset);
-        form.removeEventListener('submit', reset);
+        if (options.resetOnSubmit) {
+          form.removeEventListener('submit', reset);
+        }
       }
     };
   };

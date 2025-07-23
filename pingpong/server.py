@@ -4510,6 +4510,10 @@ async def update_assistant(
                         request.state.db, id_to_delete
                     )
                     tool_resources["file_search"] = {}
+    except ValueError as e:
+        raise HTTPException(
+            400, f"Error updating assistant files: {e}. Please try saving again."
+        )
     except Exception:
         raise HTTPException(
             500, "Error updating assistant files. Please try saving again."
@@ -4648,7 +4652,9 @@ async def update_assistant(
                 class_id=int(class_id),
             )
         except Exception as e:
-            raise HTTPException(500, f"Error removing private files: {e}")
+            logger.exception(
+                "Error deleting private files while updating assistant: %s", e
+            )
 
     await request.state.authz.write_safe(grant=grants, revoke=revokes)
     return asst

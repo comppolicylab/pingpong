@@ -1871,9 +1871,15 @@ class VectorStore(Base):
             k: v for k, v in current_file_ids.items() if k not in new_file_ids
         }
 
-        vector_store_id = await cls.get_vector_store_id_by_id(
-            session, vector_store_obj_id
-        )
+        vector_store = await cls.get_by_id(session, vector_store_obj_id)
+        if not vector_store:
+            raise ValueError(f"Vector store with id {vector_store_obj_id} does not exist.")
+        
+        if len(current_file_ids) - len(file_ids_to_remove) + len(file_ids_to_add) > 100:
+            raise ValueError(
+                "The number of files in the vector store exceeds the limit of 100."
+            )
+        vector_store_id = vector_store.vector_store_id
 
         if file_ids_to_remove:
             stmt = (
@@ -1910,6 +1916,10 @@ class VectorStore(Base):
         for row in result:
             yield row.VectorStore.id
 
+    @classmethod
+    async def get_by_id(cls, session: AsyncSession, id_: int) -> "VectorStore":
+        stmt = select(VectorStore).where(VectorStore.id == int(id_))
+        return await session.scalar(stmt)
 
 class AnonymousLink(Base):
     __tablename__ = "anonymous_links"
