@@ -514,6 +514,24 @@ async def run_thread(
                     )
                 yield handler.flush()
     except openai.APIError as openai_error:
+        if openai_error.type == "invalid_request_error" and (
+            "add messages to" in openai_error.message
+            or "already has an active run" in openai_error.message
+        ):
+            try:
+                logger.exception(f"Active run error in thread run: {openai_error}")
+                yield (
+                    orjson.dumps(
+                        {
+                            "type": "run_active_error",
+                            "detail": "OpenAI is still processing your last request. We're fetching the latest status...",
+                        }
+                    )
+                    + b"\n"
+                )
+            except Exception as e:
+                logger.exception(f"Error writing to stream: {e}")
+                pass
         if openai_error.type == "server_error":
             try:
                 logger.exception(f"Server error in thread run: {openai_error}")

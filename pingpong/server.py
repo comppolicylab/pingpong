@@ -3371,6 +3371,29 @@ async def send_message(
             detail="You do not have permission to interact with this assistant.",
         )
 
+    last_runs_result = await openai_client.beta.threads.runs.list(
+        thread.thread_id, limit=1, order="desc"
+    )
+    last_run = last_runs_result.data[0] if last_runs_result.data else None
+
+    if not last_run:
+        raise HTTPException(
+            status_code=500,
+            detail="OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+        )
+
+    if last_run.status not in {
+        "completed",
+        "failed",
+        "incomplete",
+        "expired",
+        "cancelled",
+    }:
+        raise HTTPException(
+            status_code=409,
+            detail="OpenAI is still processing your last request. We're fetching the latest status...",
+        )
+
     try:
         asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
 

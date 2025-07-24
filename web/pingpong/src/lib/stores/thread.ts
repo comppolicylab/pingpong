@@ -257,6 +257,12 @@ export class ThreadManager {
           error: { detail: e.message, wasSent: false },
           submitting: false
         }));
+      } else if (e instanceof api.RunActiveError) {
+        this.#data.update((d) => ({
+          ...d,
+          error: { detail: e.message, wasSent: false },
+          submitting: false
+        }));
       } else {
         this.#data.update((d) => ({ ...d, error: { detail: (e as Error).detail, wasSent: true } }));
       }
@@ -567,7 +573,7 @@ export class ThreadManager {
       callback({ success: true, errorMessage: null, message_sent: true });
     } catch (e) {
       console.error('Error posting message', e);
-      if (e instanceof api.PresendError) {
+      if (e instanceof api.PresendError || e instanceof api.RunActiveError) {
         this.#data.update((d) => ({
           ...d,
           optimistic: d.optimistic.filter((msg) => msg.id !== optimisticMsgId),
@@ -582,6 +588,9 @@ export class ThreadManager {
             {} as Record<string, api.ServerFile>
           )
         }));
+        if (e instanceof api.RunActiveError) {
+          await this.#pollThread();
+        }
       } else if (e instanceof api.StreamError) {
         this.#data.update((d) => ({
           ...d,
@@ -686,6 +695,13 @@ export class ThreadManager {
           message_sent: false
         });
         throw new api.PresendError(chunk.detail || 'An unknown error occurred.');
+      case 'run_active_error':
+        callback({
+          success: false,
+          errorMessage: chunk.detail || 'An unknown error occurred.',
+          message_sent: false
+        });
+        throw new api.RunActiveError(chunk.detail || 'An unknown error occurred.');
       case 'tool_call_created':
         this.#createToolCall(chunk.tool_call);
         this.#appendToolCallDelta(chunk.tool_call);
