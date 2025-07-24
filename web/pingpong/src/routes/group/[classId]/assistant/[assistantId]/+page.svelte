@@ -17,7 +17,7 @@
     RadioButton
   } from 'flowbite-svelte';
   import type { Tool, ServerFile, FileUploadInfo } from '$lib/api';
-  import { beforeNavigate, goto } from '$app/navigation';
+  import { beforeNavigate, goto, invalidate } from '$app/navigation';
   import * as api from '$lib/api';
   import { setsEqual } from '$lib/set';
   import { happyToast, sadToast } from '$lib/toast';
@@ -50,6 +50,7 @@
   import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
   import DropdownBadge from '$lib/components/DropdownBadge.svelte';
   import Sanitize from '$lib/components/Sanitize.svelte';
+  import { page } from '$app/stores';
   export let data;
 
   // Flag indicating whether we should check for changes before navigating away.
@@ -742,7 +743,8 @@
     $loading = false;
     checkForChanges = false;
     happyToast('Assistant deleted');
-    await goto(`/group/${data.class.id}/assistant`, { invalidateAll: true });
+    await invalidate(`/group/${$page.params.classId}`);
+    await goto(`/group/${data.class.id}/assistant`);
     return;
   };
 
@@ -809,7 +811,8 @@
       $loadingMessage = '';
       happyToast('Assistant saved');
       checkForChanges = false;
-      await goto(`/group/${data.class.id}/assistant`, { invalidateAll: true });
+      await invalidate(`/group/${$page.params.classId}`);
+      await goto(`/group/${data.class.id}/assistant`);
     }
   };
 
