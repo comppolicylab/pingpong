@@ -4093,15 +4093,7 @@ async def create_assistant(
         )
 
     try:
-        # Delete private files uploaded but not attached to the assistant
-        await handle_delete_files(
-            request.state.db,
-            request.state.authz,
-            openai_client,
-            req.deleted_private_files,
-            class_id=int(class_id),
-        )
-
+        deleted_private_files = req.deleted_private_files or []
         del req.deleted_private_files
 
         asst = await models.Assistant.create(
@@ -4112,6 +4104,18 @@ async def create_assistant(
             assistant_id=new_asst.id,
             vector_store_id=vector_store_object_id,
             version=2,
+        )
+
+        # Delete private files uploaded but not attached to the assistant
+        files_to_delete = await models.File.get_files_not_used_by_assistant(
+            request.state.db, asst.id, deleted_private_files
+        )
+        await handle_delete_files(
+            request.state.db,
+            request.state.authz,
+            openai_client,
+            files_to_delete,
+            class_id=int(class_id),
         )
 
         grants = [
@@ -4533,6 +4537,10 @@ async def update_assistant(
                         request.state.db, id_to_delete
                     )
                     tool_resources["file_search"] = {}
+    except ValueError as e:
+        raise HTTPException(
+            400, f"Error updating assistant files: {e}. Please try saving again."
+        )
     except Exception:
         raise HTTPException(
             500, "Error updating assistant files. Please try saving again."
@@ -4662,16 +4670,23 @@ async def update_assistant(
         and req.deleted_private_files != []
     ):
         try:
+            files_to_delete = await models.File.get_files_not_used_by_assistant(
+                request.state.db,
+                asst.id,
+                req.deleted_private_files,
+            )
             # Delete any private files that were removed
             await handle_delete_files(
                 request.state.db,
                 request.state.authz,
                 openai_client,
-                req.deleted_private_files,
+                files_to_delete,
                 class_id=int(class_id),
             )
         except Exception as e:
-            raise HTTPException(500, f"Error removing private files: {e}")
+            logger.exception(
+                "Error deleting private files while updating assistant: %s", e
+            )
 
     await request.state.authz.write_safe(grant=grants, revoke=revokes)
     return asst

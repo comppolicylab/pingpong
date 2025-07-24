@@ -306,7 +306,7 @@
   style="display: none;"
   bind:this={uploadRef}
   on:change={handleFileInputChange}
-  use:bindToForm={{ files: files, dispatch: dispatch }}
+  use:bindToForm={{ files: files, dispatch: dispatch, resetOnSubmit: false }}
 />
 <div id={name} class="flex justify-between">
   <div class="w-[45%]">

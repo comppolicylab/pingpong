@@ -630,10 +630,10 @@ async def handle_create_file(
             is_azure_client,
             use_image_descriptions,
             user_auth,
-            anonymous_link_auth,
-            anonymous_user_auth,
-            anonymous_session_id,
-            anonymous_link_id,
+            anonymous_link_auth if purpose != "assistants" else None,
+            anonymous_user_auth if purpose != "assistants" else None,
+            anonymous_session_id if purpose != "assistants" else None,
+            anonymous_link_id if purpose != "assistants" else None,
         )
     else:
         return await handle_create_single_purpose_file(
@@ -649,10 +649,10 @@ async def handle_create_file(
             is_azure_client,
             use_image_descriptions,
             user_auth,
-            anonymous_link_auth,
-            anonymous_user_auth,
-            anonymous_session_id,
-            anonymous_link_id,
+            anonymous_link_auth if purpose != "assistants" else None,
+            anonymous_user_auth if purpose != "assistants" else None,
+            anonymous_session_id if purpose != "assistants" else None,
+            anonymous_link_id if purpose != "assistants" else None,
         )
 
 

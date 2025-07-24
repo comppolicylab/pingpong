@@ -40,6 +40,8 @@ async def create_vector_store(
                 new_vector_store.id, file_ids=file_search_file_ids
             )
     except openai.BadRequestError as e:
+        if new_vector_store:
+            await openai_client.vector_stores.delete(new_vector_store.id)
         raise HTTPException(
             400, get_details_from_api_error(e, "OpenAI rejected this request")
         )
@@ -146,16 +148,6 @@ async def sync_vector_store_files(
         session, vector_store_obj_id, file_search_file_ids
     )
 
-    if file_ids_to_add:
-        try:
-            await openai_client.vector_stores.file_batches.create_and_poll(
-                vector_store_id, file_ids=file_ids_to_add
-            )
-        except openai.BadRequestError as e:
-            raise HTTPException(
-                400, get_details_from_api_error(e, "OpenAI rejected this request")
-            )
-
     for file_id in file_ids_to_remove:
         try:
             await openai_client.vector_stores.files.delete(
@@ -168,6 +160,17 @@ async def sync_vector_store_files(
             raise HTTPException(
                 400, get_details_from_api_error(e, "OpenAI rejected this request")
             )
+
+    if file_ids_to_add:
+        try:
+            await openai_client.vector_stores.file_batches.create_and_poll(
+                vector_store_id, file_ids=file_ids_to_add
+            )
+        except openai.BadRequestError as e:
+            raise HTTPException(
+                400, get_details_from_api_error(e, "OpenAI rejected this request")
+            )
+
     return vector_store_id
 
 

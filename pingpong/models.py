@@ -1632,6 +1632,49 @@ class File(Base):
         return result.all()
 
     @classmethod
+    async def get_files_not_used_by_assistant(
+        cls, session: AsyncSession, assistant_id: int, file_ids: list[int]
+    ) -> list[int]:
+        if not file_ids:
+            return []
+
+        vs_path = (
+            select(file_vector_store_association.c.file_id.label("file_id"))
+            .join(
+                VectorStore,
+                file_vector_store_association.c.vector_store_id == VectorStore.id,
+            )
+            .join(Assistant, Assistant.vector_store_id == VectorStore.id)
+            .where(
+                Assistant.id == assistant_id,
+                file_vector_store_association.c.file_id.in_(file_ids),
+            )
+        )
+        ci_path = (
+            select(
+                code_interpreter_file_assistant_association.c.file_id.label("file_id")
+            )
+            .join(
+                Assistant,
+                Assistant.id
+                == code_interpreter_file_assistant_association.c.assistant_id,
+            )
+            .where(
+                Assistant.id == assistant_id,
+                code_interpreter_file_assistant_association.c.file_id.in_(file_ids),
+            )
+        )
+        files_and_assistants = union_all(vs_path, ci_path).subquery()
+
+        # Get the file IDs that ARE used by the assistant
+        stmt = select(files_and_assistants.c.file_id).distinct()
+        result = await session.execute(stmt)
+        used_file_ids = {row[0] for row in result}
+
+        # Return file IDs that are NOT used by the assistant
+        return [file_id for file_id in file_ids if file_id not in used_file_ids]
+
+    @classmethod
     async def remove_file_from_class(
         cls, session: AsyncSession, file_id: int, class_id: int
     ) -> None:
@@ -1871,9 +1914,17 @@ class VectorStore(Base):
             k: v for k, v in current_file_ids.items() if k not in new_file_ids
         }
 
-        vector_store_id = await cls.get_vector_store_id_by_id(
-            session, vector_store_obj_id
-        )
+        vector_store = await cls.get_by_id(session, vector_store_obj_id)
+        if not vector_store:
+            raise ValueError(
+                f"Vector store with id {vector_store_obj_id} does not exist."
+            )
+
+        if len(current_file_ids) - len(file_ids_to_remove) + len(file_ids_to_add) > 100:
+            raise ValueError(
+                "The number of files in the vector store exceeds the limit of 100."
+            )
+        vector_store_id = vector_store.vector_store_id
 
         if file_ids_to_remove:
             stmt = (
@@ -1909,6 +1960,11 @@ class VectorStore(Base):
         result = await session.execute(stmt)
         for row in result:
             yield row.VectorStore.id
+
+    @classmethod
+    async def get_by_id(cls, session: AsyncSession, id_: int) -> "VectorStore":
+        stmt = select(VectorStore).where(VectorStore.id == int(id_))
+        return await session.scalar(stmt)
 
 
 class AnonymousLink(Base):
