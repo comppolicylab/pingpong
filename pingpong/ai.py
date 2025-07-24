@@ -514,7 +514,10 @@ async def run_thread(
                     )
                 yield handler.flush()
     except openai.APIError as openai_error:
-        if openai_error.type == "invalid_request_error" and ("add messages to" in openai_error.message or "already has an active run" in openai_error.message):
+        if openai_error.type == "invalid_request_error" and (
+            "add messages to" in openai_error.message
+            or "already has an active run" in openai_error.message
+        ):
             try:
                 logger.exception(f"Active run error in thread run: {openai_error}")
                 yield (

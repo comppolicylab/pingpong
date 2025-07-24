@@ -3382,7 +3382,13 @@ async def send_message(
             detail="OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
         )
 
-    if last_run.status not in {"completed", "failed", "incomplete", "expired", "cancelled"}:
+    if last_run.status not in {
+        "completed",
+        "failed",
+        "incomplete",
+        "expired",
+        "cancelled",
+    }:
         raise HTTPException(
             status_code=409,
             detail="OpenAI is still processing your last request. We're fetching the latest status...",
