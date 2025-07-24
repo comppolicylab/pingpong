@@ -46,6 +46,13 @@ export class PresendError extends Error {
   }
 }
 
+export class RunActiveError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RunActiveError';
+  }
+}
+
 export class StreamError extends Error {
   constructor(message: string) {
     super(message);
@@ -2363,6 +2370,11 @@ export type ThreadServerErrorChunk = {
   detail: string;
 };
 
+export type ThreadRunActiveErrorChunk = {
+  type: 'run_active_error';
+  detail: string;
+};
+
 export type ThreadStreamDoneChunk = {
   type: 'done';
 };
@@ -2383,6 +2395,7 @@ export type ThreadStreamChunk =
   | ThreadStreamMessageDeltaChunk
   | ThreadStreamMessageCreatedChunk
   | ThreadStreamErrorChunk
+  | ThreadRunActiveErrorChunk
   | ThreadPreSendErrorChunk
   | ThreadServerErrorChunk
   | ThreadStreamDoneChunk
@@ -2418,6 +2431,19 @@ const streamThreadChunks = (res: Response) => {
           type: 'presend_error',
           detail: `We were unable to send your message, because it was not accepted by our server: ${message}`
         } as ThreadPreSendErrorChunk;
+      }
+    };
+  } else if (res.status === 409) {
+    return {
+      stream,
+      reader,
+      async *[Symbol.asyncIterator]() {
+        const error = await reader.read();
+        const error_ = error.value as ThreadHTTPErrorChunk;
+        yield {
+          type: 'run_active_error',
+          detail: `We were unable to send your message: ${error_.detail}`
+        } as ThreadRunActiveErrorChunk;
       }
     };
   } else if (res.status !== 200) {
