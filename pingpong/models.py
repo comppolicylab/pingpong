@@ -44,6 +44,8 @@ from sqlalchemy.sql import func
 import pingpong.schemas as schemas
 import logging
 
+logger = logging.getLogger(__name__)
+
 
 def _get_upsert_stmt(session: AsyncSession):
     """Get the appropriate upsert statement for the current database."""
@@ -352,7 +354,9 @@ class UserClassRole(Base):
         )
         result = await session.scalar(stmt)
         if sso_tenant and sso_id:
-            await ExternalLogin.create_or_update(session, user_id, sso_tenant, sso_id)
+            await ExternalLogin.create_or_update(
+                session, user_id, sso_tenant, sso_id, called_by="UserClassRole.create"
+            )
         return result
 
     @classmethod
@@ -838,7 +842,12 @@ class ExternalLogin(Base):
 
     @classmethod
     async def create_or_update(
-        cls, session: AsyncSession, user_id: int, provider: str, identifier: str
+        cls,
+        session: AsyncSession,
+        user_id: int,
+        provider: str,
+        identifier: str,
+        called_by: str | None = None,
     ) -> bool:
         provider_ = await ExternalLoginProvider.get_or_create_by_name(session, provider)
         if provider not in {"email"}:
@@ -866,6 +875,10 @@ class ExternalLogin(Base):
                     provider_id=provider_.id,
                 )
                 session.add(new_login)
+                if called_by:
+                    logger.info(
+                        f"ELDEBUG: ({called_by}) Creating new external login for user {user_id} with provider {provider} and identifier {identifier}"
+                    )
                 return True
         else:
             # For email provider, always create a new record if it doesn't exist
@@ -1160,7 +1173,11 @@ class User(Base):
             if provider and identifier:
                 # We might not have the external login information stored
                 await ExternalLogin.create_or_update(
-                    session, existing.id, provider=provider, identifier=identifier
+                    session,
+                    existing.id,
+                    provider=provider,
+                    identifier=identifier,
+                    called_by="User.get_or_create_by_email_sso",
                 )
             # Now that we updated the external login, we can return the user
             await session.refresh(existing)

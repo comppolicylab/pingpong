@@ -246,6 +246,7 @@ class AddNewUsers(ABC):
                 enrollment.user_id,
                 self.new_ucr.sso_tenant,
                 sso_id,
+                called_by="UserClassRole.update_user_enrollment",
             )
 
     async def _create_user_enrollment(
