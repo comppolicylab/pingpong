@@ -191,6 +191,7 @@ async def merge_external_logins(
             user_id=new_user_id,
             provider=provider,
             identifier=identifier,
+            called_by="merge_external_logins",
         )
 
 

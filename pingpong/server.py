@@ -361,7 +361,11 @@ async def login_sso_saml_acs(provider: str, request: Request):
     if attrs.identifier:
         # Add external login and get accounts to merge
         await models.ExternalLogin.create_or_update(
-            request.state.db, user.id, provider=provider, identifier=attrs.identifier
+            request.state.db,
+            user.id,
+            provider=provider,
+            identifier=attrs.identifier,
+            called_by="login_sso_saml_acs",
         )
         user_ids = await models.ExternalLogin.accounts_to_merge(
             request.state.db, user.id, provider=provider, identifier=attrs.identifier
@@ -459,7 +463,11 @@ async def add_email_to_user(user_id: str, email: str, request: Request):
 
     try:
         is_new_or_updated = await models.ExternalLogin.create_or_update(
-            request.state.db, user.id, provider="email", identifier=_new_email
+            request.state.db,
+            user.id,
+            provider="email",
+            identifier=_new_email,
+            called_by="add_email_to_user",
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
