@@ -898,7 +898,7 @@ async def canvas_sync_all(
     sync_classes_with_error_status: bool = False,
 ) -> None:
     logger.info(
-        f"Last ExternalLogin RID before sync: {await ExternalLogin.get_last_row_id(session)}"
+        f"ELDEBUG: (canvas_sync_all) Last ExternalLogin RID before sync: {await ExternalLogin.get_last_row_id(session)}"
     )
 
     async for class_ in Class.get_all_to_sync(
@@ -909,7 +909,7 @@ async def canvas_sync_all(
     ):
         logger.info(f"Syncing class {class_.id}...")
         logger.info(
-            f"ExternalLogin RID before class {class_.id} sync: {await ExternalLogin.get_last_row_id(session)}"
+            f"ELDEBUG: (canvas_sync_all) ExternalLogin RID before class {class_.id} sync: {await ExternalLogin.get_last_row_id(session)}"
         )
         async with session.begin_nested() as session_:
             try:
@@ -931,7 +931,7 @@ async def canvas_sync_all(
                 logger.exception(f"Error syncing class {class_.id}: {e}")
                 await session_.rollback()
         logger.info(
-            f"ExternalLogin RID after class {class_.id} sync: {await ExternalLogin.get_last_row_id(session)}"
+            f"ELDEBUG: (canvas_sync_all) ExternalLogin RID after class {class_.id} sync: {await ExternalLogin.get_last_row_id(session)}"
         )
     # Finally, commit all changes
     await session.commit()

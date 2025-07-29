@@ -355,13 +355,13 @@ class UserClassRole(Base):
         result = await session.scalar(stmt)
         if sso_tenant and sso_id:
             logger.info(
-                f"(UserClassRole.create) ExternalLogin RID before {sso_tenant}, {sso_id}, {user_id} creation: {await ExternalLogin.get_last_row_id(session)}"
+                f"ELDEBUG: (UserClassRole.create) ExternalLogin RID before {sso_tenant}, {sso_id}, {user_id} creation: {await ExternalLogin.get_last_row_id(session)}"
             )
             await ExternalLogin.create_or_update(
                 session, user_id, sso_tenant, sso_id, called_by="UserClassRole.create"
             )
             logger.info(
-                f"(UserClassRole.create) ExternalLogin RID after {sso_tenant}, {sso_id}, {user_id} creation: {await ExternalLogin.get_last_row_id(session)}"
+                f"ELDEBUG: (UserClassRole.create) ExternalLogin RID after {sso_tenant}, {sso_id}, {user_id} creation: {await ExternalLogin.get_last_row_id(session)}"
             )
         return result
 
@@ -1186,7 +1186,7 @@ class User(Base):
         if existing:
             if provider and identifier:
                 logger.info(
-                    f"(User.get_or_create_by_email_sso) ExternalLogin RID before adding {provider}, {identifier}, {existing.id}: {await ExternalLogin.get_last_row_id(session)}"
+                    f"ELDEBUG: (User.get_or_create_by_email_sso) ExternalLogin RID before adding {provider}, {identifier}, {existing.id}: {await ExternalLogin.get_last_row_id(session)}"
                 )
 
                 # We might not have the external login information stored
@@ -1202,14 +1202,14 @@ class User(Base):
             await session.refresh(existing)
             if provider and identifier:
                 logger.info(
-                    f"(User.get_or_create_by_email_sso, EXISTING user) ExternalLogin RID after adding {provider}, {identifier}, {existing.id}: {await ExternalLogin.get_last_row_id(session)}"
+                    f"ELDEBUG: (User.get_or_create_by_email_sso, EXISTING user) ExternalLogin RID after adding {provider}, {identifier}, {existing.id}: {await ExternalLogin.get_last_row_id(session)}"
                 )
             return existing
 
         # User does not exist, create a new user
         if provider and identifier:
             logger.info(
-                f"(User.get_or_create_by_email_sso, NEW user) ExternalLogin RID before adding {provider}, {identifier}: {await ExternalLogin.get_last_row_id(session)}"
+                f"ELDEBUG: (User.get_or_create_by_email_sso, NEW user) ExternalLogin RID before adding {provider}, {identifier}: {await ExternalLogin.get_last_row_id(session)}"
             )
             provider_ = await ExternalLoginProvider.get_or_create_by_name(
                 session, provider
@@ -1233,7 +1233,7 @@ class User(Base):
         await session.refresh(user)
         if provider and identifier:
             logger.info(
-                f"(User.get_or_create_by_email_sso, NEW user) ExternalLogin RID before adding {provider}, {identifier}, {user.id}: {await ExternalLogin.get_last_row_id(session)}"
+                f"ELDEBUG: (User.get_or_create_by_email_sso, NEW user) ExternalLogin RID before adding {provider}, {identifier}, {user.id}: {await ExternalLogin.get_last_row_id(session)}"
             )
         return user
 
