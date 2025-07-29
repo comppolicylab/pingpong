@@ -22,6 +22,8 @@ from pingpong.models import (
 )
 from pingpong.schemas import MergedUserTuple
 
+logger = logging.getLogger(__name__)
+
 
 async def merge(
     session: AsyncSession,
@@ -184,7 +186,17 @@ async def merge_external_logins(
     result = await session.execute(delete_stmt)
     old_logins = result.fetchall()
 
+    logger.info(
+        "(merge_external_logins) ExternalLogin RID before migration: ",
+        await ExternalLogin.get_last_row_id(session),
+    )
+
     for provider, identifier in old_logins:
+        logger.info(
+            f"(merge_external_logins) ExternalLogin RID before {provider}, {identifier} migration: ",
+            await ExternalLogin.get_last_row_id(session),
+        )
+
         # Use the create_or_update method to migrate each login to the new user
         await ExternalLogin.create_or_update(
             session,
@@ -193,6 +205,16 @@ async def merge_external_logins(
             identifier=identifier,
             called_by="merge_external_logins",
         )
+
+        logger.info(
+            f"(merge_external_logins) ExternalLogin RID after {provider}, {identifier} migration: ",
+            await ExternalLogin.get_last_row_id(session),
+        )
+
+    logger.info(
+        "(merge_external_logins) ExternalLogin RID after migration: ",
+        await ExternalLogin.get_last_row_id(session),
+    )
 
 
 async def merge_user_files(
