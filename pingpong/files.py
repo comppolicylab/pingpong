@@ -324,7 +324,7 @@ async def handle_create_single_purpose_file(
     await upload.seek(0)
     try:
         openai_file_purpose = (
-            "user_data" if purpose == "assistants" and is_azure_client else purpose
+            "user_data" if purpose == "assistants" and not is_azure_client else purpose
         )
         new_f = await oai_client.files.create(
             # NOTE(jnu): the client tries to infer the filename, which doesn't
