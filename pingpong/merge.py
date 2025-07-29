@@ -187,14 +187,12 @@ async def merge_external_logins(
     old_logins = result.fetchall()
 
     logger.info(
-        "(merge_external_logins) ExternalLogin RID before migration: ",
-        await ExternalLogin.get_last_row_id(session),
+        f"ELDEBUG: (merge_external_logins) ExternalLogin RID before migration: {await ExternalLogin.get_last_row_id(session)}"
     )
 
     for provider, identifier in old_logins:
         logger.info(
-            f"(merge_external_logins) ExternalLogin RID before {provider}, {identifier} migration: ",
-            await ExternalLogin.get_last_row_id(session),
+            f"ELDEBUG: (merge_external_logins) ExternalLogin RID before {provider}, {identifier} migration: {await ExternalLogin.get_last_row_id(session)}"
         )
 
         # Use the create_or_update method to migrate each login to the new user
@@ -207,13 +205,11 @@ async def merge_external_logins(
         )
 
         logger.info(
-            f"(merge_external_logins) ExternalLogin RID after {provider}, {identifier} migration: ",
-            await ExternalLogin.get_last_row_id(session),
+            f"ELDEBUG: (merge_external_logins) ExternalLogin RID after {provider}, {identifier} migration: {await ExternalLogin.get_last_row_id(session)}"
         )
 
     logger.info(
-        "(merge_external_logins) ExternalLogin RID after migration: ",
-        await ExternalLogin.get_last_row_id(session),
+        f"ELDEBUG: (merge_external_logins) ExternalLogin RID after migration: {await ExternalLogin.get_last_row_id(session)}"
     )
 
 
