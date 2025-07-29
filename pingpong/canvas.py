@@ -14,7 +14,7 @@ from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.time import convert_seconds
 
 from .config import CanvasSettings, config
-from .models import Class, LMSClass as CanvasClass
+from .models import Class, ExternalLogin, LMSClass as CanvasClass
 from .now import NowFn, utcnow
 from .retry import with_retry
 from .schemas import (
@@ -897,6 +897,11 @@ async def canvas_sync_all(
     sync_without_sso_ids: bool = False,
     sync_classes_with_error_status: bool = False,
 ) -> None:
+    logger.info(
+        "Last ExternalLogin RID before sync: ",
+        await ExternalLogin.get_last_row_id(session),
+    )
+
     async for class_ in Class.get_all_to_sync(
         session,
         canvas_backend.tenant,
@@ -904,6 +909,10 @@ async def canvas_sync_all(
         sync_classes_with_error_status=sync_classes_with_error_status,
     ):
         logger.info(f"Syncing class {class_.id}...")
+        logger.info(
+            f"ExternalLogin RID before class {class_.id} sync: ",
+            await ExternalLogin.get_last_row_id(session),
+        )
         async with session.begin_nested() as session_:
             try:
                 async with ScriptCanvasClient(
@@ -923,6 +932,9 @@ async def canvas_sync_all(
             except Exception as e:
                 logger.exception(f"Error syncing class {class_.id}: {e}")
                 await session_.rollback()
-
+        logger.info(
+            f"ExternalLogin RID after class {class_.id} sync: ",
+            await ExternalLogin.get_last_row_id(session),
+        )
     # Finally, commit all changes
     await session.commit()
