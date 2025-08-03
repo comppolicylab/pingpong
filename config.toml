@@ -38,6 +38,19 @@ save_target = "/your/path/here"
 # Defaults to 1 hour. Maximum value is 86400 seconds, or 24 hours.
 download_link_expiration = 86400
 
+[file_store]
+# Store for storing all file uploads, like images, documents, etc.
+# accepts `s3` and `local`
+type = "s3"
+# IF `s3`, set the s3 bucket to save exports to
+# e.g. save_target = "your-bucket-here"
+# IF `local`, set the directory to save exports to
+save_target = "/your/path/here"
+# Time (in seconds) that the export download link we send to users
+# requesting the data export should be valid for.
+# Defaults to 1 hour. Maximum value is 86400 seconds, or 24 hours.
+download_link_expiration = 86400
+
 [audio_store]
 # Store for storing Voice mode recordings
 # accepts `s3` and `local`

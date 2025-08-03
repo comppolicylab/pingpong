@@ -74,7 +74,7 @@ class LocalArtifactStore(BaseArtifactStore):
         file_path = os.path.join(self._directory, name)
         content.seek(0)
         # Write the file content to the local file system
-        with open(file_path, "wb" if isinstance(content, TextIO) else "w") as f:
+        with open(file_path, "wb" if not isinstance(content, TextIO) else "w") as f:
             f.write(content.read())
 
     async def get(

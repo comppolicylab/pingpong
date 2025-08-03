@@ -286,6 +286,7 @@ class Config(BaseSettings):
     prompt_randomizer_log_level: str | None = Field(
         None, env="PROMPT_RANDOMIZER_LOG_LEVEL"
     )
+    responses_api_log_level: str | None = Field(None, env="RESPONSES_API_LOG_LEVEL")
     feature_flags: FeatureFlags = Field(FeatureFlags())
 
     reload: int = Field(0)
@@ -293,6 +294,9 @@ class Config(BaseSettings):
     development: bool = Field(False, env="DEVELOPMENT")
     artifact_store: ArtifactStoreSettings = LocalStoreSettings(
         save_target="local_exports/thread_exports"
+    )
+    file_store: ArtifactStoreSettings = LocalStoreSettings(
+        save_target="local_exports/files"
     )
     audio_store: AudioStoreSettings = LocalAudioStoreSettings(
         save_target="local_exports/voice_mode_recordings"
@@ -373,6 +377,9 @@ logging.getLogger("audio_recorder").setLevel(
 )
 logging.getLogger("prompt_randomizer").setLevel(
     config.prompt_randomizer_log_level or config.log_level
+)
+logging.getLogger("responses_api_transition").setLevel(
+    config.responses_api_log_level or config.log_level
 )
 if config.log_level != "DEBUG":
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)

@@ -306,7 +306,6 @@
     }
     try {
       await threadMgr.fetchCodeInterpreterResult(
-        content.thread_id,
         content.run_id,
         content.step_id
       );

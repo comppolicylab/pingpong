@@ -13,8 +13,12 @@ import pingpong.models as models
 from pingpong.prompt import replace_random_blocks
 from pingpong.schemas import (
     APIKeyValidationResponse,
+    AnnotationType,
+    CodeInterpreterOutputType,
     ThreadName,
     NewThreadMessage,
+    MessagePartType,
+    ToolCallType,
 )
 
 from datetime import datetime, timezone
@@ -22,6 +26,34 @@ from openai.types.beta.assistant_stream_event import (
     ThreadRunStepCompleted,
     ThreadRunStepFailed,
     ThreadRunFailed,
+)
+from openai.types.responses.response_input_item_param import (
+    ResponseInputItemParam,
+    EasyInputMessageParam,
+    ResponseInputMessageContentListParam,
+)
+from openai.types.responses.response_input_image_param import ResponseInputImageParam
+from openai.types.responses.response_input_text_param import ResponseInputTextParam
+from openai.types.responses.response_output_message_param import (
+    ResponseOutputTextParam,
+    ResponseOutputRefusalParam,
+)
+from openai.types.responses.response_output_text_param import (
+    Annotation,
+    AnnotationFileCitation,
+    AnnotationURLCitation,
+    AnnotationContainerFileCitation,
+    AnnotationFilePath,
+)
+from openai.types.responses.response_file_search_tool_call_param import (
+    ResponseFileSearchToolCallParam,
+    Result,
+)
+from openai.types.responses.response_code_interpreter_tool_call_param import (
+    ResponseCodeInterpreterToolCallParam,
+    OutputLogs,
+    OutputImage,
+    Output,
 )
 from openai._exceptions import APIError
 from openai.types.beta.threads import ImageFile, MessageContentPartParam
@@ -401,6 +433,163 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
                 "detail": str(exception),
             }
         )
+
+
+async def build_response_input_item_list(
+    cli: openai.AsyncClient,
+    thread_id: int,
+) -> list[ResponseInputItemParam]:
+    """Build a list of ResponseInputItem from a thread run step."""
+    response_input_items: list[ResponseInputItemParam] = []
+
+    async for run in models.Run.get_runs_by_thread_id(cli.session, thread_id):
+        # Store ResponseInputItemParam and time created to sort later
+        response_input_items_with_time: list[
+            tuple[datetime, ResponseInputItemParam]
+        ] = []
+
+        # Messages
+        for message in run.messages:
+            content_list: list[ResponseInputMessageContentListParam] = []
+            for content in message.content:
+                match content.type:
+                    case MessagePartType.INPUT_TEXT:
+                        content_list.append(ResponseInputTextParam(text=content.text))
+                    case MessagePartType.INPUT_IMAGE:
+                        content_list.append(
+                            ResponseInputImageParam(file_id=content.input_image_file_id)
+                        )
+                    case MessagePartType.OUTPUT_TEXT:
+                        annotations: list[Annotation] = []
+
+                        for annotation in content.annotations:
+                            match annotation.type:
+                                case AnnotationType.FILE_CITATION:
+                                    annotations.append(
+                                        AnnotationFileCitation(
+                                            file_id=annotation.file_id,
+                                            filename=annotation.filename,
+                                            index=annotation.index,
+                                        )
+                                    )
+                                case AnnotationType.FILE_PATH:
+                                    annotations.append(
+                                        AnnotationFilePath(
+                                            file_path=annotation.file_path,
+                                            index=annotation.index,
+                                        )
+                                    )
+                                case AnnotationType.URL_CITATION:
+                                    annotations.append(
+                                        AnnotationURLCitation(
+                                            url=annotation.url,
+                                            start_index=annotation.start_index,
+                                            end_index=annotation.end_index,
+                                            title=annotation.title,
+                                        )
+                                    )
+                                case AnnotationType.CONTAINER_FILE_CITATION:
+                                    annotations.append(
+                                        AnnotationContainerFileCitation(
+                                            file_id=annotation.file_id,
+                                            container_id=annotation.container_id,
+                                            filename=annotation.filename,
+                                            start_index=annotation.start_index,
+                                            end_index=annotation.end_index,
+                                        )
+                                    )
+                                case _:
+                                    continue  # Skip unsupported annotation types
+
+                        content_list.append(
+                            ResponseOutputTextParam(
+                                text=content.text, annotations=annotations
+                            )
+                        )
+                    case MessagePartType.REFUSAL:
+                        content_list.append(
+                            ResponseOutputRefusalParam(refusal=content.refusal)
+                        )
+            response_input_items_with_time.append(
+                (
+                    message.created_at,
+                    EasyInputMessageParam(role="user", content=content_list),
+                )
+            )
+
+        # Tool Calls
+        for tool_call in run.tool_calls:
+            match tool_call.type:
+                case ToolCallType.CODE_INTERPRETER:
+                    tool_call_outputs: list[Output] = []
+                    for output in tool_call.outputs:
+                        match output.type:
+                            case CodeInterpreterOutputType.LOGS:
+                                tool_call_outputs.append(
+                                    OutputLogs(logs=output.logs, type="logs")
+                                )
+                            case CodeInterpreterOutputType.IMAGE:
+                                tool_call_outputs.append(
+                                    OutputImage(url=output.image.url, type="image")
+                                )
+                    response_input_items_with_time.append(
+                        (
+                            tool_call.created_at,
+                            ResponseCodeInterpreterToolCallParam(
+                                id=tool_call.tool_call_id,
+                                code=tool_call.code,
+                                container_id=tool_call.container_id,
+                                outputs=tool_call_outputs,
+                                status=tool_call.status,
+                            ),
+                        )
+                    )
+                case ToolCallType.FILE_SEARCH:
+                    file_search_results: list[Result] = []
+                    for result in tool_call.file_search.results:
+                        file_search_results.append(
+                            Result(
+                                attributes=json.loads(result.attributes),
+                                file_id=result.file_id,
+                                filename=result.filename,
+                                score=result.score,
+                                text=result.text,
+                            )
+                        )
+                    response_input_items_with_time.append(
+                        (
+                            tool_call.created_at,
+                            ResponseFileSearchToolCallParam(
+                                id=tool_call.tool_call_id,
+                                queries=json.loads(tool_call.file_search.queries),
+                                status=tool_call.status,
+                                results=file_search_results,
+                            ),
+                        )
+                    )
+
+        # Sort by created time
+        response_input_items_with_time.sort(key=lambda x: x[0])
+        # Extract the ResponseInputItemParam from the sorted list
+        response_input_items.extend(item for _, item in response_input_items_with_time)
+
+    return response_input_items
+
+
+async def run_response(
+    cli: openai.AsyncClient,
+    *,
+    run: models.Run,
+    class_id: str,
+    thread_id: int,
+    assistant_id: int,
+    file_names: dict[str, str] = {},
+    vector_store_id: str | None = None,
+    file_search_file_ids: list[str] | None = None,
+    code_interpreter_file_ids: list[str] | None = None,
+    instructions: str | None = None,
+):
+    pass
 
 
 async def run_thread(

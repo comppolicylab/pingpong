@@ -6,15 +6,19 @@ import logging
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from pathlib import Path
+import uuid_utils as uuid
 
 from .ai import get_details_from_api_error
 from .authz import AuthzClient, Relation
-from .models import File
+from .config import config
+from .models import File, S3File
 from .schemas import FileTypeInfo, FileUploadPurpose, GenericStatus, ImageProxy
 from .schemas import File as FileSchema
 import base64
 
 logger = logging.getLogger(__name__)
+responses_api_transition_logger = logging.getLogger("responses_api_transition")
 
 OpenAIClientType = Union[openai.AsyncClient, openai.AsyncAzureOpenAI]
 
@@ -619,8 +623,9 @@ async def handle_create_file(
 
     is_azure_client = isinstance(oai_client, openai.AsyncAzureOpenAI)
 
+    file = None
     if "multimodal" in purpose:
-        return await handle_multimodal_upload(
+        file = await handle_multimodal_upload(
             session,
             authz,
             oai_client,
@@ -639,7 +644,7 @@ async def handle_create_file(
             anonymous_link_id if purpose != "assistants" else None,
         )
     else:
-        return await handle_create_single_purpose_file(
+        file = await handle_create_single_purpose_file(
             session,
             authz,
             oai_client,
@@ -657,6 +662,45 @@ async def handle_create_file(
             anonymous_session_id if purpose != "assistants" else None,
             anonymous_link_id if purpose != "assistants" else None,
         )
+
+    if not file:
+        raise HTTPException(
+            status_code=500, detail="File not uploaded, something went wrong!"
+        )
+
+    suffix = Path(upload.filename).suffix.lower()
+    upload_filename = f"file_{uuid.uuid4()}{suffix}"
+    await config.file_store.store.put(upload_filename, upload.file, upload.content_type)
+
+    added_file_ids = list(
+        filter(
+            None,
+            [
+                file.file_id,
+                file.file_search_file_id,
+                file.code_interpreter_file_id,
+                file.vision_file_id,
+            ],
+        )
+    )
+    added_file_obj_ids = [file.vision_obj_id] if file.vision_obj_id else []
+
+    responses_api_transition_logger.debug(
+        f"Creating S3File for file {file.name} with key {upload_filename}, "
+        f"file_ids: {added_file_ids}, file_obj_ids: {added_file_obj_ids}"
+    )
+    s3_file = await S3File.create(
+        session,
+        key=upload_filename,
+        file_obj_ids=added_file_obj_ids,
+        file_ids=added_file_ids,
+    )
+
+    responses_api_transition_logger.debug(
+        f"Created S3File {s3_file.id} with key {s3_file.key} for file {file.name}"
+    )
+
+    return file
 
 
 # Support information comes from:

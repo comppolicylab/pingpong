@@ -52,6 +52,7 @@ from .models import (
     Assistant,
     Base,
     ExternalLogin,
+    S3File,
     ScheduledJob,
     PeriodicTask,
     User,
@@ -702,6 +703,18 @@ def get_assistant_description_stats() -> None:
             )
 
     asyncio.run(_get_assistant_description_stats())
+
+
+@db.command("get_inactive_s3_files")
+def get_inactive_s3_files() -> None:
+    async def _get_inactive_s3_files() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Getting inactive S3 files...")
+            async for s3_file in S3File.get_s3_files_without_files(session):
+                logger.info(f"Inactive S3 file found: {s3_file.id}")
+            logger.info("Done!")
+
+    asyncio.run(_get_inactive_s3_files())
 
 
 async def _lms_sync_all(

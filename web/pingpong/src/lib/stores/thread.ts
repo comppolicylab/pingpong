@@ -229,7 +229,7 @@ export class ThreadManager {
 
     // Check if the run is in progress. If it is, we'll need to poll until it's done;
     // streaming is not available.
-    if (expanded.data.run) {
+    if (expanded.data.run && expanded.data.run.status !== 'pending') {
       if (!api.finished(expanded.data.run)) {
         await this.#pollThread();
         return;
@@ -406,14 +406,13 @@ export class ThreadManager {
     });
   }
 
-  async fetchCodeInterpreterResult(openai_thread_id: string, run_id: string, step_id: string) {
+  async fetchCodeInterpreterResult(run_id: string, step_id: string) {
     this.#data.update((d) => ({ ...d, error: null, waiting: true }));
     try {
       const result = await api.getCIMessages(
         this.#fetcher,
         this.classId,
         this.threadId,
-        openai_thread_id,
         run_id,
         step_id
       );
@@ -536,7 +535,6 @@ export class ThreadManager {
       created_at: Math.floor(Date.now() / 1000),
       metadata: { user_id: fromUserId, is_current_user: true },
       assistant_id: '',
-      thread_id: '',
       file_search_file_ids: file_search_file_ids || [],
       code_interpreter_file_ids: code_interpreter_file_ids || [],
       vision_file_ids: vision_file_ids || [],
@@ -739,7 +737,6 @@ export class ThreadManager {
           created_at: Math.floor(Date.now() / 1000),
           id: `optimistic-${(Math.random() + 1).toString(36).substring(2)}`,
           assistant_id: '',
-          thread_id: '',
           metadata: {},
           file_search_file_ids: [],
           code_interpreter_file_ids: [],

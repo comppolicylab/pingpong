@@ -384,6 +384,7 @@ def temperature_validator(self):
 
 class CreateAssistant(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
+    version: int = Field(3, ge=2, le=3)
     code_interpreter_file_ids: list[str] | None = None
     file_search_file_ids: list[str] | None = None
     instructions: str = Field(..., min_length=3)
@@ -457,7 +458,6 @@ class Assistants(BaseModel):
 class Thread(BaseModel):
     id: int
     name: str | None
-    thread_id: str
     class_id: int
     interaction_mode: InteractionMode
     assistant_names: dict[int, str] = {}
@@ -1204,6 +1204,7 @@ class OpenAIRun(BaseModel):
         | Literal["incomplete"]
         | Literal["completed"]
         | Literal["expired"]
+        | Literal["pending"]
     )
     thread_id: str
     tools: list[Tool]
@@ -1516,3 +1517,59 @@ class UpdateAgreementPolicyRequest(BaseModel):
     agreement_id: int | None = None
     apply_to_all: bool | None = None
     limit_to_providers: list[int] | None = None
+
+
+class AnnotationType(StrEnum):
+    FILE_PATH = "file_path"
+    URL_CITATION = "url_citation"
+    FILE_CITATION = "file_citation"
+    CONTAINER_FILE_CITATION = "container_file_citation"
+
+
+class CodeInterpreterOutputType(StrEnum):
+    LOGS = "logs"
+    IMAGE = "image"
+
+
+class ToolCallType(StrEnum):
+    CODE_INTERPRETER = "code_interpreter_call"
+    FILE_SEARCH = "file_search_call"
+
+
+class ToolCallStatus(StrEnum):
+    IN_PROGRESS = "in_progress"
+    SEARCHING = "searching"
+    INTERPRETING = "interpreting"
+    COMPLETED = "completed"
+    INCOMPLETE = "incomplete"
+    FAILED = "failed"
+
+
+class MessagePartType(StrEnum):
+    INPUT_TEXT = "input_text"
+    INPUT_IMAGE = "input_image"
+    OUTPUT_TEXT = "output_text"
+    REFUSAL = "refusal"
+
+
+class MessageStatus(StrEnum):
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    INCOMPLETE = "incomplete"
+    PENDING = "pending"
+
+
+class MessageRole(StrEnum):
+    USER = "user"
+    SYSTEM = "system"
+    ASSISTANT = "assistant"
+    DEVELOPER = "developer"
+
+
+class RunStatus(StrEnum):
+    QUEUED = "queued"
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    INCOMPLETE = "incomplete"

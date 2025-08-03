@@ -1427,6 +1427,24 @@ file_class_association = Table(
     Index("file_class_idx", "file_id", "class_id", unique=True),
 )
 
+file_search_attachment_association = Table(
+    "message_attachments_file_search",
+    Base.metadata,
+    Column("message_id", Integer, ForeignKey("messages.id", ondelete="CASCADE")),
+    Column("file_id", Integer, ForeignKey("files.id", ondelete="CASCADE")),
+    Index("message_attachments_file_search_idx", "message_id", "file_id", unique=True),
+)
+
+code_interpreter_attachment_association = Table(
+    "message_attachments_code_interpreter",
+    Base.metadata,
+    Column("message_id", Integer, ForeignKey("messages.id", ondelete="CASCADE")),
+    Column("file_id", Integer, ForeignKey("files.id", ondelete="CASCADE")),
+    Index(
+        "message_attachments_code_interpreter_idx", "message_id", "file_id", unique=True
+    ),
+)
+
 assistant_link_association = Table(
     "assistant_anonymous_links",
     Base.metadata,
@@ -1434,6 +1452,48 @@ assistant_link_association = Table(
     Column("link_id", Integer, ForeignKey("anonymous_links.id", ondelete="CASCADE")),
     Index("assistant_link_idx", "assistant_id", "link_id", unique=True),
 )
+
+
+class S3File(Base):
+    __tablename__ = "s3_files"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key = Column(String, nullable=False, unique=True)
+    files = relationship("File", back_populates="s3_file", lazy="selectin")
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        key: str,
+        file_obj_ids: list[int] | None = None,
+        file_ids: list[str] | None = None,
+    ) -> "S3File":
+        s3_file = S3File(key=key)
+        session.add(s3_file)
+        await session.flush()
+        await session.refresh(s3_file)
+
+        update(File).where(
+            or_(File.id.in_(file_obj_ids), File.file_id.in_(file_ids))
+        ).values(s3_file_id=s3_file.id)
+        return s3_file
+
+    @classmethod
+    async def get_s3_files_without_files(
+        cls, session: AsyncSession
+    ) -> AsyncGenerator["S3File", None]:
+        """Returns an async generator of S3Files that are not linked to any File."""
+        stmt = (
+            select(S3File)
+            .outerjoin(File, S3File.id == File.s3_file_id)
+            .where(File.id.is_(None))
+        )
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.S3File
 
 
 class File(Base):
@@ -1448,6 +1508,10 @@ class File(Base):
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, default=None
     )
     private = Column(Boolean, default=False)
+    s3_file_id = Column(
+        Integer, ForeignKey("s3_files.id", ondelete="SET NULL"), nullable=True
+    )
+    s3_file = relationship("S3File", lazy="selectin", uselist=False)
     class_ = relationship("Class", back_populates="files")
     classes = relationship(
         "Class", secondary=file_class_association, back_populates="files"
@@ -1469,6 +1533,20 @@ class File(Base):
         "Thread",
         secondary=image_file_thread_association,
         back_populates="image_files",
+    )
+    input_images = relationship(
+        "MessagePart",
+        back_populates="input_image_file",
+    )
+    message_attachments_file_search = relationship(
+        "Message",
+        secondary=file_search_attachment_association,
+        back_populates="file_search_attachments",
+    )
+    message_attachments_code_interpreter = relationship(
+        "Message",
+        secondary=code_interpreter_attachment_association,
+        back_populates="code_interpreter_attachments",
     )
     anonymous_session_id = Column(
         Integer, ForeignKey("anonymous_sessions.id", ondelete="CASCADE"), nullable=True
@@ -2197,7 +2275,7 @@ class Assistant(Base):
         *,
         class_id: int,
         user_id: int,
-        assistant_id: str,
+        assistant_id: str | None = None,
         vector_store_id: int | None = None,
         version: int = 1,
     ) -> "Assistant":
@@ -3239,6 +3317,287 @@ class AnonymousSession(Base):
         return session_obj
 
 
+class Annotation(Base):
+    __tablename__ = "annotations"
+
+    id = Column(Integer, primary_key=True)
+    type = Column(SQLEnum(schemas.AnnotationType), nullable=False)
+
+    message_part_id = Column(
+        Integer, ForeignKey("message_parts.id", ondelete="CASCADE"), nullable=False
+    )
+    message_part = relationship(
+        "MessagePart", back_populates="annotations", uselist=False
+    )
+
+    file_id = Column(String, nullable=True)
+    file_object_id = Column(
+        Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True
+    )
+
+    container_id = Column(String, nullable=True)
+
+    filename = Column(String, nullable=True)
+    title = Column(String, nullable=True)
+    url = Column(String, nullable=True)
+    text = Column(String, nullable=True)
+
+    index = Column(Integer, nullable=True)
+    start_index = Column(Integer, nullable=True)
+    end_index = Column(Integer, nullable=True)
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class FileSearchCallResult(Base):
+    __tablename__ = "file_search_call_results"
+
+    id = Column(Integer, primary_key=True)
+
+    attributes = Column(String, nullable=True)
+    file_id = Column(String, nullable=True)
+    file_object_id = Column(
+        Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True
+    )
+    filename = Column(String, nullable=True)
+
+    tool_call_id = Column(
+        Integer, ForeignKey("tool_calls.id", ondelete="CASCADE"), nullable=False
+    )
+    tool_call = relationship("ToolCall", back_populates="results", uselist=False)
+
+    score = Column(Float, nullable=True)
+    text = Column(String, nullable=True)
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class CodeInterpreterCallOutput(Base):
+    __tablename__ = "code_interpreter_call_outputs"
+
+    id = Column(Integer, primary_key=True)
+    tool_call_id = Column(
+        Integer, ForeignKey("tool_calls.id", ondelete="CASCADE"), nullable=False
+    )
+    tool_call = relationship("ToolCall", back_populates="outputs", uselist=False)
+
+    output_type = Column(SQLEnum(schemas.CodeInterpreterOutputType), nullable=False)
+    logs = Column(String, nullable=True)
+    url = Column(String, nullable=True)
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class ToolCall(Base):
+    __tablename__ = "tool_calls"
+
+    id = Column(Integer, primary_key=True)
+    tool_call_id = Column(String, nullable=False)
+
+    type = Column(SQLEnum(schemas.ToolCallType), nullable=False)
+    status = Column(SQLEnum(schemas.ToolCallStatus), nullable=False)
+
+    run_id = Column(Integer, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
+    run = relationship("Run", back_populates="tool_calls", uselist=False)
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    completed = Column(DateTime(timezone=True), nullable=True)
+
+    queries = Column(String, nullable=True)
+    results = relationship(
+        "FileSearchCallResult", back_populates="tool_call", lazy="selectin"
+    )
+
+    code = Column(String, nullable=True)
+    container_id = Column(String, nullable=True)
+    outputs = relationship(
+        "CodeInterpreterCallOutput",
+        back_populates="tool_call",
+        lazy="selectin",
+    )
+
+
+class MessagePart(Base):
+    __tablename__ = "message_parts"
+
+    id = Column(Integer, primary_key=True)
+    type = Column(SQLEnum(schemas.MessagePartType), nullable=False)
+
+    message_id = Column(Integer, ForeignKey("messages.id", ondelete="CASCADE"))
+    message = relationship("Message", back_populates="content", uselist=False)
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    text = Column(String, nullable=True)
+    input_image_file_id = Column(String, nullable=True)
+    input_image_file_object_id = Column(
+        Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True
+    )
+    input_image_file = relationship(
+        "File", back_populates="input_images", uselist=False
+    )
+
+    refusal = Column(String, nullable=True)
+
+    annotations = relationship(
+        "Annotation",
+        back_populates="message_part",
+        lazy="selectin",
+    )
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(String, nullable=True)
+    message_status = Column(SQLEnum(schemas.MessageStatus), nullable=False)
+
+    run_id = Column(Integer, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
+    run = relationship("Run", back_populates="messages", uselist=False)
+
+    role = Column(SQLEnum(schemas.MessageRole), nullable=False)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    file_search_attachments = relationship(
+        "File",
+        secondary=file_search_attachment_association,
+        back_populates="message_attachments_file_search",
+        lazy="selectin",
+    )
+
+    code_interpreter_attachments = relationship(
+        "File",
+        secondary=code_interpreter_attachment_association,
+        back_populates="message_attachments_code_interpreter",
+        lazy="selectin",
+    )
+
+    content = relationship(
+        "MessagePart",
+        back_populates="message",
+        lazy="selectin",
+    )
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    completed = Column(DateTime(timezone=True), nullable=True)
+
+    @classmethod
+    async def get_messages_by_thread_id(
+        cls, session: AsyncSession, thread_id: int
+    ) -> AsyncGenerator["Message", None]:
+        stmt = (
+            select(Message)
+            .join(Run)
+            .filter(Run.thread_id == thread_id)
+            .order_by(Message.created.desc())
+        )
+
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.Message
+
+
+class Run(Base):
+    __tablename__ = "runs"
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(String, unique=True, nullable=True)
+
+    status = Column(SQLEnum(schemas.RunStatus), nullable=False)
+    messages = relationship(
+        "Message",
+        back_populates="run",
+        lazy="selectin",
+    )
+
+    error_code = Column(String, nullable=True)
+    error_message = Column(String, nullable=True)
+    incomplete_reason = Column(String, nullable=True)
+
+    tool_calls = relationship(
+        "ToolCall",
+        back_populates="message",
+        lazy="selectin",
+    )
+
+    thread_id = Column(Integer, ForeignKey("threads.id", ondelete="CASCADE"))
+    thread = relationship("Thread", back_populates="runs", uselist=False)
+
+    creator_id = Column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    completed = Column(DateTime(timezone=True), nullable=True)
+
+    @classmethod
+    async def get_file_search_files_from_messages(
+        cls, session: AsyncSession, run_id: int
+    ) -> list[str]:
+        """Get all file search file ids from messages in a run."""
+        stmt = (
+            select(File.file_id)
+            .join(Message, Message.run_id == Run.id)
+            .join(
+                file_search_attachment_association,
+                file_search_attachment_association.c.message_id == Message.id,
+            )
+            .join(File, File.id == file_search_attachment_association.c.file_id)
+            .where(Run.id == run_id)
+        )
+        result = await session.execute(stmt)
+        return [row[0] for row in result.fetchall()]
+
+    @classmethod
+    async def get_runs_by_thread_id(
+        cls, session: AsyncSession, thread_id: int
+    ) -> AsyncGenerator["Run", None]:
+        """Get all runs associated with a specific thread."""
+        stmt = (
+            select(Run).where(Run.thread_id == thread_id).order_by(Run.created.desc())
+        )
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.Run
+
+
 class Thread(Base):
     __tablename__ = "threads"
 
@@ -3286,6 +3645,11 @@ class Thread(Base):
     code_interpreter_calls = relationship(
         "CodeInterpreterCall",
         back_populates="thread",
+    )
+    runs = relationship(
+        "Run",
+        back_populates="thread",
+        lazy="selectin",
     )
     tools_available = Column(String)
     vector_store_id = Column(
