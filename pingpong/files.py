@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pathlib import Path
 import uuid_utils as uuid
 
-from .ai import get_details_from_api_error
+from .ai_error import get_details_from_api_error
 from .authz import AuthzClient, Relation
 from .config import config
 from .models import File, S3File

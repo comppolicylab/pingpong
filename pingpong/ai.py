@@ -5,9 +5,12 @@ import hashlib
 import io
 import json
 import logging
+from fastapi import UploadFile
 import openai
 import orjson
 from pingpong.auth import encode_auth_token
+from pingpong.authz.base import AuthzClient
+from pingpong.files import handle_create_file
 from pingpong.invite import send_export_download
 import pingpong.models as models
 from pingpong.prompt import replace_random_blocks
@@ -15,6 +18,8 @@ from pingpong.schemas import (
     APIKeyValidationResponse,
     AnnotationType,
     CodeInterpreterOutputType,
+    MessageStatus,
+    RunStatus,
     ThreadName,
     NewThreadMessage,
     MessagePartType,
@@ -26,6 +31,17 @@ from openai.types.beta.assistant_stream_event import (
     ThreadRunStepCompleted,
     ThreadRunStepFailed,
     ThreadRunFailed,
+)
+from openai.types.responses import ToolParam, FileSearchToolParam
+from openai.types.responses.tool_param import (
+    CodeInterpreter,
+    CodeInterpreterContainerCodeInterpreterToolAuto,
+)
+from openai.types.responses.response_output_item import ResponseOutputMessage
+from openai.types.responses.response_output_text import ResponseOutputText
+from openai.types.responses.response_stream_event import (
+    ResponseCreatedEvent,
+    ResponseTextDeltaEvent,
 )
 from openai.types.responses.response_input_item_param import (
     ResponseInputItemParam,
@@ -55,7 +71,7 @@ from openai.types.responses.response_code_interpreter_tool_call_param import (
     OutputImage,
     Output,
 )
-from openai._exceptions import APIError
+from openai.types.shared.reasoning import Reasoning
 from openai.types.beta.threads import ImageFile, MessageContentPartParam
 from openai.types.beta.threads.annotation import FileCitationAnnotation
 from openai.types.beta.threads.image_file_content_block import ImageFileContentBlock
@@ -65,6 +81,7 @@ from openai.types.beta.threads.message_create_params import Attachment
 from openai.types.beta.threads.runs import ToolCallsStepDetails, CodeInterpreterToolCall
 from openai.types.beta.threads.text_content_block import TextContentBlock
 from pingpong.now import NowFn, utcnow
+from pingpong.ai_error import get_details_from_api_error
 from pingpong.schemas import CodeInterpreterMessage, DownloadExport
 from pingpong.config import config
 from typing import Dict, Literal, Union, overload
@@ -72,17 +89,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
-
-
-def get_details_from_api_error(e: APIError, custom_fallback: str | None = None) -> str:
-    fallback = custom_fallback or "OpenAI was unable to process your request."
-    if hasattr(e, "body") and isinstance(e.body, dict):
-        message = e.body.get("message")
-        if message:
-            return message
-    if hasattr(e, "message") and e.message:
-        return e.message
-    return fallback
 
 
 class GetOpenAIClientException(Exception):
@@ -436,13 +442,13 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
 
 
 async def build_response_input_item_list(
-    cli: openai.AsyncClient,
+    session: AsyncSession,
     thread_id: int,
 ) -> list[ResponseInputItemParam]:
     """Build a list of ResponseInputItem from a thread run step."""
     response_input_items: list[ResponseInputItemParam] = []
 
-    async for run in models.Run.get_runs_by_thread_id(cli.session, thread_id):
+    async for run in models.Run.get_runs_by_thread_id(session, thread_id):
         # Store ResponseInputItemParam and time created to sort later
         response_input_items_with_time: list[
             tuple[datetime, ResponseInputItemParam]
@@ -454,10 +460,14 @@ async def build_response_input_item_list(
             for content in message.content:
                 match content.type:
                     case MessagePartType.INPUT_TEXT:
-                        content_list.append(ResponseInputTextParam(text=content.text))
+                        content_list.append(
+                            ResponseInputTextParam(text=content.text, type="input_text")
+                        )
                     case MessagePartType.INPUT_IMAGE:
                         content_list.append(
-                            ResponseInputImageParam(file_id=content.input_image_file_id)
+                            ResponseInputImageParam(
+                                file_id=content.input_image_file_id, type="input_image"
+                            )
                         )
                     case MessagePartType.OUTPUT_TEXT:
                         annotations: list[Annotation] = []
@@ -470,6 +480,7 @@ async def build_response_input_item_list(
                                             file_id=annotation.file_id,
                                             filename=annotation.filename,
                                             index=annotation.index,
+                                            type="file_citation",
                                         )
                                     )
                                 case AnnotationType.FILE_PATH:
@@ -477,6 +488,7 @@ async def build_response_input_item_list(
                                         AnnotationFilePath(
                                             file_path=annotation.file_path,
                                             index=annotation.index,
+                                            type="file_path",
                                         )
                                     )
                                 case AnnotationType.URL_CITATION:
@@ -486,6 +498,7 @@ async def build_response_input_item_list(
                                             start_index=annotation.start_index,
                                             end_index=annotation.end_index,
                                             title=annotation.title,
+                                            type="url_citation",
                                         )
                                     )
                                 case AnnotationType.CONTAINER_FILE_CITATION:
@@ -496,6 +509,7 @@ async def build_response_input_item_list(
                                             filename=annotation.filename,
                                             start_index=annotation.start_index,
                                             end_index=annotation.end_index,
+                                            type="container_file_citation",
                                         )
                                     )
                                 case _:
@@ -503,17 +517,23 @@ async def build_response_input_item_list(
 
                         content_list.append(
                             ResponseOutputTextParam(
-                                text=content.text, annotations=annotations
+                                text=content.text,
+                                annotations=annotations,
+                                type="output_text",
                             )
                         )
                     case MessagePartType.REFUSAL:
                         content_list.append(
-                            ResponseOutputRefusalParam(refusal=content.refusal)
+                            ResponseOutputRefusalParam(
+                                refusal=content.refusal, type="output_refusal"
+                            )
                         )
             response_input_items_with_time.append(
                 (
-                    message.created_at,
-                    EasyInputMessageParam(role="user", content=content_list),
+                    message.created,
+                    EasyInputMessageParam(
+                        role="user", content=content_list, type="message"
+                    ),
                 )
             )
 
@@ -541,6 +561,7 @@ async def build_response_input_item_list(
                                 container_id=tool_call.container_id,
                                 outputs=tool_call_outputs,
                                 status=tool_call.status,
+                                type="code_interpreter_call",
                             ),
                         )
                     )
@@ -564,6 +585,7 @@ async def build_response_input_item_list(
                                 queries=json.loads(tool_call.file_search.queries),
                                 status=tool_call.status,
                                 results=file_search_results,
+                                type="file_search_call",
                             ),
                         )
                     )
@@ -576,6 +598,142 @@ async def build_response_input_item_list(
     return response_input_items
 
 
+class BufferedResponseStreamHandler:
+    def __init__(
+        self,
+        session: AsyncSession,
+        auth: AuthzClient,
+        cli: openai.AsyncClient,
+        run: models.Run,
+        file_names: dict[str, str],
+        class_id: int,
+        user_id: int,
+        user_auth: str | None = None,
+        anonymous_link_auth: str | None = None,
+        anonymous_user_auth: str | None = None,
+        anonymous_session_id: int | None = None,
+        anonymous_link_id: int | None = None,
+        *args,
+        **kwargs,
+    ):
+        self.__buffer = io.BytesIO()
+        self.file_names = file_names
+        self.db = session
+        self.auth = auth
+        self.openai_cli = cli
+        self.class_id = class_id
+        self.user_id = user_id
+        self.user_auth = user_auth
+        self.anonymous_link_auth = anonymous_link_auth
+        self.anonymous_user_auth = anonymous_user_auth
+        self.anonymous_session_id = anonymous_session_id
+        self.anonymous_link_id = anonymous_link_id
+        self.__cached_run: models.Run = run
+        self.__cached_message: models.Message | None = None
+        self.__cached_message_part: models.MessagePart | None = None
+        self.__cached_tool_calls: list[models.ToolCall] = []
+        self.__current_tool_call: models.ToolCall | None = None
+
+    def enqueue(self, data: Dict) -> None:
+        self.__buffer.write(orjson.dumps(data))
+        self.__buffer.write(b"\n")
+
+    def flush(self) -> bytes:
+        value = self.__buffer.getvalue()
+        self.__buffer.truncate(0)
+        self.__buffer.seek(0)
+        return value
+
+    async def on_response_created(self, data: ResponseCreatedEvent):
+        self.__cached_run.run_id = data.response.id
+        self.__cached_run.status = RunStatus(data.response.status)
+
+    async def on_output_message_created(self, data: ResponseOutputMessage):
+        self.__cached_message = models.Message(
+            message_id=data.id,
+            message_status=MessageStatus(data.status),
+            role=data.role,
+            created=utcnow(),
+            run_id=self.__cached_run.id,
+        )
+
+    async def on_output_text_part_created(self, data: ResponseOutputText):
+        self.__cached_message_part = models.MessagePart(
+            message_part_id=data.id,
+            type=MessagePartType(data.type),
+            text=data.text,
+        )
+
+    async def on_output_text_delta(self, data: ResponseTextDeltaEvent):
+        if not self.__cached_message_part:
+            logger.exception(
+                f"Received text delta without a cached message part. Data: {data}"
+            )
+            return
+        self.__cached_message_part.text += data.delta.text
+
+    async def on_output_text_container_file_citation_added(
+        self, data: AnnotationContainerFileCitation
+    ):
+        file_content = await self.openai_cli.containers.files.content.retrieve(
+            file_id=data.file_id, container_id=data.container_id
+        )
+
+        upload_file = UploadFile(
+            file=io.BytesIO(file_content.content),
+            filename=data.filename or f"container_file_{data.file_id}",
+            headers={"content-type": "application/octet-stream"},
+        )
+
+        file = await handle_create_file(
+            session=self.db,
+            authz=self.auth,
+            oai_client=self.openai_cli,
+            upload=upload_file,
+            class_id=self.class_id,
+            uploader_id=self.user_id,
+            private=True,
+            user_auth=f"user:{self.user_id}",
+            anonymous_link_auth=self.anonymous_link_auth,
+            anonymous_user_auth=self.anonymous_user_auth,
+            anonymous_session_id=self.anonymous_session_id,
+            anonymous_link_id=self.anonymous_link_id,
+        )
+
+        if file.code_interpreter_file_id:
+            await models.Thread.add_code_interpeter_files(
+                session=self.db,
+                thread_id=self.__cached_run.thread_id,
+                file_ids=[file.code_interpreter_file_id],
+            )
+
+        if not self.__cached_message_part:
+            logger.exception(
+                f"Received file citation annotation without a cached message part. Data: {data}"
+            )
+            return
+
+        self.__cached_message_part.annotations.append(
+            models.Annotation(
+                type=AnnotationType(data.type),
+                file_id=file.file_id,
+                file_object_id=file.id,
+                filename=file.name,
+                start_index=data.start_index,
+                end_index=data.end_index,
+            )
+        )
+
+    async def on_output_text_part_done(self, data: ResponseOutputText):
+        if not self.__cached_message_part:
+            logger.exception(
+                f"Received text part done event without a cached message part. Data: {data}"
+            )
+            return
+
+        # self.__content_message.
+
+
 async def run_response(
     cli: openai.AsyncClient,
     *,
@@ -583,13 +741,148 @@ async def run_response(
     class_id: str,
     thread_id: int,
     assistant_id: int,
+    model: str,
+    reasoning_effort: int | None = None,
+    temperature: float | None = None,
     file_names: dict[str, str] = {},
-    vector_store_id: str | None = None,
-    file_search_file_ids: list[str] | None = None,
+    assistant_vector_store_id: str | None = None,
+    thread_vector_store_id: str | None = None,
+    attached_file_search_file_ids: list[str] | None = None,
     code_interpreter_file_ids: list[str] | None = None,
+    available_tools: str | None = None,
     instructions: str | None = None,
 ):
-    pass
+    reasoning_settings: Reasoning | openai.NotGiven = openai.NOT_GIVEN
+
+    if reasoning_effort is not None:
+        if reasoning_effort not in REASONING_EFFORT_MAP:
+            raise ValueError(
+                f"Invalid reasoning effort: {reasoning_effort}. Must be one of {list(REASONING_EFFORT_MAP.keys())}."
+            )
+        reasoning_settings = Reasoning(
+            effort=REASONING_EFFORT_MAP[reasoning_effort], summary="auto"
+        )
+
+    temperature_setting: float | openai.NotGiven = (
+        temperature if temperature is not None else openai.NOT_GIVEN
+    )
+
+    async with config.db.driver.async_session() as session_:
+        input_items = await build_response_input_item_list(
+            session_, thread_id=thread_id
+        )
+
+        tools: list[ToolParam] = []
+
+        if available_tools and "file_search" in available_tools:
+            vector_store_ids = []
+            if assistant_vector_store_id is not None:
+                vector_store_ids.append(assistant_vector_store_id)
+            if thread_vector_store_id is not None:
+                vector_store_ids.append(thread_vector_store_id)
+            if attached_file_search_file_ids:
+                if not thread_vector_store_id:
+                    raise ValueError("Vector store ID is required for file search")
+                await asyncio.gather(
+                    *[
+                        cli.vector_stores.files.poll(
+                            file_id=file_id, vector_store_id=thread_vector_store_id
+                        )
+                        for file_id in attached_file_search_file_ids
+                    ]
+                )
+            if vector_store_ids:
+                tools.append(
+                    FileSearchToolParam(
+                        type="file_search", vector_store_ids=vector_store_ids
+                    )
+                )
+
+        if available_tools and "code_interpreter" in available_tools:
+            tools.append(
+                CodeInterpreter(
+                    container=CodeInterpreterContainerCodeInterpreterToolAuto(
+                        file_ids=code_interpreter_file_ids or [], type="auto"
+                    ),
+                    type="code_interpreter",
+                )
+            )
+        stream = await cli.responses.create(
+            include=[
+                "code_interpreter_call.outputs",
+                "file_search_call.results",
+            ],
+            input=input_items,
+            instructions=instructions,
+            model=model,
+            parallel_tool_calls=False,
+            reasoning=reasoning_settings,
+            tools=tools,
+            store=False,
+            stream=True,
+            temperature=temperature_setting,
+            truncation="auto",
+        )
+
+        try:
+            async for event in stream:
+                # Yield the event as JSON bytes for streaming
+                print(f"Event: {event}")
+                yield (
+                    orjson.dumps(
+                        {"type": "response_event", "event": event.model_dump()}
+                    )
+                    + b"\n"
+                )
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as e:
+            logger.info(f"Client disconnected: {e}")
+            return
+        except asyncio.CancelledError:
+            logger.info("Stream cancelled")
+            return
+        except openai.APIError as openai_error:
+            if openai_error.type == "server_error":
+                try:
+                    logger.exception(f"Server error in response stream: {openai_error}")
+                    yield (
+                        orjson.dumps(
+                            {
+                                "type": "error",
+                                "detail": "OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+                            }
+                        )
+                        + b"\n"
+                    )
+                except Exception as e:
+                    logger.exception(f"Error writing to stream: {e}")
+                    pass
+            else:
+                try:
+                    logger.exception("Error in response stream")
+                    yield (
+                        orjson.dumps(
+                            {
+                                "type": "error",
+                                "detail": "OpenAI was unable to process your request. "
+                                + get_details_from_api_error(
+                                    openai_error, "Please try again later."
+                                ),
+                            }
+                        )
+                        + b"\n"
+                    )
+                except Exception as e:
+                    logger.exception(f"Error writing to stream: {e}")
+                    pass
+        except (ValueError, Exception) as e:
+            try:
+                logger.exception(f"Error in response stream: {e}")
+                yield orjson.dumps({"type": "error", "detail": str(e)}) + b"\n"
+            except Exception as e_:
+                logger.exception(f"Error writing to stream: {e_}")
+                pass
+        finally:
+            yield b'{"type":"done"}\n'
 
 
 async def run_thread(

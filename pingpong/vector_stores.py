@@ -1,7 +1,7 @@
 import openai
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from .ai import get_details_from_api_error
+from .ai_error import get_details_from_api_error
 from .schemas import VectorStoreDeleteResponse, VectorStoreType
 
 import pingpong.models as models

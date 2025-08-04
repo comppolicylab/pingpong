@@ -86,8 +86,8 @@ from .ai import (
     validate_api_key,
     get_ci_messages_from_step,
     get_azure_model_deployment_name_equivalent,
-    get_details_from_api_error,
 )
+from .ai_error import get_details_from_api_error
 from .auth import (
     decode_auth_token,
     generate_auth_link,
@@ -3663,11 +3663,18 @@ async def create_run(
             file_names = await models.Thread.get_file_search_files(
                 request.state.db, thread.id
             )
-            vector_store_id = (
+            thread_vector_store_id = (
                 await models.VectorStore.get_vector_store_id_by_id(
                     request.state.db, thread.vector_store_id
                 )
                 if thread.vector_store_id
+                else None
+            )
+            assistant_vector_store_id = (
+                await models.VectorStore.get_vector_store_id_by_id(
+                    request.state.db, asst.vector_store_id
+                )
+                if asst.vector_store_id
                 else None
             )
             if not thread.instructions:
@@ -3682,18 +3689,24 @@ async def create_run(
                 await request.state.db.flush()
                 await request.state.db.refresh(thread)
 
+            print(asst.tools)
             stream = run_response(
                 openai_client,
                 run=run_to_complete,
                 class_id=class_id,
                 thread_id=thread.id,
                 assistant_id=asst.id,
+                model=asst.model,
+                reasoning_effort=asst.reasoning_effort,
+                temperature=asst.temperature,
                 file_names=file_names,
-                vector_store_id=vector_store_id,
-                file_search_file_ids=file_search_file_ids,
+                assistant_vector_store_id=assistant_vector_store_id,
+                thread_vector_store_id=thread_vector_store_id,
+                attached_file_search_file_ids=file_search_file_ids,
                 code_interpreter_file_ids=[
                     file.file_id for file in thread.code_interpreter_files
                 ],
+                available_tools=asst.tools,
                 instructions=inject_timestamp_to_instructions(
                     thread.instructions, req.timezone if req else thread.timezone
                 ),
@@ -3753,7 +3766,7 @@ async def create_run(
                 detail="We faced an error while sending your message. " + str(e),
             )
 
-        return StreamingResponse(stream, media_type="text/event-stream")
+    return StreamingResponse(stream, media_type="text/event-stream")
 
 
 @v1.post(

@@ -3549,7 +3549,7 @@ class Run(Base):
 
     tool_calls = relationship(
         "ToolCall",
-        back_populates="message",
+        back_populates="run",
         lazy="selectin",
     )
 
@@ -3574,6 +3574,7 @@ class Run(Base):
         """Get all file search file ids from messages in a run."""
         stmt = (
             select(File.file_id)
+            .select_from(Run)
             .join(Message, Message.run_id == Run.id)
             .join(
                 file_search_attachment_association,
