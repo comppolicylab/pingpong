@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from jwt import PyJWTError
@@ -260,5 +261,4 @@ async def get_courses(request: Request):
         )
 
     courses = await get_courses_by_instructor_id(instructor.record_id)
-    print(courses)
     return {"courses": [process_course(course) for course in courses]}

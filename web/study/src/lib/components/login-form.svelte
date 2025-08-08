@@ -7,6 +7,7 @@
 	import type { HTMLAttributes } from 'svelte/elements';
 	import { loginWithMagicLink } from '$lib/api/client';
 	import { fail } from '@sveltejs/kit';
+	import SpinnerIcon from '$lib/components/spinner.svelte';
 	let { class: className, ...restProps }: HTMLAttributes<HTMLDivElement> = $props();
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
@@ -17,9 +18,11 @@
 
 	const id = $props.id();
 	let emailSent = $state(false);
+	let isLoading = $state(false);
 
 	async function handleSubmit(event: Event) {
 		event.preventDefault();
+		isLoading = true;
 		const formData = new FormData(event.target as HTMLFormElement);
 		const email = formData.get('email') as string;
 
@@ -39,6 +42,7 @@
 				}
 			);
 		}
+		isLoading = false;
 	}
 </script>
 
@@ -63,9 +67,16 @@
 									name="email"
 									placeholder="name@example.edu"
 									required
+									disabled={isLoading}
 								/>
 							</div>
-							<Button type="submit" class="w-full">Login</Button>
+							<Button type="submit" class="w-full" disabled={isLoading}>
+								{#if isLoading}
+									<SpinnerIcon class="animate-spin" />
+								{:else}
+									Login
+								{/if}
+							</Button>
 						</div>
 						<div class="text-center text-sm">
 							Not an instructor in the study?
