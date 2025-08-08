@@ -37,3 +37,16 @@ class Course(Model):
         api_key = config.study.airtable_api_key
         base_id = config.study.airtable_base_id
         table_name = config.study.airtable_class_table_id
+
+
+class Admin(Model):
+    """Airtable admin model."""
+
+    record_id = F.RequiredSingleLineTextField("ID")
+    email = F.EmailField("Email")
+    first_name = F.SingleLineTextField("First Name")
+
+    class Meta:
+        api_key = config.study.airtable_api_key
+        base_id = config.study.airtable_base_id
+        table_name = config.study.airtable_admin_table_id

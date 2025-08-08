@@ -1,7 +1,7 @@
 import asyncio
 from requests import HTTPError
 from pingpong.users import UserNotFoundException
-from pingpong.study.schemas import Course, Instructor
+from pingpong.study.schemas import Admin, Course, Instructor
 
 
 async def get_instructor(user_id: str) -> Instructor:
@@ -30,3 +30,10 @@ async def get_courses_by_instructor_id(instructor_id: str) -> list[Course]:
     formula = Course.instructor.eq(instructor_id)
     courses = await asyncio.to_thread(Course.all, formula=formula)
     return courses
+
+
+async def get_admin_by_email(email: str) -> Admin | None:
+    email_to_match = email.lower().strip()
+    formula = Admin.email.eq(email_to_match)
+    admin = await asyncio.to_thread(Admin.first, formula=formula)
+    return admin

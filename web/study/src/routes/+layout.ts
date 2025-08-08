@@ -1,9 +1,8 @@
 import { expandResponse, explodeResponse } from '$lib/api/utils';
-import { me as getMe } from '$lib/api/client';
+import { me as getMe, getMyCourses } from '$lib/api/client';
 import type { LayoutLoad } from './$types';
 import { redirect, error } from '@sveltejs/kit';
 import type { Course } from '$lib/api/types';
-import { getMyCourses } from '$lib/api/client/course';
 
 const LOGIN = '/login';
 const LOGOUT = '/logout';

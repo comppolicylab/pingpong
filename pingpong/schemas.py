@@ -126,6 +126,12 @@ class MagicLoginRequest(BaseModel):
     forward: str = "/"
 
 
+class LoginAsRequest(BaseModel):
+    instructor_email: str
+    admin_email: str
+    forward: str = "/"
+
+
 class Profile(BaseModel):
     name: str | None
     email: str

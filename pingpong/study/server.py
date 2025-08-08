@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from jwt import PyJWTError
 import jwt
@@ -6,10 +6,10 @@ from pingpong.auth import (
     TimeException,
     decode_auth_token,
     decode_session_token,
-    encode_auth_token,
     generate_auth_link,
     redirect_with_session_study,
 )
+from pingpong.permission import StudyExpression
 import pingpong.schemas as schemas
 from pyairtable import Api
 from pingpong.config import config
@@ -17,6 +17,7 @@ from pingpong.session import get_now_fn
 from pingpong.study.schemas import Course
 from pingpong.users import UserNotFoundException
 from pingpong.study.airtable import (
+    get_admin_by_email,
     get_courses_by_instructor_id,
     get_instructor,
     get_instructor_by_email,
@@ -25,6 +26,14 @@ from pingpong.template import email_template as message_template
 from pingpong.time import convert_seconds
 
 study = FastAPI()
+
+
+class LoggedIn(StudyExpression):
+    async def test(self, request: Request) -> bool:
+        return request.state.session.status == schemas.SessionStatus.VALID
+
+    def __str__(self):
+        return "LoggedIn()"
 
 
 async def populate_request(request):
@@ -84,12 +93,6 @@ async def add_airtable_client(request: Request, call_next):
     return await call_next(request)
 
 
-@study.get("/health")
-async def health(request: Request):
-    """Health check."""
-    return {"status": encode_auth_token("recsgN7KchQmuIivJ", 100000)}
-
-
 @study.get(
     "/me",
 )
@@ -139,6 +142,49 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
     await config.email.sender.send(
         email,
         "Log back in to your Study Dashboard",
+        message,
+    )
+
+    return {"status": "ok"}
+
+
+@study.post("/admin/login-as", response_model=schemas.GenericStatus)
+async def login_as(body: schemas.LoginAsRequest, request: Request):
+    """Send a magic link to the admin email to login as the instructor."""
+    admin = await get_admin_by_email(body.admin_email)
+    if not admin:
+        raise HTTPException(status_code=403, detail="Access denied.")
+
+    instructor = await get_instructor_by_email(body.instructor_email)
+    if not instructor:
+        raise HTTPException(status_code=404, detail="Instructor not found.")
+
+    nowfn = get_now_fn(request)
+    magic_link = generate_auth_link(
+        instructor.record_id,
+        expiry=3_600,
+        nowfn=nowfn,
+        redirect=body.forward,
+        api_version="study",
+    )
+
+    message = message_template.substitute(
+        {
+            "title": f"Login as {instructor.first_name} {instructor.last_name}",
+            "subtitle": "Click the button below to log in to the PingPong College Study dashboard as this instructor. No password required. It&#8217;s secure and easy.",
+            "type": "login link",
+            "cta": "Login as instructor",
+            "underline": "",
+            "expires": convert_seconds(3_600),
+            "link": magic_link,
+            "email": admin.email,
+            "legal_text": "because you requested a login link from PingPong Study",
+        }
+    )
+
+    await config.email.sender.send(
+        admin.email,
+        "Here's the Study Dashboard login link you requested",
         message,
     )
 
@@ -249,7 +295,7 @@ def process_course(course: Course) -> schemas.StudyCourse:
     )
 
 
-@study.get("/courses")
+@study.get("/courses", dependencies=[Depends(LoggedIn())])
 async def get_courses(request: Request):
     """Get the courses for the current user."""
     instructor = await get_instructor(request.state.session.token.sub)
