@@ -1,5 +1,5 @@
 ########## Build pingpong ##########
-FROM node:21-alpine AS build_pingpong
+FROM node:22-alpine AS build_pingpong
 
 RUN npm install -g pnpm
 
@@ -26,7 +26,7 @@ ENV BODY_SIZE_LIMIT=512000000
 RUN pnpm build -d
 
 ########## Build study ##########
-FROM node:21-alpine AS build_study
+FROM node:22-alpine AS build_study
 
 RUN npm install -g pnpm
 
