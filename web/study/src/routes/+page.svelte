@@ -142,6 +142,6 @@
 		</Alert.Root>
 	</div>
 
-	<h2 class="mt-4 text-xl font-semibold">Your Classes</h2>
+	<h2 class="mt-4 text-xl font-semibold">Your Courses</h2>
 	<DataTable data={data.courses} {columns} />
 </div>
