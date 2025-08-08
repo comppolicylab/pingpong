@@ -145,7 +145,7 @@ def generate_auth_link(
     redirect: str = "/",
     expiry: int = 600,
     nowfn: NowFn = utcnow,
-    api_version: str = "v1",
+    is_study: bool = False,
 ) -> str:
     """Generates the link to log in.
 
@@ -157,7 +157,10 @@ def generate_auth_link(
         str: Auth Link
     """
     tok = encode_auth_token(str(user_id), expiry=expiry, nowfn=nowfn)
-    return config.url(f"/api/{api_version}/auth?token={tok}&redirect={redirect}")
+    if is_study:
+        return config.study_url(f"/api/study/auth?token={tok}&redirect={redirect}")
+    else:
+        return config.url(f"/api/v1/auth?token={tok}&redirect={redirect}")
 
 
 def redirect_with_session(

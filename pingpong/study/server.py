@@ -11,7 +11,6 @@ from pingpong.auth import (
 )
 from pingpong.permission import StudyExpression
 import pingpong.schemas as schemas
-from pyairtable import Api
 from pingpong.config import config
 from pingpong.session import get_now_fn
 from pingpong.study.schemas import Course
@@ -86,13 +85,6 @@ async def parse_session_token(request: Request, call_next):
     return await call_next(request)
 
 
-@study.middleware("http")
-async def add_airtable_client(request: Request, call_next):
-    """Add the Airtable client to the request state."""
-    request.state.airtable = Api(api_key=config.study.airtable_api_key)
-    return await call_next(request)
-
-
 @study.get(
     "/me",
 )
@@ -122,7 +114,7 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
         expiry=86_400,
         nowfn=nowfn,
         redirect=body.forward,
-        api_version="study",
+        is_study=True,
     )
 
     message = message_template.substitute(
@@ -165,7 +157,7 @@ async def login_as(body: schemas.LoginAsRequest, request: Request):
         expiry=3_600,
         nowfn=nowfn,
         redirect=body.forward,
-        api_version="study",
+        is_study=True,
     )
 
     message = message_template.substitute(

@@ -1,5 +1,11 @@
 from pyairtable.orm import Model, fields as F
-from pingpong.config import config
+from typing import cast
+from pingpong.config import config, StudySettings
+
+# Ensure study config is available at import time for Airtable models
+if config.study is None:
+    raise ValueError("Study settings are not configured")
+study_config = cast(StudySettings, config.study)
 
 
 class Instructor(Model):
@@ -15,9 +21,9 @@ class Instructor(Model):
     institution = F.LookupField[str]("Institution Name", readonly=True)
 
     class Meta:
-        api_key = config.study.airtable_api_key
-        base_id = config.study.airtable_base_id
-        table_name = config.study.airtable_instructor_table_id
+        api_key = study_config.airtable_api_key
+        base_id = study_config.airtable_base_id
+        table_name = study_config.airtable_instructor_table_id
 
 
 class Course(Model):
@@ -34,9 +40,9 @@ class Course(Model):
     instructor = F.LookupField[Instructor]("Instructor", readonly=True)
 
     class Meta:
-        api_key = config.study.airtable_api_key
-        base_id = config.study.airtable_base_id
-        table_name = config.study.airtable_class_table_id
+        api_key = study_config.airtable_api_key
+        base_id = study_config.airtable_base_id
+        table_name = study_config.airtable_class_table_id
 
 
 class Admin(Model):
@@ -47,6 +53,6 @@ class Admin(Model):
     first_name = F.SingleLineTextField("First Name")
 
     class Meta:
-        api_key = config.study.airtable_api_key
-        base_id = config.study.airtable_base_id
-        table_name = config.study.airtable_admin_table_id
+        api_key = study_config.airtable_api_key
+        base_id = study_config.airtable_base_id
+        table_name = study_config.airtable_admin_table_id

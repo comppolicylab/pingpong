@@ -22,6 +22,13 @@ prompt_randomizer_log_level = "INFO"
 # should be the public URL of the server, like `https://pingpong.app/`.
 public_url = "http://localhost:5173"
 
+# The URL where the study dashboard can be accessed. This is used to generate
+# absolute URLs in emails and other places.
+# In development, this is the UI dev server (`pnpm dev`). In production it
+# should be the public URL of the server, like `https://study.pingpong.app/`.
+# OPTIONAL: If not set, the study dashboard will not be available.
+study_public_url = "http://localhost:5174"
+
 # Whether the server is running in development mode. Should be `false` in prod.
 development = true
 
@@ -157,8 +164,15 @@ sync_wait = 600
 auth_token_expiry = 3600
 
 [study]
+# Settings for the study dashboard.
+#
+# Airtable API key for reading instructor data.
 airtable_api_key = "your api key here"
+# Airtable base ID for the study dashboard.
 airtable_base_id = "your base id here"
+# Airtable class table ID for the study dashboard.
 airtable_class_table_id = "your class table id here"
+# Airtable instructor table ID for the study dashboard.
 airtable_instructor_table_id = "your instructor table id here"
+# Airtable admin table ID for the study dashboard.
 airtable_admin_table_id = "your admin table id here"

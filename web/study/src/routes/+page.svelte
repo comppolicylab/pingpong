@@ -6,10 +6,16 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
 	import Info from '@lucide/svelte/icons/info';
+	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
 	import DataTable from '$lib/components/classes-table/data-table.svelte';
 	import { columns } from '$lib/components/classes-table/columns.js';
 
 	let { data } = $props();
+	const hasAnyTreatmentCourses = $derived(
+		data.courses.some(
+			(course) => course.pingpong_group_url !== '' && course.randomization === 'treatment'
+		)
+	);
 </script>
 
 <div class="flex flex-col gap-4">
@@ -143,5 +149,26 @@
 	</div>
 
 	<h2 class="mt-4 text-xl font-semibold">Your Courses</h2>
+	{#if hasAnyTreatmentCourses}
+		<Alert.Root class="self-start">
+			<CalendarClock />
+			<Alert.Title class="line-clamp-none tracking-normal"
+				>TutorBot assistant coming to your PingPong Groups on August 18</Alert.Title
+			>
+			<Alert.Description>
+				<p>
+					Courses assigned to the Treatment group will receive access to TutorBot, an AI-powered
+					tutor developed by our team. The TutorBot assistant will be available in your PingPong
+					Groups starting August 18. In the meantime, you are welcome to explore the platform and
+					create your own course-specific assistants. Email <a
+						href="mailto:support@pingpong-hks.atlassian.net"
+						class="text-nowrap text-primary underline underline-offset-4 hover:text-primary/80"
+						>support@pingpong-hks.atlassian.net
+					</a> if you have any questions.
+				</p>
+			</Alert.Description>
+		</Alert.Root>
+	{/if}
+
 	<DataTable data={data.courses} {columns} />
 </div>

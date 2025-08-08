@@ -6,7 +6,7 @@
 	function toExplainer(value: string): string | undefined {
 		switch (value) {
 			case 'control':
-				return 'Your class will not receive access to the PingPong platform for this semester.';
+				return 'This class will not receive access to the PingPong platform for this semester.';
 			case 'treatment':
 				return 'You and your students in this class will receive access to the PingPong platform for this semester.';
 		}

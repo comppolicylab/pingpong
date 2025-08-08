@@ -44,7 +44,6 @@ from pingpong.emails import (
 from pingpong.realtime import browser_realtime_websocket
 from pingpong.session import populate_request
 from pingpong.stats import get_statistics
-from pingpong.study.server import study
 from pingpong.summary import send_class_summary_to_user_task
 from .animal_hash import name, process_threads, pseudonym, user_names
 from openai.types.beta.assistant_create_params import ToolResources
@@ -188,7 +187,6 @@ async def begin_db_session(request: Request, call_next):
 
 
 @v1.middleware("http")
-@study.middleware("http")
 async def log_request(request: Request, call_next):
     """Log the request."""
     metrics.in_flight.inc(app=config.public_url)
@@ -5535,7 +5533,18 @@ async def handle_exception(request: Request, exc: Exception):
 
 app.mount("/api/v1", v1)
 
-app.mount("/api/study", study)
+# Conditionally mount Study app when configured
+try:
+    if config.study_public_url and config.study:
+        from pingpong.study.server import study as study_app
+
+        # Attach shared logging middleware to study app
+        study_app.middleware("http")(log_request)
+
+        app.mount("/api/study", study_app)
+except Exception:
+    # If study is not configured or import fails, skip mounting
+    pass
 
 
 @app.get("/health")
