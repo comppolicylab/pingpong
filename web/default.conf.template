@@ -36,7 +36,7 @@ server {
     listen ${NGINX_LISTEN};
     listen ${NGINX_LISTEN_SSL} ssl;
 
-    server_name study.pingpong.harvard.hks.edu;
+    server_name study.pingpong.hks.harvard.edu;
 
     ssl_certificate ${NGINX_SSL_CERT};
     ssl_certificate_key ${NGINX_SSL_CERT_KEY};
