@@ -979,6 +979,17 @@ class AIProvider(StrEnum):
     AZURE = "azure"
 
 
+class StudyCourse(BaseModel):
+    id: str
+    name: str | None = None
+    status: Literal["in_review", "accepted", "rejected"] | None = None
+    randomization: Literal["control", "treatment"] | None = None
+    start_date: datetime | None = None
+    enrollment_count: int | None = None
+    preassessment_url: str | None
+    pingpong_group_url: str | None
+
+
 class Class(BaseModel):
     id: int
     name: str
@@ -1343,6 +1354,24 @@ class SessionState(BaseModel):
     user: User | None = None
     profile: Profile | None = None
     agreement_id: int | None = None
+
+
+class InstructorResponse(BaseModel):
+    id: str
+    first_name: str | None = None
+    last_name: str | None = None
+    academic_email: str | None = None
+    personal_email: str | None = None
+    honorarium_status: Literal["Yes", "No", "Unsure/Other"] | None = None
+    mailing_address: str | None = None
+    institution: str | None = None
+
+
+class StudySessionState(BaseModel):
+    status: SessionStatus
+    error: str | None = None
+    instructor: InstructorResponse | None = None
+    token: SessionToken | None = None
 
 
 class Support(BaseModel):

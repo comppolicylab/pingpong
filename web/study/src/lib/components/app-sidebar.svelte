@@ -17,6 +17,8 @@
 	import NavUser from './nav-user.svelte';
 
 	let { ref = $bindable(null), ...restProps }: ComponentProps<typeof Sidebar.Root> = $props();
+
+	const data = $derived(page.data);
 </script>
 
 <Sidebar.Root bind:ref variant="inset" {...restProps}>
@@ -76,6 +78,11 @@
 		</Sidebar.Group>
 	</Sidebar.Content>
 	<Sidebar.Footer>
-		<NavUser user={{ name: 'John Doe', email: 'john@example.com' }} />
+		<NavUser
+			user={{
+				name: data.instructor?.first_name + ' ' + data.instructor?.last_name,
+				email: data.instructor?.academic_email
+			}}
+		/>
 	</Sidebar.Footer>
 </Sidebar.Root>

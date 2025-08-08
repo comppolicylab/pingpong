@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
+	import { goto } from '$app/navigation';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
@@ -7,6 +9,13 @@
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	let { user }: { user: { name: string; email: string } } = $props();
 	const sidebar = useSidebar();
+
+	async function logout() {
+		if (browser) {
+			document.cookie = 'study_session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+			await goto('/login');
+		}
+	}
 </script>
 
 <Sidebar.Menu>
@@ -20,7 +29,12 @@
 						{...props}
 					>
 						<Avatar.Root class="size-8 rounded-lg">
-							<Avatar.Fallback class="rounded-lg">CN</Avatar.Fallback>
+							<Avatar.Fallback class="rounded-lg"
+								>{user.name
+									.split(' ')
+									.map((n) => n[0])
+									.join('')}</Avatar.Fallback
+							>
 						</Avatar.Root>
 						<div class="grid flex-1 text-left text-sm leading-tight">
 							<span class="truncate font-medium">{user.name}</span>
@@ -39,7 +53,12 @@
 				<DropdownMenu.Label class="p-0 font-normal">
 					<div class="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
 						<Avatar.Root class="size-8 rounded-lg">
-							<Avatar.Fallback class="rounded-lg">CN</Avatar.Fallback>
+							<Avatar.Fallback class="rounded-lg"
+								>{user.name
+									.split(' ')
+									.map((n) => n[0])
+									.join('')}</Avatar.Fallback
+							>
 						</Avatar.Root>
 						<div class="grid flex-1 text-left text-sm leading-tight">
 							<span class="truncate font-medium">{user.name}</span>
@@ -48,7 +67,7 @@
 					</div>
 				</DropdownMenu.Label>
 				<DropdownMenu.Separator />
-				<DropdownMenu.Item>
+				<DropdownMenu.Item onclick={logout}>
 					<LogOutIcon />
 					Log out
 				</DropdownMenu.Item>

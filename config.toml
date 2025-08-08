@@ -155,3 +155,9 @@ sync_wait = 600
 # Defaults to 1 hour.
 # See: https://canvas.instructure.com/doc/api/file.oauth.html#oauth2-flow-2
 auth_token_expiry = 3600
+
+[study]
+airtable_api_key = "your api key here"
+airtable_base_id = "your base id here"
+airtable_class_table_id = "your class table id here"
+airtable_instructor_table_id = "your instructor table id here"

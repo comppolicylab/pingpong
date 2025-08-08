@@ -6,6 +6,7 @@
 	import AppSidebar from '$lib/components/app-sidebar.svelte';
 	import Separator from '$lib/components/ui/separator/separator.svelte';
 	import { page } from '$app/state';
+	import { Toaster } from '$lib/components/ui/sonner/index.js';
 
 	let { children } = $props();
 	let pageTitle = $derived(page.data?.title || 'PingPong College Study');
@@ -13,6 +14,7 @@
 </script>
 
 <ModeWatcher />
+<Toaster position="top-center" />
 {#if showSidebar}
 	<Sidebar.Provider>
 		<AppSidebar />
@@ -37,6 +39,12 @@
 			</div>
 		</Sidebar.Inset>
 	</Sidebar.Provider>
+	<script
+		data-jsd-embedded
+		data-key="66f55cfb-f3b4-44aa-a910-3f49aaedce06"
+		data-base-url="https://jsd-widget.atlassian.com"
+		src="https://jsd-widget.atlassian.com/assets/embed.js"
+	></script>
 {:else}
 	{@render children?.()}
 {/if}

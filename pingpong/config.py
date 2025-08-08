@@ -198,6 +198,16 @@ class CanvasSettings(BaseSettings):
 LMSInstance = Union[CanvasSettings]
 
 
+class StudySettings(BaseSettings):
+    """Settings for the study."""
+
+    airtable_api_key: str
+    airtable_base_id: str
+    airtable_class_table_id: str
+    airtable_instructor_table_id: str
+    airtable_instructor_table_id_field_id: str
+
+
 class LMSSettings(BaseSettings):
     """LMS connection settings."""
 
@@ -302,6 +312,7 @@ class Config(BaseSettings):
     authz: AuthzSettings
     email: EmailSettings
     lms: LMSSettings
+    study: StudySettings
     sentry: SentrySettings = Field(SentrySettings())
     metrics: MetricsSettings = Field(MetricsSettings())
     init: InitSettings = Field(InitSettings())
