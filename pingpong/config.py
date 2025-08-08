@@ -205,7 +205,6 @@ class StudySettings(BaseSettings):
     airtable_base_id: str
     airtable_class_table_id: str
     airtable_instructor_table_id: str
-    airtable_instructor_table_id_field_id: str
 
 
 class LMSSettings(BaseSettings):

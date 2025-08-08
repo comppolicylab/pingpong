@@ -51,3 +51,9 @@ client_id = "your client id here"
 client_secret = "your client secret here"
 sync_wait = 600
 auth_token_expiry = 3600
+
+[study]
+airtable_api_key = "your api key here"
+airtable_base_id = "your base id here"
+airtable_class_table_id = "your class table id here"
+airtable_instructor_table_id = "your instructor table id here"
