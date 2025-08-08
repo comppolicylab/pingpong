@@ -73,27 +73,8 @@ jobs:
         working-directory: ${{env.wd}}
         run: pnpm test
 
-  study-check:
-    name: Detect Study
-    runs-on: ubuntu-latest
-    outputs:
-      present: ${{ steps.detect.outputs.present }}
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-      - id: detect
-        name: Check if web/study exists
-        run: |
-          if [ -d web/study ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-          fi
-
   build-study:
     name: Test Frontend Study
-    needs: study-check
-    if: needs.study-check.outputs.present == 'true'
     timeout-minutes: 10
     runs-on: ubuntu-latest
     env:
