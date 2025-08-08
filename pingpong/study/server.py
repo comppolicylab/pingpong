@@ -1,4 +1,3 @@
-import asyncio
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from jwt import PyJWTError
