@@ -32,7 +32,7 @@ services:
     platform: linux/amd64
     image: pingpong-web:latest
     build:
-      context: ./web/pingpong
+      context: ./web
       dockerfile: Dockerfile
       args:
         host: 0.0.0.0

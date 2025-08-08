@@ -5533,6 +5533,19 @@ async def handle_exception(request: Request, exc: Exception):
 
 app.mount("/api/v1", v1)
 
+# Conditionally mount Study app when configured
+try:
+    if config.study_public_url and config.study:
+        from pingpong.study.server import study as study_app
+
+        # Attach shared logging middleware to study app
+        study_app.middleware("http")(log_request)
+
+        app.mount("/api/study", study_app)
+except Exception:
+    # If study is not configured or import fails, skip mounting
+    pass
+
 
 @app.get("/health")
 async def health():
