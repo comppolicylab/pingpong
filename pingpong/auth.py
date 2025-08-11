@@ -141,11 +141,12 @@ def decode_auth_token(token: str, nowfn: NowFn = utcnow) -> AuthToken:
 
 
 def generate_auth_link(
-    user_id: int,
+    user_id: int | str,
     redirect: str = "/",
     expiry: int = 600,
     nowfn: NowFn = utcnow,
     is_study: bool = False,
+    is_study_admin: bool = False,
 ) -> str:
     """Generates the link to log in.
 
@@ -158,7 +159,12 @@ def generate_auth_link(
     """
     tok = encode_auth_token(str(user_id), expiry=expiry, nowfn=nowfn)
     if is_study:
-        return config.study_url(f"/api/study/auth?token={tok}&redirect={redirect}")
+        if is_study_admin:
+            return config.study_url(
+                f"/api/study/auth/admin?token={tok}&redirect={redirect}"
+            )
+        else:
+            return config.study_url(f"/api/study/auth?token={tok}&redirect={redirect}")
     else:
         return config.url(f"/api/v1/auth?token={tok}&redirect={redirect}")
 

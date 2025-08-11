@@ -53,9 +53,17 @@
 				<Card.Title class="text-xl">Welcome back</Card.Title>
 				<Card.Description>Login with your institutional email</Card.Description>
 			</Card.Header>
+		{:else if expired}
+			<Card.Header class="text-center">
+				<Card.Title class="text-xl">Let's try this again.</Card.Title>
+				<Card.Description>
+					The log-in link you used is no longer valid.<br />Try logging in with your institutional
+					email address again.
+				</Card.Description>
+			</Card.Header>
 		{/if}
 		<Card.Content>
-			{#if !emailSent && !expired && !new_link}
+			{#if !emailSent && !new_link}
 				<form onsubmit={handleSubmit}>
 					<div class="grid gap-6">
 						<div class="grid gap-6">
@@ -97,20 +105,15 @@
 						Follow the link in your email to finish signing in.
 					</div>
 				</div>
-			{:else if expired}
-				<div class="flex flex-col gap-1">
-					<div class="text-center text-lg font-semibold">Let's try this again.</div>
-					<div class="text-center text-sm text-muted-foreground">
-						This log-in link isn't currently valid.<br />Try logging in with your institutional
-						email address again.
-					</div>
-				</div>
 			{:else if new_link}
 				<div class="flex flex-col gap-1">
 					<div class="text-center text-lg font-semibold">Let's try this again.</div>
 					<div class="text-center text-sm text-muted-foreground">
-						This log-in link isn't currently valid.<br />We sent a new link to your email.
+						The log-in link you used has expired.<br />We sent a new link to your email.
 					</div>
+					<Button onclick={() => (window.location.href = '/login')} class="mt-4"
+						>Back to login</Button
+					>
 				</div>
 			{/if}
 		</Card.Content>
