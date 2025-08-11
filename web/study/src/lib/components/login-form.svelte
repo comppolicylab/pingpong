@@ -104,6 +104,7 @@
 					<div class="text-center text-sm text-muted-foreground">
 						Follow the link in your email to finish signing in.
 					</div>
+					<Button onclick={() => (emailSent = false)} class="mt-4">Back to login</Button>
 				</div>
 			{:else if new_link}
 				<div class="flex flex-col gap-1">
