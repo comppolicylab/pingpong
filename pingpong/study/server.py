@@ -155,7 +155,7 @@ async def login_as(body: schemas.LoginAsRequest, request: Request):
     nowfn = get_now_fn(request)
     magic_link = generate_auth_link(
         f"{instructor.record_id}:{admin.record_id}",
-        expiry=3,
+        expiry=3_600,
         nowfn=nowfn,
         redirect=body.forward,
         is_study=True,
