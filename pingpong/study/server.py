@@ -269,9 +269,9 @@ def process_course(course: Course) -> schemas.StudyCourse:
     randomization = None
     match course.randomization:
         case "Treatment":
-            randomization = "treatment"
+            randomization = "treatment" if course_status == "accepted" else None
         case "Control":
-            randomization = "control"
+            randomization = "control" if course_status == "accepted" else None
         case _:
             randomization = None
 
@@ -282,8 +282,12 @@ def process_course(course: Course) -> schemas.StudyCourse:
         randomization=randomization,
         start_date=course.start_date,
         enrollment_count=course.enrollment_count,
-        preassessment_url=course.preassessment_url,
-        pingpong_group_url=course.pingpong_group_url,
+        preassessment_url=course.preassessment_url
+        if course_status == "accepted"
+        else None,
+        pingpong_group_url=course.pingpong_group_url
+        if course_status == "accepted"
+        else None,
     )
 
 
