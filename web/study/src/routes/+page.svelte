@@ -8,6 +8,8 @@
 	import Info from '@lucide/svelte/icons/info';
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
 	import DataTable from '$lib/components/classes-table/data-table.svelte';
+	import Percent from '@lucide/svelte/icons/percent';
+	import Users from '@lucide/svelte/icons/users';
 	import { columns } from '$lib/components/classes-table/columns.js';
 
 	let { data } = $props();
@@ -15,6 +17,9 @@
 		data.courses.some(
 			(course) => course.pingpong_group_url !== '' && course.randomization === 'treatment'
 		)
+	);
+	const hasAnyAcceptedCourses = $derived(
+		data.courses.some((course) => course.status === 'accepted')
 	);
 </script>
 
@@ -149,6 +154,50 @@
 	</div>
 
 	<h2 class="mt-4 text-xl font-semibold">Your Courses</h2>
+	{#if hasAnyAcceptedCourses}
+		<div class="grid grid-cols-2 gap-4">
+			<Alert.Root class="self-start">
+				<Percent />
+				<Alert.Title class="line-clamp-none tracking-normal"
+					>Pre-assessment completion rate targets coming on August 18</Alert.Title
+				>
+				<Alert.Description>
+					<p>
+						You will soon be able to view completion rate targets for your accepted courses. <span
+							class="font-medium"
+							>As a reminder, all courses in both treatment and control groups need to meet the
+							completion rate targets for the pre-assessment and post-assessment to remain in the
+							study and receive the honorarium.</span
+						>
+						Email
+						<a
+							href="mailto:support@pingpong-hks.atlassian.net"
+							class="text-nowrap text-primary underline underline-offset-4 hover:text-primary/80"
+							>support@pingpong-hks.atlassian.net
+						</a> if you have any questions.
+					</p>
+				</Alert.Description>
+			</Alert.Root>
+			<Alert.Root class="self-start">
+				<Users />
+				<Alert.Title class="line-clamp-none tracking-normal"
+					>Lists of students that have completed the pre-assessment will be available starting
+					August 22</Alert.Title
+				>
+				<Alert.Description>
+					<p>
+						You will soon be able to view real-time lists of students that have completed the
+						pre-assessment for your accepted courses. <span class="font-medium"
+							>All students in your course should complete the pre-assessment, whether they are in a
+							treatment or control group class, regardless of whether they agree for the research
+							team to analyze their de-identified data.</span
+						>
+					</p>
+				</Alert.Description>
+			</Alert.Root>
+		</div>
+	{/if}
+
 	{#if hasAnyTreatmentCourses}
 		<Alert.Root class="self-start">
 			<CalendarClock />

@@ -186,7 +186,7 @@ def redirect_with_session_study(
     """Redirect to the destination with a session token."""
     session_token = encode_auth_token(user_id, expiry=expiry, nowfn=nowfn)
     response = RedirectResponse(
-        config.url(destination) if destination.startswith("/") else destination,
+        config.study_url(destination) if destination.startswith("/") else destination,
         status_code=303,
     )
     response.set_cookie(

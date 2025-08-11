@@ -12,18 +12,24 @@
 			case 'rejected':
 				return 'destructive';
 			default:
-				return 'outline';
+				return 'secondary';
 		}
 	}
 
-	function humanize(value: string): string {
-		return value
-			.split('_')
-			.map((p) => (p ? p[0].toUpperCase() + p.slice(1) : p))
-			.join(' ');
+	function toLabel(value: string): string {
+		switch (value) {
+			case 'accepted':
+				return 'Accepted';
+			case 'in_review':
+				return 'In Review';
+			case 'rejected':
+				return 'Not Selected';
+			default:
+				return 'In Review';
+		}
 	}
 </script>
 
 <Badge variant={toVariant(status)}>
-	{humanize(status)}
+	{toLabel(status)}
 </Badge>
