@@ -32,6 +32,11 @@ async def get_courses_by_instructor_id(instructor_id: str) -> list[Course]:
     return courses
 
 
+async def get_admin_by_id(admin_id: str) -> Admin | None:
+    admin = await asyncio.to_thread(Admin.from_id, admin_id)
+    return admin
+
+
 async def get_admin_by_email(email: str) -> Admin | None:
     email_to_match = email.lower().strip()
     formula = Admin.email.eq(email_to_match)

@@ -17,6 +17,7 @@ from pingpong.study.schemas import Course
 from pingpong.users import UserNotFoundException
 from pingpong.study.airtable import (
     get_admin_by_email,
+    get_admin_by_id,
     get_courses_by_instructor_id,
     get_instructor,
     get_instructor_by_email,
@@ -153,11 +154,12 @@ async def login_as(body: schemas.LoginAsRequest, request: Request):
 
     nowfn = get_now_fn(request)
     magic_link = generate_auth_link(
-        instructor.record_id,
+        f"{instructor.record_id}:{admin.record_id}",
         expiry=3_600,
         nowfn=nowfn,
         redirect=body.forward,
         is_study=True,
+        is_study_admin=True,
     )
 
     message = message_template.substitute(
@@ -244,6 +246,81 @@ async def auth(request: Request):
         )
 
     return redirect_with_session_study(dest, auth_token.sub, nowfn=nowfn)
+
+
+@study.get("/auth/admin")
+async def auth_admin(request: Request):
+    """Continue the auth flow based on a JWT in the query params.
+
+    If the token is valid, determine the correct authn method based on the user.
+    If the user is allowed to use magic link auth, they'll be authed automatically
+    by this endpoint. If they have to go through SSO, they'll be redirected to the
+    SSO login endpoint.
+
+    Raises:
+        HTTPException(401): If the token is invalid.
+        HTTPException(500): If there is an runtime error decoding the token.
+        HTTPException(404): If the user ID is not found.
+        HTTPException(501): If we don't support the auth method for the user.
+
+    Returns:
+        RedirectResponse: Redirect either to the SSO login endpoint or to the destination.
+    """
+    dest = request.query_params.get("redirect", "/")
+    stok = request.query_params.get("token")
+    nowfn = get_now_fn(request)
+    try:
+        auth_token = decode_auth_token(stok, nowfn=nowfn)
+    except jwt.exceptions.PyJWTError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except TimeException as e:
+        # UserID format is <instructor_id>:<admin_id>
+        instructor_id, admin_id = e.user_id.split(":")
+        instructor = await get_instructor(instructor_id)
+        admin = await get_admin_by_id(admin_id)
+        forward = request.query_params.get("redirect", "/")
+        if instructor and instructor.academic_email and admin and admin.email:
+            try:
+                await login_as(
+                    schemas.LoginAsRequest(
+                        instructor_email=instructor.academic_email,
+                        admin_email=admin.email,
+                        forward=forward,
+                    ),
+                    request,
+                )
+            except HTTPException as e:
+                # login_magic will throw a 403 if the user needs to use SSO
+                # to log in. In that case, we redirect them to the SSO login
+                # page.
+                if e.status_code == 403:
+                    return RedirectResponse(e.detail, status_code=303)
+                else:
+                    return RedirectResponse(
+                        f"/login?expired=true&forward={forward}", status_code=303
+                    )
+            return RedirectResponse("/login?new_link=true", status_code=303)
+        return RedirectResponse(
+            f"/login?expired=true&forward={forward}", status_code=303
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    instructor_id, admin_id = auth_token.sub.split(":")
+    instructor = await get_instructor(instructor_id)
+    admin = await get_admin_by_id(admin_id)
+    if not admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied. Please contact the study administrator.",
+        )
+    if not instructor:
+        raise HTTPException(
+            status_code=404,
+            detail="We couldn't find the instructor in the study database. Please contact the study administrator.",
+        )
+
+    return redirect_with_session_study(dest, instructor_id, nowfn=nowfn)
 
 
 def process_course(course: Course) -> schemas.StudyCourse:
