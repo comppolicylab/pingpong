@@ -37,7 +37,8 @@
     StopSolid,
     CheckOutline,
     MicrophoneSlashOutline,
-    UsersSolid
+    UsersSolid,
+    LinkOutline
   } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
@@ -50,6 +51,7 @@
   import { isFirefox } from '$lib/stores/general';
   import Sanitize from '$lib/components/Sanitize.svelte';
   import AudioPlayer from '$lib/components/AudioPlayer.svelte';
+  import { copy } from 'svelte-copy';
   export let data;
 
   let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -379,6 +381,13 @@
 
   const handleDismissError = () => {
     threadMgr.dismissError();
+  };
+
+  // Show info that we copied the link to the clipboard
+  const showCopiedLink = (e: Event) => {
+    e.preventDefault();
+    e.stopPropagation();
+    happyToast('Link copied to clipboard', 3000);
   };
 
   /**
@@ -1311,7 +1320,15 @@
               >
             {/if}
           </div>
-
+          <button
+            on:click|preventDefault={() => {}}
+            on:svelte-copy={showCopiedLink}
+            use:copy={`${$page.url.protocol}//${$page.url.host}/group/${classId}/thread/${threadId}`}
+            ><LinkOutline
+              class="dark:text-white inline-block w-5 h-6 text-blue-dark-30 hover:text-blue-dark-50 active:animate-ping font-medium"
+              size="lg"
+            /></button
+          >
           {#if !(data.threadInteractionMode === 'voice' && $messages.length === 0 && assistantInteractionMode === 'voice')}
             <div class="shrink-0 grow-0 h-auto">
               <CogOutline class="dark:text-white cursor-pointer w-6 h-4 font-light" size="lg" />
