@@ -78,13 +78,14 @@ async def populate_anonymous_tokens(request):
     return request
 
 
-def populate_script_token(request):
+def populate_authorization_token(request):
     try:
         request.cookies["session"]
     except KeyError:
-        script_token = request.headers.get("X-Session-Token")
-        if script_token:
-            request.cookies["session"] = script_token
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            bearer_token = auth_header.removeprefix("Bearer ").strip()
+            request.cookies["session"] = bearer_token
 
     return request
 
@@ -92,7 +93,7 @@ def populate_script_token(request):
 async def populate_request(request):
     try:
         request = await populate_anonymous_tokens(request)
-        request = populate_script_token(request)
+        request = populate_authorization_token(request)
         session_token = request.cookies["session"]
     except KeyError:
         if (
