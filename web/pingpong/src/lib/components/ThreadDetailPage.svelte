@@ -381,6 +381,18 @@
     threadMgr.dismissError();
   };
 
+  const copyThreadUrl = async () => {
+    try {
+      const url = `${window.location.origin}/group/${classId}/thread/${threadId}`;
+      await navigator.clipboard.writeText(url);
+      happyToast('Thread link copied to clipboard.');
+      settingsOpen = false;
+    } catch (e) {
+      sadToast(`Failed to copy thread link. Error: ${errorMessage(e, 'Unknown error.')}`);
+      settingsOpen = false;
+    }
+  };
+
   /**
    * Publish or unpublish a thread.
    */
@@ -1335,6 +1347,9 @@
                 </DropdownItem>
                 <DropdownItem on:click={deleteThread} disabled={!canDeleteThread}>
                   <span class:text-gray-300={!canDeleteThread}>Delete</span>
+                </DropdownItem>
+                <DropdownItem on:click={copyThreadUrl}>
+                  <span class="whitespace-nowrap">Copy Thread Link</span>
                 </DropdownItem>
               </Dropdown>
             </div>
