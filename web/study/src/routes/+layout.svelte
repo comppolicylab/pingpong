@@ -34,7 +34,7 @@
 					</Breadcrumb.Root>
 				</div>
 			</header>
-			<div class="flex flex-col p-4 overflow-auto">
+			<div class="flex flex-col overflow-auto p-4">
 				{@render children?.()}
 			</div>
 		</Sidebar.Inset>
