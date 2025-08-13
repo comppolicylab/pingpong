@@ -5544,6 +5544,7 @@ try:
         app.mount("/api/study", study_app)
 except Exception:
     # If study is not configured or import fails, skip mounting
+    logger.exception("Failed to mount study app.")
     pass
 
 
