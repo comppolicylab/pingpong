@@ -5542,7 +5542,7 @@ try:
         study_app.middleware("http")(log_request)
 
         app.mount("/api/study", study_app)
-except Exception as e:
+except Exception:
     # If study is not configured or import fails, skip mounting
     logger.exception("Failed to mount study app.")
     pass
