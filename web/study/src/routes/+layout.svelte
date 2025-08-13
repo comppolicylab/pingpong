@@ -16,7 +16,7 @@
 <ModeWatcher />
 <Toaster position="top-center" />
 {#if showSidebar}
-	<Sidebar.Provider class="h-dvh">
+	<Sidebar.Provider>
 		<AppSidebar />
 		<Sidebar.Inset>
 			<header class="flex h-16 shrink-0 items-center gap-2 border-b">
@@ -34,7 +34,7 @@
 					</Breadcrumb.Root>
 				</div>
 			</header>
-			<div class="flex flex-col p-4 overflow-auto">
+			<div class="flex flex-col p-4">
 				{@render children?.()}
 			</div>
 		</Sidebar.Inset>
