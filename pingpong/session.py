@@ -78,9 +78,22 @@ async def populate_anonymous_tokens(request):
     return request
 
 
+def populate_authorization_token(request):
+    try:
+        request.cookies["session"]
+    except KeyError:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            bearer_token = auth_header.removeprefix("Bearer ").strip()
+            request.cookies["session"] = bearer_token
+
+    return request
+
+
 async def populate_request(request):
     try:
         request = await populate_anonymous_tokens(request)
+        request = populate_authorization_token(request)
         session_token = request.cookies["session"]
     except KeyError:
         if (

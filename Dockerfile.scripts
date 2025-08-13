@@ -24,7 +24,7 @@ WORKDIR /code
 COPY poetry.lock pyproject.toml /code/
 
 # Install dependencies
-RUN poetry install --only main,local-scripts --no-interaction --no-ansi
+RUN poetry install --only main --no-interaction --no-ansi
 
 COPY . /code
 

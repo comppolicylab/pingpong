@@ -14,7 +14,7 @@ This is the UI for the PingPong app.
 
 ### Pre-reqs
 
-- Use Node `v21.1.0` (other versions probably work, but no guarantees)
+- Use Node `v22.18.0` (other versions probably work, but no guarantees)
 - Use [`pnpm`](https://pnpm.io/) for package management. (It's a lot faster than `npm` and `yarnpkg`.)
 - Run the PingPong API, DB, and other services. The easiest way to do this is with Docker by running the `./start-dev-docker.sh` script.
 
