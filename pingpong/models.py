@@ -3415,6 +3415,13 @@ class ToolCall(Base):
     run_id = Column(Integer, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
     run = relationship("Run", back_populates="tool_calls", uselist=False)
 
+    thread_id = Column(
+        Integer, ForeignKey("threads.id", ondelete="CASCADE"), nullable=False
+    )
+    thread = relationship("Thread", back_populates="tool_calls", uselist=False)
+
+    output_index = Column(Integer, nullable=False)
+
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(
         DateTime(timezone=True),
@@ -3445,6 +3452,8 @@ class MessagePart(Base):
 
     message_id = Column(Integer, ForeignKey("messages.id", ondelete="CASCADE"))
     message = relationship("Message", back_populates="content", uselist=False)
+
+    part_sequence = Column(Integer, nullable=False)
 
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(
@@ -3480,6 +3489,13 @@ class Message(Base):
 
     run_id = Column(Integer, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
     run = relationship("Run", back_populates="messages", uselist=False)
+
+    thread_id = Column(
+        Integer, ForeignKey("threads.id", ondelete="CASCADE"), nullable=False
+    )
+    thread = relationship("Thread", back_populates="messages", uselist=False)
+
+    output_index = Column(Integer, nullable=False)
 
     role = Column(SQLEnum(schemas.MessageRole), nullable=False)
     user_id = Column(
