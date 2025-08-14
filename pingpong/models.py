@@ -3668,6 +3668,16 @@ class Thread(Base):
         back_populates="thread",
         lazy="selectin",
     )
+    messages = relationship(
+        "Message",
+        back_populates="thread",
+        lazy="selectin",
+    )
+    tool_calls = relationship(
+        "ToolCall",
+        back_populates="thread",
+        lazy="selectin",
+    )
     tools_available = Column(String)
     vector_store_id = Column(
         Integer,
