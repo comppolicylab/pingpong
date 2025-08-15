@@ -1955,6 +1955,7 @@ export const getThreadRecording = async (f: Fetcher, classId: number, threadId: 
 export type Thread = {
   id: number;
   name: string | null;
+  version: number;
   interaction_mode: 'chat' | 'voice';
   class_id: number;
   assistant_names?: Record<number, string> | null;
@@ -2327,7 +2328,10 @@ export type ToolImageOutput = {
   type: 'image';
 };
 
-export type ToolOutput = ToolImageOutput;
+export type ToolOutput =
+  | ToolImageOutput
+  | MessageContentCodeOutputImageURL
+  | MessageContentCodeOutputLogs;
 
 export type ToolCallIO = {
   input: string | null;
@@ -2406,6 +2410,8 @@ export type ThreadStreamChunk =
   | ThreadServerErrorChunk
   | ThreadStreamDoneChunk
   | ThreadStreamToolCallCreatedChunk
+  | MessageContentCodeOutputImageURL
+  | MessageContentCodeOutputLogs
   | ThreadStreamToolCallDeltaChunk;
 
 /**

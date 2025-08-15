@@ -1,8 +1,8 @@
 """Add Responses API Schema
 
-Revision ID: c265e731523d
+Revision ID: a0e423503265
 Revises: bdeb2a584ac2
-Create Date: 2025-08-14 21:43:37.907415
+Create Date: 2025-08-15 17:31:16.281984
 
 """
 
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "c265e731523d"
+revision: str = "a0e423503265"
 down_revision: Union[str, None] = "bdeb2a584ac2"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -57,6 +57,12 @@ def upgrade() -> None:
         sa.Column("error_message", sa.String(), nullable=True),
         sa.Column("incomplete_reason", sa.String(), nullable=True),
         sa.Column("thread_id", sa.Integer(), nullable=True),
+        sa.Column("assistant_id", sa.Integer(), nullable=True),
+        sa.Column("model", sa.String(), nullable=True),
+        sa.Column("reasoning_effort", sa.Integer(), nullable=True),
+        sa.Column("temperature", sa.Float(), nullable=True),
+        sa.Column("instructions", sa.String(), nullable=True),
+        sa.Column("tools_available", sa.String(), nullable=True),
         sa.Column("creator_id", sa.Integer(), nullable=True),
         sa.Column(
             "created",
@@ -71,6 +77,9 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.Column("completed", sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(
+            ["assistant_id"], ["assistants.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["creator_id"], ["users.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["thread_id"], ["threads.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -93,6 +102,7 @@ def upgrade() -> None:
         ),
         sa.Column("run_id", sa.Integer(), nullable=False),
         sa.Column("thread_id", sa.Integer(), nullable=False),
+        sa.Column("assistant_id", sa.Integer(), nullable=True),
         sa.Column("output_index", sa.Integer(), nullable=False),
         sa.Column(
             "role",
@@ -113,6 +123,9 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.Column("completed", sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(
+            ["assistant_id"], ["assistants.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["run_id"], ["runs.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["thread_id"], ["threads.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="SET NULL"),
@@ -367,36 +380,4 @@ def downgrade() -> None:
     op.drop_table("runs")
     op.drop_index(op.f("ix_s3_files_updated"), table_name="s3_files")
     op.drop_table("s3_files")
-    sa.Enum("CODE_INTERPRETER", "FILE_SEARCH", name="toolcalltype").drop(op.get_bind())
-    sa.Enum(
-        "QUEUED",
-        "PENDING",
-        "IN_PROGRESS",
-        "COMPLETED",
-        "FAILED",
-        "INCOMPLETE",
-        name="runstatus",
-    ).drop(op.get_bind())
-    sa.Enum(
-        "IN_PROGRESS", "COMPLETED", "INCOMPLETE", "PENDING", name="messagestatus"
-    ).drop(op.get_bind())
-    sa.Enum("USER", "SYSTEM", "ASSISTANT", "DEVELOPER", name="messagerole").drop(
-        op.get_bind()
-    )
-    sa.Enum(
-        "INPUT_TEXT", "INPUT_IMAGE", "OUTPUT_TEXT", "REFUSAL", name="messageparttype"
-    ).drop(op.get_bind())
-    sa.Enum("FILE_PATH", "URL_CITATION", "FILE_CITATION", name="annotationtype").drop(
-        op.get_bind()
-    )
-    sa.Enum("LOGS", "IMAGE", name="codeinterpreteroutputtype").drop(op.get_bind())
-    sa.Enum(
-        "IN_PROGRESS",
-        "SEARCHING",
-        "INTERPRETING",
-        "COMPLETED",
-        "INCOMPLETE",
-        "FAILED",
-        name="toolcallstatus",
-    ).drop(op.get_bind())
     # ### end Alembic commands ###

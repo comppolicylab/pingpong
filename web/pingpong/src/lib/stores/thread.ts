@@ -116,6 +116,8 @@ export class ThreadManager {
    */
   instructions: Readable<string | null>;
 
+  version: Readable<number>;
+
   #data: Writable<ThreadManagerState>;
   #fetcher: api.Fetcher;
 
@@ -213,6 +215,10 @@ export class ThreadManager {
 
     this.instructions = derived(this.#data, ($data) => {
       return $data?.instructions || null;
+    });
+
+    this.version = derived(this.#data, ($data) => {
+      return $data?.data?.thread?.version || 2;
     });
   }
 
@@ -784,6 +790,18 @@ export class ThreadManager {
                 lastMessage.content.push({
                   type: 'code_output_image_file',
                   image_file: output.image
+                });
+                break;
+              case 'code_output_logs':
+                lastMessage.content.push({
+                  type: 'code_output_logs',
+                  logs: output.logs
+                });
+                break;
+              case 'code_output_image_url':
+                lastMessage.content.push({
+                  type: 'code_output_image_url',
+                  url: output.url
                 });
                 break;
               default:

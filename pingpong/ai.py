@@ -38,7 +38,6 @@ from openai.types.beta.assistant_stream_event import (
     ThreadRunFailed,
 )
 from openai.types.responses import ToolParam, FileSearchToolParam
-from openai.types.responses.response_stream_event import ResponseStreamEvent
 from openai._streaming import AsyncStream
 from openai.types.responses.tool_param import (
     CodeInterpreter,
@@ -51,7 +50,11 @@ from openai.types.responses.response_output_item import (
 )
 from openai.types.responses.response_output_text import ResponseOutputText
 from openai.types.responses.response_stream_event import (
+    ResponseStreamEvent,
     ResponseCreatedEvent,
+    ResponseFailedEvent,
+    ResponseIncompleteEvent,
+    ResponseErrorEvent,
     ResponseInProgressEvent,
     ResponseTextDeltaEvent,
     ResponseCompletedEvent,
@@ -230,6 +233,7 @@ async def get_thread_conversation_name(
     thread_id: str,
     class_id: str,
 ) -> str | None:
+    return None
     messages = await cli.beta.threads.messages.list(thread_id, limit=10, order="asc")
 
     message_str = ""
@@ -468,13 +472,10 @@ async def build_response_input_item_list(
 ) -> tuple[list[ResponseInputItemParam], int]:
     """Build a list of ResponseInputItem from a thread run step."""
     response_input_items: list[ResponseInputItemParam] = []
+    # Store ResponseInputItemParam and time created to sort later
+    response_input_items_with_time: list[tuple[datetime, ResponseInputItemParam]] = []
 
     async for run in models.Run.get_runs_by_thread_id(session, thread_id):
-        # Store ResponseInputItemParam and time created to sort later
-        response_input_items_with_time: list[
-            tuple[datetime, ResponseInputItemParam]
-        ] = []
-
         # Messages
         for message in run.messages:
             content_list: list[ResponseInputMessageContentListParam] = []
@@ -500,7 +501,7 @@ async def build_response_input_item_list(
                                         AnnotationFileCitation(
                                             file_id=annotation.file_id,
                                             filename=annotation.filename,
-                                            index=annotation.index,
+                                            index=annotation.index or 0,
                                             type="file_citation",
                                         )
                                     )
@@ -508,7 +509,7 @@ async def build_response_input_item_list(
                                     annotations.append(
                                         AnnotationFilePath(
                                             file_path=annotation.file_path,
-                                            index=annotation.index,
+                                            index=annotation.index or 0,
                                             type="file_path",
                                         )
                                     )
@@ -516,8 +517,8 @@ async def build_response_input_item_list(
                                     annotations.append(
                                         AnnotationURLCitation(
                                             url=annotation.url,
-                                            start_index=annotation.start_index,
-                                            end_index=annotation.end_index,
+                                            start_index=annotation.start_index or 0,
+                                            end_index=annotation.end_index or 0,
                                             title=annotation.title,
                                             type="url_citation",
                                         )
@@ -528,8 +529,8 @@ async def build_response_input_item_list(
                                             file_id=annotation.file_id,
                                             container_id=annotation.container_id,
                                             filename=annotation.filename,
-                                            start_index=annotation.start_index,
-                                            end_index=annotation.end_index,
+                                            start_index=annotation.start_index or 0,
+                                            end_index=annotation.end_index or 0,
                                             type="container_file_citation",
                                         )
                                     )
@@ -553,7 +554,7 @@ async def build_response_input_item_list(
                 (
                     message.created,
                     EasyInputMessageParam(
-                        role="user", content=content_list, type="message"
+                        role=message.role, content=content_list, type="message"
                     ),
                 )
             )
@@ -575,7 +576,7 @@ async def build_response_input_item_list(
                                 )
                     response_input_items_with_time.append(
                         (
-                            tool_call.created_at,
+                            tool_call.created,
                             ResponseCodeInterpreterToolCallParam(
                                 id=tool_call.tool_call_id,
                                 code=tool_call.code,
@@ -588,7 +589,7 @@ async def build_response_input_item_list(
                     )
                 case ToolCallType.FILE_SEARCH:
                     file_search_results: list[Result] = []
-                    for result in tool_call.file_search.results:
+                    for result in tool_call.results:
                         file_search_results.append(
                             Result(
                                 attributes=json.loads(result.attributes),
@@ -600,10 +601,10 @@ async def build_response_input_item_list(
                         )
                     response_input_items_with_time.append(
                         (
-                            tool_call.created_at,
+                            tool_call.created,
                             ResponseFileSearchToolCallParam(
                                 id=tool_call.tool_call_id,
-                                queries=json.loads(tool_call.file_search.queries),
+                                queries=json.loads(tool_call.queries),
                                 status=tool_call.status,
                                 results=file_search_results,
                                 type="file_search_call",
@@ -611,10 +612,10 @@ async def build_response_input_item_list(
                         )
                     )
 
-        # Sort by created time
-        response_input_items_with_time.sort(key=lambda x: x[0])
-        # Extract the ResponseInputItemParam from the sorted list
-        response_input_items.extend(item for _, item in response_input_items_with_time)
+    # Sort by created time
+    response_input_items_with_time.sort(key=lambda x: x[0])
+    # Extract the ResponseInputItemParam from the sorted list
+    response_input_items.extend(item for _, item in response_input_items_with_time)
 
     return response_input_items, len(response_input_items)
 
@@ -629,6 +630,8 @@ class BufferedResponseStreamHandler:
         prev_output_index: int,
         file_names: dict[str, str],
         class_id: int,
+        thread_id: int,
+        assistant_id: int,
         user_id: int,
         user_auth: str | None = None,
         anonymous_link_auth: str | None = None,
@@ -650,7 +653,9 @@ class BufferedResponseStreamHandler:
         self.anonymous_user_auth = anonymous_user_auth
         self.anonymous_session_id = anonymous_session_id
         self.anonymous_link_id = anonymous_link_id
-        self.__cached_run: models.Run = run
+        self.__thread_id: int = thread_id
+        self.__assistant_id: int = assistant_id
+        self.__cached_run: models.Run | None = run
         self.__prev_output_index = prev_output_index
         self.__cached_message: models.Message | None = None
         self.__prev_part_index = -1
@@ -668,13 +673,28 @@ class BufferedResponseStreamHandler:
         return value
 
     async def on_response_created(self, data: ResponseCreatedEvent):
+        if not self.__cached_run:
+            logger.exception(
+                f"Received response created event without a cached run. Data: {data}"
+            )
+            return
         self.__cached_run.run_id = data.response.id
         self.__cached_run.status = RunStatus(data.response.status)
 
     async def on_response_in_progress(self, data: ResponseInProgressEvent):
+        if not self.__cached_run:
+            logger.exception(
+                f"Received response in progress event without a cached run. Data: {data}"
+            )
+            return
         self.__cached_run.status = RunStatus(data.response.status)
 
     async def on_output_message_created(self, data: ResponseOutputMessage):
+        if not self.__cached_run:
+            logger.exception(
+                f"Received output message created event without a cached run. Data: {data}"
+            )
+            return
         if self.__cached_message:
             logger.exception(
                 f"Received output message created event with cached message. Data: {data}"
@@ -683,15 +703,20 @@ class BufferedResponseStreamHandler:
         self.__prev_output_index += 1
         self.__cached_message = models.Message(
             output_index=self.__prev_output_index,
-            thread_id=self.__cached_run.thread_id,
+            thread_id=self.__thread_id,
             message_id=data.id,
             message_status=MessageStatus(data.status),
+            assistant_id=self.__assistant_id,
             role=data.role,
             created=utcnow(),
-            run_id=self.__cached_run.id,
         )
 
     async def on_output_text_part_created(self, data: ResponseOutputText):
+        if not self.__cached_run:
+            logger.exception(
+                f"Received text part created event without a cached run. Data: {data}"
+            )
+            return
         if not self.__cached_message:
             logger.exception(
                 f"Received text part created without a cached message. Data: {data}"
@@ -708,6 +733,22 @@ class BufferedResponseStreamHandler:
             type=MessagePartType(data.type),
             text=data.text,
         )
+        self.enqueue(
+            {
+                "type": "message_created",
+                "role": "assistant",
+                "message": {
+                    "id": str(self.__cached_message.message_id),
+                    "thread_id": str(self.__cached_run.thread_id),
+                    "assistant_id": None,
+                    "created_at": int(self.__cached_message.created.timestamp()),
+                    "object": "thread.message",
+                    "role": self.__cached_message.role,
+                    "content": [],
+                    "status": "in_progress",
+                },
+            }
+        )
 
     async def on_output_text_delta(self, data: ResponseTextDeltaEvent):
         if not self.__cached_message_part:
@@ -716,10 +757,34 @@ class BufferedResponseStreamHandler:
             )
             return
         self.__cached_message_part.text += data.delta
+        self.enqueue(
+            {
+                "type": "message_delta",
+                "delta": {
+                    "content": [
+                        {
+                            "index": 0,
+                            "type": "text",
+                            "text": {
+                                "value": data.delta,
+                                "annotations": [],
+                            },
+                        },
+                    ],
+                    "role": None,
+                },
+            }
+        )
 
     async def on_output_text_container_file_citation_added(
         self, data: AnnotationContainerFileCitation, annotation_index: int | None = None
     ):
+        if not self.__cached_run:
+            logger.exception(
+                f"Received text container file citation added event without a cached run. Data: {data}"
+            )
+            return
+
         file_content = await self.openai_cli.containers.files.content.retrieve(
             file_id=data["file_id"], container_id=data["container_id"]
         )
@@ -786,6 +851,51 @@ class BufferedResponseStreamHandler:
             )
         )
 
+        if file.vision_file_id:
+            self.enqueue(
+                {
+                    "type": "message_delta",
+                    "delta": {
+                        "content": [
+                            {
+                                "type": "image_file",
+                                "image_file": {
+                                    "file_id": str(file.vision_file_id),
+                                },
+                            },
+                        ],
+                        "role": None,
+                    },
+                }
+            )
+        else:
+            self.enqueue(
+                {
+                    "type": "message_delta",
+                    "delta": {
+                        "content": [
+                            {
+                                "index": 0,
+                                "type": "text",
+                                "text": {
+                                    "value": "",
+                                    "annotations": [
+                                        {
+                                            "type": "file_path",
+                                            "end_index": data["end_index"],
+                                            "start_index": data["start_index"],
+                                            "file_path": {"file_id": str(file.id)},
+                                            "text": "",
+                                        }
+                                    ],
+                                },
+                            },
+                        ],
+                        "role": None,
+                    },
+                }
+            )
+
     async def on_output_text_file_citation_added(
         self, data: AnnotationFileCitation, annotation_index: int | None = None
     ):
@@ -799,6 +909,7 @@ class BufferedResponseStreamHandler:
                 type=AnnotationType.FILE_CITATION,
                 file_id=data["file_id"],
                 filename=data["filename"],
+                index=data["index"],
                 annotation_index=annotation_index,
             )
         )
@@ -820,6 +931,11 @@ class BufferedResponseStreamHandler:
         self.__cached_message_part = None
 
     async def on_output_message_done(self, data: ResponseOutputMessage):
+        if not self.__cached_run:
+            logger.exception(
+                f"Received output message done event without a cached run. Data: {data}"
+            )
+            return
         if not self.__cached_message:
             logger.exception(
                 f"Received output message done event without a cached message. Data: {data}"
@@ -841,6 +957,11 @@ class BufferedResponseStreamHandler:
     async def on_code_interpreter_tool_call_created(
         self, data: ResponseCodeInterpreterToolCall
     ):
+        if not self.__cached_run:
+            logger.exception(
+                f"Received code interpreter tool call created event without a cached run. Data: {data}"
+            )
+            return
         if self.__current_tool_call:
             logger.exception(
                 f"Received code interpreter tool call created with an existing tool call. Data: {data}"
@@ -856,6 +977,17 @@ class BufferedResponseStreamHandler:
             container_id=data.container_id,
             code=data.code,
             created=utcnow(),
+        )
+
+        self.enqueue(
+            {
+                "type": "tool_call_created",
+                "tool_call": {
+                    "id": str(data.id),
+                    "type": "code_interpreter",
+                    "code_interpreter": {"input": data.code or "", "outputs": None},
+                },
+            }
         )
 
     async def on_code_interpreter_tool_call_in_progress(
@@ -887,6 +1019,18 @@ class BufferedResponseStreamHandler:
             )
             return
         self.__current_tool_call.code += data.delta
+
+        self.enqueue(
+            {
+                "type": "tool_call_delta",
+                "delta": {
+                    "index": data.output_index,
+                    "type": "code_interpreter",
+                    "id": data.item_id,
+                    "code_interpreter": {"input": data.delta, "outputs": None},
+                },
+            }
+        )
 
     async def on_code_interpreter_tool_call_interpreting(
         self, data: ResponseCodeInterpreterCallInterpretingEvent
@@ -921,6 +1065,11 @@ class BufferedResponseStreamHandler:
     async def on_code_interpreter_tool_call_done(
         self, data: ResponseCodeInterpreterToolCall
     ):
+        if not self.__cached_run:
+            logger.exception(
+                f"Received code interpreter tool call done without a cached run. Data: {data}"
+            )
+            return
         if not self.__current_tool_call:
             logger.exception(
                 f"Received code interpreter tool call done without a current tool call. Data: {data}"
@@ -950,6 +1099,25 @@ class BufferedResponseStreamHandler:
                                 created=utcnow(),
                             )
                         )
+                        self.enqueue(
+                            {
+                                "type": "tool_call_delta",
+                                "delta": {
+                                    "index": self.__prev_output_index,
+                                    "type": "code_interpreter",
+                                    "id": data.id,
+                                    "code_interpreter": {
+                                        "input": None,
+                                        "outputs": [
+                                            {
+                                                "type": "code_output_image_url",
+                                                "url": output.url,
+                                            }
+                                        ],
+                                    },
+                                },
+                            }
+                        )
                     case "logs":
                         self.__current_tool_call.outputs.append(
                             models.CodeInterpreterCallOutput(
@@ -958,11 +1126,35 @@ class BufferedResponseStreamHandler:
                                 created=utcnow(),
                             )
                         )
+                        self.enqueue(
+                            {
+                                "type": "tool_call_delta",
+                                "delta": {
+                                    "index": self.__prev_output_index,
+                                    "type": "code_interpreter",
+                                    "id": data.id,
+                                    "code_interpreter": {
+                                        "input": None,
+                                        "outputs": [
+                                            {
+                                                "type": "code_output_logs",
+                                                "logs": output.logs,
+                                            }
+                                        ],
+                                    },
+                                },
+                            }
+                        )
 
         self.__cached_run.tool_calls.append(self.__current_tool_call)
         self.__current_tool_call = None
 
     async def on_file_search_call_created(self, data: ResponseFileSearchToolCall):
+        if not self.__cached_run:
+            logger.exception(
+                f"Received file search call created event without a cached run. Data: {data}"
+            )
+            return
         if self.__current_tool_call:
             logger.exception(
                 f"Received code interpreter tool call created with an existing tool call. Data: {data}"
@@ -1028,6 +1220,11 @@ class BufferedResponseStreamHandler:
         self.__current_tool_call.status = ToolCallStatus.COMPLETED
 
     async def on_file_search_call_done(self, data: ResponseFileSearchToolCall):
+        if not self.__cached_run:
+            logger.exception(
+                f"Received file search call done without a cached run. Data: {data}"
+            )
+            return
         if not self.__current_tool_call:
             logger.exception(
                 f"Received file search call done without a current tool call. Data: {data}"
@@ -1061,15 +1258,111 @@ class BufferedResponseStreamHandler:
         self.__cached_run.tool_calls.append(self.__current_tool_call)
         self.__current_tool_call = None
 
-    async def on_response_completed(self, data: ResponseCompletedEvent):
-        self.__cached_run.completed = utcnow()
-        self.__cached_run.status = RunStatus(data.response.status)
+    async def cleanup(
+        self,
+        run_status: RunStatus,
+        response_error_code: str | None = None,
+        response_error_message: str | None = None,
+        response_incomplete_reason: str | None = None,
+        send_error_message_only_if_active: bool = False,
+    ):
+        has_active_run = False
+        if self.__cached_run:
+            has_active_run = True
+            if self.__cached_message_part and self.__cached_message:
+                self.__cached_message.content.append(self.__cached_message_part)
+                self.__cached_message_part = None
+            if self.__cached_message:
+                self.__cached_message.message_status = MessageStatus.INCOMPLETE
+                self.__cached_run.messages.append(self.__cached_message)
+                self.__cached_message = None
+            if self.__current_tool_call:
+                self.__current_tool_call.status = ToolCallStatus.INCOMPLETE
+                self.__cached_run.tool_calls.append(self.__current_tool_call)
+                self.__current_tool_call = None
 
-        if data.response.error:
-            self.__cached_run.error_code = data.response.error.code
-            self.__cached_run.error_message = data.response.error.message
-        self.db.add(self.__cached_run)
-        await self.db.commit()
+            self.__cached_run.completed = utcnow()
+            self.__cached_run.status = run_status
+
+            self.__cached_run.error_code = response_error_code
+            self.__cached_run.error_message = response_error_message
+            self.__cached_run.incomplete_reason = response_incomplete_reason
+
+            self.db.add(self.__cached_run)
+            await self.db.commit()
+            self.__cached_run = None
+
+        if response_error_message and (
+            not send_error_message_only_if_active or has_active_run
+        ):
+            self.enqueue(
+                {
+                    "type": "error",
+                    "detail": str(response_error_message),
+                }
+            )
+        if response_incomplete_reason and (
+            not send_error_message_only_if_active or has_active_run
+        ):
+            self.enqueue(
+                {
+                    "type": "error",
+                    "detail": f"Response incomplete: {response_incomplete_reason}",
+                }
+            )
+        self.enqueue({"type": "done"})
+
+    async def on_response_completed(
+        self,
+        data: Union[
+            ResponseCompletedEvent, ResponseFailedEvent, ResponseIncompleteEvent
+        ],
+    ):
+        if not self.__cached_run:
+            logger.exception(
+                f"Received response completed event without a cached run. Data: {data}"
+            )
+            return
+
+        await self.cleanup(
+            run_status=RunStatus(data.response.status),
+            response_error_code=data.response.error.code
+            if data.response.error
+            else None,
+            response_error_message=data.response.error.message
+            if data.response.error
+            else None,
+            response_incomplete_reason=data.response.incomplete_details.reason
+            if data.response.incomplete_details
+            else None,
+        )
+
+    async def on_response_error(self, data: ResponseErrorEvent) -> None:
+        if not self.__cached_run:
+            logger.exception(
+                f"Received response error event without a cached run. Data: {data}"
+            )
+            return
+        self.__cached_run.error_code = data.code
+        self.__cached_run.error_message = data.message
+        if data.code == "rate_limit_exceeded":
+            await models.Class.log_rate_limit_error(
+                self.db, class_id=str(self.class_id)
+            )
+            await self.db.commit()
+        self.enqueue(
+            {
+                "type": "error",
+                "detail": str(data.message),
+            }
+        )
+
+    async def on_response_canceled(self) -> None:
+        await self.cleanup(
+            run_status=RunStatus.INCOMPLETE,
+            response_incomplete_reason="User canceled the request.",
+            send_error_message_only_if_active=False,
+        )
 
 
 async def run_response(
@@ -1077,18 +1370,11 @@ async def run_response(
     *,
     run: models.Run,
     class_id: str,
-    thread_id: int,
-    assistant_id: int,
-    model: str,
-    reasoning_effort: int | None = None,
-    temperature: float | None = None,
     file_names: dict[str, str] = {},
     assistant_vector_store_id: str | None = None,
     thread_vector_store_id: str | None = None,
     attached_file_search_file_ids: list[str] | None = None,
     code_interpreter_file_ids: list[str] | None = None,
-    available_tools: str | None = None,
-    instructions: str | None = None,
     user_auth: str | None = None,
     anonymous_link_auth: str | None = None,
     anonymous_user_auth: str | None = None,
@@ -1097,28 +1383,28 @@ async def run_response(
 ):
     reasoning_settings: Reasoning | openai.NotGiven = openai.NOT_GIVEN
 
-    if reasoning_effort is not None:
-        if reasoning_effort not in REASONING_EFFORT_MAP:
+    if run.reasoning_effort is not None:
+        if run.reasoning_effort not in REASONING_EFFORT_MAP:
             raise ValueError(
-                f"Invalid reasoning effort: {reasoning_effort}. Must be one of {list(REASONING_EFFORT_MAP.keys())}."
+                f"Invalid reasoning effort: {run.reasoning_effort}. Must be one of {list(REASONING_EFFORT_MAP.keys())}."
             )
         reasoning_settings = Reasoning(
-            effort=REASONING_EFFORT_MAP[reasoning_effort], summary="auto"
+            effort=REASONING_EFFORT_MAP[run.reasoning_effort], summary="auto"
         )
 
     temperature_setting: float | openai.NotGiven = (
-        temperature if temperature is not None else openai.NOT_GIVEN
+        run.temperature if run.temperature is not None else openai.NOT_GIVEN
     )
     await config.authz.driver.init()
     async with config.db.driver.async_session() as session_:
         async with config.authz.driver.get_client() as c:
             input_items, input_count = await build_response_input_item_list(
-                session_, thread_id=thread_id
+                session_, thread_id=run.thread_id
             )
 
             tools: list[ToolParam] = []
 
-            if available_tools and "file_search" in available_tools:
+            if run.tools_available and "file_search" in run.tools_available:
                 vector_store_ids = []
                 if assistant_vector_store_id is not None:
                     vector_store_ids.append(assistant_vector_store_id)
@@ -1142,7 +1428,7 @@ async def run_response(
                         )
                     )
 
-            if available_tools and "code_interpreter" in available_tools:
+            if run.tools_available and "code_interpreter" in run.tools_available:
                 tools.append(
                     CodeInterpreter(
                         container=CodeInterpreterContainerCodeInterpreterToolAuto(
@@ -1151,39 +1437,43 @@ async def run_response(
                         type="code_interpreter",
                     )
                 )
-            stream: AsyncStream[ResponseStreamEvent] = await cli.responses.create(
-                include=[
-                    "code_interpreter_call.outputs",
-                    "file_search_call.results",
-                ],
-                input=input_items,
-                instructions=instructions,
-                model=model,
-                parallel_tool_calls=False,
-                reasoning=reasoning_settings,
-                tools=tools,
-                store=False,
-                stream=True,
-                temperature=temperature_setting,
-                truncation="auto",
-            )
-            handler = BufferedResponseStreamHandler(
-                session=session_,
-                auth=c,
-                cli=cli,
-                run=run,
-                prev_output_index=input_count - 1,
-                file_names=file_names,
-                class_id=int(class_id),
-                user_id=run.creator_id,
-                user_auth=user_auth,
-                anonymous_user_auth=anonymous_user_auth,
-                anonymous_link_auth=anonymous_link_auth,
-                anonymous_session_id=anonymous_session_id,
-                anonymous_link_id=anonymous_link_id,
-            )
 
+            handler: BufferedResponseStreamHandler | None = None
             try:
+                handler = BufferedResponseStreamHandler(
+                    session=session_,
+                    auth=c,
+                    cli=cli,
+                    run=run,
+                    prev_output_index=input_count - 1,
+                    file_names=file_names,
+                    class_id=int(class_id),
+                    thread_id=run.thread_id,
+                    assistant_id=run.assistant_id,
+                    user_id=run.creator_id,
+                    user_auth=user_auth,
+                    anonymous_user_auth=anonymous_user_auth,
+                    anonymous_link_auth=anonymous_link_auth,
+                    anonymous_session_id=anonymous_session_id,
+                    anonymous_link_id=anonymous_link_id,
+                )
+                stream: AsyncStream[ResponseStreamEvent] = await cli.responses.create(
+                    include=[
+                        "code_interpreter_call.outputs",
+                        "file_search_call.results",
+                    ],
+                    input=input_items,
+                    instructions=run.instructions,
+                    model=run.model,
+                    parallel_tool_calls=False,
+                    reasoning=reasoning_settings,
+                    tools=tools,
+                    store=False,
+                    stream=True,
+                    temperature=temperature_setting,
+                    truncation="auto",
+                )
+
                 async for event in stream:
                     match event.type:
                         case "response.created":
@@ -1266,16 +1556,15 @@ async def run_response(
                                     pass
                         case "response.completed":
                             await handler.on_response_completed(event)
+                        case "response.incomplete":
+                            await handler.on_response_completed(event)
+                        case "response.failed":
+                            await handler.on_response_completed(event)
+                        case "error":
+                            await handler.on_response_error(event)
                         case _:
                             pass
-                    # Yield the event as JSON bytes for streaming
-                    responses_api_transition_logger.debug(f"Event: {event}")
-                    yield (
-                        orjson.dumps(
-                            {"type": "response_event", "event": event.model_dump()}
-                        )
-                        + b"\n"
-                    )
+                    yield handler.flush()
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as e:
                 logger.info(f"Client disconnected: {e}")
                 return
@@ -1288,45 +1577,83 @@ async def run_response(
                         logger.exception(
                             f"Server error in response stream: {openai_error}"
                         )
-                        yield (
-                            orjson.dumps(
-                                {
-                                    "type": "error",
-                                    "detail": "OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
-                                }
+                        if handler:
+                            await handler.cleanup(
+                                run_status=RunStatus.FAILED,
+                                response_error_code=openai_error.code,
+                                response_error_message="OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+                                send_error_message_only_if_active=False,
                             )
-                            + b"\n"
-                        )
+                            yield handler.flush()
+                        else:
+                            yield (
+                                orjson.dumps(
+                                    {
+                                        "type": "error",
+                                        "detail": "OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+                                    }
+                                )
+                                + b"\n"
+                            )
+
                     except Exception as e:
                         logger.exception(f"Error writing to stream: {e}")
                         pass
                 else:
                     try:
                         logger.exception("Error in response stream")
-                        yield (
-                            orjson.dumps(
-                                {
-                                    "type": "error",
-                                    "detail": "OpenAI was unable to process your request. "
-                                    + get_details_from_api_error(
-                                        openai_error, "Please try again later."
-                                    ),
-                                }
+                        if handler:
+                            await handler.cleanup(
+                                run_status=RunStatus.FAILED,
+                                response_error_code=openai_error.code,
+                                response_error_message="OpenAI was unable to process your request. "
+                                + get_details_from_api_error(
+                                    openai_error, "Please try again later."
+                                ),
+                                send_error_message_only_if_active=False,
                             )
-                            + b"\n"
-                        )
+                            yield handler.flush()
+                        else:
+                            yield (
+                                orjson.dumps(
+                                    {
+                                        "type": "error",
+                                        "detail": "OpenAI was unable to process your request. "
+                                        + get_details_from_api_error(
+                                            openai_error, "Please try again later."
+                                        ),
+                                    }
+                                )
+                                + b"\n"
+                            )
+
                     except Exception as e:
                         logger.exception(f"Error writing to stream: {e}")
                         pass
             except (ValueError, Exception) as e:
                 try:
                     logger.exception(f"Error in response stream: {e}")
-                    yield orjson.dumps({"type": "error", "detail": str(e)}) + b"\n"
+                    if handler:
+                        await handler.cleanup(
+                            run_status=RunStatus.FAILED,
+                            response_error_code="pingpong_error",
+                            response_error_message=str(e),
+                            send_error_message_only_if_active=False,
+                        )
+                        yield handler.flush()
+                    else:
+                        yield orjson.dumps({"type": "error", "detail": str(e)}) + b"\n"
                 except Exception as e_:
                     logger.exception(f"Error writing to stream: {e_}")
                     pass
             finally:
-                yield b'{"type":"done"}\n'
+                if handler:
+                    await handler.cleanup(
+                        run_status=RunStatus.INCOMPLETE,
+                        response_incomplete_reason="User canceled the request.",
+                        send_error_message_only_if_active=True,
+                    )
+                    yield handler.flush()
 
 
 async def run_thread(

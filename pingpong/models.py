@@ -3511,6 +3511,10 @@ class Message(Base):
     )
     thread = relationship("Thread", back_populates="messages", uselist=False)
 
+    assistant_id = Column(
+        Integer, ForeignKey("assistants.id", ondelete="SET NULL"), nullable=True
+    )
+
     output_index = Column(Integer, nullable=False)
 
     role = Column(SQLEnum(schemas.MessageRole), nullable=False)
@@ -3587,6 +3591,15 @@ class Run(Base):
 
     thread_id = Column(Integer, ForeignKey("threads.id", ondelete="CASCADE"))
     thread = relationship("Thread", back_populates="runs", uselist=False)
+
+    assistant_id = Column(
+        Integer, ForeignKey("assistants.id", ondelete="SET NULL"), nullable=True
+    )
+    model = Column(String, nullable=True)
+    reasoning_effort = Column(Integer, nullable=True)
+    temperature = Column(Float, nullable=True)
+    instructions = Column(String, nullable=True)
+    tools_available = Column(String, nullable=True)
 
     creator_id = Column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -4133,6 +4146,44 @@ class Thread(Base):
         result = await session.execute(stmt)
         files = result.scalars().all()
         return {file.file_id: file for file in files}
+
+    @classmethod
+    async def get_code_interpreter_file_obj_ids_including_assistant(
+        cls, session: AsyncSession, thread_id: int, assistant_id: int
+    ) -> list[str]:
+        stmt = (
+            select(File.file_id)
+            .join(code_interpreter_file_assistant_association)
+            .join(code_interpreter_file_thread_association)
+            .where(
+                or_(
+                    code_interpreter_file_thread_association.c.thread_id == thread_id,
+                    code_interpreter_file_assistant_association.c.assistant_id
+                    == assistant_id,
+                )
+            )
+            .distinct()
+        )
+        result = await session.execute(stmt)
+        return result.scalars().all()
+
+    @classmethod
+    async def get_max_output_sequence(
+        cls, session: AsyncSession, thread_id: int
+    ) -> int:
+        combined = union_all(
+            select(Message.output_index.label("output_index")).where(
+                Message.thread_id == thread_id
+            ),
+            select(ToolCall.output_index.label("output_index")).where(
+                ToolCall.thread_id == thread_id
+            ),
+        ).subquery()
+
+        stmt = select(func.coalesce(func.max(combined.c.output_index), -1))
+
+        result = await session.execute(stmt)
+        return result.scalar_one()
 
     @classmethod
     async def get_file_search_files_by_thread(

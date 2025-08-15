@@ -401,8 +401,5 @@ logging.getLogger("prompt_randomizer").setLevel(
 logging.getLogger("responses_api_transition").setLevel(
     config.responses_api_log_level or config.log_level
 )
-logging.getLogger("responses_api_transition").addHandler(
-    logging.FileHandler("responses_api_transition.log")
-)
 if config.log_level != "DEBUG":
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)

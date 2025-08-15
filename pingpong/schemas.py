@@ -464,6 +464,7 @@ class Assistants(BaseModel):
 class Thread(BaseModel):
     id: int
     name: str | None
+    version: int = 2
     class_id: int
     interaction_mode: InteractionMode
     assistant_names: dict[int, str] = {}

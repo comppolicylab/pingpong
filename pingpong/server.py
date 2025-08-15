@@ -2338,16 +2338,19 @@ async def get_thread(
                         )
                     )
                 elif tool_call.type == schemas.ToolCallType.FILE_SEARCH:
-                    print(tool_call.__dict__)
                     for result in tool_call.results:
-                        file_search_results.setdefault(
-                            result.file_id,
-                            schemas.FileSearchToolAnnotationResult(
-                                file_id=result.file_id,
-                                filename=result.filename,
-                                text=result.text,
-                            ),
-                        )
+                        if file_search_results.get(result.file_id):
+                            file_search_results[result.file_id].text += (
+                                "\n\n <hr/> \n\n" + result.text
+                            )
+                        else:
+                            file_search_results[result.file_id] = (
+                                schemas.FileSearchToolAnnotationResult(
+                                    file_id=result.file_id,
+                                    filename=result.filename,
+                                    text=result.text,
+                                )
+                            )
 
             run_messages = run.messages
             run_messages.sort(key=lambda m: m.created, reverse=True)
@@ -2395,14 +2398,15 @@ async def get_thread(
                         case schemas.MessagePartType.INPUT_IMAGE:
                             _message.content.append(
                                 ImageFileContentBlock(
-                                    type="image",
-                                    image=ImageFile(
+                                    type="image_file",
+                                    image_file=ImageFile(
                                         file_id=content.input_image_file_id,
                                     ),
                                 )
                             )
                         case schemas.MessagePartType.OUTPUT_TEXT:
                             _annotations: list[Annotation] = []
+                            _file_ids_file_citation_annotation: set[str] = set()
                             if content.annotations:
                                 for annotation in content.annotations:
                                     if (
@@ -2413,18 +2417,26 @@ async def get_thread(
                                             annotation.file_id
                                         )
                                         if _file_record:
-                                            _file_citation = FileCitationAnnotation(
-                                                end_index=annotation.end_index or 0,
-                                                start_index=annotation.start_index or 0,
-                                                file_citation=FileCitation(
-                                                    file_id=_file_record.file_id,
-                                                    file_name=_file_record.filename,
-                                                    quote=_file_record.text,
-                                                ),
-                                                text="responses_v3",
-                                                type="file_citation",
-                                            )
-                                            _annotations.append(_file_citation)
+                                            if (
+                                                annotation.file_id
+                                                not in _file_ids_file_citation_annotation
+                                            ):
+                                                _file_ids_file_citation_annotation.add(
+                                                    annotation.file_id
+                                                )
+                                                _file_citation = FileCitationAnnotation(
+                                                    end_index=annotation.end_index or 0,
+                                                    start_index=annotation.start_index
+                                                    or 0,
+                                                    file_citation=FileCitation(
+                                                        file_id=_file_record.file_id,
+                                                        file_name=_file_record.filename,
+                                                        quote=_file_record.text,
+                                                    ),
+                                                    text="responses_v3",
+                                                    type="file_citation",
+                                                )
+                                                _annotations.append(_file_citation)
                                     elif (
                                         annotation.type
                                         == schemas.AnnotationType.FILE_PATH
@@ -3575,6 +3587,33 @@ async def create_thread(
         result = await models.Thread.create(request.state.db, new_thread)
 
         if assistant.version == 3:
+            tasks_to_run = []
+
+            async def empty_file_list() -> list[models.File]:
+                return []
+
+            if req.code_interpreter_file_ids:
+                tasks_to_run.append(
+                    models.File.get_all_by_file_id(
+                        request.state.db, req.code_interpreter_file_ids
+                    )
+                )
+            else:
+                tasks_to_run.append(empty_file_list())  # placeholder
+
+            if req.file_search_file_ids:
+                tasks_to_run.append(
+                    models.File.get_all_by_file_id(
+                        request.state.db, req.file_search_file_ids
+                    )
+                )
+            else:
+                tasks_to_run.append(empty_file_list())  # placeholder
+
+            code_interpreter_files, file_search_files = await asyncio.gather(
+                *tasks_to_run
+            )
+
             messageContentParts: list[models.MessagePart] = []
             part_index = 0
             for part in messageContent:
@@ -3601,6 +3640,11 @@ async def create_thread(
                     status=schemas.RunStatus.PENDING,
                     thread_id=result.id,
                     creator_id=request.state.session.user.id,
+                    assistant_id=assistant.id,
+                    model=assistant.model,
+                    reasoning_effort=assistant.reasoning_effort,
+                    temperature=assistant.temperature,
+                    tools_available=result.tools_available,
                     messages=[
                         models.Message(
                             thread_id=result.id,
@@ -3609,6 +3653,8 @@ async def create_thread(
                             role=schemas.MessageRole.USER,
                             user_id=request.state.session.user.id,
                             content=messageContentParts,
+                            file_search_attachments=file_search_files,
+                            code_interpreter_attachments=code_interpreter_files,
                         )
                     ],
                 )
@@ -3729,10 +3775,30 @@ async def create_run(
                     schemas.RunStatus.INCOMPLETE,
                 }
             ):
+                if not thread.instructions:
+                    thread.instructions = format_instructions(
+                        asst.instructions,
+                        asst.use_latex,
+                        asst.use_image_descriptions,
+                        thread_id=str(thread.id),
+                        user_id=request.state.session.user.id,
+                    )
+                    request.state.db.add(thread)
+                    await request.state.db.flush()
+                    await request.state.db.refresh(thread)
+
                 run_to_complete = models.Run(
                     status=schemas.RunStatus.PENDING,
                     thread_id=thread.id,
                     creator_id=request.state.session.user.id,
+                    assistant_id=asst.id,
+                    model=asst.model,
+                    reasoning_effort=asst.reasoning_effort,
+                    temperature=asst.temperature,
+                    tools_available=thread.tools_available,
+                    instructions=inject_timestamp_to_instructions(
+                        thread.instructions, req.timezone if req else thread.timezone
+                    ),
                 )
                 request.state.db.add(run_to_complete)
                 await request.state.db.flush()
@@ -3760,27 +3826,11 @@ async def create_run(
                 if asst.vector_store_id
                 else None
             )
-            if not thread.instructions:
-                thread.instructions = format_instructions(
-                    asst.instructions,
-                    asst.use_latex,
-                    asst.use_image_descriptions,
-                    thread_id=str(thread.id),
-                    user_id=request.state.session.user.id,
-                )
-                request.state.db.add(thread)
-                await request.state.db.flush()
-                await request.state.db.refresh(thread)
 
             stream = run_response(
                 openai_client,
                 run=run_to_complete,
                 class_id=class_id,
-                thread_id=thread.id,
-                assistant_id=asst.id,
-                model=asst.model,
-                reasoning_effort=asst.reasoning_effort,
-                temperature=asst.temperature,
                 file_names=file_names,
                 assistant_vector_store_id=assistant_vector_store_id,
                 thread_vector_store_id=thread_vector_store_id,
@@ -3788,10 +3838,6 @@ async def create_run(
                 code_interpreter_file_ids=[
                     file.file_id for file in thread.code_interpreter_files
                 ],
-                available_tools=asst.tools,
-                instructions=inject_timestamp_to_instructions(
-                    thread.instructions, req.timezone if req else thread.timezone
-                ),
                 user_auth=request.state.auth_user
                 if hasattr(request.state, "auth_user")
                 else None,
@@ -3908,28 +3954,49 @@ async def send_message(
             detail="You do not have permission to interact with this assistant.",
         )
 
-    last_runs_result = await openai_client.beta.threads.runs.list(
-        thread.thread_id, limit=1, order="desc"
-    )
-    last_run = last_runs_result.data[0] if last_runs_result.data else None
-
-    if not last_run:
-        raise HTTPException(
-            status_code=500,
-            detail="OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+    if thread.version == 2:
+        last_runs_result = await openai_client.beta.threads.runs.list(
+            thread.thread_id, limit=1, order="desc"
         )
+        last_run = last_runs_result.data[0] if last_runs_result.data else None
 
-    if last_run.status not in {
-        "completed",
-        "failed",
-        "incomplete",
-        "expired",
-        "cancelled",
-    }:
-        raise HTTPException(
-            status_code=409,
-            detail="OpenAI is still processing your last request. We're fetching the latest status...",
-        )
+        if not last_run:
+            raise HTTPException(
+                status_code=500,
+                detail="OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+            )
+
+        if last_run.status not in {
+            "completed",
+            "failed",
+            "incomplete",
+            "expired",
+            "cancelled",
+        }:
+            raise HTTPException(
+                status_code=409,
+                detail="OpenAI is still processing your last request. We're fetching the latest status...",
+            )
+    elif thread.version == 3:
+        runs = thread.runs
+        runs.sort(key=lambda r: r.created, reverse=True)
+        last_run = runs[0] if runs else None
+
+        if not last_run:
+            raise HTTPException(
+                status_code=500,
+                detail="We're having trouble fetching information about this conversation. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+            )
+
+        if last_run.status in {
+            schemas.RunStatus.QUEUED,
+            schemas.RunStatus.PENDING,
+            schemas.RunStatus.IN_PROGRESS,
+        }:
+            raise HTTPException(
+                status_code=409,
+                detail="OpenAI is still processing your last request. We're fetching the latest status...",
+            )
 
     try:
         asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
@@ -3962,7 +4029,7 @@ async def send_message(
                     class_id,
                     data.file_search_file_ids,
                     type=schemas.VectorStoreType.THREAD,
-                    upload_to_oai=False,
+                    upload_to_oai=thread.version == 3,
                 )
                 thread.vector_store_id = vector_store_object_id
                 tool_resources["file_search"] = {"vector_store_ids": [vector_store_id]}
@@ -3975,15 +4042,18 @@ async def send_message(
                 ]
                 tool_resources["code_interpreter"] = {"file_ids": existing_file_ids}
 
-                try:
-                    await openai_client.beta.threads.update(
-                        thread.thread_id, tool_resources=tool_resources
-                    )
-                except openai.BadRequestError as e:
-                    raise HTTPException(
-                        400,
-                        get_details_from_api_error(e, "OpenAI rejected this request"),
-                    )
+                if thread.version == 2:
+                    try:
+                        await openai_client.beta.threads.update(
+                            thread.thread_id, tool_resources=tool_resources
+                        )
+                    except openai.BadRequestError as e:
+                        raise HTTPException(
+                            400,
+                            get_details_from_api_error(
+                                e, "OpenAI rejected this request"
+                            ),
+                        )
 
                 thread.updated = func.now()
 
@@ -4048,7 +4118,7 @@ async def send_message(
         file_names = await models.Thread.get_file_search_files(
             request.state.db, thread.id
         )
-        vector_store_id_ = (
+        thread_vector_store_id = (
             await models.VectorStore.get_vector_store_id_by_id(
                 request.state.db, thread.vector_store_id
             )
@@ -4056,37 +4126,161 @@ async def send_message(
             else None
         )
 
-        metadata: dict[str, str | int] = {
-            "user_id": str(request.state.session.user.id),
-        }
-        if (
-            hasattr(request.state, "anonymous_share_token")
-            and request.state.anonymous_share_token is not None
-        ):
-            metadata["share_token"] = str(request.state.anonymous_share_token)
-        if (
-            hasattr(request.state, "anonymous_session_token")
-            and request.state.anonymous_session_token is not None
-        ):
-            metadata["anonymous_session_token"] = str(
-                request.state.anonymous_session_token
+        if thread.version == 2:
+            metadata: dict[str, str | int] = {
+                "user_id": str(request.state.session.user.id),
+            }
+            if (
+                hasattr(request.state, "anonymous_share_token")
+                and request.state.anonymous_share_token is not None
+            ):
+                metadata["share_token"] = str(request.state.anonymous_share_token)
+            if (
+                hasattr(request.state, "anonymous_session_token")
+                and request.state.anonymous_session_token is not None
+            ):
+                metadata["anonymous_session_token"] = str(
+                    request.state.anonymous_session_token
+                )
+            # Create a generator that will stream chunks to the client.
+            stream = run_thread(
+                openai_client,
+                class_id=class_id,
+                thread_id=thread.thread_id,
+                assistant_id=asst.assistant_id,
+                message=messageContent,
+                metadata=metadata,
+                file_names=file_names,
+                file_search_file_ids=data.file_search_file_ids,
+                code_interpreter_file_ids=data.code_interpreter_file_ids,
+                vector_store_id=thread_vector_store_id,
+                instructions=inject_timestamp_to_instructions(
+                    thread.instructions,
+                    data.timezone if data.timezone else thread.timezone,
+                ),
             )
-        # Create a generator that will stream chunks to the client.
-        stream = run_thread(
-            openai_client,
-            class_id=class_id,
-            thread_id=thread.thread_id,
-            assistant_id=asst.assistant_id,
-            message=messageContent,
-            metadata=metadata,
-            file_names=file_names,
-            file_search_file_ids=data.file_search_file_ids,
-            code_interpreter_file_ids=data.code_interpreter_file_ids,
-            vector_store_id=vector_store_id_,
-            instructions=inject_timestamp_to_instructions(
-                thread.instructions, data.timezone if data.timezone else thread.timezone
-            ),
-        )
+        elif thread.version == 3:
+            tasks_to_run = []
+
+            async def empty_file_list() -> list[models.File]:
+                return []
+
+            if data.code_interpreter_file_ids:
+                tasks_to_run.append(
+                    models.File.get_all_by_file_id(
+                        request.state.db, data.code_interpreter_file_ids
+                    )
+                )
+            else:
+                tasks_to_run.append(empty_file_list())  # placeholder
+
+            if data.file_search_file_ids:
+                tasks_to_run.append(
+                    models.File.get_all_by_file_id(
+                        request.state.db, data.file_search_file_ids
+                    )
+                )
+            else:
+                tasks_to_run.append(empty_file_list())  # placeholder
+
+            (
+                code_interpreter_files,
+                file_search_files,
+            ) = await asyncio.gather(*tasks_to_run)
+
+            ci_all_files = await models.Thread.get_code_interpreter_file_obj_ids_including_assistant(
+                request.state.db, thread.id, asst.id
+            )
+
+            prev_output_sequence = await models.Thread.get_max_output_sequence(
+                request.state.db, thread.id
+            )
+
+            messageContentParts: list[models.MessagePart] = []
+            part_index = 0
+            for part in messageContent:
+                if part["type"] == "text":
+                    messageContentParts.append(
+                        models.MessagePart(
+                            part_index=part_index,
+                            type=schemas.MessagePartType.INPUT_TEXT,
+                            text=part["text"],
+                        )
+                    )
+                elif part["type"] == "image_file":
+                    messageContentParts.append(
+                        models.MessagePart(
+                            part_index=part_index,
+                            type=schemas.MessagePartType.INPUT_IMAGE,
+                            input_image_file_id=part["image_file"]["file_id"],
+                        )
+                    )
+                part_index += 1
+            run_to_complete = models.Run(
+                status=schemas.RunStatus.PENDING,
+                thread_id=thread.id,
+                creator_id=request.state.session.user.id,
+                assistant_id=asst.id,
+                model=asst.model,
+                reasoning_effort=asst.reasoning_effort,
+                temperature=asst.temperature,
+                tools_available=thread.tools_available,
+                instructions=inject_timestamp_to_instructions(
+                    thread.instructions,
+                    data.timezone if data.timezone else thread.timezone,
+                ),
+                messages=[
+                    models.Message(
+                        thread_id=thread.id,
+                        output_index=prev_output_sequence + 1,
+                        message_status=schemas.MessageStatus.COMPLETED,
+                        role=schemas.MessageRole.USER,
+                        user_id=request.state.session.user.id,
+                        content=messageContentParts,
+                        file_search_attachments=file_search_files,
+                        code_interpreter_attachments=code_interpreter_files,
+                    )
+                ],
+            )
+            request.state.db.add(run_to_complete)
+            await request.state.db.flush()
+            await request.state.db.refresh(run_to_complete)
+
+            assistant_vector_store_id = (
+                await models.VectorStore.get_vector_store_id_by_id(
+                    request.state.db, asst.vector_store_id
+                )
+                if asst.vector_store_id
+                else None
+            )
+
+            stream = run_response(
+                openai_client,
+                run=run_to_complete,
+                class_id=class_id,
+                file_names=file_names,
+                assistant_vector_store_id=assistant_vector_store_id,
+                thread_vector_store_id=thread_vector_store_id,
+                attached_file_search_file_ids=data.file_search_file_ids or [],
+                code_interpreter_file_ids=ci_all_files,
+                user_auth=request.state.auth_user
+                if hasattr(request.state, "auth_user")
+                else None,
+                anonymous_user_auth=request.state.anonymous_session_token_auth
+                if hasattr(request.state, "anonymous_session_token_auth")
+                else None,
+                anonymous_link_auth=request.state.anonymous_share_token_auth
+                if hasattr(request.state, "anonymous_share_token_auth")
+                else None,
+                anonymous_session_id=request.state.anonymous_session_id
+                if hasattr(request.state, "anonymous_session_id")
+                else None,
+                anonymous_link_id=request.state.anonymous_link_id
+                if hasattr(request.state, "anonymous_link_id")
+                else None,
+            )
+        else:
+            raise NotImplementedError("Thread version not supported")
     except Exception:
         logger.exception("Error running thread")
         raise HTTPException(

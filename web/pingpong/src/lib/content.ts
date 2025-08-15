@@ -9,12 +9,16 @@ type Replacement = {
 /**
  * Rewrite OpenAI text content to incorporate annotations.
  */
-export const parseTextContent = (text: Text, baseUrl: string = '') => {
+export const parseTextContent = (text: Text, threadVersion: number = 2, baseUrl: string = '') => {
   let content = text.value;
   const replacements: Replacement[] = [];
   if (text.annotations) {
     for (const annotation of text.annotations) {
-      if (annotation.type === 'file_path') {
+      if (
+        annotation.type === 'file_path' &&
+        ((!annotation.file_path.file_id.startsWith('cfile_') && threadVersion === 3) ||
+          threadVersion === 2)
+      ) {
         const { start_index, end_index, file_path } = annotation;
         const url = join(baseUrl, `/file/${file_path.file_id}`);
         replacements.push({ start: start_index, end: end_index, newValue: url });

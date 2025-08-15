@@ -76,6 +76,7 @@
   $: messages = threadMgr.messages;
   $: participants = threadMgr.participants;
   $: published = threadMgr.published;
+  $: version = threadMgr.version;
   $: error = threadMgr.error;
   $: threadManagerError = $error?.detail || null;
   $: assistantId = threadMgr.assistantId;
@@ -851,6 +852,7 @@
                 <Markdown
                   content={parseTextContent(
                     { value: clean_string, annotations: content.text.annotations },
+                    $version,
                     api.fullPath(`/class/${classId}/thread/${threadId}`)
                   )}
                   syntax={true}
@@ -869,17 +871,6 @@
               {/if}
               {#if attachment_file_ids}
                 <div class="flex flex-wrap gap-2">
-                  {#each attachment_file_ids as file_id}
-                    {#if allFiles[file_id]}
-                      <FilePlaceholder
-                        info={allFiles[file_id]}
-                        mimeType={data.uploadInfo.mimeType}
-                        on:delete={removeFile}
-                      />
-                    {:else}
-                      <AttachmentDeletedPlaceholder {file_id} />
-                    {/if}
-                  {/each}
                   {#each imageInfo as image}
                     {#if !(image.response && 'file_id' in image.response && image.response.file_id in allFiles)}
                       <FilePlaceholder
@@ -994,6 +985,21 @@
               <div class="leading-6"><pre>{JSON.stringify(content, null, 2)}</pre></div>
             {/if}
           {/each}
+          {#if attachment_file_ids}
+            <div class="flex flex-wrap gap-2 mt-4">
+              {#each attachment_file_ids as file_id}
+                {#if allFiles[file_id]}
+                  <FilePlaceholder
+                    info={allFiles[file_id]}
+                    mimeType={data.uploadInfo.mimeType}
+                    on:delete={removeFile}
+                  />
+                {:else}
+                  <AttachmentDeletedPlaceholder {file_id} />
+                {/if}
+              {/each}
+            </div>
+          {/if}
         </div>
       </div>
     {/each}
