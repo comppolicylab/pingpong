@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
+import io
 from typing import Union
 import openai
 import logging
@@ -618,7 +619,7 @@ async def handle_create_file(
     content_type = upload.content_type.lower()
     if not _is_supported(content_type):
         raise HTTPException(
-            status_code=403, detail="File type not supported by OpenAI!"
+            status_code=403, detail=f"File type not supported by OpenAI! {content_type}"
         )
 
     is_azure_client = isinstance(oai_client, openai.AsyncAzureOpenAI)
@@ -959,6 +960,43 @@ def _is_fs_supported(content_type: str) -> bool:
 def _is_ci_supported(content_type: str) -> bool:
     """Check if the content type is supported for code interpreter."""
     return content_type in _CI_SUPPORTED_TYPE
+
+
+def file_extension_to_mime_type(extension: str) -> str | None:
+    """Convert a file extension to its corresponding MIME type."""
+    for file_type in FILE_TYPES:
+        if extension in file_type.extensions:
+            return file_type.mime_type
+    return None
+
+
+def base64_to_upload_file(data_url: str) -> UploadFile:
+    # 1. Strip the prefix
+    header, encoded = data_url.split(",", 1)
+
+    # Extract content type and file extension from header
+    # e.g., data:image/png;base64
+    content_type = (
+        header.split(";")[0].split(":")[1]
+        if ";" in header
+        else "application/octet-stream"
+    )
+    file_extension = content_type.split("/")[-1]
+
+    # 2. Decode the Base64 string
+    image_bytes = base64.b64decode(encoded)
+
+    # 3. Wrap in BytesIO
+    file_like = io.BytesIO(image_bytes)
+
+    # 4. Create UploadFile
+    upload_file = UploadFile(
+        filename=f"code_interpreter_output_{uuid.uuid4()}.{file_extension}",
+        file=file_like,
+        content_type=content_type,
+    )
+
+    return upload_file
 
 
 IMAGE_DESCRIPTION_PROMPT = """

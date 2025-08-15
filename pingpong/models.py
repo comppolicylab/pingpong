@@ -1476,9 +1476,12 @@ class S3File(Base):
         await session.flush()
         await session.refresh(s3_file)
 
-        update(File).where(
-            or_(File.id.in_(file_obj_ids), File.file_id.in_(file_ids))
-        ).values(s3_file_id=s3_file.id)
+        stmt = (
+            update(File)
+            .where(or_(File.id.in_(file_obj_ids), File.file_id.in_(file_ids)))
+            .values(s3_file_id=s3_file.id)
+        )
+        await session.execute(stmt)
         return s3_file
 
     @classmethod
@@ -1509,7 +1512,9 @@ class File(Base):
     )
     private = Column(Boolean, default=False)
     s3_file_id = Column(
-        Integer, ForeignKey("s3_files.id", ondelete="SET NULL"), nullable=True
+        Integer,
+        ForeignKey("s3_files.id", ondelete="SET NULL", name="fk_files_s3_files"),
+        nullable=True,
     )
     s3_file = relationship("S3File", lazy="selectin", uselist=False)
     class_ = relationship("Class", back_populates="files")
@@ -1604,6 +1609,11 @@ class File(Base):
     @classmethod
     async def get_by_file_id(cls, session: AsyncSession, file_id: str) -> "File":
         stmt = select(File).where(File.file_id == file_id)
+        return await session.scalar(stmt)
+    
+    @classmethod
+    async def get_obj_id_by_file_id(cls, session: AsyncSession, file_id: str) -> "File":
+        stmt = select(File.id).where(File.file_id == file_id)
         return await session.scalar(stmt)
 
     @classmethod
@@ -3329,9 +3339,15 @@ class Annotation(Base):
     message_part = relationship(
         "MessagePart", back_populates="annotations", uselist=False
     )
+    annotation_index = Column(Integer, nullable=False)
 
     file_id = Column(String, nullable=True)
     file_object_id = Column(
+        Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True
+    )
+
+    vision_file_id = Column(String, nullable=True)
+    vision_file_object_id = Column(
         Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True
     )
 
@@ -3453,7 +3469,7 @@ class MessagePart(Base):
     message_id = Column(Integer, ForeignKey("messages.id", ondelete="CASCADE"))
     message = relationship("Message", back_populates="content", uselist=False)
 
-    part_sequence = Column(Integer, nullable=False)
+    part_index = Column(Integer, nullable=False)
 
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(

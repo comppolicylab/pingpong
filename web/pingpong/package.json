@@ -48,7 +48,7 @@
     "@zerodevx/svelte-toast": "^0.9.5",
     "dayjs": "^1.11.13",
     "dotenv": "^16.4.5",
-    "flowbite-svelte-icons": "^1.6.1",
+    "flowbite-svelte-icons": "^1.6.2",
     "highlight.js": "^11.10.0",
     "isomorphic-dompurify": "^2.15.0",
     "katex": "^0.16.21",

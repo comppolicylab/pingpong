@@ -1238,13 +1238,26 @@ class MessageContentCodeOutputImageFile(BaseModel):
     type: Literal["code_output_image_file"]
 
 
+class MessageContentCodeOutputImageURL(BaseModel):
+    url: str
+    type: Literal["code_output_image_url"]
+
+
+class MessageContentCodeOutputLogs(BaseModel):
+    logs: str
+    type: Literal["code_output_logs"]
+
+
 class MessageContentCode(BaseModel):
     code: str
     type: Literal["code"]
 
 
 CodeInterpreterMessageContent = Union[
-    MessageContentCodeOutputImageFile, MessageContentCode
+    MessageContentCodeOutputImageFile,
+    MessageContentCode,
+    MessageContentCodeOutputImageURL,
+    MessageContentCodeOutputLogs,
 ]
 
 
@@ -1314,6 +1327,12 @@ class ThreadWithMeta(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class FileSearchToolAnnotationResult(BaseModel):
+    file_id: str
+    filename: str
+    text: str
 
 
 class AuthToken(BaseModel):

@@ -10,7 +10,11 @@ import openai
 import orjson
 from pingpong.auth import encode_auth_token
 from pingpong.authz.base import AuthzClient
-from pingpong.files import handle_create_file
+from pingpong.files import (
+    _is_vision_supported,
+    file_extension_to_mime_type,
+    handle_create_file,
+)
 from pingpong.invite import send_export_download
 import pingpong.models as models
 from pingpong.prompt import replace_random_blocks
@@ -23,6 +27,7 @@ from pingpong.schemas import (
     ThreadName,
     NewThreadMessage,
     MessagePartType,
+    ToolCallStatus,
     ToolCallType,
 )
 
@@ -33,15 +38,30 @@ from openai.types.beta.assistant_stream_event import (
     ThreadRunFailed,
 )
 from openai.types.responses import ToolParam, FileSearchToolParam
+from openai.types.responses.response_stream_event import ResponseStreamEvent
+from openai._streaming import AsyncStream
 from openai.types.responses.tool_param import (
     CodeInterpreter,
     CodeInterpreterContainerCodeInterpreterToolAuto,
 )
-from openai.types.responses.response_output_item import ResponseOutputMessage
+from openai.types.responses.response_output_item import (
+    ResponseOutputMessage,
+    ResponseCodeInterpreterToolCall,
+    ResponseFileSearchToolCall,
+)
 from openai.types.responses.response_output_text import ResponseOutputText
 from openai.types.responses.response_stream_event import (
     ResponseCreatedEvent,
+    ResponseInProgressEvent,
     ResponseTextDeltaEvent,
+    ResponseCompletedEvent,
+    ResponseCodeInterpreterCallInProgressEvent,
+    ResponseCodeInterpreterCallCodeDeltaEvent,
+    ResponseCodeInterpreterCallInterpretingEvent,
+    ResponseCodeInterpreterCallCompletedEvent,
+    ResponseFileSearchCallInProgressEvent,
+    ResponseFileSearchCallSearchingEvent,
+    ResponseFileSearchCallCompletedEvent,
 )
 from openai.types.responses.response_input_item_param import (
     ResponseInputItemParam,
@@ -89,6 +109,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
+responses_api_transition_logger = logging.getLogger("responses_api_transition")
 
 
 class GetOpenAIClientException(Exception):
@@ -444,7 +465,7 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
 async def build_response_input_item_list(
     session: AsyncSession,
     thread_id: int,
-) -> list[ResponseInputItemParam]:
+) -> tuple[list[ResponseInputItemParam], int]:
     """Build a list of ResponseInputItem from a thread run step."""
     response_input_items: list[ResponseInputItemParam] = []
 
@@ -595,7 +616,7 @@ async def build_response_input_item_list(
         # Extract the ResponseInputItemParam from the sorted list
         response_input_items.extend(item for _, item in response_input_items_with_time)
 
-    return response_input_items
+    return response_input_items, len(response_input_items)
 
 
 class BufferedResponseStreamHandler:
@@ -605,6 +626,7 @@ class BufferedResponseStreamHandler:
         auth: AuthzClient,
         cli: openai.AsyncClient,
         run: models.Run,
+        prev_output_index: int,
         file_names: dict[str, str],
         class_id: int,
         user_id: int,
@@ -629,9 +651,10 @@ class BufferedResponseStreamHandler:
         self.anonymous_session_id = anonymous_session_id
         self.anonymous_link_id = anonymous_link_id
         self.__cached_run: models.Run = run
+        self.__prev_output_index = prev_output_index
         self.__cached_message: models.Message | None = None
+        self.__prev_part_index = -1
         self.__cached_message_part: models.MessagePart | None = None
-        self.__cached_tool_calls: list[models.ToolCall] = []
         self.__current_tool_call: models.ToolCall | None = None
 
     def enqueue(self, data: Dict) -> None:
@@ -648,8 +671,19 @@ class BufferedResponseStreamHandler:
         self.__cached_run.run_id = data.response.id
         self.__cached_run.status = RunStatus(data.response.status)
 
+    async def on_response_in_progress(self, data: ResponseInProgressEvent):
+        self.__cached_run.status = RunStatus(data.response.status)
+
     async def on_output_message_created(self, data: ResponseOutputMessage):
+        if self.__cached_message:
+            logger.exception(
+                f"Received output message created event with cached message. Data: {data}"
+            )
+            return
+        self.__prev_output_index += 1
         self.__cached_message = models.Message(
+            output_index=self.__prev_output_index,
+            thread_id=self.__cached_run.thread_id,
             message_id=data.id,
             message_status=MessageStatus(data.status),
             role=data.role,
@@ -658,8 +692,19 @@ class BufferedResponseStreamHandler:
         )
 
     async def on_output_text_part_created(self, data: ResponseOutputText):
+        if not self.__cached_message:
+            logger.exception(
+                f"Received text part created without a cached message. Data: {data}"
+            )
+            return
+        if self.__cached_message_part:
+            logger.exception(
+                f"Received text part created with a cached message part. Data: {data}"
+            )
+            return
+        self.__prev_part_index += 1
         self.__cached_message_part = models.MessagePart(
-            message_part_id=data.id,
+            part_index=self.__prev_part_index,
             type=MessagePartType(data.type),
             text=data.text,
         )
@@ -670,19 +715,23 @@ class BufferedResponseStreamHandler:
                 f"Received text delta without a cached message part. Data: {data}"
             )
             return
-        self.__cached_message_part.text += data.delta.text
+        self.__cached_message_part.text += data.delta
 
     async def on_output_text_container_file_citation_added(
-        self, data: AnnotationContainerFileCitation
+        self, data: AnnotationContainerFileCitation, annotation_index: int | None = None
     ):
         file_content = await self.openai_cli.containers.files.content.retrieve(
-            file_id=data.file_id, container_id=data.container_id
+            file_id=data["file_id"], container_id=data["container_id"]
         )
-
+        extension = file_extension_to_mime_type(data["filename"].split(".")[-1])
         upload_file = UploadFile(
             file=io.BytesIO(file_content.content),
-            filename=data.filename or f"container_file_{data.file_id}",
-            headers={"content-type": "application/octet-stream"},
+            filename=data["filename"] or f"container_file_{data['file_id']}",
+            headers={
+                "content-type": file_extension_to_mime_type(
+                    data["filename"].split(".")[-1]
+                )
+            },
         )
 
         file = await handle_create_file(
@@ -693,7 +742,10 @@ class BufferedResponseStreamHandler:
             class_id=self.class_id,
             uploader_id=self.user_id,
             private=True,
-            user_auth=f"user:{self.user_id}",
+            purpose="vision"
+            if extension and _is_vision_supported(extension)
+            else "assistants",
+            user_auth=self.user_auth,
             anonymous_link_auth=self.anonymous_link_auth,
             anonymous_user_auth=self.anonymous_user_auth,
             anonymous_session_id=self.anonymous_session_id,
@@ -707,6 +759,13 @@ class BufferedResponseStreamHandler:
                 file_ids=[file.code_interpreter_file_id],
             )
 
+        if file.vision_file_id:
+            await models.Thread.add_image_files(
+                session=self.db,
+                thread_id=self.__cached_run.thread_id,
+                file_ids=[file.vision_file_id],
+            )
+
         if not self.__cached_message_part:
             logger.exception(
                 f"Received file citation annotation without a cached message part. Data: {data}"
@@ -715,12 +774,32 @@ class BufferedResponseStreamHandler:
 
         self.__cached_message_part.annotations.append(
             models.Annotation(
-                type=AnnotationType(data.type),
+                type=AnnotationType.CONTAINER_FILE_CITATION,
                 file_id=file.file_id,
-                file_object_id=file.id,
+                file_object_id=file.id if not file.vision_file_id else None,
+                vision_file_id=file.vision_file_id,
+                vision_file_object_id=file.id if file.vision_file_id else None,
                 filename=file.name,
-                start_index=data.start_index,
-                end_index=data.end_index,
+                start_index=data["start_index"],
+                end_index=data["end_index"],
+                annotation_index=annotation_index,
+            )
+        )
+
+    async def on_output_text_file_citation_added(
+        self, data: AnnotationFileCitation, annotation_index: int | None = None
+    ):
+        if not self.__cached_message_part:
+            logger.exception(
+                f"Received file citation annotation without a cached message part. Data: {data}"
+            )
+            return
+        self.__cached_message_part.annotations.append(
+            models.Annotation(
+                type=AnnotationType.FILE_CITATION,
+                file_id=data["file_id"],
+                filename=data["filename"],
+                annotation_index=annotation_index,
             )
         )
 
@@ -731,7 +810,266 @@ class BufferedResponseStreamHandler:
             )
             return
 
-        # self.__content_message.
+        if not self.__cached_message:
+            logger.exception(
+                f"Received text part done event without a cached message. Data: {data}"
+            )
+            return
+
+        self.__cached_message.content.append(self.__cached_message_part)
+        self.__cached_message_part = None
+
+    async def on_output_message_done(self, data: ResponseOutputMessage):
+        if not self.__cached_message:
+            logger.exception(
+                f"Received output message done event without a cached message. Data: {data}"
+            )
+            return
+
+        if self.__cached_message_part:
+            logger.exception(
+                f"Output message done event received with a cached message part. Data: {data}"
+            )
+            self.__cached_message.content.append(self.__cached_message_part)
+            self.__cached_message_part = None
+
+        self.__cached_message.completed = utcnow()
+        self.__cached_message.message_status = MessageStatus(data.status)
+        self.__cached_run.messages.append(self.__cached_message)
+        self.__cached_message = None
+
+    async def on_code_interpreter_tool_call_created(
+        self, data: ResponseCodeInterpreterToolCall
+    ):
+        if self.__current_tool_call:
+            logger.exception(
+                f"Received code interpreter tool call created with an existing tool call. Data: {data}"
+            )
+            return
+        self.__prev_output_index += 1
+        self.__current_tool_call = models.ToolCall(
+            tool_call_id=data.id,
+            type=ToolCallType.CODE_INTERPRETER,
+            status=ToolCallStatus(data.status),
+            thread_id=self.__cached_run.thread_id,
+            output_index=self.__prev_output_index,
+            container_id=data.container_id,
+            code=data.code,
+            created=utcnow(),
+        )
+
+    async def on_code_interpreter_tool_call_in_progress(
+        self, data: ResponseCodeInterpreterCallInProgressEvent
+    ):
+        if not self.__current_tool_call:
+            logger.exception(
+                f"Received code interpreter tool call in progress without a current tool call. Data: {data}"
+            )
+            return
+        if self.__current_tool_call.tool_call_id != data.item_id:
+            logger.exception(
+                f"Received code interpreter tool call in progress with a different tool call ID. Data: {data}"
+            )
+            return
+        self.__current_tool_call.status = ToolCallStatus.IN_PROGRESS
+
+    async def on_code_interpreter_tool_call_code_delta(
+        self, data: ResponseCodeInterpreterCallCodeDeltaEvent
+    ):
+        if not self.__current_tool_call:
+            logger.exception(
+                f"Received code interpreter tool call code delta without a current tool call. Data: {data}"
+            )
+            return
+        if self.__current_tool_call.tool_call_id != data.item_id:
+            logger.exception(
+                f"Received code interpreter tool call code delta with a different tool call ID. Data: {data}"
+            )
+            return
+        self.__current_tool_call.code += data.delta
+
+    async def on_code_interpreter_tool_call_interpreting(
+        self, data: ResponseCodeInterpreterCallInterpretingEvent
+    ):
+        if not self.__current_tool_call:
+            logger.exception(
+                f"Received code interpreter tool call interpreting without a current tool call. Data: {data}"
+            )
+            return
+        if self.__current_tool_call.tool_call_id != data.item_id:
+            logger.exception(
+                f"Received code interpreter tool call interpreting with a different tool call ID. Data: {data}"
+            )
+            return
+        self.__current_tool_call.status = ToolCallStatus.INTERPRETING
+
+    async def on_code_interpreter_tool_call_completed(
+        self, data: ResponseCodeInterpreterCallCompletedEvent
+    ):
+        if not self.__current_tool_call:
+            logger.exception(
+                f"Received code interpreter tool call completed without a current tool call. Data: {data}"
+            )
+            return
+        if self.__current_tool_call.tool_call_id != data.item_id:
+            logger.exception(
+                f"Received code interpreter tool call completed with a different tool call ID. Data: {data}"
+            )
+            return
+        self.__current_tool_call.status = ToolCallStatus.COMPLETED
+
+    async def on_code_interpreter_tool_call_done(
+        self, data: ResponseCodeInterpreterToolCall
+    ):
+        if not self.__current_tool_call:
+            logger.exception(
+                f"Received code interpreter tool call done without a current tool call. Data: {data}"
+            )
+            return
+        if self.__current_tool_call.tool_call_id != data.id:
+            logger.exception(
+                f"Received code interpreter tool call done with a different tool call ID. Data: {data}"
+            )
+            return
+
+        self.__current_tool_call.status = ToolCallStatus(data.status)
+
+        if data.outputs:
+            for output in data.outputs:
+                match output.type:
+                    case "image":
+                        if not output.url:
+                            logger.warning(
+                                f"Received image output without a URL. Data: {output}"
+                            )
+                            return
+                        self.__current_tool_call.outputs.append(
+                            models.CodeInterpreterCallOutput(
+                                output_type=CodeInterpreterOutputType.IMAGE,
+                                url=output.url,
+                                created=utcnow(),
+                            )
+                        )
+                    case "logs":
+                        self.__current_tool_call.outputs.append(
+                            models.CodeInterpreterCallOutput(
+                                output_type=CodeInterpreterOutputType.LOGS,
+                                logs=output.logs,
+                                created=utcnow(),
+                            )
+                        )
+
+        self.__cached_run.tool_calls.append(self.__current_tool_call)
+        self.__current_tool_call = None
+
+    async def on_file_search_call_created(self, data: ResponseFileSearchToolCall):
+        if self.__current_tool_call:
+            logger.exception(
+                f"Received code interpreter tool call created with an existing tool call. Data: {data}"
+            )
+            return
+        self.__prev_output_index += 1
+        self.__current_tool_call = models.ToolCall(
+            tool_call_id=data.id,
+            type=ToolCallType.FILE_SEARCH,
+            status=ToolCallStatus(data.status),
+            thread_id=self.__cached_run.thread_id,
+            output_index=self.__prev_output_index,
+            queries=json.dumps(data.queries),
+            created=utcnow(),
+        )
+
+    async def on_file_search_call_in_progress(
+        self, data: ResponseFileSearchCallInProgressEvent
+    ):
+        if not self.__current_tool_call:
+            logger.exception(
+                f"Received file search call in progress without a current tool call. Data: {data}"
+            )
+            return
+        if self.__current_tool_call.tool_call_id != data.item_id:
+            logger.exception(
+                f"Received file search call in progress with a different tool call ID. Data: {data}"
+            )
+            return
+
+        self.__current_tool_call.status = ToolCallStatus.IN_PROGRESS
+
+    async def on_file_search_call_searching(
+        self, data: ResponseFileSearchCallSearchingEvent
+    ):
+        if not self.__current_tool_call:
+            logger.exception(
+                f"Received file search call searching without a current tool call. Data: {data}"
+            )
+            return
+        if self.__current_tool_call.tool_call_id != data.item_id:
+            logger.exception(
+                f"Received file search call searching with a different tool call ID. Data: {data}"
+            )
+            return
+
+        self.__current_tool_call.status = ToolCallStatus.SEARCHING
+
+    async def on_file_search_call_completed(
+        self, data: ResponseFileSearchCallCompletedEvent
+    ):
+        if not self.__current_tool_call:
+            logger.exception(
+                f"Received file search call completed without a current tool call. Data: {data}"
+            )
+            return
+        if self.__current_tool_call.tool_call_id != data.item_id:
+            logger.exception(
+                f"Received file search call completed with a different tool call ID. Data: {data}"
+            )
+            return
+
+        self.__current_tool_call.status = ToolCallStatus.COMPLETED
+
+    async def on_file_search_call_done(self, data: ResponseFileSearchToolCall):
+        if not self.__current_tool_call:
+            logger.exception(
+                f"Received file search call done without a current tool call. Data: {data}"
+            )
+            return
+        if self.__current_tool_call.tool_call_id != data.id:
+            logger.exception(
+                f"Received file search call done with a different tool call ID. Data: {data}"
+            )
+            return
+
+        self.__current_tool_call.status = ToolCallStatus(data.status)
+        self.__current_tool_call.queries = json.dumps(data.queries)
+
+        for result in data.results:
+            self.__current_tool_call.results.append(
+                models.FileSearchCallResult(
+                    attributes=json.dumps(result.attributes),
+                    file_id=result.file_id,
+                    file_object_id=await models.File.get_obj_id_by_file_id(
+                        self.db, result.file_id
+                    )
+                    if result.file_id
+                    else None,
+                    filename=result.filename,
+                    score=result.score,
+                    text=result.text,
+                    created=utcnow(),
+                )
+            )
+        self.__cached_run.tool_calls.append(self.__current_tool_call)
+        self.__current_tool_call = None
+
+    async def on_response_completed(self, data: ResponseCompletedEvent):
+        self.__cached_run.completed = utcnow()
+        self.__cached_run.status = RunStatus(data.response.status)
+
+        if data.response.error:
+            self.__cached_run.error_code = data.response.error.code
+            self.__cached_run.error_message = data.response.error.message
+        self.db.add(self.__cached_run)
+        await self.db.commit()
 
 
 async def run_response(
@@ -751,6 +1089,11 @@ async def run_response(
     code_interpreter_file_ids: list[str] | None = None,
     available_tools: str | None = None,
     instructions: str | None = None,
+    user_auth: str | None = None,
+    anonymous_link_auth: str | None = None,
+    anonymous_user_auth: str | None = None,
+    anonymous_session_id: int | None = None,
+    anonymous_link_id: int | None = None,
 ):
     reasoning_settings: Reasoning | openai.NotGiven = openai.NOT_GIVEN
 
@@ -766,123 +1109,224 @@ async def run_response(
     temperature_setting: float | openai.NotGiven = (
         temperature if temperature is not None else openai.NOT_GIVEN
     )
-
+    await config.authz.driver.init()
     async with config.db.driver.async_session() as session_:
-        input_items = await build_response_input_item_list(
-            session_, thread_id=thread_id
-        )
-
-        tools: list[ToolParam] = []
-
-        if available_tools and "file_search" in available_tools:
-            vector_store_ids = []
-            if assistant_vector_store_id is not None:
-                vector_store_ids.append(assistant_vector_store_id)
-            if thread_vector_store_id is not None:
-                vector_store_ids.append(thread_vector_store_id)
-            if attached_file_search_file_ids:
-                if not thread_vector_store_id:
-                    raise ValueError("Vector store ID is required for file search")
-                await asyncio.gather(
-                    *[
-                        cli.vector_stores.files.poll(
-                            file_id=file_id, vector_store_id=thread_vector_store_id
-                        )
-                        for file_id in attached_file_search_file_ids
-                    ]
-                )
-            if vector_store_ids:
-                tools.append(
-                    FileSearchToolParam(
-                        type="file_search", vector_store_ids=vector_store_ids
-                    )
-                )
-
-        if available_tools and "code_interpreter" in available_tools:
-            tools.append(
-                CodeInterpreter(
-                    container=CodeInterpreterContainerCodeInterpreterToolAuto(
-                        file_ids=code_interpreter_file_ids or [], type="auto"
-                    ),
-                    type="code_interpreter",
-                )
+        async with config.authz.driver.get_client() as c:
+            input_items, input_count = await build_response_input_item_list(
+                session_, thread_id=thread_id
             )
-        stream = await cli.responses.create(
-            include=[
-                "code_interpreter_call.outputs",
-                "file_search_call.results",
-            ],
-            input=input_items,
-            instructions=instructions,
-            model=model,
-            parallel_tool_calls=False,
-            reasoning=reasoning_settings,
-            tools=tools,
-            store=False,
-            stream=True,
-            temperature=temperature_setting,
-            truncation="auto",
-        )
 
-        try:
-            async for event in stream:
-                # Yield the event as JSON bytes for streaming
-                print(f"Event: {event}")
-                yield (
-                    orjson.dumps(
-                        {"type": "response_event", "event": event.model_dump()}
+            tools: list[ToolParam] = []
+
+            if available_tools and "file_search" in available_tools:
+                vector_store_ids = []
+                if assistant_vector_store_id is not None:
+                    vector_store_ids.append(assistant_vector_store_id)
+                if thread_vector_store_id is not None:
+                    vector_store_ids.append(thread_vector_store_id)
+                if attached_file_search_file_ids:
+                    if not thread_vector_store_id:
+                        raise ValueError("Vector store ID is required for file search")
+                    await asyncio.gather(
+                        *[
+                            cli.vector_stores.files.poll(
+                                file_id=file_id, vector_store_id=thread_vector_store_id
+                            )
+                            for file_id in attached_file_search_file_ids
+                        ]
                     )
-                    + b"\n"
+                if vector_store_ids:
+                    tools.append(
+                        FileSearchToolParam(
+                            type="file_search", vector_store_ids=vector_store_ids
+                        )
+                    )
+
+            if available_tools and "code_interpreter" in available_tools:
+                tools.append(
+                    CodeInterpreter(
+                        container=CodeInterpreterContainerCodeInterpreterToolAuto(
+                            file_ids=code_interpreter_file_ids or [], type="auto"
+                        ),
+                        type="code_interpreter",
+                    )
                 )
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as e:
-            logger.info(f"Client disconnected: {e}")
-            return
-        except asyncio.CancelledError:
-            logger.info("Stream cancelled")
-            return
-        except openai.APIError as openai_error:
-            if openai_error.type == "server_error":
-                try:
-                    logger.exception(f"Server error in response stream: {openai_error}")
-                    yield (
-                        orjson.dumps(
-                            {
-                                "type": "error",
-                                "detail": "OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
-                            }
-                        )
-                        + b"\n"
-                    )
-                except Exception as e:
-                    logger.exception(f"Error writing to stream: {e}")
-                    pass
-            else:
-                try:
-                    logger.exception("Error in response stream")
-                    yield (
-                        orjson.dumps(
-                            {
-                                "type": "error",
-                                "detail": "OpenAI was unable to process your request. "
-                                + get_details_from_api_error(
-                                    openai_error, "Please try again later."
-                                ),
-                            }
-                        )
-                        + b"\n"
-                    )
-                except Exception as e:
-                    logger.exception(f"Error writing to stream: {e}")
-                    pass
-        except (ValueError, Exception) as e:
+            stream: AsyncStream[ResponseStreamEvent] = await cli.responses.create(
+                include=[
+                    "code_interpreter_call.outputs",
+                    "file_search_call.results",
+                ],
+                input=input_items,
+                instructions=instructions,
+                model=model,
+                parallel_tool_calls=False,
+                reasoning=reasoning_settings,
+                tools=tools,
+                store=False,
+                stream=True,
+                temperature=temperature_setting,
+                truncation="auto",
+            )
+            handler = BufferedResponseStreamHandler(
+                session=session_,
+                auth=c,
+                cli=cli,
+                run=run,
+                prev_output_index=input_count - 1,
+                file_names=file_names,
+                class_id=int(class_id),
+                user_id=run.creator_id,
+                user_auth=user_auth,
+                anonymous_user_auth=anonymous_user_auth,
+                anonymous_link_auth=anonymous_link_auth,
+                anonymous_session_id=anonymous_session_id,
+                anonymous_link_id=anonymous_link_id,
+            )
+
             try:
-                logger.exception(f"Error in response stream: {e}")
-                yield orjson.dumps({"type": "error", "detail": str(e)}) + b"\n"
-            except Exception as e_:
-                logger.exception(f"Error writing to stream: {e_}")
-                pass
-        finally:
-            yield b'{"type":"done"}\n'
+                async for event in stream:
+                    match event.type:
+                        case "response.created":
+                            await handler.on_response_created(event)
+                        case "response.in_progress":
+                            await handler.on_response_in_progress(event)
+                        case "response.output_item.added":
+                            match event.item.type:
+                                case "message":
+                                    await handler.on_output_message_created(event.item)
+                                case "code_interpreter_call":
+                                    await handler.on_code_interpreter_tool_call_created(
+                                        event.item
+                                    )
+                                case "file_search_call":
+                                    await handler.on_file_search_call_created(
+                                        event.item
+                                    )
+                                case _:
+                                    pass
+                        case "response.content_part.added":
+                            match event.part.type:
+                                case "output_text":
+                                    await handler.on_output_text_part_created(
+                                        event.part
+                                    )
+                                case _:
+                                    pass
+                        case "response.output_text.delta":
+                            await handler.on_output_text_delta(event)
+                        case "response.output_text.annotation.added":
+                            match event.annotation["type"]:
+                                case "container_file_citation":
+                                    await handler.on_output_text_container_file_citation_added(
+                                        event.annotation, event.annotation_index
+                                    )
+                                case "file_citation":
+                                    await handler.on_output_text_file_citation_added(
+                                        event.annotation, event.annotation_index
+                                    )
+                                case _:
+                                    pass
+                        case "response.content_part.done":
+                            match event.part.type:
+                                case "output_text":
+                                    await handler.on_output_text_part_done(event.part)
+                                case _:
+                                    pass
+                        case "response.code_interpreter_call.in_progress":
+                            await handler.on_code_interpreter_tool_call_in_progress(
+                                event
+                            )
+                        case "response.code_interpreter_call_code.delta":
+                            await handler.on_code_interpreter_tool_call_code_delta(
+                                event
+                            )
+                        case "response.code_interpreter_call.interpreting":
+                            await handler.on_code_interpreter_tool_call_interpreting(
+                                event
+                            )
+                        case "response.code_interpreter_call.completed":
+                            await handler.on_code_interpreter_tool_call_completed(event)
+                        case "response.file_search_call.completed":
+                            await handler.on_file_search_call_completed(event)
+                        case "response.file_search_call.in_progress":
+                            await handler.on_file_search_call_in_progress(event)
+                        case "response.file_search_call.searching":
+                            await handler.on_file_search_call_searching(event)
+                        case "response.output_item.done":
+                            match event.item.type:
+                                case "message":
+                                    await handler.on_output_message_done(event.item)
+                                case "code_interpreter_call":
+                                    await handler.on_code_interpreter_tool_call_done(
+                                        event.item
+                                    )
+                                case "file_search_call":
+                                    await handler.on_file_search_call_done(event.item)
+                                case _:
+                                    pass
+                        case "response.completed":
+                            await handler.on_response_completed(event)
+                        case _:
+                            pass
+                    # Yield the event as JSON bytes for streaming
+                    responses_api_transition_logger.debug(f"Event: {event}")
+                    yield (
+                        orjson.dumps(
+                            {"type": "response_event", "event": event.model_dump()}
+                        )
+                        + b"\n"
+                    )
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as e:
+                logger.info(f"Client disconnected: {e}")
+                return
+            except asyncio.CancelledError:
+                logger.info("Stream cancelled")
+                return
+            except openai.APIError as openai_error:
+                if openai_error.type == "server_error":
+                    try:
+                        logger.exception(
+                            f"Server error in response stream: {openai_error}"
+                        )
+                        yield (
+                            orjson.dumps(
+                                {
+                                    "type": "error",
+                                    "detail": "OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+                                }
+                            )
+                            + b"\n"
+                        )
+                    except Exception as e:
+                        logger.exception(f"Error writing to stream: {e}")
+                        pass
+                else:
+                    try:
+                        logger.exception("Error in response stream")
+                        yield (
+                            orjson.dumps(
+                                {
+                                    "type": "error",
+                                    "detail": "OpenAI was unable to process your request. "
+                                    + get_details_from_api_error(
+                                        openai_error, "Please try again later."
+                                    ),
+                                }
+                            )
+                            + b"\n"
+                        )
+                    except Exception as e:
+                        logger.exception(f"Error writing to stream: {e}")
+                        pass
+            except (ValueError, Exception) as e:
+                try:
+                    logger.exception(f"Error in response stream: {e}")
+                    yield orjson.dumps({"type": "error", "detail": str(e)}) + b"\n"
+                except Exception as e_:
+                    logger.exception(f"Error writing to stream: {e_}")
+                    pass
+            finally:
+                yield b'{"type":"done"}\n'
 
 
 async def run_thread(

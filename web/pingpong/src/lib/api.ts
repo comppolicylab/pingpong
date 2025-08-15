@@ -2113,9 +2113,19 @@ export type MessageContentImageFile = {
   type: 'image_file';
 };
 
+export type MessageContentCodeOutputImageURL = {
+  url: string;
+  type: 'code_output_image_url';
+};
+
 export type MessageContentCodeOutputImageFile = {
   image_file: ImageFile;
   type: 'code_output_image_file';
+};
+
+export type MessageContentCodeOutputLogs = {
+  logs: string;
+  type: 'code_output_logs';
 };
 
 export type MessageContentCode = {
@@ -2134,6 +2144,8 @@ export type Content =
   | MessageContentText
   | MessageContentCode
   | MessageContentCodeOutputImageFile
+  | MessageContentCodeOutputImageURL
+  | MessageContentCodeOutputLogs
   | CodeInterpreterCallPlaceholder;
 
 export type OpenAIMessage = {

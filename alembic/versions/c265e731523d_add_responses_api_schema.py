@@ -1,8 +1,8 @@
 """Add Responses API Schema
 
-Revision ID: 721bacfde6e3
+Revision ID: c265e731523d
 Revises: bdeb2a584ac2
-Create Date: 2025-08-14 14:29:31.304718
+Create Date: 2025-08-14 21:43:37.907415
 
 """
 
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "721bacfde6e3"
+revision: str = "c265e731523d"
 down_revision: Union[str, None] = "bdeb2a584ac2"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -260,7 +260,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("message_id", sa.Integer(), nullable=True),
-        sa.Column("part_sequence", sa.Integer(), nullable=False),
+        sa.Column("part_index", sa.Integer(), nullable=False),
         sa.Column(
             "created",
             sa.DateTime(timezone=True),
@@ -298,8 +298,11 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("message_part_id", sa.Integer(), nullable=False),
+        sa.Column("annotation_index", sa.Integer(), nullable=False),
         sa.Column("file_id", sa.String(), nullable=True),
         sa.Column("file_object_id", sa.Integer(), nullable=True),
+        sa.Column("vision_file_id", sa.String(), nullable=True),
+        sa.Column("vision_file_object_id", sa.Integer(), nullable=True),
         sa.Column("container_id", sa.String(), nullable=True),
         sa.Column("filename", sa.String(), nullable=True),
         sa.Column("title", sa.String(), nullable=True),
@@ -323,6 +326,9 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["file_object_id"], ["files.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(
             ["message_part_id"], ["message_parts.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["vision_file_object_id"], ["files.id"], ondelete="SET NULL"
         ),
         sa.PrimaryKeyConstraint("id"),
     )
@@ -393,5 +399,4 @@ def downgrade() -> None:
         "FAILED",
         name="toolcallstatus",
     ).drop(op.get_bind())
-
     # ### end Alembic commands ###

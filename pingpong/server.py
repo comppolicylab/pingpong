@@ -2289,10 +2289,66 @@ async def get_thread(
         messages_to_fetch = 20
         messages_added = 0
         thread_messages: list[OpenAIMessage] = []
+        placeholder_ci_calls = []
 
         for run in runs:
             if messages_added >= messages_to_fetch:
                 break
+            run_tool_calls = run.tool_calls
+            file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
+            for tool_call in run_tool_calls:
+                if tool_call.type == schemas.ToolCallType.CODE_INTERPRETER:
+                    tool_content: list[schemas.CodeInterpreterMessageContent] = []
+
+                    if tool_call.code:
+                        tool_content.append(
+                            schemas.MessageContentCode(code=tool_call.code, type="code")
+                        )
+
+                    for output in tool_call.outputs:
+                        if (
+                            output.output_type
+                            == schemas.CodeInterpreterOutputType.IMAGE
+                        ):
+                            tool_content.append(
+                                schemas.MessageContentCodeOutputImageURL(
+                                    url=output.url, type="code_output_image_url"
+                                )
+                            )
+                        elif (
+                            output.output_type == schemas.CodeInterpreterOutputType.LOGS
+                        ):
+                            tool_content.append(
+                                schemas.MessageContentCodeOutputLogs(
+                                    logs=output.logs, type="code_output_logs"
+                                )
+                            )
+
+                    placeholder_ci_calls.append(
+                        schemas.CodeInterpreterMessage(
+                            id=str(tool_call.id),
+                            assistant_id=str(assistant.id) if assistant else "",
+                            created_at=int(tool_call.created.timestamp()),
+                            content=tool_content,
+                            metadata={},
+                            object="thread.message",
+                            role="assistant",
+                            run_id=str(run.run_id),
+                            thread_id=str(thread.id),
+                        )
+                    )
+                elif tool_call.type == schemas.ToolCallType.FILE_SEARCH:
+                    print(tool_call.__dict__)
+                    for result in tool_call.results:
+                        file_search_results.setdefault(
+                            result.file_id,
+                            schemas.FileSearchToolAnnotationResult(
+                                file_id=result.file_id,
+                                filename=result.filename,
+                                text=result.text,
+                            ),
+                        )
+
             run_messages = run.messages
             run_messages.sort(key=lambda m: m.created, reverse=True)
             for message in run_messages:
@@ -2352,26 +2408,31 @@ async def get_thread(
                                     if (
                                         annotation.type
                                         == schemas.AnnotationType.FILE_CITATION
-                                        and annotation.file_citation
                                     ):
-                                        _file_citation = FileCitationAnnotation(
-                                            end_index=annotation.end_index,
-                                            start_index=annotation.start_index,
-                                            file_citation=FileCitation(
-                                                file_id=annotation.file_id,
-                                            ),
-                                            text=annotation.text,
-                                            type="file_citation",
+                                        _file_record = file_search_results.get(
+                                            annotation.file_id
                                         )
-                                        _file_citation.file_citation.file_name = (
-                                            file_names.get(
-                                                annotation.file_id, "Unknown citation"
+                                        if _file_record:
+                                            _file_citation = FileCitationAnnotation(
+                                                end_index=annotation.end_index or 0,
+                                                start_index=annotation.start_index or 0,
+                                                file_citation=FileCitation(
+                                                    file_id=_file_record.file_id,
+                                                    file_name=_file_record.filename,
+                                                    quote=_file_record.text,
+                                                ),
+                                                text="responses_v3",
+                                                type="file_citation",
                                             )
-                                        )
-                                        _annotations.append(_file_citation)
+                                            _annotations.append(_file_citation)
                                     elif (
                                         annotation.type
                                         == schemas.AnnotationType.FILE_PATH
+                                        or (
+                                            annotation.type
+                                            == schemas.AnnotationType.CONTAINER_FILE_CITATION
+                                            and not annotation.vision_file_id
+                                        )
                                     ):
                                         _annotations.append(
                                             FilePathAnnotation(
@@ -2379,16 +2440,34 @@ async def get_thread(
                                                 end_index=annotation.end_index,
                                                 start_index=annotation.start_index,
                                                 file_path=FilePath(
-                                                    file_id=annotation.file_path.file_id,
+                                                    file_id=str(
+                                                        annotation.file_object_id
+                                                        or annotation.file_id
+                                                    ),
                                                 ),
-                                                text=annotation.text,
+                                                text=annotation.text or "",
                                             )
                                         )
+                                    elif (
+                                        annotation.type
+                                        == schemas.AnnotationType.CONTAINER_FILE_CITATION
+                                        and annotation.vision_file_id
+                                    ):
+                                        _message.content.insert(
+                                            0,
+                                            ImageFileContentBlock(
+                                                image_file=ImageFile(
+                                                    file_id=annotation.vision_file_id,
+                                                ),
+                                                type="image_file",
+                                            ),
+                                        )
+
                             _message.content.append(
                                 TextContentBlock(
                                     type="text",
                                     text=Text(
-                                        content.output_text,
+                                        value=content.text,
                                         annotations=_annotations,
                                     ),
                                 )
@@ -2419,8 +2498,6 @@ async def get_thread(
                     )
                 thread_messages.append(_message)
                 messages_added += 1
-
-        placeholder_ci_calls = []
 
         if assistant:
             thread.assistant_names = {assistant.id: assistant.name}
@@ -3499,10 +3576,12 @@ async def create_thread(
 
         if assistant.version == 3:
             messageContentParts: list[models.MessagePart] = []
+            part_index = 0
             for part in messageContent:
                 if part["type"] == "text":
                     messageContentParts.append(
                         models.MessagePart(
+                            part_index=part_index,
                             type=schemas.MessagePartType.INPUT_TEXT,
                             text=part["text"],
                         )
@@ -3510,10 +3589,12 @@ async def create_thread(
                 elif part["type"] == "image_file":
                     messageContentParts.append(
                         models.MessagePart(
+                            part_index=part_index,
                             type=schemas.MessagePartType.INPUT_IMAGE,
                             input_image_file_id=part["image_file"]["file_id"],
                         )
                     )
+                part_index += 1
 
             result.runs = [
                 models.Run(
@@ -3522,7 +3603,9 @@ async def create_thread(
                     creator_id=request.state.session.user.id,
                     messages=[
                         models.Message(
-                            message_status=schemas.MessageStatus.PENDING,
+                            thread_id=result.id,
+                            output_index=0,
+                            message_status=schemas.MessageStatus.COMPLETED,
                             role=schemas.MessageRole.USER,
                             user_id=request.state.session.user.id,
                             content=messageContentParts,
@@ -3689,7 +3772,6 @@ async def create_run(
                 await request.state.db.flush()
                 await request.state.db.refresh(thread)
 
-            print(asst.tools)
             stream = run_response(
                 openai_client,
                 run=run_to_complete,
@@ -3710,6 +3792,21 @@ async def create_run(
                 instructions=inject_timestamp_to_instructions(
                     thread.instructions, req.timezone if req else thread.timezone
                 ),
+                user_auth=request.state.auth_user
+                if hasattr(request.state, "auth_user")
+                else None,
+                anonymous_user_auth=request.state.anonymous_session_token_auth
+                if hasattr(request.state, "anonymous_session_token_auth")
+                else None,
+                anonymous_link_auth=request.state.anonymous_share_token_auth
+                if hasattr(request.state, "anonymous_share_token_auth")
+                else None,
+                anonymous_session_id=request.state.anonymous_session_id
+                if hasattr(request.state, "anonymous_session_id")
+                else None,
+                anonymous_link_id=request.state.anonymous_link_id
+                if hasattr(request.state, "anonymous_link_id")
+                else None,
             )
         except Exception as e:
             logger.exception("Error running thread")
@@ -5323,23 +5420,50 @@ async def download_file(
     request: Request,
     openai_client: OpenAIClient,
 ):
-    response = await openai_client.files.with_raw_response.retrieve_content(file_id)
-    if response.status_code != 200:
+    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+
+    if not thread:
         raise HTTPException(
-            status_code=response.status_code,
-            detail="An error occurred fetching the requested file",
+            status_code=404,
+            detail="Thread not found",
         )
-    # Usually we can just proxy headers from the OpenAI response, but make sure we have
-    # defaults set just in case.
-    media_type = response.headers.get("content-type", "application/octet-stream")
-    disposition = response.headers.get(
-        "content-disposition", f"attachment; filename={file_id}"
-    )
-    headers = {
-        "Content-Type": media_type,
-        "Content-Disposition": disposition,
-    }
-    return Response(content=response.content, headers=headers)
+
+    if thread.version == 2:
+        response = await openai_client.files.with_raw_response.retrieve_content(file_id)
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=response.status_code,
+                detail="An error occurred fetching the requested file",
+            )
+        # Usually we can just proxy headers from the OpenAI response, but make sure we have
+        # defaults set just in case.
+        media_type = response.headers.get("content-type", "application/octet-stream")
+        disposition = response.headers.get(
+            "content-disposition", f"attachment; filename={file_id}"
+        )
+        headers = {
+            "Content-Type": media_type,
+            "Content-Disposition": disposition,
+        }
+        return Response(content=response.content, headers=headers)
+    elif thread.version == 3:
+        file = await models.File.get_by_id(request.state.db, int(file_id))
+        if not file or not file.s3_file:
+            raise HTTPException(
+                status_code=404,
+                detail="File not found",
+            )
+
+        return StreamingResponse(
+            config.file_store.store.get(name=file.s3_file.key),
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename={file.name}"},
+        )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported thread version",
+        )
 
 
 @v1.get(
