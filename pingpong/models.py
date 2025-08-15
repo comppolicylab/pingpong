@@ -1610,7 +1610,7 @@ class File(Base):
     async def get_by_file_id(cls, session: AsyncSession, file_id: str) -> "File":
         stmt = select(File).where(File.file_id == file_id)
         return await session.scalar(stmt)
-    
+
     @classmethod
     async def get_obj_id_by_file_id(cls, session: AsyncSession, file_id: str) -> "File":
         stmt = select(File.id).where(File.file_id == file_id)

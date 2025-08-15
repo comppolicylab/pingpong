@@ -9,7 +9,7 @@
 </script>
 
 <Modal bind:open={isOpen} title={`Text used from "${name}"`} autoclose outsideclose dismissable>
-  <Markdown content={quote} syntax={true}/>
+  <Markdown content={quote} syntax={true} />
 </Modal>
 
 <button
