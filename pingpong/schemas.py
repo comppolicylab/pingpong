@@ -353,6 +353,7 @@ class AnonymousLinkResponse(BaseModel):
 class Assistant(BaseModel):
     id: int
     name: str
+    version: int | None = None
     instructions: str
     description: str | None
     interaction_mode: InteractionMode

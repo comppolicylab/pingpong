@@ -1256,6 +1256,7 @@ export type AnonymousLink = {
 export type Assistant = {
   id: number;
   name: string;
+  version?: number | null;
   description: string | null;
   instructions: string;
   interaction_mode: 'chat' | 'voice';
