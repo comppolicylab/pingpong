@@ -3,7 +3,7 @@ import logging
 import os
 
 from abc import ABC, abstractmethod
-from typing import IO, AsyncGenerator, TextIO
+from typing import IO, AsyncGenerator
 
 from aiohttp import ClientError
 
@@ -74,8 +74,12 @@ class LocalArtifactStore(BaseArtifactStore):
         file_path = os.path.join(self._directory, name)
         content.seek(0)
         # Write the file content to the local file system
-        with open(file_path, "wb" if isinstance(content, TextIO) else "w") as f:
-            f.write(content.read())
+        # Use binary mode for all content types to handle bytes properly
+        with open(file_path, "wb") as f:
+            data = content.read()
+            if isinstance(data, str):
+                data = data.encode("utf-8")
+            f.write(data)
 
     async def get(
         self, name: str, chunk_size: int = 1024 * 1024

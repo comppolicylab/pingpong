@@ -165,14 +165,26 @@ async def delete_assistant(
     await auth.write_safe(revoke=revokes)
 
 
-async def remove_responses_threads_assistants(
+async def remove_responses_threads(
+    session: AsyncSession, auth: OpenFgaAuthzClient
+) -> None:
+    async for thread in models.Thread.get_all_threads_by_version(session, 3):
+        thread_id = thread.id
+        await delete_thread(session, auth, thread_id)
+    await session.commit()
+
+
+async def remove_responses_assistants(
     session: AsyncSession, auth: OpenFgaAuthzClient
 ) -> None:
     async for assistant in models.Assistant.get_all_assistants_by_version(session, 3):
         assistant_id = assistant.id
         await delete_assistant(session, auth, assistant_id)
-    async for thread in models.Thread.get_all_threads_by_version(session, 3):
-        thread_id = thread.id
-        await delete_thread(session, auth, thread_id)
-
     await session.commit()
+
+
+async def remove_responses_threads_assistants(
+    session: AsyncSession, auth: OpenFgaAuthzClient
+) -> None:
+    await remove_responses_assistants(session, auth)
+    await remove_responses_threads(session, auth)

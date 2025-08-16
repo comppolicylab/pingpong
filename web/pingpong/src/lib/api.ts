@@ -1256,6 +1256,7 @@ export type AnonymousLink = {
 export type Assistant = {
   id: number;
   name: string;
+  version?: number | null;
   description: string | null;
   instructions: string;
   interaction_mode: 'chat' | 'voice';
@@ -1955,7 +1956,7 @@ export const getThreadRecording = async (f: Fetcher, classId: number, threadId: 
 export type Thread = {
   id: number;
   name: string | null;
-  thread_id: string;
+  version: number;
   interaction_mode: 'chat' | 'voice';
   class_id: number;
   assistant_names?: Record<number, string> | null;
@@ -2052,8 +2053,8 @@ export type OpenAIRun = {
     | 'failed'
     | 'incomplete'
     | 'completed'
-    | 'expired';
-  thread_id: string;
+    | 'expired'
+    | 'pending';
   tools: unknown[];
   // usage: unknown | null;
 };
@@ -2114,9 +2115,19 @@ export type MessageContentImageFile = {
   type: 'image_file';
 };
 
+export type MessageContentCodeOutputImageURL = {
+  url: string;
+  type: 'code_output_image_url';
+};
+
 export type MessageContentCodeOutputImageFile = {
   image_file: ImageFile;
   type: 'code_output_image_file';
+};
+
+export type MessageContentCodeOutputLogs = {
+  logs: string;
+  type: 'code_output_logs';
 };
 
 export type MessageContentCode = {
@@ -2127,7 +2138,6 @@ export type MessageContentCode = {
 export type CodeInterpreterCallPlaceholder = {
   run_id: string;
   step_id: string;
-  thread_id: string;
   type: 'code_interpreter_call_placeholder';
 };
 
@@ -2136,6 +2146,8 @@ export type Content =
   | MessageContentText
   | MessageContentCode
   | MessageContentCodeOutputImageFile
+  | MessageContentCodeOutputImageURL
+  | MessageContentCodeOutputLogs
   | CodeInterpreterCallPlaceholder;
 
 export type OpenAIMessage = {
@@ -2150,7 +2162,6 @@ export type OpenAIMessage = {
   object: 'thread.message' | 'code_interpreter_call_placeholder';
   role: 'user' | 'assistant';
   run_id: string | null;
-  thread_id: string;
   attachments: OpenAIAttachment[] | null;
 };
 
@@ -2191,7 +2202,6 @@ export type CodeInterpreterMessages = {
 };
 
 export type GetCIMessagesOpts = {
-  openai_thread_id: string;
   run_id: string;
   step_id: string;
 };
@@ -2203,13 +2213,11 @@ export const getCIMessages = async (
   f: Fetcher,
   classId: number,
   threadId: number,
-  openai_thread_id: string,
   run_id: string,
   step_id: string
 ) => {
   const url = `class/${classId}/thread/${threadId}/ci_messages`;
   const opts = {
-    openai_thread_id: openai_thread_id,
     run_id: run_id,
     step_id: step_id
   };
@@ -2321,7 +2329,10 @@ export type ToolImageOutput = {
   type: 'image';
 };
 
-export type ToolOutput = ToolImageOutput;
+export type ToolOutput =
+  | ToolImageOutput
+  | MessageContentCodeOutputImageURL
+  | MessageContentCodeOutputLogs;
 
 export type ToolCallIO = {
   input: string | null;
@@ -2400,6 +2411,8 @@ export type ThreadStreamChunk =
   | ThreadServerErrorChunk
   | ThreadStreamDoneChunk
   | ThreadStreamToolCallCreatedChunk
+  | MessageContentCodeOutputImageURL
+  | MessageContentCodeOutputLogs
   | ThreadStreamToolCallDeltaChunk;
 
 /**

@@ -1533,6 +1533,26 @@
                 <p class="text-sm">high</p>
               </div>
             {/if}
+            {#if !data.isCreating}
+              <div class="col-span-2 mb-1">
+                <span
+                  class="text-sm rtl:text-right font-medium block text-gray-900 dark:text-gray-300"
+                  >Assistant Version: {assistant?.version === 3
+                    ? 'Next-Gen Assistants'
+                    : assistant?.version
+                      ? 'Classic Assistants'
+                      : 'No Version Information'}</span
+                >
+                <Helper class="pb-1"
+                  >Shows which version of Assistants you’re using. Next-Gen Assistants are the next
+                  generation of PingPong Assistants. They're designed to enable additional
+                  capabilities and improve reliability. Most new Assistants you create will
+                  automatically use this Next-Gen version. Existing Classic Assistants will continue
+                  to work just as expected and will be upgraded to Next-Gen in the future so you can
+                  take advantage of the latest improvements.</Helper
+                >
+              </div>
+            {/if}
           </div>
         </AccordionItem>
       </Accordion>

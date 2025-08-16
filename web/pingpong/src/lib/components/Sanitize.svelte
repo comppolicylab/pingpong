@@ -23,5 +23,7 @@
 
 <div>
   <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-  {@html sanitized}
+  {@html sanitized.replace(/<a\b([^>]*)>(.*?)<\/a>/gi, (match, attrs, text) => {
+    return /href\s*=\s*(['"])[^'"]+\1/.test(attrs) ? match : `<span${attrs}>${text}</span>`;
+  })}
 </div>

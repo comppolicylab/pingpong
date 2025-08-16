@@ -6,6 +6,10 @@ development = true
 type = "local"
 save_target = "/path/to/test"
 
+[file_store]
+type = "local"
+save_target = "/path/to/test"
+
 [db]
 engine = "sqlite"
 path = "test_db.sqlite"

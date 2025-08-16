@@ -16,6 +16,7 @@ from pingpong.schemas import (
     AssistantSummary,
     ClassSummary,
     ClassSummaryExport,
+    MessagePartType,
     ThreadUserMessages,
     ThreadsToSummarize,
     TopicSummary,
@@ -294,7 +295,9 @@ async def generate_assistant_summaries(
                 ThreadUserMessages(
                     id=thread.id,
                     thread_id=thread.thread_id,
-                    user_messages=await get_thread_user_messages(cli, thread.thread_id),
+                    user_messages=await get_thread_user_messages(
+                        session, cli, thread.thread_id
+                    ),
                 )
             )
 
@@ -362,21 +365,46 @@ def convert_to_class_summary(
 
 
 async def get_thread_user_messages(
-    cli: openai.AsyncClient, thread_id: str, words: int = 100
+    session: AsyncSession,
+    cli: openai.AsyncClient,
+    thread_id: str,
+    words: int = 100,
+    thread_version: int = 2,
 ) -> list[str]:
-    messages = await cli.beta.threads.messages.list(thread_id, limit=10, order="asc")
+    if thread_version <= 2:
+        messages = await cli.beta.threads.messages.list(
+            thread_id, limit=10, order="asc"
+        )
 
-    user_messages = list[str]()
-    for message in messages.data:
-        for content in message.content:
+        user_messages = list[str]()
+        for message in messages.data:
+            for content in message.content:
+                if message.role == "user":
+                    if content.type == "text":
+                        user_messages.append(
+                            f"{' '.join(content.text.value.split()[:words])}"
+                        )
+                    if content.type in ["image_file", "image_url"]:
+                        user_messages.append("User uploaded an image file")
+        return user_messages
+    elif thread_version == 3:
+        messages_v3 = await models.Thread.list_messages(
+            session, int(thread_id), limit=10, order="asc"
+        )
+
+        user_messages = list[str]()
+        for message in messages_v3:
             if message.role == "user":
-                if content.type == "text":
-                    user_messages.append(
-                        f"{' '.join(content.text.value.split()[:words])}"
-                    )
-                if content.type in ["image_file", "image_url"]:
-                    user_messages.append("User uploaded an image file")
-    return user_messages
+                for content in message.content:
+                    if content.type == MessagePartType.INPUT_TEXT:
+                        user_messages.append(
+                            f"{' '.join(content.text.split()[:words])}"
+                        )
+                    elif content.type == MessagePartType.INPUT_IMAGE:
+                        user_messages.append("User uploaded an image file")
+        return user_messages
+    else:
+        raise ValueError(f"Invalid thread version: {thread_version}")
 
 
 summarization_prompt = """

@@ -353,6 +353,7 @@ class AnonymousLinkResponse(BaseModel):
 class Assistant(BaseModel):
     id: int
     name: str
+    version: int | None = None
     instructions: str
     description: str | None
     interaction_mode: InteractionMode
@@ -463,7 +464,7 @@ class Assistants(BaseModel):
 class Thread(BaseModel):
     id: int
     name: str | None
-    thread_id: str
+    version: int = 2
     class_id: int
     interaction_mode: InteractionMode
     assistant_names: dict[int, str] = {}
@@ -1221,6 +1222,7 @@ class OpenAIRun(BaseModel):
         | Literal["incomplete"]
         | Literal["completed"]
         | Literal["expired"]
+        | Literal["pending"]
     )
     thread_id: str
     tools: list[Tool]
@@ -1237,13 +1239,26 @@ class MessageContentCodeOutputImageFile(BaseModel):
     type: Literal["code_output_image_file"]
 
 
+class MessageContentCodeOutputImageURL(BaseModel):
+    url: str
+    type: Literal["code_output_image_url"]
+
+
+class MessageContentCodeOutputLogs(BaseModel):
+    logs: str
+    type: Literal["code_output_logs"]
+
+
 class MessageContentCode(BaseModel):
     code: str
     type: Literal["code"]
 
 
 CodeInterpreterMessageContent = Union[
-    MessageContentCodeOutputImageFile, MessageContentCode
+    MessageContentCodeOutputImageFile,
+    MessageContentCode,
+    MessageContentCodeOutputImageURL,
+    MessageContentCodeOutputLogs,
 ]
 
 
@@ -1313,6 +1328,12 @@ class ThreadWithMeta(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class FileSearchToolAnnotationResult(BaseModel):
+    file_id: str
+    filename: str
+    text: str
 
 
 class AuthToken(BaseModel):
@@ -1551,3 +1572,59 @@ class UpdateAgreementPolicyRequest(BaseModel):
     agreement_id: int | None = None
     apply_to_all: bool | None = None
     limit_to_providers: list[int] | None = None
+
+
+class AnnotationType(StrEnum):
+    FILE_PATH = "file_path"
+    URL_CITATION = "url_citation"
+    FILE_CITATION = "file_citation"
+    CONTAINER_FILE_CITATION = "container_file_citation"
+
+
+class CodeInterpreterOutputType(StrEnum):
+    LOGS = "logs"
+    IMAGE = "image"
+
+
+class ToolCallType(StrEnum):
+    CODE_INTERPRETER = "code_interpreter_call"
+    FILE_SEARCH = "file_search_call"
+
+
+class ToolCallStatus(StrEnum):
+    IN_PROGRESS = "in_progress"
+    SEARCHING = "searching"
+    INTERPRETING = "interpreting"
+    COMPLETED = "completed"
+    INCOMPLETE = "incomplete"
+    FAILED = "failed"
+
+
+class MessagePartType(StrEnum):
+    INPUT_TEXT = "input_text"
+    INPUT_IMAGE = "input_image"
+    OUTPUT_TEXT = "output_text"
+    REFUSAL = "refusal"
+
+
+class MessageStatus(StrEnum):
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    INCOMPLETE = "incomplete"
+    PENDING = "pending"
+
+
+class MessageRole(StrEnum):
+    USER = "user"
+    SYSTEM = "system"
+    ASSISTANT = "assistant"
+    DEVELOPER = "developer"
+
+
+class RunStatus(StrEnum):
+    QUEUED = "queued"
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    INCOMPLETE = "incomplete"

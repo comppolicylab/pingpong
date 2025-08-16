@@ -38,7 +38,8 @@
     CheckOutline,
     MicrophoneSlashOutline,
     UsersSolid,
-    LinkOutline
+    LinkOutline,
+    TerminalOutline
   } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
@@ -52,6 +53,7 @@
   import Sanitize from '$lib/components/Sanitize.svelte';
   import AudioPlayer from '$lib/components/AudioPlayer.svelte';
   import { copy } from 'svelte-copy';
+  import FileCitation from './FileCitation.svelte';
   export let data;
 
   let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -74,6 +76,7 @@
   $: messages = threadMgr.messages;
   $: participants = threadMgr.participants;
   $: published = threadMgr.published;
+  $: version = threadMgr.version;
   $: error = threadMgr.error;
   $: threadManagerError = $error?.detail || null;
   $: assistantId = threadMgr.assistantId;
@@ -176,6 +179,9 @@
   let showAssistantPrompt = false;
   let settingsOpen = false;
 
+  function isFileCitation(a: api.TextAnnotation): a is api.TextAnnotationFileCitation {
+    return a.type === 'file_citation' && a.text === 'responses_v3';
+  }
   const getShortMessageTimestamp = (timestamp: number) => {
     return new Intl.DateTimeFormat('en-US', {
       hour: 'numeric',
@@ -307,11 +313,7 @@
       return;
     }
     try {
-      await threadMgr.fetchCodeInterpreterResult(
-        content.thread_id,
-        content.run_id,
-        content.step_id
-      );
+      await threadMgr.fetchCodeInterpreterResult(content.run_id, content.step_id);
     } catch (e) {
       sadToast(
         `Failed to load code interpreter results. Error: ${errorMessage(e, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
@@ -819,7 +821,7 @@
     {#each $messages as message}
       {@const attachment_file_ids = message.data.attachments
         ? new Set(message.data.attachments.map((attachment) => attachment.file_id))
-        : []}
+        : new Set([])}
       <div class="py-4 px-6 flex gap-x-3">
         <div class="shrink-0">
           {#if message.data.role === 'user'}
@@ -844,30 +846,31 @@
             {#if content.type === 'text'}
               {@const { clean_string, images } = processString(content.text.value)}
               {@const imageInfo = convertImageProxyToInfo(images)}
+              {@const quoteCitations = (content.text.annotations ?? []).filter(isFileCitation)}
 
               <div class="leading-6">
                 <Markdown
                   content={parseTextContent(
                     { value: clean_string, annotations: content.text.annotations },
+                    $version,
                     api.fullPath(`/class/${classId}/thread/${threadId}`)
                   )}
                   syntax={true}
                   latex={useLatex}
                 />
               </div>
-              {#if attachment_file_ids}
+              {#if quoteCitations.length > 0}
                 <div class="flex flex-wrap gap-2">
-                  {#each attachment_file_ids as file_id}
-                    {#if allFiles[file_id]}
-                      <FilePlaceholder
-                        info={allFiles[file_id]}
-                        mimeType={data.uploadInfo.mimeType}
-                        on:delete={removeFile}
-                      />
-                    {:else}
-                      <AttachmentDeletedPlaceholder {file_id} />
-                    {/if}
+                  {#each quoteCitations as citation}
+                    <FileCitation
+                      name={citation.file_citation.file_name}
+                      quote={citation.file_citation.quote}
+                    />
                   {/each}
+                </div>
+              {/if}
+              {#if attachment_file_ids.size > 0}
+                <div class="flex flex-wrap gap-2">
                   {#each imageInfo as image}
                     {#if !(image.response && 'file_id' in image.response && image.response.file_id in allFiles)}
                       <FilePlaceholder
@@ -888,7 +891,7 @@
                     <span slot="header"
                       ><div class="flex-row flex items-center space-x-2">
                         <div><CodeOutline size="lg" /></div>
-                        <div>Code Interpreter</div>
+                        <div>Code Interpreter Code</div>
                       </div></span
                     >
                     <pre style="white-space: pre-wrap;" class="text-black">{content.code}</pre>
@@ -922,7 +925,7 @@
                   <span slot="header"
                     ><div class="flex-row flex items-center space-x-2">
                       <div><ImageSolid size="lg" /></div>
-                      <div>Code Interpreter Output</div>
+                      <div>Output Image</div>
                     </div></span
                   >
                   <div class="leading-6 w-full">
@@ -933,6 +936,38 @@
                       )}
                       alt="Attachment generated by the assistant"
                     />
+                  </div>
+                </AccordionItem>
+              </Accordion>
+            {:else if content.type === 'code_output_image_url'}
+              <Accordion flush>
+                <AccordionItem>
+                  <span slot="header"
+                    ><div class="flex-row flex items-center space-x-2">
+                      <div><ImageSolid size="lg" /></div>
+                      <div>Output Image</div>
+                    </div></span
+                  >
+                  <div class="leading-6 w-full">
+                    <img
+                      class="img-attachment m-auto"
+                      src={content.url}
+                      alt="Attachment generated by the assistant"
+                    />
+                  </div>
+                </AccordionItem>
+              </Accordion>
+            {:else if content.type === 'code_output_logs'}
+              <Accordion flush>
+                <AccordionItem>
+                  <span slot="header"
+                    ><div class="flex-row flex items-center space-x-2">
+                      <div><TerminalOutline size="lg" /></div>
+                      <div>Output Logs</div>
+                    </div></span
+                  >
+                  <div class="leading-6 w-full">
+                    <pre style="white-space: pre-wrap;" class="text-black">{content.logs}</pre>
                   </div>
                 </AccordionItem>
               </Accordion>
@@ -950,6 +985,21 @@
               <div class="leading-6"><pre>{JSON.stringify(content, null, 2)}</pre></div>
             {/if}
           {/each}
+          {#if attachment_file_ids.size > 0}
+            <div class="flex flex-wrap gap-2 mt-4">
+              {#each attachment_file_ids as file_id}
+                {#if allFiles[file_id]}
+                  <FilePlaceholder
+                    info={allFiles[file_id]}
+                    mimeType={data.uploadInfo.mimeType}
+                    on:delete={removeFile}
+                  />
+                {:else}
+                  <AttachmentDeletedPlaceholder {file_id} />
+                {/if}
+              {/each}
+            </div>
+          {/if}
         </div>
       </div>
     {/each}
