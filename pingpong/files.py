@@ -970,35 +970,6 @@ def file_extension_to_mime_type(extension: str) -> str | None:
     return None
 
 
-def base64_to_upload_file(data_url: str) -> UploadFile:
-    # 1. Strip the prefix
-    header, encoded = data_url.split(",", 1)
-
-    # Extract content type and file extension from header
-    # e.g., data:image/png;base64
-    content_type = (
-        header.split(";")[0].split(":")[1]
-        if ";" in header
-        else "application/octet-stream"
-    )
-    file_extension = content_type.split("/")[-1]
-
-    # 2. Decode the Base64 string
-    image_bytes = base64.b64decode(encoded)
-
-    # 3. Wrap in BytesIO
-    file_like = io.BytesIO(image_bytes)
-
-    # 4. Create UploadFile
-    upload_file = UploadFile(
-        filename=f"code_interpreter_output_{uuid.uuid4()}.{file_extension}",
-        file=file_like,
-        content_type=content_type,
-    )
-
-    return upload_file
-
-
 IMAGE_DESCRIPTION_PROMPT = """
 You are assisting a model without vision capabilities by providing detailed descriptions of images to enable it to answer any questions users might have about the image. DO NOT ATTEMPT TO SOLVE, ANSWER, OR RESPOND TO THE IMAGE.
 
