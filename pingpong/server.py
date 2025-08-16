@@ -2262,7 +2262,7 @@ async def get_thread(
             [assistant, file_names, all_files],
             is_supervisor_check,
         ) = await asyncio.gather(
-            models.Thread.list_messages(
+            models.Thread.list_messages_tool_calls(
                 request.state.db, thread.id, limit=20, order="desc"
             ),
             models.Thread.get_thread_components(request.state.db, thread.id),
@@ -4112,6 +4112,11 @@ async def create_run(
                 else None
             )
 
+            run_to_complete.status = schemas.RunStatus.QUEUED
+            request.state.db.add(run_to_complete)
+            await request.state.db.flush()
+            await request.state.db.refresh(run_to_complete)
+
             stream = run_response(
                 openai_client,
                 run=run_to_complete,
@@ -5028,6 +5033,17 @@ async def create_assistant(
             status_code=404,
             detail=f"Associated class {class_id} not found.",
         )
+    assistant_version = 2
+    if req.interaction_mode == schemas.InteractionMode.VOICE:
+        # Voice mode assistants are only supported in version 2
+        assistant_version = 2
+    else:
+        if class_.api_key_obj and class_.api_key_obj.provider == "openai":
+            assistant_version = 3
+        elif not class_.api_key_obj and class_.api_key:
+            assistant_version = 3
+        else:
+            assistant_version = 2
 
     # Check that the class is not private if user information should be recorded
     if class_.private and (
@@ -5068,7 +5084,7 @@ async def create_assistant(
             )
         tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
 
-    if req.version <= 2:
+    if assistant_version <= 2:
         try:
             if uses_voice:
                 _model = "gpt-4o"
@@ -5125,7 +5141,7 @@ async def create_assistant(
             raise HTTPException(
                 404, get_details_from_api_error(e, "OpenAI rejected this request")
             )
-    elif req.version == 3:
+    elif assistant_version == 3:
         responses_api_transition_logger.debug(
             "Creating a Version 3 assistant; skipping creation of OpenAI Assistants API object."
         )
@@ -5144,7 +5160,7 @@ async def create_assistant(
             user_id=creator_id,
             assistant_id=new_asst.id if new_asst else None,
             vector_store_id=vector_store_object_id,
-            version=req.version,
+            version=assistant_version,
         )
 
         # Delete private files uploaded but not attached to the assistant

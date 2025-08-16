@@ -390,7 +390,6 @@ def temperature_validator(self):
 
 class CreateAssistant(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
-    version: int = Field(3, ge=2, le=3)
     code_interpreter_file_ids: list[str] | None = None
     file_search_file_ids: list[str] | None = None
     instructions: str = Field(..., min_length=3)
