@@ -1675,6 +1675,14 @@ async def run_response(
                                 )
                                 yield handler.flush()
                             else:
+                                run.status = RunStatus.FAILED
+                                run.error_code = openai_error.type
+                                run.error_message = (
+                                    f"Error in response stream: {openai_error}"
+                                )
+                                session_.add(run)
+                                await session_.commit()
+
                                 yield (
                                     orjson.dumps(
                                         {
@@ -1705,6 +1713,14 @@ async def run_response(
                                 )
                                 yield handler.flush()
                             else:
+                                run.status = RunStatus.FAILED
+                                run.error_code = openai_error.type
+                                run.error_message = (
+                                    f"Error in response stream: {openai_error}"
+                                )
+                                session_.add(run)
+                                await session_.commit()
+
                                 yield (
                                     orjson.dumps(
                                         {
@@ -1729,7 +1745,7 @@ async def run_response(
                                 handler.cleanup(
                                     run_status=RunStatus.FAILED,
                                     response_error_code="pingpong_error",
-                                    response_error_message=str(e),
+                                    response_error_message="We were unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
                                     send_error_message_only_if_active=False,
                                 )
                             )
@@ -1737,9 +1753,7 @@ async def run_response(
                         else:
                             run.status = RunStatus.FAILED
                             run.error_code = "pingpong_error"
-                            run.error_message = (
-                                f"We were unable to process your request: {e}"
-                            )
+                            run.error_message = f"Error in response stream: {e}"
                             session_.add(run)
                             await session_.commit()
 
@@ -1774,7 +1788,7 @@ async def run_response(
                 else:
                     run.status = RunStatus.FAILED
                     run.error_code = "pingpong_error"
-                    run.error_message = "We were unable to process your request."
+                    run.error_message = f"Error in response stream: {e}"
                     session_.add(run)
                     await session_.commit()
                 yield (
