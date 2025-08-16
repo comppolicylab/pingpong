@@ -700,6 +700,7 @@ def m02_remove_responses_threads_assistants() -> None:
 
     asyncio.run(_remove_responses_threads_assistants())
 
+
 @db.command("m02_remove_responses_threads")
 def m02_remove_responses_threads() -> None:
     async def _remove_responses_threads() -> None:
@@ -713,6 +714,7 @@ def m02_remove_responses_threads() -> None:
 
     asyncio.run(_remove_responses_threads())
 
+
 @db.command("m02_remove_responses_assistants")
 def m02_remove_responses_assistants() -> None:
     async def _remove_responses_assistants() -> None:
@@ -725,6 +727,7 @@ def m02_remove_responses_assistants() -> None:
                 logger.info("Done!")
 
     asyncio.run(_remove_responses_assistants())
+
 
 @db.command("get_assistant_description_stats")
 def get_assistant_description_stats() -> None:

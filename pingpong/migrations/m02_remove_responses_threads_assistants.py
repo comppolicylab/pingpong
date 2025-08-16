@@ -164,6 +164,7 @@ async def delete_assistant(
     # clean up grants
     await auth.write_safe(revoke=revokes)
 
+
 async def remove_responses_threads(
     session: AsyncSession, auth: OpenFgaAuthzClient
 ) -> None:
@@ -172,6 +173,7 @@ async def remove_responses_threads(
         await delete_thread(session, auth, thread_id)
     await session.commit()
 
+
 async def remove_responses_assistants(
     session: AsyncSession, auth: OpenFgaAuthzClient
 ) -> None:
@@ -179,6 +181,7 @@ async def remove_responses_assistants(
         assistant_id = assistant.id
         await delete_assistant(session, auth, assistant_id)
     await session.commit()
+
 
 async def remove_responses_threads_assistants(
     session: AsyncSession, auth: OpenFgaAuthzClient
