@@ -4091,7 +4091,7 @@ async def create_run(
                 file_search_file_ids = []
             else:
                 raise HTTPException(
-                    status_code=400,
+                    status_code=409,
                     detail="OpenAI is still processing your last request. We're fetching the latest status...",
                 )
             file_names = await models.Thread.get_file_search_files(
