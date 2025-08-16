@@ -1,7 +1,16 @@
 import asyncio
 import json
 from datetime import datetime
-from typing import AsyncGenerator, List, Optional, Union, Callable, Coroutine, Any
+from typing import (
+    AsyncGenerator,
+    List,
+    Literal,
+    Optional,
+    Union,
+    Callable,
+    Coroutine,
+    Any,
+)
 
 from sqlalchemy import (
     Boolean,
@@ -9,8 +18,11 @@ from sqlalchemy import (
     DateTime,
     Float,
     UniqueConstraint,
+    asc,
+    desc,
     distinct,
     literal,
+    literal_column,
     not_,
     or_,
     union_all,
@@ -4216,3 +4228,81 @@ class Thread(Base):
         result = await session.execute(stmt)
         thread = result.scalar()
         return thread
+
+    @classmethod
+    async def list_messages(
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        limit: int = 100,
+        before: int | None = None,
+        after: int | None = None,
+        order: Literal["asc", "desc"] = "desc",
+    ) -> list["Message"]:
+        stmt = select(Message).where(Message.thread_id == thread_id)
+
+        if before is not None:
+            stmt = stmt.where(Message.id < before)
+        if after is not None:
+            stmt = stmt.where(Message.id > after)
+
+        ordering = (
+            asc(Message.output_index) if order == "asc" else desc(Message.output_index)
+        )
+        stmt = stmt.order_by(ordering).limit(limit)
+
+        result = await session.execute(stmt)
+        return result.scalars().all()
+
+    @classmethod
+    async def list_messages_tool_calls(
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        limit: int = 100,
+        before: str | None = None,
+        after: str | None = None,
+        order: Literal["asc", "desc"] = "desc",
+    ) -> tuple[list["Message"], list["ToolCall"]]:
+        msg_stmt = select(
+            Message.id.label("id"),
+            Message.output_index.label("output_index"),
+            literal_column("'message'").label("type"),
+        ).where(Message.thread_id == thread_id)
+        if before is not None:
+            msg_stmt = msg_stmt.where(Message.id < int(before))
+        if after is not None:
+            msg_stmt = msg_stmt.where(Message.id > int(after))
+
+        tool_stmt = select(
+            ToolCall.id.label("id"),
+            ToolCall.output_index.label("output_index"),
+            literal_column("'tool_call'").label("type"),
+        ).where(ToolCall.thread_id == thread_id)
+        if before is not None:
+            tool_stmt = tool_stmt.where(ToolCall.id < int(before))
+        if after is not None:
+            tool_stmt = tool_stmt.where(ToolCall.id > int(after))
+
+        combined_stmt = union_all(msg_stmt, tool_stmt)
+        ordering = asc("output_index") if order == "asc" else desc("output_index")
+        stmt = (
+            select(combined_stmt.c.id, combined_stmt.c.type)
+            .order_by(ordering)
+            .limit(limit)
+        )
+
+        result = await session.execute(stmt)
+        rows = result.all()
+
+        messages_ids = [r.id for r in rows if r.type == "message"]
+        tool_call_ids = [r.id for r in rows if r.type == "tool_call"]
+
+        messages = await session.execute(
+            select(Message).where(Message.id.in_(messages_ids)).order_by(ordering)
+        )
+        tool_calls = await session.execute(
+            select(ToolCall).where(ToolCall.id.in_(tool_call_ids)).order_by(ordering)
+        )
+
+        return messages.scalars().all(), tool_calls.scalars().all()

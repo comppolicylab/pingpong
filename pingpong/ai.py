@@ -232,20 +232,42 @@ async def get_thread_conversation_name(
     data: NewThreadMessage,
     thread_id: str,
     class_id: str,
+    thread_version: int = 2,
 ) -> str | None:
-    return None
-    messages = await cli.beta.threads.messages.list(thread_id, limit=10, order="asc")
+    if thread_version <= 2:
+        messages = await cli.beta.threads.messages.list(
+            thread_id, limit=10, order="asc"
+        )
 
-    message_str = ""
-    for message in messages.data:
-        for content in message.content:
-            if content.type == "text":
-                message_str += f"{message.role.upper()}: {' '.join(content.text.value.split()[:100])}\n"
-            if content.type in ["image_file", "image_url"]:
-                message_str += f"{message.role.upper()}: Uploaded an image file\n"
-    message_str += f"USER: {data.message}\n"
-    if data.vision_file_ids:
-        message_str += "USER: Uploaded an image file\n"
+        message_str = ""
+        for message in messages.data:
+            for content in message.content:
+                if content.type == "text":
+                    message_str += f"{message.role.upper()}: {' '.join(content.text.value.split()[:100])}\n"
+                if content.type in ["image_file", "image_url"]:
+                    message_str += f"{message.role.upper()}: Uploaded an image file\n"
+        message_str += f"USER: {data.message}\n"
+        if data.vision_file_ids:
+            message_str += "USER: Uploaded an image file\n"
+    elif thread_version == 3:
+        messages_v3 = await models.Thread.list_messages(
+            session=session, thread_id=int(thread_id), limit=10, order="asc"
+        )
+
+        message_str = ""
+        for message in messages_v3:
+            if message.role == "user":
+                for content in message.content:
+                    if content.type == MessagePartType.INPUT_TEXT:
+                        message_str += f"{message.role.upper()}: {' '.join(content.text.split()[:100])}\n"
+                    elif content.type == MessagePartType.INPUT_IMAGE:
+                        message_str += (
+                            f"{message.role.upper()}: Uploaded an image file\n"
+                        )
+        if data.vision_file_ids:
+            message_str += "USER: Uploaded an image file\n"
+    else:
+        raise ValueError(f"Unsupported thread version: {thread_version}")
     return await generate_thread_name(cli, session, message_str, class_id)
 
 
@@ -2081,41 +2103,81 @@ async def export_threads_multiple_classes(
                 csvwriter.writerow(prompt_row)
 
                 after = None
-                while True:
-                    messages = await cli.beta.threads.messages.list(
-                        thread_id=thread.thread_id,
-                        after=after,
-                        order="asc",
-                    )
-
-                    for message in messages.data:
-                        row = [user_hashes_str]
-
-                        if include_user_emails:
-                            row.append(user_emails_str)
-
-                        row.extend(
-                            [
-                                class_.id,
-                                class_.name,
-                                assistant_id,
-                                assistant_name,
-                                message.role,
-                                thread.id,
-                                datetime.fromtimestamp(
-                                    message.created_at, tz=timezone.utc
-                                )
-                                .astimezone(ZoneInfo("America/New_York"))
-                                .isoformat(),
-                                process_message_content(message.content, file_names),
-                            ]
+                if thread.version <= 2:
+                    while True:
+                        messages = await cli.beta.threads.messages.list(
+                            thread_id=thread.thread_id,
+                            after=after,
+                            order="asc",
                         )
-                        csvwriter.writerow(row)
 
-                    if len(messages.data) == 0:
-                        break
-                    after = messages.data[-1].id
+                        for message in messages.data:
+                            row = [user_hashes_str]
 
+                            if include_user_emails:
+                                row.append(user_emails_str)
+
+                            row.extend(
+                                [
+                                    class_.id,
+                                    class_.name,
+                                    assistant_id,
+                                    assistant_name,
+                                    message.role,
+                                    thread.id,
+                                    datetime.fromtimestamp(
+                                        message.created_at, tz=timezone.utc
+                                    )
+                                    .astimezone(ZoneInfo("America/New_York"))
+                                    .isoformat(),
+                                    process_message_content(
+                                        message.content, file_names
+                                    ),
+                                ]
+                            )
+                            csvwriter.writerow(row)
+
+                        if len(messages.data) == 0:
+                            break
+                        after = messages.data[-1].id
+                elif thread.version == 3:
+                    while True:
+                        messages = await models.Thread.list_messages(
+                            session, thread.id, after=after, order="asc"
+                        )
+
+                        for message in messages.data:
+                            row = [user_hashes_str]
+
+                            if include_user_emails:
+                                row.append(user_emails_str)
+
+                            row.extend(
+                                [
+                                    class_.id,
+                                    class_.name,
+                                    assistant_id,
+                                    assistant_name,
+                                    message.role,
+                                    thread.id,
+                                    message.created.astimezone(
+                                        ZoneInfo("America/New_York")
+                                    )
+                                    .replace(microsecond=0)
+                                    .isoformat(),
+                                    process_message_content_v3(
+                                        message.content, file_names
+                                    ),
+                                ]
+                            )
+                            csvwriter.writerow(row)
+
+                        if len(messages.data) == 0:
+                            break
+                        after = messages.data[-1].id
+                else:
+                    logger.exception(f"Unknown thread version: {thread.version}")
+                    continue
         if not class_id:
             logger.warning(f"Found no classes with IDs {class_ids}")
             return
@@ -2334,6 +2396,37 @@ def process_message_content(
     return "\n".join(processed_content)
 
 
+def process_message_content_v3(
+    content: list[models.MessagePart], file_names: dict[str, str]
+) -> str:
+    """Process message content for CSV export. The end result is a single string with all the content combined.
+    Images are replaced with their file names, and text is extracted from the content parts.
+    File citations are replaced with their file names inside the text
+    """
+    processed_content = []
+    for part in content:
+        match part.type:
+            case MessagePartType.INPUT_TEXT:
+                processed_content.append(
+                    replace_annotations_in_text_v3(part=part, file_names=file_names)
+                )
+            case MessagePartType.INPUT_IMAGE:
+                processed_content.append(
+                    f"[Image file: {part.input_image_file_id or 'Unknown image file'}]"
+                )
+            case MessagePartType.OUTPUT_TEXT:
+                processed_content.append(
+                    replace_annotations_in_text_v3(part=part, file_names=file_names)
+                )
+            case MessagePartType.REFUSAL:
+                processed_content.append(
+                    f"[Refusal: {part.refusal or 'Unknown refusal'}]"
+                )
+            case _:
+                logger.warning(f"Unknown content type: {part}")
+    return "\n".join(processed_content)
+
+
 def replace_annotations_in_text(
     text: TextContentBlock, file_names: dict[str, str]
 ) -> str:
@@ -2344,6 +2437,23 @@ def replace_annotations_in_text(
                 annotation.text,
                 f" [{file_names.get(annotation.file_citation.file_id, 'Unknown citation/Deleted Assistant')}] ",
             )
+    return updated_text
+
+
+def replace_annotations_in_text_v3(
+    part: models.MessagePart, file_names: dict[str, str]
+) -> str:
+    updated_text = part.text.value
+    for annotation in part.annotations:
+        match annotation.type:
+            case AnnotationType.FILE_PATH:
+                updated_text += f"\n [File Path Annotation: {file_names.get(annotation.file_object_id, 'Unknown citation/Deleted Assistant')}] "
+            case AnnotationType.FILE_CITATION:
+                updated_text += f"\n [File Citation Annotation: {annotation.filename or 'Unknown file/Deleted Assistant'}] "
+            case AnnotationType.CONTAINER_FILE_CITATION:
+                updated_text += f"\n [Code Interpreter Output File Annotation: {annotation.filename or 'Unknown file/Deleted Assistant'}] "
+            case AnnotationType.URL_CITATION:
+                updated_text += f"\n [URL Citation Annotation: {annotation.title or 'Unknown Website/Deleted Assistant'} ({annotation.url or 'Unknown URL/Deleted Assistant'})] "
     return updated_text
 
 

@@ -2147,7 +2147,7 @@ async def get_thread(
     class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
-    if thread.version == 2:
+    if thread.version <= 2:
         (
             messages,
             [assistant, file_names, all_files],
@@ -2258,9 +2258,13 @@ async def get_thread(
         }
     elif thread.version == 3:
         (
+            [messages_v3, tool_calls_v3],
             [assistant, file_names, all_files],
             is_supervisor_check,
         ) = await asyncio.gather(
+            models.Thread.list_messages(
+                request.state.db, thread.id, limit=20, order="desc"
+            ),
             models.Thread.get_thread_components(request.state.db, thread.id),
             request.state.authz.check(
                 [
@@ -2286,230 +2290,209 @@ async def get_thread(
         is_supervisor = is_supervisor_check[0]
         is_current_user = False
 
-        messages_to_fetch = 20
-        messages_added = 0
         thread_messages: list[OpenAIMessage] = []
         placeholder_ci_calls = []
+        file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
+        for tool_call in tool_calls_v3:
+            if tool_call.type == schemas.ToolCallType.CODE_INTERPRETER:
+                tool_content: list[schemas.CodeInterpreterMessageContent] = []
 
-        for run in runs:
-            if messages_added >= messages_to_fetch:
-                break
-            run_tool_calls = run.tool_calls
-            file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
-            for tool_call in run_tool_calls:
-                if tool_call.type == schemas.ToolCallType.CODE_INTERPRETER:
-                    tool_content: list[schemas.CodeInterpreterMessageContent] = []
+                if tool_call.code:
+                    tool_content.append(
+                        schemas.MessageContentCode(code=tool_call.code, type="code")
+                    )
 
-                    if tool_call.code:
+                for output in tool_call.outputs:
+                    if output.output_type == schemas.CodeInterpreterOutputType.IMAGE:
                         tool_content.append(
-                            schemas.MessageContentCode(code=tool_call.code, type="code")
+                            schemas.MessageContentCodeOutputImageURL(
+                                url=output.url, type="code_output_image_url"
+                            )
+                        )
+                    elif output.output_type == schemas.CodeInterpreterOutputType.LOGS:
+                        tool_content.append(
+                            schemas.MessageContentCodeOutputLogs(
+                                logs=output.logs, type="code_output_logs"
+                            )
                         )
 
-                    for output in tool_call.outputs:
-                        if (
-                            output.output_type
-                            == schemas.CodeInterpreterOutputType.IMAGE
-                        ):
-                            tool_content.append(
-                                schemas.MessageContentCodeOutputImageURL(
-                                    url=output.url, type="code_output_image_url"
-                                )
-                            )
-                        elif (
-                            output.output_type == schemas.CodeInterpreterOutputType.LOGS
-                        ):
-                            tool_content.append(
-                                schemas.MessageContentCodeOutputLogs(
-                                    logs=output.logs, type="code_output_logs"
-                                )
-                            )
-
-                    placeholder_ci_calls.append(
-                        schemas.CodeInterpreterMessage(
-                            id=str(tool_call.id),
-                            assistant_id=str(assistant.id) if assistant else "",
-                            created_at=int(tool_call.created.timestamp()),
-                            content=tool_content,
-                            metadata={},
-                            object="thread.message",
-                            role="assistant",
-                            run_id=str(run.run_id),
-                            thread_id=str(thread.id),
-                        )
+                placeholder_ci_calls.append(
+                    schemas.CodeInterpreterMessage(
+                        id=str(tool_call.id),
+                        assistant_id=str(assistant.id) if assistant else "",
+                        created_at=int(tool_call.created.timestamp()),
+                        content=tool_content,
+                        metadata={},
+                        object="thread.message",
+                        role="assistant",
+                        run_id=str(tool_call.run_id),
+                        thread_id=str(thread.id),
                     )
-                elif tool_call.type == schemas.ToolCallType.FILE_SEARCH:
-                    for result in tool_call.results:
-                        if file_search_results.get(result.file_id):
-                            file_search_results[result.file_id].text += (
-                                "\n\n <hr/> \n\n" + result.text
-                            )
-                        else:
-                            file_search_results[result.file_id] = (
-                                schemas.FileSearchToolAnnotationResult(
-                                    file_id=result.file_id,
-                                    filename=result.filename,
-                                    text=result.text,
-                                )
-                            )
-
-            run_messages = run.messages
-            run_messages.sort(key=lambda m: m.created, reverse=True)
-            for message in run_messages:
-                if messages_added >= messages_to_fetch:
-                    break
-                _message = OpenAIMessage(
-                    id=str(message.id),
-                    thread_id=str(thread.id),
-                    assistant_id=str(assistant.id)
-                    if assistant and assistant.id
-                    else None,
-                    created_at=int(message.created.timestamp()),
-                    object="thread.message",
-                    role=message.role.value,
-                    content=[],
-                    status=message.message_status.value
-                    if message.message_status != "pending"
-                    else "in_progress",
                 )
-                attachments: list[Attachment] = []
-                attachments_dict: dict[str, list[dict[str, str]]] = {}
-                for attachment in message.file_search_attachments:
-                    attachments_dict.setdefault(attachment.file_id, []).append(
-                        {"type": "file_search"}
-                    )
-
-                for attachment in message.code_interpreter_attachments:
-                    attachments_dict.setdefault(attachment.file_id, []).append(
-                        {"type": "code_interpreter"}
-                    )
-                for file_id, tools in attachments_dict.items():
-                    attachments.append({"file_id": file_id, "tools": tools})
-
-                _message.attachments = attachments
-                for content in message.content:
-                    match content.type:
-                        case schemas.MessagePartType.INPUT_TEXT:
-                            _message.content.append(
-                                TextContentBlock(
-                                    text=Text(value=content.text, annotations=[]),
-                                    type="text",
-                                )
+            elif tool_call.type == schemas.ToolCallType.FILE_SEARCH:
+                for result in tool_call.results:
+                    if file_search_results.get(result.file_id):
+                        file_search_results[result.file_id].text += (
+                            "\n\n <hr/> \n\n" + result.text
+                        )
+                    else:
+                        file_search_results[result.file_id] = (
+                            schemas.FileSearchToolAnnotationResult(
+                                file_id=result.file_id,
+                                filename=result.filename,
+                                text=result.text,
                             )
-                        case schemas.MessagePartType.INPUT_IMAGE:
-                            _message.content.append(
-                                ImageFileContentBlock(
-                                    type="image_file",
-                                    image_file=ImageFile(
-                                        file_id=content.input_image_file_id,
-                                    ),
-                                )
+                        )
+
+        for message in messages_v3:
+            _message = OpenAIMessage(
+                id=str(message.id),
+                thread_id=str(thread.id),
+                assistant_id=str(assistant.id) if assistant and assistant.id else None,
+                created_at=int(message.created.timestamp()),
+                object="thread.message",
+                role=message.role.value,
+                content=[],
+                status=message.message_status.value
+                if message.message_status != "pending"
+                else "in_progress",
+            )
+            attachments: list[Attachment] = []
+            attachments_dict: dict[str, list[dict[str, str]]] = {}
+            for attachment in message.file_search_attachments:
+                attachments_dict.setdefault(attachment.file_id, []).append(
+                    {"type": "file_search"}
+                )
+
+            for attachment in message.code_interpreter_attachments:
+                attachments_dict.setdefault(attachment.file_id, []).append(
+                    {"type": "code_interpreter"}
+                )
+            for file_id, tools in attachments_dict.items():
+                attachments.append({"file_id": file_id, "tools": tools})
+
+            _message.attachments = attachments
+            for content in message.content:
+                match content.type:
+                    case schemas.MessagePartType.INPUT_TEXT:
+                        _message.content.append(
+                            TextContentBlock(
+                                text=Text(value=content.text, annotations=[]),
+                                type="text",
                             )
-                        case schemas.MessagePartType.OUTPUT_TEXT:
-                            _annotations: list[Annotation] = []
-                            _file_ids_file_citation_annotation: set[str] = set()
-                            if content.annotations:
-                                for annotation in content.annotations:
-                                    if (
-                                        annotation.type
-                                        == schemas.AnnotationType.FILE_CITATION
-                                    ):
-                                        _file_record = file_search_results.get(
+                        )
+                    case schemas.MessagePartType.INPUT_IMAGE:
+                        _message.content.append(
+                            ImageFileContentBlock(
+                                type="image_file",
+                                image_file=ImageFile(
+                                    file_id=content.input_image_file_id,
+                                ),
+                            )
+                        )
+                    case schemas.MessagePartType.OUTPUT_TEXT:
+                        _annotations: list[Annotation] = []
+                        _file_ids_file_citation_annotation: set[str] = set()
+                        if content.annotations:
+                            for annotation in content.annotations:
+                                if (
+                                    annotation.type
+                                    == schemas.AnnotationType.FILE_CITATION
+                                ):
+                                    _file_record = file_search_results.get(
+                                        annotation.file_id
+                                    )
+                                    if _file_record:
+                                        if (
                                             annotation.file_id
-                                        )
-                                        if _file_record:
-                                            if (
+                                            not in _file_ids_file_citation_annotation
+                                        ):
+                                            _file_ids_file_citation_annotation.add(
                                                 annotation.file_id
-                                                not in _file_ids_file_citation_annotation
-                                            ):
-                                                _file_ids_file_citation_annotation.add(
-                                                    annotation.file_id
-                                                )
-                                                _file_citation = FileCitationAnnotation(
-                                                    end_index=annotation.end_index or 0,
-                                                    start_index=annotation.start_index
-                                                    or 0,
-                                                    file_citation=FileCitation(
-                                                        file_id=_file_record.file_id,
-                                                        file_name=_file_record.filename,
-                                                        quote=_file_record.text,
-                                                    ),
-                                                    text="responses_v3",
-                                                    type="file_citation",
-                                                )
-                                                _annotations.append(_file_citation)
-                                    elif (
-                                        annotation.type
-                                        == schemas.AnnotationType.FILE_PATH
-                                        or (
-                                            annotation.type
-                                            == schemas.AnnotationType.CONTAINER_FILE_CITATION
-                                            and not annotation.vision_file_id
-                                        )
-                                    ):
-                                        _annotations.append(
-                                            FilePathAnnotation(
-                                                type="file_path",
-                                                end_index=annotation.end_index,
-                                                start_index=annotation.start_index,
-                                                file_path=FilePath(
-                                                    file_id=str(
-                                                        annotation.file_object_id
-                                                        or annotation.file_id
-                                                    ),
-                                                ),
-                                                text=annotation.text or "",
                                             )
-                                        )
-                                    elif (
+                                            _file_citation = FileCitationAnnotation(
+                                                end_index=annotation.end_index or 0,
+                                                start_index=annotation.start_index or 0,
+                                                file_citation=FileCitation(
+                                                    file_id=_file_record.file_id,
+                                                    file_name=_file_record.filename,
+                                                    quote=_file_record.text,
+                                                ),
+                                                text="responses_v3",
+                                                type="file_citation",
+                                            )
+                                            _annotations.append(_file_citation)
+                                elif (
+                                    annotation.type == schemas.AnnotationType.FILE_PATH
+                                    or (
                                         annotation.type
                                         == schemas.AnnotationType.CONTAINER_FILE_CITATION
-                                        and annotation.vision_file_id
-                                    ):
-                                        _message.content.insert(
-                                            0,
-                                            ImageFileContentBlock(
-                                                image_file=ImageFile(
-                                                    file_id=annotation.vision_file_id,
+                                        and not annotation.vision_file_id
+                                    )
+                                ):
+                                    _annotations.append(
+                                        FilePathAnnotation(
+                                            type="file_path",
+                                            end_index=annotation.end_index,
+                                            start_index=annotation.start_index,
+                                            file_path=FilePath(
+                                                file_id=str(
+                                                    annotation.file_object_id
+                                                    or annotation.file_id
                                                 ),
-                                                type="image_file",
                                             ),
+                                            text=annotation.text or "",
                                         )
+                                    )
+                                elif (
+                                    annotation.type
+                                    == schemas.AnnotationType.CONTAINER_FILE_CITATION
+                                    and annotation.vision_file_id
+                                ):
+                                    _message.content.insert(
+                                        0,
+                                        ImageFileContentBlock(
+                                            image_file=ImageFile(
+                                                file_id=annotation.vision_file_id,
+                                            ),
+                                            type="image_file",
+                                        ),
+                                    )
 
-                            _message.content.append(
-                                TextContentBlock(
-                                    type="text",
-                                    text=Text(
-                                        value=content.text,
-                                        annotations=_annotations,
-                                    ),
-                                )
+                        _message.content.append(
+                            TextContentBlock(
+                                type="text",
+                                text=Text(
+                                    value=content.text,
+                                    annotations=_annotations,
+                                ),
                             )
+                        )
 
-                if not message.user_id:
-                    thread_messages.append(_message)
-                    continue
-
-                if int(message.user_id) in current_user_ids:
-                    is_current_user = True
-                    _message.metadata = {"is_current_user": True}
-                else:
-                    _message.metadata = {"is_current_user": False}
-
-                if message.user_id not in users:
-                    if is_current_user:
-                        _message.metadata["name"] = "Me"
-                    else:
-                        _message.metadata["name"] = "Unknown User"
-                else:
-                    _message.metadata["name"] = (
-                        name(users[message.user_id])
-                        if thread.display_user_info and is_supervisor
-                        else "Anonymous User"
-                        if thread.private
-                        else pseudonym(thread, users[message.user_id])
-                    )
+            if not message.user_id:
                 thread_messages.append(_message)
-                messages_added += 1
+                continue
+
+            if int(message.user_id) in current_user_ids:
+                is_current_user = True
+                _message.metadata = {"is_current_user": True}
+            else:
+                _message.metadata = {"is_current_user": False}
+
+            if message.user_id not in users:
+                if is_current_user:
+                    _message.metadata["name"] = "Me"
+                else:
+                    _message.metadata["name"] = "Unknown User"
+            else:
+                _message.metadata["name"] = (
+                    name(users[message.user_id])
+                    if thread.display_user_info and is_supervisor
+                    else "Anonymous User"
+                    if thread.private
+                    else pseudonym(thread, users[message.user_id])
+                )
+            thread_messages.append(_message)
 
         if assistant:
             thread.assistant_names = {assistant.id: assistant.name}
@@ -2568,6 +2551,8 @@ async def get_thread(
             if is_supervisor or is_current_user
             else None,
         }
+    else:
+        raise HTTPException(status_code=400, detail="Invalid thread version")
 
 
 @v1.get(
@@ -2650,10 +2635,12 @@ async def get_ci_messages(
     step_id: str,
 ):
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
-    messages = await get_ci_messages_from_step(
-        openai_client, thread.thread_id, run_id, step_id
-    )
-
+    if thread.version <= 2:
+        messages = await get_ci_messages_from_step(
+            openai_client, thread.thread_id, run_id, step_id
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Invalid thread version")
     return {
         "ci_messages": messages,
     }
@@ -2820,68 +2807,328 @@ async def list_thread_messages(
     limit = min(limit, 100)
 
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
-    messages_task = openai_client.beta.threads.messages.list(
-        thread.thread_id, limit=limit, order="asc", before=before
-    )
-    file_names_task = models.Thread.get_file_search_files(request.state.db, thread.id)
-    is_supervisor_check_task = request.state.authz.check(
-        [
-            (
-                f"user:{request.state.session.user.id}",
-                "supervisor",
-                f"class:{class_id}",
-            ),
-        ]
-    )
+    if thread.version <= 2:
+        messages_task = openai_client.beta.threads.messages.list(
+            thread.thread_id, limit=limit, order="asc", before=before
+        )
+        file_names_task = models.Thread.get_file_search_files(
+            request.state.db, thread.id
+        )
+        is_supervisor_check_task = request.state.authz.check(
+            [
+                (
+                    f"user:{request.state.session.user.id}",
+                    "supervisor",
+                    f"class:{class_id}",
+                ),
+            ]
+        )
 
-    messages, file_names, is_supervisor_check = await asyncio.gather(
-        messages_task,
-        file_names_task,
-        is_supervisor_check_task,
-    )
+        messages, file_names, is_supervisor_check = await asyncio.gather(
+            messages_task,
+            file_names_task,
+            is_supervisor_check_task,
+        )
 
-    if messages.data:
-        users = {u.id: u.created for u in thread.users}
-
-    for message in messages.data:
-        for content in message.content:
-            if content.type == "text" and content.text.annotations:
-                for annotation in content.text.annotations:
-                    if annotation.type == "file_citation" and annotation.file_citation:
-                        annotation.file_citation.file_name = file_names.get(
-                            annotation.file_citation.file_id, "Unknown citation"
-                        )
-        user_id = message.metadata.pop("user_id", None)
-        if not user_id:
-            continue
-        message.metadata["is_current_user"] = user_id == str(
+        current_user_ids = [
             request.state.session.user.id
+        ] + await models.User.get_previous_ids_by_id(
+            request.state.db, request.state.session.user.id
         )
-        message.metadata["name"] = (
-            name(users[user_id])
-            if thread.display_user_info and is_supervisor_check[0]
-            else "Anonymous User"
-            if thread.private
-            else pseudonym(thread, users[user_id])
+        if messages.data:
+            users = {u.id: u.created for u in thread.users}
+
+        for message in messages.data:
+            for content in message.content:
+                if content.type == "text" and content.text.annotations:
+                    for annotation in content.text.annotations:
+                        if (
+                            annotation.type == "file_citation"
+                            and annotation.file_citation
+                        ):
+                            annotation.file_citation.file_name = file_names.get(
+                                annotation.file_citation.file_id, "Unknown citation"
+                            )
+            user_id = message.metadata.pop("user_id", None)
+            if not user_id:
+                continue
+            if int(user_id) in current_user_ids:
+                is_current_user = True
+                message.metadata["is_current_user"] = True
+            else:
+                message.metadata["is_current_user"] = False
+            if user_id not in users:
+                if is_current_user:
+                    message.metadata["name"] = "Me"
+                else:
+                    message.metadata["name"] = "Unknown User"
+            else:
+                message.metadata["name"] = (
+                    name(users[user_id])
+                    if thread.display_user_info and is_supervisor_check[0]
+                    else "Anonymous User"
+                    if thread.private
+                    else pseudonym(thread, users[user_id])
+                )
+
+        placeholder_ci_calls = []
+        # Only run the extra steps if code_interpreter is available
+        if "code_interpreter" in thread.tools_available and messages.data:
+            placeholder_ci_calls = await get_placeholder_ci_calls(
+                request.state.db,
+                messages.data[0].assistant_id
+                if messages.data[0].assistant_id
+                else "None",
+                thread.thread_id,
+                thread.id,
+                messages.data[0].created_at,
+                messages.data[-1].created_at,
+            )
+
+        return {
+            "messages": list(messages.data),
+            "ci_messages": placeholder_ci_calls,
+            "limit": limit,
+        }
+    elif thread.version == 3:
+        (
+            [messages_v3, tool_calls_v3],
+            file_names,
+            is_supervisor_check,
+        ) = await asyncio.gather(
+            models.Thread.list_messages_tool_calls(
+                request.state.db, thread.id, limit=20, order="asc", before=before
+            ),
+            models.Thread.get_file_search_files(request.state.db, thread.id),
+            request.state.authz.check(
+                [
+                    (
+                        f"user:{request.state.session.user.id}",
+                        "supervisor",
+                        f"class:{class_id}",
+                    ),
+                ]
+            ),
         )
 
-    placeholder_ci_calls = []
-    # Only run the extra steps if code_interpreter is available
-    if "code_interpreter" in thread.tools_available and messages.data:
-        placeholder_ci_calls = await get_placeholder_ci_calls(
-            request.state.db,
-            messages.data[0].assistant_id if messages.data[0].assistant_id else "None",
-            thread.thread_id,
-            thread.id,
-            messages.data[0].created_at,
-            messages.data[-1].created_at,
+        current_user_ids = [
+            request.state.session.user.id
+        ] + await models.User.get_previous_ids_by_id(
+            request.state.db, request.state.session.user.id
         )
+        users = {str(u.id): u for u in thread.users}
 
-    return {
-        "messages": list(messages.data),
-        "ci_messages": placeholder_ci_calls,
-        "limit": limit,
-    }
+        is_supervisor = is_supervisor_check[0]
+        is_current_user = False
+
+        thread_messages: list[OpenAIMessage] = []
+        placeholder_ci_calls = []
+        file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
+        for tool_call in tool_calls_v3:
+            if tool_call.type == schemas.ToolCallType.CODE_INTERPRETER:
+                tool_content: list[schemas.CodeInterpreterMessageContent] = []
+
+                if tool_call.code:
+                    tool_content.append(
+                        schemas.MessageContentCode(code=tool_call.code, type="code")
+                    )
+
+                for output in tool_call.outputs:
+                    if output.output_type == schemas.CodeInterpreterOutputType.IMAGE:
+                        tool_content.append(
+                            schemas.MessageContentCodeOutputImageURL(
+                                url=output.url, type="code_output_image_url"
+                            )
+                        )
+                    elif output.output_type == schemas.CodeInterpreterOutputType.LOGS:
+                        tool_content.append(
+                            schemas.MessageContentCodeOutputLogs(
+                                logs=output.logs, type="code_output_logs"
+                            )
+                        )
+
+                placeholder_ci_calls.append(
+                    schemas.CodeInterpreterMessage(
+                        id=str(tool_call.id),
+                        assistant_id=str(thread.assistant_id)
+                        if thread.assistant_id
+                        else "",
+                        created_at=int(tool_call.created.timestamp()),
+                        content=tool_content,
+                        metadata={},
+                        object="thread.message",
+                        role="assistant",
+                        run_id=str(tool_call.run_id),
+                        thread_id=str(thread.id),
+                    )
+                )
+            elif tool_call.type == schemas.ToolCallType.FILE_SEARCH:
+                for result in tool_call.results:
+                    if file_search_results.get(result.file_id):
+                        file_search_results[result.file_id].text += (
+                            "\n\n <hr/> \n\n" + result.text
+                        )
+                    else:
+                        file_search_results[result.file_id] = (
+                            schemas.FileSearchToolAnnotationResult(
+                                file_id=result.file_id,
+                                filename=result.filename,
+                                text=result.text,
+                            )
+                        )
+
+        for message in messages_v3:
+            _message = OpenAIMessage(
+                id=str(message.id),
+                thread_id=str(thread.id),
+                assistant_id=str(thread.assistant_id) if thread.assistant_id else "",
+                created_at=int(message.created.timestamp()),
+                object="thread.message",
+                role=message.role.value,
+                content=[],
+                status=message.message_status.value
+                if message.message_status != "pending"
+                else "in_progress",
+            )
+            attachments: list[Attachment] = []
+            attachments_dict: dict[str, list[dict[str, str]]] = {}
+            for attachment in message.file_search_attachments:
+                attachments_dict.setdefault(attachment.file_id, []).append(
+                    {"type": "file_search"}
+                )
+
+            for attachment in message.code_interpreter_attachments:
+                attachments_dict.setdefault(attachment.file_id, []).append(
+                    {"type": "code_interpreter"}
+                )
+            for file_id, tools in attachments_dict.items():
+                attachments.append({"file_id": file_id, "tools": tools})
+
+            _message.attachments = attachments
+            for content in message.content:
+                match content.type:
+                    case schemas.MessagePartType.INPUT_TEXT:
+                        _message.content.append(
+                            TextContentBlock(
+                                text=Text(value=content.text, annotations=[]),
+                                type="text",
+                            )
+                        )
+                    case schemas.MessagePartType.INPUT_IMAGE:
+                        _message.content.append(
+                            ImageFileContentBlock(
+                                type="image_file",
+                                image_file=ImageFile(
+                                    file_id=content.input_image_file_id,
+                                ),
+                            )
+                        )
+                    case schemas.MessagePartType.OUTPUT_TEXT:
+                        _annotations: list[Annotation] = []
+                        _file_ids_file_citation_annotation: set[str] = set()
+                        if content.annotations:
+                            for annotation in content.annotations:
+                                if (
+                                    annotation.type
+                                    == schemas.AnnotationType.FILE_CITATION
+                                ):
+                                    _file_record = file_search_results.get(
+                                        annotation.file_id
+                                    )
+                                    if _file_record:
+                                        if (
+                                            annotation.file_id
+                                            not in _file_ids_file_citation_annotation
+                                        ):
+                                            _file_ids_file_citation_annotation.add(
+                                                annotation.file_id
+                                            )
+                                            _file_citation = FileCitationAnnotation(
+                                                end_index=annotation.end_index or 0,
+                                                start_index=annotation.start_index or 0,
+                                                file_citation=FileCitation(
+                                                    file_id=_file_record.file_id,
+                                                    file_name=_file_record.filename,
+                                                    quote=_file_record.text,
+                                                ),
+                                                text="responses_v3",
+                                                type="file_citation",
+                                            )
+                                            _annotations.append(_file_citation)
+                                elif (
+                                    annotation.type == schemas.AnnotationType.FILE_PATH
+                                    or (
+                                        annotation.type
+                                        == schemas.AnnotationType.CONTAINER_FILE_CITATION
+                                        and not annotation.vision_file_id
+                                    )
+                                ):
+                                    _annotations.append(
+                                        FilePathAnnotation(
+                                            type="file_path",
+                                            end_index=annotation.end_index,
+                                            start_index=annotation.start_index,
+                                            file_path=FilePath(
+                                                file_id=str(
+                                                    annotation.file_object_id
+                                                    or annotation.file_id
+                                                ),
+                                            ),
+                                            text=annotation.text or "",
+                                        )
+                                    )
+                                elif (
+                                    annotation.type
+                                    == schemas.AnnotationType.CONTAINER_FILE_CITATION
+                                    and annotation.vision_file_id
+                                ):
+                                    _message.content.insert(
+                                        0,
+                                        ImageFileContentBlock(
+                                            image_file=ImageFile(
+                                                file_id=annotation.vision_file_id,
+                                            ),
+                                            type="image_file",
+                                        ),
+                                    )
+
+                        _message.content.append(
+                            TextContentBlock(
+                                type="text",
+                                text=Text(
+                                    value=content.text,
+                                    annotations=_annotations,
+                                ),
+                            )
+                        )
+
+            if not message.user_id:
+                thread_messages.append(_message)
+                continue
+
+            if int(message.user_id) in current_user_ids:
+                is_current_user = True
+                _message.metadata = {"is_current_user": True}
+            else:
+                _message.metadata = {"is_current_user": False}
+
+            if message.user_id not in users:
+                if is_current_user:
+                    _message.metadata["name"] = "Me"
+                else:
+                    _message.metadata["name"] = "Unknown User"
+            else:
+                _message.metadata["name"] = (
+                    name(users[message.user_id])
+                    if thread.display_user_info and is_supervisor
+                    else "Anonymous User"
+                    if thread.private
+                    else pseudonym(thread, users[message.user_id])
+                )
+            thread_messages.append(_message)
+        return {"messages": thread_messages, "ci_messages": [], "limit": limit}
+    else:
+        raise HTTPException(status_code=400, detail="Invalid thread version")
 
 
 @v1.get(
@@ -2901,46 +3148,79 @@ async def get_last_run(
     TIMEOUT = 60  # seconds
     thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
 
-    # Streaming is not supported right now, so we need to poll to get the last run.
-    # https://platform.openai.com/docs/assistants/how-it-works/runs-and-run-steps
-    runs = [
-        r
-        async for r in await openai_client.beta.threads.runs.list(
-            thread.thread_id, limit=1, order="desc"
-        )
-    ]
+    if thread.version <= 2:
+        # Streaming is not supported right now, so we need to poll to get the last run.
+        # https://platform.openai.com/docs/assistants/how-it-works/runs-and-run-steps
+        runs = [
+            r
+            async for r in await openai_client.beta.threads.runs.list(
+                thread.thread_id, limit=1, order="desc"
+            )
+        ]
 
-    if not runs:
-        return {"thread": thread, "run": None}
+        if not runs:
+            return {"thread": thread, "run": None}
 
-    last_run = runs[0]
+        last_run = runs[0]
 
-    if not block:
+        if not block:
+            return {"thread": thread, "run": last_run}
+
+        t0 = time.monotonic()
+        while last_run.status not in {
+            "completed",
+            "failed",
+            "incomplete",
+            "expired",
+            "cancelled",
+        }:
+            if time.monotonic() - t0 > TIMEOUT:
+                raise HTTPException(
+                    status_code=504, detail="Timeout waiting for run to complete"
+                )
+            # Poll until the run is complete.
+            await asyncio.sleep(1)
+            try:
+                last_run = await openai_client.beta.threads.runs.retrieve(
+                    last_run.id, thread_id=thread.thread_id
+                )
+            except openai.APIConnectionError as e:
+                logger.exception("Error connecting to OpenAI: %s", e)
+                # Continue polling
+
         return {"thread": thread, "run": last_run}
+    elif thread.version == 3:
+        runs = thread.runs
+        runs.sort(key=lambda r: r.created, reverse=True)
+        last_run = runs[0] if runs else None
 
-    t0 = time.monotonic()
-    while last_run.status not in {
-        "completed",
-        "failed",
-        "incomplete",
-        "expired",
-        "cancelled",
-    }:
-        if time.monotonic() - t0 > TIMEOUT:
-            raise HTTPException(
-                status_code=504, detail="Timeout waiting for run to complete"
-            )
-        # Poll until the run is complete.
-        await asyncio.sleep(1)
-        try:
-            last_run = await openai_client.beta.threads.runs.retrieve(
-                last_run.id, thread_id=thread.thread_id
-            )
-        except openai.APIConnectionError as e:
-            logger.exception("Error connecting to OpenAI: %s", e)
-            # Continue polling
+        if not last_run:
+            return {"thread": thread, "run": None}
 
-    return {"thread": thread, "run": last_run}
+        if not block:
+            return {"thread": thread, "run": last_run}
+
+        t0 = time.monotonic()
+        while last_run.status not in {
+            schemas.RunStatus.COMPLETED,
+            schemas.RunStatus.FAILED,
+            schemas.RunStatus.INCOMPLETE,
+        }:
+            if time.monotonic() - t0 > TIMEOUT:
+                raise HTTPException(
+                    status_code=504, detail="Timeout waiting for run to complete"
+                )
+            # Poll until the run is complete.
+            await asyncio.sleep(1)
+            try:
+                await request.state.db.refresh(last_run)
+            except Exception as e:
+                logger.exception("Error refreshing run status: %s", e)
+                # Continue polling
+
+        return {"thread": thread, "run": last_run}
+    else:
+        raise HTTPException(status_code=400, detail="Invalid thread version")
 
 
 @v1.get(
@@ -3194,7 +3474,7 @@ async def create_audio_thread(
             parties_ids.append(request.state.session.user.id)
 
     assistant = await models.Assistant.get_by_id(request.state.db, req.assistant_id)
-    if assistant.version == 2:
+    if assistant.version <= 2:
         try:
             thread, class_, parties = await asyncio.gather(
                 openai_client.beta.threads.create(
@@ -3246,6 +3526,11 @@ async def create_audio_thread(
         raise HTTPException(
             status_code=400,
             detail="Audio conversations are not supported with the assistant version you selected. Please select an assistant with version 2.",
+        )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid assistant version",
         )
 
     all_parties = parties or []
@@ -3462,7 +3747,7 @@ async def create_thread(
 
     tools_export = req.model_dump(include={"tools_available"})
 
-    if assistant.version == 2:
+    if assistant.version <= 2:
         try:
             thread, parties, thread_name = await asyncio.gather(
                 openai_client.beta.threads.create(
@@ -3543,7 +3828,7 @@ async def create_thread(
                 status_code=400,
                 detail="Something went wrong while creating your conversation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
             )
-    elif assistant.version != 3:
+    else:
         if vector_store_id:
             await openai_client.vector_stores.delete(vector_store_id)
         raise HTTPException(
@@ -3575,7 +3860,7 @@ async def create_thread(
             thread_id=thread.id if thread and thread.id else None,
             user_id=request.state.session.user.id,
         )
-        if assistant.version == 2
+        if assistant.version <= 2
         else None,
         "timezone": req.timezone,
         "display_user_info": assistant.should_record_user_information
@@ -3860,7 +4145,7 @@ async def create_run(
                 status_code=500,
                 detail="We faced an error while sending your message. " + str(e),
             )
-    elif thread.version == 2:
+    elif thread.version <= 2:
         try:
             file_names = await models.Thread.get_file_search_files(
                 request.state.db, thread.id
@@ -3908,6 +4193,11 @@ async def create_run(
                 status_code=500,
                 detail="We faced an error while sending your message. " + str(e),
             )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid thread version",
+        )
 
     return StreamingResponse(stream, media_type="text/event-stream")
 
@@ -3954,7 +4244,7 @@ async def send_message(
             detail="You do not have permission to interact with this assistant.",
         )
 
-    if thread.version == 2:
+    if thread.version <= 2:
         last_runs_result = await openai_client.beta.threads.runs.list(
             thread.thread_id, limit=1, order="desc"
         )
@@ -3997,6 +4287,11 @@ async def send_message(
                 status_code=409,
                 detail="OpenAI is still processing your last request. We're fetching the latest status...",
             )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid thread version",
+        )
 
     try:
         asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
@@ -4009,6 +4304,7 @@ async def send_message(
                 data,
                 thread.thread_id,
                 class_id,
+                thread_version=thread.version,
             )
 
         if data.file_search_file_ids:
@@ -4042,7 +4338,7 @@ async def send_message(
                 ]
                 tool_resources["code_interpreter"] = {"file_ids": existing_file_ids}
 
-                if thread.version == 2:
+                if thread.version <= 2:
                     try:
                         await openai_client.beta.threads.update(
                             thread.thread_id, tool_resources=tool_resources
@@ -4126,7 +4422,7 @@ async def send_message(
             else None
         )
 
-        if thread.version == 2:
+        if thread.version <= 2:
             metadata: dict[str, str | int] = {
                 "user_id": str(request.state.session.user.id),
             }
@@ -4280,7 +4576,10 @@ async def send_message(
                 else None,
             )
         else:
-            raise NotImplementedError("Thread version not supported")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid thread version",
+            )
     except Exception:
         logger.exception("Error running thread")
         raise HTTPException(
@@ -4419,20 +4718,23 @@ async def delete_thread(
             )
 
     # Keep the OAI thread ID for deletion
+    thread_obj_id = thread.thread_id
+    thread_version = thread.version
     await thread.delete(request.state.db)
 
     # Delete vector store as late as possible to avoid orphaned thread
     if vector_store_obj_id:
         await delete_vector_store_oai(openai_client, vector_store_obj_id)
 
-    try:
-        await openai_client.beta.threads.delete(thread.thread_id)
-    except openai.NotFoundError:
-        pass
-    except openai.BadRequestError as e:
-        raise HTTPException(
-            400, get_details_from_api_error(e, "OpenAI rejected this request")
-        )
+    if thread_version <= 2:
+        try:
+            await openai_client.beta.threads.delete(thread_obj_id)
+        except openai.NotFoundError:
+            pass
+        except openai.BadRequestError as e:
+            raise HTTPException(
+                400, get_details_from_api_error(e, "OpenAI rejected this request")
+            )
 
     # clean up grants
     await request.state.authz.write_safe(revoke=revokes)
@@ -4766,7 +5068,7 @@ async def create_assistant(
             )
         tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
 
-    if req.version == 2:
+    if req.version <= 2:
         try:
             if uses_voice:
                 _model = "gpt-4o"
@@ -4828,6 +5130,8 @@ async def create_assistant(
             "Creating a Version 3 assistant; skipping creation of OpenAI Assistants API object."
         )
         new_asst = None
+    else:
+        raise HTTPException(400, "Invalid assistant version")
 
     try:
         deleted_private_files = req.deleted_private_files or []
@@ -5622,7 +5926,7 @@ async def download_file(
             detail="Thread not found",
         )
 
-    if thread.version == 2:
+    if thread.version <= 2:
         response = await openai_client.files.with_raw_response.retrieve_content(file_id)
         if response.status_code != 200:
             raise HTTPException(
