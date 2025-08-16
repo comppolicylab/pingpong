@@ -3665,6 +3665,13 @@ class Run(Base):
         for row in result:
             yield row.Run
 
+    @classmethod
+    async def get_by_id(cls, session: AsyncSession, id: int) -> "Run":
+        """Get a run by its ID."""
+        stmt = select(Run).where(Run.id == id)
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
+
 
 class Thread(Base):
     __tablename__ = "threads"

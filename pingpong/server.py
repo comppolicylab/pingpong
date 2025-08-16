@@ -4307,7 +4307,7 @@ async def send_message(
                 openai_client,
                 request.state.db,
                 data,
-                thread.thread_id,
+                thread.id,
                 class_id,
                 thread_version=thread.version,
             )

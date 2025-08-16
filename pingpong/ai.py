@@ -71,6 +71,9 @@ from openai.types.responses.response_input_item_param import (
     EasyInputMessageParam,
     ResponseInputMessageContentListParam,
 )
+from openai.types.responses.response_output_message_param import (
+    ResponseOutputMessageParam,
+)
 from openai.types.responses.response_input_image_param import ResponseInputImageParam
 from openai.types.responses.response_input_text_param import ResponseInputTextParam
 from openai.types.responses.response_output_message_param import (
@@ -87,12 +90,6 @@ from openai.types.responses.response_output_text_param import (
 from openai.types.responses.response_file_search_tool_call_param import (
     ResponseFileSearchToolCallParam,
     Result,
-)
-from openai.types.responses.response_code_interpreter_tool_call_param import (
-    ResponseCodeInterpreterToolCallParam,
-    OutputLogs,
-    OutputImage,
-    Output,
 )
 from openai.types.shared.reasoning import Reasoning
 from openai.types.beta.threads import ImageFile, MessageContentPartParam
@@ -489,8 +486,7 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
 
 
 async def build_response_input_item_list(
-    session: AsyncSession,
-    thread_id: int,
+    session: AsyncSession, thread_id: int, uses_reasoning: bool = False
 ) -> tuple[list[ResponseInputItemParam], int]:
     """Build a list of ResponseInputItem from a thread run step."""
     response_input_items: list[ResponseInputItemParam] = []
@@ -515,7 +511,6 @@ async def build_response_input_item_list(
                         )
                     case MessagePartType.OUTPUT_TEXT:
                         annotations: list[Annotation] = []
-
                         for annotation in content.annotations:
                             match annotation.type:
                                 case AnnotationType.FILE_CITATION:
@@ -546,6 +541,8 @@ async def build_response_input_item_list(
                                         )
                                     )
                                 case AnnotationType.CONTAINER_FILE_CITATION:
+                                    continue
+                                    # API currently rejects container_file_citation
                                     annotations.append(
                                         AnnotationContainerFileCitation(
                                             file_id=annotation.file_id,
@@ -554,6 +551,7 @@ async def build_response_input_item_list(
                                             start_index=annotation.start_index or 0,
                                             end_index=annotation.end_index or 0,
                                             type="container_file_citation",
+                                            index=0,
                                         )
                                     )
                                 case _:
@@ -575,7 +573,7 @@ async def build_response_input_item_list(
             response_input_items_with_time.append(
                 (
                     message.created,
-                    EasyInputMessageParam(
+                    ResponseOutputMessageParam(
                         role=message.role, content=content_list, type="message"
                     ),
                 )
@@ -585,30 +583,50 @@ async def build_response_input_item_list(
         for tool_call in run.tool_calls:
             match tool_call.type:
                 case ToolCallType.CODE_INTERPRETER:
-                    tool_call_outputs: list[Output] = []
+                    tool_call_outputs: str = ""
                     for output in tool_call.outputs:
-                        match output.type:
+                        match output.output_type:
                             case CodeInterpreterOutputType.LOGS:
-                                tool_call_outputs.append(
-                                    OutputLogs(logs=output.logs, type="logs")
-                                )
+                                tool_call_outputs += f"LOGS: {output.logs}\n"
                             case CodeInterpreterOutputType.IMAGE:
-                                tool_call_outputs.append(
-                                    OutputImage(url=output.image.url, type="image")
-                                )
+                                tool_call_outputs += "Generated an image\n"
+
                     response_input_items_with_time.append(
                         (
                             tool_call.created,
-                            ResponseCodeInterpreterToolCallParam(
-                                id=tool_call.tool_call_id,
-                                code=tool_call.code,
-                                container_id=tool_call.container_id,
-                                outputs=tool_call_outputs,
-                                status=tool_call.status,
-                                type="code_interpreter_call",
+                            EasyInputMessageParam(
+                                role="developer" if uses_reasoning else "system",
+                                content=f"The assistant made use of the code interpreter tool.\n CODE RUN: {tool_call.code} \n OUTPUTS: {tool_call_outputs}",
                             ),
                         )
                     )
+                    # When not storing responses, the API does not
+                    # accept ResponseCodeInterpreterToolCallParam
+
+                    # tool_call_outputs: list[Output] = []
+                    # for output in tool_call.outputs:
+                    #     match output.output_type:
+                    #         case CodeInterpreterOutputType.LOGS:
+                    #             tool_call_outputs.append(
+                    #                 OutputLogs(logs=output.logs, type="logs")
+                    #             )
+                    #         case CodeInterpreterOutputType.IMAGE:
+                    #             tool_call_outputs.append(
+                    #                 OutputImage(url=output.image.url, type="image")
+                    #             )
+                    # response_input_items_with_time.append(
+                    #     (
+                    #         tool_call.created,
+                    #         ResponseCodeInterpreterToolCallParam(
+                    #             id=tool_call.tool_call_id,
+                    #             code=tool_call.code,
+                    #             container_id=tool_call.container_id,
+                    #             outputs=tool_call_outputs,
+                    #             status=tool_call.status,
+                    #             type="code_interpreter_call",
+                    #         ),
+                    #     )
+                    # )
                 case ToolCallType.FILE_SEARCH:
                     file_search_results: list[Result] = []
                     for result in tool_call.results:
@@ -867,6 +885,7 @@ class BufferedResponseStreamHandler:
                 vision_file_id=file.vision_file_id,
                 vision_file_object_id=file.id if file.vision_file_id else None,
                 filename=file.name,
+                container_id=data["container_id"],
                 start_index=data["start_index"],
                 end_index=data["end_index"],
                 annotation_index=annotation_index,
@@ -1287,9 +1306,20 @@ class BufferedResponseStreamHandler:
         response_error_message: str | None = None,
         response_incomplete_reason: str | None = None,
         send_error_message_only_if_active: bool = False,
+        restore_to_pending_if_queued: bool = False,
     ):
         has_active_run = False
         if self.__cached_run:
+            if (
+                self.__cached_run.status == RunStatus.QUEUED
+                and restore_to_pending_if_queued
+            ):
+                self.__cached_run.status = RunStatus.PENDING
+                self.db.add(self.__cached_run)
+                await self.db.commit()
+                self.__cached_run = None
+                self.enqueue({"type": "done"})
+                return
             has_active_run = True
             if self.__cached_message_part and self.__cached_message:
                 self.__cached_message.content.append(self.__cached_message_part)
@@ -1403,287 +1433,359 @@ async def run_response(
     anonymous_session_id: int | None = None,
     anonymous_link_id: int | None = None,
 ):
-    reasoning_settings: Reasoning | openai.NotGiven = openai.NOT_GIVEN
-
-    if run.reasoning_effort is not None:
-        if run.reasoning_effort not in REASONING_EFFORT_MAP:
-            raise ValueError(
-                f"Invalid reasoning effort: {run.reasoning_effort}. Must be one of {list(REASONING_EFFORT_MAP.keys())}."
-            )
-        reasoning_settings = Reasoning(
-            effort=REASONING_EFFORT_MAP[run.reasoning_effort], summary="auto"
-        )
-
-    temperature_setting: float | openai.NotGiven = (
-        run.temperature if run.temperature is not None else openai.NOT_GIVEN
-    )
     await config.authz.driver.init()
     async with config.db.driver.async_session() as session_:
         async with config.authz.driver.get_client() as c:
-            input_items, input_count = await build_response_input_item_list(
-                session_, thread_id=run.thread_id
-            )
-
-            tools: list[ToolParam] = []
-
-            if run.tools_available and "file_search" in run.tools_available:
-                vector_store_ids = []
-                if assistant_vector_store_id is not None:
-                    vector_store_ids.append(assistant_vector_store_id)
-                if thread_vector_store_id is not None:
-                    vector_store_ids.append(thread_vector_store_id)
-                if attached_file_search_file_ids:
-                    if not thread_vector_store_id:
-                        raise ValueError("Vector store ID is required for file search")
-                    await asyncio.gather(
-                        *[
-                            cli.vector_stores.files.poll(
-                                file_id=file_id, vector_store_id=thread_vector_store_id
-                            )
-                            for file_id in attached_file_search_file_ids
-                        ]
-                    )
-                if vector_store_ids:
-                    tools.append(
-                        FileSearchToolParam(
-                            type="file_search", vector_store_ids=vector_store_ids
-                        )
-                    )
-
-            if run.tools_available and "code_interpreter" in run.tools_available:
-                tools.append(
-                    CodeInterpreter(
-                        container=CodeInterpreterContainerCodeInterpreterToolAuto(
-                            file_ids=code_interpreter_file_ids or [], type="auto"
-                        ),
-                        type="code_interpreter",
-                    )
-                )
-
-            handler: BufferedResponseStreamHandler | None = None
             try:
-                handler = BufferedResponseStreamHandler(
-                    session=session_,
-                    auth=c,
-                    cli=cli,
-                    run=run,
-                    prev_output_index=input_count - 1,
-                    file_names=file_names,
-                    class_id=int(class_id),
-                    thread_id=run.thread_id,
-                    assistant_id=run.assistant_id,
-                    user_id=run.creator_id,
-                    user_auth=user_auth,
-                    anonymous_user_auth=anonymous_user_auth,
-                    anonymous_link_auth=anonymous_link_auth,
-                    anonymous_session_id=anonymous_session_id,
-                    anonymous_link_id=anonymous_link_id,
-                )
-                stream: AsyncStream[ResponseStreamEvent] = await cli.responses.create(
-                    include=[
-                        "code_interpreter_call.outputs",
-                        "file_search_call.results",
-                    ],
-                    input=input_items,
-                    instructions=run.instructions,
-                    model=run.model,
-                    parallel_tool_calls=False,
-                    reasoning=reasoning_settings,
-                    tools=tools,
-                    store=False,
-                    stream=True,
-                    temperature=temperature_setting,
-                    truncation="auto",
-                )
+                reasoning_settings: Reasoning | openai.NotGiven = openai.NOT_GIVEN
 
-                async for event in stream:
-                    match event.type:
-                        case "response.created":
-                            await handler.on_response_created(event)
-                        case "response.in_progress":
-                            await handler.on_response_in_progress(event)
-                        case "response.output_item.added":
-                            match event.item.type:
-                                case "message":
-                                    await handler.on_output_message_created(event.item)
-                                case "code_interpreter_call":
-                                    await handler.on_code_interpreter_tool_call_created(
-                                        event.item
-                                    )
-                                case "file_search_call":
-                                    await handler.on_file_search_call_created(
-                                        event.item
-                                    )
-                                case _:
-                                    pass
-                        case "response.content_part.added":
-                            match event.part.type:
-                                case "output_text":
-                                    await handler.on_output_text_part_created(
-                                        event.part
-                                    )
-                                case _:
-                                    pass
-                        case "response.output_text.delta":
-                            await handler.on_output_text_delta(event)
-                        case "response.output_text.annotation.added":
-                            match event.annotation["type"]:
-                                case "container_file_citation":
-                                    await handler.on_output_text_container_file_citation_added(
-                                        event.annotation, event.annotation_index
-                                    )
-                                case "file_citation":
-                                    await handler.on_output_text_file_citation_added(
-                                        event.annotation, event.annotation_index
-                                    )
-                                case _:
-                                    pass
-                        case "response.content_part.done":
-                            match event.part.type:
-                                case "output_text":
-                                    await handler.on_output_text_part_done(event.part)
-                                case _:
-                                    pass
-                        case "response.code_interpreter_call.in_progress":
-                            await handler.on_code_interpreter_tool_call_in_progress(
-                                event
-                            )
-                        case "response.code_interpreter_call_code.delta":
-                            await handler.on_code_interpreter_tool_call_code_delta(
-                                event
-                            )
-                        case "response.code_interpreter_call.interpreting":
-                            await handler.on_code_interpreter_tool_call_interpreting(
-                                event
-                            )
-                        case "response.code_interpreter_call.completed":
-                            await handler.on_code_interpreter_tool_call_completed(event)
-                        case "response.file_search_call.completed":
-                            await handler.on_file_search_call_completed(event)
-                        case "response.file_search_call.in_progress":
-                            await handler.on_file_search_call_in_progress(event)
-                        case "response.file_search_call.searching":
-                            await handler.on_file_search_call_searching(event)
-                        case "response.output_item.done":
-                            match event.item.type:
-                                case "message":
-                                    await handler.on_output_message_done(event.item)
-                                case "code_interpreter_call":
-                                    await handler.on_code_interpreter_tool_call_done(
-                                        event.item
-                                    )
-                                case "file_search_call":
-                                    await handler.on_file_search_call_done(event.item)
-                                case _:
-                                    pass
-                        case "response.completed":
-                            await handler.on_response_completed(event)
-                        case "response.incomplete":
-                            await handler.on_response_completed(event)
-                        case "response.failed":
-                            await handler.on_response_completed(event)
-                        case "error":
-                            await handler.on_response_error(event)
-                        case _:
-                            pass
-                    yield handler.flush()
-            except (
-                BrokenPipeError,
-                ConnectionResetError,
-                ConnectionAbortedError,
-                asyncio.CancelledError,
-            ) as e:
-                logger.warning(f"Client disconnected: {e}")
-                if handler:
-                    await handler.cleanup(
-                        run_status=RunStatus.INCOMPLETE,
-                        response_incomplete_reason=f"Client disconnected: {e}",
-                        send_error_message_only_if_active=True,
-                    )
-                    yield handler.flush()
-            except openai.APIError as openai_error:
-                if openai_error.type == "server_error":
-                    try:
-                        logger.exception(
-                            f"Server error in response stream: {openai_error}"
+                if run.reasoning_effort is not None:
+                    if run.reasoning_effort not in REASONING_EFFORT_MAP:
+                        raise ValueError(
+                            f"Invalid reasoning effort: {run.reasoning_effort}. Must be one of {list(REASONING_EFFORT_MAP.keys())}."
                         )
-                        if handler:
-                            await handler.cleanup(
-                                run_status=RunStatus.FAILED,
-                                response_error_code=openai_error.code,
-                                response_error_message="OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
-                                send_error_message_only_if_active=False,
-                            )
-                            yield handler.flush()
-                        else:
-                            yield (
-                                orjson.dumps(
-                                    {
-                                        "type": "error",
-                                        "detail": "OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
-                                    }
-                                )
-                                + b"\n"
-                            )
+                    reasoning_settings = Reasoning(
+                        effort=REASONING_EFFORT_MAP[run.reasoning_effort],
+                        summary="auto",
+                    )
 
-                    except Exception as e:
-                        logger.exception(f"Error writing to stream: {e}")
-                        pass
-                else:
-                    try:
-                        logger.exception("Error in response stream")
-                        if handler:
-                            await handler.cleanup(
-                                run_status=RunStatus.FAILED,
-                                response_error_code=openai_error.code,
-                                response_error_message="OpenAI was unable to process your request. "
-                                + get_details_from_api_error(
-                                    openai_error, "Please try again later."
-                                ),
-                                send_error_message_only_if_active=False,
+                temperature_setting: float | openai.NotGiven = (
+                    run.temperature if run.temperature is not None else openai.NOT_GIVEN
+                )
+                input_items, input_count = await build_response_input_item_list(
+                    session_,
+                    thread_id=run.thread_id,
+                    uses_reasoning=not isinstance(reasoning_settings, openai.NotGiven),
+                )
+
+                tools: list[ToolParam] = []
+
+                if run.tools_available and "file_search" in run.tools_available:
+                    vector_store_ids = []
+                    if assistant_vector_store_id is not None:
+                        vector_store_ids.append(assistant_vector_store_id)
+                    if thread_vector_store_id is not None:
+                        vector_store_ids.append(thread_vector_store_id)
+                    if attached_file_search_file_ids:
+                        if not thread_vector_store_id:
+                            raise ValueError(
+                                "Vector store ID is required for file search"
                             )
-                            yield handler.flush()
-                        else:
-                            yield (
-                                orjson.dumps(
-                                    {
-                                        "type": "error",
-                                        "detail": "OpenAI was unable to process your request. "
+                        await asyncio.gather(
+                            *[
+                                cli.vector_stores.files.poll(
+                                    file_id=file_id,
+                                    vector_store_id=thread_vector_store_id,
+                                )
+                                for file_id in attached_file_search_file_ids
+                            ]
+                        )
+                    if vector_store_ids:
+                        tools.append(
+                            FileSearchToolParam(
+                                type="file_search", vector_store_ids=vector_store_ids
+                            )
+                        )
+
+                if run.tools_available and "code_interpreter" in run.tools_available:
+                    tools.append(
+                        CodeInterpreter(
+                            container=CodeInterpreterContainerCodeInterpreterToolAuto(
+                                file_ids=code_interpreter_file_ids or [], type="auto"
+                            ),
+                            type="code_interpreter",
+                        )
+                    )
+
+                handler: BufferedResponseStreamHandler | None = None
+                try:
+                    stream: AsyncStream[
+                        ResponseStreamEvent
+                    ] = await cli.responses.create(
+                        include=[
+                            "code_interpreter_call.outputs",
+                            "file_search_call.results",
+                        ],
+                        input=input_items,
+                        instructions=run.instructions,
+                        model=run.model,
+                        parallel_tool_calls=False,
+                        reasoning=reasoning_settings,
+                        tools=tools,
+                        store=False,
+                        stream=True,
+                        temperature=temperature_setting,
+                        truncation="auto",
+                    )
+                    handler = BufferedResponseStreamHandler(
+                        session=session_,
+                        auth=c,
+                        cli=cli,
+                        run=run,
+                        prev_output_index=input_count - 1,
+                        file_names=file_names,
+                        class_id=int(class_id),
+                        thread_id=run.thread_id,
+                        assistant_id=run.assistant_id,
+                        user_id=run.creator_id,
+                        user_auth=user_auth,
+                        anonymous_user_auth=anonymous_user_auth,
+                        anonymous_link_auth=anonymous_link_auth,
+                        anonymous_session_id=anonymous_session_id,
+                        anonymous_link_id=anonymous_link_id,
+                    )
+
+                    async for event in stream:
+                        match event.type:
+                            case "response.created":
+                                await handler.on_response_created(event)
+                            case "response.in_progress":
+                                await handler.on_response_in_progress(event)
+                            case "response.output_item.added":
+                                match event.item.type:
+                                    case "message":
+                                        await handler.on_output_message_created(
+                                            event.item
+                                        )
+                                    case "code_interpreter_call":
+                                        await handler.on_code_interpreter_tool_call_created(
+                                            event.item
+                                        )
+                                    case "file_search_call":
+                                        await handler.on_file_search_call_created(
+                                            event.item
+                                        )
+                                    case _:
+                                        pass
+                            case "response.content_part.added":
+                                match event.part.type:
+                                    case "output_text":
+                                        await handler.on_output_text_part_created(
+                                            event.part
+                                        )
+                                    case _:
+                                        pass
+                            case "response.output_text.delta":
+                                await handler.on_output_text_delta(event)
+                            case "response.output_text.annotation.added":
+                                match event.annotation["type"]:
+                                    case "container_file_citation":
+                                        await handler.on_output_text_container_file_citation_added(
+                                            event.annotation, event.annotation_index
+                                        )
+                                    case "file_citation":
+                                        await (
+                                            handler.on_output_text_file_citation_added(
+                                                event.annotation, event.annotation_index
+                                            )
+                                        )
+                                    case _:
+                                        pass
+                            case "response.content_part.done":
+                                match event.part.type:
+                                    case "output_text":
+                                        await handler.on_output_text_part_done(
+                                            event.part
+                                        )
+                                    case _:
+                                        pass
+                            case "response.code_interpreter_call.in_progress":
+                                await handler.on_code_interpreter_tool_call_in_progress(
+                                    event
+                                )
+                            case "response.code_interpreter_call_code.delta":
+                                await handler.on_code_interpreter_tool_call_code_delta(
+                                    event
+                                )
+                            case "response.code_interpreter_call.interpreting":
+                                await (
+                                    handler.on_code_interpreter_tool_call_interpreting(
+                                        event
+                                    )
+                                )
+                            case "response.code_interpreter_call.completed":
+                                await handler.on_code_interpreter_tool_call_completed(
+                                    event
+                                )
+                            case "response.file_search_call.completed":
+                                await handler.on_file_search_call_completed(event)
+                            case "response.file_search_call.in_progress":
+                                await handler.on_file_search_call_in_progress(event)
+                            case "response.file_search_call.searching":
+                                await handler.on_file_search_call_searching(event)
+                            case "response.output_item.done":
+                                match event.item.type:
+                                    case "message":
+                                        await handler.on_output_message_done(event.item)
+                                    case "code_interpreter_call":
+                                        await (
+                                            handler.on_code_interpreter_tool_call_done(
+                                                event.item
+                                            )
+                                        )
+                                    case "file_search_call":
+                                        await handler.on_file_search_call_done(
+                                            event.item
+                                        )
+                                    case _:
+                                        pass
+                            case "response.completed":
+                                await handler.on_response_completed(event)
+                            case "response.incomplete":
+                                await handler.on_response_completed(event)
+                            case "response.failed":
+                                await handler.on_response_completed(event)
+                            case "error":
+                                await handler.on_response_error(event)
+                            case _:
+                                pass
+                        yield handler.flush()
+                except (
+                    BrokenPipeError,
+                    ConnectionResetError,
+                    ConnectionAbortedError,
+                    asyncio.CancelledError,
+                ) as e:
+                    logger.warning(f"Client disconnected: {e}")
+                    if handler:
+                        await asyncio.shield(
+                            handler.cleanup(
+                                run_status=RunStatus.INCOMPLETE,
+                                response_incomplete_reason=f"Client disconnected: {e}",
+                                send_error_message_only_if_active=True,
+                                restore_to_pending_if_queued=True,
+                            )
+                        )
+                        await stream.close()
+                        yield handler.flush()
+                except openai.APIError as openai_error:
+                    if openai_error.type == "server_error":
+                        try:
+                            logger.exception(
+                                f"Server error in response stream: {openai_error}"
+                            )
+                            if handler:
+                                await asyncio.shield(
+                                    handler.cleanup(
+                                        run_status=RunStatus.FAILED,
+                                        response_error_code=openai_error.code,
+                                        response_error_message="OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+                                        send_error_message_only_if_active=False,
+                                    )
+                                )
+                                yield handler.flush()
+                            else:
+                                yield (
+                                    orjson.dumps(
+                                        {
+                                            "type": "error",
+                                            "detail": "OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+                                        }
+                                    )
+                                    + b"\n"
+                                )
+
+                        except Exception as e:
+                            logger.exception(f"Error writing to stream: {e}")
+                            pass
+                    else:
+                        try:
+                            logger.exception("Error in response stream")
+                            if handler:
+                                await asyncio.shield(
+                                    handler.cleanup(
+                                        run_status=RunStatus.FAILED,
+                                        response_error_code=openai_error.code,
+                                        response_error_message="OpenAI was unable to process your request. "
                                         + get_details_from_api_error(
                                             openai_error, "Please try again later."
                                         ),
+                                        send_error_message_only_if_active=False,
+                                    )
+                                )
+                                yield handler.flush()
+                            else:
+                                yield (
+                                    orjson.dumps(
+                                        {
+                                            "type": "error",
+                                            "detail": "OpenAI was unable to process your request. "
+                                            + get_details_from_api_error(
+                                                openai_error, "Please try again later."
+                                            ),
+                                        }
+                                    )
+                                    + b"\n"
+                                )
+
+                        except Exception as e:
+                            logger.exception(f"Error writing to stream: {e}")
+                            pass
+                except (ValueError, Exception) as e:
+                    try:
+                        logger.exception(f"Error in response stream: {e}")
+                        if handler:
+                            await asyncio.shield(
+                                handler.cleanup(
+                                    run_status=RunStatus.FAILED,
+                                    response_error_code="pingpong_error",
+                                    response_error_message=str(e),
+                                    send_error_message_only_if_active=False,
+                                )
+                            )
+                            yield handler.flush()
+                        else:
+                            run.status = RunStatus.FAILED
+                            run.error_code = "pingpong_error"
+                            run.error_message = (
+                                f"We were unable to process your request: {e}"
+                            )
+                            session_.add(run)
+                            await session_.commit()
+
+                            yield (
+                                orjson.dumps(
+                                    {
+                                        "type": "error",
+                                        "detail": "We were unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
                                     }
                                 )
                                 + b"\n"
                             )
-
-                    except Exception as e:
-                        logger.exception(f"Error writing to stream: {e}")
+                    except Exception as e_:
+                        logger.exception(f"Error writing to stream: {e_}")
                         pass
-            except (ValueError, Exception) as e:
-                try:
-                    logger.exception(f"Error in response stream: {e}")
+                finally:
                     if handler:
-                        await handler.cleanup(
-                            run_status=RunStatus.FAILED,
-                            response_error_code="pingpong_error",
-                            response_error_message=str(e),
-                            send_error_message_only_if_active=False,
-                        )
                         yield handler.flush()
-                    else:
-                        yield orjson.dumps({"type": "error", "detail": str(e)}) + b"\n"
-                except Exception as e_:
-                    logger.exception(f"Error writing to stream: {e_}")
-                    pass
-            finally:
+                    yield b'{"type":"done"}\n'
+            except Exception as e:
+                logger.exception(f"Error in response creating responses handler: {e}")
                 if handler:
+                    # If we reach here, it means the handler was not able to complete successfully.
+                    # We should clean up the run and notify the user.
                     await handler.cleanup(
-                        run_status=RunStatus.INCOMPLETE,
-                        response_incomplete_reason="User canceled the request.",
-                        send_error_message_only_if_active=True,
+                        run_status=RunStatus.FAILED,
+                        response_error_code="pingpong_error",
+                        response_error_message="We were unable to process your request.",
+                        send_error_message_only_if_active=False,
                     )
                     yield handler.flush()
+                else:
+                    run.status = RunStatus.FAILED
+                    run.error_code = "pingpong_error"
+                    run.error_message = "We were unable to process your request."
+                    session_.add(run)
+                    await session_.commit()
+                yield (
+                    orjson.dumps(
+                        {
+                            "type": "error",
+                            "detail": "We were unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+                        }
+                    )
+                    + b"\n"
+                )
 
 
 async def run_thread(
