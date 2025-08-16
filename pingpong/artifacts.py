@@ -3,7 +3,7 @@ import logging
 import os
 
 from abc import ABC, abstractmethod
-from typing import IO, AsyncGenerator, TextIO
+from typing import IO, AsyncGenerator
 
 from aiohttp import ClientError
 
@@ -78,7 +78,7 @@ class LocalArtifactStore(BaseArtifactStore):
         with open(file_path, "wb") as f:
             data = content.read()
             if isinstance(data, str):
-                data = data.encode('utf-8')
+                data = data.encode("utf-8")
             f.write(data)
 
     async def get(
