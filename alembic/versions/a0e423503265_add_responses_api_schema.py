@@ -380,4 +380,36 @@ def downgrade() -> None:
     op.drop_table("runs")
     op.drop_index(op.f("ix_s3_files_updated"), table_name="s3_files")
     op.drop_table("s3_files")
+    sa.Enum("CODE_INTERPRETER", "FILE_SEARCH", name="toolcalltype").drop(op.get_bind())
+    sa.Enum(
+        "QUEUED",
+        "PENDING",
+        "IN_PROGRESS",
+        "COMPLETED",
+        "FAILED",
+        "INCOMPLETE",
+        name="runstatus",
+    ).drop(op.get_bind())
+    sa.Enum(
+        "IN_PROGRESS", "COMPLETED", "INCOMPLETE", "PENDING", name="messagestatus"
+    ).drop(op.get_bind())
+    sa.Enum("USER", "SYSTEM", "ASSISTANT", "DEVELOPER", name="messagerole").drop(
+        op.get_bind()
+    )
+    sa.Enum(
+        "INPUT_TEXT", "INPUT_IMAGE", "OUTPUT_TEXT", "REFUSAL", name="messageparttype"
+    ).drop(op.get_bind())
+    sa.Enum("FILE_PATH", "URL_CITATION", "FILE_CITATION", name="annotationtype").drop(
+        op.get_bind()
+    )
+    sa.Enum("LOGS", "IMAGE", name="codeinterpreteroutputtype").drop(op.get_bind())
+    sa.Enum(
+        "IN_PROGRESS",
+        "SEARCHING",
+        "INTERPRETING",
+        "COMPLETED",
+        "INCOMPLETE",
+        "FAILED",
+        name="toolcallstatus",
+    ).drop(op.get_bind())
     # ### end Alembic commands ###
