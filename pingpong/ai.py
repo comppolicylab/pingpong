@@ -2270,7 +2270,7 @@ async def export_threads_multiple_classes(
                             session, thread.id, after=after, order="asc"
                         )
 
-                        for message in messages.data:
+                        for message in messages:
                             row = [user_hashes_str]
 
                             if include_user_emails:
@@ -2296,9 +2296,9 @@ async def export_threads_multiple_classes(
                             )
                             csvwriter.writerow(row)
 
-                        if len(messages.data) == 0:
+                        if len(messages) == 0:
                             break
-                        after = messages.data[-1].id
+                        after = messages[-1].id
                 else:
                     logger.exception(f"Unknown thread version: {thread.version}")
                     continue
@@ -2423,38 +2423,75 @@ async def export_class_threads(
             csvwriter.writerow(prompt_row)
 
             after = None
-            while True:
-                messages = await cli.beta.threads.messages.list(
-                    thread_id=thread.thread_id,
-                    after=after,
-                    order="asc",
-                )
-
-                for message in messages.data:
-                    row = [user_hashes_str]
-
-                    if include_user_emails:
-                        row.append(user_emails_str)
-
-                    row.extend(
-                        [
-                            class_.id,
-                            class_.name,
-                            assistant_id,
-                            assistant_name,
-                            message.role,
-                            thread.id,
-                            datetime.fromtimestamp(message.created_at, tz=timezone.utc)
-                            .astimezone(ZoneInfo("America/New_York"))
-                            .isoformat(),
-                            process_message_content(message.content, file_names),
-                        ]
+            if thread.version <= 2:
+                while True:
+                    messages = await cli.beta.threads.messages.list(
+                        thread_id=thread.thread_id,
+                        after=after,
+                        order="asc",
                     )
-                    csvwriter.writerow(row)
 
-                if len(messages.data) == 0:
-                    break
-                after = messages.data[-1].id
+                    for message in messages.data:
+                        row = [user_hashes_str]
+
+                        if include_user_emails:
+                            row.append(user_emails_str)
+
+                        row.extend(
+                            [
+                                class_.id,
+                                class_.name,
+                                assistant_id,
+                                assistant_name,
+                                message.role,
+                                thread.id,
+                                datetime.fromtimestamp(
+                                    message.created_at, tz=timezone.utc
+                                )
+                                .astimezone(ZoneInfo("America/New_York"))
+                                .isoformat(),
+                                process_message_content(message.content, file_names),
+                            ]
+                        )
+                        csvwriter.writerow(row)
+
+                    if len(messages.data) == 0:
+                        break
+                    after = messages.data[-1].id
+            elif thread.version == 3:
+                while True:
+                    messages = await models.Thread.list_messages(
+                        session, thread.id, after=after, order="asc"
+                    )
+
+                    for message in messages:
+                        row = [user_hashes_str]
+
+                        if include_user_emails:
+                            row.append(user_emails_str)
+
+                        row.extend(
+                            [
+                                class_.id,
+                                class_.name,
+                                assistant_id,
+                                assistant_name,
+                                message.role,
+                                thread.id,
+                                message.created.astimezone(ZoneInfo("America/New_York"))
+                                .replace(microsecond=0)
+                                .isoformat(),
+                                process_message_content_v3(message.content, file_names),
+                            ]
+                        )
+                        csvwriter.writerow(row)
+
+                    if len(messages) == 0:
+                        break
+                    after = messages[-1].id
+            else:
+                logger.exception(f"Unknown thread version: {thread.version}")
+                continue
 
         csv_buffer.seek(0)
 
@@ -2567,7 +2604,7 @@ def replace_annotations_in_text(
 def replace_annotations_in_text_v3(
     part: models.MessagePart, file_names: dict[str, str]
 ) -> str:
-    updated_text = part.text.value
+    updated_text = part.text
     for annotation in part.annotations:
         match annotation.type:
             case AnnotationType.FILE_PATH:
