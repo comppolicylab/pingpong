@@ -846,7 +846,7 @@
             {#if content.type === 'text'}
               {@const { clean_string, images } = processString(content.text.value)}
               {@const imageInfo = convertImageProxyToInfo(images)}
-              {@const quoteCitations = content.text.annotations.filter(isFileCitation)}
+              {@const quoteCitations = (content.text.annotations ?? []).filter(isFileCitation)}
 
               <div class="leading-6">
                 <Markdown

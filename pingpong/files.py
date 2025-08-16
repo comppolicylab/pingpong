@@ -619,7 +619,7 @@ async def handle_create_file(
     content_type = upload.content_type.lower()
     if not _is_supported(content_type):
         raise HTTPException(
-            status_code=403, detail=f"File type not supported by OpenAI! {content_type}"
+            status_code=403, detail="File type not supported by OpenAI!"
         )
 
     is_azure_client = isinstance(oai_client, openai.AsyncAzureOpenAI)
