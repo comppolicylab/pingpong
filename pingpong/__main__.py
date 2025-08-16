@@ -39,6 +39,9 @@ from pingpong.merge import (
 from pingpong.migrations.m01_file_class_id_to_assoc_table import (
     migrate_file_class_id_to_assoc_table,
 )
+from pingpong.migrations.m02_remove_responses_threads_assistants import (
+    remove_responses_threads_assistants,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType
 from pingpong.summary import send_class_summary_for_class
@@ -679,6 +682,20 @@ def m01_file_class_id_to_assoc_table() -> None:
             logger.info("Done!")
 
     asyncio.run(_m01_file_class_id_to_assoc_table())
+
+
+@db.command("remove_responses_threads_assistants_v3")
+def remove_responses_threads_assistants_v3() -> None:
+    async def _remove_responses_threads_assistants() -> None:
+        await config.authz.driver.init()
+        async with config.db.driver.async_session() as session:
+            async with config.authz.driver.get_client() as c:
+                logger.info("Removing threads, and assistants...")
+                await remove_responses_threads_assistants(session, c)
+                await session.commit()
+                logger.info("Done!")
+
+    asyncio.run(_remove_responses_threads_assistants())
 
 
 @db.command("get_assistant_description_stats")
