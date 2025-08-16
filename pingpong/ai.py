@@ -22,6 +22,7 @@ from pingpong.schemas import (
     APIKeyValidationResponse,
     AnnotationType,
     CodeInterpreterOutputType,
+    FileSearchToolAnnotationResult,
     MessageStatus,
     RunStatus,
     ThreadName,
@@ -492,165 +493,162 @@ async def build_response_input_item_list(
     response_input_items: list[ResponseInputItemParam] = []
     # Store ResponseInputItemParam and time created to sort later
     response_input_items_with_time: list[tuple[datetime, ResponseInputItemParam]] = []
+    async for message in models.Thread.list_all_messages_gen(session, thread_id):
+        content_list: list[ResponseInputMessageContentListParam] = []
+        for content in message.content:
+            match content.type:
+                case MessagePartType.INPUT_TEXT:
+                    content_list.append(
+                        ResponseInputTextParam(text=content.text, type="input_text")
+                    )
+                case MessagePartType.INPUT_IMAGE:
+                    content_list.append(
+                        ResponseInputImageParam(
+                            file_id=content.input_image_file_id, type="input_image"
+                        )
+                    )
+                case MessagePartType.OUTPUT_TEXT:
+                    annotations: list[Annotation] = []
+                    for annotation in content.annotations:
+                        match annotation.type:
+                            case AnnotationType.FILE_CITATION:
+                                annotations.append(
+                                    AnnotationFileCitation(
+                                        file_id=annotation.file_id,
+                                        filename=annotation.filename,
+                                        index=annotation.index or 0,
+                                        type="file_citation",
+                                    )
+                                )
+                            case AnnotationType.FILE_PATH:
+                                annotations.append(
+                                    AnnotationFilePath(
+                                        file_path=annotation.file_path,
+                                        index=annotation.index or 0,
+                                        type="file_path",
+                                    )
+                                )
+                            case AnnotationType.URL_CITATION:
+                                annotations.append(
+                                    AnnotationURLCitation(
+                                        url=annotation.url,
+                                        start_index=annotation.start_index or 0,
+                                        end_index=annotation.end_index or 0,
+                                        title=annotation.title,
+                                        type="url_citation",
+                                    )
+                                )
+                            case AnnotationType.CONTAINER_FILE_CITATION:
+                                # The API currently rejects
+                                # container_file_citation as input
+                                continue
+                                annotations.append(
+                                    AnnotationContainerFileCitation(
+                                        file_id=annotation.file_id,
+                                        container_id=annotation.container_id,
+                                        filename=annotation.filename,
+                                        start_index=annotation.start_index or 0,
+                                        end_index=annotation.end_index or 0,
+                                        type="container_file_citation",
+                                        index=0,
+                                    )
+                                )
+                            case _:
+                                continue  # Skip unsupported annotation types
 
-    async for run in models.Run.get_runs_by_thread_id(session, thread_id):
-        # Messages
-        for message in run.messages:
-            content_list: list[ResponseInputMessageContentListParam] = []
-            for content in message.content:
-                match content.type:
-                    case MessagePartType.INPUT_TEXT:
-                        content_list.append(
-                            ResponseInputTextParam(text=content.text, type="input_text")
+                    content_list.append(
+                        ResponseOutputTextParam(
+                            text=content.text,
+                            annotations=annotations,
+                            type="output_text",
                         )
-                    case MessagePartType.INPUT_IMAGE:
-                        content_list.append(
-                            ResponseInputImageParam(
-                                file_id=content.input_image_file_id, type="input_image"
-                            )
+                    )
+                case MessagePartType.REFUSAL:
+                    content_list.append(
+                        ResponseOutputRefusalParam(
+                            refusal=content.refusal, type="output_refusal"
                         )
-                    case MessagePartType.OUTPUT_TEXT:
-                        annotations: list[Annotation] = []
-                        for annotation in content.annotations:
-                            match annotation.type:
-                                case AnnotationType.FILE_CITATION:
-                                    annotations.append(
-                                        AnnotationFileCitation(
-                                            file_id=annotation.file_id,
-                                            filename=annotation.filename,
-                                            index=annotation.index or 0,
-                                            type="file_citation",
-                                        )
-                                    )
-                                case AnnotationType.FILE_PATH:
-                                    annotations.append(
-                                        AnnotationFilePath(
-                                            file_path=annotation.file_path,
-                                            index=annotation.index or 0,
-                                            type="file_path",
-                                        )
-                                    )
-                                case AnnotationType.URL_CITATION:
-                                    annotations.append(
-                                        AnnotationURLCitation(
-                                            url=annotation.url,
-                                            start_index=annotation.start_index or 0,
-                                            end_index=annotation.end_index or 0,
-                                            title=annotation.title,
-                                            type="url_citation",
-                                        )
-                                    )
-                                case AnnotationType.CONTAINER_FILE_CITATION:
-                                    continue
-                                    # API currently rejects container_file_citation
-                                    annotations.append(
-                                        AnnotationContainerFileCitation(
-                                            file_id=annotation.file_id,
-                                            container_id=annotation.container_id,
-                                            filename=annotation.filename,
-                                            start_index=annotation.start_index or 0,
-                                            end_index=annotation.end_index or 0,
-                                            type="container_file_citation",
-                                            index=0,
-                                        )
-                                    )
-                                case _:
-                                    continue  # Skip unsupported annotation types
-
-                        content_list.append(
-                            ResponseOutputTextParam(
-                                text=content.text,
-                                annotations=annotations,
-                                type="output_text",
-                            )
-                        )
-                    case MessagePartType.REFUSAL:
-                        content_list.append(
-                            ResponseOutputRefusalParam(
-                                refusal=content.refusal, type="output_refusal"
-                            )
-                        )
-            response_input_items_with_time.append(
-                (
-                    message.created,
-                    ResponseOutputMessageParam(
-                        role=message.role, content=content_list, type="message"
-                    ),
-                )
+                    )
+        response_input_items_with_time.append(
+            (
+                message.created,
+                ResponseOutputMessageParam(
+                    role=message.role, content=content_list, type="message"
+                ),
             )
+        )
 
-        # Tool Calls
-        for tool_call in run.tool_calls:
-            match tool_call.type:
-                case ToolCallType.CODE_INTERPRETER:
-                    tool_call_outputs: str = ""
-                    for output in tool_call.outputs:
-                        match output.output_type:
-                            case CodeInterpreterOutputType.LOGS:
-                                tool_call_outputs += f"LOGS: {output.logs}\n"
-                            case CodeInterpreterOutputType.IMAGE:
-                                tool_call_outputs += "Generated an image\n"
+    async for tool_call in models.Thread.list_all_tool_calls_gen(session, thread_id):
+        match tool_call.type:
+            case ToolCallType.CODE_INTERPRETER:
+                tool_call_outputs: str = ""
+                for output in tool_call.outputs:
+                    match output.output_type:
+                        case CodeInterpreterOutputType.LOGS:
+                            tool_call_outputs += f"LOGS: {output.logs}\n"
+                        case CodeInterpreterOutputType.IMAGE:
+                            tool_call_outputs += "Generated an image\n"
 
-                    response_input_items_with_time.append(
-                        (
-                            tool_call.created,
-                            EasyInputMessageParam(
-                                role="developer" if uses_reasoning else "system",
-                                content=f"The assistant made use of the code interpreter tool.\n CODE RUN: {tool_call.code} \n OUTPUTS: {tool_call_outputs}",
-                            ),
+                response_input_items_with_time.append(
+                    (
+                        tool_call.created,
+                        EasyInputMessageParam(
+                            role="developer" if uses_reasoning else "system",
+                            content=f"The assistant made use of the code interpreter tool.\n CODE RUN: {tool_call.code} \n OUTPUTS: {tool_call_outputs}",
+                        ),
+                    )
+                )
+                # When not storing responses, the API does not
+                # accept ResponseCodeInterpreterToolCallParam
+
+                # tool_call_outputs: list[Output] = []
+                # for output in tool_call.outputs:
+                #     match output.output_type:
+                #         case CodeInterpreterOutputType.LOGS:
+                #             tool_call_outputs.append(
+                #                 OutputLogs(logs=output.logs, type="logs")
+                #             )
+                #         case CodeInterpreterOutputType.IMAGE:
+                #             tool_call_outputs.append(
+                #                 OutputImage(url=output.image.url, type="image")
+                #             )
+                # response_input_items_with_time.append(
+                #     (
+                #         tool_call.created,
+                #         ResponseCodeInterpreterToolCallParam(
+                #             id=tool_call.tool_call_id,
+                #             code=tool_call.code,
+                #             container_id=tool_call.container_id,
+                #             outputs=tool_call_outputs,
+                #             status=tool_call.status,
+                #             type="code_interpreter_call",
+                #         ),
+                #     )
+                # )
+            case ToolCallType.FILE_SEARCH:
+                file_search_results: list[Result] = []
+                for result in tool_call.results:
+                    file_search_results.append(
+                        Result(
+                            attributes=json.loads(result.attributes),
+                            file_id=result.file_id,
+                            filename=result.filename,
+                            score=result.score,
+                            text=result.text,
                         )
                     )
-                    # When not storing responses, the API does not
-                    # accept ResponseCodeInterpreterToolCallParam
-
-                    # tool_call_outputs: list[Output] = []
-                    # for output in tool_call.outputs:
-                    #     match output.output_type:
-                    #         case CodeInterpreterOutputType.LOGS:
-                    #             tool_call_outputs.append(
-                    #                 OutputLogs(logs=output.logs, type="logs")
-                    #             )
-                    #         case CodeInterpreterOutputType.IMAGE:
-                    #             tool_call_outputs.append(
-                    #                 OutputImage(url=output.image.url, type="image")
-                    #             )
-                    # response_input_items_with_time.append(
-                    #     (
-                    #         tool_call.created,
-                    #         ResponseCodeInterpreterToolCallParam(
-                    #             id=tool_call.tool_call_id,
-                    #             code=tool_call.code,
-                    #             container_id=tool_call.container_id,
-                    #             outputs=tool_call_outputs,
-                    #             status=tool_call.status,
-                    #             type="code_interpreter_call",
-                    #         ),
-                    #     )
-                    # )
-                case ToolCallType.FILE_SEARCH:
-                    file_search_results: list[Result] = []
-                    for result in tool_call.results:
-                        file_search_results.append(
-                            Result(
-                                attributes=json.loads(result.attributes),
-                                file_id=result.file_id,
-                                filename=result.filename,
-                                score=result.score,
-                                text=result.text,
-                            )
-                        )
-                    response_input_items_with_time.append(
-                        (
-                            tool_call.created,
-                            ResponseFileSearchToolCallParam(
-                                id=tool_call.tool_call_id,
-                                queries=json.loads(tool_call.queries),
-                                status=tool_call.status,
-                                results=file_search_results,
-                                type="file_search_call",
-                            ),
-                        )
+                response_input_items_with_time.append(
+                    (
+                        tool_call.created,
+                        ResponseFileSearchToolCallParam(
+                            id=tool_call.tool_call_id,
+                            queries=json.loads(tool_call.queries),
+                            status=tool_call.status,
+                            results=file_search_results,
+                            type="file_search_call",
+                        ),
                     )
+                )
 
     # Sort by created time
     response_input_items_with_time.sort(key=lambda x: x[0])
@@ -701,6 +699,8 @@ class BufferedResponseStreamHandler:
         self.__prev_part_index = -1
         self.__cached_message_part: models.MessagePart | None = None
         self.__current_tool_call: models.ToolCall | None = None
+        self.__file_search_results: dict[str, FileSearchToolAnnotationResult] = {}
+        self.__file_ids_file_citation_annotation: set[str] = set()
 
     def enqueue(self, data: Dict) -> None:
         self.__buffer.write(orjson.dumps(data))
@@ -954,6 +954,40 @@ class BufferedResponseStreamHandler:
                 annotation_index=annotation_index,
             )
         )
+        _file_record = self.__file_search_results.get(data["file_id"])
+        if _file_record:
+            if data["file_id"] not in self.__file_ids_file_citation_annotation:
+                self.__file_ids_file_citation_annotation.add(data["file_id"])
+                self.enqueue(
+                    {
+                        "type": "message_delta",
+                        "delta": {
+                            "content": [
+                                {
+                                    "index": 0,
+                                    "type": "text",
+                                    "text": {
+                                        "value": "",
+                                        "annotations": [
+                                            {
+                                                "type": "file_citation",
+                                                "end_index": 0,
+                                                "start_index": 0,
+                                                "file_citation": {
+                                                    "file_id": data["file_id"],
+                                                    "file_name": data["filename"],
+                                                    "quote": _file_record.text,
+                                                },
+                                                "text": "responses_v3",
+                                            }
+                                        ],
+                                    },
+                                },
+                            ],
+                            "role": None,
+                        },
+                    }
+                )
 
     async def on_output_text_part_done(self, data: ResponseOutputText):
         if not self.__cached_message_part:
@@ -1281,6 +1315,20 @@ class BufferedResponseStreamHandler:
         self.__current_tool_call.queries = json.dumps(data.queries)
 
         for result in data.results:
+            if result.file_id:
+                if self.__file_search_results.get(result.file_id):
+                    self.__file_search_results[result.file_id].text += (
+                        "\n\n <hr/> \n\n" + result.text
+                    )
+                else:
+                    self.__file_search_results[result.file_id] = (
+                        FileSearchToolAnnotationResult(
+                            file_id=result.file_id,
+                            filename=result.filename,
+                            text=result.text,
+                        )
+                    )
+
             self.__current_tool_call.results.append(
                 models.FileSearchCallResult(
                     attributes=json.dumps(result.attributes),
@@ -1436,6 +1484,8 @@ async def run_response(
     await config.authz.driver.init()
     async with config.db.driver.async_session() as session_:
         async with config.authz.driver.get_client() as c:
+            handler: BufferedResponseStreamHandler | None = None
+
             try:
                 reasoning_settings: Reasoning | openai.NotGiven = openai.NOT_GIVEN
 
@@ -1497,7 +1547,6 @@ async def run_response(
                         )
                     )
 
-                handler: BufferedResponseStreamHandler | None = None
                 try:
                     stream: AsyncStream[
                         ResponseStreamEvent

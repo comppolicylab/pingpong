@@ -821,7 +821,7 @@
     {#each $messages as message}
       {@const attachment_file_ids = message.data.attachments
         ? new Set(message.data.attachments.map((attachment) => attachment.file_id))
-        : []}
+        : new Set([])}
       <div class="py-4 px-6 flex gap-x-3">
         <div class="shrink-0">
           {#if message.data.role === 'user'}
@@ -869,7 +869,7 @@
                   {/each}
                 </div>
               {/if}
-              {#if attachment_file_ids}
+              {#if attachment_file_ids.size > 0}
                 <div class="flex flex-wrap gap-2">
                   {#each imageInfo as image}
                     {#if !(image.response && 'file_id' in image.response && image.response.file_id in allFiles)}
@@ -985,7 +985,7 @@
               <div class="leading-6"><pre>{JSON.stringify(content, null, 2)}</pre></div>
             {/if}
           {/each}
-          {#if attachment_file_ids}
+          {#if attachment_file_ids.size > 0}
             <div class="flex flex-wrap gap-2 mt-4">
               {#each attachment_file_ids as file_id}
                 {#if allFiles[file_id]}

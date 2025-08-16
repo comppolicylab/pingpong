@@ -3859,9 +3859,7 @@ async def create_thread(
             assistant.use_image_descriptions,
             thread_id=thread.id if thread and thread.id else None,
             user_id=request.state.session.user.id,
-        )
-        if assistant.version <= 2
-        else None,
+        ),
         "timezone": req.timezone,
         "display_user_info": assistant.should_record_user_information
         and not class_.private,
@@ -3941,7 +3939,9 @@ async def create_thread(
                             file_search_attachments=file_search_files,
                             code_interpreter_attachments=code_interpreter_files,
                         )
-                    ],
+                    ]
+                    if messageContentParts
+                    else [],
                 )
             ]
             request.state.db.add(result)

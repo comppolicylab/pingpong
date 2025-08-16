@@ -1,6 +1,5 @@
 import asyncio
 from datetime import datetime, timezone
-import io
 from typing import Union
 import openai
 import logging

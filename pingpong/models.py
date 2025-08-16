@@ -4272,6 +4272,28 @@ class Thread(Base):
         return result.scalars().all()
 
     @classmethod
+    async def list_all_messages_gen(
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+    ) -> AsyncGenerator["Message", None]:
+        stmt = select(Message).where(Message.thread_id == thread_id)
+        result = await session.execute(stmt)
+        for message in result.scalars().all():
+            yield message
+
+    @classmethod
+    async def list_all_tool_calls_gen(
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+    ) -> AsyncGenerator["ToolCall", None]:
+        stmt = select(ToolCall).where(ToolCall.thread_id == thread_id)
+        result = await session.execute(stmt)
+        for tool_call in result.scalars().all():
+            yield tool_call
+
+    @classmethod
     async def list_messages_tool_calls(
         cls,
         session: AsyncSession,
