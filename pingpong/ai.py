@@ -1587,12 +1587,20 @@ async def run_response(
                         case _:
                             pass
                     yield handler.flush()
-            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as e:
-                logger.info(f"Client disconnected: {e}")
-                return
-            except asyncio.CancelledError:
-                logger.info("Stream cancelled")
-                return
+            except (
+                BrokenPipeError,
+                ConnectionResetError,
+                ConnectionAbortedError,
+                asyncio.CancelledError,
+            ) as e:
+                logger.warning(f"Client disconnected: {e}")
+                if handler:
+                    await handler.cleanup(
+                        run_status=RunStatus.INCOMPLETE,
+                        response_incomplete_reason=f"Client disconnected: {e}",
+                        send_error_message_only_if_active=True,
+                    )
+                    yield handler.flush()
             except openai.APIError as openai_error:
                 if openai_error.type == "server_error":
                     try:
