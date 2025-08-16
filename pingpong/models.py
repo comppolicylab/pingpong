@@ -2463,6 +2463,16 @@ class Assistant(Base):
         )
         await session.execute(stmt)
 
+    @classmethod
+    async def get_all_assistants_by_version(
+        cls, session: AsyncSession, version: int
+    ) -> AsyncGenerator["Assistant", None]:
+        """Get all assistants by version."""
+        stmt = select(Assistant).where(Assistant.version == version)
+        result = await session.execute(stmt)
+        for assistant in result:
+            yield assistant.Assistant
+
 
 class LMSClass(Base):
     __tablename__ = "lms_classes"
@@ -4306,3 +4316,13 @@ class Thread(Base):
         )
 
         return messages.scalars().all(), tool_calls.scalars().all()
+
+    @classmethod
+    async def get_all_threads_by_version(
+        cls, session: AsyncSession, version: int
+    ) -> AsyncGenerator["Thread", None]:
+        """Get all threads by version."""
+        stmt = select(Thread).where(Thread.version == version)
+        result = await session.execute(stmt)
+        for thread in result:
+            yield thread.Thread
