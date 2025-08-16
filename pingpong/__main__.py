@@ -40,6 +40,8 @@ from pingpong.migrations.m01_file_class_id_to_assoc_table import (
     migrate_file_class_id_to_assoc_table,
 )
 from pingpong.migrations.m02_remove_responses_threads_assistants import (
+    remove_responses_assistants,
+    remove_responses_threads,
     remove_responses_threads_assistants,
 )
 from pingpong.now import _get_next_run_time, croner, utcnow
@@ -685,8 +687,8 @@ def m01_file_class_id_to_assoc_table() -> None:
     asyncio.run(_m01_file_class_id_to_assoc_table())
 
 
-@db.command("remove_responses_threads_assistants_v3")
-def remove_responses_threads_assistants_v3() -> None:
+@db.command("m02_remove_responses_threads_assistants")
+def m02_remove_responses_threads_assistants() -> None:
     async def _remove_responses_threads_assistants() -> None:
         await config.authz.driver.init()
         async with config.db.driver.async_session() as session:
@@ -698,6 +700,31 @@ def remove_responses_threads_assistants_v3() -> None:
 
     asyncio.run(_remove_responses_threads_assistants())
 
+@db.command("m02_remove_responses_threads")
+def m02_remove_responses_threads() -> None:
+    async def _remove_responses_threads() -> None:
+        await config.authz.driver.init()
+        async with config.db.driver.async_session() as session:
+            async with config.authz.driver.get_client() as c:
+                logger.info("Removing threads...")
+                await remove_responses_threads(session, c)
+                await session.commit()
+                logger.info("Done!")
+
+    asyncio.run(_remove_responses_threads())
+
+@db.command("m02_remove_responses_assistants")
+def m02_remove_responses_assistants() -> None:
+    async def _remove_responses_assistants() -> None:
+        await config.authz.driver.init()
+        async with config.db.driver.async_session() as session:
+            async with config.authz.driver.get_client() as c:
+                logger.info("Removing assistants...")
+                await remove_responses_assistants(session, c)
+                await session.commit()
+                logger.info("Done!")
+
+    asyncio.run(_remove_responses_assistants())
 
 @db.command("get_assistant_description_stats")
 def get_assistant_description_stats() -> None:
