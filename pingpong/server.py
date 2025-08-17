@@ -5864,20 +5864,22 @@ async def delete_assistant(
 
     # Keep the OAI assistant ID for deletion
     assistant_id = asst.assistant_id
+    assistant_version = asst.version
     await models.Assistant.delete(request.state.db, asst.id)
 
     # Delete vector store as late as possible to avoid orphaned assistant
     if vector_store_obj_id:
         await delete_vector_store_oai(openai_client, vector_store_obj_id)
 
-    try:
-        await openai_client.beta.assistants.delete(assistant_id)
-    except openai.NotFoundError:
-        pass
-    except openai.BadRequestError as e:
-        raise HTTPException(
-            400, get_details_from_api_error(e, "OpenAI rejected this request")
-        )
+    if assistant_version <= 2:
+        try:
+            await openai_client.beta.assistants.delete(assistant_id)
+        except openai.NotFoundError:
+            pass
+        except openai.BadRequestError as e:
+            raise HTTPException(
+                400, get_details_from_api_error(e, "OpenAI rejected this request")
+            )
 
     # clean up grants
     await request.state.authz.write_safe(revoke=revokes)
