@@ -2838,6 +2838,8 @@ async def list_thread_messages(
         if messages.data:
             users = {u.id: u.created for u in thread.users}
 
+        is_supervisor = is_supervisor_check[0]
+        is_current_user = False
         for message in messages.data:
             for content in message.content:
                 if content.type == "text" and content.text.annotations:
