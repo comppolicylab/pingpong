@@ -2401,11 +2401,17 @@ class Assistant(Base):
 
     @classmethod
     async def async_get_published(
-        cls, session: AsyncSession, class_id: int, user_ids: list[int] | None = None
+        cls,
+        session: AsyncSession,
+        class_id: int,
+        user_ids: list[int] | None = None,
+        version: int | None = None,
     ) -> AsyncGenerator["Assistant", None]:
         condition = [Assistant.published.is_not(None)]
         if user_ids:
             condition.append(Assistant.creator_id.in_(user_ids))
+        if version:
+            condition.append(Assistant.version == version)
 
         stmt = select(Assistant).where(
             and_(
