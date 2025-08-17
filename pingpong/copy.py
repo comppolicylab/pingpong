@@ -384,7 +384,7 @@ async def copy_moderator_published_assistants(
     )
 
     async for assistant in models.Assistant.async_get_published(
-        session, source_class_id, supervisor_ids
+        session, source_class_id, supervisor_ids, version=2
     ):
         await copy_assistant(
             session,
@@ -403,7 +403,7 @@ async def copy_all_published_assistants(
     target_class_id: int,
 ):
     async for assistant in models.Assistant.async_get_published(
-        session, source_class_id
+        session, source_class_id, version=2
     ):
         await copy_assistant(
             session,
