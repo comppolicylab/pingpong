@@ -2270,11 +2270,13 @@ class Assistant(Base):
 
     @classmethod
     async def async_get_id_name_by_class_id(
-        cls, session: AsyncSession, class_id: int
+        cls, session: AsyncSession, class_id: int, version: int | None = None
     ) -> AsyncGenerator[tuple[int, str], None]:
         stmt = select(Assistant.id, Assistant.name).where(
             Assistant.class_id == int(class_id)
         )
+        if version is not None:
+            stmt = stmt.where(Assistant.version == version)
         result = await session.execute(stmt)
         for row in result:
             yield row.id, row.name
