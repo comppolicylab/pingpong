@@ -4307,7 +4307,7 @@ async def send_message(
                 openai_client,
                 request.state.db,
                 data,
-                thread.id,
+                str(thread.id) if thread.version == 3 else thread.thread_id,
                 class_id,
                 thread_version=thread.version,
             )
