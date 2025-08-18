@@ -58,6 +58,15 @@ export const columns: ColumnDef<Course>[] = [
 				: renderSnippet(notAssignedSnippet, '')
 	},
 	{
+		header: 'Completion Rate Target',
+		accessorKey: 'completion_rate_target',
+		cell: ({ getValue }) => {
+			const v = getValue();
+			return v ? `${v}%` : renderSnippet(noValueSnippet, '');
+		}
+	},
+
+	{
 		header: 'PingPong Group URL',
 		accessorKey: 'pingpong_group_url',
 		cell: ({ getValue }) =>

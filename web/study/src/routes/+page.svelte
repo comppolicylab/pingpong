@@ -159,11 +159,11 @@
 			<Alert.Root class="self-start">
 				<Percent />
 				<Alert.Title class="line-clamp-none tracking-normal"
-					>Pre-assessment completion rate targets coming on August 18</Alert.Title
+					>Available Now: Pre-assessment completion rate targets</Alert.Title
 				>
 				<Alert.Description>
 					<p>
-						You will soon be able to view completion rate targets for your accepted courses. <span
+						You can now view completion rate targets for your accepted courses. <span
 							class="font-medium"
 							>As a reminder, all courses in both treatment and control groups need to meet the
 							completion rate targets for the pre-assessment and post-assessment to remain in the
@@ -181,8 +181,7 @@
 			<Alert.Root class="self-start">
 				<Users />
 				<Alert.Title class="line-clamp-none tracking-normal"
-					>Lists of students that have completed the pre-assessment will be available starting
-					August 22</Alert.Title
+					>Coming August 22: List of students that have completed the pre-assessment</Alert.Title
 				>
 				<Alert.Description>
 					<p>
@@ -202,14 +201,13 @@
 		<Alert.Root class="self-start">
 			<CalendarClock />
 			<Alert.Title class="line-clamp-none tracking-normal"
-				>TutorBot assistant coming to your PingPong Groups on August 18</Alert.Title
+				>Available Now: TutorBot assistant in your PingPong Groups</Alert.Title
 			>
 			<Alert.Description>
 				<p>
-					Courses assigned to the Treatment group will receive access to TutorBot, an AI-powered
-					tutor developed by our team. The TutorBot assistant will be available in your PingPong
-					Groups starting August 18. In the meantime, you are welcome to explore the platform and
-					create your own course-specific assistants. Email <a
+					Courses assigned to the Treatment group have access to TutorBot, an AI-powered tutor
+					developed by our team. The TutorBot assistant is now available in your PingPong Groups.
+					You are welcome to create your own course-specific assistants. Email <a
 						href="mailto:support@pingpong-hks.atlassian.net"
 						class="text-nowrap text-primary underline underline-offset-4 hover:text-primary/80"
 						>support@pingpong-hks.atlassian.net
