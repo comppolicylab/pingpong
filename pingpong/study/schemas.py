@@ -35,6 +35,7 @@ class Course(Model):
     randomization = F.SelectField("Randomization Result")
     start_date = F.DateField("Start Date")
     enrollment_count = F.NumberField("Enrollment")
+    completion_rate_target = F.NumberField("Completion Target (Public)")
     preassessment_url = F.UrlField("Pre-Assessment URL")
     pingpong_group_url = F.UrlField("PingPong Group URL")
     instructor = F.LookupField[Instructor]("Instructor", readonly=True)

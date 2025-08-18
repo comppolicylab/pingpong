@@ -993,6 +993,7 @@ class StudyCourse(BaseModel):
     randomization: Literal["control", "treatment"] | None = None
     start_date: datetime | None = None
     enrollment_count: int | None = None
+    completion_rate_target: float | None = None
     preassessment_url: str | None
     pingpong_group_url: str | None
 

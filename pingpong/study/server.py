@@ -359,6 +359,9 @@ def process_course(course: Course) -> schemas.StudyCourse:
         randomization=randomization,
         start_date=course.start_date,
         enrollment_count=course.enrollment_count,
+        completion_rate_target=course.completion_rate_target * 100
+        if course_status == "accepted"
+        else None,
         preassessment_url=course.preassessment_url
         if course_status == "accepted"
         else None,
