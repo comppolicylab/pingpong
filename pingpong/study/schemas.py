@@ -1,5 +1,8 @@
+from datetime import datetime
 from pyairtable.orm import Model, fields as F
 from typing import cast
+
+from pydantic import BaseModel
 from pingpong.config import config, StudySettings
 
 # Ensure study config is available at import time for Airtable models
@@ -44,6 +47,38 @@ class Course(Model):
         api_key = study_config.airtable_api_key
         base_id = study_config.airtable_base_id
         table_name = study_config.airtable_class_table_id
+
+
+class PreAssessmentStudentSubmission(Model):
+    """Airtable pre-assessment student submission model."""
+
+    submission_id = F.RequiredSingleLineTextField("Response ID")
+    first_name = F.SingleLineTextField("First Name")
+    last_name = F.SingleLineTextField("Last Name")
+    email = F.EmailField("Academic Email")
+    submitted_at = F.DatetimeField("Completed At (ET)")
+    course_id = F.LookupField[Course]("Class", readonly=True)
+
+    class Meta:
+        api_key = study_config.airtable_api_key
+        base_id = study_config.airtable_base_id
+        table_name = study_config.airtable_preassessment_submission_table_id
+
+
+class PreAssessmentStudentSubmissionResponse(BaseModel):
+    """Response model for pre-assessment student submission."""
+
+    id: str
+    first_name: str
+    last_name: str
+    email: str
+    submission_date: datetime
+
+
+class PreAssessmentStudentSubmissionsResponse(BaseModel):
+    """Response model for pre-assessment student submissions."""
+
+    students: list[PreAssessmentStudentSubmissionResponse]
 
 
 class Admin(Model):

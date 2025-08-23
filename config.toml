@@ -189,3 +189,5 @@ airtable_class_table_id = "your class table id here"
 airtable_instructor_table_id = "your instructor table id here"
 # Airtable admin table ID for the study dashboard.
 airtable_admin_table_id = "your admin table id here"
+# Airtable pre-assessment submission table ID for the study dashboard.
+airtable_preassessment_submission_table_id = "your preassessment submission table id here"

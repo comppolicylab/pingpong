@@ -1,6 +1,7 @@
 import type { ColumnDef } from '@tanstack/table-core';
 import { renderComponent, renderSnippet } from '$lib/components/ui/data-table/index.js';
 import UrlCopyable from './data-table-url-copyable.svelte';
+import TableButton from './data-table-button.svelte';
 import StatusBadge from './status-badge.svelte';
 import RandomizationBadge from './randomization-badge.svelte';
 import { createRawSnippet } from 'svelte';
@@ -65,7 +66,14 @@ export const columns: ColumnDef<Course>[] = [
 			return v ? `${v}%` : renderSnippet(noValueSnippet, '');
 		}
 	},
-
+	{
+		header: 'Pre-Assessment Completion',
+		id: 'actions',
+		cell: ({ row }) =>
+			row.original.preassessment_url
+				? renderComponent(TableButton, { classId: String(row.original.id) })
+				: renderSnippet(notAssignedSnippet, '')
+	},
 	{
 		header: 'PingPong Group URL',
 		accessorKey: 'pingpong_group_url',

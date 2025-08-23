@@ -9,16 +9,30 @@
 	import Building2 from '@lucide/svelte/icons/building-2';
 	import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard';
 	import BookOpenTextIcon from '@lucide/svelte/icons/book-open-text';
+	import ContactIcon from '@lucide/svelte/icons/contact';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 
 	// Components
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
+	import * as Collapsible from '$lib/components/ui/collapsible/index.js';
 
 	// Snippets
 	import NavUser from './nav-user.svelte';
+	import type { Course } from '$lib/api/types';
 
 	let { ref = $bindable(null), ...restProps }: ComponentProps<typeof Sidebar.Root> = $props();
 
 	const data = $derived(page.data);
+	const courses = $derived.by(() => {
+		const allCourses: Course[] = data.courses ?? [];
+		let coursesWithPreAssessment: Course[] = [];
+		for (const cls of allCourses) {
+			if (cls.preassessment_url && cls.preassessment_url !== '' && cls.status === 'accepted') {
+				coursesWithPreAssessment.push(cls);
+			}
+		}
+		return coursesWithPreAssessment;
+	});
 </script>
 
 <Sidebar.Root bind:ref variant="inset" {...restProps}>
@@ -56,6 +70,41 @@
 						{/snippet}
 					</Sidebar.MenuButton>
 				</Sidebar.MenuItem>
+				<Collapsible.Root open class="group/collapsible">
+					<Sidebar.MenuItem>
+						<Collapsible.Trigger>
+							{#snippet child({ props })}
+								<Sidebar.MenuButton
+									{...props}
+									isActive={page.url.pathname.startsWith('/preassessment')}
+								>
+									<ContactIcon />
+									<span>Pre-Assessment Details</span>
+									<ChevronRightIcon
+										class="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90"
+									/>
+								</Sidebar.MenuButton>
+							{/snippet}
+						</Collapsible.Trigger>
+						<Collapsible.Content>
+							<Sidebar.MenuSub>
+								{#each courses ?? [] as subItem (subItem.name)}
+									<Sidebar.MenuSubItem>
+										<Sidebar.MenuSubButton
+											isActive={page.url.pathname === `/preassessment/${subItem.id}`}
+										>
+											{#snippet child({ props })}
+												<a href={`/preassessment/${subItem.id}`} {...props}>
+													<span>{subItem.name}</span>
+												</a>
+											{/snippet}
+										</Sidebar.MenuSubButton>
+									</Sidebar.MenuSubItem>
+								{/each}
+							</Sidebar.MenuSub>
+						</Collapsible.Content>
+					</Sidebar.MenuItem>
+				</Collapsible.Root>
 			</Sidebar.Menu>
 		</Sidebar.Group>
 		<Sidebar.Group>
