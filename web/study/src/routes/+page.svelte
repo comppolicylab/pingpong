@@ -7,7 +7,7 @@
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
 	import Info from '@lucide/svelte/icons/info';
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
-	import DataTable from '$lib/components/classes-table/data-table.svelte';
+	import DataTable from '$lib/components/common-table/data-table.svelte';
 	import Percent from '@lucide/svelte/icons/percent';
 	import Users from '@lucide/svelte/icons/users';
 	import { columns } from '$lib/components/classes-table/columns.js';
@@ -181,12 +181,12 @@
 			<Alert.Root class="self-start">
 				<Users />
 				<Alert.Title class="line-clamp-none tracking-normal"
-					>Coming August 22: List of students that have completed the pre-assessment</Alert.Title
+					>Available Now: List of students that have completed the pre-assessment</Alert.Title
 				>
 				<Alert.Description>
 					<p>
-						You will soon be able to view real-time lists of students that have completed the
-						pre-assessment for your accepted courses. <span class="font-medium"
+						You can now view real-time lists of students that have completed the pre-assessment for
+						your accepted courses. <span class="font-medium"
 							>All students in your course should complete the pre-assessment, whether they are in a
 							treatment or control group class, regardless of whether they agree for the research
 							team to analyze their de-identified data.</span

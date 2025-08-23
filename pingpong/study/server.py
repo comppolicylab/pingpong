@@ -13,14 +13,20 @@ from pingpong.permission import StudyExpression
 import pingpong.schemas as schemas
 from pingpong.config import config
 from pingpong.session import get_now_fn
-from pingpong.study.schemas import Course
+from pingpong.study.schemas import (
+    Course,
+    PreAssessmentStudentSubmissionsResponse,
+    PreAssessmentStudentSubmissionResponse,
+)
 from pingpong.users import UserNotFoundException
 from pingpong.study.airtable import (
+    check_if_instructor_teaches_course_by_ids,
     get_admin_by_email,
     get_admin_by_id,
     get_courses_by_instructor_id,
     get_instructor,
     get_instructor_by_email,
+    get_preassessment_students_by_class_id,
 )
 from pingpong.template import email_template as message_template
 from pingpong.time import convert_seconds
@@ -383,3 +389,46 @@ async def get_courses(request: Request):
 
     courses = await get_courses_by_instructor_id(instructor.record_id)
     return {"courses": [process_course(course) for course in courses]}
+
+
+@study.get(
+    "/preassessment/{class_id}/students",
+    dependencies=[Depends(LoggedIn())],
+    response_model=PreAssessmentStudentSubmissionsResponse,
+)
+async def get_preassessment_students(class_id: str, request: Request):
+    """Get the pre-assessment students for a specific class."""
+    instructor = await get_instructor(request.state.session.token.sub)
+    if not instructor:
+        raise HTTPException(
+            status_code=404,
+            detail="We couldn't find you in the study database. Please contact the study administrator.",
+        )
+
+    if not await check_if_instructor_teaches_course_by_ids(
+        instructor.record_id, class_id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to view this class's pre-assessment students.",
+        )
+
+    students = await get_preassessment_students_by_class_id(class_id)
+    return {
+        "students": [
+            PreAssessmentStudentSubmissionResponse(
+                id=student.submission_id,
+                first_name=student.first_name,
+                last_name=student.last_name,
+                email=student.email,
+                submission_date=student.submitted_at or "",
+            )
+            for student in sorted(
+                students,
+                key=lambda s: (
+                    (s.last_name or "").lower(),
+                    (s.first_name or "").lower(),
+                ),
+            )
+        ]
+    }
