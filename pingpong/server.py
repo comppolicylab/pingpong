@@ -249,7 +249,7 @@ def get_config(request: Request):
     for instance in d.get("lms", {}).get("lms_instances", []):
         if "client_secret" in instance:
             instance["client_secret"] = "******"
-    if "airtable_api_key" in d.get("study", {}):
+    if d.get("study", {}) is not None and "airtable_api_key" in d.get("study", {}):
         d["study"]["airtable_api_key"] = "******"
     return {"config": d, "headers": dict(request.headers)}
 
