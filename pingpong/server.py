@@ -237,7 +237,7 @@ async def log_request(request: Request, call_next):
 
 @v1.get("/config", dependencies=[Depends(Authz("admin"))])
 def get_config(request: Request):
-    d = config.dict()
+    d = config.model_dump()
     for k in d.get("auth", {}).get("secret_keys", []):
         k["key"] = "******"
     if "key" in d.get("authz", {}):
@@ -246,7 +246,12 @@ def get_config(request: Request):
         d["db"]["password"] = "******"
     if "webhook" in d.get("support", {}):
         d["support"]["webhook"] = "******"
-    return {"config": config.model_dump(), "headers": dict(request.headers)}
+    for instance in d.get("lms", {}).get("lms_instances", []):
+        if "client_secret" in instance:
+            instance["client_secret"] = "******"
+    if "airtable_api_key" in d.get("study", {}):
+        d["study"]["airtable_api_key"] = "******"
+    return {"config": d, "headers": dict(request.headers)}
 
 
 @v1.get(
