@@ -42,6 +42,7 @@ class Course(Model):
     preassessment_url = F.UrlField("Pre-Assessment URL")
     pingpong_group_url = F.UrlField("PingPong Group URL")
     instructor = F.LookupField[Instructor]("Instructor", readonly=True)
+    preassessment_student_count = F.NumberField("Pre-Assessment Student Count")
 
     class Meta:
         api_key = study_config.airtable_api_key
@@ -53,6 +54,7 @@ class PreAssessmentStudentSubmission(Model):
     """Airtable pre-assessment student submission model."""
 
     submission_id = F.RequiredSingleLineTextField("Response ID")
+    status = F.SelectField("Automation Status")
     first_name = F.SingleLineTextField("First Name")
     last_name = F.SingleLineTextField("Last Name")
     email = F.EmailField("Academic Email")

@@ -996,6 +996,7 @@ class StudyCourse(BaseModel):
     completion_rate_target: float | None = None
     preassessment_url: str | None
     pingpong_group_url: str | None
+    preassessment_student_count: int | None = None
 
 
 class Class(BaseModel):

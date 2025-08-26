@@ -13,8 +13,18 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 		.then((res) => res.students);
 
 	const title = courses.find((course) => course.id === courseId)?.name || 'Unknown Course';
+	const completionRateTarget = courses.find(
+		(course) => course.id === courseId
+	)?.completion_rate_target;
+	const enrollmentCount = courses.find((course) => course.id === courseId)?.enrollment_count;
+	const preAssessmentStudentCount = courses.find(
+		(course) => course.id === courseId
+	)?.preassessment_student_count;
 	return {
 		title,
-		preAssessmentStudents
+		preAssessmentStudents,
+		completionRateTarget,
+		enrollmentCount,
+		preAssessmentStudentCount
 	};
 };

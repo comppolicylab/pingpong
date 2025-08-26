@@ -47,7 +47,9 @@ async def check_if_instructor_teaches_course_by_ids(
 async def get_preassessment_students_by_class_id(
     class_id: str,
 ) -> list[PreAssessmentStudentSubmission]:
-    formula = PreAssessmentStudentSubmission.course_id.eq(class_id)
+    formula = PreAssessmentStudentSubmission.course_id.eq(
+        class_id
+    ) & PreAssessmentStudentSubmission.status.eq("Processed")
     submissions = await asyncio.to_thread(
         PreAssessmentStudentSubmission.all, formula=formula
     )

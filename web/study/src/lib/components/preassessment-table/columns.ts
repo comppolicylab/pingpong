@@ -9,6 +9,12 @@ const noValueSnippet = createRawSnippet(() => ({
 
 export const columns: ColumnDef<PreAssessmentStudent>[] = [
 	{
+		id: 'rowNumber',
+		cell: ({ row }) => row.index + 1,
+		enableSorting: false,
+		enableColumnFilter: false
+	},
+	{
 		header: 'First Name',
 		accessorKey: 'first_name',
 		cell: ({ getValue }) => {

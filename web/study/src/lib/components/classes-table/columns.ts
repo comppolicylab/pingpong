@@ -6,6 +6,7 @@ import StatusBadge from './status-badge.svelte';
 import RandomizationBadge from './randomization-badge.svelte';
 import { createRawSnippet } from 'svelte';
 import type { Course } from '$lib/api/types';
+import Progress from '$lib/components/completion-progress/progress.svelte';
 
 const notAssignedSnippet = createRawSnippet(() => ({
 	render: () => `<div class="text-muted-foreground">Not assigned</div>`
@@ -59,11 +60,24 @@ export const columns: ColumnDef<Course>[] = [
 				: renderSnippet(notAssignedSnippet, '')
 	},
 	{
-		header: 'Completion Rate Target',
+		header: 'Completion Rate',
 		accessorKey: 'completion_rate_target',
-		cell: ({ getValue }) => {
+		cell: ({ getValue, row }) => {
 			const v = getValue();
-			return v ? `${v}%` : renderSnippet(noValueSnippet, '');
+			const completionRate =
+				row.original.preassessment_student_count && row.original.enrollment_count
+					? Math.round(
+							(row.original.preassessment_student_count / row.original.enrollment_count) * 100
+						)
+					: 0;
+			return v
+				? renderComponent(Progress, {
+						target: Number(v),
+						value: completionRate,
+						max: 100,
+						showIndicators: true
+					})
+				: renderSnippet(noValueSnippet, '');
 		}
 	},
 	{
