@@ -1363,9 +1363,8 @@ class BufferedResponseStreamHandler:
                 and restore_to_pending_if_queued
             ):
                 self.__cached_run.status = RunStatus.PENDING
-                # Protect database operations from cancellation
                 self.db.add(self.__cached_run)
-                await asyncio.shield(self.db.commit())
+                await self.db.commit()
                 self.__cached_run = None
                 self.enqueue({"type": "done"})
                 return
@@ -1389,9 +1388,8 @@ class BufferedResponseStreamHandler:
             self.__cached_run.error_message = response_error_message
             self.__cached_run.incomplete_reason = response_incomplete_reason
 
-            # Protect database operations from cancellation
             self.db.add(self.__cached_run)
-            await asyncio.shield(self.db.commit())
+            await self.db.commit()
             self.__cached_run = None
 
         if response_error_message and (
@@ -1451,7 +1449,7 @@ class BufferedResponseStreamHandler:
             await models.Class.log_rate_limit_error(
                 self.db, class_id=str(self.class_id)
             )
-            await asyncio.shield(self.db.commit())
+            await self.db.commit()
         self.enqueue(
             {
                 "type": "error",
@@ -1732,7 +1730,7 @@ async def run_response(
                                     f"Error in response stream: {openai_error}"
                                 )
                                 session_.add(run)
-                                await asyncio.shield(session_.commit())
+                                await session_.commit()
 
                                 yield (
                                     orjson.dumps(
@@ -1770,7 +1768,7 @@ async def run_response(
                                     f"Error in response stream: {openai_error}"
                                 )
                                 session_.add(run)
-                                await asyncio.shield(session_.commit())
+                                await session_.commit()
 
                                 yield (
                                     orjson.dumps(
@@ -1806,7 +1804,7 @@ async def run_response(
                             run.error_code = "pingpong_error"
                             run.error_message = f"Error in response stream: {e}"
                             session_.add(run)
-                            await asyncio.shield(session_.commit())
+                            await session_.commit()
 
                             yield (
                                 orjson.dumps(
@@ -1841,7 +1839,7 @@ async def run_response(
                     run.error_code = "pingpong_error"
                     run.error_message = f"Error in response stream: {e}"
                     session_.add(run)
-                    await asyncio.shield(session_.commit())
+                    await session_.commit()
                 yield (
                     orjson.dumps(
                         {
@@ -1933,7 +1931,7 @@ async def run_thread(
                     await config.authz.driver.init()
                     async with config.db.driver.async_session() as session:
                         await models.CodeInterpreterCall.create(session, data)
-                        await asyncio.shield(session.commit())
+                        await session.commit()
                 elif isinstance(event, ThreadRunStepFailed) or isinstance(
                     event, ThreadRunFailed
                 ):
@@ -1943,7 +1941,7 @@ async def run_thread(
                             await models.Class.log_rate_limit_error(
                                 session, class_id=class_id
                             )
-                            await asyncio.shield(session.commit())
+                            await session.commit()
                         yield (
                             orjson.dumps(
                                 {
