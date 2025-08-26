@@ -10,7 +10,7 @@ import alembic.command
 import alembic.config
 
 from datetime import datetime, timedelta
-from sqlalchemy import and_, func, select, text
+from sqlalchemy import and_, func, select, text, update
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from pingpong.ai import (
@@ -45,7 +45,7 @@ from pingpong.migrations.m02_remove_responses_threads_assistants import (
     remove_responses_threads_assistants,
 )
 from pingpong.now import _get_next_run_time, croner, utcnow
-from pingpong.schemas import LMSType
+from pingpong.schemas import LMSType, RunStatus
 from pingpong.summary import send_class_summary_for_class
 
 from .auth import encode_auth_token
@@ -57,6 +57,7 @@ from .models import (
     Assistant,
     Base,
     ExternalLogin,
+    Run,
     S3File,
     ScheduledJob,
     PeriodicTask,
@@ -519,6 +520,90 @@ def clear_rate_limit_logs(before: Optional[str], after: Optional[str]) -> None:
             logger.info("Done!")
 
     asyncio.run(_clear_rate_limit_logs())
+
+
+@db.command("mark_stale_in_progress_runs")
+@click.option(
+    "--hours",
+    type=int,
+    default=1,
+    show_default=True,
+    help="Mark runs older than this many hours as INCOMPLETE",
+)
+def mark_stale_in_progress_runs(hours: int) -> None:
+    """Mark IN_PROGRESS runs older than the given hours as INCOMPLETE."""
+
+    async def _mark_stale() -> None:
+        async with config.db.driver.async_session() as session:
+            cutoff = utcnow() - timedelta(hours=hours)
+
+            # Count affected rows for logging
+            count_stmt = (
+                select(func.count())
+                .select_from(Run)
+                .where(and_(Run.status == RunStatus.IN_PROGRESS, Run.created < cutoff))
+            )
+            result = await session.execute(count_stmt)
+            count = result.scalar_one()
+            logger.info(
+                f"Marking {count} IN_PROGRESS run(s) older than {hours} hour(s) as INCOMPLETE"
+            )
+
+            if count:
+                update_stmt = (
+                    update(Run)
+                    .where(
+                        and_(Run.status == RunStatus.IN_PROGRESS, Run.created < cutoff)
+                    )
+                    .values(status=RunStatus.INCOMPLETE)
+                )
+                await session.execute(update_stmt)
+                await session.commit()
+
+            logger.info("Done!")
+
+    asyncio.run(_mark_stale())
+
+
+@db.command("mark_stale_queued_runs")
+@click.option(
+    "--hours",
+    type=int,
+    default=1,
+    show_default=True,
+    help="Mark runs older than this many hours as PENDING",
+)
+def mark_stale_queued_runs(hours: int) -> None:
+    """Mark QUEUED runs older than the given hours as PENDING."""
+
+    async def _mark_stale() -> None:
+        async with config.db.driver.async_session() as session:
+            cutoff = utcnow() - timedelta(hours=hours)
+
+            # Count affected rows for logging
+            count_stmt = (
+                select(func.count())
+                .select_from(Run)
+                .where(and_(Run.status == RunStatus.QUEUED, Run.created < cutoff))
+            )
+            result = await session.execute(count_stmt)
+            count = result.scalar_one()
+            logger.info(
+                f"Marking {count} QUEUED run(s) older than {hours} hour(s) as PENDING"
+            )
+
+            if count:
+                update_stmt = (
+                    update(Run)
+                    .where(and_(Run.status == RunStatus.QUEUED, Run.created < cutoff))
+                    .values(status=RunStatus.PENDING)
+                )
+                await session.execute(update_stmt)
+                await session.commit()
+
+            logger.info("Done!")
+
+    asyncio.run(_mark_stale())
 
 
 @db.command("migrate_lms_tenants")
