@@ -374,6 +374,7 @@ def process_course(course: Course) -> schemas.StudyCourse:
         pingpong_group_url=course.pingpong_group_url
         if course_status == "accepted"
         else None,
+        preassessment_student_count=course.preassessment_student_count if course_status == "accepted" else None
     )
 
 
