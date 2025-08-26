@@ -35,7 +35,7 @@
 				>
 				<span>students</span>
 			</div>
-			{#if data.preAssessmentStudentCount && data.enrollmentCount && data.preAssessmentStudentCount < data.enrollmentCount}
+			{#if data.preAssessmentStudentCount && data.preAssessmentStudentCount < data.preAssessmentStudents.length}
 				<Alert.Root class="self-start">
 					<Info />
 					<Alert.Title class="line-clamp-none tracking-normal"
