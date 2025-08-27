@@ -1357,7 +1357,7 @@ class BufferedResponseStreamHandler:
         restore_to_pending_if_queued: bool = False,
     ):
         logger.info(
-            f"Cleaning up run: {self.__cached_run.id if self.__cached_run else None}"
+            f"Starting to clean up run: {self.__cached_run.id if self.__cached_run else None}"
         )
         has_active_run = False
         if self.__cached_run:
@@ -1367,9 +1367,8 @@ class BufferedResponseStreamHandler:
             ):
                 self.__cached_run.status = RunStatus.PENDING
                 logger.info(f"Run status changed to PENDING: {self.__cached_run.id}")
-                # Protect database operations from cancellation
                 self.db.add(self.__cached_run)
-                await asyncio.shield(self.db.commit())
+                await self.db.commit()
                 self.__cached_run = None
                 self.enqueue({"type": "done"})
                 return
@@ -1393,12 +1392,11 @@ class BufferedResponseStreamHandler:
             self.__cached_run.error_message = response_error_message
             self.__cached_run.incomplete_reason = response_incomplete_reason
 
-            # Protect database operations from cancellation
             logger.info(
-                f"Cleaning up run: {self.__cached_run.id if self.__cached_run else None}"
+                f"About to save run data while cleaning up run: {self.__cached_run.id if self.__cached_run else None}"
             )
             self.db.add(self.__cached_run)
-            await asyncio.shield(self.db.commit())
+            await self.db.commit()
             self.__cached_run = None
 
         if response_error_message and (
@@ -1490,6 +1488,7 @@ async def run_response(
     anonymous_session_id: int | None = None,
     anonymous_link_id: int | None = None,
 ):
+    is_canceled = False
     await config.authz.driver.init()
     async with config.db.driver.async_session() as session_:
         async with config.authz.driver.get_client() as c:
@@ -1713,7 +1712,7 @@ async def run_response(
                             restore_to_pending_if_queued=True,
                         )
                     logger.info(f"Cleaned up run {run.id} after client disconnect")
-                    return
+                    is_canceled = True
                 except openai.APIError as openai_error:
                     if openai_error.type == "server_error":
                         try:
@@ -1823,9 +1822,10 @@ async def run_response(
                         logger.exception(f"Error writing to stream: {e_}")
                         pass
                 finally:
-                    if handler:
-                        yield handler.flush()
-                    yield b'{"type":"done"}\n'
+                    if not is_canceled:
+                        if handler:
+                            yield handler.flush()
+                        yield b'{"type":"done"}\n'
             except Exception as e:
                 logger.exception(f"Error in response creating responses handler: {e}")
                 if handler:
