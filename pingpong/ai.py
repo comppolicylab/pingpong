@@ -108,6 +108,7 @@ from pingpong.config import config
 from typing import Dict, Literal, Union, overload
 from sqlalchemy.ext.asyncio import AsyncSession
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 logger = logging.getLogger(__name__)
 responses_api_transition_logger = logging.getLogger("responses_api_transition")
@@ -1356,6 +1357,7 @@ class BufferedResponseStreamHandler:
         send_error_message_only_if_active: bool = False,
         restore_to_pending_if_queued: bool = False,
     ):
+        logger.info(f"Cleaning up run: {self.__cached_run.id if self.__cached_run else None}")
         has_active_run = False
         if self.__cached_run:
             if (
@@ -1363,6 +1365,7 @@ class BufferedResponseStreamHandler:
                 and restore_to_pending_if_queued
             ):
                 self.__cached_run.status = RunStatus.PENDING
+                logger.info(f"Run status changed to PENDING: {self.__cached_run.id}")
                 # Protect database operations from cancellation
                 self.db.add(self.__cached_run)
                 await asyncio.shield(self.db.commit())
@@ -1390,6 +1393,7 @@ class BufferedResponseStreamHandler:
             self.__cached_run.incomplete_reason = response_incomplete_reason
 
             # Protect database operations from cancellation
+            logger.info(f"Cleaning up run: {self.__cached_run.id if self.__cached_run else None}")
             self.db.add(self.__cached_run)
             await asyncio.shield(self.db.commit())
             self.__cached_run = None
@@ -1451,7 +1455,7 @@ class BufferedResponseStreamHandler:
             await models.Class.log_rate_limit_error(
                 self.db, class_id=str(self.class_id)
             )
-            await asyncio.shield(self.db.commit())
+            await self.db.commit()
         self.enqueue(
             {
                 "type": "error",
@@ -1699,13 +1703,11 @@ async def run_response(
                 ) as e:
                     logger.warning(f"Client disconnected: {e}")
                     if handler:
-                        await asyncio.shield(
-                            handler.cleanup(
-                                run_status=RunStatus.INCOMPLETE,
-                                response_incomplete_reason=f"Client disconnected: {e}",
-                                send_error_message_only_if_active=True,
-                                restore_to_pending_if_queued=True,
-                            )
+                        await handler.cleanup(
+                            run_status=RunStatus.INCOMPLETE,
+                            response_incomplete_reason=f"Client disconnected: {e}",
+                            send_error_message_only_if_active=True,
+                            restore_to_pending_if_queued=True,
                         )
                     logger.info(f"Cleaned up run {run.id} after client disconnect")
                     return
@@ -1716,14 +1718,13 @@ async def run_response(
                                 f"Server error in response stream: {openai_error}"
                             )
                             if handler:
-                                await asyncio.shield(
-                                    handler.cleanup(
-                                        run_status=RunStatus.FAILED,
-                                        response_error_code=openai_error.code,
-                                        response_error_message="OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
-                                        send_error_message_only_if_active=False,
-                                    )
+                                await handler.cleanup(
+                                    run_status=RunStatus.FAILED,
+                                    response_error_code=openai_error.code,
+                                    response_error_message="OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+                                    send_error_message_only_if_active=False,
                                 )
+
                                 yield handler.flush()
                             else:
                                 run.status = RunStatus.FAILED
@@ -1732,7 +1733,7 @@ async def run_response(
                                     f"Error in response stream: {openai_error}"
                                 )
                                 session_.add(run)
-                                await asyncio.shield(session_.commit())
+                                await session_.commit()
 
                                 yield (
                                     orjson.dumps(
@@ -1751,17 +1752,16 @@ async def run_response(
                         try:
                             logger.exception("Error in response stream")
                             if handler:
-                                await asyncio.shield(
-                                    handler.cleanup(
-                                        run_status=RunStatus.FAILED,
-                                        response_error_code=openai_error.code,
-                                        response_error_message="OpenAI was unable to process your request. "
-                                        + get_details_from_api_error(
-                                            openai_error, "Please try again later."
-                                        ),
-                                        send_error_message_only_if_active=False,
-                                    )
+                                await handler.cleanup(
+                                    run_status=RunStatus.FAILED,
+                                    response_error_code=openai_error.code,
+                                    response_error_message="OpenAI was unable to process your request. "
+                                    + get_details_from_api_error(
+                                        openai_error, "Please try again later."
+                                    ),
+                                    send_error_message_only_if_active=False,
                                 )
+
                                 yield handler.flush()
                             else:
                                 run.status = RunStatus.FAILED
@@ -1770,7 +1770,7 @@ async def run_response(
                                     f"Error in response stream: {openai_error}"
                                 )
                                 session_.add(run)
-                                await asyncio.shield(session_.commit())
+                                await session_.commit()
 
                                 yield (
                                     orjson.dumps(
@@ -1792,21 +1792,20 @@ async def run_response(
                     try:
                         logger.exception(f"Error in response stream: {e}")
                         if handler:
-                            await asyncio.shield(
-                                handler.cleanup(
-                                    run_status=RunStatus.FAILED,
-                                    response_error_code="pingpong_error",
-                                    response_error_message="We were unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
-                                    send_error_message_only_if_active=False,
-                                )
+                            await handler.cleanup(
+                                run_status=RunStatus.FAILED,
+                                response_error_code="pingpong_error",
+                                response_error_message="We were unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+                                send_error_message_only_if_active=False,
                             )
+
                             yield handler.flush()
                         else:
                             run.status = RunStatus.FAILED
                             run.error_code = "pingpong_error"
                             run.error_message = f"Error in response stream: {e}"
                             session_.add(run)
-                            await asyncio.shield(session_.commit())
+                            await session_.commit()
 
                             yield (
                                 orjson.dumps(
@@ -1841,7 +1840,7 @@ async def run_response(
                     run.error_code = "pingpong_error"
                     run.error_message = f"Error in response stream: {e}"
                     session_.add(run)
-                    await asyncio.shield(session_.commit())
+                    await session_.commit()
                 yield (
                     orjson.dumps(
                         {
@@ -1933,7 +1932,7 @@ async def run_thread(
                     await config.authz.driver.init()
                     async with config.db.driver.async_session() as session:
                         await models.CodeInterpreterCall.create(session, data)
-                        await asyncio.shield(session.commit())
+                        await session.commit()
                 elif isinstance(event, ThreadRunStepFailed) or isinstance(
                     event, ThreadRunFailed
                 ):
@@ -1943,7 +1942,7 @@ async def run_thread(
                             await models.Class.log_rate_limit_error(
                                 session, class_id=class_id
                             )
-                            await asyncio.shield(session.commit())
+                            await session.commit()
                         yield (
                             orjson.dumps(
                                 {
