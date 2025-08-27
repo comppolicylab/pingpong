@@ -1759,7 +1759,6 @@ async def run_response(
                         send_error_message_only_if_active=True,
                         restore_to_pending_if_queued=True,
                     )
-                    await stream.close()
                     return
             except openai.APIError as openai_error:
                 if openai_error.type == "server_error":
