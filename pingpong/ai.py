@@ -1540,6 +1540,31 @@ class BufferedResponseStreamHandler:
         )
 
 
+async def clean_up_on_disconnect(
+    run_id: int | None,
+    message_id: int | None,
+    tool_call_id: int | None,
+    response_error_code: str | None = None,
+    response_error_message: str | None = None,
+    response_incomplete_reason: str | None = None,
+):
+    logger.info(f"Cleaning up on disconnect: {locals()}")
+    async with config.db.driver.async_session() as session_:
+        if run_id is not None:
+            await models.Run.mark_as_incomplete(
+                session_,
+                id=run_id,
+                error_code=response_error_code,
+                error_message=response_error_message,
+                incomplete_reason=response_incomplete_reason,
+            )
+        if message_id is not None:
+            await models.Message.mark_as_incomplete(session_, id=message_id)
+        if tool_call_id is not None:
+            await models.ToolCall.mark_as_incomplete(session_, id=tool_call_id)
+        await session_.commit()
+
+
 async def run_response(
     cli: openai.AsyncClient,
     *,
@@ -1753,11 +1778,19 @@ async def run_response(
             ) as e:
                 logger.warning(f"Client disconnected: {e}")
                 if handler:
-                    await handler.cleanup(
-                        run_status=RunStatus.INCOMPLETE,
-                        response_incomplete_reason=f"Client disconnected: {e}",
-                        send_error_message_only_if_active=True,
-                        restore_to_pending_if_queued=True,
+                    asyncio.create_task(
+                        clean_up_on_disconnect(
+                            run_id=handler.__cached_run.id
+                            if handler.__cached_run
+                            else None,
+                            message_id=handler.__cached_message.id
+                            if handler.__cached_message
+                            else None,
+                            tool_call_id=handler.__current_tool_call.id
+                            if handler.__current_tool_call
+                            else None,
+                            response_incomplete_reason=f"Client disconnected: {e}",
+                        )
                     )
                 return
             except openai.APIError as openai_error:

@@ -3489,6 +3489,16 @@ class ToolCall(Base):
         lazy="selectin",
     )
 
+    @classmethod
+    async def mark_as_incomplete(cls, session: AsyncSession, id: int) -> None:
+        """Mark a tool call as incomplete."""
+        stmt = (
+            update(ToolCall)
+            .where(ToolCall.id == id)
+            .values(status=schemas.ToolCallStatus.INCOMPLETE)
+        )
+        await session.execute(stmt)
+
 
 class MessagePart(Base):
     __tablename__ = "message_parts"
@@ -3595,6 +3605,18 @@ class Message(Base):
         for row in result:
             yield row.Message
 
+    @classmethod
+    async def mark_as_incomplete(cls, session: AsyncSession, id: int) -> None:
+        """Mark a message as incomplete."""
+        stmt = (
+            update(Message)
+            .where(Message.id == id)
+            .values(
+                status=schemas.MessageStatus.INCOMPLETE,
+            )
+        )
+        await session.execute(stmt)
+
 
 class Run(Base):
     __tablename__ = "runs"
@@ -3679,6 +3701,28 @@ class Run(Base):
         stmt = select(Run).where(Run.id == id)
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
+
+    @classmethod
+    async def mark_as_incomplete(
+        cls,
+        session: AsyncSession,
+        id: int,
+        error_code: str | None,
+        error_message: str | None,
+        incomplete_reason: str | None,
+    ) -> None:
+        """Mark a run as incomplete."""
+        stmt = (
+            update(Run)
+            .where(Run.id == id)
+            .values(
+                status=schemas.RunStatus.INCOMPLETE,
+                error_code=error_code,
+                error_message=error_message,
+                incomplete_reason=incomplete_reason,
+            )
+        )
+        await session.execute(stmt)
 
 
 class Thread(Base):
