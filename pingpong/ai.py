@@ -1707,6 +1707,7 @@ async def run_response(
                                 restore_to_pending_if_queued=True,
                             )
                         )
+                    logger.info(f"Cleaned up run {run.id} after client disconnect")
                     return
                 except openai.APIError as openai_error:
                     if openai_error.type == "server_error":
