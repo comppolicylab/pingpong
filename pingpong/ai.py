@@ -1428,6 +1428,10 @@ class BufferedResponseStreamHandler:
         send_error_message_only_if_active: bool = False,
         restore_to_pending_if_queued: bool = False,
     ):
+        logger.info(
+            f"Starting to clean up run: {self.__cached_run.id if self.__cached_run else None}"
+        )
+
         has_active_run = False
         if self.__cached_run:
             async with config.db.driver.async_session() as session_:
@@ -1462,6 +1466,9 @@ class BufferedResponseStreamHandler:
                 self.__cached_run.incomplete_reason = response_incomplete_reason
 
                 session_.add(self.__cached_run)
+                logger.info(
+                    f"About to save run data while cleaning up run: {self.__cached_run.id if self.__cached_run else None}"
+                )
                 await session_.commit()
                 self.__cached_run = None
 
