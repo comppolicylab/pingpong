@@ -1760,7 +1760,7 @@ async def run_response(
                         restore_to_pending_if_queued=True,
                     )
                     await stream.close()
-                    yield handler.flush()
+                    return
             except openai.APIError as openai_error:
                 if openai_error.type == "server_error":
                     try:
