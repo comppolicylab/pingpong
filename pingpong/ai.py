@@ -1874,6 +1874,8 @@ async def run_response(
                 if handler:
                     yield handler.flush()
                 yield b'{"type":"done"}\n'
+        except asyncio.CancelledError:
+            return
         except Exception as e:
             logger.exception(f"Error in response creating responses handler: {e}")
             if handler:
