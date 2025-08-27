@@ -108,7 +108,6 @@ from pingpong.config import config
 from typing import Dict, Literal, Union, overload
 from sqlalchemy.ext.asyncio import AsyncSession
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 logger = logging.getLogger(__name__)
 responses_api_transition_logger = logging.getLogger("responses_api_transition")
@@ -1357,7 +1356,9 @@ class BufferedResponseStreamHandler:
         send_error_message_only_if_active: bool = False,
         restore_to_pending_if_queued: bool = False,
     ):
-        logger.info(f"Cleaning up run: {self.__cached_run.id if self.__cached_run else None}")
+        logger.info(
+            f"Cleaning up run: {self.__cached_run.id if self.__cached_run else None}"
+        )
         has_active_run = False
         if self.__cached_run:
             if (
@@ -1393,7 +1394,9 @@ class BufferedResponseStreamHandler:
             self.__cached_run.incomplete_reason = response_incomplete_reason
 
             # Protect database operations from cancellation
-            logger.info(f"Cleaning up run: {self.__cached_run.id if self.__cached_run else None}")
+            logger.info(
+                f"Cleaning up run: {self.__cached_run.id if self.__cached_run else None}"
+            )
             self.db.add(self.__cached_run)
             await asyncio.shield(self.db.commit())
             self.__cached_run = None
