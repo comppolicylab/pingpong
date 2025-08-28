@@ -11,6 +11,7 @@ import orjson
 from pingpong.auth import encode_auth_token
 from pingpong.authz.base import AuthzClient
 from pingpong.bg_tasks import safe_task
+from pingpong.db import db_session_handler
 from pingpong.files import (
     _is_vision_supported,
     file_extension_to_mime_type,
@@ -719,9 +720,13 @@ class BufferedResponseStreamHandler:
             return
         self.__cached_run.run_id = data.response.id
         self.__cached_run.status = RunStatus(data.response.status)
-        async with config.db.driver.async_session() as session_:
-            session_.add(self.__cached_run)
-            await session_.commit()
+
+        @db_session_handler
+        async def update_run(session: AsyncSession):
+            session.add(self.__cached_run)
+            await session.commit()
+
+        await update_run()
 
     async def on_response_in_progress(self, data: ResponseInProgressEvent):
         if not self.__cached_run:
@@ -730,9 +735,13 @@ class BufferedResponseStreamHandler:
             )
             return
         self.__cached_run.status = RunStatus(data.response.status)
-        async with config.db.driver.async_session() as session_:
-            session_.add(self.__cached_run)
-            await session_.commit()
+
+        @db_session_handler
+        async def update_run(session: AsyncSession):
+            session.add(self.__cached_run)
+            await session.commit()
+
+        await update_run()
 
     async def on_output_message_created(self, data: ResponseOutputMessage):
         if not self.__cached_run:
@@ -756,10 +765,14 @@ class BufferedResponseStreamHandler:
             role=data.role,
             created=utcnow(),
         )
-        async with config.db.driver.async_session() as session_:
-            session_.add(self.__cached_message)
-            await session_.commit()
-            await session_.refresh(self.__cached_message)
+
+        @db_session_handler
+        async def add_message(session: AsyncSession):
+            session.add(self.__cached_message)
+            await session.commit()
+            await session.refresh(self.__cached_message)
+
+        await add_message()
 
     async def on_output_text_part_created(self, data: ResponseOutputText):
         if not self.__cached_run:
@@ -784,10 +797,14 @@ class BufferedResponseStreamHandler:
             type=MessagePartType(data.type),
             text=data.text,
         )
-        async with config.db.driver.async_session() as session_:
-            session_.add(self.__cached_message_part)
-            await session_.commit()
-            await session_.refresh(self.__cached_message_part)
+
+        @db_session_handler
+        async def add_message_part(session: AsyncSession):
+            session.add(self.__cached_message_part)
+            await session.commit()
+            await session.refresh(self.__cached_message_part)
+
+        await add_message_part()
         self.enqueue(
             {
                 "type": "message_created",
@@ -812,9 +829,13 @@ class BufferedResponseStreamHandler:
             )
             return
         self.__cached_message_part.text += data.delta
-        async with config.db.driver.async_session() as session_:
-            session_.add(self.__cached_message_part)
-            await session_.commit()
+
+        @db_session_handler
+        async def update_message_part(session: AsyncSession):
+            session.add(self.__cached_message_part)
+            await session.commit()
+
+        await update_message_part()
         self.enqueue(
             {
                 "type": "message_delta",
@@ -856,8 +877,10 @@ class BufferedResponseStreamHandler:
                 )
             },
         )
-        async with config.db.driver.async_session() as session_:
-            file = await handle_create_file(
+
+        @db_session_handler
+        async def create_file(session_: AsyncSession):
+            return await handle_create_file(
                 session=session_,
                 authz=self.auth,
                 oai_client=self.openai_cli,
@@ -875,42 +898,62 @@ class BufferedResponseStreamHandler:
                 anonymous_link_id=self.anonymous_link_id,
             )
 
-            if file.code_interpreter_file_id:
-                await models.Thread.add_code_interpeter_files(
-                    session=session_,
+        file = await create_file()
+        if not file:
+            logger.error(f"Failed to create file from citation. Data: {data}")
+            return
+
+        @db_session_handler
+        async def add_code_interpreter_files(session: AsyncSession):
+            if self.__cached_run and file.code_interpreter_file_id:
+                await models.Thread.add_code_interpreter_files(
+                    session=session,
                     thread_id=self.__cached_run.thread_id,
                     file_ids=[file.code_interpreter_file_id],
                 )
 
-            if file.vision_file_id:
+        if file.code_interpreter_file_id:
+            await add_code_interpreter_files()
+
+        @db_session_handler
+        async def add_image_files(session: AsyncSession):
+            if self.__cached_run and file.vision_file_id:
                 await models.Thread.add_image_files(
-                    session=session_,
+                    session=session,
                     thread_id=self.__cached_run.thread_id,
                     file_ids=[file.vision_file_id],
                 )
 
-            if not self.__cached_message_part:
-                logger.exception(
-                    f"Received file citation annotation without a cached message part. Data: {data}"
-                )
-                return
+        if file.vision_file_id:
+            await add_image_files()
 
-            self.__cached_message_part.annotations.append(
-                models.Annotation(
-                    type=AnnotationType.CONTAINER_FILE_CITATION,
-                    file_id=file.file_id,
-                    file_object_id=file.id if not file.vision_file_id else None,
-                    vision_file_id=file.vision_file_id,
-                    vision_file_object_id=file.id if file.vision_file_id else None,
-                    filename=file.name,
-                    container_id=data["container_id"],
-                    start_index=data["start_index"],
-                    end_index=data["end_index"],
-                    annotation_index=annotation_index,
-                )
+        if not self.__cached_message_part:
+            logger.exception(
+                f"Received file citation annotation without a cached message part. Data: {data}"
             )
+            return
+
+        self.__cached_message_part.annotations.append(
+            models.Annotation(
+                type=AnnotationType.CONTAINER_FILE_CITATION,
+                file_id=file.file_id,
+                file_object_id=file.id if not file.vision_file_id else None,
+                vision_file_id=file.vision_file_id,
+                vision_file_object_id=file.id if file.vision_file_id else None,
+                filename=file.name,
+                container_id=data["container_id"],
+                start_index=data["start_index"],
+                end_index=data["end_index"],
+                annotation_index=annotation_index,
+            )
+        )
+
+        @db_session_handler
+        async def add_cached_message_part(session_: AsyncSession):
             session_.add(self.__cached_message_part)
             await session_.commit()
+
+        await add_cached_message_part()
 
         if file.vision_file_id:
             self.enqueue(
@@ -974,9 +1017,14 @@ class BufferedResponseStreamHandler:
                 annotation_index=annotation_index,
             )
         )
-        async with config.db.driver.async_session() as session_:
+
+        @db_session_handler
+        async def add_cached_message_part(session_: AsyncSession):
             session_.add(self.__cached_message_part)
             await session_.commit()
+
+        await add_cached_message_part()
+
         _file_record = self.__file_search_results.get(data["file_id"])
         if _file_record:
             if data["file_id"] not in self.__file_ids_file_citation_annotation:
@@ -1025,9 +1073,12 @@ class BufferedResponseStreamHandler:
             )
             return
 
-        async with config.db.driver.async_session() as session_:
+        @db_session_handler
+        async def add_cached_message_part(session_: AsyncSession):
             session_.add(self.__cached_message_part)
             await session_.commit()
+
+        await add_cached_message_part()
         self.__cached_message_part = None
 
     async def on_output_message_done(self, data: ResponseOutputMessage):
@@ -1051,10 +1102,12 @@ class BufferedResponseStreamHandler:
         self.__cached_message.completed = utcnow()
         self.__cached_message.message_status = MessageStatus(data.status)
 
-        async with config.db.driver.async_session() as session_:
+        @db_session_handler
+        async def add_cached_message(session_: AsyncSession):
             session_.add(self.__cached_message)
             await session_.commit()
 
+        await add_cached_message()
         self.__cached_message = None
 
     async def on_code_interpreter_tool_call_created(
@@ -1083,10 +1136,13 @@ class BufferedResponseStreamHandler:
             created=utcnow(),
         )
 
-        async with config.db.driver.async_session() as session_:
+        @db_session_handler
+        async def add_cached_tool_call(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
             await session_.refresh(self.__current_tool_call)
+
+        await add_cached_tool_call()
 
         self.enqueue(
             {
@@ -1113,9 +1169,13 @@ class BufferedResponseStreamHandler:
             )
             return
         self.__current_tool_call.status = ToolCallStatus.IN_PROGRESS
-        async with config.db.driver.async_session() as session_:
+
+        @db_session_handler
+        async def add_cached_tool_call(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
+
+        await add_cached_tool_call()
 
     async def on_code_interpreter_tool_call_code_delta(
         self, data: ResponseCodeInterpreterCallCodeDeltaEvent
@@ -1132,9 +1192,12 @@ class BufferedResponseStreamHandler:
             return
         self.__current_tool_call.code += data.delta
 
-        async with config.db.driver.async_session() as session_:
+        @db_session_handler
+        async def add_cached_tool_call(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
+
+        await add_cached_tool_call()
 
         self.enqueue(
             {
@@ -1163,9 +1226,12 @@ class BufferedResponseStreamHandler:
             return
         self.__current_tool_call.status = ToolCallStatus.INTERPRETING
 
-        async with config.db.driver.async_session() as session_:
+        @db_session_handler
+        async def add_cached_tool_call(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
+
+        await add_cached_tool_call()
 
     async def on_code_interpreter_tool_call_completed(
         self, data: ResponseCodeInterpreterCallCompletedEvent
@@ -1182,9 +1248,12 @@ class BufferedResponseStreamHandler:
             return
         self.__current_tool_call.status = ToolCallStatus.COMPLETED
 
-        async with config.db.driver.async_session() as session_:
+        @db_session_handler
+        async def add_cached_tool_call(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
+
+        await add_cached_tool_call()
 
     async def on_code_interpreter_tool_call_done(
         self, data: ResponseCodeInterpreterToolCall
@@ -1270,9 +1339,12 @@ class BufferedResponseStreamHandler:
                             }
                         )
 
-        async with config.db.driver.async_session() as session_:
+        @db_session_handler
+        async def add_cached_tool_call(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
+
+        await add_cached_tool_call()
         self.__current_tool_call = None
 
     async def on_file_search_call_created(self, data: ResponseFileSearchToolCall):
@@ -1298,10 +1370,13 @@ class BufferedResponseStreamHandler:
             created=utcnow(),
         )
 
-        async with config.db.driver.async_session() as session_:
+        @db_session_handler
+        async def add_cached_tool_call(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
             await session_.refresh(self.__current_tool_call)
+
+        await add_cached_tool_call()
 
     async def on_file_search_call_in_progress(
         self, data: ResponseFileSearchCallInProgressEvent
@@ -1319,9 +1394,12 @@ class BufferedResponseStreamHandler:
 
         self.__current_tool_call.status = ToolCallStatus.IN_PROGRESS
 
-        async with config.db.driver.async_session() as session_:
+        @db_session_handler
+        async def add_cached_tool_call(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
+
+        await add_cached_tool_call()
 
     async def on_file_search_call_searching(
         self, data: ResponseFileSearchCallSearchingEvent
@@ -1339,9 +1417,12 @@ class BufferedResponseStreamHandler:
 
         self.__current_tool_call.status = ToolCallStatus.SEARCHING
 
-        async with config.db.driver.async_session() as session_:
+        @db_session_handler
+        async def add_cached_tool_call(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
+
+        await add_cached_tool_call()
 
     async def on_file_search_call_completed(
         self, data: ResponseFileSearchCallCompletedEvent
@@ -1359,9 +1440,12 @@ class BufferedResponseStreamHandler:
 
         self.__current_tool_call.status = ToolCallStatus.COMPLETED
 
-        async with config.db.driver.async_session() as session_:
+        @db_session_handler
+        async def add_cached_tool_call(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
+
+        await add_cached_tool_call()
 
     async def on_file_search_call_done(self, data: ResponseFileSearchToolCall):
         if not self.__cached_run:
@@ -1383,40 +1467,45 @@ class BufferedResponseStreamHandler:
         self.__current_tool_call.status = ToolCallStatus(data.status)
         self.__current_tool_call.queries = json.dumps(data.queries)
 
-        async with config.db.driver.async_session() as session_:
-            for result in data.results:
-                if result.file_id:
-                    if self.__file_search_results.get(result.file_id):
-                        self.__file_search_results[result.file_id].text += (
-                            "\n\n <hr/> \n\n" + result.text
-                        )
-                    else:
-                        self.__file_search_results[result.file_id] = (
-                            FileSearchToolAnnotationResult(
-                                file_id=result.file_id,
-                                filename=result.filename,
-                                text=result.text,
-                            )
-                        )
-
-                self.__current_tool_call.results.append(
-                    models.FileSearchCallResult(
-                        attributes=json.dumps(result.attributes),
-                        file_id=result.file_id,
-                        file_object_id=await models.File.get_obj_id_by_file_id(
-                            session_, result.file_id
-                        )
-                        if result.file_id
-                        else None,
-                        filename=result.filename,
-                        score=result.score,
-                        text=result.text,
-                        created=utcnow(),
+        for result in data.results:
+            if result.file_id:
+                if self.__file_search_results.get(result.file_id):
+                    self.__file_search_results[result.file_id].text += (
+                        "\n\n <hr/> \n\n" + result.text
                     )
-                )
+                else:
+                    self.__file_search_results[result.file_id] = (
+                        FileSearchToolAnnotationResult(
+                            file_id=result.file_id,
+                            filename=result.filename,
+                            text=result.text,
+                        )
+                    )
 
-            session_.add(self.__current_tool_call)
-            await session_.commit()
+            @db_session_handler
+            async def get_file_object_id(session_: AsyncSession):
+                return await models.File.get_obj_id_by_file_id(session_, result.file_id)
+
+            self.__current_tool_call.results.append(
+                models.FileSearchCallResult(
+                    attributes=json.dumps(result.attributes),
+                    file_id=result.file_id,
+                    file_object_id=await get_file_object_id(result.file_id)
+                    if result.file_id
+                    else None,
+                    filename=result.filename,
+                    score=result.score,
+                    text=result.text,
+                    created=utcnow(),
+                )
+            )
+
+            @db_session_handler
+            async def add_current_tool_call(session_: AsyncSession):
+                session_.add(self.__current_tool_call)
+                await session_.commit()
+
+            await add_current_tool_call()
 
         self.__current_tool_call = None
 
