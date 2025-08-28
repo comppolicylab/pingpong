@@ -10,6 +10,7 @@ import openai
 import orjson
 from pingpong.auth import encode_auth_token
 from pingpong.authz.base import AuthzClient
+from pingpong.bg_tasks import safe_task
 from pingpong.files import (
     _is_vision_supported,
     file_extension_to_mime_type,
@@ -1547,6 +1548,50 @@ class BufferedResponseStreamHandler:
         )
 
 
+async def cleanup_task(
+    run_status: RunStatus,
+    run_id: int | None = None,
+    message_id: int | None = None,
+    tool_call_id: int | None = None,
+    response_error_code: str | None = None,
+    response_error_message: str | None = None,
+    response_incomplete_reason: str | None = None,
+    restore_to_pending_if_queued: bool = False,
+):
+    logger.info(
+        f"Starting to clean up run from async task: {run_id if run_id else 'No run ID'}"
+    )
+
+    if run_id:
+        async with config.db.driver.async_session() as session_:
+            run = await models.Run.get_by_id(session_, run_id)
+            if not run:
+                logger.warning(f"Run not found: {run_id}")
+                return
+            if run.status == RunStatus.QUEUED and restore_to_pending_if_queued:
+                run.status = RunStatus.PENDING
+                session_.add(run)
+                await session_.commit()
+                return
+            if message_id:
+                await models.Message.mark_as_incomplete(session_, message_id)
+            if tool_call_id:
+                await models.ToolCall.mark_as_incomplete(session_, tool_call_id)
+
+            run.completed = utcnow()
+            run.status = run_status
+
+            run.error_code = response_error_code
+            run.error_message = response_error_message
+            run.incomplete_reason = response_incomplete_reason
+
+            session_.add(run)
+            logger.info(
+                f"About to save run data while cleaning up run: {run.id if run else None}"
+            )
+            await session_.commit()
+
+
 async def run_response(
     cli: openai.AsyncClient,
     *,
@@ -1761,11 +1806,21 @@ async def run_response(
             ) as e:
                 logger.warning(f"Client disconnected: {e}")
                 if handler:
-                    await handler.cleanup(
-                        run_status=RunStatus.INCOMPLETE,
-                        response_incomplete_reason=f"Client disconnected: {e}",
-                        send_error_message_only_if_active=True,
-                        restore_to_pending_if_queued=True,
+                    asyncio.create_task(
+                        safe_task(
+                            cleanup_task(
+                                run_status=RunStatus.INCOMPLETE,
+                                run_id=run.id if run else None,
+                                message_id=handler.__cached_message.id
+                                if handler.__cached_message
+                                else None,
+                                tool_call_id=handler.__current_tool_call.id
+                                if handler.__current_tool_call
+                                else None,
+                                response_incomplete_reason="User disconnected.",
+                                restore_to_pending_if_queued=True,
+                            )
+                        )
                     )
                 logger.info(f"Cleaned up run {run.id} after client disconnect.")
                 is_canceled = True
