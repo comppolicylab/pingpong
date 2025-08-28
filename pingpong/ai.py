@@ -662,16 +662,16 @@ async def build_response_input_item_list(
         item: ResponseCodeInterpreterToolCallParam, uses_reasoning: bool
     ) -> EasyInputMessageParam:
         tool_call_outputs: str = ""
-        for output in item.outputs or []:
+        for output in item["outputs"] or []:
             match output["type"]:
                 case "logs":
-                    tool_call_outputs += f"LOGS: {output.logs}\n"
+                    tool_call_outputs += f"LOGS: {output['logs']}\n"
                 case "image":
                     tool_call_outputs += "Generated an image\n"
 
         return EasyInputMessageParam(
             role="developer" if uses_reasoning else "system",
-            content=f"The assistant made use of the code interpreter tool.\n CODE RUN: {item.code} \n OUTPUTS: {tool_call_outputs}",
+            content=f"The assistant made use of the code interpreter tool.\n CODE RUN: {item['code']} \n OUTPUTS: {tool_call_outputs}",
         )
 
     for item in response_input_items:
