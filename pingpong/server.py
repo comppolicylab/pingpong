@@ -2484,7 +2484,7 @@ async def get_thread(
             else:
                 _message.metadata = {"is_current_user": False}
 
-            if message.user_id not in users:
+            if str(message.user_id) not in users:
                 if is_current_user:
                     _message.metadata["name"] = "Me"
                 else:
@@ -3119,7 +3119,7 @@ async def list_thread_messages(
             else:
                 _message.metadata = {"is_current_user": False}
 
-            if message.user_id not in users:
+            if str(message.user_id) not in users:
                 if is_current_user:
                     _message.metadata["name"] = "Me"
                 else:
