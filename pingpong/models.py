@@ -4190,8 +4190,17 @@ class Thread(Base):
     ) -> list[str]:
         stmt = (
             select(File.file_id)
-            .join(code_interpreter_file_assistant_association)
-            .join(code_interpreter_file_thread_association)
+            .select_from(File)
+            .join(
+                code_interpreter_file_assistant_association,
+                code_interpreter_file_assistant_association.c.file_id == File.id,
+                isouter=True,
+            )
+            .join(
+                code_interpreter_file_thread_association,
+                code_interpreter_file_thread_association.c.file_id == File.id,
+                isouter=True,
+            )
             .where(
                 or_(
                     code_interpreter_file_thread_association.c.thread_id == thread_id,

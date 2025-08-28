@@ -71,6 +71,7 @@ from openai.types.responses.response_input_item_param import (
     ResponseInputItemParam,
     EasyInputMessageParam,
     ResponseInputMessageContentListParam,
+    ResponseCodeInterpreterToolCallParam,
 )
 from openai.types.responses.response_output_message_param import (
     ResponseOutputMessageParam,
@@ -91,6 +92,11 @@ from openai.types.responses.response_output_text_param import (
 from openai.types.responses.response_file_search_tool_call_param import (
     ResponseFileSearchToolCallParam,
     Result,
+)
+from openai.types.responses.response_code_interpreter_tool_call_param import (
+    Output,
+    OutputImage,
+    OutputLogs,
 )
 from openai.types.shared.reasoning import Reasoning
 from openai.types.beta.threads import ImageFile, MessageContentPartParam
@@ -493,6 +499,7 @@ async def build_response_input_item_list(
     response_input_items: list[ResponseInputItemParam] = []
     # Store ResponseInputItemParam and time created to sort later
     response_input_items_with_time: list[tuple[datetime, ResponseInputItemParam]] = []
+    container_by_last_active_time: dict[int, datetime] = {}
     async for message in models.Thread.list_all_messages_gen(session, thread_id):
         content_list: list[ResponseInputMessageContentListParam] = []
         for content in message.content:
@@ -581,50 +588,52 @@ async def build_response_input_item_list(
     async for tool_call in models.Thread.list_all_tool_calls_gen(session, thread_id):
         match tool_call.type:
             case ToolCallType.CODE_INTERPRETER:
-                tool_call_outputs: str = ""
+                tool_call_outputs: list[Output] = []
                 for output in tool_call.outputs:
                     match output.output_type:
                         case CodeInterpreterOutputType.LOGS:
-                            tool_call_outputs += f"LOGS: {output.logs}\n"
+                            tool_call_outputs.append(
+                                OutputLogs(logs=output.logs, type="logs")
+                            )
                         case CodeInterpreterOutputType.IMAGE:
-                            tool_call_outputs += "Generated an image\n"
-
+                            tool_call_outputs.append(
+                                OutputImage(url=output.url, type="image")
+                            )
                 response_input_items_with_time.append(
                     (
                         tool_call.created,
-                        EasyInputMessageParam(
-                            role="developer" if uses_reasoning else "system",
-                            content=f"The assistant made use of the code interpreter tool.\n CODE RUN: {tool_call.code} \n OUTPUTS: {tool_call_outputs}",
+                        ResponseCodeInterpreterToolCallParam(
+                            id=tool_call.tool_call_id,
+                            code=tool_call.code,
+                            container_id=tool_call.container_id,
+                            outputs=tool_call_outputs,
+                            status=tool_call.status,
+                            type="code_interpreter_call",
                         ),
                     )
                 )
-                # When not storing responses, the API does not
-                # accept ResponseCodeInterpreterToolCallParam
 
-                # tool_call_outputs: list[Output] = []
-                # for output in tool_call.outputs:
-                #     match output.output_type:
-                #         case CodeInterpreterOutputType.LOGS:
-                #             tool_call_outputs.append(
-                #                 OutputLogs(logs=output.logs, type="logs")
-                #             )
-                #         case CodeInterpreterOutputType.IMAGE:
-                #             tool_call_outputs.append(
-                #                 OutputImage(url=output.image.url, type="image")
-                #             )
-                # response_input_items_with_time.append(
-                #     (
-                #         tool_call.created,
-                #         ResponseCodeInterpreterToolCallParam(
-                #             id=tool_call.tool_call_id,
-                #             code=tool_call.code,
-                #             container_id=tool_call.container_id,
-                #             outputs=tool_call_outputs,
-                #             status=tool_call.status,
-                #             type="code_interpreter_call",
-                #         ),
-                #     )
-                # )
+                # Track last active time for each container (ignore None completions)
+                existing_time = container_by_last_active_time.get(
+                    tool_call.container_id
+                )
+                # Build a list of candidate datetimes filtering out None
+                candidates: list[datetime] = []
+                if existing_time is not None:
+                    candidates.append(existing_time)
+                if (
+                    tool_call.created is not None
+                ):  # created should normally always exist
+                    candidates.append(tool_call.created)
+                if (
+                    getattr(tool_call, "completed", None) is not None
+                ):  # completed may be None
+                    candidates.append(tool_call.completed)  # type: ignore[arg-type]
+                if candidates:  # only update if we have at least one datetime
+                    container_by_last_active_time[tool_call.container_id] = max(
+                        candidates
+                    )
+
             case ToolCallType.FILE_SEARCH:
                 file_search_results: list[Result] = []
                 for result in tool_call.results:
@@ -655,6 +664,34 @@ async def build_response_input_item_list(
     # Extract the ResponseInputItemParam from the sorted list
     response_input_items.extend(item for _, item in response_input_items_with_time)
 
+    def convert_to_message(
+        item: ResponseCodeInterpreterToolCallParam, uses_reasoning: bool
+    ) -> EasyInputMessageParam:
+        tool_call_outputs: str = ""
+        for output in item.outputs or []:
+            match output["type"]:
+                case "logs":
+                    tool_call_outputs += f"LOGS: {output.logs}\n"
+                case "image":
+                    tool_call_outputs += "Generated an image\n"
+
+        return EasyInputMessageParam(
+            role="developer" if uses_reasoning else "system",
+            content=f"The assistant made use of the code interpreter tool.\n CODE RUN: {item.code} \n OUTPUTS: {tool_call_outputs}",
+        )
+
+    for item in response_input_items:
+        if item["type"] == "code_interpreter_call":
+            if (
+                item["container_id"] not in container_by_last_active_time
+                or (
+                    utcnow() - container_by_last_active_time[item["container_id"]]
+                ).total_seconds()
+                > 19 * 60
+            ):
+                response_input_items[response_input_items.index(item)] = (
+                    convert_to_message(item, uses_reasoning)
+                )
     return response_input_items, len(response_input_items)
 
 
@@ -1563,7 +1600,7 @@ async def run_response(
                         parallel_tool_calls=False,
                         reasoning=reasoning_settings,
                         tools=tools,
-                        store=False,
+                        store=True,
                         stream=True,
                         temperature=temperature_setting,
                         truncation="auto",
