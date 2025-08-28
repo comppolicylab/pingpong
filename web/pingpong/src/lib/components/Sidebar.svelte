@@ -293,7 +293,6 @@
           <Button
             href={`/threads`}
             class="text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap justify-between gap-2 items-center"
-            disabled={threads.length === 0}
           >
             <span class="text-xs">View All</span><ArrowRightOutline
               size="md"
