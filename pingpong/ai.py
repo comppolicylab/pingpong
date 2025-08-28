@@ -613,23 +613,17 @@ async def build_response_input_item_list(
                     )
                 )
 
-                # Track last active time for each container (ignore None completions)
                 existing_time = container_by_last_active_time.get(
                     tool_call.container_id
                 )
-                # Build a list of candidate datetimes filtering out None
                 candidates: list[datetime] = []
                 if existing_time is not None:
                     candidates.append(existing_time)
-                if (
-                    tool_call.created is not None
-                ):  # created should normally always exist
+                if tool_call.created is not None:
                     candidates.append(tool_call.created)
-                if (
-                    getattr(tool_call, "completed", None) is not None
-                ):  # completed may be None
-                    candidates.append(tool_call.completed)  # type: ignore[arg-type]
-                if candidates:  # only update if we have at least one datetime
+                if getattr(tool_call, "completed", None) is not None:
+                    candidates.append(tool_call.completed)
+                if candidates:
                     container_by_last_active_time[tool_call.container_id] = max(
                         candidates
                     )
