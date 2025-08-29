@@ -32,7 +32,7 @@
   export let assistant: Assistant;
   export let creator: AppUser;
   export let editable = false;
-  export let shareable = true;
+  export let shareable = false;
 
   let sharedAssistantModalOpen = false;
 

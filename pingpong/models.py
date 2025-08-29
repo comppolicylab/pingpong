@@ -2645,6 +2645,7 @@ class Class(Base):
     lms_last_synced = Column(DateTime(timezone=True), nullable=True)
     any_can_create_assistant = Column(Boolean, default=False)
     any_can_publish_assistant = Column(Boolean, default=False)
+    any_can_share_assistant = Column(Boolean, default=False)
     any_can_publish_thread = Column(Boolean, default=False)
     any_can_upload_class_file = Column(Boolean, default=False)
     users: Mapped[List["UserClassRole"]] = relationship(
