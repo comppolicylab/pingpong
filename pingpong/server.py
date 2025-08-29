@@ -5072,12 +5072,21 @@ async def create_assistant(
         # Voice mode assistants are only supported in version 2
         assistant_version = 2
     else:
-        if class_.api_key_obj and class_.api_key_obj.provider == "openai":
+        if (
+            class_.api_key_obj
+            and class_.api_key_obj.provider == "openai"
+            and not req.create_classic_assistant
+        ):
             assistant_version = 3
-        elif not class_.api_key_obj and class_.api_key:
+        elif (
+            not class_.api_key_obj
+            and class_.api_key
+            and not req.create_classic_assistant
+        ):
             assistant_version = 3
         else:
             assistant_version = 2
+    del req.create_classic_assistant
 
     # Check that the class is not private if user information should be recorded
     if class_.private and (
@@ -5423,6 +5432,7 @@ async def update_assistant(
     request: Request,
     openai_client: OpenAIClient,
 ):
+    print(req.model_dump())
     # Get the existing assistant.
     asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
     grants = list[Relation]()

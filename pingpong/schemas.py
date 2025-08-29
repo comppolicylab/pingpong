@@ -407,6 +407,7 @@ class CreateAssistant(BaseModel):
     assistant_should_message_first: bool = False
     should_record_user_information: bool = False
     deleted_private_files: list[int] = []
+    create_classic_assistant: bool = False
 
     _temperature_check = model_validator(mode="after")(temperature_validator)
 
