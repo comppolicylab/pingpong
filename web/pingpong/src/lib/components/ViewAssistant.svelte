@@ -226,7 +226,7 @@
         /></button
       >
 
-      {#if shareable && assistant.published}
+      {#if editable && shareable && assistant.published}
         <button
           on:click|preventDefault={() => {
             sharedAssistantModalOpen = true;
