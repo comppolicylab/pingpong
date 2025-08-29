@@ -860,6 +860,8 @@ async def get_institution_classes(institution_id: str, request: Request):
 async def create_class(
     institution_id: str, create: schemas.CreateClass, request: Request
 ):
+    if not create.any_can_publish_assistant:
+        create.any_can_share_assistant = False
     new_class = await models.Class.create(request.state.db, int(institution_id), create)
 
     user = await models.User.get_by_id(request.state.db, request.state.session.user.id)
