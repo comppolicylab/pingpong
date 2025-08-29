@@ -318,6 +318,7 @@
     useImageDescriptions = assistant?.use_image_descriptions;
     hasSetImageDescriptions = true;
   }
+  let createClassicAssistant = false;
   let assistantShouldMessageFirst = false;
   let hasSetAssistantShouldMessageFirst = false;
   $: if (
@@ -660,6 +661,7 @@
       use_image_descriptions: body.use_image_descriptions?.toString() === 'on',
       hide_prompt: body.hide_prompt?.toString() === 'on',
       assistant_should_message_first: assistantShouldMessageFirst,
+      create_classic_assistant: createClassicAssistant,
       deleted_private_files: [...$trashPrivateFileIds, ...fileSearchCodeInterpreterUnusedFiles],
       should_record_user_information: shouldRecordNameOrVoice
     };
@@ -1550,6 +1552,24 @@
                   automatically use this Next-Gen version. Existing Classic Assistants will continue
                   to work just as expected and will be upgraded to Next-Gen in the future so you can
                   take advantage of the latest improvements.</Helper
+                >
+              </div>
+            {:else}
+              <div class="col-span-2 mb-1">
+                <Checkbox
+                  id="create_classic_assistant"
+                  name="create_classic_assistant"
+                  disabled={preventEdits}
+                  bind:checked={createClassicAssistant}>Create Classic Assistant</Checkbox
+                >
+                <Helper
+                  >Control whether to use the previous generation of Assistants. When checked,
+                  you'll create a Classic Assistant instead of a Next-Gen Assistant.<br /><br
+                  />Next-Gen Assistants are the next generation of PingPong Assistants. They're
+                  designed to enable additional capabilities and improve reliability. Most new
+                  Assistants you create will automatically use this Next-Gen version. Existing
+                  Classic Assistants will continue to work just as expected and will be upgraded to
+                  Next-Gen in the future so you can take advantage of the latest improvements.</Helper
                 >
               </div>
             {/if}

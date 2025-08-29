@@ -1343,6 +1343,7 @@ export type CreateAssistantRequest = {
   instructions: string;
   model: string;
   interaction_mode: 'chat' | 'voice';
+  create_classic_assistant?: boolean;
   temperature: number | null;
   reasoning_effort: number | null;
   tools: Tool[];
@@ -1366,6 +1367,7 @@ export type UpdateAssistantRequest = {
   instructions?: string;
   model?: string;
   interaction_mode?: 'chat' | 'voice';
+  create_classic_assistant?: boolean;
   temperature?: number | null;
   reasoning_effort?: number | null;
   tools?: Tool[];
@@ -1401,6 +1403,7 @@ export const updateAssistant = async (
   assistantId: number,
   data: UpdateAssistantRequest
 ) => {
+  console.log('Updating assistant', data);
   const url = `class/${classId}/assistant/${assistantId}`;
   return await PUT<UpdateAssistantRequest, Assistant>(f, url, data);
 };
