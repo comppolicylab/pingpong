@@ -19,8 +19,17 @@
   export let groupSession: string;
   export let makePrivate = false;
   export let anyCanPublishThread = false;
+  export let anyCanShareAssistant = false;
   export let assistantPermissions: string = 'create:0,publish:0,upload:0';
   export let aiProvider = '';
+
+  let disableAnyCanShareAssistants = assistantPermissions.includes('publish:0');
+  $: {
+    disableAnyCanShareAssistants = assistantPermissions.includes('publish:0');
+    if (disableAnyCanShareAssistants) {
+      anyCanShareAssistant = false;
+    }
+  }
 
   let assistantCopy: 'moderators' | 'all' = 'moderators';
   let userCopy: 'moderators' | 'all' = 'moderators';
@@ -31,6 +40,7 @@
     groupSession,
     makePrivate,
     anyCanPublishThread,
+    anyCanShareAssistant,
     assistantPermissions,
     assistantCopy,
     userCopy
@@ -86,6 +96,15 @@
             name="asst_perm"
             class="truncate"
           />
+          <Checkbox
+            id="any_can_share_assistant"
+            name="any_can_share_assistant"
+            disabled={disableAnyCanShareAssistants}
+            class={'col-span-2 ' +
+              (disableAnyCanShareAssistants ? 'text-gray-400' : '!text-gray-900 !opacity-100')}
+            bind:checked={anyCanShareAssistant}
+            >Allow members to create public links for assistants</Checkbox
+          >
         </div>
       </AccordionItem>
       <AccordionItem paddingFlush="py-2">

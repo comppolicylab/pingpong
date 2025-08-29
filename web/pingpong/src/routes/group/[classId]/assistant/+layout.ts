@@ -24,6 +24,11 @@ export const load: LayoutLoad = async ({ fetch, params, parent }) => {
         target_id: classId,
         relation: 'can_publish_assistants'
       },
+      canShareAssistants: {
+        target_type: 'class',
+        target_id: classId,
+        relation: 'can_share_assistants'
+      },
       canUploadClassFiles: {
         target_type: 'class',
         target_id: classId,

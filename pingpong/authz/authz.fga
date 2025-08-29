@@ -39,6 +39,7 @@ type class
     define can_create_assistants: [class#student] or supervisor
     define can_manage_assistants: [class#supervisor]
     define can_publish_assistants: [class#student] or supervisor
+    define can_share_assistants: [class#student] or supervisor
     define can_manage_threads: [class#supervisor]
     define can_publish_threads: [class#student] or can_manage_threads
     define can_upload_class_files: [class#student] or supervisor

@@ -201,6 +201,7 @@
   let daysToSummarize = defaultDaysToSummarize;
   let usersModalOpen = false;
   let anyCanPublishThread = data?.class.any_can_publish_thread || false;
+  let anyCanShareAssistant = data?.class.any_can_share_assistant || false;
   let presignedUrlExpiration = data?.class.download_link_expiration || null;
   let makePrivate = data?.class.private || false;
   let assistantPermissions = formatAssistantPermissions(data?.class);
@@ -209,6 +210,8 @@
     { value: 'create:1,publish:0,upload:1', name: 'Members can create but not publish' },
     { value: 'create:1,publish:1,upload:1', name: 'Members can create and publish' }
   ];
+  let anyCanPublishAssistant =
+    parseAssistantPermissions(assistantPermissions).any_can_publish_assistant;
 
   // Check if the group has been rate limited by OpenAI recently
   $: lastRateLimitedAt = data?.class.last_rate_limited_at
@@ -311,6 +314,7 @@
       name: d.name.toString(),
       term: d.term.toString(),
       any_can_publish_thread: d.any_can_publish_thread?.toString() === 'on',
+      any_can_share_assistant: d.any_can_share_assistant?.toString() === 'on',
       private: makePrivate,
       ...parseAssistantPermissions(d.asst_perm.toString())
     };
@@ -321,7 +325,12 @@
       let msg = result.detail || 'An unknown error occurred';
       sadToast(msg);
     } else {
-      invalidateAll();
+      await invalidateAll();
+      anyCanPublishThread = data?.class.any_can_publish_thread || false;
+      anyCanShareAssistant = data?.class.any_can_share_assistant || false;
+      assistantPermissions = formatAssistantPermissions(data?.class);
+      anyCanPublishAssistant =
+        parseAssistantPermissions(assistantPermissions).any_can_publish_assistant;
       $updatingClass = false;
       happyToast('Saved group info');
     }
@@ -373,6 +382,7 @@
       name: requestInfo.groupName.toString(),
       term: requestInfo.groupSession.toString(),
       any_can_publish_thread: requestInfo.anyCanPublishThread,
+      any_can_share_assistant: requestInfo.anyCanShareAssistant,
       private: makePrivate,
       copy_assistants: requestInfo.assistantCopy,
       copy_users: requestInfo.userCopy,
@@ -760,6 +770,11 @@
       member: !!data?.class.any_can_publish_assistant || false,
       moderator: true
     },
+    {
+      name: 'Create a share link for anyone, including non-PingPong users to chat with',
+      member: !!data?.class.any_can_share_assistant || false,
+      moderator: true
+    },
     { name: 'Publish a thread for others to view', member: anyCanPublishThread, moderator: true },
     {
       name: 'View unpublished assistants created by others',
@@ -904,6 +919,7 @@
           aiProvider={apiProvider}
           {anyCanPublishThread}
           {assistantPermissions}
+          {anyCanShareAssistant}
           on:confirm={cloneClass}
           on:cancel={() => (cloneModal = false)}
         />
@@ -1000,6 +1016,25 @@
           on:change={submitParentForm}
           disabled={$updatingClass}
         />
+
+        <div></div>
+        <Helper
+          >Choose whether to allow members to create shared links, allowing anyone, even without a
+          PingPong account to interact with a published assistant. Moderators will always be able to
+          create Shared Links for published assistants.</Helper
+        >
+        <Checkbox
+          id="any_can_share_assistant"
+          name="any_can_share_assistant"
+          disabled={$updatingClass || !anyCanPublishAssistant}
+          on:change={submitParentForm}
+          bind:checked={anyCanShareAssistant}
+          class={$updatingClass || !anyCanPublishAssistant
+            ? 'text-gray-400'
+            : '!text-gray-900 !opacity-100'}
+        >
+          Allow members to create public share links for assistants
+        </Checkbox>
         <div></div>
 
         <div class="col-span-2 flex flex-col gap-3">
