@@ -40,17 +40,16 @@ def db_session_handler(
 
         try:
             async with config.db.driver.async_session() as session:
-                await asyncio.shield(_execute(session))
-            logger.debug(f"DB operation {func.__name__} succeeded.")
-            return
+                return await asyncio.shield(_execute(session))
         except BaseException as e:
             logger.warning(f"DB operation {func.__name__} failed, retrying. Error: {e}")
             try:
                 async with config.db.driver.async_session() as session:
-                    await asyncio.shield(_execute(session))
-                logger.debug(f"DB operation {func.__name__} succeeded on retry.")
-                return
+                    return await asyncio.shield(_execute(session))
             except BaseException as e:
-                logger.warning(f"DB operation {func.__name__} failed on retry. Error: {e}")
+                logger.warning(
+                    f"DB operation {func.__name__} failed on retry. Error: {e}"
+                )
+                raise e
 
     return wrapper
