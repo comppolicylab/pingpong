@@ -315,6 +315,20 @@
             ]
           }
         },
+        "can_share_assistants": {
+          "union": {
+            "child": [
+              {
+                "this": {}
+              },
+              {
+                "computedUserset": {
+                  "relation": "supervisor"
+                }
+              }
+            ]
+          }
+        },
         "can_manage_threads": {
           "this": {}
         },
@@ -451,6 +465,14 @@
             ]
           },
           "can_publish_assistants": {
+            "directly_related_user_types": [
+              {
+                "type": "class",
+                "relation": "student"
+              }
+            ]
+          },
+          "can_share_assistants": {
             "directly_related_user_types": [
               {
                 "type": "class",

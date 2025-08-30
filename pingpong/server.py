@@ -860,6 +860,8 @@ async def get_institution_classes(institution_id: str, request: Request):
 async def create_class(
     institution_id: str, create: schemas.CreateClass, request: Request
 ):
+    if not create.any_can_publish_assistant:
+        create.any_can_share_assistant = False
     new_class = await models.Class.create(request.state.db, int(institution_id), create)
 
     user = await models.User.get_by_id(request.state.db, request.state.session.user.id)
@@ -910,6 +912,15 @@ async def create_class(
                 f"class:{new_class.id}",
             )
         )
+
+        if new_class.any_can_share_assistant:
+            grants.append(
+                (
+                    f"class:{new_class.id}#student",
+                    "can_share_assistants",
+                    f"class:{new_class.id}",
+                )
+            )
 
     if new_class.any_can_publish_thread:
         grants.append(
@@ -1032,6 +1043,11 @@ async def get_class_upload_info(class_id: str, request: Request):
 )
 async def update_class(class_id: str, update: schemas.UpdateClass, request: Request):
     try:
+        if (
+            update.any_can_publish_assistant is not None
+            and not update.any_can_publish_assistant
+        ):
+            update.any_can_share_assistant = False
         cls = await models.Class.update(request.state.db, int(class_id), update)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1046,6 +1062,11 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
     can_pub_asst = (
         f"class:{class_id}#student",
         "can_publish_assistants",
+        f"class:{class_id}",
+    )
+    can_share_asst = (
+        f"class:{class_id}#student",
+        "can_share_assistants",
         f"class:{class_id}",
     )
     can_pub_thread = (
@@ -1074,10 +1095,16 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
     else:
         revokes.append(can_create_asst)
 
+    if cls.any_can_share_assistant and not cls.any_can_publish_assistant:
+        grants.append(can_share_asst)
+    else:
+        revokes.append(can_share_asst)
+
     if cls.any_can_publish_assistant:
         grants.append(can_pub_asst)
     else:
         revokes.append(can_pub_asst)
+        revokes.append(can_share_asst)
 
     if cls.any_can_publish_thread:
         grants.append(can_pub_thread)
@@ -2484,7 +2511,7 @@ async def get_thread(
             else:
                 _message.metadata = {"is_current_user": False}
 
-            if message.user_id not in users:
+            if str(message.user_id) not in users:
                 if is_current_user:
                     _message.metadata["name"] = "Me"
                 else:
@@ -3119,7 +3146,7 @@ async def list_thread_messages(
             else:
                 _message.metadata = {"is_current_user": False}
 
-            if message.user_id not in users:
+            if str(message.user_id) not in users:
                 if is_current_user:
                     _message.metadata["name"] = "Me"
                 else:
@@ -5045,12 +5072,21 @@ async def create_assistant(
         # Voice mode assistants are only supported in version 2
         assistant_version = 2
     else:
-        if class_.api_key_obj and class_.api_key_obj.provider == "openai":
+        if (
+            class_.api_key_obj
+            and class_.api_key_obj.provider == "openai"
+            and not req.create_classic_assistant
+        ):
             assistant_version = 3
-        elif not class_.api_key_obj and class_.api_key:
+        elif (
+            not class_.api_key_obj
+            and class_.api_key
+            and not req.create_classic_assistant
+        ):
             assistant_version = 3
         else:
             assistant_version = 2
+    del req.create_classic_assistant
 
     # Check that the class is not private if user information should be recorded
     if class_.private and (
@@ -5226,7 +5262,12 @@ async def preview_assistant_instructions(
 
 @v1.post(
     "/class/{class_id}/assistant/{assistant_id}/share",
-    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    dependencies=[
+        Depends(
+            Authz("can_edit", "assistant:{assistant_id}"),
+        ),
+        Depends(Authz("can_share_assistants", "class:{class_id}")),
+    ],
     response_model=schemas.GenericStatus,
 )
 async def share_assistant(
@@ -5279,7 +5320,12 @@ async def share_assistant(
 
 @v1.delete(
     "/class/{class_id}/assistant/{assistant_id}/share/{share_id}",
-    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    dependencies=[
+        Depends(
+            Authz("can_edit", "assistant:{assistant_id}"),
+        ),
+        Depends(Authz("can_share_assistants", "class:{class_id}")),
+    ],
     response_model=schemas.GenericStatus,
 )
 async def unshare_assistant(
@@ -5341,7 +5387,12 @@ async def unshare_assistant(
 
 @v1.put(
     "/class/{class_id}/assistant/{assistant_id}/share/{share_id}",
-    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    dependencies=[
+        Depends(
+            Authz("can_edit", "assistant:{assistant_id}"),
+        ),
+        Depends(Authz("can_share_assistants", "class:{class_id}")),
+    ],
     response_model=schemas.GenericStatus,
 )
 async def update_assistant_share_name(
@@ -5381,6 +5432,7 @@ async def update_assistant(
     request: Request,
     openai_client: OpenAIClient,
 ):
+    print(req.model_dump())
     # Get the existing assistant.
     asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
     grants = list[Relation]()

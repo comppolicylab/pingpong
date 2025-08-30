@@ -407,6 +407,7 @@ class CreateAssistant(BaseModel):
     assistant_should_message_first: bool = False
     should_record_user_information: bool = False
     deleted_private_files: list[int] = []
+    create_classic_assistant: bool = False
 
     _temperature_check = model_validator(mode="after")(temperature_validator)
 
@@ -1016,6 +1017,7 @@ class Class(BaseModel):
     lms_last_synced: datetime | None = None
     any_can_create_assistant: bool | None = None
     any_can_publish_assistant: bool | None = None
+    any_can_share_assistant: bool | None = None
     any_can_publish_thread: bool | None = None
     any_can_upload_class_file: bool | None = None
     download_link_expiration: str | None = None
@@ -1032,6 +1034,7 @@ class CopyClassRequest(BaseModel):
     private: bool = False
     any_can_create_assistant: bool = False
     any_can_publish_assistant: bool = False
+    any_can_share_assistant: bool = False
     any_can_publish_thread: bool = False
     any_can_upload_class_file: bool = False
     copy_assistants: Literal["moderators", "all"] = "moderators"
@@ -1045,6 +1048,7 @@ class CreateClass(BaseModel):
     private: bool = False
     any_can_create_assistant: bool = False
     any_can_publish_assistant: bool = False
+    any_can_share_assistant: bool = False
     any_can_publish_thread: bool = False
     any_can_upload_class_file: bool = False
 
@@ -1055,6 +1059,7 @@ class UpdateClass(BaseModel):
     private: bool | None = None
     any_can_create_assistant: bool | None = None
     any_can_publish_assistant: bool | None = None
+    any_can_share_assistant: bool | None = None
     any_can_publish_thread: bool | None = None
     any_can_upload_class_file: bool | None = None
 

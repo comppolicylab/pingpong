@@ -87,6 +87,15 @@ async def create_new_class(
             )
         )
 
+        if new_class.any_can_share_assistant:
+            grants.append(
+                (
+                    f"class:{new_class.id}#student",
+                    "can_share_assistants",
+                    f"class:{new_class.id}",
+                )
+            )
+
     if new_class.any_can_publish_thread:
         grants.append(
             (
@@ -434,6 +443,7 @@ async def copy_group(
                     api_key_id=class_.api_key_id,
                     private=copy_options.private,
                     any_can_create_assistant=copy_options.any_can_create_assistant,
+                    any_can_share_assistant=copy_options.any_can_share_assistant,
                     any_can_publish_assistant=copy_options.any_can_publish_assistant,
                     any_can_publish_thread=copy_options.any_can_publish_thread,
                     any_can_upload_class_file=copy_options.any_can_upload_class_file,

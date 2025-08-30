@@ -32,7 +32,7 @@
   export let assistant: Assistant;
   export let creator: AppUser;
   export let editable = false;
-  export let shareable = true;
+  export let shareable = false;
 
   let sharedAssistantModalOpen = false;
 
@@ -226,7 +226,7 @@
         /></button
       >
 
-      {#if shareable && assistant.published}
+      {#if editable && shareable && assistant.published}
         <button
           on:click|preventDefault={() => {
             sharedAssistantModalOpen = true;

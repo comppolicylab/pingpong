@@ -2645,6 +2645,7 @@ class Class(Base):
     lms_last_synced = Column(DateTime(timezone=True), nullable=True)
     any_can_create_assistant = Column(Boolean, default=False)
     any_can_publish_assistant = Column(Boolean, default=False)
+    any_can_share_assistant = Column(Boolean, default=False)
     any_can_publish_thread = Column(Boolean, default=False)
     any_can_upload_class_file = Column(Boolean, default=False)
     users: Mapped[List["UserClassRole"]] = relationship(
@@ -4234,8 +4235,17 @@ class Thread(Base):
     ) -> list[str]:
         stmt = (
             select(File.file_id)
-            .join(code_interpreter_file_assistant_association)
-            .join(code_interpreter_file_thread_association)
+            .select_from(File)
+            .join(
+                code_interpreter_file_assistant_association,
+                code_interpreter_file_assistant_association.c.file_id == File.id,
+                isouter=True,
+            )
+            .join(
+                code_interpreter_file_thread_association,
+                code_interpreter_file_thread_association.c.file_id == File.id,
+                isouter=True,
+            )
             .where(
                 or_(
                     code_interpreter_file_thread_association.c.thread_id == thread_id,

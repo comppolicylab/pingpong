@@ -699,6 +699,7 @@ export type Class = {
   any_can_publish_assistant: boolean | null;
   any_can_publish_thread: boolean | null;
   any_can_upload_class_file: boolean | null;
+  any_can_share_assistant: boolean | null;
   download_link_expiration: string | null;
   last_rate_limited_at: string | null;
   ai_provider: 'openai' | 'azure' | null;
@@ -760,6 +761,7 @@ export type CreateClassRequest = {
   api_key_id: number | null;
   any_can_create_assistant?: boolean;
   any_can_publish_assistant?: boolean;
+  any_can_share_assistant?: boolean;
   any_can_publish_thread?: boolean;
   any_can_upload_class_file?: boolean;
 };
@@ -773,6 +775,7 @@ export type UpdateClassRequest = {
   private?: boolean;
   any_can_create_assistant?: boolean;
   any_can_publish_assistant?: boolean;
+  any_can_share_assistant?: boolean;
   any_can_publish_thread?: boolean;
   any_can_upload_class_file?: boolean;
 };
@@ -782,6 +785,7 @@ export type CopyClassRequestInfo = {
   groupSession: string;
   makePrivate: boolean;
   anyCanPublishThread: boolean;
+  anyCanShareAssistant: boolean;
   assistantPermissions: string;
   assistantCopy: 'moderators' | 'all';
   userCopy: 'moderators' | 'all';
@@ -793,6 +797,7 @@ export type CopyClassRequest = {
   private: boolean;
   any_can_create_assistant: boolean;
   any_can_publish_assistant: boolean;
+  any_can_share_assistant: boolean;
   any_can_publish_thread: boolean;
   any_can_upload_class_file: boolean;
   copy_assistants: 'moderators' | 'all';
@@ -1338,6 +1343,7 @@ export type CreateAssistantRequest = {
   instructions: string;
   model: string;
   interaction_mode: 'chat' | 'voice';
+  create_classic_assistant?: boolean;
   temperature: number | null;
   reasoning_effort: number | null;
   tools: Tool[];
@@ -1361,6 +1367,7 @@ export type UpdateAssistantRequest = {
   instructions?: string;
   model?: string;
   interaction_mode?: 'chat' | 'voice';
+  create_classic_assistant?: boolean;
   temperature?: number | null;
   reasoning_effort?: number | null;
   tools?: Tool[];
@@ -1396,6 +1403,7 @@ export const updateAssistant = async (
   assistantId: number,
   data: UpdateAssistantRequest
 ) => {
+  console.log('Updating assistant', data);
   const url = `class/${classId}/assistant/${assistantId}`;
   return await PUT<UpdateAssistantRequest, Assistant>(f, url, data);
 };

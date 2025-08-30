@@ -88,6 +88,7 @@
           {assistant}
           creator={creators[assistant.creator_id]}
           editable={data.editableAssistants.has(assistant.id)}
+          shareable={data.grants.canShareAssistants && !!assistant.published}
         />
       {:else}
         <div>No group assistants</div>
