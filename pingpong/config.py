@@ -404,4 +404,3 @@ logging.getLogger("responses_api_transition").setLevel(
 )
 if config.log_level != "DEBUG":
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
-logging.getLogger("sqlalchemy.pool").setLevel(logging.DEBUG)

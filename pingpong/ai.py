@@ -722,11 +722,11 @@ class BufferedResponseStreamHandler:
         self.__cached_run.status = RunStatus(data.response.status)
 
         @db_session_handler
-        async def update_run(session: AsyncSession):
+        async def update_run_on_response_created(session: AsyncSession):
             session.add(self.__cached_run)
             await session.commit()
 
-        await update_run()
+        await update_run_on_response_created()
 
     async def on_response_in_progress(self, data: ResponseInProgressEvent):
         if not self.__cached_run:
@@ -737,11 +737,11 @@ class BufferedResponseStreamHandler:
         self.__cached_run.status = RunStatus(data.response.status)
 
         @db_session_handler
-        async def update_run(session: AsyncSession):
+        async def update_run_on_response_in_progress(session: AsyncSession):
             session.add(self.__cached_run)
             await session.commit()
 
-        await update_run()
+        await update_run_on_response_in_progress()
 
     async def on_output_message_created(self, data: ResponseOutputMessage):
         if not self.__cached_run:
@@ -767,12 +767,12 @@ class BufferedResponseStreamHandler:
         )
 
         @db_session_handler
-        async def add_message(session: AsyncSession):
+        async def add_message_on_output_message_created(session: AsyncSession):
             session.add(self.__cached_message)
             await session.commit()
             await session.refresh(self.__cached_message)
 
-        await add_message()
+        await add_message_on_output_message_created()
 
     async def on_output_text_part_created(self, data: ResponseOutputText):
         if not self.__cached_run:
@@ -799,12 +799,12 @@ class BufferedResponseStreamHandler:
         )
 
         @db_session_handler
-        async def add_message_part(session: AsyncSession):
+        async def add_message_part_on_output_text_part_created(session: AsyncSession):
             session.add(self.__cached_message_part)
             await session.commit()
             await session.refresh(self.__cached_message_part)
 
-        await add_message_part()
+        await add_message_part_on_output_text_part_created()
         self.enqueue(
             {
                 "type": "message_created",
@@ -831,11 +831,11 @@ class BufferedResponseStreamHandler:
         self.__cached_message_part.text += data.delta
 
         @db_session_handler
-        async def update_message_part(session: AsyncSession):
+        async def update_message_part_on_output_text_delta(session: AsyncSession):
             session.add(self.__cached_message_part)
             await session.commit()
 
-        await update_message_part()
+        await update_message_part_on_output_text_delta()
         self.enqueue(
             {
                 "type": "message_delta",
@@ -879,7 +879,7 @@ class BufferedResponseStreamHandler:
         )
 
         @db_session_handler
-        async def create_file(session_: AsyncSession):
+        async def create_file_on_output_text_container_file_citation_added(session_: AsyncSession):
             return await handle_create_file(
                 session=session_,
                 authz=self.auth,
@@ -898,13 +898,13 @@ class BufferedResponseStreamHandler:
                 anonymous_link_id=self.anonymous_link_id,
             )
 
-        file = await create_file()
+        file = await create_file_on_output_text_container_file_citation_added()
         if not file:
             logger.error(f"Failed to create file from citation. Data: {data}")
             return
 
         @db_session_handler
-        async def add_code_interpreter_files(session: AsyncSession):
+        async def add_code_interpreter_files_on_output_text_container_file_citation_added(session: AsyncSession):
             if self.__cached_run and file.code_interpreter_file_id:
                 await models.Thread.add_code_interpreter_files(
                     session=session,
@@ -913,10 +913,10 @@ class BufferedResponseStreamHandler:
                 )
 
         if file.code_interpreter_file_id:
-            await add_code_interpreter_files()
+            await add_code_interpreter_files_on_output_text_container_file_citation_added()
 
         @db_session_handler
-        async def add_image_files(session: AsyncSession):
+        async def add_image_files_on_output_text_container_file_citation_added(session: AsyncSession):
             if self.__cached_run and file.vision_file_id:
                 await models.Thread.add_image_files(
                     session=session,
@@ -925,7 +925,7 @@ class BufferedResponseStreamHandler:
                 )
 
         if file.vision_file_id:
-            await add_image_files()
+            await add_image_files_on_output_text_container_file_citation_added()
 
         if not self.__cached_message_part:
             logger.exception(
@@ -949,11 +949,11 @@ class BufferedResponseStreamHandler:
         )
 
         @db_session_handler
-        async def add_cached_message_part(session_: AsyncSession):
+        async def add_cached_message_part_on_output_text_container_file_citation_added(session_: AsyncSession):
             session_.add(self.__cached_message_part)
             await session_.commit()
 
-        await add_cached_message_part()
+        await add_cached_message_part_on_output_text_container_file_citation_added()
 
         if file.vision_file_id:
             self.enqueue(
@@ -1019,11 +1019,11 @@ class BufferedResponseStreamHandler:
         )
 
         @db_session_handler
-        async def add_cached_message_part(session_: AsyncSession):
+        async def add_cached_message_part_on_output_text_file_citation_added(session_: AsyncSession):
             session_.add(self.__cached_message_part)
             await session_.commit()
 
-        await add_cached_message_part()
+        await add_cached_message_part_on_output_text_file_citation_added()
 
         _file_record = self.__file_search_results.get(data["file_id"])
         if _file_record:
@@ -1074,11 +1074,11 @@ class BufferedResponseStreamHandler:
             return
 
         @db_session_handler
-        async def add_cached_message_part(session_: AsyncSession):
+        async def add_cached_message_part_on_output_text_part_done(session_: AsyncSession):
             session_.add(self.__cached_message_part)
             await session_.commit()
 
-        await add_cached_message_part()
+        await add_cached_message_part_on_output_text_part_done()
         self.__cached_message_part = None
 
     async def on_output_message_done(self, data: ResponseOutputMessage):
@@ -1103,11 +1103,11 @@ class BufferedResponseStreamHandler:
         self.__cached_message.message_status = MessageStatus(data.status)
 
         @db_session_handler
-        async def add_cached_message(session_: AsyncSession):
+        async def add_cached_message_add_cached_message(session_: AsyncSession):
             session_.add(self.__cached_message)
             await session_.commit()
 
-        await add_cached_message()
+        await add_cached_message_add_cached_message()
         self.__cached_message = None
 
     async def on_code_interpreter_tool_call_created(
@@ -1137,12 +1137,12 @@ class BufferedResponseStreamHandler:
         )
 
         @db_session_handler
-        async def add_cached_tool_call(session_: AsyncSession):
+        async def add_cached_tool_call_on_code_interpreter_tool_call_created(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
             await session_.refresh(self.__current_tool_call)
 
-        await add_cached_tool_call()
+        await add_cached_tool_call_on_code_interpreter_tool_call_created()
 
         self.enqueue(
             {
@@ -1171,11 +1171,11 @@ class BufferedResponseStreamHandler:
         self.__current_tool_call.status = ToolCallStatus.IN_PROGRESS
 
         @db_session_handler
-        async def add_cached_tool_call(session_: AsyncSession):
+        async def add_cached_tool_call_on_code_interpreter_tool_call_in_progress(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
 
-        await add_cached_tool_call()
+        await add_cached_tool_call_on_code_interpreter_tool_call_in_progress()
 
     async def on_code_interpreter_tool_call_code_delta(
         self, data: ResponseCodeInterpreterCallCodeDeltaEvent
@@ -1193,11 +1193,11 @@ class BufferedResponseStreamHandler:
         self.__current_tool_call.code += data.delta
 
         @db_session_handler
-        async def add_cached_tool_call(session_: AsyncSession):
+        async def add_cached_tool_call_on_code_interpreter_tool_call_in_progress(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
 
-        await add_cached_tool_call()
+        await add_cached_tool_call_on_code_interpreter_tool_call_in_progress()
 
         self.enqueue(
             {
@@ -1227,11 +1227,11 @@ class BufferedResponseStreamHandler:
         self.__current_tool_call.status = ToolCallStatus.INTERPRETING
 
         @db_session_handler
-        async def add_cached_tool_call(session_: AsyncSession):
+        async def add_cached_tool_call_on_code_interpreter_tool_call_interpreting(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
 
-        await add_cached_tool_call()
+        await add_cached_tool_call_on_code_interpreter_tool_call_interpreting()
 
     async def on_code_interpreter_tool_call_completed(
         self, data: ResponseCodeInterpreterCallCompletedEvent
@@ -1249,11 +1249,11 @@ class BufferedResponseStreamHandler:
         self.__current_tool_call.status = ToolCallStatus.COMPLETED
 
         @db_session_handler
-        async def add_cached_tool_call(session_: AsyncSession):
+        async def add_cached_tool_call_on_code_interpreter_tool_call_completed(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
 
-        await add_cached_tool_call()
+        await add_cached_tool_call_on_code_interpreter_tool_call_completed()
 
     async def on_code_interpreter_tool_call_done(
         self, data: ResponseCodeInterpreterToolCall
@@ -1340,11 +1340,11 @@ class BufferedResponseStreamHandler:
                         )
 
         @db_session_handler
-        async def add_cached_tool_call(session_: AsyncSession):
+        async def add_cached_tool_call_on_code_interpreter_tool_call_done(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
 
-        await add_cached_tool_call()
+        await add_cached_tool_call_on_code_interpreter_tool_call_done()
         self.__current_tool_call = None
 
     async def on_file_search_call_created(self, data: ResponseFileSearchToolCall):
@@ -1371,12 +1371,12 @@ class BufferedResponseStreamHandler:
         )
 
         @db_session_handler
-        async def add_cached_tool_call(session_: AsyncSession):
+        async def add_cached_tool_call_on_file_search_call_created(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
             await session_.refresh(self.__current_tool_call)
 
-        await add_cached_tool_call()
+        await add_cached_tool_call_on_file_search_call_created()
 
     async def on_file_search_call_in_progress(
         self, data: ResponseFileSearchCallInProgressEvent
@@ -1395,11 +1395,11 @@ class BufferedResponseStreamHandler:
         self.__current_tool_call.status = ToolCallStatus.IN_PROGRESS
 
         @db_session_handler
-        async def add_cached_tool_call(session_: AsyncSession):
+        async def add_cached_tool_call_on_file_search_call_in_progress(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
 
-        await add_cached_tool_call()
+        await add_cached_tool_call_on_file_search_call_in_progress()
 
     async def on_file_search_call_searching(
         self, data: ResponseFileSearchCallSearchingEvent
@@ -1418,11 +1418,11 @@ class BufferedResponseStreamHandler:
         self.__current_tool_call.status = ToolCallStatus.SEARCHING
 
         @db_session_handler
-        async def add_cached_tool_call(session_: AsyncSession):
+        async def add_cached_tool_call_on_file_search_call_searching(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
 
-        await add_cached_tool_call()
+        await add_cached_tool_call_on_file_search_call_searching()
 
     async def on_file_search_call_completed(
         self, data: ResponseFileSearchCallCompletedEvent
@@ -1441,11 +1441,11 @@ class BufferedResponseStreamHandler:
         self.__current_tool_call.status = ToolCallStatus.COMPLETED
 
         @db_session_handler
-        async def add_cached_tool_call(session_: AsyncSession):
+        async def add_cached_tool_call_on_file_search_call_completed(session_: AsyncSession):
             session_.add(self.__current_tool_call)
             await session_.commit()
 
-        await add_cached_tool_call()
+        await add_cached_tool_call_on_file_search_call_completed()
 
     async def on_file_search_call_done(self, data: ResponseFileSearchToolCall):
         if not self.__cached_run:
@@ -1483,14 +1483,14 @@ class BufferedResponseStreamHandler:
                     )
 
             @db_session_handler
-            async def get_file_object_id(session_: AsyncSession):
+            async def get_file_object_id_on_file_search_call_done(session_: AsyncSession):
                 return await models.File.get_obj_id_by_file_id(session_, result.file_id)
 
             self.__current_tool_call.results.append(
                 models.FileSearchCallResult(
                     attributes=json.dumps(result.attributes),
                     file_id=result.file_id,
-                    file_object_id=await get_file_object_id(result.file_id)
+                    file_object_id=await get_file_object_id_on_file_search_call_done(result.file_id)
                     if result.file_id
                     else None,
                     filename=result.filename,
@@ -1501,11 +1501,11 @@ class BufferedResponseStreamHandler:
             )
 
             @db_session_handler
-            async def add_current_tool_call(session_: AsyncSession):
+            async def add_current_tool_call_on_file_search_call_done(session_: AsyncSession):
                 session_.add(self.__current_tool_call)
                 await session_.commit()
 
-            await add_current_tool_call()
+            await add_current_tool_call_on_file_search_call_done()
 
         self.__current_tool_call = None
 
@@ -1524,43 +1524,58 @@ class BufferedResponseStreamHandler:
 
         has_active_run = False
         if self.__cached_run:
-            async with config.db.driver.async_session() as session_:
-                if (
-                    self.__cached_run.status == RunStatus.QUEUED
-                    and restore_to_pending_if_queued
-                ):
-                    self.__cached_run.status = RunStatus.PENDING
-                    session_.add(self.__cached_run)
-                    await session_.commit()
-                    self.__cached_run = None
-                    self.enqueue({"type": "done"})
-                    return
-                has_active_run = True
-                if self.__cached_message_part and self.__cached_message:
-                    session_.add(self.__cached_message_part)
-                    self.__cached_message_part = None
-                if self.__cached_message:
-                    self.__cached_message.message_status = MessageStatus.INCOMPLETE
-                    session_.add(self.__cached_message)
-                    self.__cached_message = None
-                if self.__current_tool_call:
-                    self.__current_tool_call.status = ToolCallStatus.INCOMPLETE
-                    session_.add(self.__current_tool_call)
-                    self.__current_tool_call = None
-
-                self.__cached_run.completed = utcnow()
-                self.__cached_run.status = run_status
-
-                self.__cached_run.error_code = response_error_code
-                self.__cached_run.error_message = response_error_message
-                self.__cached_run.incomplete_reason = response_incomplete_reason
-
+            @db_session_handler
+            async def save_cached_run_on_cleanup(session_: AsyncSession):
                 session_.add(self.__cached_run)
-                logger.info(
-                    f"About to save run data while cleaning up run: {self.__cached_run.id if self.__cached_run else None}"
-                )
                 await session_.commit()
+
+            @db_session_handler
+            async def save_cached_message_part_on_cleanup(session_: AsyncSession):
+                session_.add(self.__cached_message_part)
+
+            @db_session_handler
+            async def save_cached_message_on_cleanup(session_: AsyncSession):
+                session_.add(self.__cached_message)
+
+            @db_session_handler
+            async def save_current_tool_call_on_cleanup(session_: AsyncSession):
+                session_.add(self.__current_tool_call)
+
+            if (
+                self.__cached_run.status == RunStatus.QUEUED
+                and restore_to_pending_if_queued
+            ):
+                self.__cached_run.status = RunStatus.PENDING
+                await save_cached_run_on_cleanup()
                 self.__cached_run = None
+                self.enqueue({"type": "done"})
+                return
+            has_active_run = True
+            if self.__cached_message_part and self.__cached_message:
+                await save_cached_message_part_on_cleanup()
+                self.__cached_message_part = None
+            if self.__cached_message:
+                self.__cached_message.message_status = MessageStatus.INCOMPLETE
+                await save_cached_message_on_cleanup()
+                self.__cached_message = None
+            if self.__current_tool_call:
+                self.__current_tool_call.status = ToolCallStatus.INCOMPLETE
+                await save_current_tool_call_on_cleanup()
+                self.__current_tool_call = None
+
+            self.__cached_run.completed = utcnow()
+            self.__cached_run.status = run_status
+
+            self.__cached_run.error_code = response_error_code
+            self.__cached_run.error_message = response_error_message
+            self.__cached_run.incomplete_reason = response_incomplete_reason
+
+            
+            logger.info(
+                f"About to save run data while cleaning up run: {self.__cached_run.id if self.__cached_run else None}"
+            )
+            await save_cached_run_on_cleanup()
+            self.__cached_run = None
 
         if response_error_message and (
             not send_error_message_only_if_active or has_active_run
@@ -1895,22 +1910,18 @@ async def run_response(
             ) as e:
                 logger.warning(f"Client disconnected: {e}")
                 if handler:
-                    asyncio.create_task(
-                        safe_task(
-                            cleanup_task(
+                    try:
+                        await asyncio.shield(
+                            handler.cleanup(
                                 run_status=RunStatus.INCOMPLETE,
-                                run_id=run.id if run else None,
-                                message_id=handler.__cached_message.id
-                                if handler.__cached_message
-                                else None,
-                                tool_call_id=handler.__current_tool_call.id
-                                if handler.__current_tool_call
-                                else None,
                                 response_incomplete_reason="User disconnected.",
                                 restore_to_pending_if_queued=True,
                             )
                         )
-                    )
+                    except BaseException as e:
+                        logger.error(f"Error cleaning up run {run.id}: {e}")
+                    except Exception as e:
+                        logger.error(f"Unexpected error cleaning up run {run.id}: {e}")
                 logger.info(f"Cleaned up run {run.id} after client disconnect.")
                 is_canceled = True
             except openai.APIError as openai_error:
