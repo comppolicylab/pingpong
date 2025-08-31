@@ -11,15 +11,32 @@
 	import Percent from '@lucide/svelte/icons/percent';
 	import Users from '@lucide/svelte/icons/users';
 	import { columns } from '$lib/components/classes-table/columns.js';
+	import { onMount } from 'svelte';
+	import type { Course } from '$lib/api/types';
+	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
+	import {
+		courses as coursesStore,
+		loading as coursesLoading,
+		ensureCourses
+	} from '$lib/stores/courses';
 
 	let { data } = $props();
+
+	onMount(async () => {
+		try {
+			await ensureCourses(fetch);
+		} catch {
+			// ignore; skeleton/empty will show
+		}
+	});
+
 	const hasAnyTreatmentCourses = $derived(
-		data.courses.some(
+		$coursesStore.some(
 			(course) => course.pingpong_group_url !== '' && course.randomization === 'treatment'
 		)
 	);
 	const hasAnyAcceptedCourses = $derived(
-		data.courses.some((course) => course.status === 'accepted')
+		$coursesStore.some((course) => course.status === 'accepted')
 	);
 </script>
 
@@ -217,5 +234,14 @@
 		</Alert.Root>
 	{/if}
 
-	<DataTable data={data.courses} {columns} />
+	{#if $coursesLoading}
+		<div class="mt-2 space-y-2">
+			<Skeleton class="h-8 w-full" />
+			<Skeleton class="h-8 w-full" />
+			<Skeleton class="h-8 w-full" />
+			<Skeleton class="h-8 w-full" />
+		</div>
+	{:else}
+		<DataTable data={$coursesStore as Course[]} {columns} />
+	{/if}
 </div>

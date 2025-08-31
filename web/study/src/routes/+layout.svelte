@@ -7,9 +7,20 @@
 	import Separator from '$lib/components/ui/separator/separator.svelte';
 	import { page } from '$app/state';
 	import { Toaster } from '$lib/components/ui/sonner/index.js';
+	import { courseById } from '$lib/stores/courses';
 
 	let { children } = $props();
-	let pageTitle = $derived(page.data?.title || 'PingPong College Study');
+	let courseStore = $state(courseById((page.params.courseId as string) || ''));
+	$effect(() => {
+		const id = (page.params.courseId as string) || '';
+		courseStore = courseById(id);
+	});
+
+	let pageTitle = $derived(
+		(page.url.pathname.startsWith('/preassessment/') && $courseStore?.name) ||
+			page.data?.title ||
+			'PingPong College Study'
+	);
 	let showSidebar = $derived(page.data?.showSidebar !== false);
 </script>
 

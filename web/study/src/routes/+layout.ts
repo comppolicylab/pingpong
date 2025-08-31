@@ -1,5 +1,5 @@
-import { expandResponse, explodeResponse } from '$lib/api/utils';
-import { me as getMe, getMyCourses } from '$lib/api/client';
+import { expandResponse } from '$lib/api/utils';
+import { me as getMe } from '$lib/api/client';
 import type { LayoutLoad } from './$types';
 import { redirect, error } from '@sveltejs/kit';
 import type { Course } from '$lib/api/types';
@@ -43,16 +43,10 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 		throw redirect(302, `${LOGIN}?forward=${destination}`);
 	}
 
-	let courses: Course[] = [];
-	if (authed) {
-		courses = await getMyCourses(fetch)
-			.then(explodeResponse)
-			.then((c) => c.courses);
-	}
-
 	return {
 		showSidebar,
-		courses,
+		// Defer course fetching to page/components to avoid blocking nav
+		courses: [] as Course[],
 		instructor: me.data.instructor
 	};
 };

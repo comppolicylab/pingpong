@@ -4,11 +4,44 @@
 	import { columns } from '$lib/components/preassessment-table/columns.js';
 	import * as Alert from '$lib/components/ui/alert/index.js';
 	import Info from '@lucide/svelte/icons/info';
-	let { data } = $props();
+	import { onMount } from 'svelte';
+	import { page } from '$app/state';
+	import type { Course, PreAssessmentStudent } from '$lib/api/types';
+	import { getPreAssessmentStudents } from '$lib/api/client';
+	import { explodeResponse } from '$lib/api/utils';
+	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
+	import { courses as coursesStore, ensureCourses } from '$lib/stores/courses';
+
+	let preAssessmentStudents = $state([] as PreAssessmentStudent[]);
+	let loading = $state(true);
+	let enrollmentCount = $state<number | undefined>(undefined);
+	let preAssessmentStudentCount = $state<number | undefined>(undefined);
+	let completionRateTarget = $state<number | undefined>(undefined);
+
+	onMount(async () => {
+		try {
+			const courseId = page.params.courseId as string;
+			const [studentsRes] = await Promise.all([
+				getPreAssessmentStudents(fetch, courseId).then(explodeResponse),
+				ensureCourses(fetch)
+			]);
+			preAssessmentStudents = studentsRes.students ?? [];
+			const course: Course | undefined = $coursesStore.find((c) => c.id === courseId);
+			if (course) {
+				enrollmentCount = course.enrollment_count;
+				preAssessmentStudentCount = course.preassessment_student_count;
+				completionRateTarget = course.completion_rate_target;
+			}
+		} catch {
+			// Leave defaults; error could be surfaced in future UX
+		} finally {
+			loading = false;
+		}
+	});
 
 	const completionRate = $derived(
-		data.enrollmentCount && data.preAssessmentStudentCount
-			? Math.round((data.preAssessmentStudentCount / data.enrollmentCount) * 100)
+		enrollmentCount && preAssessmentStudentCount
+			? Math.round((preAssessmentStudentCount / enrollmentCount) * 100)
 			: 0
 	);
 </script>
@@ -17,25 +50,40 @@
 	<div class="grid grid-cols-4 gap-4">
 		<div class="col-span-3 flex flex-col gap-2">
 			<h2 class="text-xl font-semibold">Pre-Assessment Submissions</h2>
-			<DataTable data={data.preAssessmentStudents} {columns} />
+			{#if loading}
+				<div class="space-y-2">
+					<Skeleton class="h-8 w-full" />
+					<Skeleton class="h-8 w-full" />
+					<Skeleton class="h-8 w-full" />
+					<Skeleton class="h-8 w-full" />
+				</div>
+			{:else}
+				<DataTable data={preAssessmentStudents} {columns} />
+			{/if}
 		</div>
 		<div class="col-span-1 flex flex-col gap-2">
 			<h2 class="text-xl font-semibold">Pre-Assessment Completion Rate</h2>
-			<Progress
-				value={completionRate}
-				target={data.completionRateTarget}
-				max={100}
-				class="h-4"
-				showIndicators
-				textClass="text-sm"
-			/>
-			<div class="flex flex-row items-center gap-2 text-sm">
-				<span class="text-2xl font-bold"
-					>{data.preAssessmentStudentCount}/{data.enrollmentCount}</span
-				>
-				<span>students</span>
-			</div>
-			{#if data.preAssessmentStudentCount && data.preAssessmentStudentCount < data.preAssessmentStudents.length}
+			{#if loading}
+				<Skeleton class="h-4 w-full" />
+				<div class="flex flex-row items-center gap-2 text-sm">
+					<Skeleton class="h-6 w-24" />
+					<span>students</span>
+				</div>
+			{:else}
+				<Progress
+					value={completionRate}
+					target={completionRateTarget}
+					max={100}
+					class="h-4"
+					showIndicators
+					textClass="text-sm"
+				/>
+				<div class="flex flex-row items-center gap-2 text-sm">
+					<span class="text-2xl font-bold">{preAssessmentStudentCount}/{enrollmentCount}</span>
+					<span>students</span>
+				</div>
+			{/if}
+			{#if !loading && preAssessmentStudentCount && preAssessmentStudentCount < preAssessmentStudents.length}
 				<Alert.Root class="self-start">
 					<Info />
 					<Alert.Title class="line-clamp-none tracking-normal"
