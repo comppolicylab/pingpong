@@ -3400,6 +3400,12 @@ class Annotation(Base):
         onupdate=func.now(),
     )
 
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> None:
+        annotation = Annotation(**data)
+        session.add(annotation)
+        await session.flush()
+
 
 class FileSearchCallResult(Base):
     __tablename__ = "file_search_call_results"
@@ -3428,6 +3434,12 @@ class FileSearchCallResult(Base):
         onupdate=func.now(),
     )
 
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> None:
+        result = cls(**data)
+        session.add(result)
+        await session.flush()
+
 
 class CodeInterpreterCallOutput(Base):
     __tablename__ = "code_interpreter_call_outputs"
@@ -3448,6 +3460,12 @@ class CodeInterpreterCallOutput(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> None:
+        output = cls(**data)
+        session.add(output)
+        await session.flush()
 
 
 class ToolCall(Base):
@@ -3500,6 +3518,58 @@ class ToolCall(Base):
         )
         await session.execute(stmt)
 
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> "ToolCall":
+        """Create a new tool call."""
+        tool_call = cls(**data)
+        session.add(tool_call)
+        await session.commit()
+        return tool_call
+
+    @classmethod
+    async def update_status(
+        cls,
+        session: AsyncSession,
+        id: int,
+        status: schemas.ToolCallStatus,
+        completed: datetime | None = None,
+    ) -> None:
+        """Update the status of a tool call."""
+        stmt = (
+            update(ToolCall)
+            .where(ToolCall.id == id)
+            .values(status=status, completed=completed)
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def add_code_delta(
+        cls, session: AsyncSession, id: int, code_delta: str
+    ) -> None:
+        """Append a code delta to a tool call."""
+        stmt = (
+            update(ToolCall)
+            .where(ToolCall.id == id)
+            .values(code=ToolCall.code + code_delta)
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def add_status_queries(
+        cls,
+        session: AsyncSession,
+        id: int,
+        status: schemas.ToolCallStatus,
+        queries: str,
+    ) -> None:
+        """Append status queries to a tool call."""
+        stmt = (
+            update(ToolCall)
+            .where(ToolCall.id == id)
+            .values(queries=queries, status=status)
+        )
+        await session.execute(stmt)
+
 
 class MessagePart(Base):
     __tablename__ = "message_parts"
@@ -3535,6 +3605,26 @@ class MessagePart(Base):
         back_populates="message_part",
         lazy="selectin",
     )
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> "MessagePart":
+        """Create a new message part."""
+        message_part = cls(**data)
+        session.add(message_part)
+        await session.commit()
+        return message_part
+
+    @classmethod
+    async def add_text_delta(
+        cls, session: AsyncSession, id_: int, text_delta: str
+    ) -> None:
+        """Append a text delta to a message part."""
+        stmt = (
+            update(MessagePart)
+            .where(MessagePart.id == id_)
+            .values(text=MessagePart.text + text_delta)
+        )
+        await session.execute(stmt)
 
 
 class Message(Base):
@@ -3613,7 +3703,34 @@ class Message(Base):
             update(Message)
             .where(Message.id == id)
             .values(
-                status=schemas.MessageStatus.INCOMPLETE,
+                message_status=schemas.MessageStatus.INCOMPLETE,
+            )
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> "Message":
+        """Create a new message."""
+        message = cls(**data)
+        session.add(message)
+        await session.commit()
+        return message
+
+    @classmethod
+    async def mark_status(
+        cls,
+        session: AsyncSession,
+        id: int,
+        status: schemas.MessageStatus,
+        completed: datetime | None = None,
+    ) -> None:
+        """Mark a message as a specific status."""
+        stmt = (
+            update(Message)
+            .where(Message.id == id)
+            .values(
+                message_status=status,
+                completed=completed,
             )
         )
         await session.execute(stmt)
@@ -3704,23 +3821,74 @@ class Run(Base):
         return result.scalar_one_or_none()
 
     @classmethod
-    async def mark_as_incomplete(
+    async def mark_as_status(
         cls,
         session: AsyncSession,
         id: int,
+        status: schemas.RunStatus,
         error_code: str | None,
         error_message: str | None,
         incomplete_reason: str | None,
+        completed: bool = True,
     ) -> None:
-        """Mark a run as incomplete."""
         stmt = (
             update(Run)
             .where(Run.id == id)
             .values(
-                status=schemas.RunStatus.INCOMPLETE,
+                status=status,
                 error_code=error_code,
                 error_message=error_message,
                 incomplete_reason=incomplete_reason,
+                completed=func.now() if completed else None,
+            )
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def update_run_id_status(
+        cls,
+        session: AsyncSession,
+        id_: int,
+        run_id: str,
+        status: schemas.RunStatus,
+    ) -> None:
+        """Update the run ID and status for a specific run."""
+        stmt = (
+            update(Run)
+            .where(Run.id == id_)
+            .values(
+                run_id=run_id,
+                status=status,
+            )
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def update_status(
+        cls, session: AsyncSession, id: int, status: schemas.RunStatus
+    ) -> None:
+        """Update the status for a specific run."""
+        stmt = (
+            update(Run)
+            .where(Run.id == id)
+            .values(
+                status=status,
+            )
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def mark_as_pending(
+        cls,
+        session: AsyncSession,
+        id: int,
+    ) -> None:
+        """Mark a run as pending."""
+        stmt = (
+            update(Run)
+            .where(Run.id == id)
+            .values(
+                status=schemas.RunStatus.PENDING,
             )
         )
         await session.execute(stmt)

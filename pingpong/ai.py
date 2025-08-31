@@ -587,6 +587,8 @@ async def build_response_input_item_list(
         )
 
     async for tool_call in models.Thread.list_all_tool_calls_gen(session, thread_id):
+        if tool_call.status == ToolCallStatus.INCOMPLETE:
+            continue
         match tool_call.type:
             case ToolCallType.CODE_INTERPRETER:
                 tool_call_outputs: list[Output] = []
@@ -695,7 +697,8 @@ class BufferedResponseStreamHandler:
         self,
         auth: AuthzClient,
         cli: openai.AsyncClient,
-        run: models.Run,
+        run_id: int,
+        run_status: RunStatus,
         prev_output_index: int,
         file_names: dict[str, str],
         class_id: int,
@@ -721,16 +724,20 @@ class BufferedResponseStreamHandler:
         self.anonymous_user_auth = anonymous_user_auth
         self.anonymous_session_id = anonymous_session_id
         self.anonymous_link_id = anonymous_link_id
-        self.__thread_id: int = thread_id
-        self.__assistant_id: int = assistant_id
-        self.__cached_run: models.Run | None = run
-        self.__prev_output_index = prev_output_index
-        self.__cached_message: models.Message | None = None
-        self.__prev_part_index = -1
-        self.__cached_message_part: models.MessagePart | None = None
-        self.__current_tool_call: models.ToolCall | None = None
-        self.__file_search_results: dict[str, FileSearchToolAnnotationResult] = {}
-        self.__file_ids_file_citation_annotation: set[str] = set()
+        self.run_id: int | None = run_id
+        self.run_status: RunStatus | None = run_status
+        self.message_id: int | None = None
+        self.message_created_at: datetime | None = None
+        self.message_part_id: int | None = None
+        self.prev_output_index = prev_output_index
+        self.tool_call_id: int | None = None
+        self.tool_call_external_id: int | None = None
+        self.thread_id: int = thread_id
+        self.assistant_id: int = assistant_id
+        self.prev_output_index = prev_output_index
+        self.prev_part_index = -1
+        self.file_search_results: dict[str, FileSearchToolAnnotationResult] = {}
+        self.file_ids_file_citation_annotation: set[str] = set()
 
     def enqueue(self, data: Dict) -> None:
         self.__buffer.write(orjson.dumps(data))
@@ -743,109 +750,133 @@ class BufferedResponseStreamHandler:
         return value
 
     async def on_response_created(self, data: ResponseCreatedEvent):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received response created event without a cached run. Data: {data}"
             )
             return
-        self.__cached_run.run_id = data.response.id
-        self.__cached_run.status = RunStatus(data.response.status)
 
         @db_session_handler
         async def update_run_on_response_created(session: AsyncSession):
-            session.add(self.__cached_run)
+            if not self.run_id:
+                return
+            await models.Run.update_run_id_status(
+                session,
+                id_=self.run_id,
+                run_id=data.response.id,
+                status=RunStatus(data.response.status),
+            )
             await session.commit()
 
         await update_run_on_response_created()
+        self.run_status = RunStatus(data.response.status)
 
     async def on_response_in_progress(self, data: ResponseInProgressEvent):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received response in progress event without a cached run. Data: {data}"
             )
             return
-        self.__cached_run.status = RunStatus(data.response.status)
 
         @db_session_handler
         async def update_run_on_response_in_progress(session: AsyncSession):
-            session.add(self.__cached_run)
+            if not self.run_id:
+                return
+            await models.Run.update_status(
+                session=session,
+                id=self.run_id,
+                status=RunStatus(data.response.status),
+            )
             await session.commit()
 
         await update_run_on_response_in_progress()
+        self.run_status = RunStatus(data.response.status)
 
     async def on_output_message_created(self, data: ResponseOutputMessage):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received output message created event without a cached run. Data: {data}"
             )
             return
-        if self.__cached_message:
+        if self.message_id:
             logger.exception(
                 f"Received output message created event with cached message. Data: {data}"
             )
             return
-        self.__prev_output_index += 1
-        self.__cached_message = models.Message(
-            output_index=self.__prev_output_index,
-            thread_id=self.__thread_id,
-            run_id=self.__cached_run.id,
-            message_id=data.id,
-            message_status=MessageStatus(data.status),
-            assistant_id=self.__assistant_id,
-            role=data.role,
-            created=utcnow(),
-        )
+
+        self.prev_output_index += 1
+
+        message_data = {
+            "output_index": self.prev_output_index,
+            "thread_id": self.thread_id,
+            "run_id": self.run_id,
+            "message_id": data.id,
+            "message_status": MessageStatus(data.status),
+            "assistant_id": self.assistant_id,
+            "role": data.role,
+            "created": utcnow(),
+        }
 
         @db_session_handler
         async def add_message_on_output_message_created(session: AsyncSession):
-            session.add(self.__cached_message)
+            message = await models.Message.create(session=session, data=message_data)
             await session.commit()
-            await session.refresh(self.__cached_message)
+            return message
 
-        await add_message_on_output_message_created()
+        message = await add_message_on_output_message_created()
+        self.message_id = message.id
+        self.message_created_at = message.created
 
     async def on_output_text_part_created(self, data: ResponseOutputText):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received text part created event without a cached run. Data: {data}"
             )
             return
-        if not self.__cached_message:
+        if not self.message_id:
             logger.exception(
                 f"Received text part created without a cached message. Data: {data}"
             )
             return
-        if self.__cached_message_part:
+        if self.message_part_id:
             logger.exception(
                 f"Received text part created with a cached message part. Data: {data}"
             )
             return
-        self.__prev_part_index += 1
-        self.__cached_message_part = models.MessagePart(
-            message_id=self.__cached_message.id,
-            part_index=self.__prev_part_index,
-            type=MessagePartType(data.type),
-            text=data.text,
-        )
+
+        self.prev_part_index += 1
+
+        part_data = {
+            "message_id": self.message_id,
+            "part_index": self.prev_part_index,
+            "type": MessagePartType(data.type),
+            "text": data.text,
+        }
 
         @db_session_handler
         async def add_message_part_on_output_text_part_created(session: AsyncSession):
-            session.add(self.__cached_message_part)
+            message_part = await models.MessagePart.create(
+                session=session, data=part_data
+            )
             await session.commit()
-            await session.refresh(self.__cached_message_part)
+            return message_part
 
-        await add_message_part_on_output_text_part_created()
+        message_part = await add_message_part_on_output_text_part_created()
+        self.message_part_id = message_part.id
+
         self.enqueue(
             {
                 "type": "message_created",
                 "role": "assistant",
                 "message": {
-                    "id": str(self.__cached_message.message_id),
-                    "thread_id": str(self.__cached_run.thread_id),
+                    "id": str(self.message_id),
+                    "thread_id": str(self.thread_id),
                     "assistant_id": None,
-                    "created_at": int(self.__cached_message.created.timestamp()),
+                    "created_at": int(self.message_created_at.timestamp())
+                    if self.message_created_at
+                    else None,
                     "object": "thread.message",
-                    "role": self.__cached_message.role,
+                    "role": "assistant",
                     "content": [],
                     "status": "in_progress",
                 },
@@ -853,16 +884,19 @@ class BufferedResponseStreamHandler:
         )
 
     async def on_output_text_delta(self, data: ResponseTextDeltaEvent):
-        if not self.__cached_message_part:
+        if not self.message_part_id:
             logger.exception(
                 f"Received text delta without a cached message part. Data: {data}"
             )
             return
-        self.__cached_message_part.text += data.delta
 
         @db_session_handler
         async def update_message_part_on_output_text_delta(session: AsyncSession):
-            session.add(self.__cached_message_part)
+            if not self.message_part_id:
+                return
+            await models.MessagePart.add_text_delta(
+                session=session, id_=self.message_part_id, text_delta=data.delta
+            )
             await session.commit()
 
         await update_message_part_on_output_text_delta()
@@ -888,7 +922,7 @@ class BufferedResponseStreamHandler:
     async def on_output_text_container_file_citation_added(
         self, data: AnnotationContainerFileCitation, annotation_index: int | None = None
     ):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received text container file citation added event without a cached run. Data: {data}"
             )
@@ -912,7 +946,7 @@ class BufferedResponseStreamHandler:
         async def create_file_on_output_text_container_file_citation_added(
             session_: AsyncSession,
         ):
-            return await handle_create_file(
+            file = await handle_create_file(
                 session=session_,
                 authz=self.auth,
                 oai_client=self.openai_cli,
@@ -929,6 +963,8 @@ class BufferedResponseStreamHandler:
                 anonymous_session_id=self.anonymous_session_id,
                 anonymous_link_id=self.anonymous_link_id,
             )
+            await session_.commit()
+            return file
 
         file = await create_file_on_output_text_container_file_citation_added()
         if not file:
@@ -939,12 +975,13 @@ class BufferedResponseStreamHandler:
         async def add_code_interpreter_files_on_output_text_container_file_citation_added(
             session: AsyncSession,
         ):
-            if self.__cached_run and file.code_interpreter_file_id:
+            if file.code_interpreter_file_id:
                 await models.Thread.add_code_interpreter_files(
                     session=session,
-                    thread_id=self.__cached_run.thread_id,
+                    thread_id=self.thread_id,
                     file_ids=[file.code_interpreter_file_id],
                 )
+                await session.commit()
 
         if file.code_interpreter_file_id:
             await add_code_interpreter_files_on_output_text_container_file_citation_added()
@@ -953,42 +990,42 @@ class BufferedResponseStreamHandler:
         async def add_image_files_on_output_text_container_file_citation_added(
             session: AsyncSession,
         ):
-            if self.__cached_run and file.vision_file_id:
+            if file.vision_file_id:
                 await models.Thread.add_image_files(
                     session=session,
-                    thread_id=self.__cached_run.thread_id,
+                    thread_id=self.thread_id,
                     file_ids=[file.vision_file_id],
                 )
+                await session.commit()
 
         if file.vision_file_id:
             await add_image_files_on_output_text_container_file_citation_added()
 
-        if not self.__cached_message_part:
+        if not self.message_part_id:
             logger.exception(
                 f"Received file citation annotation without a cached message part. Data: {data}"
             )
             return
 
-        self.__cached_message_part.annotations.append(
-            models.Annotation(
-                type=AnnotationType.CONTAINER_FILE_CITATION,
-                file_id=file.file_id,
-                file_object_id=file.id if not file.vision_file_id else None,
-                vision_file_id=file.vision_file_id,
-                vision_file_object_id=file.id if file.vision_file_id else None,
-                filename=file.name,
-                container_id=data["container_id"],
-                start_index=data["start_index"],
-                end_index=data["end_index"],
-                annotation_index=annotation_index,
-            )
-        )
+        annotation_data = {
+            "type": AnnotationType.CONTAINER_FILE_CITATION,
+            "file_id": file.file_id,
+            "file_object_id": file.id if not file.vision_file_id else None,
+            "vision_file_id": file.vision_file_id,
+            "vision_file_object_id": file.id if file.vision_file_id else None,
+            "filename": file.name,
+            "container_id": data["container_id"],
+            "start_index": data["start_index"],
+            "end_index": data["end_index"],
+            "annotation_index": annotation_index,
+            "message_part_id": self.message_part_id,
+        }
 
         @db_session_handler
         async def add_cached_message_part_on_output_text_container_file_citation_added(
             session_: AsyncSession,
         ):
-            session_.add(self.__cached_message_part)
+            await models.Annotation.create(session=session_, data=annotation_data)
             await session_.commit()
 
         await add_cached_message_part_on_output_text_container_file_citation_added()
@@ -1041,34 +1078,34 @@ class BufferedResponseStreamHandler:
     async def on_output_text_file_citation_added(
         self, data: AnnotationFileCitation, annotation_index: int | None = None
     ):
-        if not self.__cached_message_part:
+        if not self.message_part_id:
             logger.exception(
                 f"Received file citation annotation without a cached message part. Data: {data}"
             )
             return
-        self.__cached_message_part.annotations.append(
-            models.Annotation(
-                type=AnnotationType.FILE_CITATION,
-                file_id=data["file_id"],
-                filename=data["filename"],
-                index=data["index"],
-                annotation_index=annotation_index,
-            )
-        )
+
+        annotation_data = {
+            "message_part_id": self.message_part_id,
+            "type": AnnotationType.FILE_CITATION,
+            "file_id": data["file_id"],
+            "filename": data["filename"],
+            "index": data["index"],
+            "annotation_index": annotation_index,
+        }
 
         @db_session_handler
         async def add_cached_message_part_on_output_text_file_citation_added(
             session_: AsyncSession,
         ):
-            session_.add(self.__cached_message_part)
+            await models.Annotation.create(session=session_, data=annotation_data)
             await session_.commit()
 
         await add_cached_message_part_on_output_text_file_citation_added()
 
-        _file_record = self.__file_search_results.get(data["file_id"])
+        _file_record = self.file_search_results.get(data["file_id"])
         if _file_record:
-            if data["file_id"] not in self.__file_ids_file_citation_annotation:
-                self.__file_ids_file_citation_annotation.add(data["file_id"])
+            if data["file_id"] not in self.file_ids_file_citation_annotation:
+                self.file_ids_file_citation_annotation.add(data["file_id"])
                 self.enqueue(
                     {
                         "type": "message_delta",
@@ -1101,92 +1138,94 @@ class BufferedResponseStreamHandler:
                 )
 
     async def on_output_text_part_done(self, data: ResponseOutputText):
-        if not self.__cached_message_part:
+        if not self.message_part_id:
             logger.exception(
                 f"Received text part done event without a cached message part. Data: {data}"
             )
             return
 
-        if not self.__cached_message:
+        if not self.message_id:
             logger.exception(
                 f"Received text part done event without a cached message. Data: {data}"
             )
             return
 
-        @db_session_handler
-        async def add_cached_message_part_on_output_text_part_done(
-            session_: AsyncSession,
-        ):
-            session_.add(self.__cached_message_part)
-            await session_.commit()
-
-        await add_cached_message_part_on_output_text_part_done()
-        self.__cached_message_part = None
+        self.message_part_id = None
 
     async def on_output_message_done(self, data: ResponseOutputMessage):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received output message done event without a cached run. Data: {data}"
             )
             return
-        if not self.__cached_message:
+        if not self.message_id:
             logger.exception(
                 f"Received output message done event without a cached message. Data: {data}"
             )
             return
 
-        if self.__cached_message_part:
+        if self.message_part_id:
             logger.exception(
                 f"Output message done event received with a cached message part. Data: {data}"
             )
-            self.__cached_message_part = None
+            self.message_part_id = None
 
-        self.__cached_message.completed = utcnow()
-        self.__cached_message.message_status = MessageStatus(data.status)
+        completed_time = utcnow()
 
         @db_session_handler
         async def add_cached_message_add_cached_message(session_: AsyncSession):
-            session_.add(self.__cached_message)
+            if not self.message_id:
+                return
+            await models.Message.mark_status(
+                session_,
+                self.message_id,
+                MessageStatus(data.status),
+                completed=completed_time,
+            )
             await session_.commit()
 
         await add_cached_message_add_cached_message()
-        self.__cached_message = None
+        self.message_id = None
 
     async def on_code_interpreter_tool_call_created(
         self, data: ResponseCodeInterpreterToolCall
     ):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received code interpreter tool call created event without a cached run. Data: {data}"
             )
             return
-        if self.__current_tool_call:
+        if self.tool_call_id:
             logger.exception(
                 f"Received code interpreter tool call created with an existing tool call. Data: {data}"
             )
             return
-        self.__prev_output_index += 1
-        self.__current_tool_call = models.ToolCall(
-            run_id=self.__cached_run.id,
-            tool_call_id=data.id,
-            type=ToolCallType.CODE_INTERPRETER,
-            status=ToolCallStatus(data.status),
-            thread_id=self.__cached_run.thread_id,
-            output_index=self.__prev_output_index,
-            container_id=data.container_id,
-            code=data.code,
-            created=utcnow(),
-        )
+
+        self.prev_output_index += 1
+
+        tool_call_data = {
+            "run_id": self.run_id,
+            "tool_call_id": data.id,
+            "type": ToolCallType.CODE_INTERPRETER,
+            "status": ToolCallStatus(data.status),
+            "thread_id": self.thread_id,
+            "output_index": self.prev_output_index,
+            "container_id": data.container_id,
+            "code": data.code,
+            "created": utcnow(),
+        }
 
         @db_session_handler
         async def add_cached_tool_call_on_code_interpreter_tool_call_created(
             session_: AsyncSession,
         ):
-            session_.add(self.__current_tool_call)
+            tool_call = await models.ToolCall.create(session_, tool_call_data)
             await session_.commit()
-            await session_.refresh(self.__current_tool_call)
+            return tool_call
 
-        await add_cached_tool_call_on_code_interpreter_tool_call_created()
+        tool_call = await add_cached_tool_call_on_code_interpreter_tool_call_created()
+        self.tool_call_id = tool_call.id
+        self.tool_call_external_id = tool_call.tool_call_id
 
         self.enqueue(
             {
@@ -1202,23 +1241,26 @@ class BufferedResponseStreamHandler:
     async def on_code_interpreter_tool_call_in_progress(
         self, data: ResponseCodeInterpreterCallInProgressEvent
     ):
-        if not self.__current_tool_call:
+        if not self.tool_call_id:
             logger.exception(
                 f"Received code interpreter tool call in progress without a current tool call. Data: {data}"
             )
             return
-        if self.__current_tool_call.tool_call_id != data.item_id:
+        if self.tool_call_external_id != data.item_id:
             logger.exception(
                 f"Received code interpreter tool call in progress with a different tool call ID. Data: {data}"
             )
             return
-        self.__current_tool_call.status = ToolCallStatus.IN_PROGRESS
 
         @db_session_handler
         async def add_cached_tool_call_on_code_interpreter_tool_call_in_progress(
             session_: AsyncSession,
         ):
-            session_.add(self.__current_tool_call)
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_status(
+                session_, self.tool_call_id, ToolCallStatus.IN_PROGRESS
+            )
             await session_.commit()
 
         await add_cached_tool_call_on_code_interpreter_tool_call_in_progress()
@@ -1226,23 +1268,26 @@ class BufferedResponseStreamHandler:
     async def on_code_interpreter_tool_call_code_delta(
         self, data: ResponseCodeInterpreterCallCodeDeltaEvent
     ):
-        if not self.__current_tool_call:
+        if not self.tool_call_id:
             logger.exception(
                 f"Received code interpreter tool call code delta without a current tool call. Data: {data}"
             )
             return
-        if self.__current_tool_call.tool_call_id != data.item_id:
+        if self.tool_call_external_id != data.item_id:
             logger.exception(
                 f"Received code interpreter tool call code delta with a different tool call ID. Data: {data}"
             )
             return
-        self.__current_tool_call.code += data.delta
 
         @db_session_handler
         async def add_cached_tool_call_on_code_interpreter_tool_call_in_progress(
             session_: AsyncSession,
         ):
-            session_.add(self.__current_tool_call)
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.add_code_delta(
+                session_, self.tool_call_id, data.delta
+            )
             await session_.commit()
 
         await add_cached_tool_call_on_code_interpreter_tool_call_in_progress()
@@ -1262,23 +1307,26 @@ class BufferedResponseStreamHandler:
     async def on_code_interpreter_tool_call_interpreting(
         self, data: ResponseCodeInterpreterCallInterpretingEvent
     ):
-        if not self.__current_tool_call:
+        if not self.tool_call_id:
             logger.exception(
                 f"Received code interpreter tool call interpreting without a current tool call. Data: {data}"
             )
             return
-        if self.__current_tool_call.tool_call_id != data.item_id:
+        if self.tool_call_id != data.item_id:
             logger.exception(
                 f"Received code interpreter tool call interpreting with a different tool call ID. Data: {data}"
             )
             return
-        self.__current_tool_call.status = ToolCallStatus.INTERPRETING
 
         @db_session_handler
         async def add_cached_tool_call_on_code_interpreter_tool_call_interpreting(
             session_: AsyncSession,
         ):
-            session_.add(self.__current_tool_call)
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_status(
+                session_, self.tool_call_id, ToolCallStatus.INTERPRETING
+            )
             await session_.commit()
 
         await add_cached_tool_call_on_code_interpreter_tool_call_interpreting()
@@ -1286,23 +1334,31 @@ class BufferedResponseStreamHandler:
     async def on_code_interpreter_tool_call_completed(
         self, data: ResponseCodeInterpreterCallCompletedEvent
     ):
-        if not self.__current_tool_call:
+        if not self.tool_call_id:
             logger.exception(
                 f"Received code interpreter tool call completed without a current tool call. Data: {data}"
             )
             return
-        if self.__current_tool_call.tool_call_id != data.item_id:
+        if self.tool_call_id != data.item_id:
             logger.exception(
                 f"Received code interpreter tool call completed with a different tool call ID. Data: {data}"
             )
             return
-        self.__current_tool_call.status = ToolCallStatus.COMPLETED
+
+        completed_at = utcnow()
 
         @db_session_handler
         async def add_cached_tool_call_on_code_interpreter_tool_call_completed(
             session_: AsyncSession,
         ):
-            session_.add(self.__current_tool_call)
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_status(
+                session_,
+                self.tool_call_id,
+                ToolCallStatus.COMPLETED,
+                completed=completed_at,
+            )
             await session_.commit()
 
         await add_cached_tool_call_on_code_interpreter_tool_call_completed()
@@ -1310,23 +1366,26 @@ class BufferedResponseStreamHandler:
     async def on_code_interpreter_tool_call_done(
         self, data: ResponseCodeInterpreterToolCall
     ):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received code interpreter tool call done without a cached run. Data: {data}"
             )
             return
-        if not self.__current_tool_call:
+        if not self.tool_call_id:
             logger.exception(
                 f"Received code interpreter tool call done without a current tool call. Data: {data}"
             )
             return
-        if self.__current_tool_call.tool_call_id != data.id:
+        if self.tool_call_external_id != data.id:
             logger.exception(
                 f"Received code interpreter tool call done with a different tool call ID. Data: {data}"
             )
             return
 
-        self.__current_tool_call.status = ToolCallStatus(data.status)
+        @db_session_handler
+        async def add_code_interpreter_call_output(session_: AsyncSession, data: dict):
+            await models.CodeInterpreterCallOutput.create(session_, data)
+            await session_.commit()
 
         if data.outputs:
             for output in data.outputs:
@@ -1337,18 +1396,18 @@ class BufferedResponseStreamHandler:
                                 f"Received image output without a URL. Data: {output}"
                             )
                             return
-                        self.__current_tool_call.outputs.append(
-                            models.CodeInterpreterCallOutput(
-                                output_type=CodeInterpreterOutputType.IMAGE,
-                                url=output.url,
-                                created=utcnow(),
-                            )
-                        )
+                        image_data = {
+                            "tool_call_id": self.tool_call_id,
+                            "output_type": CodeInterpreterOutputType.IMAGE,
+                            "url": output.url,
+                            "created": utcnow(),
+                        }
+                        await add_code_interpreter_call_output(image_data)
                         self.enqueue(
                             {
                                 "type": "tool_call_delta",
                                 "delta": {
-                                    "index": self.__prev_output_index,
+                                    "index": self.prev_output_index,
                                     "type": "code_interpreter",
                                     "id": data.id,
                                     "code_interpreter": {
@@ -1364,18 +1423,19 @@ class BufferedResponseStreamHandler:
                             }
                         )
                     case "logs":
-                        self.__current_tool_call.outputs.append(
-                            models.CodeInterpreterCallOutput(
-                                output_type=CodeInterpreterOutputType.LOGS,
-                                logs=output.logs,
-                                created=utcnow(),
-                            )
-                        )
+                        logs_data = {
+                            "tool_call_id": self.tool_call_id,
+                            "output_type": CodeInterpreterOutputType.LOGS,
+                            "created": utcnow(),
+                            "logs": output.logs,
+                        }
+                        await add_code_interpreter_call_output(logs_data)
+
                         self.enqueue(
                             {
                                 "type": "tool_call_delta",
                                 "delta": {
-                                    "index": self.__prev_output_index,
+                                    "index": self.prev_output_index,
                                     "type": "code_interpreter",
                                     "id": data.id,
                                     "code_interpreter": {
@@ -1395,66 +1455,78 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_code_interpreter_tool_call_done(
             session_: AsyncSession,
         ):
-            session_.add(self.__current_tool_call)
+            await models.ToolCall.mark_status(
+                session_,
+                self.tool_call_id,
+                ToolCallStatus(data.status),
+            )
             await session_.commit()
 
         await add_cached_tool_call_on_code_interpreter_tool_call_done()
-        self.__current_tool_call = None
+        self.tool_call_id = None
+        self.tool_call_external_id = None
 
     async def on_file_search_call_created(self, data: ResponseFileSearchToolCall):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received file search call created event without a cached run. Data: {data}"
             )
             return
-        if self.__current_tool_call:
+        if self.tool_call_id:
             logger.exception(
                 f"Received code interpreter tool call created with an existing tool call. Data: {data}"
             )
             return
-        self.__prev_output_index += 1
-        self.__current_tool_call = models.ToolCall(
-            run_id=self.__cached_run.id,
-            tool_call_id=data.id,
-            type=ToolCallType.FILE_SEARCH,
-            status=ToolCallStatus(data.status),
-            thread_id=self.__cached_run.thread_id,
-            output_index=self.__prev_output_index,
-            queries=json.dumps(data.queries),
-            created=utcnow(),
-        )
+
+        self.prev_output_index += 1
+
+        tool_call_data = {
+            "run_id": self.run_id,
+            "tool_call_id": data.id,
+            "type": ToolCallType.FILE_SEARCH,
+            "status": ToolCallStatus(data.status),
+            "thread_id": self.thread_id,
+            "output_index": self.prev_output_index,
+            "queries": json.dumps(data.queries),
+            "created": utcnow(),
+        }
 
         @db_session_handler
         async def add_cached_tool_call_on_file_search_call_created(
             session_: AsyncSession,
         ):
-            session_.add(self.__current_tool_call)
+            tool_call = await models.ToolCall.create(session_, tool_call_data)
             await session_.commit()
-            await session_.refresh(self.__current_tool_call)
+            return tool_call
 
-        await add_cached_tool_call_on_file_search_call_created()
+        tool_call = await add_cached_tool_call_on_file_search_call_created()
+        self.tool_call_id = tool_call.id
+        self.tool_call_external_id = tool_call.tool_call_id
 
     async def on_file_search_call_in_progress(
         self, data: ResponseFileSearchCallInProgressEvent
     ):
-        if not self.__current_tool_call:
+        if not self.tool_call_id:
             logger.exception(
                 f"Received file search call in progress without a current tool call. Data: {data}"
             )
             return
-        if self.__current_tool_call.tool_call_id != data.item_id:
+        if self.tool_call_external_id != data.item_id:
             logger.exception(
                 f"Received file search call in progress with a different tool call ID. Data: {data}"
             )
             return
 
-        self.__current_tool_call.status = ToolCallStatus.IN_PROGRESS
-
         @db_session_handler
         async def add_cached_tool_call_on_file_search_call_in_progress(
             session_: AsyncSession,
         ):
-            session_.add(self.__current_tool_call)
+            if not self.tool_call_id:
+                return
+
+            await models.ToolCall.update_status(
+                session_, self.tool_call_id, ToolCallStatus.IN_PROGRESS
+            )
             await session_.commit()
 
         await add_cached_tool_call_on_file_search_call_in_progress()
@@ -1462,24 +1534,26 @@ class BufferedResponseStreamHandler:
     async def on_file_search_call_searching(
         self, data: ResponseFileSearchCallSearchingEvent
     ):
-        if not self.__current_tool_call:
+        if not self.tool_call_id:
             logger.exception(
                 f"Received file search call searching without a current tool call. Data: {data}"
             )
             return
-        if self.__current_tool_call.tool_call_id != data.item_id:
+        if self.tool_call_external_id != data.item_id:
             logger.exception(
                 f"Received file search call searching with a different tool call ID. Data: {data}"
             )
             return
 
-        self.__current_tool_call.status = ToolCallStatus.SEARCHING
-
         @db_session_handler
         async def add_cached_tool_call_on_file_search_call_searching(
             session_: AsyncSession,
         ):
-            session_.add(self.__current_tool_call)
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_status(
+                session_, self.tool_call_id, ToolCallStatus.SEARCHING
+            )
             await session_.commit()
 
         await add_cached_tool_call_on_file_search_call_searching()
@@ -1487,56 +1561,73 @@ class BufferedResponseStreamHandler:
     async def on_file_search_call_completed(
         self, data: ResponseFileSearchCallCompletedEvent
     ):
-        if not self.__current_tool_call:
+        if not self.tool_call_id:
             logger.exception(
                 f"Received file search call completed without a current tool call. Data: {data}"
             )
             return
-        if self.__current_tool_call.tool_call_id != data.item_id:
+        if self.tool_call_external_id != data.item_id:
             logger.exception(
                 f"Received file search call completed with a different tool call ID. Data: {data}"
             )
             return
 
-        self.__current_tool_call.status = ToolCallStatus.COMPLETED
+        completed_at = utcnow()
 
         @db_session_handler
         async def add_cached_tool_call_on_file_search_call_completed(
             session_: AsyncSession,
         ):
-            session_.add(self.__current_tool_call)
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_status(
+                session_,
+                self.tool_call_id,
+                ToolCallStatus.COMPLETED,
+                completed=completed_at,
+            )
             await session_.commit()
 
         await add_cached_tool_call_on_file_search_call_completed()
 
     async def on_file_search_call_done(self, data: ResponseFileSearchToolCall):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received file search call done without a cached run. Data: {data}"
             )
             return
-        if not self.__current_tool_call:
+        if not self.tool_call_id:
             logger.exception(
                 f"Received file search call done without a current tool call. Data: {data}"
             )
             return
-        if self.__current_tool_call.tool_call_id != data.id:
+        if self.tool_call_external_id != data.id:
             logger.exception(
                 f"Received file search call done with a different tool call ID. Data: {data}"
             )
             return
 
-        self.__current_tool_call.status = ToolCallStatus(data.status)
-        self.__current_tool_call.queries = json.dumps(data.queries)
+        @db_session_handler
+        async def get_file_object_id_on_file_search_call_done(
+            session_: AsyncSession, file_id: str
+        ):
+            return await models.File.get_obj_id_by_file_id(session_, file_id)
+
+        @db_session_handler
+        async def add_current_tool_call_on_file_search_call_done(
+            session_: AsyncSession, data: dict
+        ):
+            await models.FileSearchCallResult.create(session_, data)
+            await session_.commit()
 
         for result in data.results:
             if result.file_id:
-                if self.__file_search_results.get(result.file_id):
-                    self.__file_search_results[result.file_id].text += (
+                if self.file_search_results.get(result.file_id):
+                    self.file_search_results[result.file_id].text += (
                         "\n\n <hr/> \n\n" + result.text
                     )
                 else:
-                    self.__file_search_results[result.file_id] = (
+                    self.file_search_results[result.file_id] = (
                         FileSearchToolAnnotationResult(
                             file_id=result.file_id,
                             filename=result.filename,
@@ -1544,38 +1635,41 @@ class BufferedResponseStreamHandler:
                         )
                     )
 
-            @db_session_handler
-            async def get_file_object_id_on_file_search_call_done(
-                session_: AsyncSession,
-            ):
-                return await models.File.get_obj_id_by_file_id(session_, result.file_id)
-
-            self.__current_tool_call.results.append(
-                models.FileSearchCallResult(
-                    attributes=json.dumps(result.attributes),
-                    file_id=result.file_id,
-                    file_object_id=await get_file_object_id_on_file_search_call_done(
-                        result.file_id
-                    )
-                    if result.file_id
-                    else None,
-                    filename=result.filename,
-                    score=result.score,
-                    text=result.text,
-                    created=utcnow(),
+            fs_result_data = {
+                "attributes": json.dumps(result.attributes),
+                "file_id": result.file_id,
+                "file_object_id": await get_file_object_id_on_file_search_call_done(
+                    result.file_id
                 )
+                if result.file_id
+                else None,
+                "filename": result.filename,
+                "score": result.score,
+                "text": result.text,
+                "created": utcnow(),
+                "tool_call_id": self.tool_call_id,
+            }
+
+            await add_current_tool_call_on_file_search_call_done(fs_result_data)
+
+        @db_session_handler
+        async def update_status_queries_on_file_search_call_done(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.add_status_queries(
+                session_,
+                self.tool_call_id,
+                ToolCallStatus(data.status),
+                json.dumps(data.queries),
             )
+            await session_.commit()
 
-            @db_session_handler
-            async def add_current_tool_call_on_file_search_call_done(
-                session_: AsyncSession,
-            ):
-                session_.add(self.__current_tool_call)
-                await session_.commit()
+        await update_status_queries_on_file_search_call_done()
 
-            await add_current_tool_call_on_file_search_call_done()
-
-        self.__current_tool_call = None
+        self.tool_call_id = None
+        self.tool_call_external_id = None
 
     async def cleanup(
         self,
@@ -1586,64 +1680,78 @@ class BufferedResponseStreamHandler:
         send_error_message_only_if_active: bool = False,
         restore_to_pending_if_queued: bool = False,
     ):
-        logger.info(
-            f"Starting to clean up run: {self.__cached_run.id if self.__cached_run else None}"
-        )
+        logger.info(f"Starting to clean up run: {self.run_id}")
 
         has_active_run = False
-        if self.__cached_run:
+        if self.run_id:
 
             @db_session_handler
-            async def save_cached_run_on_cleanup(session_: AsyncSession):
-                session_.add(self.__cached_run)
-                await session_.commit()
+            async def mark_cached_run_as_pending_on_cleanup(session_: AsyncSession):
+                if self.run_id:
+                    await models.Run.mark_as_pending(session_, self.run_id)
+                    await session_.commit()
 
             @db_session_handler
-            async def save_cached_message_part_on_cleanup(session_: AsyncSession):
-                session_.add(self.__cached_message_part)
-
-            @db_session_handler
-            async def save_cached_message_on_cleanup(session_: AsyncSession):
-                session_.add(self.__cached_message)
-
-            @db_session_handler
-            async def save_current_tool_call_on_cleanup(session_: AsyncSession):
-                session_.add(self.__current_tool_call)
-
-            if (
-                self.__cached_run.status == RunStatus.QUEUED
-                and restore_to_pending_if_queued
+            async def mark_cached_run_status_on_cleanup(
+                session_: AsyncSession,
+                run_status: RunStatus,
+                error_code: str | None,
+                error_message: str | None,
+                incomplete_reason: str | None,
             ):
-                self.__cached_run.status = RunStatus.PENDING
-                await save_cached_run_on_cleanup()
-                self.__cached_run = None
+                if self.run_id:
+                    await models.Run.mark_as_status(
+                        session_,
+                        self.run_id,
+                        status=run_status,
+                        error_code=error_code,
+                        error_message=error_message,
+                        incomplete_reason=incomplete_reason,
+                    )
+                    await session_.commit()
+
+            @db_session_handler
+            async def mark_cached_message_as_incomplete_on_cleanup(
+                session_: AsyncSession,
+            ):
+                if self.message_id:
+                    await models.Message.mark_as_incomplete(session_, self.message_id)
+                    await session_.commit()
+
+            @db_session_handler
+            async def mark_cached_tool_call_as_incomplete_on_cleanup(
+                session_: AsyncSession,
+            ):
+                if self.tool_call_id:
+                    await models.ToolCall.mark_as_incomplete(
+                        session_, self.tool_call_id
+                    )
+                    await session_.commit()
+
+            if self.run_status == RunStatus.QUEUED and restore_to_pending_if_queued:
+                await mark_cached_run_as_pending_on_cleanup()
+                self.run_id = None
+                self.run_status = None
                 self.enqueue({"type": "done"})
                 return
+
             has_active_run = True
-            if self.__cached_message_part and self.__cached_message:
-                await save_cached_message_part_on_cleanup()
-                self.__cached_message_part = None
-            if self.__cached_message:
-                self.__cached_message.message_status = MessageStatus.INCOMPLETE
-                await save_cached_message_on_cleanup()
-                self.__cached_message = None
-            if self.__current_tool_call:
-                self.__current_tool_call.status = ToolCallStatus.INCOMPLETE
-                await save_current_tool_call_on_cleanup()
-                self.__current_tool_call = None
+            if self.message_id:
+                await mark_cached_message_as_incomplete_on_cleanup()
+                self.message_id = None
+            if self.tool_call_id:
+                await mark_cached_tool_call_as_incomplete_on_cleanup()
+                self.tool_call_id = None
 
-            self.__cached_run.completed = utcnow()
-            self.__cached_run.status = run_status
-
-            self.__cached_run.error_code = response_error_code
-            self.__cached_run.error_message = response_error_message
-            self.__cached_run.incomplete_reason = response_incomplete_reason
-
-            logger.info(
-                f"About to save run data while cleaning up run: {self.__cached_run.id if self.__cached_run else None}"
+            logger.info(f"About to save run data while cleaning up run: {self.run_id}")
+            await mark_cached_run_status_on_cleanup(
+                run_status,
+                response_error_code,
+                response_error_message,
+                response_incomplete_reason,
             )
-            await save_cached_run_on_cleanup()
-            self.__cached_run = None
+            self.run_id = None
+            self.run_status = None
 
         if response_error_message and (
             not send_error_message_only_if_active or has_active_run
@@ -1671,7 +1779,7 @@ class BufferedResponseStreamHandler:
             ResponseCompletedEvent, ResponseFailedEvent, ResponseIncompleteEvent
         ],
     ):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received response completed event without a cached run. Data: {data}"
             )
@@ -1691,20 +1799,28 @@ class BufferedResponseStreamHandler:
         )
 
     async def on_response_error(self, data: ResponseErrorEvent) -> None:
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received response error event without a cached run. Data: {data}"
             )
             return
-        self.__cached_run.error_code = data.code
-        self.__cached_run.error_message = data.message
-        async with config.db.driver.async_session() as session_:
-            if data.code == "rate_limit_exceeded":
-                await models.Class.log_rate_limit_error(
-                    session_, class_id=str(self.class_id)
-                )
-            session_.add(self.__cached_run)
+
+        @db_session_handler
+        async def log_rate_limit_error_on_response_error(session_: AsyncSession):
+            await models.Class.log_rate_limit_error(
+                session_, class_id=str(self.class_id)
+            )
             await session_.commit()
+
+        if data.code == "rate_limit_exceeded":
+            await log_rate_limit_error_on_response_error()
+
+        await self.cleanup(
+            run_status=RunStatus.FAILED,
+            response_error_code=data.code,
+            response_error_message=data.message,
+        )
+
         self.enqueue(
             {
                 "type": "error",
@@ -1718,50 +1834,6 @@ class BufferedResponseStreamHandler:
             response_incomplete_reason="User canceled the request.",
             send_error_message_only_if_active=False,
         )
-
-
-async def cleanup_task(
-    run_status: RunStatus,
-    run_id: int | None = None,
-    message_id: int | None = None,
-    tool_call_id: int | None = None,
-    response_error_code: str | None = None,
-    response_error_message: str | None = None,
-    response_incomplete_reason: str | None = None,
-    restore_to_pending_if_queued: bool = False,
-):
-    logger.info(
-        f"Starting to clean up run from async task: {run_id if run_id else 'No run ID'}"
-    )
-
-    if run_id:
-        async with config.db.driver.async_session() as session_:
-            run = await models.Run.get_by_id(session_, run_id)
-            if not run:
-                logger.warning(f"Run not found: {run_id}")
-                return
-            if run.status == RunStatus.QUEUED and restore_to_pending_if_queued:
-                run.status = RunStatus.PENDING
-                session_.add(run)
-                await session_.commit()
-                return
-            if message_id:
-                await models.Message.mark_as_incomplete(session_, message_id)
-            if tool_call_id:
-                await models.ToolCall.mark_as_incomplete(session_, tool_call_id)
-
-            run.completed = utcnow()
-            run.status = run_status
-
-            run.error_code = response_error_code
-            run.error_message = response_error_message
-            run.incomplete_reason = response_incomplete_reason
-
-            session_.add(run)
-            logger.info(
-                f"About to save run data while cleaning up run: {run.id if run else None}"
-            )
-            await session_.commit()
 
 
 async def run_response(
@@ -1866,7 +1938,8 @@ async def run_response(
                     session=session_,
                     auth=c,
                     cli=cli,
-                    run=run,
+                    run_id=run.id,
+                    run_status=RunStatus(run.status),
                     prev_output_index=input_count - 1,
                     file_names=file_names,
                     class_id=int(class_id),
@@ -1976,23 +2049,10 @@ async def run_response(
                 ConnectionResetError,
                 ConnectionAbortedError,
                 asyncio.CancelledError,
-            ) as e:
-                logger.warning(f"Client disconnected: {e}")
-                if handler:
-                    try:
-                        await asyncio.shield(
-                            handler.cleanup(
-                                run_status=RunStatus.INCOMPLETE,
-                                response_incomplete_reason="User disconnected.",
-                                restore_to_pending_if_queued=True,
-                            )
-                        )
-                    except BaseException as e:
-                        logger.error(f"Error cleaning up run {run.id}: {e}")
-                    except Exception as e:
-                        logger.error(f"Unexpected error cleaning up run {run.id}: {e}")
-                logger.info(f"Cleaned up run {run.id} after client disconnect.")
+            ):
                 is_canceled = True
+                if handler:
+                    await asyncio.shield(handler.on_response_canceled())
             except openai.APIError as openai_error:
                 if openai_error.type == "server_error":
                     try:
@@ -2104,13 +2164,12 @@ async def run_response(
                     logger.exception(f"Error writing to stream: {e_}")
                     pass
             finally:
-                logger.info("Entered finally block")
                 if not is_canceled:
-                    logger.info("Not canceled, flushing remaining data")
                     if handler:
                         yield handler.flush()
                     yield b'{"type":"done"}\n'
         except asyncio.CancelledError:
+            logger.info("Response stream was cancelled")
             return
         except Exception as e:
             logger.exception(f"Error in response creating responses handler: {e}")
