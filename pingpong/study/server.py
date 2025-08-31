@@ -342,6 +342,8 @@ def process_course(course: Course) -> schemas.StudyCourse:
             course_status = "in_review"
         case "Rejected":
             course_status = "rejected"
+        case "Withdrawn":
+            course_status = "withdrawn"
         case "Accepted — Treatment":
             course_status = "accepted"
         case "Accepted — Control":
