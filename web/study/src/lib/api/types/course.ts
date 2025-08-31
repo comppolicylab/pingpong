@@ -1,7 +1,7 @@
 export type Course = {
 	id: string;
 	name?: string;
-	status?: 'in_review' | 'accepted' | 'rejected';
+	status?: 'in_review' | 'accepted' | 'rejected' | 'withdrawn';
 	randomization?: 'control' | 'treatment';
 	start_date?: string;
 	enrollment_count?: number;

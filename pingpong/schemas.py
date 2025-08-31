@@ -990,7 +990,7 @@ class AIProvider(StrEnum):
 class StudyCourse(BaseModel):
     id: str
     name: str | None = None
-    status: Literal["in_review", "accepted", "rejected"] | None = None
+    status: Literal["in_review", "accepted", "rejected", "withdrawn"] | None = None
     randomization: Literal["control", "treatment"] | None = None
     start_date: datetime | None = None
     enrollment_count: int | None = None
