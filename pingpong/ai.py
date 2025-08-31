@@ -2054,6 +2054,7 @@ async def run_response(
                 is_canceled = True
                 if handler:
                     await asyncio.shield(handler.on_response_canceled())
+                return
             except openai.APIError as openai_error:
                 if openai_error.type == "server_error":
                     try:
