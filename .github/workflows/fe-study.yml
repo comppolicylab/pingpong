@@ -1,20 +1,20 @@
-name: UI - PingPong
+name: UI — Study
 
 on:
   push:
     branches: [main]
-    paths: [web/pingpong/**]
+    paths: [web/study/**]
   pull_request:
     branches: [main]
-    paths: [web/pingpong/**]
+    paths: [web/study/**]
 
 jobs:
-  build:
-    name: Test Frontend
+  build-study:
+    name: Test Frontend Study
     timeout-minutes: 10
     runs-on: ubuntu-latest
     env:
-      wd: ./web/pingpong/
+      wd: ./web/study/
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -68,7 +68,3 @@ jobs:
               echo -e "\033[91m" 'Run `pnpm format` and check in the result.' "\033[0m"
               exit 1
           }
-
-      - name: Run tests
-        working-directory: ${{env.wd}}
-        run: pnpm test
