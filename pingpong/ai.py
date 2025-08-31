@@ -10,6 +10,7 @@ import openai
 import orjson
 from pingpong.auth import encode_auth_token
 from pingpong.authz.base import AuthzClient
+from pingpong.db import db_session_handler
 from pingpong.files import (
     _is_vision_supported,
     file_extension_to_mime_type,
@@ -586,6 +587,8 @@ async def build_response_input_item_list(
         )
 
     async for tool_call in models.Thread.list_all_tool_calls_gen(session, thread_id):
+        if tool_call.status == ToolCallStatus.INCOMPLETE:
+            continue
         match tool_call.type:
             case ToolCallType.CODE_INTERPRETER:
                 tool_call_outputs: list[Output] = []
@@ -692,10 +695,10 @@ async def build_response_input_item_list(
 class BufferedResponseStreamHandler:
     def __init__(
         self,
-        session: AsyncSession,
         auth: AuthzClient,
         cli: openai.AsyncClient,
-        run: models.Run,
+        run_id: int,
+        run_status: RunStatus,
         prev_output_index: int,
         file_names: dict[str, str],
         class_id: int,
@@ -712,7 +715,6 @@ class BufferedResponseStreamHandler:
     ):
         self.__buffer = io.BytesIO()
         self.file_names = file_names
-        self.db = session
         self.auth = auth
         self.openai_cli = cli
         self.class_id = class_id
@@ -722,16 +724,19 @@ class BufferedResponseStreamHandler:
         self.anonymous_user_auth = anonymous_user_auth
         self.anonymous_session_id = anonymous_session_id
         self.anonymous_link_id = anonymous_link_id
-        self.__thread_id: int = thread_id
-        self.__assistant_id: int = assistant_id
-        self.__cached_run: models.Run | None = run
-        self.__prev_output_index = prev_output_index
-        self.__cached_message: models.Message | None = None
-        self.__prev_part_index = -1
-        self.__cached_message_part: models.MessagePart | None = None
-        self.__current_tool_call: models.ToolCall | None = None
-        self.__file_search_results: dict[str, FileSearchToolAnnotationResult] = {}
-        self.__file_ids_file_citation_annotation: set[str] = set()
+        self.run_id: int | None = run_id
+        self.run_status: RunStatus | None = run_status
+        self.message_id: int | None = None
+        self.message_created_at: datetime | None = None
+        self.message_part_id: int | None = None
+        self.prev_output_index = prev_output_index
+        self.tool_call_id: int | None = None
+        self.tool_call_external_id: int | None = None
+        self.thread_id: int = thread_id
+        self.assistant_id: int = assistant_id
+        self.prev_part_index = -1
+        self.file_search_results: dict[str, FileSearchToolAnnotationResult] = {}
+        self.file_ids_file_citation_annotation: set[str] = set()
 
     def enqueue(self, data: Dict) -> None:
         self.__buffer.write(orjson.dumps(data))
@@ -744,77 +749,133 @@ class BufferedResponseStreamHandler:
         return value
 
     async def on_response_created(self, data: ResponseCreatedEvent):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received response created event without a cached run. Data: {data}"
             )
             return
-        self.__cached_run.run_id = data.response.id
-        self.__cached_run.status = RunStatus(data.response.status)
+
+        @db_session_handler
+        async def update_run_on_response_created(session: AsyncSession):
+            if not self.run_id:
+                return
+            await models.Run.update_run_id_status(
+                session,
+                id_=self.run_id,
+                run_id=data.response.id,
+                status=RunStatus(data.response.status),
+            )
+            await session.commit()
+
+        await update_run_on_response_created()
+        self.run_status = RunStatus(data.response.status)
 
     async def on_response_in_progress(self, data: ResponseInProgressEvent):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received response in progress event without a cached run. Data: {data}"
             )
             return
-        self.__cached_run.status = RunStatus(data.response.status)
+
+        @db_session_handler
+        async def update_run_on_response_in_progress(session: AsyncSession):
+            if not self.run_id:
+                return
+            await models.Run.update_status(
+                session=session,
+                id=self.run_id,
+                status=RunStatus(data.response.status),
+            )
+            await session.commit()
+
+        await update_run_on_response_in_progress()
+        self.run_status = RunStatus(data.response.status)
 
     async def on_output_message_created(self, data: ResponseOutputMessage):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received output message created event without a cached run. Data: {data}"
             )
             return
-        if self.__cached_message:
+        if self.message_id:
             logger.exception(
                 f"Received output message created event with cached message. Data: {data}"
             )
             return
-        self.__prev_output_index += 1
-        self.__cached_message = models.Message(
-            output_index=self.__prev_output_index,
-            thread_id=self.__thread_id,
-            message_id=data.id,
-            message_status=MessageStatus(data.status),
-            assistant_id=self.__assistant_id,
-            role=data.role,
-            created=utcnow(),
-        )
+
+        self.prev_output_index += 1
+
+        message_data = {
+            "output_index": self.prev_output_index,
+            "thread_id": self.thread_id,
+            "run_id": self.run_id,
+            "message_id": data.id,
+            "message_status": MessageStatus(data.status),
+            "assistant_id": self.assistant_id,
+            "role": data.role,
+            "created": utcnow(),
+        }
+
+        @db_session_handler
+        async def add_message_on_output_message_created(session: AsyncSession):
+            message = await models.Message.create(session=session, data=message_data)
+            await session.commit()
+            return message
+
+        message = await add_message_on_output_message_created()
+        self.message_id = message.id
+        self.message_created_at = message.created
 
     async def on_output_text_part_created(self, data: ResponseOutputText):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received text part created event without a cached run. Data: {data}"
             )
             return
-        if not self.__cached_message:
+        if not self.message_id:
             logger.exception(
                 f"Received text part created without a cached message. Data: {data}"
             )
             return
-        if self.__cached_message_part:
+        if self.message_part_id:
             logger.exception(
                 f"Received text part created with a cached message part. Data: {data}"
             )
             return
-        self.__prev_part_index += 1
-        self.__cached_message_part = models.MessagePart(
-            part_index=self.__prev_part_index,
-            type=MessagePartType(data.type),
-            text=data.text,
-        )
+
+        self.prev_part_index += 1
+
+        part_data = {
+            "message_id": self.message_id,
+            "part_index": self.prev_part_index,
+            "type": MessagePartType(data.type),
+            "text": data.text,
+        }
+
+        @db_session_handler
+        async def add_message_part_on_output_text_part_created(session: AsyncSession):
+            message_part = await models.MessagePart.create(
+                session=session, data=part_data
+            )
+            await session.commit()
+            return message_part
+
+        message_part = await add_message_part_on_output_text_part_created()
+        self.message_part_id = message_part.id
+
         self.enqueue(
             {
                 "type": "message_created",
                 "role": "assistant",
                 "message": {
-                    "id": str(self.__cached_message.message_id),
-                    "thread_id": str(self.__cached_run.thread_id),
+                    "id": str(self.message_id),
+                    "thread_id": str(self.thread_id),
                     "assistant_id": None,
-                    "created_at": int(self.__cached_message.created.timestamp()),
+                    "created_at": int(self.message_created_at.timestamp())
+                    if self.message_created_at
+                    else None,
                     "object": "thread.message",
-                    "role": self.__cached_message.role,
+                    "role": "assistant",
                     "content": [],
                     "status": "in_progress",
                 },
@@ -822,12 +883,22 @@ class BufferedResponseStreamHandler:
         )
 
     async def on_output_text_delta(self, data: ResponseTextDeltaEvent):
-        if not self.__cached_message_part:
+        if not self.message_part_id:
             logger.exception(
                 f"Received text delta without a cached message part. Data: {data}"
             )
             return
-        self.__cached_message_part.text += data.delta
+
+        @db_session_handler
+        async def update_message_part_on_output_text_delta(session: AsyncSession):
+            if not self.message_part_id:
+                return
+            await models.MessagePart.add_text_delta(
+                session=session, id_=self.message_part_id, text_delta=data.delta
+            )
+            await session.commit()
+
+        await update_message_part_on_output_text_delta()
         self.enqueue(
             {
                 "type": "message_delta",
@@ -850,7 +921,7 @@ class BufferedResponseStreamHandler:
     async def on_output_text_container_file_citation_added(
         self, data: AnnotationContainerFileCitation, annotation_index: int | None = None
     ):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received text container file citation added event without a cached run. Data: {data}"
             )
@@ -870,58 +941,93 @@ class BufferedResponseStreamHandler:
             },
         )
 
-        file = await handle_create_file(
-            session=self.db,
-            authz=self.auth,
-            oai_client=self.openai_cli,
-            upload=upload_file,
-            class_id=self.class_id,
-            uploader_id=self.user_id,
-            private=True,
-            purpose="vision"
-            if extension and _is_vision_supported(extension)
-            else "assistants",
-            user_auth=self.user_auth,
-            anonymous_link_auth=self.anonymous_link_auth,
-            anonymous_user_auth=self.anonymous_user_auth,
-            anonymous_session_id=self.anonymous_session_id,
-            anonymous_link_id=self.anonymous_link_id,
-        )
+        @db_session_handler
+        async def create_file_on_output_text_container_file_citation_added(
+            session_: AsyncSession,
+        ):
+            file = await handle_create_file(
+                session=session_,
+                authz=self.auth,
+                oai_client=self.openai_cli,
+                upload=upload_file,
+                class_id=self.class_id,
+                uploader_id=self.user_id,
+                private=True,
+                purpose="vision"
+                if extension and _is_vision_supported(extension)
+                else "assistants",
+                user_auth=self.user_auth,
+                anonymous_link_auth=self.anonymous_link_auth,
+                anonymous_user_auth=self.anonymous_user_auth,
+                anonymous_session_id=self.anonymous_session_id,
+                anonymous_link_id=self.anonymous_link_id,
+            )
+            await session_.commit()
+            return file
+
+        file = await create_file_on_output_text_container_file_citation_added()
+        if not file:
+            logger.error(f"Failed to create file from citation. Data: {data}")
+            return
+
+        @db_session_handler
+        async def add_code_interpreter_files_on_output_text_container_file_citation_added(
+            session: AsyncSession,
+        ):
+            if file.code_interpreter_file_id:
+                await models.Thread.add_code_interpreter_files(
+                    session=session,
+                    thread_id=self.thread_id,
+                    file_ids=[file.code_interpreter_file_id],
+                )
+                await session.commit()
 
         if file.code_interpreter_file_id:
-            await models.Thread.add_code_interpeter_files(
-                session=self.db,
-                thread_id=self.__cached_run.thread_id,
-                file_ids=[file.code_interpreter_file_id],
-            )
+            await add_code_interpreter_files_on_output_text_container_file_citation_added()
+
+        @db_session_handler
+        async def add_image_files_on_output_text_container_file_citation_added(
+            session: AsyncSession,
+        ):
+            if file.vision_file_id:
+                await models.Thread.add_image_files(
+                    session=session,
+                    thread_id=self.thread_id,
+                    file_ids=[file.vision_file_id],
+                )
+                await session.commit()
 
         if file.vision_file_id:
-            await models.Thread.add_image_files(
-                session=self.db,
-                thread_id=self.__cached_run.thread_id,
-                file_ids=[file.vision_file_id],
-            )
+            await add_image_files_on_output_text_container_file_citation_added()
 
-        if not self.__cached_message_part:
+        if not self.message_part_id:
             logger.exception(
                 f"Received file citation annotation without a cached message part. Data: {data}"
             )
             return
 
-        self.__cached_message_part.annotations.append(
-            models.Annotation(
-                type=AnnotationType.CONTAINER_FILE_CITATION,
-                file_id=file.file_id,
-                file_object_id=file.id if not file.vision_file_id else None,
-                vision_file_id=file.vision_file_id,
-                vision_file_object_id=file.id if file.vision_file_id else None,
-                filename=file.name,
-                container_id=data["container_id"],
-                start_index=data["start_index"],
-                end_index=data["end_index"],
-                annotation_index=annotation_index,
-            )
-        )
+        annotation_data = {
+            "type": AnnotationType.CONTAINER_FILE_CITATION,
+            "file_id": file.file_id,
+            "file_object_id": file.id if not file.vision_file_id else None,
+            "vision_file_id": file.vision_file_id,
+            "vision_file_object_id": file.id if file.vision_file_id else None,
+            "filename": file.name,
+            "container_id": data["container_id"],
+            "start_index": data["start_index"],
+            "end_index": data["end_index"],
+            "annotation_index": annotation_index,
+            "message_part_id": self.message_part_id,
+        }
+
+        @db_session_handler
+        async def add_cached_message_part_on_output_text_container_file_citation_added(
+            session_: AsyncSession,
+        ):
+            await models.Annotation.create(session=session_, data=annotation_data)
+            await session_.commit()
+
+        await add_cached_message_part_on_output_text_container_file_citation_added()
 
         if file.vision_file_id:
             self.enqueue(
@@ -971,24 +1077,34 @@ class BufferedResponseStreamHandler:
     async def on_output_text_file_citation_added(
         self, data: AnnotationFileCitation, annotation_index: int | None = None
     ):
-        if not self.__cached_message_part:
+        if not self.message_part_id:
             logger.exception(
                 f"Received file citation annotation without a cached message part. Data: {data}"
             )
             return
-        self.__cached_message_part.annotations.append(
-            models.Annotation(
-                type=AnnotationType.FILE_CITATION,
-                file_id=data["file_id"],
-                filename=data["filename"],
-                index=data["index"],
-                annotation_index=annotation_index,
-            )
-        )
-        _file_record = self.__file_search_results.get(data["file_id"])
+
+        annotation_data = {
+            "message_part_id": self.message_part_id,
+            "type": AnnotationType.FILE_CITATION,
+            "file_id": data["file_id"],
+            "filename": data["filename"],
+            "index": data["index"],
+            "annotation_index": annotation_index,
+        }
+
+        @db_session_handler
+        async def add_cached_message_part_on_output_text_file_citation_added(
+            session_: AsyncSession,
+        ):
+            await models.Annotation.create(session=session_, data=annotation_data)
+            await session_.commit()
+
+        await add_cached_message_part_on_output_text_file_citation_added()
+
+        _file_record = self.file_search_results.get(data["file_id"])
         if _file_record:
-            if data["file_id"] not in self.__file_ids_file_citation_annotation:
-                self.__file_ids_file_citation_annotation.add(data["file_id"])
+            if data["file_id"] not in self.file_ids_file_citation_annotation:
+                self.file_ids_file_citation_annotation.add(data["file_id"])
                 self.enqueue(
                     {
                         "type": "message_delta",
@@ -1021,69 +1137,94 @@ class BufferedResponseStreamHandler:
                 )
 
     async def on_output_text_part_done(self, data: ResponseOutputText):
-        if not self.__cached_message_part:
+        if not self.message_part_id:
             logger.exception(
                 f"Received text part done event without a cached message part. Data: {data}"
             )
             return
 
-        if not self.__cached_message:
+        if not self.message_id:
             logger.exception(
                 f"Received text part done event without a cached message. Data: {data}"
             )
             return
 
-        self.__cached_message.content.append(self.__cached_message_part)
-        self.__cached_message_part = None
+        self.message_part_id = None
 
     async def on_output_message_done(self, data: ResponseOutputMessage):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received output message done event without a cached run. Data: {data}"
             )
             return
-        if not self.__cached_message:
+        if not self.message_id:
             logger.exception(
                 f"Received output message done event without a cached message. Data: {data}"
             )
             return
 
-        if self.__cached_message_part:
+        if self.message_part_id:
             logger.exception(
                 f"Output message done event received with a cached message part. Data: {data}"
             )
-            self.__cached_message.content.append(self.__cached_message_part)
-            self.__cached_message_part = None
+            self.message_part_id = None
 
-        self.__cached_message.completed = utcnow()
-        self.__cached_message.message_status = MessageStatus(data.status)
-        self.__cached_run.messages.append(self.__cached_message)
-        self.__cached_message = None
+        completed_time = utcnow()
+
+        @db_session_handler
+        async def add_cached_message_add_cached_message(session_: AsyncSession):
+            if not self.message_id:
+                return
+            await models.Message.mark_status(
+                session_,
+                self.message_id,
+                MessageStatus(data.status),
+                completed=completed_time,
+            )
+            await session_.commit()
+
+        await add_cached_message_add_cached_message()
+        self.message_id = None
 
     async def on_code_interpreter_tool_call_created(
         self, data: ResponseCodeInterpreterToolCall
     ):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received code interpreter tool call created event without a cached run. Data: {data}"
             )
             return
-        if self.__current_tool_call:
+        if self.tool_call_id:
             logger.exception(
                 f"Received code interpreter tool call created with an existing tool call. Data: {data}"
             )
             return
-        self.__prev_output_index += 1
-        self.__current_tool_call = models.ToolCall(
-            tool_call_id=data.id,
-            type=ToolCallType.CODE_INTERPRETER,
-            status=ToolCallStatus(data.status),
-            thread_id=self.__cached_run.thread_id,
-            output_index=self.__prev_output_index,
-            container_id=data.container_id,
-            code=data.code,
-            created=utcnow(),
-        )
+
+        self.prev_output_index += 1
+
+        tool_call_data = {
+            "run_id": self.run_id,
+            "tool_call_id": data.id,
+            "type": ToolCallType.CODE_INTERPRETER,
+            "status": ToolCallStatus(data.status),
+            "thread_id": self.thread_id,
+            "output_index": self.prev_output_index,
+            "container_id": data.container_id,
+            "code": data.code,
+            "created": utcnow(),
+        }
+
+        @db_session_handler
+        async def add_cached_tool_call_on_code_interpreter_tool_call_created(
+            session_: AsyncSession,
+        ):
+            tool_call = await models.ToolCall.create(session_, tool_call_data)
+            await session_.commit()
+            return tool_call
+
+        tool_call = await add_cached_tool_call_on_code_interpreter_tool_call_created()
+        self.tool_call_id = tool_call.id
+        self.tool_call_external_id = tool_call.tool_call_id
 
         self.enqueue(
             {
@@ -1099,32 +1240,56 @@ class BufferedResponseStreamHandler:
     async def on_code_interpreter_tool_call_in_progress(
         self, data: ResponseCodeInterpreterCallInProgressEvent
     ):
-        if not self.__current_tool_call:
+        if not self.tool_call_id:
             logger.exception(
                 f"Received code interpreter tool call in progress without a current tool call. Data: {data}"
             )
             return
-        if self.__current_tool_call.tool_call_id != data.item_id:
+        if self.tool_call_external_id != data.item_id:
             logger.exception(
                 f"Received code interpreter tool call in progress with a different tool call ID. Data: {data}"
             )
             return
-        self.__current_tool_call.status = ToolCallStatus.IN_PROGRESS
+
+        @db_session_handler
+        async def add_cached_tool_call_on_code_interpreter_tool_call_in_progress(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_status(
+                session_, self.tool_call_id, ToolCallStatus.IN_PROGRESS
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_code_interpreter_tool_call_in_progress()
 
     async def on_code_interpreter_tool_call_code_delta(
         self, data: ResponseCodeInterpreterCallCodeDeltaEvent
     ):
-        if not self.__current_tool_call:
+        if not self.tool_call_id:
             logger.exception(
                 f"Received code interpreter tool call code delta without a current tool call. Data: {data}"
             )
             return
-        if self.__current_tool_call.tool_call_id != data.item_id:
+        if self.tool_call_external_id != data.item_id:
             logger.exception(
                 f"Received code interpreter tool call code delta with a different tool call ID. Data: {data}"
             )
             return
-        self.__current_tool_call.code += data.delta
+
+        @db_session_handler
+        async def add_cached_tool_call_on_code_interpreter_tool_call_in_progress(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.add_code_delta(
+                session_, self.tool_call_id, data.delta
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_code_interpreter_tool_call_in_progress()
 
         self.enqueue(
             {
@@ -1141,53 +1306,85 @@ class BufferedResponseStreamHandler:
     async def on_code_interpreter_tool_call_interpreting(
         self, data: ResponseCodeInterpreterCallInterpretingEvent
     ):
-        if not self.__current_tool_call:
+        if not self.tool_call_id:
             logger.exception(
                 f"Received code interpreter tool call interpreting without a current tool call. Data: {data}"
             )
             return
-        if self.__current_tool_call.tool_call_id != data.item_id:
+        if self.tool_call_external_id != data.item_id:
             logger.exception(
                 f"Received code interpreter tool call interpreting with a different tool call ID. Data: {data}"
             )
             return
-        self.__current_tool_call.status = ToolCallStatus.INTERPRETING
+
+        @db_session_handler
+        async def add_cached_tool_call_on_code_interpreter_tool_call_interpreting(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_status(
+                session_, self.tool_call_id, ToolCallStatus.INTERPRETING
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_code_interpreter_tool_call_interpreting()
 
     async def on_code_interpreter_tool_call_completed(
         self, data: ResponseCodeInterpreterCallCompletedEvent
     ):
-        if not self.__current_tool_call:
+        if not self.tool_call_id:
             logger.exception(
                 f"Received code interpreter tool call completed without a current tool call. Data: {data}"
             )
             return
-        if self.__current_tool_call.tool_call_id != data.item_id:
+        if self.tool_call_external_id != data.item_id:
             logger.exception(
                 f"Received code interpreter tool call completed with a different tool call ID. Data: {data}"
             )
             return
-        self.__current_tool_call.status = ToolCallStatus.COMPLETED
+
+        completed_at = utcnow()
+
+        @db_session_handler
+        async def add_cached_tool_call_on_code_interpreter_tool_call_completed(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_status(
+                session_,
+                self.tool_call_id,
+                ToolCallStatus.COMPLETED,
+                completed=completed_at,
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_code_interpreter_tool_call_completed()
 
     async def on_code_interpreter_tool_call_done(
         self, data: ResponseCodeInterpreterToolCall
     ):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received code interpreter tool call done without a cached run. Data: {data}"
             )
             return
-        if not self.__current_tool_call:
+        if not self.tool_call_id:
             logger.exception(
                 f"Received code interpreter tool call done without a current tool call. Data: {data}"
             )
             return
-        if self.__current_tool_call.tool_call_id != data.id:
+        if self.tool_call_external_id != data.id:
             logger.exception(
                 f"Received code interpreter tool call done with a different tool call ID. Data: {data}"
             )
             return
 
-        self.__current_tool_call.status = ToolCallStatus(data.status)
+        @db_session_handler
+        async def add_code_interpreter_call_output(session_: AsyncSession, data: dict):
+            await models.CodeInterpreterCallOutput.create(session_, data)
+            await session_.commit()
 
         if data.outputs:
             for output in data.outputs:
@@ -1198,18 +1395,18 @@ class BufferedResponseStreamHandler:
                                 f"Received image output without a URL. Data: {output}"
                             )
                             return
-                        self.__current_tool_call.outputs.append(
-                            models.CodeInterpreterCallOutput(
-                                output_type=CodeInterpreterOutputType.IMAGE,
-                                url=output.url,
-                                created=utcnow(),
-                            )
-                        )
+                        image_data = {
+                            "tool_call_id": self.tool_call_id,
+                            "output_type": CodeInterpreterOutputType.IMAGE,
+                            "url": output.url,
+                            "created": utcnow(),
+                        }
+                        await add_code_interpreter_call_output(image_data)
                         self.enqueue(
                             {
                                 "type": "tool_call_delta",
                                 "delta": {
-                                    "index": self.__prev_output_index,
+                                    "index": self.prev_output_index,
                                     "type": "code_interpreter",
                                     "id": data.id,
                                     "code_interpreter": {
@@ -1225,18 +1422,19 @@ class BufferedResponseStreamHandler:
                             }
                         )
                     case "logs":
-                        self.__current_tool_call.outputs.append(
-                            models.CodeInterpreterCallOutput(
-                                output_type=CodeInterpreterOutputType.LOGS,
-                                logs=output.logs,
-                                created=utcnow(),
-                            )
-                        )
+                        logs_data = {
+                            "tool_call_id": self.tool_call_id,
+                            "output_type": CodeInterpreterOutputType.LOGS,
+                            "created": utcnow(),
+                            "logs": output.logs,
+                        }
+                        await add_code_interpreter_call_output(logs_data)
+
                         self.enqueue(
                             {
                                 "type": "tool_call_delta",
                                 "delta": {
-                                    "index": self.__prev_output_index,
+                                    "index": self.prev_output_index,
                                     "type": "code_interpreter",
                                     "id": data.id,
                                     "code_interpreter": {
@@ -1252,107 +1450,185 @@ class BufferedResponseStreamHandler:
                             }
                         )
 
-        self.__cached_run.tool_calls.append(self.__current_tool_call)
-        self.__current_tool_call = None
+        @db_session_handler
+        async def add_cached_tool_call_on_code_interpreter_tool_call_done(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_status(
+                session_,
+                self.tool_call_id,
+                ToolCallStatus(data.status),
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_code_interpreter_tool_call_done()
+        self.tool_call_id = None
+        self.tool_call_external_id = None
 
     async def on_file_search_call_created(self, data: ResponseFileSearchToolCall):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received file search call created event without a cached run. Data: {data}"
             )
             return
-        if self.__current_tool_call:
+        if self.tool_call_id:
             logger.exception(
                 f"Received code interpreter tool call created with an existing tool call. Data: {data}"
             )
             return
-        self.__prev_output_index += 1
-        self.__current_tool_call = models.ToolCall(
-            tool_call_id=data.id,
-            type=ToolCallType.FILE_SEARCH,
-            status=ToolCallStatus(data.status),
-            thread_id=self.__cached_run.thread_id,
-            output_index=self.__prev_output_index,
-            queries=json.dumps(data.queries),
-            created=utcnow(),
-        )
+
+        self.prev_output_index += 1
+
+        tool_call_data = {
+            "run_id": self.run_id,
+            "tool_call_id": data.id,
+            "type": ToolCallType.FILE_SEARCH,
+            "status": ToolCallStatus(data.status),
+            "thread_id": self.thread_id,
+            "output_index": self.prev_output_index,
+            "queries": json.dumps(data.queries),
+            "created": utcnow(),
+        }
+
+        @db_session_handler
+        async def add_cached_tool_call_on_file_search_call_created(
+            session_: AsyncSession,
+        ):
+            tool_call = await models.ToolCall.create(session_, tool_call_data)
+            await session_.commit()
+            return tool_call
+
+        tool_call = await add_cached_tool_call_on_file_search_call_created()
+        self.tool_call_id = tool_call.id
+        self.tool_call_external_id = tool_call.tool_call_id
 
     async def on_file_search_call_in_progress(
         self, data: ResponseFileSearchCallInProgressEvent
     ):
-        if not self.__current_tool_call:
+        if not self.tool_call_id:
             logger.exception(
                 f"Received file search call in progress without a current tool call. Data: {data}"
             )
             return
-        if self.__current_tool_call.tool_call_id != data.item_id:
+        if self.tool_call_external_id != data.item_id:
             logger.exception(
                 f"Received file search call in progress with a different tool call ID. Data: {data}"
             )
             return
 
-        self.__current_tool_call.status = ToolCallStatus.IN_PROGRESS
+        @db_session_handler
+        async def add_cached_tool_call_on_file_search_call_in_progress(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+
+            await models.ToolCall.update_status(
+                session_, self.tool_call_id, ToolCallStatus.IN_PROGRESS
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_file_search_call_in_progress()
 
     async def on_file_search_call_searching(
         self, data: ResponseFileSearchCallSearchingEvent
     ):
-        if not self.__current_tool_call:
+        if not self.tool_call_id:
             logger.exception(
                 f"Received file search call searching without a current tool call. Data: {data}"
             )
             return
-        if self.__current_tool_call.tool_call_id != data.item_id:
+        if self.tool_call_external_id != data.item_id:
             logger.exception(
                 f"Received file search call searching with a different tool call ID. Data: {data}"
             )
             return
 
-        self.__current_tool_call.status = ToolCallStatus.SEARCHING
+        @db_session_handler
+        async def add_cached_tool_call_on_file_search_call_searching(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_status(
+                session_, self.tool_call_id, ToolCallStatus.SEARCHING
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_file_search_call_searching()
 
     async def on_file_search_call_completed(
         self, data: ResponseFileSearchCallCompletedEvent
     ):
-        if not self.__current_tool_call:
+        if not self.tool_call_id:
             logger.exception(
                 f"Received file search call completed without a current tool call. Data: {data}"
             )
             return
-        if self.__current_tool_call.tool_call_id != data.item_id:
+        if self.tool_call_external_id != data.item_id:
             logger.exception(
                 f"Received file search call completed with a different tool call ID. Data: {data}"
             )
             return
 
-        self.__current_tool_call.status = ToolCallStatus.COMPLETED
+        completed_at = utcnow()
+
+        @db_session_handler
+        async def add_cached_tool_call_on_file_search_call_completed(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_status(
+                session_,
+                self.tool_call_id,
+                ToolCallStatus.COMPLETED,
+                completed=completed_at,
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_file_search_call_completed()
 
     async def on_file_search_call_done(self, data: ResponseFileSearchToolCall):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received file search call done without a cached run. Data: {data}"
             )
             return
-        if not self.__current_tool_call:
+        if not self.tool_call_id:
             logger.exception(
                 f"Received file search call done without a current tool call. Data: {data}"
             )
             return
-        if self.__current_tool_call.tool_call_id != data.id:
+        if self.tool_call_external_id != data.id:
             logger.exception(
                 f"Received file search call done with a different tool call ID. Data: {data}"
             )
             return
 
-        self.__current_tool_call.status = ToolCallStatus(data.status)
-        self.__current_tool_call.queries = json.dumps(data.queries)
+        @db_session_handler
+        async def get_file_object_id_on_file_search_call_done(
+            session_: AsyncSession, file_id: str
+        ):
+            return await models.File.get_obj_id_by_file_id(session_, file_id)
+
+        @db_session_handler
+        async def add_current_tool_call_on_file_search_call_done(
+            session_: AsyncSession, data: dict
+        ):
+            await models.FileSearchCallResult.create(session_, data)
+            await session_.commit()
 
         for result in data.results:
             if result.file_id:
-                if self.__file_search_results.get(result.file_id):
-                    self.__file_search_results[result.file_id].text += (
+                if self.file_search_results.get(result.file_id):
+                    self.file_search_results[result.file_id].text += (
                         "\n\n <hr/> \n\n" + result.text
                     )
                 else:
-                    self.__file_search_results[result.file_id] = (
+                    self.file_search_results[result.file_id] = (
                         FileSearchToolAnnotationResult(
                             file_id=result.file_id,
                             filename=result.filename,
@@ -1360,23 +1636,41 @@ class BufferedResponseStreamHandler:
                         )
                     )
 
-            self.__current_tool_call.results.append(
-                models.FileSearchCallResult(
-                    attributes=json.dumps(result.attributes),
-                    file_id=result.file_id,
-                    file_object_id=await models.File.get_obj_id_by_file_id(
-                        self.db, result.file_id
-                    )
-                    if result.file_id
-                    else None,
-                    filename=result.filename,
-                    score=result.score,
-                    text=result.text,
-                    created=utcnow(),
+            fs_result_data = {
+                "attributes": json.dumps(result.attributes),
+                "file_id": result.file_id,
+                "file_object_id": await get_file_object_id_on_file_search_call_done(
+                    result.file_id
                 )
+                if result.file_id
+                else None,
+                "filename": result.filename,
+                "score": result.score,
+                "text": result.text,
+                "created": utcnow(),
+                "tool_call_id": self.tool_call_id,
+            }
+
+            await add_current_tool_call_on_file_search_call_done(fs_result_data)
+
+        @db_session_handler
+        async def update_status_queries_on_file_search_call_done(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.add_status_queries(
+                session_,
+                self.tool_call_id,
+                ToolCallStatus(data.status),
+                json.dumps(data.queries),
             )
-        self.__cached_run.tool_calls.append(self.__current_tool_call)
-        self.__current_tool_call = None
+            await session_.commit()
+
+        await update_status_queries_on_file_search_call_done()
+
+        self.tool_call_id = None
+        self.tool_call_external_id = None
 
     async def cleanup(
         self,
@@ -1387,43 +1681,78 @@ class BufferedResponseStreamHandler:
         send_error_message_only_if_active: bool = False,
         restore_to_pending_if_queued: bool = False,
     ):
+        logger.info(f"Starting to clean up run: {self.run_id}")
+
         has_active_run = False
-        if self.__cached_run:
-            if (
-                self.__cached_run.status == RunStatus.QUEUED
-                and restore_to_pending_if_queued
+        if self.run_id:
+
+            @db_session_handler
+            async def mark_cached_run_as_pending_on_cleanup(session_: AsyncSession):
+                if self.run_id:
+                    await models.Run.mark_as_pending(session_, self.run_id)
+                    await session_.commit()
+
+            @db_session_handler
+            async def mark_cached_run_status_on_cleanup(
+                session_: AsyncSession,
+                run_status: RunStatus,
+                error_code: str | None,
+                error_message: str | None,
+                incomplete_reason: str | None,
             ):
-                self.__cached_run.status = RunStatus.PENDING
-                # Protect database operations from cancellation
-                self.db.add(self.__cached_run)
-                await asyncio.shield(self.db.commit())
-                self.__cached_run = None
+                if self.run_id:
+                    await models.Run.mark_as_status(
+                        session_,
+                        self.run_id,
+                        status=run_status,
+                        error_code=error_code,
+                        error_message=error_message,
+                        incomplete_reason=incomplete_reason,
+                    )
+                    await session_.commit()
+
+            @db_session_handler
+            async def mark_cached_message_as_incomplete_on_cleanup(
+                session_: AsyncSession,
+            ):
+                if self.message_id:
+                    await models.Message.mark_as_incomplete(session_, self.message_id)
+                    await session_.commit()
+
+            @db_session_handler
+            async def mark_cached_tool_call_as_incomplete_on_cleanup(
+                session_: AsyncSession,
+            ):
+                if self.tool_call_id:
+                    await models.ToolCall.mark_as_incomplete(
+                        session_, self.tool_call_id
+                    )
+                    await session_.commit()
+
+            if self.run_status == RunStatus.QUEUED and restore_to_pending_if_queued:
+                await mark_cached_run_as_pending_on_cleanup()
+                self.run_id = None
+                self.run_status = None
                 self.enqueue({"type": "done"})
                 return
+
             has_active_run = True
-            if self.__cached_message_part and self.__cached_message:
-                self.__cached_message.content.append(self.__cached_message_part)
-                self.__cached_message_part = None
-            if self.__cached_message:
-                self.__cached_message.message_status = MessageStatus.INCOMPLETE
-                self.__cached_run.messages.append(self.__cached_message)
-                self.__cached_message = None
-            if self.__current_tool_call:
-                self.__current_tool_call.status = ToolCallStatus.INCOMPLETE
-                self.__cached_run.tool_calls.append(self.__current_tool_call)
-                self.__current_tool_call = None
+            if self.message_id:
+                await mark_cached_message_as_incomplete_on_cleanup()
+                self.message_id = None
+            if self.tool_call_id:
+                await mark_cached_tool_call_as_incomplete_on_cleanup()
+                self.tool_call_id = None
 
-            self.__cached_run.completed = utcnow()
-            self.__cached_run.status = run_status
-
-            self.__cached_run.error_code = response_error_code
-            self.__cached_run.error_message = response_error_message
-            self.__cached_run.incomplete_reason = response_incomplete_reason
-
-            # Protect database operations from cancellation
-            self.db.add(self.__cached_run)
-            await asyncio.shield(self.db.commit())
-            self.__cached_run = None
+            logger.info(f"About to save run data while cleaning up run: {self.run_id}")
+            await mark_cached_run_status_on_cleanup(
+                run_status,
+                response_error_code,
+                response_error_message,
+                response_incomplete_reason,
+            )
+            self.run_id = None
+            self.run_status = None
 
         if response_error_message and (
             not send_error_message_only_if_active or has_active_run
@@ -1451,7 +1780,7 @@ class BufferedResponseStreamHandler:
             ResponseCompletedEvent, ResponseFailedEvent, ResponseIncompleteEvent
         ],
     ):
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received response completed event without a cached run. Data: {data}"
             )
@@ -1471,18 +1800,28 @@ class BufferedResponseStreamHandler:
         )
 
     async def on_response_error(self, data: ResponseErrorEvent) -> None:
-        if not self.__cached_run:
+        if not self.run_id:
             logger.exception(
                 f"Received response error event without a cached run. Data: {data}"
             )
             return
-        self.__cached_run.error_code = data.code
-        self.__cached_run.error_message = data.message
-        if data.code == "rate_limit_exceeded":
+
+        @db_session_handler
+        async def log_rate_limit_error_on_response_error(session_: AsyncSession):
             await models.Class.log_rate_limit_error(
-                self.db, class_id=str(self.class_id)
+                session_, class_id=str(self.class_id)
             )
-            await asyncio.shield(self.db.commit())
+            await session_.commit()
+
+        if data.code == "rate_limit_exceeded":
+            await log_rate_limit_error_on_response_error()
+
+        await self.cleanup(
+            run_status=RunStatus.FAILED,
+            response_error_code=data.code,
+            response_error_message=data.message,
+        )
+
         self.enqueue(
             {
                 "type": "error",
@@ -1514,374 +1853,353 @@ async def run_response(
     anonymous_session_id: int | None = None,
     anonymous_link_id: int | None = None,
 ):
+    is_canceled = False
     await config.authz.driver.init()
-    async with config.db.driver.async_session() as session_:
-        async with config.authz.driver.get_client() as c:
-            handler: BufferedResponseStreamHandler | None = None
+    async with config.authz.driver.get_client() as c:
+        handler: BufferedResponseStreamHandler | None = None
 
-            try:
-                reasoning_settings: Reasoning | openai.NotGiven = openai.NOT_GIVEN
+        try:
+            reasoning_settings: Reasoning | openai.NotGiven = openai.NOT_GIVEN
 
-                if run.reasoning_effort is not None:
-                    if run.reasoning_effort not in REASONING_EFFORT_MAP:
-                        raise ValueError(
-                            f"Invalid reasoning effort: {run.reasoning_effort}. Must be one of {list(REASONING_EFFORT_MAP.keys())}."
-                        )
-                    reasoning_settings = Reasoning(
-                        effort=REASONING_EFFORT_MAP[run.reasoning_effort],
-                        summary="auto",
+            if run.reasoning_effort is not None:
+                if run.reasoning_effort not in REASONING_EFFORT_MAP:
+                    raise ValueError(
+                        f"Invalid reasoning effort: {run.reasoning_effort}. Must be one of {list(REASONING_EFFORT_MAP.keys())}."
                     )
-
-                temperature_setting: float | openai.NotGiven = (
-                    run.temperature if run.temperature is not None else openai.NOT_GIVEN
+                reasoning_settings = Reasoning(
+                    effort=REASONING_EFFORT_MAP[run.reasoning_effort],
+                    summary="auto",
                 )
+
+            temperature_setting: float | openai.NotGiven = (
+                run.temperature if run.temperature is not None else openai.NOT_GIVEN
+            )
+            async with config.db.driver.async_session() as session_:
                 input_items, input_count = await build_response_input_item_list(
                     session_,
                     thread_id=run.thread_id,
                     uses_reasoning=not isinstance(reasoning_settings, openai.NotGiven),
                 )
 
-                tools: list[ToolParam] = []
+            tools: list[ToolParam] = []
 
-                if run.tools_available and "file_search" in run.tools_available:
-                    vector_store_ids = []
-                    if assistant_vector_store_id is not None:
-                        vector_store_ids.append(assistant_vector_store_id)
-                    if thread_vector_store_id is not None:
-                        vector_store_ids.append(thread_vector_store_id)
-                    if attached_file_search_file_ids:
-                        if not thread_vector_store_id:
-                            raise ValueError(
-                                "Vector store ID is required for file search"
+            if run.tools_available and "file_search" in run.tools_available:
+                vector_store_ids = []
+                if assistant_vector_store_id is not None:
+                    vector_store_ids.append(assistant_vector_store_id)
+                if thread_vector_store_id is not None:
+                    vector_store_ids.append(thread_vector_store_id)
+                if attached_file_search_file_ids:
+                    if not thread_vector_store_id:
+                        raise ValueError("Vector store ID is required for file search")
+                    await asyncio.gather(
+                        *[
+                            cli.vector_stores.files.poll(
+                                file_id=file_id,
+                                vector_store_id=thread_vector_store_id,
                             )
-                        await asyncio.gather(
-                            *[
-                                cli.vector_stores.files.poll(
-                                    file_id=file_id,
-                                    vector_store_id=thread_vector_store_id,
-                                )
-                                for file_id in attached_file_search_file_ids
-                            ]
-                        )
-                    if vector_store_ids:
-                        tools.append(
-                            FileSearchToolParam(
-                                type="file_search", vector_store_ids=vector_store_ids
-                            )
-                        )
-
-                if run.tools_available and "code_interpreter" in run.tools_available:
+                            for file_id in attached_file_search_file_ids
+                        ]
+                    )
+                if vector_store_ids:
                     tools.append(
-                        CodeInterpreter(
-                            container=CodeInterpreterContainerCodeInterpreterToolAuto(
-                                file_ids=code_interpreter_file_ids or [], type="auto"
-                            ),
-                            type="code_interpreter",
+                        FileSearchToolParam(
+                            type="file_search", vector_store_ids=vector_store_ids
                         )
                     )
 
-                try:
-                    stream: AsyncStream[
-                        ResponseStreamEvent
-                    ] = await cli.responses.create(
-                        include=[
-                            "code_interpreter_call.outputs",
-                            "file_search_call.results",
-                        ],
-                        input=input_items,
-                        instructions=run.instructions,
-                        model=run.model,
-                        parallel_tool_calls=False,
-                        reasoning=reasoning_settings,
-                        tools=tools,
-                        store=True,
-                        stream=True,
-                        temperature=temperature_setting,
-                        truncation="auto",
+            if run.tools_available and "code_interpreter" in run.tools_available:
+                tools.append(
+                    CodeInterpreter(
+                        container=CodeInterpreterContainerCodeInterpreterToolAuto(
+                            file_ids=code_interpreter_file_ids or [], type="auto"
+                        ),
+                        type="code_interpreter",
                     )
-                    handler = BufferedResponseStreamHandler(
-                        session=session_,
-                        auth=c,
-                        cli=cli,
-                        run=run,
-                        prev_output_index=input_count - 1,
-                        file_names=file_names,
-                        class_id=int(class_id),
-                        thread_id=run.thread_id,
-                        assistant_id=run.assistant_id,
-                        user_id=run.creator_id,
-                        user_auth=user_auth,
-                        anonymous_user_auth=anonymous_user_auth,
-                        anonymous_link_auth=anonymous_link_auth,
-                        anonymous_session_id=anonymous_session_id,
-                        anonymous_link_id=anonymous_link_id,
-                    )
+                )
 
-                    async for event in stream:
-                        match event.type:
-                            case "response.created":
-                                await handler.on_response_created(event)
-                            case "response.in_progress":
-                                await handler.on_response_in_progress(event)
-                            case "response.output_item.added":
-                                match event.item.type:
-                                    case "message":
-                                        await handler.on_output_message_created(
-                                            event.item
-                                        )
-                                    case "code_interpreter_call":
-                                        await handler.on_code_interpreter_tool_call_created(
-                                            event.item
-                                        )
-                                    case "file_search_call":
-                                        await handler.on_file_search_call_created(
-                                            event.item
-                                        )
-                                    case _:
-                                        pass
-                            case "response.content_part.added":
-                                match event.part.type:
-                                    case "output_text":
-                                        await handler.on_output_text_part_created(
-                                            event.part
-                                        )
-                                    case _:
-                                        pass
-                            case "response.output_text.delta":
-                                await handler.on_output_text_delta(event)
-                            case "response.output_text.annotation.added":
-                                match event.annotation["type"]:
-                                    case "container_file_citation":
-                                        await handler.on_output_text_container_file_citation_added(
-                                            event.annotation, event.annotation_index
-                                        )
-                                    case "file_citation":
-                                        await (
-                                            handler.on_output_text_file_citation_added(
-                                                event.annotation, event.annotation_index
-                                            )
-                                        )
-                                    case _:
-                                        pass
-                            case "response.content_part.done":
-                                match event.part.type:
-                                    case "output_text":
-                                        await handler.on_output_text_part_done(
-                                            event.part
-                                        )
-                                    case _:
-                                        pass
-                            case "response.code_interpreter_call.in_progress":
-                                await handler.on_code_interpreter_tool_call_in_progress(
-                                    event
-                                )
-                            case "response.code_interpreter_call_code.delta":
-                                await handler.on_code_interpreter_tool_call_code_delta(
-                                    event
-                                )
-                            case "response.code_interpreter_call.interpreting":
-                                await (
-                                    handler.on_code_interpreter_tool_call_interpreting(
-                                        event
+            try:
+                stream: AsyncStream[ResponseStreamEvent] = await cli.responses.create(
+                    include=[
+                        "code_interpreter_call.outputs",
+                        "file_search_call.results",
+                    ],
+                    input=input_items,
+                    instructions=run.instructions,
+                    model=run.model,
+                    parallel_tool_calls=False,
+                    reasoning=reasoning_settings,
+                    tools=tools,
+                    store=True,
+                    stream=True,
+                    temperature=temperature_setting,
+                    truncation="auto",
+                )
+                handler = BufferedResponseStreamHandler(
+                    session=session_,
+                    auth=c,
+                    cli=cli,
+                    run_id=run.id,
+                    run_status=RunStatus(run.status),
+                    prev_output_index=input_count - 1,
+                    file_names=file_names,
+                    class_id=int(class_id),
+                    thread_id=run.thread_id,
+                    assistant_id=run.assistant_id,
+                    user_id=run.creator_id,
+                    user_auth=user_auth,
+                    anonymous_user_auth=anonymous_user_auth,
+                    anonymous_link_auth=anonymous_link_auth,
+                    anonymous_session_id=anonymous_session_id,
+                    anonymous_link_id=anonymous_link_id,
+                )
+
+                async for event in stream:
+                    match event.type:
+                        case "response.created":
+                            await handler.on_response_created(event)
+                        case "response.in_progress":
+                            await handler.on_response_in_progress(event)
+                        case "response.output_item.added":
+                            match event.item.type:
+                                case "message":
+                                    await handler.on_output_message_created(event.item)
+                                case "code_interpreter_call":
+                                    await handler.on_code_interpreter_tool_call_created(
+                                        event.item
                                     )
-                                )
-                            case "response.code_interpreter_call.completed":
-                                await handler.on_code_interpreter_tool_call_completed(
-                                    event
-                                )
-                            case "response.file_search_call.completed":
-                                await handler.on_file_search_call_completed(event)
-                            case "response.file_search_call.in_progress":
-                                await handler.on_file_search_call_in_progress(event)
-                            case "response.file_search_call.searching":
-                                await handler.on_file_search_call_searching(event)
-                            case "response.output_item.done":
-                                match event.item.type:
-                                    case "message":
-                                        await handler.on_output_message_done(event.item)
-                                    case "code_interpreter_call":
-                                        await (
-                                            handler.on_code_interpreter_tool_call_done(
-                                                event.item
-                                            )
-                                        )
-                                    case "file_search_call":
-                                        await handler.on_file_search_call_done(
-                                            event.item
-                                        )
-                                    case _:
-                                        pass
-                            case "response.completed":
-                                await handler.on_response_completed(event)
-                            case "response.incomplete":
-                                await handler.on_response_completed(event)
-                            case "response.failed":
-                                await handler.on_response_completed(event)
-                            case "error":
-                                await handler.on_response_error(event)
-                            case _:
-                                pass
-                        yield handler.flush()
-                except (
-                    BrokenPipeError,
-                    ConnectionResetError,
-                    ConnectionAbortedError,
-                    asyncio.CancelledError,
-                ) as e:
-                    logger.warning(f"Client disconnected: {e}")
-                    if handler:
-                        await asyncio.shield(
-                            handler.cleanup(
-                                run_status=RunStatus.INCOMPLETE,
-                                response_incomplete_reason=f"Client disconnected: {e}",
-                                send_error_message_only_if_active=True,
-                                restore_to_pending_if_queued=True,
+                                case "file_search_call":
+                                    await handler.on_file_search_call_created(
+                                        event.item
+                                    )
+                                case _:
+                                    pass
+                        case "response.content_part.added":
+                            match event.part.type:
+                                case "output_text":
+                                    await handler.on_output_text_part_created(
+                                        event.part
+                                    )
+                                case _:
+                                    pass
+                        case "response.output_text.delta":
+                            await handler.on_output_text_delta(event)
+                        case "response.output_text.annotation.added":
+                            match event.annotation["type"]:
+                                case "container_file_citation":
+                                    await handler.on_output_text_container_file_citation_added(
+                                        event.annotation, event.annotation_index
+                                    )
+                                case "file_citation":
+                                    await handler.on_output_text_file_citation_added(
+                                        event.annotation, event.annotation_index
+                                    )
+                                case _:
+                                    pass
+                        case "response.content_part.done":
+                            match event.part.type:
+                                case "output_text":
+                                    await handler.on_output_text_part_done(event.part)
+                                case _:
+                                    pass
+                        case "response.code_interpreter_call.in_progress":
+                            await handler.on_code_interpreter_tool_call_in_progress(
+                                event
                             )
-                        )
-                        await stream.close()
-                        yield handler.flush()
-                except openai.APIError as openai_error:
-                    if openai_error.type == "server_error":
-                        try:
-                            logger.exception(
-                                f"Server error in response stream: {openai_error}"
+                        case "response.code_interpreter_call_code.delta":
+                            await handler.on_code_interpreter_tool_call_code_delta(
+                                event
                             )
-                            if handler:
-                                await asyncio.shield(
-                                    handler.cleanup(
-                                        run_status=RunStatus.FAILED,
-                                        response_error_code=openai_error.code,
-                                        response_error_message="OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
-                                        send_error_message_only_if_active=False,
+                        case "response.code_interpreter_call.interpreting":
+                            await handler.on_code_interpreter_tool_call_interpreting(
+                                event
+                            )
+                        case "response.code_interpreter_call.completed":
+                            await handler.on_code_interpreter_tool_call_completed(event)
+                        case "response.file_search_call.completed":
+                            await handler.on_file_search_call_completed(event)
+                        case "response.file_search_call.in_progress":
+                            await handler.on_file_search_call_in_progress(event)
+                        case "response.file_search_call.searching":
+                            await handler.on_file_search_call_searching(event)
+                        case "response.output_item.done":
+                            match event.item.type:
+                                case "message":
+                                    await handler.on_output_message_done(event.item)
+                                case "code_interpreter_call":
+                                    await handler.on_code_interpreter_tool_call_done(
+                                        event.item
                                     )
-                                )
-                                yield handler.flush()
-                            else:
-                                run.status = RunStatus.FAILED
-                                run.error_code = openai_error.type
-                                run.error_message = (
-                                    f"Error in response stream: {openai_error}"
-                                )
-                                session_.add(run)
-                                await asyncio.shield(session_.commit())
-
-                                yield (
-                                    orjson.dumps(
-                                        {
-                                            "type": "error",
-                                            "detail": "OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
-                                        }
-                                    )
-                                    + b"\n"
-                                )
-
-                        except Exception as e:
-                            logger.exception(f"Error writing to stream: {e}")
+                                case "file_search_call":
+                                    await handler.on_file_search_call_done(event.item)
+                                case _:
+                                    pass
+                        case "response.completed":
+                            await handler.on_response_completed(event)
+                        case "response.incomplete":
+                            await handler.on_response_completed(event)
+                        case "response.failed":
+                            await handler.on_response_completed(event)
+                        case "error":
+                            await handler.on_response_error(event)
+                        case _:
                             pass
-                    else:
-                        try:
-                            logger.exception("Error in response stream")
-                            if handler:
-                                await asyncio.shield(
-                                    handler.cleanup(
-                                        run_status=RunStatus.FAILED,
-                                        response_error_code=openai_error.code,
-                                        response_error_message="OpenAI was unable to process your request. "
-                                        + get_details_from_api_error(
-                                            openai_error, "Please try again later."
-                                        ),
-                                        send_error_message_only_if_active=False,
-                                    )
-                                )
-                                yield handler.flush()
-                            else:
-                                run.status = RunStatus.FAILED
-                                run.error_code = openai_error.type
-                                run.error_message = (
-                                    f"Error in response stream: {openai_error}"
-                                )
-                                session_.add(run)
-                                await asyncio.shield(session_.commit())
-
-                                yield (
-                                    orjson.dumps(
-                                        {
-                                            "type": "error",
-                                            "detail": "OpenAI was unable to process your request. "
-                                            + get_details_from_api_error(
-                                                openai_error, "Please try again later."
-                                            ),
-                                        }
-                                    )
-                                    + b"\n"
-                                )
-
-                        except Exception as e:
-                            logger.exception(f"Error writing to stream: {e}")
-                            pass
-                except (ValueError, Exception) as e:
+                    yield handler.flush()
+            except (
+                BrokenPipeError,
+                ConnectionResetError,
+                ConnectionAbortedError,
+                asyncio.CancelledError,
+            ):
+                is_canceled = True
+                if handler:
+                    await asyncio.shield(handler.on_response_canceled())
+            except openai.APIError as openai_error:
+                if openai_error.type == "server_error":
                     try:
-                        logger.exception(f"Error in response stream: {e}")
+                        logger.exception(
+                            f"Server error in response stream: {openai_error}"
+                        )
                         if handler:
-                            await asyncio.shield(
-                                handler.cleanup(
-                                    run_status=RunStatus.FAILED,
-                                    response_error_code="pingpong_error",
-                                    response_error_message="We were unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
-                                    send_error_message_only_if_active=False,
-                                )
+                            await handler.cleanup(
+                                run_status=RunStatus.FAILED,
+                                response_error_code=openai_error.code,
+                                response_error_message="OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+                                send_error_message_only_if_active=False,
                             )
                             yield handler.flush()
                         else:
-                            run.status = RunStatus.FAILED
-                            run.error_code = "pingpong_error"
-                            run.error_message = f"Error in response stream: {e}"
-                            session_.add(run)
-                            await asyncio.shield(session_.commit())
+                            async with config.db.driver.async_session() as session_:
+                                run.status = RunStatus.FAILED
+                                run.error_code = openai_error.type
+                                run.error_message = (
+                                    f"Error in response stream: {openai_error}"
+                                )
+                                session_.add(run)
+                                await session_.commit()
 
                             yield (
                                 orjson.dumps(
                                     {
                                         "type": "error",
-                                        "detail": "We were unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+                                        "detail": "OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
                                     }
                                 )
                                 + b"\n"
                             )
-                    except Exception as e_:
-                        logger.exception(f"Error writing to stream: {e_}")
+
+                    except Exception as e:
+                        logger.exception(f"Error writing to stream: {e}")
                         pass
-                finally:
+                else:
+                    try:
+                        logger.exception("Error in response stream")
+                        if handler:
+                            await handler.cleanup(
+                                run_status=RunStatus.FAILED,
+                                response_error_code=openai_error.code,
+                                response_error_message="OpenAI was unable to process your request. "
+                                + get_details_from_api_error(
+                                    openai_error, "Please try again later."
+                                ),
+                                send_error_message_only_if_active=False,
+                            )
+
+                            yield handler.flush()
+                        else:
+                            async with config.db.driver.async_session() as session_:
+                                run.status = RunStatus.FAILED
+                                run.error_code = openai_error.type
+                                run.error_message = (
+                                    f"Error in response stream: {openai_error}"
+                                )
+                                session_.add(run)
+                                await session_.commit()
+
+                            yield (
+                                orjson.dumps(
+                                    {
+                                        "type": "error",
+                                        "detail": "OpenAI was unable to process your request. "
+                                        + get_details_from_api_error(
+                                            openai_error, "Please try again later."
+                                        ),
+                                    }
+                                )
+                                + b"\n"
+                            )
+
+                    except Exception as e:
+                        logger.exception(f"Error writing to stream: {e}")
+                        pass
+            except (ValueError, Exception) as e:
+                try:
+                    logger.exception(f"Error in response stream: {e}")
+                    if handler:
+                        await handler.cleanup(
+                            run_status=RunStatus.FAILED,
+                            response_error_code="pingpong_error",
+                            response_error_message="We were unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+                            send_error_message_only_if_active=False,
+                        )
+
+                        yield handler.flush()
+                    else:
+                        async with config.db.driver.async_session() as session_:
+                            run.status = RunStatus.FAILED
+                            run.error_code = "pingpong_error"
+                            run.error_message = f"Error in response stream: {e}"
+                            session_.add(run)
+                            await session_.commit()
+
+                        yield (
+                            orjson.dumps(
+                                {
+                                    "type": "error",
+                                    "detail": "We were unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+                                }
+                            )
+                            + b"\n"
+                        )
+                except Exception as e_:
+                    logger.exception(f"Error writing to stream: {e_}")
+                    pass
+            finally:
+                if not is_canceled:
                     if handler:
                         yield handler.flush()
                     yield b'{"type":"done"}\n'
-            except Exception as e:
-                logger.exception(f"Error in response creating responses handler: {e}")
-                if handler:
-                    # If we reach here, it means the handler was not able to complete successfully.
-                    # We should clean up the run and notify the user.
-                    await handler.cleanup(
-                        run_status=RunStatus.FAILED,
-                        response_error_code="pingpong_error",
-                        response_error_message="We were unable to process your request.",
-                        send_error_message_only_if_active=False,
-                    )
-                    yield handler.flush()
-                else:
+        except asyncio.CancelledError:
+            logger.info("Response stream was cancelled")
+            return
+        except Exception as e:
+            logger.exception(f"Error in response creating responses handler: {e}")
+            if handler:
+                # If we reach here, it means the handler was not able to complete successfully.
+                # We should clean up the run and notify the user.
+                await handler.cleanup(
+                    run_status=RunStatus.FAILED,
+                    response_error_code="pingpong_error",
+                    response_error_message="We were unable to process your request.",
+                    send_error_message_only_if_active=False,
+                )
+                yield handler.flush()
+            else:
+                async with config.db.driver.async_session() as session_:
                     run.status = RunStatus.FAILED
                     run.error_code = "pingpong_error"
                     run.error_message = f"Error in response stream: {e}"
                     session_.add(run)
-                    await asyncio.shield(session_.commit())
-                yield (
-                    orjson.dumps(
-                        {
-                            "type": "error",
-                            "detail": "We were unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
-                        }
-                    )
-                    + b"\n"
+                    await session_.commit()
+            yield (
+                orjson.dumps(
+                    {
+                        "type": "error",
+                        "detail": "We were unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+                    }
                 )
+                + b"\n"
+            )
 
 
 async def run_thread(
@@ -1964,7 +2282,7 @@ async def run_thread(
                     await config.authz.driver.init()
                     async with config.db.driver.async_session() as session:
                         await models.CodeInterpreterCall.create(session, data)
-                        await asyncio.shield(session.commit())
+                        await session.commit()
                 elif isinstance(event, ThreadRunStepFailed) or isinstance(
                     event, ThreadRunFailed
                 ):
@@ -1974,7 +2292,7 @@ async def run_thread(
                             await models.Class.log_rate_limit_error(
                                 session, class_id=class_id
                             )
-                            await asyncio.shield(session.commit())
+                            await session.commit()
                         yield (
                             orjson.dumps(
                                 {
