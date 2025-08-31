@@ -27,6 +27,7 @@ from pingpong.study.airtable import (
     get_instructor,
     get_instructor_by_email,
     get_preassessment_students_by_class_id,
+    set_instructor_profile_notice_seen,
 )
 from pingpong.template import email_template as message_template
 from pingpong.time import convert_seconds
@@ -66,6 +67,15 @@ async def populate_request(request):
                     mailing_address=instructor.mailing_address,
                     institution=", ".join(instructor.institution),
                 ),
+                feature_flags=schemas.StudyFeatureFlags(
+                    flags={
+                        "notice.profile_moved.v1": bool(
+                            instructor.profile_notice_seen_sep_25
+                        )
+                        if instructor.profile_notice_seen_sep_25 is not None
+                        else False
+                    }
+                ),
             )
         except (PyJWTError, TimeException) as e:
             request.state.session = schemas.StudySessionState(
@@ -98,6 +108,24 @@ async def parse_session_token(request: Request, call_next):
 async def get_me(request: Request):
     """Get the session information."""
     return request.state.session
+
+
+@study.post(
+    "/me/notices/seen",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.GenericStatus,
+)
+async def set_notice_seen(req: schemas.StudyNoticeSeenRequest, request: Request):
+    """Mark a notice as seen for the current instructor.
+
+    Currently supports:
+    - notice.profile_moved.v1
+    """
+    user_id = request.state.session.token.sub  # type: ignore[attr-defined]
+    if req.key == "notice.profile_moved.v1":
+        await set_instructor_profile_notice_seen(user_id)
+        return {"status": "ok"}
+    raise HTTPException(status_code=400, detail="Unknown notice key")
 
 
 @study.post("/login/magic", response_model=schemas.GenericStatus)

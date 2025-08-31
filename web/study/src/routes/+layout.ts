@@ -47,6 +47,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 		showSidebar,
 		// Defer course fetching to page/components to avoid blocking nav
 		courses: [] as Course[],
-		instructor: me.data.instructor
+		instructor: me.data.instructor,
+		feature_flags: me.data.feature_flags
 	};
 };

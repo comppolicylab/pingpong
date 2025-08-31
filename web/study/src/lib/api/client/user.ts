@@ -28,3 +28,11 @@ export const loginWithMagicLink = async (f: Fetcher, email: string, forward: str
 	});
 	return response;
 };
+
+/**
+ * Mark the profile moved notice as seen for this instructor.
+ */
+export const markNoticeSeen = async (f: Fetcher, key: string) => {
+	const url = `me/notices/seen`;
+	return await POST<{ key: string }, GenericStatus>(f, url, { key });
+};

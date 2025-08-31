@@ -11,6 +11,7 @@
 	import BookOpenTextIcon from '@lucide/svelte/icons/book-open-text';
 	import ContactIcon from '@lucide/svelte/icons/contact';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import User from '@lucide/svelte/icons/user';
 
 	// Components
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
@@ -78,6 +79,16 @@
 							<a href="/" {...props}>
 								<LayoutDashboard class="size-4" />
 								<span>Dashboard</span>
+							</a>
+						{/snippet}
+					</Sidebar.MenuButton>
+				</Sidebar.MenuItem>
+				<Sidebar.MenuItem>
+					<Sidebar.MenuButton tooltipContent="Profile" isActive={page.url.pathname === '/profile'}>
+						{#snippet child({ props })}
+							<a href="/profile" {...props}>
+								<User class="size-4" />
+								<span>Profile</span>
 							</a>
 						{/snippet}
 					</Sidebar.MenuButton>

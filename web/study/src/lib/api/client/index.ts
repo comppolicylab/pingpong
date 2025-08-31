@@ -1,3 +1,3 @@
-export { me, loginWithMagicLink } from './user';
+export { me, loginWithMagicLink, markNoticeSeen } from './user';
 export { getMyCourses } from './course';
 export { getPreAssessmentStudents } from './preassessment';
