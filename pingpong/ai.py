@@ -1455,6 +1455,8 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_code_interpreter_tool_call_done(
             session_: AsyncSession,
         ):
+            if not self.tool_call_id:
+                return
             await models.ToolCall.update_status(
                 session_,
                 self.tool_call_id,
