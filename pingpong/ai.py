@@ -1312,7 +1312,7 @@ class BufferedResponseStreamHandler:
                 f"Received code interpreter tool call interpreting without a current tool call. Data: {data}"
             )
             return
-        if self.tool_call_id != data.item_id:
+        if self.tool_call_external_id != data.item_id:
             logger.exception(
                 f"Received code interpreter tool call interpreting with a different tool call ID. Data: {data}"
             )
@@ -1339,7 +1339,7 @@ class BufferedResponseStreamHandler:
                 f"Received code interpreter tool call completed without a current tool call. Data: {data}"
             )
             return
-        if self.tool_call_id != data.item_id:
+        if self.tool_call_external_id != data.item_id:
             logger.exception(
                 f"Received code interpreter tool call completed with a different tool call ID. Data: {data}"
             )
@@ -1455,7 +1455,7 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_code_interpreter_tool_call_done(
             session_: AsyncSession,
         ):
-            await models.ToolCall.mark_status(
+            await models.ToolCall.update_status(
                 session_,
                 self.tool_call_id,
                 ToolCallStatus(data.status),
