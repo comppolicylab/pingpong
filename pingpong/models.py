@@ -3611,7 +3611,7 @@ class MessagePart(Base):
         """Create a new message part."""
         message_part = cls(**data)
         session.add(message_part)
-        await session.commit()
+        await session.flush()
         return message_part
 
     @classmethod
