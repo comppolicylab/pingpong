@@ -21,7 +21,11 @@
 	import type { Course } from '$lib/api/types';
 	import { onMount } from 'svelte';
 	import SidebarMenuSkeleton from '$lib/components/ui/sidebar/sidebar-menu-skeleton.svelte';
-	import { courses as coursesStore, loading as coursesLoading, ensureCourses } from '$lib/stores/courses';
+	import {
+		courses as coursesStore,
+		loading as coursesLoading,
+		ensureCourses
+	} from '$lib/stores/courses';
 
 	let { ref = $bindable(null), ...restProps }: ComponentProps<typeof Sidebar.Root> = $props();
 
@@ -103,17 +107,17 @@
 									<SidebarMenuSkeleton showIcon />
 								{:else}
 									{#each courses ?? [] as subItem (subItem.name)}
-									<Sidebar.MenuSubItem>
-										<Sidebar.MenuSubButton
-											isActive={page.url.pathname === `/preassessment/${subItem.id}`}
-										>
-											{#snippet child({ props })}
-												<a href={`/preassessment/${subItem.id}`} {...props}>
-													<span>{subItem.name}</span>
-												</a>
-											{/snippet}
-										</Sidebar.MenuSubButton>
-									</Sidebar.MenuSubItem>
+										<Sidebar.MenuSubItem>
+											<Sidebar.MenuSubButton
+												isActive={page.url.pathname === `/preassessment/${subItem.id}`}
+											>
+												{#snippet child({ props })}
+													<a href={`/preassessment/${subItem.id}`} {...props}>
+														<span>{subItem.name}</span>
+													</a>
+												{/snippet}
+											</Sidebar.MenuSubButton>
+										</Sidebar.MenuSubItem>
 									{/each}
 								{/if}
 							</Sidebar.MenuSub>

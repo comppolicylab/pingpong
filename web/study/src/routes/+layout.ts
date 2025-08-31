@@ -43,10 +43,10 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 		throw redirect(302, `${LOGIN}?forward=${destination}`);
 	}
 
-    return {
-        showSidebar,
-        // Defer course fetching to page/components to avoid blocking nav
-        courses: [] as Course[],
-        instructor: me.data.instructor
-    };
+	return {
+		showSidebar,
+		// Defer course fetching to page/components to avoid blocking nav
+		courses: [] as Course[],
+		instructor: me.data.instructor
+	};
 };

@@ -32,7 +32,7 @@
 				preAssessmentStudentCount = course.preassessment_student_count;
 				completionRateTarget = course.completion_rate_target;
 			}
-		} catch (e) {
+		} catch {
 			// Leave defaults; error could be surfaced in future UX
 		} finally {
 			loading = false;

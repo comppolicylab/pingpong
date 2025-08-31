@@ -14,7 +14,11 @@
 	import { onMount } from 'svelte';
 	import type { Course } from '$lib/api/types';
 	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
-	import { courses as coursesStore, loading as coursesLoading, ensureCourses } from '$lib/stores/courses';
+	import {
+		courses as coursesStore,
+		loading as coursesLoading,
+		ensureCourses
+	} from '$lib/stores/courses';
 
 	let { data } = $props();
 
