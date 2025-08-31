@@ -734,7 +734,6 @@ class BufferedResponseStreamHandler:
         self.tool_call_external_id: int | None = None
         self.thread_id: int = thread_id
         self.assistant_id: int = assistant_id
-        self.prev_output_index = prev_output_index
         self.prev_part_index = -1
         self.file_search_results: dict[str, FileSearchToolAnnotationResult] = {}
         self.file_ids_file_citation_annotation: set[str] = set()
