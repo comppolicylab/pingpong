@@ -118,8 +118,8 @@
 									<SidebarMenuSkeleton showIcon />
 								{:else if (courses ?? []).length === 0}
 									<Sidebar.MenuSubItem>
-										<Sidebar.MenuSubButton aria-disabled={true}>
-											<span class="text-muted-foreground">No courses</span>
+										<Sidebar.MenuSubButton aria-disabled={true} class="aria-disabled:opacity-100">
+											<span class="text-muted-foreground">No active courses</span>
 										</Sidebar.MenuSubButton>
 									</Sidebar.MenuSubItem>
 								{:else}
