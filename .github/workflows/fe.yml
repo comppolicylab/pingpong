@@ -1,4 +1,4 @@
-name: UI
+name: UI - PingPong
 
 on:
   push:
