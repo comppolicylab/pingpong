@@ -1401,11 +1401,28 @@ class InstructorResponse(BaseModel):
     institution: str | None = None
 
 
+class StudyFeatureFlags(BaseModel):
+    """Feature flags and one-time notices for Study.
+
+    Keys use dotted, versioned names. Example:
+    - notice.profile_moved.v1
+    - banner.maintenance_2025_09.v1
+    - feature.some_toggle.v2
+    """
+
+    flags: dict[str, bool] = Field(default_factory=dict)
+
+
 class StudySessionState(BaseModel):
     status: SessionStatus
     error: str | None = None
     instructor: InstructorResponse | None = None
     token: SessionToken | None = None
+    feature_flags: StudyFeatureFlags | None = None
+
+
+class StudyNoticeSeenRequest(BaseModel):
+    key: str
 
 
 class Support(BaseModel):

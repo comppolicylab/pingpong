@@ -1,15 +1,17 @@
 <script lang="ts">
 	import * as Alert from '$lib/components/ui/alert/index.js';
-	import * as Card from '$lib/components/ui/card/index.js';
-	import { Badge } from '$lib/components/ui/badge/index.js';
-	import { Input } from '$lib/components/ui/input/index.js';
-	import { Label } from '$lib/components/ui/label';
-	import { Textarea } from '$lib/components/ui/textarea/index.js';
 	import Info from '@lucide/svelte/icons/info';
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
 	import DataTable from '$lib/components/common-table/data-table.svelte';
 	import Percent from '@lucide/svelte/icons/percent';
 	import Users from '@lucide/svelte/icons/users';
+	import User from '@lucide/svelte/icons/user';
+	import * as Dialog from '$lib/components/ui/dialog/index.js';
+	import { Button } from '$lib/components/ui/button/index.js';
+	import { browser } from '$app/environment';
+	import { asset } from '$app/paths';
+	import { page } from '$app/state';
+	import { markNoticeSeen } from '$lib/api/client';
 	import { columns } from '$lib/components/classes-table/columns.js';
 	import { onMount } from 'svelte';
 	import type { Course } from '$lib/api/types';
@@ -20,13 +22,39 @@
 		ensureCourses
 	} from '$lib/stores/courses';
 
-	let { data } = $props();
-
 	onMount(async () => {
 		try {
 			await ensureCourses(fetch);
 		} catch {
 			// ignore; skeleton/empty will show
+		}
+	});
+
+	const PROFILE_MOVED_NOTICE_KEY = 'notice.profile_moved.v1';
+	let showProfileMovedDialog = $state(false);
+	let hasShownProfileMovedDialog = $state(false);
+	let noticeSeenMarked = $state(false);
+	onMount(() => {
+		if (!browser) return;
+		try {
+			const alreadySeen = Boolean(page.data?.feature_flags?.flags?.[PROFILE_MOVED_NOTICE_KEY]);
+			if (!alreadySeen) {
+				showProfileMovedDialog = true;
+				hasShownProfileMovedDialog = true;
+			}
+		} catch {
+			// ignore storage failures
+		}
+	});
+
+	async function onDismissNotice() {
+		showProfileMovedDialog = false;
+	}
+
+	$effect(() => {
+		if (hasShownProfileMovedDialog && !showProfileMovedDialog && !noticeSeenMarked) {
+			noticeSeenMarked = true;
+			markNoticeSeen(fetch, PROFILE_MOVED_NOTICE_KEY).catch(() => {});
 		}
 	});
 
@@ -41,134 +69,51 @@
 </script>
 
 <div class="flex flex-col gap-4">
-	<div class="grid grid-cols-2 gap-4">
-		<Card.Root>
-			<Card.Header>
-				<Card.Title>Personal Details</Card.Title>
-				<Card.Description
-					>Your personal information we received when you completed the application to participate
-					in the study.</Card.Description
-				>
-			</Card.Header>
-			<Card.Content>
-				<div class="grid grid-cols-2 gap-6">
-					<div class="flex w-full flex-col gap-1.5">
-						<Label for="first-name">First Name</Label>
-						<Input
-							type="text"
-							id="first-name"
-							placeholder="First Name"
-							value={data.instructor?.first_name}
-							disabled
-							class="disabled:opacity-90"
-						/>
-					</div>
-					<div class="flex w-full flex-col gap-1.5">
-						<Label for="last-name">Last Name</Label>
-						<Input
-							type="text"
-							id="last-name"
-							placeholder="Last Name"
-							value={data.instructor?.last_name}
-							disabled
-							class="disabled:opacity-90"
-						/>
-					</div>
-					<div class="flex w-full flex-col gap-1.5">
-						<Label for="email">Institutional Email</Label>
-						<Input
-							type="email"
-							id="email"
-							placeholder="Email"
-							value={data.instructor?.academic_email}
-							disabled
-							class="disabled:opacity-90"
-						/>
-					</div>
-					<div class="flex w-full flex-col gap-1.5">
-						<Label for="email-2">Personal Email</Label>
-						<Input
-							type="email"
-							id="email-2"
-							placeholder="Email"
-							value={data.instructor?.personal_email}
-							disabled
-							class="disabled:opacity-90"
-						/>
-					</div>
-					<div class="flex w-full flex-col gap-1.5">
-						<Label for="institution">Institution</Label>
-						<Input
-							type="text"
-							id="institution"
-							placeholder="Institution"
-							value={data.instructor?.institution}
-							disabled
-							class="disabled:opacity-90"
-						/>
-					</div>
-					<div class="flex w-full flex-col gap-2.5">
-						<Label for="institution">Honorarium Status</Label>
-
-						{#if data.instructor?.honorarium_status === 'Yes'}
-							<Badge variant="outline" class="border-green-700/40 text-sm  dark:border-lime-500/80">
-								<span class="text-green-800/90 dark:text-lime-400/90">Can receive honorarium</span>
-							</Badge>
-						{:else if data.instructor?.honorarium_status === 'No'}
-							<Badge variant="outline" class="border-stone-950/40 text-sm dark:border-stone-300/70">
-								<span class="text-stone-800/90 dark:text-stone-200/90"
-									>Cannot receive honorarium</span
-								>
-							</Badge>
-						{:else}
-							<Badge
-								variant="outline"
-								class="border-amber-800/40 text-sm dark:border-yellow-500/70"
-							>
-								<span class="text-amber-700/90 dark:text-yellow-400/90"
-									>Unsure: We'll follow up</span
-								>
-							</Badge>
-						{/if}
-						<p class="text-sm text-muted-foreground">
-							This status reflects whether you can receive an honorarium. Eligibility for honorarium
-							payments will be determined during the study.
-						</p>
-					</div>
-					<div class="col-span-2 flex w-full flex-col gap-2.5">
-						<Label for="mailing">Mailing Address</Label>
-						<Textarea
-							id="mailing"
-							placeholder="Mailing Address"
-							value={data.instructor?.mailing_address}
-							disabled
-							class="disabled:opacity-90"
-						/>
-						<p class="text-sm text-muted-foreground">
-							Your mailing address is only needed if you are eligible to receive an honorarium.
-						</p>
-					</div>
+	<Dialog.Root bind:open={showProfileMovedDialog}>
+		<Dialog.Content>
+			<div class="relative -mx-6 -mt-6 mb-4 h-36 overflow-hidden rounded-t-lg">
+				<img
+					src={asset('/notice.profile_moved.v1.webp')}
+					alt=""
+					class="absolute inset-0 h-full w-full object-cover"
+				/>
+				<div class="absolute inset-0 flex items-center justify-center">
+					<User class="size-10 text-white drop-shadow" />
 				</div>
-			</Card.Content>
-		</Card.Root>
-
-		<Alert.Root class="self-start">
-			<Info />
-			<Alert.Title class="line-clamp-none tracking-normal"
-				>Welcome to your new PingPong College Study Dashboard!</Alert.Title
-			>
-			<Alert.Description>
-				<p>
-					You'll soon be able to edit your personal and course details below. In the meantime,
-					please email <a
-						href="mailto:support@pingpong-hks.atlassian.net"
-						class="text-nowrap text-primary underline underline-offset-4 hover:text-primary/80"
-						>support@pingpong-hks.atlassian.net
-					</a> if any of the information listed on this dashboard is incorrect.
-				</p>
-			</Alert.Description>
-		</Alert.Root>
-	</div>
+			</div>
+			<Dialog.Header>
+				<Dialog.Title>A new page for your personal details</Dialog.Title>
+				<Dialog.Description>
+					We've moved your instructor details to a separate Profile page, accessible from the
+					sidebar.
+				</Dialog.Description>
+			</Dialog.Header>
+			<Dialog.Footer>
+				<Button
+					onclick={async () => {
+						await onDismissNotice();
+						window.location.href = '/profile';
+					}}>Go to Profile</Button
+				>
+				<Button variant="ghost" onclick={onDismissNotice}>Got it</Button>
+			</Dialog.Footer>
+		</Dialog.Content>
+	</Dialog.Root>
+	<Alert.Root>
+		<Info />
+		<Alert.Title class="line-clamp-none tracking-normal"
+			>Welcome to your new PingPong College Study Dashboard!</Alert.Title
+		>
+		<Alert.Description>
+			<p>
+				You'll soon be able to edit your course details below. In the meantime, please email <a
+					href="mailto:support@pingpong-hks.atlassian.net"
+					class="text-nowrap text-primary underline underline-offset-4 hover:text-primary/80"
+					>support@pingpong-hks.atlassian.net
+				</a> if any of the information listed on this dashboard is incorrect.
+			</p>
+		</Alert.Description>
+	</Alert.Root>
 
 	<h2 class="mt-4 text-xl font-semibold">Your Courses</h2>
 	{#if hasAnyAcceptedCourses}

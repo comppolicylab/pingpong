@@ -61,6 +61,17 @@ async def get_admin_by_id(admin_id: str) -> Admin | None:
     return admin
 
 
+async def set_instructor_profile_notice_seen(instructor_id: str) -> None:
+    """Mark the profile moved notice as seen for an instructor."""
+
+    def _update():
+        inst = Instructor.from_id(instructor_id)
+        inst.profile_notice_seen_sep_25 = True
+        inst.save()
+
+    await asyncio.to_thread(_update)
+
+
 async def get_admin_by_email(email: str) -> Admin | None:
     email_to_match = email.lower().strip()
     formula = Admin.email.eq(email_to_match)

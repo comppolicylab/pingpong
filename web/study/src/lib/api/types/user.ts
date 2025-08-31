@@ -26,6 +26,10 @@ export type Instructor = {
 	institution: string | null;
 };
 
+export type FeatureFlags = {
+	flags: Record<string, boolean>;
+};
+
 /**
  * Information about the current session.
  */
@@ -34,4 +38,5 @@ export type SessionState = {
 	error: string | null;
 	token: SessionToken | null;
 	instructor: Instructor | null;
+	feature_flags?: FeatureFlags | null;
 };

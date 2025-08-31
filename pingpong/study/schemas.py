@@ -22,6 +22,7 @@ class Instructor(Model):
     honorarium_status = F.SelectField("Honorarium?")
     mailing_address = F.RichTextField("Mailing Address")
     institution = F.LookupField[str]("Institution Name", readonly=True)
+    profile_notice_seen_sep_25 = F.CheckboxField("notice.profile_moved.v1")
 
     class Meta:
         api_key = study_config.airtable_api_key
