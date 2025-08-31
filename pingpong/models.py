@@ -3523,7 +3523,7 @@ class ToolCall(Base):
         """Create a new tool call."""
         tool_call = cls(**data)
         session.add(tool_call)
-        await session.commit()
+        await session.flush()
         return tool_call
 
     @classmethod
