@@ -19,19 +19,27 @@
 	// Snippets
 	import NavUser from './nav-user.svelte';
 	import type { Course } from '$lib/api/types';
+	import { onMount } from 'svelte';
+	import SidebarMenuSkeleton from '$lib/components/ui/sidebar/sidebar-menu-skeleton.svelte';
+	import { courses as coursesStore, loading as coursesLoading, ensureCourses } from '$lib/stores/courses';
 
 	let { ref = $bindable(null), ...restProps }: ComponentProps<typeof Sidebar.Root> = $props();
 
 	const data = $derived(page.data);
-	const courses = $derived.by(() => {
-		const allCourses: Course[] = data.courses ?? [];
-		let coursesWithPreAssessment: Course[] = [];
-		for (const cls of allCourses) {
-			if (cls.preassessment_url && cls.preassessment_url !== '' && cls.status === 'accepted') {
-				coursesWithPreAssessment.push(cls);
-			}
+
+	onMount(async () => {
+		try {
+			await ensureCourses(fetch);
+		} catch {
+			// ignore, skeleton/no-courses will show
 		}
-		return coursesWithPreAssessment;
+	});
+
+	const courses = $derived.by(() => {
+		const filtered: Course[] = ($coursesStore ?? []).filter(
+			(cls) => cls.preassessment_url && cls.preassessment_url !== '' && cls.status === 'accepted'
+		);
+		return filtered;
 	});
 </script>
 
@@ -88,7 +96,13 @@
 						</Collapsible.Trigger>
 						<Collapsible.Content>
 							<Sidebar.MenuSub>
-								{#each courses ?? [] as subItem (subItem.name)}
+								{#if $coursesLoading}
+									<SidebarMenuSkeleton showIcon />
+									<SidebarMenuSkeleton showIcon />
+									<SidebarMenuSkeleton showIcon />
+									<SidebarMenuSkeleton showIcon />
+								{:else}
+									{#each courses ?? [] as subItem (subItem.name)}
 									<Sidebar.MenuSubItem>
 										<Sidebar.MenuSubButton
 											isActive={page.url.pathname === `/preassessment/${subItem.id}`}
@@ -100,7 +114,8 @@
 											{/snippet}
 										</Sidebar.MenuSubButton>
 									</Sidebar.MenuSubItem>
-								{/each}
+									{/each}
+								{/if}
 							</Sidebar.MenuSub>
 						</Collapsible.Content>
 					</Sidebar.MenuItem>
