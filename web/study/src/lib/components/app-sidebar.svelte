@@ -105,6 +105,12 @@
 									<SidebarMenuSkeleton showIcon />
 									<SidebarMenuSkeleton showIcon />
 									<SidebarMenuSkeleton showIcon />
+								{:else if (courses ?? []).length === 0}
+									<Sidebar.MenuSubItem>
+										<Sidebar.MenuSubButton aria-disabled={true}>
+											<span class="text-muted-foreground">No courses</span>
+										</Sidebar.MenuSubButton>
+									</Sidebar.MenuSubItem>
 								{:else}
 									{#each courses ?? [] as subItem (subItem.name)}
 										<Sidebar.MenuSubItem>
