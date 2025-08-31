@@ -242,6 +242,11 @@
 			<Skeleton class="h-8 w-full" />
 		</div>
 	{:else}
-		<DataTable data={$coursesStore as Course[]} {columns} />
+		<DataTable data={$coursesStore as Course[]} {columns}>
+			{#snippet empty()}
+				We couldn't find any courses for you.<br />
+				Please contact the study administrator if you think this is an error.
+			{/snippet}
+		</DataTable>
 	{/if}
 </div>

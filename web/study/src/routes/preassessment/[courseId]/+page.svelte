@@ -58,7 +58,11 @@
 					<Skeleton class="h-8 w-full" />
 				</div>
 			{:else}
-				<DataTable data={preAssessmentStudents} {columns} />
+				<DataTable data={preAssessmentStudents} {columns}>
+					{#snippet empty()}
+						No pre-assessment submissions yet.
+					{/snippet}
+				</DataTable>
 			{/if}
 		</div>
 		<div class="col-span-1 flex flex-col gap-2">
