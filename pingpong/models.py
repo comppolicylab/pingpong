@@ -3713,7 +3713,7 @@ class Message(Base):
         """Create a new message."""
         message = cls(**data)
         session.add(message)
-        await session.commit()
+        await session.flush()
         return message
 
     @classmethod
