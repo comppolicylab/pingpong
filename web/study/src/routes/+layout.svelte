@@ -8,6 +8,7 @@
 	import { page } from '$app/state';
 	import { Toaster } from '$lib/components/ui/sonner/index.js';
 	import { courseById } from '$lib/stores/courses';
+	import { fade } from 'svelte/transition';
 
 	let { children } = $props();
 	let courseStore = $state(courseById((page.params.courseId as string) || ''));
@@ -46,7 +47,11 @@
 				</div>
 			</header>
 			<div class="flex flex-col overflow-auto p-4">
-				{@render children?.()}
+				{#key page.url.pathname}
+					<div in:fade={{ duration: 150 }}>
+						{@render children?.()}
+					</div>
+				{/key}
 			</div>
 		</Sidebar.Inset>
 	</Sidebar.Provider>
