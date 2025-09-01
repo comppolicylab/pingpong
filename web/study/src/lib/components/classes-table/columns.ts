@@ -6,7 +6,6 @@ import StatusBadge from './status-badge.svelte';
 import RandomizationBadge from './randomization-badge.svelte';
 import { createRawSnippet } from 'svelte';
 import type { Course } from '$lib/api/types';
-// Note: Progress moved to unified dashboard section to avoid duplication.
 
 const notAssignedSnippet = createRawSnippet(() => ({
 	render: () => `<div class="text-muted-foreground">Not assigned</div>`

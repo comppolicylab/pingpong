@@ -1,6 +1,5 @@
 <script lang="ts">
 	import DataTable from '$lib/components/common-table/data-table.svelte';
-	// Top-of-page alerts moved to announcements sidebar
 	import User from '@lucide/svelte/icons/user';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -78,8 +77,8 @@
 		return ($coursesStore as Course[]).filter((c) => {
 			const start = toDate(c?.start_date);
 			if (!start) return false;
-			const due = addDays(start, 14);
-			const grace = addDays(start, 21);
+			const due = addDays(start, 15);
+			const grace = addDays(start, 22);
 			const enrollment = typeof c?.enrollment_count === 'number' ? c.enrollment_count : undefined;
 			const completed =
 				typeof c?.preassessment_student_count === 'number' ? c.preassessment_student_count : 0;
@@ -102,8 +101,6 @@
 			sessionStorage.setItem(GRACE_NOTICE_SESSION_KEY, '1');
 		}
 	});
-
-	// Announcements use course state internally; we keep page lightweight here.
 </script>
 
 <div class="flex flex-col gap-4">

@@ -47,8 +47,8 @@
 			return { kind: 'met' as const };
 		}
 
-		const due = addDays(start, 14);
-		const grace = addDays(start, 21);
+		const due = addDays(start, 15);
+		const grace = addDays(start, 22);
 
 		if (now < start) {
 			return { kind: 'upcoming' as const, days: daysLeft(due, now) };
