@@ -99,23 +99,8 @@
 			</Dialog.Footer>
 		</Dialog.Content>
 	</Dialog.Root>
-	<Alert.Root>
-		<Info />
-		<Alert.Title class="line-clamp-none tracking-normal"
-			>Welcome to your new PingPong College Study Dashboard!</Alert.Title
-		>
-		<Alert.Description>
-			<p>
-				You'll soon be able to edit your course details below. In the meantime, please email <a
-					href="mailto:support@pingpong-hks.atlassian.net"
-					class="text-nowrap text-primary underline underline-offset-4 hover:text-primary/80"
-					>support@pingpong-hks.atlassian.net
-				</a> if any of the information listed on this dashboard is incorrect.
-			</p>
-		</Alert.Description>
-	</Alert.Root>
 
-	<h2 class="mt-4 text-xl font-semibold">Your Courses</h2>
+	<h2 class="text-xl font-semibold">Your Courses</h2>
 	{#if hasAnyAcceptedCourses}
 		<div class="grid grid-cols-2 gap-4">
 			<Alert.Root class="self-start">
