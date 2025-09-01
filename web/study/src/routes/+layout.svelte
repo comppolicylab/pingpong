@@ -18,7 +18,9 @@
 	});
 
 	let pageTitle = $derived(
-		(page.url.pathname.startsWith('/preassessment/') && $courseStore?.name) ||
+		((page.url.pathname.startsWith('/preassessment/') ||
+			page.url.pathname.startsWith('/courses/')) &&
+			$courseStore?.name) ||
 			page.data?.title ||
 			'PingPong College Study'
 	);
@@ -27,6 +29,9 @@
 
 <ModeWatcher />
 <Toaster position="top-center" />
+<svelte:head>
+	<title>{pageTitle}</title>
+</svelte:head>
 {#if showSidebar}
 	<Sidebar.Provider class="h-dvh">
 		<AppSidebar />
@@ -38,7 +43,7 @@
 					<Breadcrumb.Root>
 						<Breadcrumb.List>
 							<Breadcrumb.Item>
-								<Breadcrumb.Page class="line-clamp-1">
+								<Breadcrumb.Page class="line-clamp-1 text-xl font-medium">
 									{pageTitle}
 								</Breadcrumb.Page>
 							</Breadcrumb.Item>

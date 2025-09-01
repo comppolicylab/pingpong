@@ -19,7 +19,7 @@
 
 	<Alert.Root class="mx-auto mt-3 w-full max-w-3xl text-base">
 		<Info />
-		<Alert.Title class="line-clamp-none font-normal tracking-normal">
+		<Alert.Title class="line-clamp-none text-sm font-normal tracking-normal">
 			Profile changes cannot be made on the website. Please email
 			<a
 				href="mailto:support@pingpong-hks.atlassian.net"

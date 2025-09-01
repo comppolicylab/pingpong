@@ -44,6 +44,27 @@ async def check_if_instructor_teaches_course_by_ids(
     return any(course.id == course_id for course in courses)
 
 
+async def update_course_enrollment_by_record_id(
+    course_record_id: str, enrollment_count: int
+) -> None:
+    """Update the Enrollment field for the course with the given custom record id."""
+
+    def _update():
+        course = Course.from_id(course_record_id)
+        if course is None:
+            return False
+        course.enrollment_count = enrollment_count
+        course.save()
+        return True
+
+    ok = await asyncio.to_thread(_update)
+    if not ok:
+        raise UserNotFoundException(
+            detail="Course not found.",
+            user_id=course_record_id,
+        )
+
+
 async def get_preassessment_students_by_class_id(
     class_id: str,
 ) -> list[PreAssessmentStudentSubmission]:

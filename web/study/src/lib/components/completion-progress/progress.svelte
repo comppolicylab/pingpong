@@ -103,26 +103,26 @@
 		{#if target !== undefined}
 			<!-- Target line extends above and below the bar -->
 			<div
-				class="absolute top-0 bottom-0 z-20 w-px bg-gray-500"
+				class="absolute top-0 bottom-0 z-20 w-px bg-muted-foreground"
 				style="left: {targetPercent}%; transform: translateX(-50%);"
 			></div>
 			<!-- White target line segment where it crosses the filled bar -->
 			{#if targetPercent <= currentPercent}
 				<div
-					class="absolute z-30 w-px bg-white"
+					class="absolute z-30 w-px bg-sidebar"
 					style="left: {targetPercent}%; transform: translateX(-50%); top: calc(50% - 0.5rem); height: 1rem;"
 				></div>
 			{/if}
 
 			<!-- Target label positioned left or right of line -->
 			<div
-				class="absolute top-0 z-20 font-medium whitespace-nowrap text-gray-500 {textClass}"
+				class="absolute top-0 z-20 font-medium whitespace-nowrap text-muted-foreground {textClass}"
 				style="left: {targetLabelLeft()}; transform: {targetLabelTransform()}; margin-left: {targetMarginLeft()};"
 			>
 				Target
 			</div>
 			<div
-				class="absolute bottom-0 z-20 font-medium whitespace-nowrap text-gray-500 {textClass}"
+				class="absolute bottom-0 z-20 font-medium whitespace-nowrap text-muted-foreground {textClass}"
 				style="left: {targetLabelLeft()}; transform: {targetLabelTransform()}; margin-left: {targetMarginLeft()};"
 			>
 				{target}%
