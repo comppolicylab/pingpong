@@ -29,6 +29,9 @@
 
 <ModeWatcher />
 <Toaster position="top-center" />
+<svelte:head>
+	<title>{pageTitle}</title>
+</svelte:head>
 {#if showSidebar}
 	<Sidebar.Provider class="h-dvh">
 		<AppSidebar />
