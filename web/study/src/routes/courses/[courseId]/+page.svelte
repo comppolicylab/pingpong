@@ -112,44 +112,53 @@
 
 <div class="grid grid-cols-3 gap-4">
 	<div class="col-span-2 flex flex-col gap-4">
-    {#if deadlines.kind === 'grace'}
-      <Alert.Root
-        class="self-start border-amber-600 bg-transparent text-amber-700 dark:border-amber-400 dark:text-amber-300"
-      >
-        <Hourglass />
-        <Alert.Title class="line-clamp-none font-semibold tracking-normal"
-          >Pre-Assessment Grace Period / {daysLabel(deadlines.days)} left</Alert.Title
-        >
-        <Alert.Description class="text-amber-700 dark:text-amber-300">
-          <span>
-            Your course has not reached the pre-assessment completion target. We're allowing you an
-            extra week to reach the completion target to remain in the study.
-          </span>
-          <span>
-            Extenuating circumstances? Email us at <a
-              href="mailto:support@pingpong-hks.atlassian.net"
-              class="text-nowrap text-amber-700 underline underline-offset-4 hover:text-amber-600 dark:text-amber-300 dark:hover:text-amber-500"
-              >support@pingpong-hks.atlassian.net</a
-            >.
-          </span>
-        </Alert.Description>
-      </Alert.Root>
-    {/if}
-    {#if deadlines.kind === 'risk'}
-      <Alert.Root class="self-start border-red-600 bg-transparent text-red-700 dark:border-red-400 dark:text-red-300">
-        <AlertTriangle />
-        <Alert.Title class="line-clamp-none font-semibold tracking-normal">Pre-Assessment Target Missed</Alert.Title>
-        <Alert.Description class="text-red-700 dark:text-red-300">
-          <span>
-            Your course did not meet the pre-assessment completion target. Our team will follow up with you to discuss next steps.
-          </span>
-          <span>
-            Extenuating circumstances? Email
-            <a href="mailto:support@pingpong-hks.atlassian.net" class="text-nowrap text-red-700 underline underline-offset-4 hover:text-red-600 dark:text-red-300 dark:hover:text-red-400">support@pingpong-hks.atlassian.net</a>.
-          </span>
-        </Alert.Description>
-      </Alert.Root>
-    {/if}
+		{#if deadlines.kind === 'grace'}
+			<Alert.Root
+				class="self-start border-amber-600 bg-transparent text-amber-700 dark:border-amber-400 dark:text-amber-300"
+			>
+				<Hourglass />
+				<Alert.Title class="line-clamp-none font-semibold tracking-normal"
+					>Pre-Assessment Grace Period / {daysLabel(deadlines.days)} left</Alert.Title
+				>
+				<Alert.Description class="text-amber-700 dark:text-amber-300">
+					<span>
+						Your course has not reached the pre-assessment completion target. We're allowing you an
+						extra week to reach the completion target to remain in the study.
+					</span>
+					<span>
+						Extenuating circumstances? Email us at <a
+							href="mailto:support@pingpong-hks.atlassian.net"
+							class="text-nowrap text-amber-700 underline underline-offset-4 hover:text-amber-600 dark:text-amber-300 dark:hover:text-amber-500"
+							>support@pingpong-hks.atlassian.net</a
+						>.
+					</span>
+				</Alert.Description>
+			</Alert.Root>
+		{/if}
+		{#if deadlines.kind === 'risk'}
+			<Alert.Root
+				class="self-start border-red-600 bg-transparent text-red-700 dark:border-red-400 dark:text-red-300"
+			>
+				<AlertTriangle />
+				<Alert.Title class="line-clamp-none font-semibold tracking-normal"
+					>Pre-Assessment Target Missed</Alert.Title
+				>
+				<Alert.Description class="text-red-700 dark:text-red-300">
+					<span>
+						Your course did not meet the pre-assessment completion target. Our team will follow up
+						with you to discuss next steps.
+					</span>
+					<span>
+						Extenuating circumstances? Email
+						<a
+							href="mailto:support@pingpong-hks.atlassian.net"
+							class="text-nowrap text-red-700 underline underline-offset-4 hover:text-red-600 dark:text-red-300 dark:hover:text-red-400"
+							>support@pingpong-hks.atlassian.net</a
+						>.
+					</span>
+				</Alert.Description>
+			</Alert.Root>
+		{/if}
 		<!-- Overview & Completion -->
 		<div class="rounded-md border p-4">
 			<h2 class="mb-3 text-lg font-semibold">Course Overview</h2>
