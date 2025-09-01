@@ -55,8 +55,8 @@
 
 	const start = $derived(toDate(course?.start_date));
 	const now = $derived(new SvelteDate());
-	const due = $derived(start ? addWeeks(start, 2) : null);
-	const grace = $derived(start ? addWeeks(start, 3) : null);
+	const due = $derived(start ? addDays(start, 15) : null);
+	const grace = $derived(start ? addDays(start, 22) : null);
 
 	const target = $derived(
 		typeof course?.completion_rate_target === 'number' ? course.completion_rate_target : undefined
@@ -88,7 +88,7 @@
 	}
 	function statusAdministerPre() {
 		if (!start) return 'upcoming';
-		const windowEnd = addWeeks(start, 2);
+		const windowEnd = addDays(start, 15);
 		if (now < start) return 'upcoming';
 		if (now < windowEnd) return 'active';
 		// After the administration window ends, keep this step incomplete
@@ -110,8 +110,11 @@
 	function statusTreatmentDemo() {
 		if (course?.randomization !== 'treatment') return 'upcoming';
 		if (!start) return 'upcoming';
-		const startAfterTwo = addWeeks(start, 2);
-		const wrap = addWeeks(start, 4);
+		// Keep Demo upcoming until the Pre-Study Assessment checkpoint is completed
+		const preCheckpoint = statusCheckpointPre();
+		if (preCheckpoint !== 'completed') return 'upcoming';
+		const startAfterTwo = addDays(start, 15);
+		const wrap = addDays(start, 28);
 		if (now < startAfterTwo) return 'upcoming';
 		if (now <= wrap) return 'active';
 		return 'completed';
@@ -213,7 +216,7 @@
 				Step({
 					idx: 6,
 					title: 'Conduct PingPong Demo',
-					date: start ? `After ${fmtDate(addWeeks(start, 2))}` : 'After 2 weeks of class',
+					date: start ? `After ${fmtDate(addDays(start, 15))}` : 'After 2 weeks of class',
 					description:
 						'After your course is confirmed as continuing with the study, our team will provide you with resources to conduct a brief demo to help students understand how to use PingPong.',
 					status: statusTreatmentDemo()
@@ -348,7 +351,7 @@
 											class="border-sky-600 bg-transparent text-sky-600 [a&]:hover:bg-transparent"
 										>
 											<Clock />
-											{daysLabel(daysLeft(addWeeks(start as Date, 2)))} left
+											{daysLabel(daysLeft(addDays(start as Date, 15)))} left
 										</Badge>
 									{:else}
 										<Badge
@@ -365,7 +368,7 @@
 										class="border-amber-600 bg-transparent text-amber-700 dark:border-amber-400 dark:text-amber-300 [a&]:hover:bg-transparent"
 									>
 										<Hourglass />
-										Grace period / {daysLabel(daysLeft(addWeeks(start as Date, 3)))} left
+										Grace period / {daysLabel(daysLeft(addDays(start as Date, 22)))} left
 									</Badge>
 								{:else if s.displayStatus === 'incomplete'}
 									<Badge

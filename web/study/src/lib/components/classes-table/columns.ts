@@ -6,7 +6,7 @@ import StatusBadge from './status-badge.svelte';
 import RandomizationBadge from './randomization-badge.svelte';
 import { createRawSnippet } from 'svelte';
 import type { Course } from '$lib/api/types';
-import Progress from '$lib/components/completion-progress/progress.svelte';
+// Note: Progress moved to unified dashboard section to avoid duplication.
 
 const notAssignedSnippet = createRawSnippet(() => ({
 	render: () => `<div class="text-muted-foreground">Not assigned</div>`
@@ -60,40 +60,15 @@ export const columns: ColumnDef<Course>[] = [
 				: renderSnippet(notAssignedSnippet, '')
 	},
 	{
-		header: 'Completion Rate',
-		accessorKey: 'completion_rate_target',
-		cell: ({ getValue, row }) => {
-			const v = getValue();
-			const completionRate =
-				row.original.preassessment_student_count && row.original.enrollment_count
-					? Math.round(
-							(row.original.preassessment_student_count / row.original.enrollment_count) * 100
-						)
-					: 0;
-			return v
-				? renderComponent(Progress, {
-						target: Number(v),
-						value: completionRate,
-						max: 100,
-						showIndicators: true
-					})
-				: renderSnippet(noValueSnippet, '');
-		}
-	},
-	{
-		header: 'Pre-Assessment Completion',
-		id: 'actions',
-		cell: ({ row }) =>
-			row.original.preassessment_url
-				? renderComponent(TableButton, { classId: String(row.original.id) })
-				: renderSnippet(notAssignedSnippet, '')
-	},
-	{
 		header: 'PingPong Group URL',
 		accessorKey: 'pingpong_group_url',
 		cell: ({ getValue }) =>
 			getValue()
 				? renderComponent(UrlCopyable, { url: String(getValue()) })
 				: renderSnippet(notAssignedSnippet, '')
+	},
+	{
+		id: 'actions',
+		cell: ({ row }) => renderComponent(TableButton, { classId: String(row.original.id) })
 	}
 ];

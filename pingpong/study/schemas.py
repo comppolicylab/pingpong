@@ -84,6 +84,12 @@ class PreAssessmentStudentSubmissionsResponse(BaseModel):
     students: list[PreAssessmentStudentSubmissionResponse]
 
 
+class UpdateEnrollmentRequest(BaseModel):
+    """Request body for updating a course's enrollment count."""
+
+    enrollment_count: int
+
+
 class Admin(Model):
     """Airtable admin model."""
 

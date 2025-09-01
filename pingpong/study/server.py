@@ -17,6 +17,7 @@ from pingpong.study.schemas import (
     Course,
     PreAssessmentStudentSubmissionsResponse,
     PreAssessmentStudentSubmissionResponse,
+    UpdateEnrollmentRequest,
 )
 from pingpong.users import UserNotFoundException
 from pingpong.study.airtable import (
@@ -27,6 +28,7 @@ from pingpong.study.airtable import (
     get_instructor,
     get_instructor_by_email,
     get_preassessment_students_by_class_id,
+    update_course_enrollment_by_record_id,
     set_instructor_profile_notice_seen,
 )
 from pingpong.template import email_template as message_template
@@ -465,3 +467,46 @@ async def get_preassessment_students(class_id: str, request: Request):
             )
         ]
     }
+
+
+@study.patch(
+    "/courses/{class_id}/enrollment",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.GenericStatus,
+)
+async def update_course_enrollment(
+    class_id: str, body: UpdateEnrollmentRequest, request: Request
+):
+    """Update the enrollment count for a course taught by the current instructor.
+
+    The `class_id` here refers to the course's custom "ID" field (`record_id`).
+    """
+    instructor = await get_instructor(request.state.session.token.sub)
+    if not instructor:
+        raise HTTPException(
+            status_code=404,
+            detail="We couldn't find you in the study database. Please contact the study administrator.",
+        )
+
+    # Basic validation
+    if body.enrollment_count < 0:
+        raise HTTPException(
+            status_code=400, detail="Enrollment must be a non-negative integer."
+        )
+
+    # Authorization: instructor must teach this course
+    teaches = await check_if_instructor_teaches_course_by_ids(
+        instructor.record_id, class_id
+    )
+    if not teaches:
+        raise HTTPException(
+            status_code=403, detail="You do not have permission to update this course."
+        )
+
+    # Perform update
+    try:
+        await update_course_enrollment_by_record_id(class_id, body.enrollment_count)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"status": "ok"}

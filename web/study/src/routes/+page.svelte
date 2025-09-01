@@ -1,10 +1,6 @@
 <script lang="ts">
-	import * as Alert from '$lib/components/ui/alert/index.js';
-	import Info from '@lucide/svelte/icons/info';
-	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
 	import DataTable from '$lib/components/common-table/data-table.svelte';
-	import Percent from '@lucide/svelte/icons/percent';
-	import Users from '@lucide/svelte/icons/users';
+	// Top-of-page alerts moved to announcements sidebar
 	import User from '@lucide/svelte/icons/user';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -21,6 +17,11 @@
 		loading as coursesLoading,
 		ensureCourses
 	} from '$lib/stores/courses';
+	import DeadlinesProgress from '$lib/components/dashboard/deadlines-progress.svelte';
+	import Announcements from '$lib/components/dashboard/announcements.svelte';
+	import FAQ from '$lib/components/dashboard/faq.svelte';
+	import Hourglass from '@lucide/svelte/icons/hourglass';
+	import { SvelteDate } from 'svelte/reactivity';
 
 	onMount(async () => {
 		try {
@@ -58,14 +59,51 @@
 		}
 	});
 
-	const hasAnyTreatmentCourses = $derived(
-		$coursesStore.some(
-			(course) => course.pingpong_group_url !== '' && course.randomization === 'treatment'
-		)
-	);
-	const hasAnyAcceptedCourses = $derived(
-		$coursesStore.some((course) => course.status === 'accepted')
-	);
+	// Grace-period session notice (per tab)
+	const GRACE_NOTICE_SESSION_KEY = 'notice.grace.v1.session_shown';
+	let showGraceNoticeDialog = $state(false);
+
+	function toDate(v?: string) {
+		if (!v) return null;
+		const d = new SvelteDate(v);
+		return isNaN(d.getTime()) ? null : d;
+	}
+	function addDays(base: Date, days: number) {
+		const d = new SvelteDate(base);
+		d.setDate(d.getDate() + days);
+		return d;
+	}
+	const graceCourses = $derived.by(() => {
+		const now = new SvelteDate();
+		return ($coursesStore as Course[]).filter((c) => {
+			const start = toDate(c?.start_date);
+			if (!start) return false;
+			const due = addDays(start, 14);
+			const grace = addDays(start, 21);
+			const enrollment = typeof c?.enrollment_count === 'number' ? c.enrollment_count : undefined;
+			const completed =
+				typeof c?.preassessment_student_count === 'number' ? c.preassessment_student_count : 0;
+			const target =
+				typeof c?.completion_rate_target === 'number' ? c.completion_rate_target : undefined;
+			if (target && enrollment && enrollment > 0) {
+				const pct = Math.round((completed / enrollment) * 100);
+				if (pct >= target) return false; // already met
+			}
+			return start && now > due && now <= grace;
+		});
+	});
+
+	$effect(() => {
+		if (!browser) return;
+		if ($coursesLoading) return;
+		const alreadyShown = sessionStorage.getItem(GRACE_NOTICE_SESSION_KEY) === '1';
+		if (!alreadyShown && graceCourses.length > 0) {
+			showGraceNoticeDialog = true;
+			sessionStorage.setItem(GRACE_NOTICE_SESSION_KEY, '1');
+		}
+	});
+
+	// Announcements use course state internally; we keep page lightweight here.
 </script>
 
 <div class="flex flex-col gap-4">
@@ -100,83 +138,71 @@
 		</Dialog.Content>
 	</Dialog.Root>
 
-	<h2 class="text-xl font-semibold">Your Courses</h2>
-	{#if hasAnyAcceptedCourses}
-		<div class="grid grid-cols-2 gap-4">
-			<Alert.Root class="self-start">
-				<Percent />
-				<Alert.Title class="line-clamp-none tracking-normal"
-					>Available Now: Pre-assessment completion rate targets</Alert.Title
-				>
-				<Alert.Description>
-					<p>
-						You can now view completion rate targets for your accepted courses. <span
-							class="font-medium"
-							>As a reminder, all courses in both treatment and control groups need to meet the
-							completion rate targets for the pre-assessment and post-assessment to remain in the
-							study and receive the honorarium.</span
-						>
-						Email
-						<a
-							href="mailto:support@pingpong-hks.atlassian.net"
-							class="text-nowrap text-primary underline underline-offset-4 hover:text-primary/80"
-							>support@pingpong-hks.atlassian.net
-						</a> if you have any questions.
-					</p>
-				</Alert.Description>
-			</Alert.Root>
-			<Alert.Root class="self-start">
-				<Users />
-				<Alert.Title class="line-clamp-none tracking-normal"
-					>Available Now: List of students that have completed the pre-assessment</Alert.Title
-				>
-				<Alert.Description>
-					<p>
-						You can now view real-time lists of students that have completed the pre-assessment for
-						your accepted courses. <span class="font-medium"
-							>All students in your course should complete the pre-assessment, whether they are in a
-							treatment or control group class, regardless of whether they agree for the research
-							team to analyze their de-identified data.</span
-						>
-					</p>
-				</Alert.Description>
-			</Alert.Root>
-		</div>
-	{/if}
+	<!-- Grace Period Notice: shown once per tab session when any course is in grace -->
+	<Dialog.Root bind:open={showGraceNoticeDialog}>
+		<Dialog.Content>
+			<div class="relative -mx-6 -mt-6 mb-4 h-36 overflow-hidden rounded-t-lg">
+				<img
+					src={asset('/notice.grace.v1.webp')}
+					alt=""
+					class="absolute inset-0 h-full w-full object-cover"
+				/>
+				<div class="absolute inset-0 flex items-center justify-center">
+					<Hourglass class="size-10 text-white drop-shadow" />
+				</div>
+			</div>
+			<Dialog.Header>
+				<Dialog.Title>Course(s) below completion target</Dialog.Title>
+				<Dialog.Description>
+					One or more of your accepted courses are currently below their completion target. We're
+					allowing you an extra week to reach the completion target and remain in the study.
+				</Dialog.Description>
+			</Dialog.Header>
+			<Dialog.Footer>
+				{#if graceCourses.length > 0}
+					<Button href={`/courses/${graceCourses[0].id}`}>Review course</Button>
+				{/if}
+				<Button variant="ghost" onclick={() => (showGraceNoticeDialog = false)}>Got it</Button>
+			</Dialog.Footer>
+		</Dialog.Content>
+	</Dialog.Root>
 
-	{#if hasAnyTreatmentCourses}
-		<Alert.Root class="self-start">
-			<CalendarClock />
-			<Alert.Title class="line-clamp-none tracking-normal"
-				>Available Now: TutorBot assistant in your PingPong Groups</Alert.Title
-			>
-			<Alert.Description>
-				<p>
-					Courses assigned to the Treatment group have access to TutorBot, an AI-powered tutor
-					developed by our team. The TutorBot assistant is now available in your PingPong Groups.
-					You are welcome to create your own course-specific assistants. Email <a
-						href="mailto:support@pingpong-hks.atlassian.net"
-						class="text-nowrap text-primary underline underline-offset-4 hover:text-primary/80"
-						>support@pingpong-hks.atlassian.net
-					</a> if you have any questions.
-				</p>
-			</Alert.Description>
-		</Alert.Root>
-	{/if}
+	<div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+		<div class="flex flex-col gap-4 lg:col-span-2">
+			{#if $coursesLoading}
+				<Skeleton class="h-40 w-full" />
+			{:else}
+				<DeadlinesProgress />
+			{/if}
 
-	{#if $coursesLoading}
-		<div class="mt-2 space-y-2">
-			<Skeleton class="h-8 w-full" />
-			<Skeleton class="h-8 w-full" />
-			<Skeleton class="h-8 w-full" />
-			<Skeleton class="h-8 w-full" />
+			<div>
+				<h2 class="mb-2 text-xl font-semibold">Your Courses</h2>
+				{#if $coursesLoading}
+					<div class="mt-2 space-y-2">
+						<Skeleton class="h-8 w-full" />
+						<Skeleton class="h-8 w-full" />
+						<Skeleton class="h-8 w-full" />
+						<Skeleton class="h-8 w-full" />
+					</div>
+				{:else}
+					<DataTable data={$coursesStore as Course[]} {columns}>
+						{#snippet empty()}
+							We couldn't find any courses for you.<br />
+							Please contact the study administrator if you think this is an error.
+						{/snippet}
+					</DataTable>
+				{/if}
+			</div>
 		</div>
-	{:else}
-		<DataTable data={$coursesStore as Course[]} {columns}>
-			{#snippet empty()}
-				We couldn't find any courses for you.<br />
-				Please contact the study administrator if you think this is an error.
-			{/snippet}
-		</DataTable>
-	{/if}
+		<div class="lg:col-span-1">
+			{#if $coursesLoading}
+				<Skeleton class="h-80 w-full" />
+			{:else}
+				<Announcements />
+				<div class="mt-4">
+					<FAQ />
+				</div>
+			{/if}
+		</div>
+	</div>
 </div>

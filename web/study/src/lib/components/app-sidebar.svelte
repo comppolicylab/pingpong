@@ -9,13 +9,16 @@
 	import Building2 from '@lucide/svelte/icons/building-2';
 	import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard';
 	import BookOpenTextIcon from '@lucide/svelte/icons/book-open-text';
-	import ContactIcon from '@lucide/svelte/icons/contact';
+	import GraduationCap from '@lucide/svelte/icons/graduation-cap';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import User from '@lucide/svelte/icons/user';
+	import Award from '@lucide/svelte/icons/award';
 
 	// Components
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
+	import { useSidebar } from '$lib/components/ui/sidebar/index.js';
 	import * as Collapsible from '$lib/components/ui/collapsible/index.js';
+	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 
 	// Snippets
 	import NavUser from './nav-user.svelte';
@@ -29,8 +32,11 @@
 	} from '$lib/stores/courses';
 
 	let { ref = $bindable(null), ...restProps }: ComponentProps<typeof Sidebar.Root> = $props();
+	const sidebar = useSidebar();
 
 	const data = $derived(page.data);
+
+	let coursesOpen = $state(true);
 
 	onMount(async () => {
 		try {
@@ -46,7 +52,7 @@
 	});
 </script>
 
-<Sidebar.Root bind:ref variant="inset" {...restProps}>
+<Sidebar.Root bind:ref collapsible="icon" variant="inset" {...restProps}>
 	<Sidebar.Header>
 		<Sidebar.Menu>
 			<Sidebar.MenuItem>
@@ -81,27 +87,47 @@
 						{/snippet}
 					</Sidebar.MenuButton>
 				</Sidebar.MenuItem>
-				<Sidebar.MenuItem>
-					<Sidebar.MenuButton tooltipContent="Profile" isActive={page.url.pathname === '/profile'}>
-						{#snippet child({ props })}
-							<a href="/profile" {...props}>
-								<User class="size-4" />
-								<span>Profile</span>
-							</a>
-						{/snippet}
-					</Sidebar.MenuButton>
-				</Sidebar.MenuItem>
-				<Collapsible.Root open class="group/collapsible">
+				<Collapsible.Root bind:open={coursesOpen} class="group/collapsible">
 					<Sidebar.MenuItem>
 						<Collapsible.Trigger>
 							{#snippet child({ props })}
-								<Sidebar.MenuButton {...props} isActive={page.url.pathname.startsWith('/courses')}>
-									<ContactIcon />
-									<span>Courses</span>
-									<ChevronRightIcon
-										class="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90"
-									/>
-								</Sidebar.MenuButton>
+								<div
+									role="button"
+									tabindex="0"
+									aria-label="Open sidebar to show courses"
+									onclick={(e) => {
+										if (!sidebar.isMobile && sidebar.state === 'collapsed') {
+											e.preventDefault();
+											e.stopPropagation();
+											sidebar.setOpen(true);
+											coursesOpen = true;
+										}
+									}}
+									onkeydown={(e) => {
+										if (
+											(e.key === 'Enter' || e.key === ' ') &&
+											!sidebar.isMobile &&
+											sidebar.state === 'collapsed'
+										) {
+											e.preventDefault();
+											e.stopPropagation();
+											sidebar.setOpen(true);
+											coursesOpen = true;
+										}
+									}}
+								>
+									<Sidebar.MenuButton
+										{...props}
+										isActive={page.url.pathname.startsWith('/courses')}
+										tooltipContent="Courses"
+									>
+										<GraduationCap />
+										<span>Courses</span>
+										<ChevronRightIcon
+											class="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90"
+										/>
+									</Sidebar.MenuButton>
+								</div>
 							{/snippet}
 						</Collapsible.Trigger>
 						<Collapsible.Content>
@@ -138,6 +164,33 @@
 				</Collapsible.Root>
 			</Sidebar.Menu>
 		</Sidebar.Group>
+		<Sidebar.Group>
+			<Sidebar.GroupLabel>Account</Sidebar.GroupLabel>
+			<Sidebar.Menu>
+				<Sidebar.MenuItem>
+					<Sidebar.MenuButton tooltipContent="Profile" isActive={page.url.pathname === '/profile'}>
+						{#snippet child({ props })}
+							<a href="/profile" {...props}>
+								<User class="size-4" />
+								<span>Profile</span>
+							</a>
+						{/snippet}
+					</Sidebar.MenuButton>
+				</Sidebar.MenuItem>
+				<Sidebar.MenuItem>
+					<Tooltip.Root>
+						<Tooltip.Trigger>
+							<Sidebar.MenuButton aria-disabled={true}>
+								<Award class="size-4" />
+								<span>Honorarium</span>
+							</Sidebar.MenuButton>
+						</Tooltip.Trigger>
+						<Tooltip.Content side="right" align="center">Coming soon</Tooltip.Content>
+					</Tooltip.Root>
+				</Sidebar.MenuItem>
+			</Sidebar.Menu>
+		</Sidebar.Group>
+
 		<Sidebar.Group>
 			<Sidebar.GroupLabel>Support</Sidebar.GroupLabel>
 			<Sidebar.Menu>

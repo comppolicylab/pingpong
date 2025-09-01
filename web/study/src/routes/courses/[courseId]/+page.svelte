@@ -1,7 +1,6 @@
 <script lang="ts">
 	import * as Alert from '$lib/components/ui/alert/index.js';
 	import Info from '@lucide/svelte/icons/info';
-	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import DataTable from '$lib/components/common-table/data-table.svelte';
 	import Progress from '$lib/components/completion-progress/progress.svelte';
 	import { columns } from '$lib/components/preassessment-table/columns.js';
@@ -14,15 +13,20 @@
 	import { courses as coursesStore, ensureCourses } from '$lib/stores/courses';
 	import StatusBadge from '$lib/components/classes-table/status-badge.svelte';
 	import RandomizationBadge from '$lib/components/classes-table/randomization-badge.svelte';
-	import UrlCopyable from '$lib/components/classes-table/data-table-url-copyable.svelte';
-	import Button from '$lib/components/ui/button/button.svelte';
+	// Removed standalone open/copy; using UrlCopyField instead
+	import UrlCopyField from '$lib/components/url-copy-field.svelte';
 	import CourseTimeline from '$lib/components/course-timeline.svelte';
 	import { Badge } from '$lib/components/ui/badge/index.js';
+	import { Button } from '$lib/components/ui/button/index.js';
+	import { Input } from '$lib/components/ui/input/index.js';
+	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import Check from '@lucide/svelte/icons/check';
 	import Clock from '@lucide/svelte/icons/clock';
 	import Hourglass from '@lucide/svelte/icons/hourglass';
 	import AlertTriangle from '@lucide/svelte/icons/alert-triangle';
 	import { SvelteDate } from 'svelte/reactivity';
+	import { toast } from 'svelte-sonner';
+	import { updateCourseEnrollment } from '$lib/api/client';
 
 	let preAssessmentStudents = $state([] as PreAssessmentStudent[]);
 	let loading = $state(true);
@@ -73,6 +77,40 @@
 			: 0
 	);
 
+	// Enrollment editor state
+	let showEnrollmentDialog = $state(false);
+	let pendingEnrollment = $state<number | null>(null);
+	let savingEnrollment = $state(false);
+
+	function openEnrollmentEditor() {
+		pendingEnrollment = typeof course?.enrollment_count === 'number' ? course?.enrollment_count : 0;
+		showEnrollmentDialog = true;
+	}
+
+	async function saveEnrollment() {
+		const parsed = Number(pendingEnrollment);
+		if (!Number.isFinite(parsed) || parsed < 0) {
+			toast.error('Please enter a valid non-negative number.');
+			return;
+		}
+		savingEnrollment = true;
+		const courseId = page.params.courseId as string;
+		const res = await updateCourseEnrollment(fetch, courseId, Math.floor(parsed));
+		if (res.$status && res.$status < 300) {
+			// Update local store so UI reflects change immediately
+			coursesStore.update((list) =>
+				(list || []).map((c) =>
+					c.id === (course?.id as string) ? { ...c, enrollment_count: Math.floor(parsed) } : c
+				)
+			);
+			toast.success('Enrollment updated');
+			showEnrollmentDialog = false;
+		} else {
+			toast.error(res?.detail?.toString() || 'Failed to update enrollment.');
+		}
+		savingEnrollment = false;
+	}
+
 	const deadlines = $derived.by(() => {
 		const now = new SvelteDate();
 		const start = toDate(course?.start_date);
@@ -93,11 +131,11 @@
 
 		const pct = Math.round((completed / enrollment) * 100);
 		if (pct >= target) {
-			return { kind: 'met' as const, due: addDays(start, 14), grace: addDays(start, 21) };
+			return { kind: 'met' as const, due: addDays(start, 14), grace: addDays(start, 22) };
 		}
 
-		const due = addDays(start, 14);
-		const grace = addDays(start, 21);
+		const due = addDays(start, 15);
+		const grace = addDays(start, 22);
 
 		if (now < start) {
 			return { kind: 'upcoming' as const, due, grace, days: daysLeft(due, now) };
@@ -110,8 +148,8 @@
 	});
 </script>
 
-<div class="grid grid-cols-3 gap-4">
-	<div class="col-span-2 flex flex-col gap-4">
+<div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+	<div class="flex flex-col gap-4 lg:col-span-2">
 		{#if deadlines.kind === 'grace'}
 			<Alert.Root
 				class="self-start border-amber-600 bg-transparent text-amber-700 dark:border-amber-400 dark:text-amber-300"
@@ -123,7 +161,7 @@
 				<Alert.Description class="text-amber-700 dark:text-amber-300">
 					<span>
 						Your course has not reached the pre-assessment completion target. We're allowing you an
-						extra week to reach the completion target to remain in the study.
+						extra week to reach the completion target and remain in the study.
 					</span>
 					<span>
 						Extenuating circumstances? Email us at <a
@@ -170,63 +208,59 @@
 					<Skeleton class="h-5 w-1/3" />
 				</div>
 			{:else}
-				<div class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-					<div class="text-muted-foreground">Status</div>
-					<div><StatusBadge status={course.status || 'in_review'} /></div>
-
-					<div class="text-muted-foreground">Randomization</div>
-					<div>
-						{#if course.randomization}<RandomizationBadge
-								status={course.randomization}
-							/>{:else}<span class="text-muted-foreground">Not assigned</span>{/if}
+				<div class="space-y-3 text-sm">
+					<div class="grid grid-cols-1 items-center gap-2 sm:grid-cols-3">
+						<div class="text-muted-foreground">Status</div>
+						<div class="sm:col-span-2"><StatusBadge status={course.status || 'in_review'} /></div>
 					</div>
-
-					<div class="text-muted-foreground">Start date</div>
-					<div>
-						{course.start_date
-							? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(
-									new SvelteDate(String(course.start_date))
-								)
-							: '—'}
+					<div class="grid grid-cols-1 items-center gap-2 sm:grid-cols-3">
+						<div class="text-muted-foreground">Randomization</div>
+						<div class="sm:col-span-2">
+							{#if course.randomization}<RandomizationBadge status={course.randomization} />{:else}
+								<span class="text-muted-foreground">Not assigned</span>
+							{/if}
+						</div>
 					</div>
-
-					<div class="text-muted-foreground">Enrollment</div>
-					<div>{course.enrollment_count ?? '—'}</div>
-
-					<div class="text-muted-foreground">PingPong Group</div>
-					<div class="flex items-center gap-2">
-						{#if course.pingpong_group_url}
-							<Button
-								variant="outline"
-								size="sm"
-								href={course.pingpong_group_url}
-								target="_blank"
-								rel="noopener noreferrer"
+					<div class="grid grid-cols-1 items-center gap-2 sm:grid-cols-3">
+						<div class="text-muted-foreground">Start date</div>
+						<div class="sm:col-span-2">
+							{course.start_date
+								? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(
+										new SvelteDate(String(course.start_date))
+									)
+								: '—'}
+						</div>
+					</div>
+					<div class="grid grid-cols-1 items-center gap-2 sm:grid-cols-3">
+						<div class="text-muted-foreground">Enrollment</div>
+						<div class="flex items-center justify-between gap-2 sm:col-span-2">
+							<div>{course.enrollment_count ?? '—'}</div>
+							<Button variant="outline" size="sm" onclick={openEnrollmentEditor}
+								>Change Enrollment</Button
 							>
-								<ExternalLink size={14} /> Open
-							</Button>
-							<UrlCopyable url={course.pingpong_group_url} />
-						{:else}
-							<span class="text-muted-foreground">Not assigned</span>
-						{/if}
+						</div>
 					</div>
 
-					<div class="text-muted-foreground">Pre-assessment Form</div>
-					<div class="flex items-center gap-2">
-						{#if course.preassessment_url}
-							<Button
-								variant="outline"
-								size="sm"
-								href={course.preassessment_url}
-								target="_blank"
-								rel="noopener noreferrer"
-							>
-								<ExternalLink size={14} /> Open
-							</Button>
-							<UrlCopyable url={course.preassessment_url} />
-						{:else}
-							<span class="text-muted-foreground">Not assigned</span>
-						{/if}
+					<div class="grid grid-cols-1 items-center gap-2 sm:grid-cols-3">
+						<div class="text-muted-foreground">PingPong Group</div>
+						<div class="sm:col-span-2">
+							{#if course.pingpong_group_url}
+								<UrlCopyField url={course.pingpong_group_url} />
+							{:else}
+								<span class="text-muted-foreground">Not assigned</span>
+							{/if}
+						</div>
+					</div>
+
+					<div class="grid grid-cols-1 items-center gap-2 sm:grid-cols-3">
+						<div class="text-muted-foreground">Pre-assessment Form</div>
+						<div class="sm:col-span-2">
+							{#if course.preassessment_url}
+								<UrlCopyField url={course.preassessment_url} />
+							{:else}
+								<span class="text-muted-foreground">Not assigned</span>
+							{/if}
+						</div>
 					</div>
 				</div>
 			{/if}
@@ -316,13 +350,9 @@
 				>
 				<Alert.Description>
 					<p>
-						We use your enrollment count to calculate the completion rate. Email
-						<a
-							href="mailto:support@pingpong-hks.atlassian.net"
-							class="text-nowrap text-primary underline underline-offset-4 hover:text-primary/80"
-							>support@pingpong-hks.atlassian.net</a
-						>
-						if you need to change your enrollment count.
+						We use your enrollment count to calculate completion rates. Use the <i
+							>Change Enrollment</i
+						> button above to update your enrollment count.
 					</p>
 				</Alert.Description>
 			</Alert.Root>
@@ -347,7 +377,40 @@
 			{/if}
 		</div>
 	</div>
-	<div class="col-span-1">
+	<div class="lg:col-span-1">
 		<CourseTimeline course={course as Course} />
 	</div>
 </div>
+
+<!-- Enrollment Dialog -->
+<Dialog.Root bind:open={showEnrollmentDialog}>
+	<Dialog.Content>
+		<Dialog.Header>
+			<Dialog.Title>Adjust Enrollment</Dialog.Title>
+			<Dialog.Description>
+				Update the expected number of enrolled students for this course. This number is used to
+				calculate completion rates.
+			</Dialog.Description>
+		</Dialog.Header>
+		<div class="grid gap-4 py-2">
+			<div class="grid grid-cols-4 items-center gap-4">
+				<label for="enrollment-input" class="text-right text-sm text-muted-foreground"
+					>Students</label
+				>
+				<div class="col-span-3">
+					<Input id="enrollment-input" type="number" min="0" bind:value={pendingEnrollment} />
+				</div>
+			</div>
+		</div>
+		<Dialog.Footer>
+			<Button
+				variant="outline"
+				onclick={() => (showEnrollmentDialog = false)}
+				disabled={savingEnrollment}>Cancel</Button
+			>
+			<Button onclick={saveEnrollment} disabled={savingEnrollment}>
+				{#if savingEnrollment}Saving...{:else}Save{/if}
+			</Button>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>

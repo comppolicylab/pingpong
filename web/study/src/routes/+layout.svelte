@@ -40,7 +40,7 @@
 					<Breadcrumb.Root>
 						<Breadcrumb.List>
 							<Breadcrumb.Item>
-								<Breadcrumb.Page class="line-clamp-1">
+								<Breadcrumb.Page class="line-clamp-1 text-xl font-medium">
 									{pageTitle}
 								</Breadcrumb.Page>
 							</Breadcrumb.Item>
