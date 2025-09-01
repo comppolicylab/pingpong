@@ -41,9 +41,7 @@
 	});
 
 	const courses = $derived.by(() => {
-		const filtered: Course[] = ($coursesStore ?? []).filter(
-			(cls) => cls.preassessment_url && cls.preassessment_url !== '' && cls.status === 'accepted'
-		);
+		const filtered: Course[] = ($coursesStore ?? []).filter((cls) => cls.status === 'accepted');
 		return filtered;
 	});
 </script>
@@ -97,12 +95,9 @@
 					<Sidebar.MenuItem>
 						<Collapsible.Trigger>
 							{#snippet child({ props })}
-								<Sidebar.MenuButton
-									{...props}
-									isActive={page.url.pathname.startsWith('/preassessment')}
-								>
+								<Sidebar.MenuButton {...props} isActive={page.url.pathname.startsWith('/courses')}>
 									<ContactIcon />
-									<span>Pre-Assessment Details</span>
+									<span>Courses</span>
 									<ChevronRightIcon
 										class="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90"
 									/>
@@ -126,10 +121,10 @@
 									{#each courses ?? [] as subItem (subItem.name)}
 										<Sidebar.MenuSubItem>
 											<Sidebar.MenuSubButton
-												isActive={page.url.pathname === `/preassessment/${subItem.id}`}
+												isActive={page.url.pathname === `/courses/${subItem.id}`}
 											>
 												{#snippet child({ props })}
-													<a href={`/preassessment/${subItem.id}`} {...props}>
+													<a href={`/courses/${subItem.id}`} {...props}>
 														<span>{subItem.name}</span>
 													</a>
 												{/snippet}

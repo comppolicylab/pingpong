@@ -18,7 +18,9 @@
 	});
 
 	let pageTitle = $derived(
-		(page.url.pathname.startsWith('/preassessment/') && $courseStore?.name) ||
+		((page.url.pathname.startsWith('/preassessment/') ||
+			page.url.pathname.startsWith('/courses/')) &&
+			$courseStore?.name) ||
 			page.data?.title ||
 			'PingPong College Study'
 	);
