@@ -100,6 +100,7 @@ from openai.types.responses.response_code_interpreter_tool_call_param import (
     OutputLogs,
 )
 from openai.types.shared.reasoning import Reasoning
+from openai.types.responses.response_text_config_param import ResponseTextConfigParam
 from openai.types.beta.threads import ImageFile, MessageContentPartParam
 from openai.types.beta.threads.annotation import FileCitationAnnotation
 from openai.types.beta.threads.image_file_content_block import ImageFileContentBlock
@@ -127,6 +128,19 @@ class GetOpenAIClientException(Exception):
 
 
 REASONING_EFFORT_MAP = {
+    0: "low",
+    1: "medium",
+    2: "high",
+}
+
+REASONING_EFFORT_EXPANDED_MAP = {
+    -1: "minimal",
+    0: "low",
+    1: "medium",
+    2: "high",
+}
+
+VERBOSITY_MAP = {
     0: "low",
     1: "medium",
     2: "high",
@@ -1860,15 +1874,25 @@ async def run_response(
 
         try:
             reasoning_settings: Reasoning | openai.NotGiven = openai.NOT_GIVEN
+            text_settings: ResponseTextConfigParam | openai.NotGiven = openai.NOT_GIVEN
 
             if run.reasoning_effort is not None:
-                if run.reasoning_effort not in REASONING_EFFORT_MAP:
+                if run.reasoning_effort not in REASONING_EFFORT_EXPANDED_MAP:
                     raise ValueError(
-                        f"Invalid reasoning effort: {run.reasoning_effort}. Must be one of {list(REASONING_EFFORT_MAP.keys())}."
+                        f"Invalid reasoning effort: {run.reasoning_effort}. Must be one of {list(REASONING_EFFORT_EXPANDED_MAP.keys())}."
                     )
                 reasoning_settings = Reasoning(
-                    effort=REASONING_EFFORT_MAP[run.reasoning_effort],
+                    effort=REASONING_EFFORT_EXPANDED_MAP[run.reasoning_effort],
                     summary="auto",
+                )
+
+            if run.verbosity is not None:
+                if run.verbosity not in VERBOSITY_MAP:
+                    raise ValueError(
+                        f"Invalid verbosity: {run.verbosity}. Must be one of {list(VERBOSITY_MAP.keys())}."
+                    )
+                text_settings = ResponseTextConfigParam(
+                    verbosity=VERBOSITY_MAP[run.verbosity]
                 )
 
             temperature_setting: float | openai.NotGiven = (
@@ -1934,6 +1958,7 @@ async def run_response(
                     stream=True,
                     temperature=temperature_setting,
                     truncation="auto",
+                    text=text_settings,
                 )
                 handler = BufferedResponseStreamHandler(
                     session=session_,

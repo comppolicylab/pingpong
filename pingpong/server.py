@@ -71,6 +71,7 @@ from .time import convert_seconds
 from .saml import get_saml2_client, get_saml2_settings, get_saml2_attrs
 
 from .ai import (
+    REASONING_EFFORT_EXPANDED_MAP,
     REASONING_EFFORT_MAP,
     GetOpenAIClientException,
     export_class_threads_anonymized,
@@ -2053,6 +2054,16 @@ async def list_class_models(
             "supports_code_interpreter": KNOWN_MODELS[m.id][
                 "supports_code_interpreter"
             ],
+            "supports_classic_assistants": KNOWN_MODELS[m.id][
+                "supports_classic_assistants"
+            ],
+            "supports_next_gen_assistants": KNOWN_MODELS[m.id][
+                "supports_next_gen_assistants"
+            ],
+            "supports_expanded_reasoning_effort": KNOWN_MODELS[m.id][
+                "supports_expanded_reasoning_effort"
+            ],
+            "supports_verbosity": KNOWN_MODELS[m.id]["supports_verbosity"],
             "supports_temperature": KNOWN_MODELS[m.id]["supports_temperature"],
             "supports_reasoning": KNOWN_MODELS[m.id]["supports_reasoning"],
         }
@@ -2078,6 +2089,10 @@ async def list_class_models(
                 "supports_code_interpreter": True,
                 "supports_temperature": True,
                 "supports_reasoning": False,
+                "supports_classic_assistants": True,
+                "supports_next_gen_assistants": False,
+                "supports_expanded_reasoning_effort": False,
+                "supports_verbosity": False,
                 "description": "The latest GPT-4 Turbo model.",
             }
         )
@@ -2100,6 +2115,10 @@ async def list_class_models(
                 "supports_code_interpreter": True,
                 "supports_temperature": True,
                 "supports_reasoning": False,
+                "supports_classic_assistants": True,
+                "supports_next_gen_assistants": False,
+                "supports_expanded_reasoning_effort": False,
+                "supports_verbosity": False,
                 "description": "The latest GPT-4 Turbo preview model.",
             }
         )
@@ -3959,6 +3978,7 @@ async def create_thread(
                     creator_id=request.state.session.user.id,
                     assistant_id=assistant.id,
                     model=assistant.model,
+                    verbosity=assistant.verbosity,
                     reasoning_effort=assistant.reasoning_effort,
                     temperature=assistant.temperature,
                     tools_available=result.tools_available,
@@ -4118,6 +4138,7 @@ async def create_run(
                     instructions=inject_timestamp_to_instructions(
                         thread.instructions, req.timezone if req else thread.timezone
                     ),
+                    verbosity=asst.verbosity,
                 )
                 request.state.db.add(run_to_complete)
                 await request.state.db.flush()
@@ -4564,6 +4585,7 @@ async def send_message(
                     thread.instructions,
                     data.timezone if data.timezone else thread.timezone,
                 ),
+                verbosity=asst.verbosity,
                 messages=[
                     models.Message(
                         thread_id=thread.id,
@@ -5041,6 +5063,34 @@ async def create_assistant(
             detail=f"Model {req.model} is not available for use in {req.interaction_mode} mode.",
         )
 
+    # Check that the model supports the assistant version
+    if req.create_classic_assistant and not model_record.supports_classic_assistants:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model {req.model} does not support classic assistants.",
+        )
+
+    if (
+        not req.create_classic_assistant
+        and not model_record.supports_next_gen_assistants
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model {req.model} does not support next generation assistants.",
+        )
+
+    if req.reasoning_effort == -1 and req.tools and len(req.tools) > 0:
+        raise HTTPException(
+            400,
+            "You cannot use tools when the reasoning effort is set to 'Minimal'. Please select a higher reasoning effort level.",
+        )
+
+    if req.verbosity is not None and not model_record.supports_verbosity:
+        raise HTTPException(
+            400,
+            "The selected model does not support verbosity settings. Please select a different model or remove the verbosity setting.",
+        )
+
     # Check that the model is not admin-only
     if not await request.state.authz.test(
         f"user:{creator_id}",
@@ -5138,11 +5188,18 @@ async def create_assistant(
                     else req.model
                 )
 
-            reasoning_effort = (
-                REASONING_EFFORT_MAP.get(req.reasoning_effort)
-                if req.reasoning_effort is not None
-                else None
-            )
+            if model_record.supports_expanded_reasoning_effort:
+                reasoning_effort = (
+                    REASONING_EFFORT_EXPANDED_MAP.get(req.reasoning_effort)
+                    if req.reasoning_effort is not None
+                    else None
+                )
+            else:
+                reasoning_effort = (
+                    REASONING_EFFORT_MAP.get(req.reasoning_effort)
+                    if req.reasoning_effort is not None
+                    else None
+                )
             reasoning_extra_body = (
                 {"reasoning_effort": reasoning_effort}
                 if reasoning_effort is not None
@@ -5432,7 +5489,6 @@ async def update_assistant(
     request: Request,
     openai_client: OpenAIClient,
 ):
-    print(req.model_dump())
     # Get the existing assistant.
     asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
     grants = list[Relation]()
@@ -5509,6 +5565,7 @@ async def update_assistant(
             openai_update["temperature"] = 0.2
             asst.temperature = 0.2
 
+    model_record = None
     # Check that the model is available
     if "model" in req.model_fields_set and req.model is not None:
         _model = None
@@ -5552,6 +5609,16 @@ async def update_assistant(
                         status_code=400,
                         detail=f"Model {req.model} is not available for use.",
                     )
+        else:
+            model_record_req = KNOWN_MODELS.get(asst.model)
+            if model_record_req and not model_record:
+                model_record = schemas.AssistantModel(
+                    **model_record_req,
+                    id=asst.model,
+                    created=utcnow(),
+                    updated=utcnow(),
+                    owner="",
+                )
 
         # Override the assistant model we send to OpenAI
         # when using voice mode
@@ -5581,6 +5648,86 @@ async def update_assistant(
             raise HTTPException(
                 status_code=400,
                 detail=f"Model {req.model} is not available for use in {interaction_mode.capitalize()} mode.",
+            )
+
+    if "reasoning_effort" in req.model_fields_set:
+        if model_record and model_record.supports_expanded_reasoning_effort:
+            reasoning_effort = (
+                REASONING_EFFORT_EXPANDED_MAP.get(req.reasoning_effort)
+                if req.reasoning_effort is not None
+                else None
+            )
+        elif model_record:
+            reasoning_effort = (
+                REASONING_EFFORT_MAP.get(req.reasoning_effort)
+                if req.reasoning_effort is not None
+                else None
+            )
+        else:
+            reasoning_effort = None
+
+        if reasoning_effort == "minimal" and (
+            (
+                "tools" in req.model_fields_set
+                and req.tools is not None
+                and len(req.tools) > 0
+            )
+            or (
+                ("tools" not in req.model_fields_set or req.tools is None)
+                and (asst.tools and json.loads(asst.tools))
+            )
+        ):
+            raise HTTPException(
+                400,
+                "You cannot use tools when the reasoning effort is set to 'Minimal'. Please select a higher reasoning effort level.",
+            )
+
+        reasoning_extra_body: dict[str, Optional[str]] = (
+            {"reasoning_effort": reasoning_effort}
+            if reasoning_effort
+            else (
+                {"reasoning_effort": None} if asst.reasoning_effort is not None else {}
+            )
+        )
+        openai_update["extra_body"] = reasoning_extra_body
+        asst.reasoning_effort = req.reasoning_effort
+    else:
+        if (
+            asst.reasoning_effort is not None
+            and asst.reasoning_effort == -1
+            and (
+                (
+                    "tools" in req.model_fields_set
+                    and req.tools is not None
+                    and len(req.tools) > 0
+                )
+                or (
+                    ("tools" not in req.model_fields_set or req.tools is None)
+                    and (asst.tools and json.loads(asst.tools))
+                )
+            )
+        ):
+            raise HTTPException(
+                400,
+                "You cannot use tools when the reasoning effort is set to 'Minimal'. Please select a higher reasoning effort level.",
+            )
+
+    if "verbosity" in req.model_fields_set:
+        if req.verbosity is not None and (
+            model_record and not model_record.supports_verbosity
+        ):
+            raise HTTPException(
+                400,
+                "The selected model does not support verbosity settings. Please select a different model or remove the verbosity setting.",
+            )
+        asst.verbosity = req.verbosity
+    else:
+        if asst.verbosity is not None and (
+            model_record and not model_record.supports_verbosity
+        ):
+            raise HTTPException(
+                400,
+                "The selected model does not support verbosity settings. Please remove the verbosity setting.",
             )
 
     # Track whether we have an empty vector store to delete
@@ -5714,22 +5861,6 @@ async def update_assistant(
     ):
         asst.should_record_user_information = req.should_record_user_information
 
-    if "reasoning_effort" in req.model_fields_set:
-        reasoning_effort = (
-            REASONING_EFFORT_MAP.get(req.reasoning_effort)
-            if req.reasoning_effort is not None
-            else None
-        )
-        reasoning_extra_body: dict[str, Optional[str]] = (
-            {"reasoning_effort": reasoning_effort}
-            if reasoning_effort
-            else (
-                {"reasoning_effort": None} if asst.reasoning_effort is not None else {}
-            )
-        )
-        openai_update["extra_body"] = reasoning_extra_body
-        asst.reasoning_effort = req.reasoning_effort
-
     if (
         "published" in req.model_fields_set
         and req.published is not None
@@ -5765,6 +5896,9 @@ async def update_assistant(
             responses_api_transition_logger.debug(
                 "Updating a Version 3 assistant; skipping update of OpenAI Assistants API object."
             )
+            # Delete vector store as late as possible to avoid orphaned assistant
+            if vector_store_id_to_delete:
+                await delete_vector_store_oai(openai_client, vector_store_id_to_delete)
         else:
             try:
                 await openai_client.beta.assistants.update(
