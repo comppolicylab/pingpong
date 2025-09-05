@@ -52,7 +52,7 @@
   import { isFirefox } from '$lib/stores/general';
   import Sanitize from '$lib/components/Sanitize.svelte';
   import AudioPlayer from '$lib/components/AudioPlayer.svelte';
-  import { copy } from 'svelte-copy';
+  import { tick } from 'svelte';
   import FileCitation from './FileCitation.svelte';
   export let data;
 
@@ -385,11 +385,59 @@
     threadMgr.dismissError();
   };
 
-  // Show info that we copied the link to the clipboard
-  const showCopiedLink = (e: Event) => {
-    e.preventDefault();
-    e.stopPropagation();
-    happyToast('Link copied to clipboard', 3000);
+  // Fallback link copy handling for environments (e.g., iframes) where Clipboard API is blocked
+  let copyLinkModalOpen = false;
+  let shareLink = '';
+  let shareLinkInputEl: HTMLInputElement | null = null;
+
+  type PermissionsPolicyLike = {
+    allows?: (feature: string, origin?: string) => boolean;
+    allowsFeature?: (feature: string) => boolean;
+  };
+
+  const canProgrammaticallyCopy = () => {
+    try {
+      // Check Permissions Policy if available to avoid triggering violations in iframes
+      const d = document as unknown as {
+        permissionsPolicy?: PermissionsPolicyLike;
+        featurePolicy?: PermissionsPolicyLike;
+      };
+      const pol: PermissionsPolicyLike | undefined = d.permissionsPolicy ?? d.featurePolicy;
+      if (pol) {
+        if (typeof pol.allows === 'function' && !pol.allows('clipboard-write')) return false;
+        if (typeof pol.allowsFeature === 'function' && !pol.allowsFeature('clipboard-write'))
+          return false;
+      }
+      return !!navigator.clipboard && window.isSecureContext;
+    } catch {
+      return false;
+    }
+  };
+
+  const openManualCopyModal = async (url: string) => {
+    shareLink = url;
+    copyLinkModalOpen = true;
+    await tick();
+    // Focus and select for quick manual copy (Cmd/Ctrl+C)
+    shareLinkInputEl?.focus();
+    shareLinkInputEl?.select();
+  };
+
+  const handleCopyLinkClick = async (e?: Event) => {
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
+    const url = `${$page.url.origin}/group/${classId}/thread/${threadId}`;
+    if (canProgrammaticallyCopy()) {
+      try {
+        await navigator.clipboard.writeText(url);
+        happyToast('Link copied to clipboard', 3000);
+        return;
+      } catch {
+        // Fall through to manual copy
+      }
+    }
+    // Manual copy fallback without using Clipboard API (avoids permissions policy violations)
+    await openManualCopyModal(url);
   };
 
   /**
@@ -1012,6 +1060,22 @@
       ><Sanitize html={$threadInstructions ?? ''} /></span
     ></Modal
   >
+  <Modal title="Copy Link" bind:open={copyLinkModalOpen} autoclose outsideclose>
+    <div class="flex flex-col gap-3 p-1">
+      <span class="text-sm text-gray-700">Press Cmd+C / Ctrl+C to copy the thread link.</span>
+      <input
+        class="w-full border border-gray-300 rounded-md px-2 py-1 text-sm text-gray-800 bg-gray-50"
+        readonly
+        bind:this={shareLinkInputEl}
+        value={shareLink}
+      />
+      <div class="flex justify-end pt-1">
+        <Button size="xs" color="alternative" on:click={() => (copyLinkModalOpen = false)}
+          >Done</Button
+        >
+      </div>
+    </div>
+  </Modal>
   {#if !$loading}
     {#if data.threadInteractionMode === 'voice' && !microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'voice'}
       {#if $isFirefox}
@@ -1371,9 +1435,9 @@
             {/if}
           </div>
           <button
-            on:click|preventDefault={() => {}}
-            on:svelte-copy={showCopiedLink}
-            use:copy={`${$page.url.protocol}//${$page.url.host}/group/${classId}/thread/${threadId}`}
+            on:click|preventDefault={handleCopyLinkClick}
+            title="Copy link"
+            aria-label="Copy link"
             ><LinkOutline
               class="dark:text-white inline-block w-5 h-6 text-blue-dark-30 hover:text-blue-dark-50 active:animate-ping font-medium"
               size="lg"
