@@ -164,6 +164,7 @@
     max_count: 20
   };
   const defaultTools = [{ type: 'file_search' }];
+  let createClassicAssistant = false;
 
   $: chatModelCount = data.models.filter((model) => model.type === 'chat').length;
   $: audioModelCount = data.models.filter((model) => model.type === 'voice').length;
@@ -180,6 +181,9 @@
       (model) =>
         model.is_latest &&
         !(model.hide_in_model_selector ?? false) &&
+        (createClassicAssistant
+          ? model.supports_classic_assistants
+          : model.supports_next_gen_assistants) &&
         model.type === interactionMode
     ) || []
   ).map((model) => ({
@@ -257,7 +261,15 @@
   $: supportReasoningModels = (data.models.filter((model) => model.supports_reasoning) || []).map(
     (model) => model.id
   );
+  $: supportExpandedReasoningEffortModels = (
+    data.models.filter((model) => model.supports_expanded_reasoning_effort) || []
+  ).map((model) => model.id);
   $: supportsReasoning = supportReasoningModels.includes(selectedModel);
+  $: supportsExpandedReasoningEffort = supportExpandedReasoningEffortModels.includes(selectedModel);
+  $: supportsVerbosityModels = (data.models.filter((model) => model.supports_verbosity) || []).map(
+    (model) => model.id
+  );
+  $: supportsVerbosity = supportsVerbosityModels.includes(selectedModel);
   $: supportsVision = supportVisionModels.includes(selectedModel);
   $: visionSupportOverride = data.models.find(
     (model) => model.id === selectedModel
@@ -318,7 +330,6 @@
     useImageDescriptions = assistant?.use_image_descriptions;
     hasSetImageDescriptions = true;
   }
-  let createClassicAssistant = false;
   let assistantShouldMessageFirst = false;
   let hasSetAssistantShouldMessageFirst = false;
   $: if (
@@ -481,7 +492,21 @@
       assistant?.reasoning_effort === undefined ||
       assistant?.reasoning_effort === null)
   ) {
-    reasoningEffortValue = 1;
+    reasoningEffortValue = 0;
+  }
+  let verbosityValue: number;
+  $: if (
+    assistant?.verbosity !== undefined &&
+    assistant?.verbosity !== null &&
+    verbosityValue === undefined
+  ) {
+    verbosityValue = assistant.verbosity;
+  }
+  $: if (
+    verbosityValue === undefined &&
+    (data.isCreating || assistant?.verbosity === undefined || assistant?.verbosity === null)
+  ) {
+    verbosityValue = 1;
   }
 
   let dropdownOpen = false;
@@ -629,12 +654,20 @@
 
     const tools: api.Tool[] = [];
     const fileSearchCodeInterpreterUnusedFiles: number[] = [];
-    if (fileSearchToolSelect && supportsFileSearch) {
+    if (
+      fileSearchToolSelect &&
+      supportsFileSearch &&
+      !(supportsReasoning && reasoningEffortValue === -1)
+    ) {
       tools.push({ type: 'file_search' });
     } else {
       fileSearchCodeInterpreterUnusedFiles.push(...allFSPrivateFiles.map((f) => f.id));
     }
-    if (codeInterpreterToolSelect && supportsCodeInterpreter) {
+    if (
+      codeInterpreterToolSelect &&
+      supportsCodeInterpreter &&
+      !(supportsReasoning && reasoningEffortValue === -1)
+    ) {
       tools.push({ type: 'code_interpreter' });
     } else {
       fileSearchCodeInterpreterUnusedFiles.push(...allCIPrivateFiles.map((f) => f.id));
@@ -651,11 +684,20 @@
       model: selectedModel,
       tools,
       code_interpreter_file_ids:
-        supportsCodeInterpreter && codeInterpreterToolSelect ? $selectedCodeInterpreterFiles : [],
+        supportsCodeInterpreter &&
+        !(supportsReasoning && reasoningEffortValue === -1) &&
+        codeInterpreterToolSelect
+          ? $selectedCodeInterpreterFiles
+          : [],
       file_search_file_ids:
-        supportsFileSearch && fileSearchToolSelect ? $selectedFileSearchFiles : [],
+        supportsFileSearch &&
+        !(supportsReasoning && reasoningEffortValue === -1) &&
+        fileSearchToolSelect
+          ? $selectedFileSearchFiles
+          : [],
       temperature: supportsTemperature ? temperatureValue : null,
       reasoning_effort: supportsReasoning ? reasoningEffortValue : null,
+      verbosity: supportsVerbosity ? verbosityValue : null,
       published: body.published?.toString() === 'on',
       use_latex: body.use_latex?.toString() === 'on',
       use_image_descriptions: body.use_image_descriptions?.toString() === 'on',
@@ -1154,6 +1196,20 @@
           >
         </div>
       </div>
+    {:else if supportsFileSearch && supportsReasoning && reasoningEffortValue === -1}
+      <div class="col-span-2 mb-3">
+        <div class="flex flex-col gap-y-1">
+          <Badge
+            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
+            ><CloseOutline size="sm" />
+            <div>No File Search capabilities in Minimal reasoning effort</div>
+          </Badge>
+          <Helper
+            >Minimal reasoning effort does not support File Search capabilities. To use File Search,
+            select a higher reasoning effort level.</Helper
+          >
+        </div>
+      </div>
     {:else}
       <div class="col-span-2 mb-4">
         <Checkbox
@@ -1181,6 +1237,20 @@
             select a different model.</Helper
           >
         </div>
+      {:else if supportsCodeInterpreter && supportsReasoning && reasoningEffortValue === -1}
+        <div class="col-span-2 mb-3">
+          <div class="flex flex-col gap-y-1">
+            <Badge
+              class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
+              ><CloseOutline size="sm" />
+              <div>No Code Interpreter capabilities in Minimal reasoning effort</div>
+            </Badge>
+            <Helper
+              >Minimal reasoning effort does not support Code Interpreter capabilities. To use Code
+              Interpreter, select a higher reasoning effort level.</Helper
+            >
+          </div>
+        </div>
       {:else}
         <Checkbox
           id={codeInterpreterMetadata.value}
@@ -1195,7 +1265,7 @@
       {/if}
     </div>
 
-    {#if fileSearchToolSelect && supportsFileSearch}
+    {#if fileSearchToolSelect && supportsFileSearch && !(supportsReasoning && reasoningEffortValue === -1)}
       <div class="col-span-2 mb-4">
         <Label for="selectedFileSearchFiles">{fileSearchMetadata.name} Files</Label>
         <Helper class="pb-1"
@@ -1231,7 +1301,7 @@
       </div>
     {/if}
 
-    {#if codeInterpreterToolSelect && supportsCodeInterpreter}
+    {#if codeInterpreterToolSelect && supportsCodeInterpreter && !(supportsReasoning && reasoningEffortValue === -1)}
       <div class="col-span-2 mb-4">
         <Label for="selectedCodeInterpreterFiles">{codeInterpreterMetadata.name} Files</Label>
         <Helper class="pb-1"
@@ -1509,23 +1579,75 @@
                 <Helper class="pb-1"
                   >Select your desired reasoning effort, which gives the model guidance on how much
                   time it should spend "reasoning" before creating a response to the prompt. You can
-                  specify one of <span class="font-mono">low</span>,
+                  specify one of {#if supportsExpandedReasoningEffort}<span class="font-mono"
+                      >minimal</span
+                    >,
+                  {/if}<span class="font-mono">low</span>,
                   <span class="font-mono">medium</span>, or
                   <span class="font-mono">high</span>
                   for this setting, where <span class="font-mono">low</span> will favor speed, and
                   <span class="font-mono">high</span>
                   will favor more complete reasoning at the cost of slower responses. The default value
                   is
-                  <span class="font-mono">medium</span>, which is a balance between speed and
-                  reasoning accuracy. You can change this setting anytime.</Helper
+                  <span class="font-mono">low</span>, which is a balance between speed and reasoning
+                  accuracy. You can change this setting anytime.</Helper
                 >
               </div>
               <Range
                 id="reasoning-effort"
                 name="reasoning-effort"
-                min="0"
+                min={supportsExpandedReasoningEffort ? -1 : 0}
                 max="2"
                 bind:value={reasoningEffortValue}
+                step="1"
+                disabled={preventEdits}
+              />
+              <div class="mt-2 flex flex-row justify-between">
+                {#if supportsExpandedReasoningEffort}
+                  <p class="text-sm">minimal</p>
+                {/if}
+                <p class={(supportsExpandedReasoningEffort ? '-ml-1' : '') + ' text-sm'}>low</p>
+                <p class={(supportsExpandedReasoningEffort ? 'ml-2' : '') + ' text-sm'}>medium</p>
+                <p class="text-sm">high</p>
+              </div>
+            {/if}
+            {#if supportsVerbosity}
+              <div class="flex flex-col">
+                <Label for="verbosity">Verbosity</Label>
+                <Helper class="pb-1"
+                  >Select your desired verbosity. Verbosity determines how many output tokens are
+                  generated. Lowering the number of tokens reduces overall latency. While the
+                  model's reasoning approach stays mostly the same, the model finds ways to answer
+                  more concisely—which can either improve or diminish answer quality, depending on
+                  your use case. Here are some scenarios for both ends of the verbosity spectrum:
+                  <ol class="list-disc ml-7">
+                    <li class="my-1">
+                      <span class="font-medium">High verbosity:</span> Use when you need the model to
+                      provide thorough explanations of documents or perform extensive code refactoring.
+                    </li>
+                    <li class="my-1">
+                      <span class="font-medium">Low verbosity:</span> Best for situations where you want
+                      concise answers or simple code generation, such as SQL queries.
+                    </li>
+                  </ol>
+                  Models before GPT-5 have used medium verbosity by default. With GPT-5, this option
+                  is configurable as one of<span class="font-mono">high</span>,
+                  <span class="font-mono">medium</span>, or <span class="font-mono">low</span>. When
+                  generating code, <span class="font-mono">medium</span> and
+                  <span class="font-mono">high</span>
+                  verbosity levels yield longer, more structured code with inline explanations, while
+                  <span class="font-mono">low</span>
+                  verbosity produces shorter, more concise code with minimal commentary. The default
+                  value is
+                  <span class="font-mono">medium</span>. You can change this setting anytime.</Helper
+                >
+              </div>
+              <Range
+                id="verbosity"
+                name="verbosity"
+                min="0"
+                max="2"
+                bind:value={verbosityValue}
                 step="1"
                 disabled={preventEdits}
               />
@@ -1535,6 +1657,7 @@
                 <p class="text-sm">high</p>
               </div>
             {/if}
+
             {#if !data.isCreating}
               <div class="col-span-2 mb-1">
                 <span

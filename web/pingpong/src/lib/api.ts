@@ -1089,6 +1089,10 @@ export type AssistantModel = {
   supports_file_search: boolean;
   supports_code_interpreter: boolean;
   supports_temperature: boolean;
+  supports_classic_assistants: boolean;
+  supports_next_gen_assistants: boolean;
+  supports_expanded_reasoning_effort: boolean;
+  supports_verbosity: boolean;
   supports_reasoning: boolean;
   hide_in_model_selector?: boolean;
   default_prompt_id?: string | null;
@@ -1268,6 +1272,7 @@ export type Assistant = {
   model: string;
   temperature: number | null;
   reasoning_effort: number | null;
+  verbosity: number | null;
   tools: string;
   class_id: number;
   creator_id: number;
@@ -1346,6 +1351,7 @@ export type CreateAssistantRequest = {
   create_classic_assistant?: boolean;
   temperature: number | null;
   reasoning_effort: number | null;
+  verbosity: number | null;
   tools: Tool[];
   code_interpreter_file_ids: string[];
   file_search_file_ids: string[];
@@ -1370,6 +1376,7 @@ export type UpdateAssistantRequest = {
   create_classic_assistant?: boolean;
   temperature?: number | null;
   reasoning_effort?: number | null;
+  verbosity?: number | null;
   tools?: Tool[];
   code_interpreter_file_ids?: string[];
   file_search_file_ids?: string[];

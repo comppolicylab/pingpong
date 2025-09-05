@@ -360,6 +360,7 @@ class Assistant(BaseModel):
     tools: str
     model: str
     temperature: float | None
+    verbosity: int | None
     reasoning_effort: int | None
     class_id: int
     creator_id: int
@@ -398,7 +399,8 @@ class CreateAssistant(BaseModel):
     interaction_mode: InteractionMode = InteractionMode.CHAT
     model: str = Field(..., min_length=2)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
-    reasoning_effort: int | None = Field(None, ge=0, le=2)
+    reasoning_effort: int | None = Field(None, ge=-1, le=2)
+    verbosity: int | None = Field(None, ge=0, le=2)
     tools: list[Tool]
     published: bool = False
     use_latex: bool = False
@@ -436,7 +438,8 @@ class UpdateAssistant(BaseModel):
     interaction_mode: InteractionMode | None = None
     model: str | None = Field(None, min_length=2)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
-    reasoning_effort: int | None = Field(None, ge=0, le=2)
+    reasoning_effort: int | None = Field(None, ge=-1, le=2)
+    verbosity: int | None = Field(None, ge=0, le=2)
     tools: list[Tool] | None = None
     published: bool | None = None
     use_latex: bool | None = None
@@ -1145,6 +1148,10 @@ class AssistantModel(BaseModel):
     is_latest: bool
     is_new: bool
     highlight: bool
+    supports_classic_assistants: bool
+    supports_next_gen_assistants: bool
+    supports_expanded_reasoning_effort: bool
+    supports_verbosity: bool
     supports_vision: bool
     vision_support_override: bool | None = None
     supports_file_search: bool
@@ -1174,6 +1181,10 @@ class AssistantModelDict(TypedDict):
     is_new: bool
     highlight: bool
     type: Literal["chat", "voice"]
+    supports_classic_assistants: bool
+    supports_next_gen_assistants: bool
+    supports_expanded_reasoning_effort: bool
+    supports_verbosity: bool
     supports_vision: bool
     supports_file_search: bool
     supports_code_interpreter: bool

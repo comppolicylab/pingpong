@@ -295,6 +295,7 @@ async def copy_assistant(
         model=assistant.model,
         temperature=assistant.temperature,
         reasoning_effort=assistant.reasoning_effort,
+        verbosity=assistant.verbosity,
         assistant_should_message_first=assistant.assistant_should_message_first,
         class_id=target_class_id,
         vector_store_id=new_vector_store_id,
