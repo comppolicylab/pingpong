@@ -390,17 +390,26 @@
   let shareLink = '';
   let shareLinkInputEl: HTMLInputElement | null = null;
 
+  type PermissionsPolicyLike = {
+    allows?: (feature: string, origin?: string) => boolean;
+    allowsFeature?: (feature: string) => boolean;
+  };
+
   const canProgrammaticallyCopy = () => {
     try {
       // Check Permissions Policy if available to avoid triggering violations in iframes
-      const pol: any = (document as any).permissionsPolicy || (document as any).featurePolicy;
+      const d = document as unknown as {
+        permissionsPolicy?: PermissionsPolicyLike;
+        featurePolicy?: PermissionsPolicyLike;
+      };
+      const pol: PermissionsPolicyLike | undefined = d.permissionsPolicy ?? d.featurePolicy;
       if (pol) {
         if (typeof pol.allows === 'function' && !pol.allows('clipboard-write')) return false;
         if (typeof pol.allowsFeature === 'function' && !pol.allowsFeature('clipboard-write'))
           return false;
       }
       return !!navigator.clipboard && window.isSecureContext;
-    } catch (_) {
+    } catch {
       return false;
     }
   };
@@ -423,7 +432,7 @@
         await navigator.clipboard.writeText(url);
         happyToast('Link copied to clipboard', 3000);
         return;
-      } catch (_) {
+      } catch {
         // Fall through to manual copy
       }
     }
