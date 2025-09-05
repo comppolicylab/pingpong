@@ -1895,7 +1895,6 @@ async def run_response(
                     verbosity=VERBOSITY_MAP[run.verbosity]
                 )
 
-            print(text_settings)
             temperature_setting: float | openai.NotGiven = (
                 run.temperature if run.temperature is not None else openai.NOT_GIVEN
             )

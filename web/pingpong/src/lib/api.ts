@@ -1410,7 +1410,6 @@ export const updateAssistant = async (
   assistantId: number,
   data: UpdateAssistantRequest
 ) => {
-  console.log('Updating assistant', data);
   const url = `class/${classId}/assistant/${assistantId}`;
   return await PUT<UpdateAssistantRequest, Assistant>(f, url, data);
 };

@@ -901,6 +901,11 @@ ADMIN_ONLY_MODELS = [
 # These models are only available for OpenAI users.
 AZURE_UNAVAILABLE_MODELS = [
     "gpt-5",
+    "gpt-5-mini",
+    "gpt-5-nano",
+    "gpt-5-2025-08-07",
+    "gpt-5-mini-2025-08-07",
+    "gpt-5-nano-2025-08-07",
     "gpt-4o-2024-11-20",
     "o1-2024-12-17",
     "o3-mini",

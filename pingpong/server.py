@@ -5037,7 +5037,6 @@ async def create_assistant(
     request: Request,
     openai_client: OpenAIClient,
 ):
-    print(req.model_dump())
     class_id_int = int(class_id)
     creator_id = request.state.session.user.id
 
