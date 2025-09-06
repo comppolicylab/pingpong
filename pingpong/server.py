@@ -2170,7 +2170,13 @@ async def list_class_models(
         if prompt_id in DEFAULT_PROMPTS
     ]
 
-    return {"models": filtered, "default_prompts": default_prompts}
+    return {
+        "models": filtered,
+        "default_prompts": default_prompts,
+        "enforce_classic_assistants": isinstance(
+            openai_client, openai.AsyncAzureOpenAI
+        ),
+    }
 
 
 @v1.websocket(

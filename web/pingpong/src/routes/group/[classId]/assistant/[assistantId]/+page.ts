@@ -7,25 +7,37 @@ import { get } from 'svelte/store';
 async function ensureModels(
   fetchFn: typeof fetch,
   classId: number
-): Promise<{ models: AssistantModel[]; defaultPrompts: AssistantDefaultPrompt[] }> {
+): Promise<{
+  models: AssistantModel[];
+  defaultPrompts: AssistantDefaultPrompt[];
+  enforceClassicAssistants: boolean;
+}> {
   const cache = get(modelsPromptsStore)[classId];
   if (cache) {
     return {
       models: cache.models,
-      defaultPrompts: cache.default_prompts ?? []
+      defaultPrompts: cache.default_prompts ?? [],
+      enforceClassicAssistants: cache.enforce_classic_assistants ?? false
     };
   }
 
   const modelsResponse = await getModels(fetchFn, classId).then(expandResponse);
   const models = modelsResponse.error ? [] : modelsResponse.data.models;
   const defaultPrompts = modelsResponse.error ? [] : (modelsResponse.data.default_prompts ?? []);
+  const enforceClassicAssistants = modelsResponse.error
+    ? false
+    : (modelsResponse.data.enforce_classic_assistants ?? false);
 
   modelsPromptsStore.update((m) => ({
     ...m,
-    [classId]: { models, default_prompts: defaultPrompts }
+    [classId]: {
+      models,
+      default_prompts: defaultPrompts,
+      enforce_classic_assistants: enforceClassicAssistants
+    }
   }));
 
-  return { models, defaultPrompts };
+  return { models, defaultPrompts, enforceClassicAssistants };
 }
 
 async function loadAssistantFilesOrNull(
@@ -45,7 +57,7 @@ async function loadAssistantFilesOrNull(
 export const load: PageLoad = async ({ params, fetch, parent }) => {
   const classId = parseInt(params.classId, 10);
   const isCreating = params.assistantId === 'new';
-  const { models, defaultPrompts } = await ensureModels(fetch, classId);
+  const { models, defaultPrompts, enforceClassicAssistants } = await ensureModels(fetch, classId);
 
   let assistant: Assistant | null = null;
   let assistantFiles: AssistantFiles | null = null;
@@ -67,6 +79,7 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
     selectedFileSearchFiles: assistantFiles ? assistantFiles.file_search_files : [],
     selectedCodeInterpreterFiles: assistantFiles ? assistantFiles.code_interpreter_files : [],
     models,
-    defaultPrompts
+    defaultPrompts,
+    enforceClassicAssistants
   };
 };
