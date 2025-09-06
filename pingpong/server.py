@@ -3985,6 +3985,9 @@ async def create_thread(
                     reasoning_effort=assistant.reasoning_effort,
                     temperature=assistant.temperature,
                     tools_available=result.tools_available,
+                    instructions=inject_timestamp_to_instructions(
+                        result.instructions, result.timezone
+                    ),
                     messages=[
                         models.Message(
                             thread_id=result.id,
