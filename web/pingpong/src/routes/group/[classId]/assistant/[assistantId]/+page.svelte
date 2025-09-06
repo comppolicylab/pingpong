@@ -1289,7 +1289,7 @@
       {/if}
     </div>
     <div class="col-span-2 mb-4">
-      {#if (data.isCreating && createClassicAssistant) || assistant?.version !== 3}
+      {#if (data.isCreating && createClassicAssistant) || (!data.isCreating && assistant?.version !== 3)}
         <div class="col-span-2 mb-3">
           <div class="flex flex-col gap-y-1">
             <Badge
