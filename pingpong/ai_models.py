@@ -217,7 +217,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_expanded_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": True,
-        "description": "Fast, cost-efficient reasoning model, succeeded by GPT-5 mini",
+        "description": "Fast, cost-efficient reasoning model, succeeded by GPT-5 mini.",
     },
     "o3": {
         "name": "o3",
@@ -236,7 +236,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_expanded_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": True,
-        "description": "Reasoning model for complex tasks, succeeded by GPT-5",
+        "description": "Reasoning model for complex tasks, succeeded by GPT-5.",
     },
     "o3-pro": {
         "name": "o3-pro",
@@ -255,7 +255,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_expanded_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": True,
-        "description": "Version of o3 with more compute for better responses",
+        "description": "Version of o3 with more compute for better responses.",
     },
     "o1": {
         "name": "o1",

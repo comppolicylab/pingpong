@@ -187,7 +187,8 @@
       (model) =>
         model.is_latest &&
         !(model.hide_in_model_selector ?? false) &&
-        (createClassicAssistant
+        ((data.isCreating && createClassicAssistant) ||
+        (!data.isCreating && assistant?.version !== 3)
           ? model.supports_classic_assistants
           : model.supports_next_gen_assistants) &&
         model.type === interactionMode
@@ -237,6 +238,10 @@
       (model) =>
         !model.is_latest &&
         !(model.hide_in_model_selector ?? false) &&
+        ((data.isCreating && createClassicAssistant) ||
+        (!data.isCreating && assistant?.version !== 3)
+          ? model.supports_classic_assistants
+          : model.supports_next_gen_assistants) &&
         model.type === interactionMode
     ) || []
   ).map((model) => ({
