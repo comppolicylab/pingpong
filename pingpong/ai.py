@@ -25,12 +25,14 @@ from pingpong.schemas import (
     CodeInterpreterOutputType,
     FileSearchToolAnnotationResult,
     MessageStatus,
+    ReasoningStatus,
     RunStatus,
     ThreadName,
     NewThreadMessage,
     MessagePartType,
     ToolCallStatus,
     ToolCallType,
+    WebSearchActionType,
 )
 
 from datetime import datetime, timezone
@@ -39,7 +41,7 @@ from openai.types.beta.assistant_stream_event import (
     ThreadRunStepFailed,
     ThreadRunFailed,
 )
-from openai.types.responses import ToolParam, FileSearchToolParam
+from openai.types.responses import ToolParam, FileSearchToolParam, WebSearchToolParam
 from openai._streaming import AsyncStream
 from openai.types.responses.tool_param import (
     CodeInterpreter,
@@ -49,6 +51,13 @@ from openai.types.responses.response_output_item import (
     ResponseOutputMessage,
     ResponseCodeInterpreterToolCall,
     ResponseFileSearchToolCall,
+    ResponseFunctionWebSearch,
+    ResponseReasoningItem,
+)
+from openai.types.responses.response_function_web_search import (
+    ActionSearch,
+    ActionFind,
+    ActionOpenPage,
 )
 from openai.types.responses.response_output_text import ResponseOutputText
 from openai.types.responses.response_stream_event import (
@@ -67,6 +76,12 @@ from openai.types.responses.response_stream_event import (
     ResponseFileSearchCallInProgressEvent,
     ResponseFileSearchCallSearchingEvent,
     ResponseFileSearchCallCompletedEvent,
+    ResponseWebSearchCallInProgressEvent,
+    ResponseWebSearchCallSearchingEvent,
+    ResponseWebSearchCallCompletedEvent,
+    ResponseReasoningSummaryPartAddedEvent,
+    ResponseReasoningSummaryTextDeltaEvent,
+    ResponseReasoningSummaryPartDoneEvent,
 )
 from openai.types.responses.response_input_item_param import (
     ResponseInputItemParam,
@@ -83,6 +98,11 @@ from openai.types.responses.response_output_message_param import (
     ResponseOutputTextParam,
     ResponseOutputRefusalParam,
 )
+from openai.types.responses.response_reasoning_item_param import (
+    ResponseReasoningItemParam,
+    Summary,
+    Content,
+)
 from openai.types.responses.response_output_text_param import (
     Annotation,
     AnnotationFileCitation,
@@ -98,6 +118,9 @@ from openai.types.responses.response_code_interpreter_tool_call_param import (
     Output,
     OutputImage,
     OutputLogs,
+)
+from openai.types.responses.response_function_web_search_param import (
+    ResponseFunctionWebSearchParam,
 )
 from openai.types.shared.reasoning import Reasoning
 from openai.types.responses.response_text_config_param import ResponseTextConfigParam
@@ -595,7 +618,10 @@ async def build_response_input_item_list(
             (
                 message.created,
                 ResponseOutputMessageParam(
-                    role=message.role, content=content_list, type="message"
+                    role=message.role,
+                    content=content_list,
+                    type="message",
+                    id=message.message_id,
                 ),
             )
         )
@@ -624,7 +650,7 @@ async def build_response_input_item_list(
                             code=tool_call.code,
                             container_id=tool_call.container_id,
                             outputs=tool_call_outputs,
-                            status=tool_call.status,
+                            status=ToolCallStatus(tool_call.status).value,
                             type="code_interpreter_call",
                         ),
                     )
@@ -663,13 +689,86 @@ async def build_response_input_item_list(
                         ResponseFileSearchToolCallParam(
                             id=tool_call.tool_call_id,
                             queries=json.loads(tool_call.queries),
-                            status=tool_call.status,
+                            status=ToolCallStatus(tool_call.status).value,
                             results=file_search_results,
                             type="file_search_call",
                         ),
                     )
                 )
 
+            case ToolCallType.WEB_SEARCH:
+                action_rec = (
+                    tool_call.web_search_actions[0]
+                    if tool_call.web_search_actions
+                    else None
+                )
+
+                action = None
+                if action_rec:
+                    match action_rec.type:
+                        case WebSearchActionType.SEARCH:
+                            action = ActionSearch(
+                                type="search",
+                                query=action_rec.query or "",
+                            )
+                        case WebSearchActionType.OPEN_PAGE:
+                            action = ActionOpenPage(
+                                type="open_page",
+                                url=action_rec.url,
+                            )
+                        case WebSearchActionType.FIND:
+                            action = ActionFind(
+                                type="find",
+                                query=action_rec.query,
+                            )
+                        case _:
+                            action = None
+
+                response_input_items_with_time.append(
+                    (
+                        tool_call.created,
+                        ResponseFunctionWebSearchParam(
+                            id=tool_call.tool_call_id,
+                            action=action,
+                            status=ToolCallStatus(tool_call.status).value,
+                            type="web_search_call",
+                        ),
+                    )
+                )
+
+    async for reasoning in models.Thread.list_all_reasoning_steps_gen(
+        session, thread_id
+    ):
+        summary_array: list[Summary] = []
+        for summary_step in reasoning.summary_parts:
+            summary_array.append(
+                Summary(
+                    text=summary_step.summary_text,
+                    type="summary_text",
+                )
+            )
+
+        content_array: list[Content] = []
+        for content_step in reasoning.content_parts:
+            content_array.append(
+                Content(
+                    text=content_step.content_text,
+                    type="reasoning_text",
+                )
+            )
+
+        response_input_items_with_time.append(
+            (
+                reasoning.created,
+                ResponseReasoningItemParam(
+                    id=reasoning.reasoning_id,
+                    content=content_array if content_array else None,
+                    summary=summary_array if summary_array else [],
+                    encrypted_content=reasoning.encrypted_content,
+                    type="reasoning",
+                ),
+            )
+        )
     # Sort by created time
     response_input_items_with_time.sort(key=lambda x: x[0])
     # Extract the ResponseInputItemParam from the sorted list
@@ -746,6 +845,13 @@ class BufferedResponseStreamHandler:
         self.prev_output_index = prev_output_index
         self.tool_call_id: int | None = None
         self.tool_call_external_id: int | None = None
+        self.reasoning_id: int | None = None
+        self.reasoning_external_id: str | None = None
+        self.prev_reasoning_summary_part_index = -1
+        self.current_reasoning_summary_index: int | None = None
+        self.current_summary_part_id: int | None = None
+        self.prev_reasoning_content_part_index = -1
+        self.current_reasoning_content_index: int | None = None
         self.thread_id: int = thread_id
         self.assistant_id: int = assistant_id
         self.prev_part_index = -1
@@ -1150,6 +1256,34 @@ class BufferedResponseStreamHandler:
                     }
                 )
 
+    async def on_output_text_url_citation_added(
+        self, data: AnnotationURLCitation, annotation_index: int | None = None
+    ):
+        if not self.message_part_id:
+            logger.exception(
+                f"Received URL citation annotation without a cached message part. Data: {data}"
+            )
+            return
+
+        annotation_data = {
+            "message_part_id": self.message_part_id,
+            "type": AnnotationType.URL_CITATION,
+            "end_index": data["end_index"],
+            "start_index": data["start_index"],
+            "title": data["title"],
+            "url": data["url"],
+            "annotation_index": annotation_index,
+        }
+
+        @db_session_handler
+        async def add_cached_message_part_on_output_text_url_citation_added(
+            session_: AsyncSession,
+        ):
+            await models.Annotation.create(session=session_, data=annotation_data)
+            await session_.commit()
+
+        await add_cached_message_part_on_output_text_url_citation_added()
+
     async def on_output_text_part_done(self, data: ResponseOutputText):
         if not self.message_part_id:
             logger.exception(
@@ -1481,6 +1615,227 @@ class BufferedResponseStreamHandler:
         self.tool_call_id = None
         self.tool_call_external_id = None
 
+    async def on_web_search_call_created(self, data: ResponseFunctionWebSearch):
+        if not self.run_id:
+            logger.exception(
+                f"Received web search call created event without a cached run. Data: {data}"
+            )
+            return
+        if self.tool_call_id:
+            logger.exception(
+                f"Received web search tool call created with an existing tool call. Data: {data}"
+            )
+            return
+
+        self.prev_output_index += 1
+
+        tool_call_data = {
+            "run_id": self.run_id,
+            "tool_call_id": data.id,
+            "type": ToolCallType.WEB_SEARCH,
+            "status": ToolCallStatus(data.status),
+            "thread_id": self.thread_id,
+            "output_index": self.prev_output_index,
+            "created": utcnow(),
+        }
+
+        @db_session_handler
+        async def add_cached_tool_call_on_web_search_call_created(
+            session_: AsyncSession,
+        ):
+            tool_call = await models.ToolCall.create(session_, tool_call_data)
+            await session_.commit()
+            return tool_call
+
+        tool_call = await add_cached_tool_call_on_web_search_call_created()
+        self.tool_call_id = tool_call.id
+        self.tool_call_external_id = tool_call.tool_call_id
+
+    async def on_web_search_call_in_progress(
+        self, data: ResponseWebSearchCallInProgressEvent
+    ):
+        if not self.tool_call_id:
+            logger.exception(
+                f"Received web search call in progress without a current tool call. Data: {data}"
+            )
+            return
+        if self.tool_call_external_id != data.item_id:
+            logger.exception(
+                f"Received web search call in progress with a different tool call ID. Data: {data}"
+            )
+            return
+
+        @db_session_handler
+        async def add_cached_tool_call_on_web_search_call_in_progress(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+
+            await models.ToolCall.update_status(
+                session_, self.tool_call_id, ToolCallStatus.IN_PROGRESS
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_web_search_call_in_progress()
+
+    async def on_web_search_call_searching(
+        self, data: ResponseWebSearchCallSearchingEvent
+    ):
+        if not self.tool_call_id:
+            logger.exception(
+                f"Received web search call searching without a current tool call. Data: {data}"
+            )
+            return
+        if self.tool_call_external_id != data.item_id:
+            logger.exception(
+                f"Received web search call searching with a different tool call ID. Data: {data}"
+            )
+            return
+
+        @db_session_handler
+        async def add_cached_tool_call_on_web_search_call_searching(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_status(
+                session_, self.tool_call_id, ToolCallStatus.SEARCHING
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_web_search_call_searching()
+
+    async def on_web_search_call_completed(
+        self, data: ResponseWebSearchCallCompletedEvent
+    ):
+        if not self.tool_call_id:
+            logger.exception(
+                f"Received web search call completed without a current tool call. Data: {data}"
+            )
+            return
+        if self.tool_call_external_id != data.item_id:
+            logger.exception(
+                f"Received web search call completed with a different tool call ID. Data: {data}"
+            )
+            return
+
+        completed_at = utcnow()
+
+        @db_session_handler
+        async def add_cached_tool_call_on_web_search_call_completed(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_status(
+                session_,
+                self.tool_call_id,
+                ToolCallStatus.COMPLETED,
+                completed=completed_at,
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_web_search_call_completed()
+
+    async def on_web_search_call_done(self, data: ResponseFunctionWebSearch):
+        if not self.run_id:
+            logger.exception(
+                f"Received web search call done without a cached run. Data: {data}"
+            )
+            return
+        if not self.tool_call_id:
+            logger.exception(
+                f"Received web search call done without a current tool call. Data: {data}"
+            )
+            return
+        if self.tool_call_external_id != data.id:
+            logger.exception(
+                f"Received web search call done with a different tool call ID. Data: {data}"
+            )
+            return
+
+        @db_session_handler
+        async def add_web_search_call_action_on_web_search_call_done(
+            session_: AsyncSession, data: dict
+        ):
+            result = await models.WebSearchCallAction.create(session_, data)
+            await session_.commit()
+            return result
+
+        @db_session_handler
+        async def add_web_search_call_source_on_web_search_call_done(
+            session_: AsyncSession, data: dict
+        ):
+            await models.WebSearchCallSearchSource.create(session_, data)
+            await session_.commit()
+
+        if data.action:
+            match data.action.type:
+                case "search":
+                    search_data = {
+                        "tool_call_id": self.tool_call_id,
+                        "query": data.action.query,
+                        "type": WebSearchActionType.SEARCH,
+                        "created": utcnow(),
+                    }
+                    search_action = (
+                        await add_web_search_call_action_on_web_search_call_done(
+                            search_data
+                        )
+                    )
+
+                    for source in data.action.sources or []:
+                        source_data = {
+                            "web_search_call_action_id": search_action.id,
+                            "tool_call_id": self.tool_call_id,
+                            "url": source.url,
+                            "created": utcnow(),
+                        }
+                        await add_web_search_call_source_on_web_search_call_done(
+                            source_data
+                        )
+
+                case "find":
+                    find_data = {
+                        "tool_call_id": self.tool_call_id,
+                        "pattern": data.action.pattern,
+                        "url": data.action.url,
+                        "type": WebSearchActionType.FIND,
+                        "created": utcnow(),
+                    }
+
+                    await add_web_search_call_action_on_web_search_call_done(find_data)
+
+                case "open_page":
+                    open_page_data = {
+                        "tool_call_id": self.tool_call_id,
+                        "url": data.action.url,
+                        "type": WebSearchActionType.OPEN_PAGE,
+                        "created": utcnow(),
+                    }
+
+                    await add_web_search_call_action_on_web_search_call_done(
+                        open_page_data
+                    )
+
+        @db_session_handler
+        async def add_cached_tool_call_on_web_search_call_done(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_status(
+                session_,
+                self.tool_call_id,
+                ToolCallStatus(data.status),
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_web_search_call_done()
+        self.tool_call_id = None
+        self.tool_call_external_id = None
+
     async def on_file_search_call_created(self, data: ResponseFileSearchToolCall):
         if not self.run_id:
             logger.exception(
@@ -1686,6 +2041,224 @@ class BufferedResponseStreamHandler:
         self.tool_call_id = None
         self.tool_call_external_id = None
 
+    async def on_reasoning_created(self, data: ResponseReasoningItem):
+        if not self.run_id:
+            logger.exception(
+                f"Received reasoning created event without a cached run. Data: {data}"
+            )
+            return
+        if self.reasoning_id:
+            logger.exception(
+                f"Received reasoning created with an existing reasoning. Data: {data}"
+            )
+            return
+
+        self.prev_output_index += 1
+
+        reasoning_data = {
+            "run_id": self.run_id,
+            "reasoning_id": data.id,
+            "output_index": self.prev_output_index,
+            "status": ReasoningStatus(data.status or "in_progress"),
+            "encrypted_content": data.encrypted_content,
+            "thread_id": self.thread_id,
+            "created": utcnow(),
+        }
+
+        @db_session_handler
+        async def add_cached_reasoning_step_on_reasoning_created(
+            session_: AsyncSession,
+        ):
+            reasoning = await models.ReasoningStep.create(session_, reasoning_data)
+            await session_.commit()
+            return reasoning
+
+        reasoning = await add_cached_reasoning_step_on_reasoning_created()
+        self.reasoning_id = reasoning.id
+        self.reasoning_external_id = reasoning.reasoning_id
+
+        @db_session_handler
+        async def add_reasoning_summary_part_on_reasoning_created(
+            session_: AsyncSession, data: dict
+        ):
+            await models.ReasoningSummaryPart.create(session_, data)
+            await session_.commit()
+
+        @db_session_handler
+        async def add_reasoning_content_part_on_reasoning_created(
+            session_: AsyncSession, data: dict
+        ):
+            await models.ReasoningContentPart.create(session_, data)
+            await session_.commit()
+
+        for summary_part in data.summary or []:
+            self.prev_reasoning_summary_part_index += 1
+
+            summary_part_data = {
+                "reasoning_step_id": self.reasoning_id,
+                "part_index": self.prev_reasoning_summary_part_index,
+                "summary_text": summary_part.text,
+                "created": utcnow(),
+            }
+            await add_reasoning_summary_part_on_reasoning_created(summary_part_data)
+
+        for content_part in data.content or []:
+            self.prev_reasoning_content_part_index += 1
+
+            content_part_data = {
+                "reasoning_step_id": self.reasoning_id,
+                "part_index": self.prev_reasoning_content_part_index,
+                "content_text": content_part.text,
+                "created": utcnow(),
+            }
+
+            await add_reasoning_content_part_on_reasoning_created(content_part_data)
+
+    async def on_reasoning_summary_part_added(
+        self, data: ResponseReasoningSummaryPartAddedEvent
+    ):
+        if not self.reasoning_id:
+            logger.exception(
+                f"Received reasoning summary part added event without a current reasoning. Data: {data}"
+            )
+            return
+        if self.reasoning_external_id != data.item_id:
+            logger.exception(
+                f"Received reasoning summary part added with a different reasoning ID. Data: {data}"
+            )
+            return
+
+        self.prev_reasoning_summary_part_index += 1
+
+        summary_part_data = {
+            "reasoning_step_id": self.reasoning_id,
+            "part_index": self.prev_reasoning_summary_part_index,
+            "summary_text": data.part.text,
+            "created": utcnow(),
+        }
+
+        @db_session_handler
+        async def add_reasoning_summary_part_on_reasoning_summary_part_added(
+            session_: AsyncSession, data: dict
+        ):
+            result = await models.ReasoningSummaryPart.create(session_, data)
+            await session_.commit()
+            return result
+
+        summary_part = await add_reasoning_summary_part_on_reasoning_summary_part_added(
+            summary_part_data
+        )
+        self.current_reasoning_summary_index = data.summary_index
+        self.current_summary_part_id = summary_part.id
+
+    async def on_reasoning_summary_text_delta(
+        self, data: ResponseReasoningSummaryTextDeltaEvent
+    ):
+        if not self.reasoning_id:
+            logger.exception(
+                f"Received reasoning summary text delta event without a current reasoning. Data: {data}"
+            )
+            return
+        if self.reasoning_external_id != data.item_id:
+            logger.exception(
+                f"Received reasoning summary text delta with a different reasoning ID. Data: {data}"
+            )
+            return
+        if data.summary_index != self.current_reasoning_summary_index:
+            logger.exception(
+                f"Received reasoning summary text delta with a different summary index. Data: {data}"
+            )
+            return
+        if not self.current_summary_part_id:
+            logger.exception(
+                f"Received reasoning summary text delta without a current summary part ID. Data: {data}"
+            )
+            return
+
+        @db_session_handler
+        async def update_reasoning_summary_part_on_reasoning_summary_text_delta(
+            session_: AsyncSession, part_id: int, delta: str
+        ):
+            await models.ReasoningSummaryPart.add_summary_text_delta(
+                session_, part_id, delta
+            )
+            await session_.commit()
+
+        await update_reasoning_summary_part_on_reasoning_summary_text_delta(
+            self.current_summary_part_id, data.delta
+        )
+
+    async def on_reasoning_summary_part_done(
+        self, data: ResponseReasoningSummaryPartDoneEvent
+    ):
+        if not self.reasoning_id:
+            logger.exception(
+                f"Received reasoning summary part done event without a current reasoning. Data: {data}"
+            )
+            return
+        if self.reasoning_external_id != data.item_id:
+            logger.exception(
+                f"Received reasoning summary part done with a different reasoning ID. Data: {data}"
+            )
+            return
+        if data.summary_index != self.current_reasoning_summary_index:
+            logger.exception(
+                f"Received reasoning summary part done with a different summary index. Data: {data}"
+            )
+            return
+        if not self.current_summary_part_id:
+            logger.exception(
+                f"Received reasoning summary part done without a current summary part ID. Data: {data}"
+            )
+            return
+
+        self.current_summary_part_id = None
+        self.current_reasoning_summary_index = None
+
+    async def on_reasoning_completed(self, data: ResponseReasoningItem):
+        if not self.run_id:
+            logger.exception(
+                f"Received reasoning completed event without a cached run. Data: {data}"
+            )
+            return
+        if not self.reasoning_id:
+            logger.exception(
+                f"Received reasoning completed event without a current reasoning. Data: {data}"
+            )
+            return
+        if self.reasoning_external_id != data.id:
+            logger.exception(
+                f"Received reasoning completed event with a different reasoning ID. Data: {data}"
+            )
+            return
+
+        @db_session_handler
+        async def update_reasoning_step_on_reasoning_completed(
+            session_: AsyncSession,
+            status: ReasoningStatus,
+            encrypted_content: str | None,
+        ):
+            if not self.reasoning_id:
+                return
+            await models.ReasoningStep.mark_status(
+                session_,
+                self.reasoning_id,
+                status,
+                encrypted_content,
+            )
+            await session_.commit()
+
+        await update_reasoning_step_on_reasoning_completed(
+            status=ReasoningStatus(data.status or "completed"),
+            encrypted_content=data.encrypted_content,
+        )
+        self.reasoning_id = None
+        self.reasoning_external_id = None
+        self.prev_reasoning_summary_part_index = -1
+        self.prev_reasoning_content_part_index = -1
+        self.current_reasoning_summary_index = None
+        self.current_summary_part_id = None
+
     async def cleanup(
         self,
         run_status: RunStatus,
@@ -1800,6 +2373,25 @@ class BufferedResponseStreamHandler:
             )
             return
 
+        @db_session_handler
+        async def update_encrypted_response_content_on_response_completed(
+            session_: AsyncSession, item_id: str, encrypted_content: str | None
+        ):
+            if not item_id or not encrypted_content:
+                return
+            await models.ReasoningStep.update_encrypted_content(
+                session_, item_id, encrypted_content
+            )
+            await session_.commit()
+
+        if isinstance(data, ResponseCompletedEvent):
+            for output_item in data.response.output:
+                if output_item.type == "reasoning" and output_item.encrypted_content:
+                    await update_encrypted_response_content_on_response_completed(
+                        item_id=output_item.id,
+                        encrypted_content=output_item.encrypted_content,
+                    )
+
         await self.cleanup(
             run_status=RunStatus(data.response.status),
             response_error_code=data.response.error.code
@@ -1906,6 +2498,12 @@ async def run_response(
                 )
 
             tools: list[ToolParam] = []
+            if run.tools_available and "web_search" in run.tools_available:
+                tools.append(
+                    WebSearchToolParam(
+                        type="web_search",
+                    )
+                )
 
             if run.tools_available and "file_search" in run.tools_available:
                 vector_store_ids = []
@@ -1947,6 +2545,8 @@ async def run_response(
                     include=[
                         "code_interpreter_call.outputs",
                         "file_search_call.results",
+                        "web_search_call.action.sources",
+                        "reasoning.encrypted_content",
                     ],
                     input=input_items,
                     instructions=run.instructions,
@@ -1997,6 +2597,10 @@ async def run_response(
                                     await handler.on_file_search_call_created(
                                         event.item
                                     )
+                                case "web_search_call":
+                                    await handler.on_web_search_call_created(event.item)
+                                case "reasoning":
+                                    await handler.on_reasoning_created(event.item)
                                 case _:
                                     pass
                         case "response.content_part.added":
@@ -2017,6 +2621,10 @@ async def run_response(
                                     )
                                 case "file_citation":
                                     await handler.on_output_text_file_citation_added(
+                                        event.annotation, event.annotation_index
+                                    )
+                                case "url_citation":
+                                    await handler.on_output_text_url_citation_added(
                                         event.annotation, event.annotation_index
                                     )
                                 case _:
@@ -2047,6 +2655,18 @@ async def run_response(
                             await handler.on_file_search_call_in_progress(event)
                         case "response.file_search_call.searching":
                             await handler.on_file_search_call_searching(event)
+                        case "response.web_search_call.in_progress":
+                            await handler.on_web_search_call_in_progress(event)
+                        case "response.web_search_call.searching":
+                            await handler.on_web_search_call_searching(event)
+                        case "response.web_search_call.completed":
+                            await handler.on_web_search_call_completed(event)
+                        case "response.reasoning_summary_part.added":
+                            await handler.on_reasoning_summary_part_added(event)
+                        case "response.reasoning_summary_text.delta":
+                            await handler.on_reasoning_summary_text_delta(event)
+                        case "response.reasoning_summary_part.done":
+                            await handler.on_reasoning_summary_part_done(event)
                         case "response.output_item.done":
                             match event.item.type:
                                 case "message":
@@ -2057,6 +2677,10 @@ async def run_response(
                                     )
                                 case "file_search_call":
                                     await handler.on_file_search_call_done(event.item)
+                                case "web_search_call":
+                                    await handler.on_web_search_call_done(event.item)
+                                case "reasoning":
+                                    await handler.on_reasoning_completed(event.item)
                                 case _:
                                     pass
                         case "response.completed":

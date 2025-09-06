@@ -1,6 +1,7 @@
 from datetime import datetime
 from enum import Enum, StrEnum, auto
-from typing import Generic, Literal, NotRequired, TypeVar, Union, TypedDict
+from typing import Generic, Literal, NotRequired, TypeVar, Union
+from typing_extensions import TypedDict
 
 from openai.types.beta.assistant_tool import AssistantTool as Tool
 from openai.types.beta.threads import Message as OpenAIMessage
@@ -390,6 +391,10 @@ def temperature_validator(self):
     return self
 
 
+class ToolOption(TypedDict):
+    type: Literal["file_search"] | Literal["code_interpreter"] | Literal["web_search"]
+
+
 class CreateAssistant(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
     code_interpreter_file_ids: list[str] | None = None
@@ -401,7 +406,7 @@ class CreateAssistant(BaseModel):
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=-1, le=2)
     verbosity: int | None = Field(None, ge=0, le=2)
-    tools: list[Tool]
+    tools: list[ToolOption] = Field(default_factory=list)
     published: bool = False
     use_latex: bool = False
     use_image_descriptions: bool = False
@@ -440,7 +445,7 @@ class UpdateAssistant(BaseModel):
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=-1, le=2)
     verbosity: int | None = Field(None, ge=0, le=2)
-    tools: list[Tool] | None = None
+    tools: list[ToolOption] | None = None
     published: bool | None = None
     use_latex: bool | None = None
     hide_prompt: bool | None = None
@@ -521,7 +526,7 @@ class CreateThread(BaseModel):
     file_search_file_ids: list[str] = Field([])
     vision_file_ids: list[str] = Field([])
     vision_image_descriptions: list[ImageProxy] = Field([])
-    tools_available: list[Tool]
+    tools_available: list[ToolOption] = Field(default_factory=list)
     assistant_id: int
     timezone: str | None = None
     conversation_id: str | None = None
@@ -1152,6 +1157,7 @@ class AssistantModel(BaseModel):
     supports_next_gen_assistants: bool
     supports_expanded_reasoning_effort: bool
     supports_verbosity: bool
+    supports_web_search: bool
     supports_vision: bool
     vision_support_override: bool | None = None
     supports_file_search: bool
@@ -1185,6 +1191,7 @@ class AssistantModelDict(TypedDict):
     supports_next_gen_assistants: bool
     supports_expanded_reasoning_effort: bool
     supports_verbosity: bool
+    supports_web_search: bool
     supports_vision: bool
     supports_file_search: bool
     supports_code_interpreter: bool
@@ -1624,6 +1631,7 @@ class CodeInterpreterOutputType(StrEnum):
 class ToolCallType(StrEnum):
     CODE_INTERPRETER = "code_interpreter_call"
     FILE_SEARCH = "file_search_call"
+    WEB_SEARCH = "web_search_call"
 
 
 class ToolCallStatus(StrEnum):
@@ -1633,6 +1641,12 @@ class ToolCallStatus(StrEnum):
     COMPLETED = "completed"
     INCOMPLETE = "incomplete"
     FAILED = "failed"
+
+
+class WebSearchActionType(StrEnum):
+    SEARCH = "search"
+    FIND = "find"
+    OPEN_PAGE = "open_page"
 
 
 class MessagePartType(StrEnum):
@@ -1647,6 +1661,12 @@ class MessageStatus(StrEnum):
     COMPLETED = "completed"
     INCOMPLETE = "incomplete"
     PENDING = "pending"
+
+
+class ReasoningStatus(StrEnum):
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    INCOMPLETE = "incomplete"
 
 
 class MessageRole(StrEnum):

@@ -116,6 +116,7 @@
   }
   $: supportsFileSearch = assistant.tools?.includes('file_search') || false;
   $: supportsCodeInterpreter = assistant.tools?.includes('code_interpreter') || false;
+  $: supportsWebSearch = assistant.tools?.includes('web_search') || false;
   let supportsVision = false;
   $: {
     const supportVisionModels = (
@@ -199,6 +200,9 @@
     if (supportsCodeInterpreter) {
       tools.push({ type: 'code_interpreter' });
     }
+    if (supportsWebSearch) {
+      tools.push({ type: 'web_search' });
+    }
     try {
       const newThreadOpts = api.explodeResponse(
         await api.createThread(fetch, data.class.id, {
@@ -252,6 +256,9 @@
     }
     if (supportsCodeInterpreter) {
       tools.push({ type: 'code_interpreter' });
+    }
+    if (supportsWebSearch) {
+      tools.push({ type: 'web_search' });
     }
 
     try {
