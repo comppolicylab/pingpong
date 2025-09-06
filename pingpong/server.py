@@ -5157,7 +5157,7 @@ async def create_assistant(
             status_code=400,
             detail="The selected model does not support Web Search. Please select a different model or remove the Web Search tool.",
         )
-    if uses_web_search in req.tools and assistant_version <= 2:
+    if uses_web_search and assistant_version <= 2:
         raise HTTPException(
             status_code=400,
             detail="Classic Assistants do not support Web Search capabilities. To use Web Search, create a Next-Gen Assistant.",
