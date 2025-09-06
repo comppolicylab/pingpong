@@ -1209,6 +1209,7 @@ class AssistantDefaultPrompt(BaseModel):
 class AssistantModels(BaseModel):
     models: list[AssistantModel]
     default_prompts: list[AssistantDefaultPrompt] = []
+    enforce_classic_assistants: bool = False
 
 
 class Classes(BaseModel):

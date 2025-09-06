@@ -170,7 +170,17 @@
       'Web search allows models to access up-to-date information from the internet and provide answers with sourced citations. Web search is currently in preview and may be unstable. Do not use for important tasks.'
   };
   const defaultTools = [{ type: 'file_search' }];
+
   let createClassicAssistant = false;
+  let hasSetCreateClassicAssistant = false;
+  $: if (
+    data?.enforceClassicAssistants !== undefined &&
+    data?.enforceClassicAssistants !== null &&
+    !hasSetCreateClassicAssistant
+  ) {
+    createClassicAssistant = data?.enforceClassicAssistants;
+    hasSetCreateClassicAssistant = true;
+  }
 
   $: chatModelCount = data.models.filter((model) => model.type === 'chat').length;
   $: audioModelCount = data.models.filter((model) => model.type === 'voice').length;
@@ -1293,67 +1303,69 @@
         <Helper>{codeInterpreterMetadata.description}</Helper>
       {/if}
     </div>
-    <div class="col-span-2 mb-4">
-      {#if (data.isCreating && createClassicAssistant) || (!data.isCreating && assistant?.version !== 3)}
-        <div class="col-span-2 mb-3">
+    {#if !data?.enforceClassicAssistants}
+      <div class="col-span-2 mb-4">
+        {#if (data.isCreating && createClassicAssistant) || (!data.isCreating && assistant?.version !== 3)}
+          <div class="col-span-2 mb-3">
+            <div class="flex flex-col gap-y-1">
+              <Badge
+                class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
+                ><CloseOutline size="sm" />
+                <div>No Web Search capabilities in Classic Assistants</div>
+              </Badge>
+              <Helper
+                >Classic Assistants do not support Web Search capabilities. To use Web Search,
+                create a Next-Gen Assistant.</Helper
+              >
+            </div>
+          </div>
+        {:else if !supportsWebSearch}
           <div class="flex flex-col gap-y-1">
             <Badge
               class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
               ><CloseOutline size="sm" />
-              <div>No Web Search capabilities in Classic Assistants</div>
+              <div>No Web Search capabilities</div>
             </Badge>
             <Helper
-              >Classic Assistants do not support Web Search capabilities. To use Web Search, create
-              a Next-Gen Assistant.</Helper
+              >This model does not support Web Search capabilities. To use Web Search, select a
+              different model.</Helper
             >
           </div>
-        </div>
-      {:else if !supportsWebSearch}
-        <div class="flex flex-col gap-y-1">
-          <Badge
-            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
-            ><CloseOutline size="sm" />
-            <div>No Web Search capabilities</div>
-          </Badge>
-          <Helper
-            >This model does not support Web Search capabilities. To use Web Search, select a
-            different model.</Helper
+        {:else if supportsWebSearch && supportsReasoning && reasoningEffortValue === -1}
+          <div class="col-span-2 mb-3">
+            <div class="flex flex-col gap-y-1">
+              <Badge
+                class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
+                ><CloseOutline size="sm" />
+                <div>No Web Search capabilities in Minimal reasoning effort</div>
+              </Badge>
+              <Helper
+                >Minimal reasoning effort does not support Web Search capabilities. To use Web
+                Search, select a higher reasoning effort level.</Helper
+              >
+            </div>
+          </div>
+        {:else}
+          <Checkbox
+            id={webSearchMetadata.value}
+            name={webSearchMetadata.value}
+            disabled={preventEdits || !supportsWebSearch}
+            checked={supportsWebSearch && (webSearchToolSelect || false)}
+            on:change={() => {
+              webSearchToolSelect = !webSearchToolSelect;
+            }}
+            ><div class="flex flex-wrap gap-1.5">
+              <div>{webSearchMetadata.name}</div>
+              <DropdownBadge
+                extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
+                ><span slot="name">Preview</span></DropdownBadge
+              >
+            </div></Checkbox
           >
-        </div>
-      {:else if supportsWebSearch && supportsReasoning && reasoningEffortValue === -1}
-        <div class="col-span-2 mb-3">
-          <div class="flex flex-col gap-y-1">
-            <Badge
-              class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
-              ><CloseOutline size="sm" />
-              <div>No Web Search capabilities in Minimal reasoning effort</div>
-            </Badge>
-            <Helper
-              >Minimal reasoning effort does not support Web Search capabilities. To use Web Search,
-              select a higher reasoning effort level.</Helper
-            >
-          </div>
-        </div>
-      {:else}
-        <Checkbox
-          id={webSearchMetadata.value}
-          name={webSearchMetadata.value}
-          disabled={preventEdits || !supportsWebSearch}
-          checked={supportsWebSearch && (webSearchToolSelect || false)}
-          on:change={() => {
-            webSearchToolSelect = !webSearchToolSelect;
-          }}
-          ><div class="flex flex-wrap gap-1.5">
-            <div>{webSearchMetadata.name}</div>
-            <DropdownBadge
-              extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
-              ><span slot="name">Preview</span></DropdownBadge
-            >
-          </div></Checkbox
-        >
-        <Helper>{webSearchMetadata.description}</Helper>
-      {/if}
-    </div>
+          <Helper>{webSearchMetadata.description}</Helper>
+        {/if}
+      </div>
+    {/if}
 
     {#if fileSearchToolSelect && supportsFileSearch && !(supportsReasoning && reasoningEffortValue === -1)}
       <div class="col-span-2 mb-4">
@@ -1772,8 +1784,13 @@
                 <Checkbox
                   id="create_classic_assistant"
                   name="create_classic_assistant"
-                  disabled={preventEdits}
-                  bind:checked={createClassicAssistant}>Create Classic Assistant</Checkbox
+                  disabled={preventEdits || data?.enforceClassicAssistants}
+                  bind:checked={createClassicAssistant}
+                  ><div class="flex flex-wrap gap-1">
+                    <div>Create Classic Assistant</div>
+                    {#if data?.enforceClassicAssistants}<div>&middot;</div>
+                      <div>Next-Gen Assistants unavailable for your AI Provider</div>{/if}
+                  </div></Checkbox
                 >
                 <Helper
                   >Control whether to use the previous generation of Assistants. When checked,

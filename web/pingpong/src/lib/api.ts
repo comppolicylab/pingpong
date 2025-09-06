@@ -1119,6 +1119,7 @@ export type AssistantDefaultPrompt = {
 export type AssistantModels = {
   models: AssistantModel[];
   default_prompts?: AssistantDefaultPrompt[];
+  enforce_classic_assistants?: boolean;
 };
 
 export type AssistantModelLite = {
