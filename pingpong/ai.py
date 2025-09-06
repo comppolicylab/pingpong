@@ -714,12 +714,12 @@ async def build_response_input_item_list(
                         case WebSearchActionType.OPEN_PAGE:
                             action = ActionOpenPage(
                                 type="open_page",
-                                url=action_rec.url,
+                                url=action_rec.url or "",
                             )
                         case WebSearchActionType.FIND:
                             action = ActionFind(
                                 type="find",
-                                query=action_rec.query,
+                                query=action_rec.query or "",
                             )
                         case _:
                             action = None
@@ -1789,8 +1789,9 @@ class BufferedResponseStreamHandler:
                         source_data = {
                             "web_search_call_action_id": search_action.id,
                             "tool_call_id": self.tool_call_id,
-                            "url": source.url,
+                            "url": source.url if hasattr(source, "url") else None,
                             "created": utcnow(),
+                            "name": source.name if hasattr(source, "name") else None,
                         }
                         await add_web_search_call_source_on_web_search_call_done(
                             source_data

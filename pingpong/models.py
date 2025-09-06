@@ -3425,7 +3425,8 @@ class WebSearchCallSearchSource(Base):
         Integer, ForeignKey("tool_calls.id", ondelete="CASCADE"), nullable=False
     )
 
-    url = Column(String, nullable=False)
+    url = Column(String, nullable=True)
+    name = Column(String, nullable=True)
 
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(
