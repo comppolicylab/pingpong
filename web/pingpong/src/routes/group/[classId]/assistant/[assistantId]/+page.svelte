@@ -167,7 +167,7 @@
     value: 'web_search',
     name: 'Web Search',
     description:
-      'Web search allows models to access up-to-date information from the internet and provide answers with sourced citations. Web search is currently in preview and may be unstable. Do not use for important tasks.',
+      'Web search allows models to access up-to-date information from the internet and provide answers with sourced citations. Web search is currently in preview and may be unstable. Do not use for important tasks.'
   };
   const defaultTools = [{ type: 'file_search' }];
   let createClassicAssistant = false;
@@ -1289,7 +1289,6 @@
       {/if}
     </div>
     <div class="col-span-2 mb-4">
-
       {#if (data.isCreating && createClassicAssistant) || assistant?.version !== 3}
         <div class="col-span-2 mb-3">
           <div class="flex flex-col gap-y-1">
@@ -1299,8 +1298,8 @@
               <div>No Web Search capabilities in Classic Assistants</div>
             </Badge>
             <Helper
-              >Classic Assistants do not support Web Search capabilities. To use Web
-              Search, create a Next-Gen Assistant.</Helper
+              >Classic Assistants do not support Web Search capabilities. To use Web Search, create
+              a Next-Gen Assistant.</Helper
             >
           </div>
         </div>
@@ -1312,8 +1311,8 @@
             <div>No Web Search capabilities</div>
           </Badge>
           <Helper
-            >This model does not support Web Search capabilities. To use Web Search,
-            select a different model.</Helper
+            >This model does not support Web Search capabilities. To use Web Search, select a
+            different model.</Helper
           >
         </div>
       {:else if supportsWebSearch && supportsReasoning && reasoningEffortValue === -1}
@@ -1325,8 +1324,8 @@
               <div>No Web Search capabilities in Minimal reasoning effort</div>
             </Badge>
             <Helper
-              >Minimal reasoning effort does not support Web Search capabilities. To use Web
-              Search, select a higher reasoning effort level.</Helper
+              >Minimal reasoning effort does not support Web Search capabilities. To use Web Search,
+              select a higher reasoning effort level.</Helper
             >
           </div>
         </div>
@@ -1338,10 +1337,14 @@
           checked={supportsWebSearch && (webSearchToolSelect || false)}
           on:change={() => {
             webSearchToolSelect = !webSearchToolSelect;
-          }}><div class="flex flex-wrap gap-1.5"><div>{webSearchMetadata.name}</div><DropdownBadge
+          }}
+          ><div class="flex flex-wrap gap-1.5">
+            <div>{webSearchMetadata.name}</div>
+            <DropdownBadge
               extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
               ><span slot="name">Preview</span></DropdownBadge
-            ></Checkbox
+            >
+          </div></Checkbox
         >
         <Helper>{webSearchMetadata.description}</Helper>
       {/if}
