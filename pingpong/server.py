@@ -3985,6 +3985,9 @@ async def create_thread(
                     reasoning_effort=assistant.reasoning_effort,
                     temperature=assistant.temperature,
                     tools_available=result.tools_available,
+                    instructions=inject_timestamp_to_instructions(
+                        result.instructions, result.timezone
+                    ),
                     messages=[
                         models.Message(
                             thread_id=result.id,
@@ -4129,6 +4132,7 @@ async def create_run(
                     await request.state.db.flush()
                     await request.state.db.refresh(thread)
 
+                print("Creating new run with instructions:", thread.instructions)
                 run_to_complete = models.Run(
                     status=schemas.RunStatus.PENDING,
                     thread_id=thread.id,
@@ -4484,6 +4488,8 @@ async def send_message(
             if thread.vector_store_id
             else None
         )
+
+        print("Thread Instructions:", thread.instructions)
 
         if thread.version <= 2:
             metadata: dict[str, str | int] = {
