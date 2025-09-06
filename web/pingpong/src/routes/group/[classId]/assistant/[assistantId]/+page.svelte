@@ -163,6 +163,12 @@
       'Code Interpreter can process files with diverse data and formatting, and generate files with data and images of graphs. Code Interpreter allows your Assistant to run code iteratively to solve challenging code and math problems.',
     max_count: 20
   };
+  const webSearchMetadata = {
+    value: 'web_search',
+    name: 'Web Search',
+    description:
+      'Web search allows models to access up-to-date information from the internet and provide answers with sourced citations. Web search is currently in preview and may be unstable. Do not use for important tasks.',
+  };
   const defaultTools = [{ type: 'file_search' }];
   let createClassicAssistant = false;
 
@@ -270,6 +276,10 @@
     (model) => model.id
   );
   $: supportsVerbosity = supportsVerbosityModels.includes(selectedModel);
+  $: supportsWebSearchModels = (data.models.filter((model) => model.supports_web_search) || []).map(
+    (model) => model.id
+  );
+  $: supportsWebSearch = supportsWebSearchModels.includes(selectedModel);
   $: supportsVision = supportVisionModels.includes(selectedModel);
   $: visionSupportOverride = data.models.find(
     (model) => model.id === selectedModel
@@ -309,6 +319,12 @@
   $: if (initialTools !== undefined && initialTools !== null && !hasSetCodeInterpreterToolSelect) {
     codeInterpreterToolSelect = initialTools.includes('code_interpreter');
     hasSetCodeInterpreterToolSelect = true;
+  }
+  let webSearchToolSelect = false;
+  let hasSetWebSearchToolSelect = false;
+  $: if (initialTools !== undefined && initialTools !== null && !hasSetWebSearchToolSelect) {
+    webSearchToolSelect = initialTools.includes('web_search');
+    hasSetWebSearchToolSelect = true;
   }
   let isPublished = false;
   let hasSetIsPublished = false;
@@ -671,6 +687,14 @@
       tools.push({ type: 'code_interpreter' });
     } else {
       fileSearchCodeInterpreterUnusedFiles.push(...allCIPrivateFiles.map((f) => f.id));
+    }
+    if (
+      webSearchToolSelect &&
+      supportsWebSearch &&
+      !(supportsReasoning && reasoningEffortValue === -1) &&
+      ((data.isCreating && !createClassicAssistant) || assistant?.version === 3)
+    ) {
+      tools.push({ type: 'web_search' });
     }
     const params = {
       name: preventEdits ? assistant?.name || '' : body.name.toString(),
@@ -1262,6 +1286,64 @@
           }}>{codeInterpreterMetadata.name}</Checkbox
         >
         <Helper>{codeInterpreterMetadata.description}</Helper>
+      {/if}
+    </div>
+    <div class="col-span-2 mb-4">
+
+      {#if (data.isCreating && createClassicAssistant) || assistant?.version !== 3}
+        <div class="col-span-2 mb-3">
+          <div class="flex flex-col gap-y-1">
+            <Badge
+              class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
+              ><CloseOutline size="sm" />
+              <div>No Web Search capabilities in Classic Assistants</div>
+            </Badge>
+            <Helper
+              >Classic Assistants do not support Web Search capabilities. To use Web
+              Search, create a Next-Gen Assistant.</Helper
+            >
+          </div>
+        </div>
+      {:else if !supportsWebSearch}
+        <div class="flex flex-col gap-y-1">
+          <Badge
+            class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
+            ><CloseOutline size="sm" />
+            <div>No Web Search capabilities</div>
+          </Badge>
+          <Helper
+            >This model does not support Web Search capabilities. To use Web Search,
+            select a different model.</Helper
+          >
+        </div>
+      {:else if supportsWebSearch && supportsReasoning && reasoningEffortValue === -1}
+        <div class="col-span-2 mb-3">
+          <div class="flex flex-col gap-y-1">
+            <Badge
+              class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
+              ><CloseOutline size="sm" />
+              <div>No Web Search capabilities in Minimal reasoning effort</div>
+            </Badge>
+            <Helper
+              >Minimal reasoning effort does not support Web Search capabilities. To use Web
+              Search, select a higher reasoning effort level.</Helper
+            >
+          </div>
+        </div>
+      {:else}
+        <Checkbox
+          id={webSearchMetadata.value}
+          name={webSearchMetadata.value}
+          disabled={preventEdits || !supportsWebSearch}
+          checked={supportsWebSearch && (webSearchToolSelect || false)}
+          on:change={() => {
+            webSearchToolSelect = !webSearchToolSelect;
+          }}><div class="flex flex-wrap gap-1.5"><div>{webSearchMetadata.name}</div><DropdownBadge
+              extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
+              ><span slot="name">Preview</span></DropdownBadge
+            ></Checkbox
+        >
+        <Helper>{webSearchMetadata.description}</Helper>
       {/if}
     </div>
 

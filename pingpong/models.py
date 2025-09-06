@@ -3408,6 +3408,78 @@ class Annotation(Base):
         await session.flush()
 
 
+class WebSearchCallSearchSource(Base):
+    __tablename__ = "web_search_call_search_sources"
+
+    id = Column(Integer, primary_key=True)
+
+    web_search_call_action_id = Column(
+        Integer,
+        ForeignKey("web_search_call_actions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    web_search_call_action = relationship(
+        "WebSearchCallAction", back_populates="sources", uselist=False
+    )
+    tool_call_id = Column(
+        Integer, ForeignKey("tool_calls.id", ondelete="CASCADE"), nullable=False
+    )
+
+    url = Column(String, nullable=False)
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> None:
+        source = cls(**data)
+        session.add(source)
+        await session.flush()
+
+
+class WebSearchCallAction(Base):
+    __tablename__ = "web_search_call_actions"
+
+    id = Column(Integer, primary_key=True)
+
+    type = Column(SQLEnum(schemas.WebSearchActionType), nullable=False)
+
+    tool_call_id = Column(
+        Integer, ForeignKey("tool_calls.id", ondelete="CASCADE"), nullable=False
+    )
+    tool_call = relationship(
+        "ToolCall", back_populates="web_search_actions", uselist=False
+    )
+
+    query = Column(String, nullable=True)
+    url = Column(String, nullable=True)
+    pattern = Column(String, nullable=True)
+
+    sources = relationship(
+        "WebSearchCallSearchSource",
+        back_populates="web_search_call_action",
+        lazy="selectin",
+    )
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> "WebSearchCallAction":
+        result = cls(**data)
+        session.add(result)
+        await session.flush()
+        return result
+
+
 class FileSearchCallResult(Base):
     __tablename__ = "file_search_call_results"
 
@@ -3509,6 +3581,10 @@ class ToolCall(Base):
         lazy="selectin",
     )
 
+    web_search_actions = relationship(
+        "WebSearchCallAction", back_populates="tool_call", lazy="selectin"
+    )
+
     @classmethod
     async def mark_as_incomplete(cls, session: AsyncSession, id: int) -> None:
         """Mark a tool call as incomplete."""
@@ -3568,6 +3644,156 @@ class ToolCall(Base):
             update(ToolCall)
             .where(ToolCall.id == id)
             .values(queries=queries, status=status)
+        )
+        await session.execute(stmt)
+
+
+class ReasoningSummaryPart(Base):
+    __tablename__ = "reasoning_summary_parts"
+
+    id = Column(Integer, primary_key=True)
+
+    reasoning_step_id = Column(
+        Integer, ForeignKey("reasoning_steps.id", ondelete="CASCADE"), nullable=False
+    )
+    reasoning_step = relationship(
+        "ReasoningStep", back_populates="summary_parts", uselist=False
+    )
+
+    part_index = Column(Integer, nullable=False)
+
+    summary_text = Column(String, nullable=True)
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> "ReasoningSummaryPart":
+        summary_part = cls(**data)
+        session.add(summary_part)
+        await session.flush()
+        return summary_part
+
+    @classmethod
+    async def add_summary_text_delta(
+        cls, session: AsyncSession, id: int, delta: str
+    ) -> None:
+        """Append a summary text delta to a reasoning summary part."""
+        stmt = (
+            update(ReasoningSummaryPart)
+            .where(ReasoningSummaryPart.id == id)
+            .values(summary_text=ReasoningSummaryPart.summary_text + delta)
+        )
+        await session.execute(stmt)
+
+
+class ReasoningContentPart(Base):
+    __tablename__ = "reasoning_content_parts"
+
+    id = Column(Integer, primary_key=True)
+
+    reasoning_step_id = Column(
+        Integer, ForeignKey("reasoning_steps.id", ondelete="CASCADE"), nullable=False
+    )
+    reasoning_step = relationship(
+        "ReasoningStep", back_populates="content_parts", uselist=False
+    )
+
+    part_index = Column(Integer, nullable=False)
+
+    content_text = Column(String, nullable=True)
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> None:
+        content_part = cls(**data)
+        session.add(content_part)
+        await session.flush()
+
+
+class ReasoningStep(Base):
+    __tablename__ = "reasoning_steps"
+
+    id = Column(Integer, primary_key=True)
+    reasoning_id = Column(String, nullable=True)
+
+    run_id = Column(Integer, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
+    run = relationship("Run", back_populates="reasoning_steps", uselist=False)
+
+    thread_id = Column(
+        Integer, ForeignKey("threads.id", ondelete="CASCADE"), nullable=False
+    )
+    thread = relationship("Thread", back_populates="reasoning_steps", uselist=False)
+
+    output_index = Column(Integer, nullable=False)
+
+    summary_parts = relationship(
+        "ReasoningSummaryPart",
+        back_populates="reasoning_step",
+        lazy="selectin",
+    )
+    content_parts = relationship(
+        "ReasoningContentPart",
+        back_populates="reasoning_step",
+        lazy="selectin",
+    )
+    encrypted_content = Column(String, nullable=True)
+
+    status = Column(SQLEnum(schemas.ReasoningStatus), nullable=False)
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    completed = Column(DateTime(timezone=True), nullable=True)
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> "ReasoningStep":
+        reasoning_step = cls(**data)
+        session.add(reasoning_step)
+        await session.flush()
+        return reasoning_step
+
+    @classmethod
+    async def mark_as_incomplete(cls, session: AsyncSession, id: int) -> None:
+        """Mark a reasoning step as incomplete."""
+        stmt = (
+            update(ReasoningStep)
+            .where(ReasoningStep.id == id)
+            .values(status=schemas.ReasoningStatus.INCOMPLETE)
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def mark_status(
+        cls,
+        session: AsyncSession,
+        id: int,
+        status: schemas.ReasoningStatus,
+        encrypted_content: str | None = None,
+    ) -> None:
+        """Mark a reasoning step as a specific status."""
+        stmt = (
+            update(ReasoningStep)
+            .where(ReasoningStep.id == id)
+            .values(
+                status=status,
+                encrypted_content=encrypted_content
+                if encrypted_content is not None
+                else ReasoningStep.encrypted_content,
+            )
         )
         await session.execute(stmt)
 
@@ -3756,6 +3982,12 @@ class Run(Base):
 
     tool_calls = relationship(
         "ToolCall",
+        back_populates="run",
+        lazy="selectin",
+    )
+
+    reasoning_steps = relationship(
+        "ReasoningStep",
         back_populates="run",
         lazy="selectin",
     )
@@ -3958,6 +4190,10 @@ class Thread(Base):
         "ToolCall",
         back_populates="thread",
         lazy="selectin",
+    )
+    reasoning_steps = relationship(
+        "ReasoningStep",
+        back_populates="thread",
     )
     tools_available = Column(String)
     vector_store_id = Column(
@@ -4524,6 +4760,17 @@ class Thread(Base):
         result = await session.execute(stmt)
         for tool_call in result.scalars().all():
             yield tool_call
+
+    @classmethod
+    async def list_all_reasoning_steps_gen(
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+    ) -> AsyncGenerator["ReasoningStep", None]:
+        stmt = select(ReasoningStep).where(ReasoningStep.thread_id == thread_id)
+        result = await session.execute(stmt)
+        for reasoning_step in result.scalars().all():
+            yield reasoning_step
 
     @classmethod
     async def list_messages_tool_calls(

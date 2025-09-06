@@ -2064,6 +2064,7 @@ async def list_class_models(
                 "supports_expanded_reasoning_effort"
             ],
             "supports_verbosity": KNOWN_MODELS[m.id]["supports_verbosity"],
+            "supports_web_search": KNOWN_MODELS[m.id]["supports_web_search"],
             "supports_temperature": KNOWN_MODELS[m.id]["supports_temperature"],
             "supports_reasoning": KNOWN_MODELS[m.id]["supports_reasoning"],
         }
@@ -2093,6 +2094,7 @@ async def list_class_models(
                 "supports_next_gen_assistants": False,
                 "supports_expanded_reasoning_effort": False,
                 "supports_verbosity": False,
+                "supports_web_search": False,
                 "description": "The latest GPT-4 Turbo model.",
             }
         )
@@ -2119,6 +2121,7 @@ async def list_class_models(
                 "supports_next_gen_assistants": False,
                 "supports_expanded_reasoning_effort": False,
                 "supports_verbosity": False,
+                "supports_web_search": False,
                 "description": "The latest GPT-4 Turbo preview model.",
             }
         )
@@ -5148,6 +5151,18 @@ async def create_assistant(
             detail="This class is private and does not allow recording user information.",
         )
 
+    uses_web_search = {"type": "web_search"} in req.tools
+    if uses_web_search and not model_record.supports_web_search:
+        raise HTTPException(
+            status_code=400,
+            detail="The selected model does not support Web Search. Please select a different model or remove the Web Search tool.",
+        )
+    if uses_web_search in req.tools and assistant_version <= 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Classic Assistants do not support Web Search capabilities. To use Web Search, create a Next-Gen Assistant.",
+        )
+
     tool_resources: ToolResources = {}
     vector_store_object_id = None
     uses_voice = req.interaction_mode == schemas.InteractionMode.VOICE
@@ -5712,6 +5727,29 @@ async def update_assistant(
                 "You cannot use tools when the reasoning effort is set to 'Minimal'. Please select a higher reasoning effort level.",
             )
 
+    uses_web_search = False
+    if "tools" in req.model_fields_set:
+        if req.tools is None or len(req.tools) == 0:
+            uses_web_search = False
+        else:
+            uses_web_search = {"type": "web_search"} in req.tools
+    else:
+        uses_web_search = (
+            asst.tools is not None and {"type": "web_search"} in asst.tools
+        )
+
+    if uses_web_search and asst.version <= 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Classic Assistants do not support Web Search capabilities. To use Web Search, create a Next-Gen Assistant.",
+        )
+
+    if uses_web_search and (model_record and not model_record.supports_web_search):
+        raise HTTPException(
+            400,
+            "The selected model does not support Web Search. Please select a different model or remove the Web Search tool.",
+        )
+
     if "verbosity" in req.model_fields_set:
         if req.verbosity is not None and (
             model_record and not model_record.supports_verbosity
@@ -5849,7 +5887,7 @@ async def update_assistant(
 
     if "tools" in req.model_fields_set and req.tools is not None:
         openai_update["tools"] = req.tools
-        asst.tools = json.dumps([t.model_dump() for t in req.tools])
+        asst.tools = json.dumps(req.tools)
 
     if "temperature" in req.model_fields_set:
         openai_update["temperature"] = req.temperature
