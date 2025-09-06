@@ -3797,6 +3797,21 @@ class ReasoningStep(Base):
         )
         await session.execute(stmt)
 
+    @classmethod
+    async def update_encrypted_content(
+        cls,
+        session: AsyncSession,
+        reasoning_id: str,
+        encrypted_content: str,
+    ) -> None:
+        """Update the encrypted content of a reasoning step."""
+        stmt = (
+            update(ReasoningStep)
+            .where(ReasoningStep.reasoning_id == reasoning_id)
+            .values(encrypted_content=encrypted_content)
+        )
+        await session.execute(stmt)
+
 
 class MessagePart(Base):
     __tablename__ = "message_parts"

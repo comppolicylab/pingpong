@@ -618,7 +618,10 @@ async def build_response_input_item_list(
             (
                 message.created,
                 ResponseOutputMessageParam(
-                    role=message.role, content=content_list, type="message"
+                    role=message.role,
+                    content=content_list,
+                    type="message",
+                    id=message.message_id,
                 ),
             )
         )
@@ -706,7 +709,7 @@ async def build_response_input_item_list(
                         case WebSearchActionType.SEARCH:
                             action = ActionSearch(
                                 type="search",
-                                query=action_rec.query,
+                                query=action_rec.query or "",
                             )
                         case WebSearchActionType.OPEN_PAGE:
                             action = ActionOpenPage(
@@ -736,18 +739,18 @@ async def build_response_input_item_list(
     async for reasoning in models.Thread.list_all_reasoning_steps_gen(
         session, thread_id
     ):
-        summary_list: list[Summary] = []
+        summary_array: list[Summary] = []
         for summary_step in reasoning.summary_parts:
-            summary_list.append(
+            summary_array.append(
                 Summary(
                     text=summary_step.summary_text,
                     type="summary_text",
                 )
             )
-        
-        content_list: list[Content] = []
+
+        content_array: list[Content] = []
         for content_step in reasoning.content_parts:
-            content_list.append(
+            content_array.append(
                 Content(
                     text=content_step.content_text,
                     type="reasoning_text",
@@ -759,8 +762,8 @@ async def build_response_input_item_list(
                 reasoning.created,
                 ResponseReasoningItemParam(
                     id=reasoning.reasoning_id,
-                    content=content_list if content_list else None,
-                    summary=summary_list if summary_list else None,
+                    content=content_array if content_array else None,
+                    summary=summary_array if summary_array else [],
                     encrypted_content=reasoning.encrypted_content,
                     type="reasoning",
                 ),
@@ -2235,6 +2238,8 @@ class BufferedResponseStreamHandler:
             status: ReasoningStatus,
             encrypted_content: str | None,
         ):
+            if not self.reasoning_id:
+                return
             await models.ReasoningStep.mark_status(
                 session_,
                 self.reasoning_id,
@@ -2368,6 +2373,25 @@ class BufferedResponseStreamHandler:
             )
             return
 
+        @db_session_handler
+        async def update_encrypted_response_content_on_response_completed(
+            session_: AsyncSession, item_id: str, encrypted_content: str | None
+        ):
+            if not item_id or not encrypted_content:
+                return
+            await models.ReasoningStep.update_encrypted_content(
+                session_, item_id, encrypted_content
+            )
+            await session_.commit()
+
+        if isinstance(data, ResponseCompletedEvent):
+            for output_item in data.response.output:
+                if output_item.type == "reasoning" and output_item.encrypted_content:
+                    await update_encrypted_response_content_on_response_completed(
+                        item_id=output_item.id,
+                        encrypted_content=output_item.encrypted_content,
+                    )
+
         await self.cleanup(
             run_status=RunStatus(data.response.status),
             response_error_code=data.response.error.code
@@ -2474,7 +2498,6 @@ async def run_response(
                 )
 
             tools: list[ToolParam] = []
-            print(input_items)
             if run.tools_available and "web_search" in run.tools_available:
                 tools.append(
                     WebSearchToolParam(
@@ -2557,7 +2580,6 @@ async def run_response(
                 )
 
                 async for event in stream:
-                    print(event)
                     match event.type:
                         case "response.created":
                             await handler.on_response_created(event)
