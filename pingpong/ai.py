@@ -2467,6 +2467,7 @@ async def run_response(
         try:
             reasoning_settings: Reasoning | openai.NotGiven = openai.NOT_GIVEN
             text_settings: ResponseTextConfigParam | openai.NotGiven = openai.NOT_GIVEN
+            include_with = []
 
             if run.reasoning_effort is not None:
                 if run.reasoning_effort not in REASONING_EFFORT_EXPANDED_MAP:
@@ -2477,6 +2478,7 @@ async def run_response(
                     effort=REASONING_EFFORT_EXPANDED_MAP[run.reasoning_effort],
                     summary="auto",
                 )
+                include_with.append("reasoning.encrypted_content")
 
             if run.verbosity is not None:
                 if run.verbosity not in VERBOSITY_MAP:
@@ -2504,6 +2506,7 @@ async def run_response(
                         type="web_search",
                     )
                 )
+                include_with.append("web_search_call.action.sources")
 
             if run.tools_available and "file_search" in run.tools_available:
                 vector_store_ids = []
@@ -2529,6 +2532,7 @@ async def run_response(
                             type="file_search", vector_store_ids=vector_store_ids
                         )
                     )
+                    include_with.append("file_search_call.results")
 
             if run.tools_available and "code_interpreter" in run.tools_available:
                 tools.append(
@@ -2539,15 +2543,11 @@ async def run_response(
                         type="code_interpreter",
                     )
                 )
+                include_with.append("code_interpreter_call.outputs")
 
             try:
                 stream: AsyncStream[ResponseStreamEvent] = await cli.responses.create(
-                    include=[
-                        "code_interpreter_call.outputs",
-                        "file_search_call.results",
-                        "web_search_call.action.sources",
-                        "reasoning.encrypted_content",
-                    ],
+                    include=include_with,
                     input=input_items,
                     instructions=run.instructions,
                     model=run.model,
