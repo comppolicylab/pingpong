@@ -1339,7 +1339,10 @@ class User(Base):
         stmt = (
             select(User.id)
             .outerjoin(ExternalLogin)
-            .join(ExternalLoginProvider)
+            .outerjoin(
+                ExternalLoginProvider,
+                ExternalLogin.provider_id == ExternalLoginProvider.id,
+            )
             .where(
                 or_(
                     func.lower(User.email).in_(lower_emails),
@@ -4478,7 +4481,9 @@ class Thread(Base):
         include_only_user_ids: list[int] | None = None,
     ) -> AsyncGenerator["Thread", None]:
         condition = Thread.class_id == int(class_id)
-        if include_only_user_ids:
+        if include_only_user_ids is not None:
+            if not include_only_user_ids:
+                return
             condition = and_(
                 condition, Thread.users.any(User.id.in_(include_only_user_ids))
             )
