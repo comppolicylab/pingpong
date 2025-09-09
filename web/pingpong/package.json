@@ -55,5 +55,12 @@
     "marked": "^11.2.0",
     "marked-highlight": "^2.1.4",
     "svelte-copy": "^1.4.2"
+  },
+  "pnpm": {
+    "overrides": {
+      "cookie": "0.7.0",
+      "esbuild": "0.25.0",
+      "@sentry/browser": "7.119.1"
+    }
   }
 }

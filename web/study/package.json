@@ -46,7 +46,10 @@
 	"pnpm": {
 		"onlyBuiltDependencies": [
 			"esbuild"
-		]
+		],
+		"overrides": {
+			"cookie": "0.7.0"
+		}
 	},
 	"dependencies": {
 		"mode-watcher": "^1.1.0"
