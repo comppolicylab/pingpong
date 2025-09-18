@@ -291,16 +291,15 @@ async def generate_assistant_summaries(
         async for thread in models.Thread.get_threads_by_assistant_id(
             session=session, assistant_id=id_, after=after
         ):
+            thread_id = thread.thread_id if thread.version <= 2 else str(thread.id)
             user_messages_list.append(
                 ThreadUserMessages(
                     id=thread.id,
-                    thread_id=thread.thread_id
-                    if thread.version <= 2
-                    else str(thread.id),
+                    thread_id=thread_id,
                     user_messages=await get_thread_user_messages(
                         session,
                         cli,
-                        thread.thread_id if thread.version <= 2 else str(thread.id),
+                        thread_id,
                         thread_version=thread.version,
                     ),
                 )
