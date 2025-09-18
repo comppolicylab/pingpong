@@ -285,7 +285,7 @@ async def generate_assistant_summaries(
 
     # Get all assistants for the class
     async for id_, name in models.Assistant.async_get_id_name_by_class_id(
-        session=session, class_id=class_id, version=2
+        session=session, class_id=class_id
     ):
         user_messages_list = list[ThreadUserMessages]()
         async for thread in models.Thread.get_threads_by_assistant_id(
@@ -294,9 +294,14 @@ async def generate_assistant_summaries(
             user_messages_list.append(
                 ThreadUserMessages(
                     id=thread.id,
-                    thread_id=thread.thread_id,
+                    thread_id=thread.thread_id
+                    if thread.version <= 2
+                    else str(thread.id),
                     user_messages=await get_thread_user_messages(
-                        session, cli, thread.thread_id
+                        session,
+                        cli,
+                        thread.thread_id if thread.version <= 2 else str(thread.id),
+                        thread_version=thread.version,
                     ),
                 )
             )
