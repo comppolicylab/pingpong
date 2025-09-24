@@ -2546,11 +2546,11 @@ async def get_thread(
                     _message.metadata["name"] = "Unknown User"
             else:
                 _message.metadata["name"] = (
-                    name(users[message.user_id])
+                    name(users[str(message.user_id)])
                     if thread.display_user_info and is_supervisor
                     else "Anonymous User"
                     if thread.private
-                    else pseudonym(thread, users[message.user_id])
+                    else pseudonym(thread, users[str(message.user_id)])
                 )
             thread_messages.append(_message)
 
@@ -3181,11 +3181,11 @@ async def list_thread_messages(
                     _message.metadata["name"] = "Unknown User"
             else:
                 _message.metadata["name"] = (
-                    name(users[message.user_id])
+                    name(users[str(message.user_id)])
                     if thread.display_user_info and is_supervisor
                     else "Anonymous User"
                     if thread.private
-                    else pseudonym(thread, users[message.user_id])
+                    else pseudonym(thread, users[str(message.user_id)])
                 )
             thread_messages.append(_message)
         return {"messages": thread_messages, "ci_messages": [], "limit": limit}
