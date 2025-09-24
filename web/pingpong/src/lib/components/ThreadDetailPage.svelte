@@ -23,6 +23,7 @@
   import Markdown from '$lib/components/Markdown.svelte';
   import Logo from '$lib/components/Logo.svelte';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
+  import AssistantVersionBadge from '$lib/components/AssistantVersionBadge.svelte';
   import {
     RefreshOutline,
     CodeOutline,
@@ -54,6 +55,7 @@
   import AudioPlayer from '$lib/components/AudioPlayer.svelte';
   import { tick } from 'svelte';
   import FileCitation from './FileCitation.svelte';
+  import StatusErrors from './StatusErrors.svelte';
   export let data;
 
   let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -157,6 +159,7 @@
   $: assistantDeleted = !$assistantId && $assistantId === 0;
   let useLatex = false;
   let useImageDescriptions = false;
+  let assistantVersion: number | null = null;
   let assistantInteractionMode: 'voice' | 'chat' | null = null;
   $: {
     const assistant = data.assistants.find(
@@ -166,15 +169,26 @@
       useLatex = assistant.use_latex || false;
       useImageDescriptions = assistant.use_image_descriptions || false;
       assistantInteractionMode = assistant.interaction_mode;
+      assistantVersion = assistant.version ?? null;
     } else {
       useLatex = false;
       useImageDescriptions = false;
       assistantInteractionMode = null;
+      assistantVersion = null;
       if (data.threadData.anonymous_session) {
         console.warn(`Definition for assistant ${$assistantId} not found.`);
       }
     }
   }
+  $: statusComponents = (data.statusComponents || {}) as Partial<
+    Record<string, api.StatusComponentUpdate[]>
+  >;
+  $: resolvedAssistantVersion = Number(assistantVersion ?? $version ?? 0);
+  $: statusComponentId =
+    resolvedAssistantVersion >= 3
+      ? api.STATUS_COMPONENT_IDS.nextGen
+      : api.STATUS_COMPONENT_IDS.classic;
+  $: assistantStatusUpdates = statusComponents[statusComponentId] ?? [];
   let showModerators = false;
   let showAssistantPrompt = false;
   let settingsOpen = false;
@@ -879,8 +893,16 @@
           {/if}
         </div>
         <div class="max-w-full w-full">
-          <div class="font-semibold text-blue-dark-40 mb-2 mt-1">
-            {getName(message.data)}
+          <div class="font-semibold text-blue-dark-40 mb-2 mt-1 flex flex-wrap items-center gap-2">
+            <span class="flex items-center gap-2">
+              {getName(message.data)}
+              {#if message.data.role !== 'user' && !assistantDeleted}
+                <AssistantVersionBadge
+                  version={assistantVersion ?? $version}
+                  extraClasses="shrink-0"
+                />
+              {/if}
+            </span>
             <span
               class="text-gray-500 text-xs font-normal ml-1 hover:underline"
               id={`short-timestamp-${message.data.id}`}
@@ -1249,6 +1271,7 @@
 
     <div class="w-full bg-gradient-to-t from-white to-transparent">
       <div class="w-11/12 mx-auto relative flex flex-col">
+        <StatusErrors {assistantStatusUpdates} />
         {#if data.threadInteractionMode == 'chat' && assistantInteractionMode === 'chat'}
           {#if $waiting || $submitting}
             <div

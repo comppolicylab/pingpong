@@ -3116,3 +3116,21 @@ export const createAudioWebsocket = (classId: number, threadId: number): WebSock
   const url = `${protocol}://${host}/api/v1/class/${classId}/thread/${threadId}/audio?${params}`;
   return new WebSocket(url);
 };
+
+export type StatusComponentUpdate = {
+  incidentId: string;
+  incidentName: string;
+  incidentStatus: string;
+  updateStatus: string;
+  body: string;
+  updatedAt: string | null;
+  shortlink: string | null;
+  impact: string | null;
+};
+
+export const STATUS_COMPONENT_IDS = {
+  classic: '2f2dmn0q4ntj',
+  nextGen: 'glp8y01h0srn'
+};
+
+export const STATUS_COMPONENT_GROUP_ID = 'vp0p38k9dwqd';
