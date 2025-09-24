@@ -1,9 +1,10 @@
 import * as api from '$lib/api';
 import type { PageLoad } from './$types';
 
-export const load: PageLoad = async ({ fetch, params }) => {
+export const load: PageLoad = async ({ fetch, params, parent }) => {
   const classId = parseInt(params.classId, 10);
   const threadId = parseInt(params.threadId, 10);
+  const parentData = await parent();
 
   const [threadData, threadGrants] = await Promise.all([
     api.getThread(fetch, classId, threadId),
@@ -46,6 +47,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
     canPublishThread: threadGrants.canPublish,
     canViewAssistant: assistantGrants.canViewAssistant,
     threadRecording,
-    threadDisplayUserInfo
+    threadDisplayUserInfo,
+    statusComponents: parentData.statusComponents ?? {}
   };
 };

@@ -32,6 +32,8 @@
   import { loading, isFirefox } from '$lib/stores/general';
   import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
   import Logo from '$lib/components/Logo.svelte';
+  import AssistantVersionBadge from '$lib/components/AssistantVersionBadge.svelte';
+  import StatusErrors from './StatusErrors.svelte';
 
   /**
    * Application data.
@@ -134,6 +136,16 @@
   }
   $: allowVisionUpload = true;
   let showModerators = false;
+
+  $: statusComponents = (data.statusComponents || {}) as Partial<
+    Record<string, api.StatusComponentUpdate[]>
+  >;
+  $: assistantVersionNumber = Number(assistant?.version ?? 0);
+  $: statusComponentId =
+    assistantVersionNumber >= 3
+      ? api.STATUS_COMPONENT_IDS.nextGen
+      : api.STATUS_COMPONENT_IDS.classic;
+  $: assistantStatusUpdates = statusComponents[statusComponentId] ?? [];
 
   // Handle file upload
   const handleUpload = (
@@ -322,7 +334,12 @@
           >
             <Logo size={8} />
           </div>
-          <div class="text-3xl font-medium">{assistant.name}</div>
+          <div class="flex flex-col items-center justify-center gap-1">
+            <div class="text-3xl font-medium">{assistant.name}</div>
+            {#if assistant?.id}
+              <AssistantVersionBadge version={assistantVersionNumber} />
+            {/if}
+          </div>
           {#if !(data.isSharedAssistantPage || data.isSharedThreadPage)}
             <div class="flex flex-row gap-1 text-gray-400 text-sm font-normal items-center">
               {#if assistantMeta.isCourseAssistant}
@@ -544,6 +561,7 @@
             </div>
           {/if}
           <div class="flex flex-col items-center w-full lg:w-3/5 md:w-3/4">
+            <StatusErrors {assistantStatusUpdates} />
             <ChatInput
               mimeType={data.uploadInfo.mimeType}
               maxSize={data.uploadInfo.private_file_max_size}

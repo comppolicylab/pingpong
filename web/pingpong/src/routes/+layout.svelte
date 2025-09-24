@@ -36,7 +36,7 @@
       </Main>
     </div>
   </div>
-  {#if showStatusPage}
+  {#if showStatusPage && data.hasNonComponentIncidents}
     <script src="https://pingpong-hks.statuspage.io/embed/script.js"></script>
   {/if}
 {:else if showBackground}

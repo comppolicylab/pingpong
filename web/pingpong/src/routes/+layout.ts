@@ -138,6 +138,113 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
     showAdminPage: authed && (canCreateInstitution || institutions.length > 0)
   };
 
+  let hasNonComponentIncidents = false;
+
+  const componentIncidents: Record<string, Record<string, api.StatusComponentUpdate>> = {};
+
+  try {
+    const statusResponse = await fetch(
+      'https://q559jtpt3rsz.statuspage.io/api/v2/incidents/unresolved.json'
+    );
+    if (statusResponse.ok) {
+      const statusJson = (await statusResponse.json()) as {
+        incidents?: Array<{
+          id: string;
+          name: string;
+          status: string;
+          updated_at?: string | null;
+          shortlink?: string | null;
+          impact?: string | null;
+          incident_updates?: Array<{
+            id: string;
+            status: string;
+            body: string;
+            created_at?: string | null;
+            updated_at?: string | null;
+            display_at?: string | null;
+            affected_components?: Array<{
+              code: string;
+            }>;
+          }>;
+          components?: Array<{
+            group_id: string | null;
+          }>;
+        }>;
+      };
+
+      for (const incident of statusJson.incidents ?? []) {
+        let affectedAny = false;
+        let hasPingPongWebGroupComponent = false;
+        for (const component of incident.components ?? []) {
+          if (!component.group_id || component.group_id !== api.STATUS_COMPONENT_GROUP_ID) {
+            continue;
+          }
+          hasPingPongWebGroupComponent = true;
+        }
+
+        for (const update of incident.incident_updates ?? []) {
+          const affected = update.affected_components ?? [];
+          const timestampSource =
+            update.display_at ??
+            update.updated_at ??
+            update.created_at ??
+            incident.updated_at ??
+            null;
+          const timestamp = timestampSource ? Date.parse(timestampSource) : Number.NaN;
+
+          for (const component of affected) {
+            if (!Object.values(api.STATUS_COMPONENT_IDS).includes(component.code)) {
+              continue;
+            }
+            affectedAny = true;
+
+            if (!componentIncidents[component.code]) {
+              componentIncidents[component.code] = {};
+            }
+
+            const existing = componentIncidents[component.code][incident.id];
+            const existingTimestamp = existing?.updatedAt
+              ? Date.parse(existing.updatedAt)
+              : Number.NaN;
+            const hasTimestamp = !Number.isNaN(timestamp);
+            const shouldReplace =
+              !existing ||
+              (hasTimestamp && (Number.isNaN(existingTimestamp) || existingTimestamp < timestamp));
+
+            if (!shouldReplace) {
+              continue;
+            }
+
+            componentIncidents[component.code][incident.id] = {
+              incidentId: incident.id,
+              incidentName: incident.name,
+              incidentStatus: incident.status,
+              updateStatus: update.status,
+              body: update.body,
+              updatedAt: timestampSource,
+              shortlink: incident.shortlink ?? null,
+              impact: incident.impact ?? null
+            };
+          }
+        }
+        if (!affectedAny && hasPingPongWebGroupComponent) {
+          hasNonComponentIncidents = true;
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load status page incidents', err);
+  }
+
+  const statusComponents: Record<string, api.StatusComponentUpdate[]> = {};
+  for (const [componentCode, incidents] of Object.entries(componentIncidents)) {
+    statusComponents[componentCode] = Object.values(incidents).sort((a, b) => {
+      const timeA = a.updatedAt ? Date.parse(a.updatedAt) : 0;
+      const timeB = b.updatedAt ? Date.parse(b.updatedAt) : 0;
+      return timeB - timeA;
+    });
+  }
+
   return {
     isPublicPage,
     needsOnboarding,
@@ -151,6 +258,8 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
     modelInfo,
     shareToken: t,
     isSharedAssistantPage,
-    isSharedThreadPage
+    isSharedThreadPage,
+    statusComponents,
+    hasNonComponentIncidents
   };
 };
