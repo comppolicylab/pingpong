@@ -15,7 +15,8 @@
   $: classes =
     `${baseClasses} ${isNextGen ? nextGenClasses : classicClasses} ${extraClasses}`.trim();
   $: tooltip =
-    title ?? (isNextGen
+    title ??
+    (isNextGen
       ? 'This assistant is using the latest Next-Gen architecture'
       : 'This assistant is using the previous Classic architecture');
 </script>
