@@ -28,6 +28,7 @@
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
   import { errorMessage } from '$lib/errors';
+  import { computeLatestIncidentTimestamps, filterLatestIncidentUpdates } from '$lib/statusUpdates';
   import type { Assistant, FileUploadPurpose } from '$lib/api';
   import { loading, isFirefox } from '$lib/stores/general';
   import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
@@ -140,12 +141,17 @@
   $: statusComponents = (data.statusComponents || {}) as Partial<
     Record<string, api.StatusComponentUpdate[]>
   >;
+  let latestIncidentUpdateTimestamps: Record<string, number> = {};
+  $: latestIncidentUpdateTimestamps = computeLatestIncidentTimestamps(statusComponents);
   $: assistantVersionNumber = Number(assistant?.version ?? 0);
   $: statusComponentId =
     assistantVersionNumber >= 3
       ? api.STATUS_COMPONENT_IDS.nextGen
       : api.STATUS_COMPONENT_IDS.classic;
-  $: assistantStatusUpdates = statusComponents[statusComponentId] ?? [];
+  $: assistantStatusUpdates = filterLatestIncidentUpdates(
+    statusComponents[statusComponentId],
+    latestIncidentUpdateTimestamps
+  );
 
   // Handle file upload
   const handleUpload = (

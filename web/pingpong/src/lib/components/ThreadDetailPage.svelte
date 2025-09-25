@@ -4,6 +4,7 @@
   import * as api from '$lib/api';
   import { happyToast, sadToast } from '$lib/toast';
   import { errorMessage } from '$lib/errors';
+  import { computeLatestIncidentTimestamps, filterLatestIncidentUpdates } from '$lib/statusUpdates';
   import { blur } from 'svelte/transition';
   import {
     Accordion,
@@ -183,12 +184,17 @@
   $: statusComponents = (data.statusComponents || {}) as Partial<
     Record<string, api.StatusComponentUpdate[]>
   >;
+  let latestIncidentUpdateTimestamps: Record<string, number> = {};
+  $: latestIncidentUpdateTimestamps = computeLatestIncidentTimestamps(statusComponents);
   $: resolvedAssistantVersion = Number(assistantVersion ?? $version ?? 0);
   $: statusComponentId =
     resolvedAssistantVersion >= 3
       ? api.STATUS_COMPONENT_IDS.nextGen
       : api.STATUS_COMPONENT_IDS.classic;
-  $: assistantStatusUpdates = statusComponents[statusComponentId] ?? [];
+  $: assistantStatusUpdates = filterLatestIncidentUpdates(
+    statusComponents[statusComponentId],
+    latestIncidentUpdateTimestamps
+  );
   let showModerators = false;
   let showAssistantPrompt = false;
   let settingsOpen = false;
