@@ -5519,7 +5519,14 @@ async def update_assistant(
     revokes = list[Relation]()
 
     # Users without publish permission can't toggle the published status of assistants.
-    if "published" in req.model_fields_set and asst.published != req.published:
+    if (
+        "published" in req.model_fields_set
+        and req.published is not None
+        and (
+            (req.published is True and asst.published is None)
+            or (req.published is False and asst.published is not None)
+        )
+    ):
         if not await request.state.authz.test(
             f"user:{request.state.session.user.id}",
             "can_publish",
@@ -5911,7 +5918,10 @@ async def update_assistant(
     if (
         "published" in req.model_fields_set
         and req.published is not None
-        and req.published != asst.published
+        and (
+            (req.published is True and asst.published is None)
+            or (req.published is False and asst.published is not None)
+        )
     ):
         ptuple = (f"class:{class_id}#member", "can_view", f"assistant:{asst.id}")
         if req.published:
