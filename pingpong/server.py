@@ -5585,6 +5585,18 @@ async def update_assistant(
     )
     uses_voice = interaction_mode == schemas.InteractionMode.VOICE
 
+    # Reinforce model version:
+    # 1. If Azure OpenAI client, only support version 2 assistants
+    # 2. If Voice mode, only support version 2 assistants
+    # 3. Otherwise, force version 3 assistants if class has OAI key
+    if isinstance(openai_client, openai.AsyncAzureOpenAI) or uses_voice:
+        asst.version = 2
+    else:
+        if class_.api_key_obj or class_.api_key:
+            asst.version = 3
+        else:
+            asst.version = 2
+
     # If the interaction mode is changing, and the user did not specify a
     # temperature, set a default temperature based on the interaction mode
     # This is to ensure that the temperature is set appropriately for the mode.
@@ -5683,6 +5695,7 @@ async def update_assistant(
                 detail=f"Model {req.model} is not available for use in {interaction_mode.capitalize()} mode.",
             )
 
+    new_reasoning_effort_body = None
     if "reasoning_effort" in req.model_fields_set:
         if model_record and model_record.supports_expanded_reasoning_effort:
             reasoning_effort = (
@@ -5724,6 +5737,7 @@ async def update_assistant(
         )
         openai_update["extra_body"] = reasoning_extra_body
         asst.reasoning_effort = req.reasoning_effort
+        new_reasoning_effort_body = reasoning_extra_body
     else:
         if (
             asst.reasoning_effort is not None
@@ -5744,6 +5758,11 @@ async def update_assistant(
                 400,
                 "You cannot use tools when the reasoning effort is set to 'Minimal'. Please select a higher reasoning effort level.",
             )
+        new_reasoning_effort_body = (
+            {"reasoning_effort": REASONING_EFFORT_MAP.get(asst.reasoning_effort)}
+            if asst.reasoning_effort
+            else {}
+        )
 
     uses_web_search = False
     if "tools" in req.model_fields_set:
@@ -5898,7 +5917,6 @@ async def update_assistant(
         if not req.instructions:
             raise HTTPException(400, "Instructions cannot be empty.")
         asst.instructions = req.instructions
-    _model = None
 
     if "description" in req.model_fields_set and req.description is not None:
         asst.description = req.description
@@ -5929,13 +5947,15 @@ async def update_assistant(
     if "name" in req.model_fields_set and req.name is not None:
         asst.name = req.name
 
-    await models.Thread.update_tools_available(request.state.db, asst.id, asst.tools)
+    await models.Thread.update_tools_available(
+        request.state.db, asst.id, asst.tools, asst.version, asst.interaction_mode
+    )
     request.state.db.add(asst)
     await request.state.db.flush()
     await request.state.db.refresh(asst)
 
     if not asst.instructions:
-        raise HTTPException(500, "Instructions cannot be empty.")
+        raise HTTPException(400, "Instructions cannot be empty.")
     if update_instructions:
         openai_update["instructions"] = format_instructions(
             asst.instructions,
@@ -5953,9 +5973,44 @@ async def update_assistant(
                 await delete_vector_store_oai(openai_client, vector_store_id_to_delete)
         else:
             try:
-                await openai_client.beta.assistants.update(
-                    assistant_id=asst.assistant_id, **openai_update
-                )
+                if not asst.assistant_id:
+                    new_tool_resources = {}
+
+                    if (
+                        asst.code_interpreter_files
+                        and asst.code_interpreter_files != []
+                    ):
+                        new_tool_resources["code_interpreter"] = {
+                            "file_ids": [f.file_id for f in asst.code_interpreter_files]
+                        }
+                    if asst.vector_store_id:
+                        new_tool_resources["file_search"] = {
+                            "vector_store_ids": [asst.vector_store.id]
+                        }
+                    new_asst = await openai_client.beta.assistants.create(
+                        instructions=format_instructions(
+                            asst.instructions,
+                            use_latex=asst.use_latex,
+                            use_image_descriptions=asst.use_image_descriptions,
+                        ),
+                        model=_model,
+                        tools=json.loads(asst.tools),
+                        temperature=asst.temperature,
+                        metadata={
+                            "class_id": class_id,
+                            "creator_id": str(request.state.session.user.id),
+                        },
+                        tool_resources=new_tool_resources,
+                        extra_body=new_reasoning_effort_body,
+                    )
+                    asst.assistant_id = new_asst.id
+                    request.state.db.add(asst)
+                    await request.state.db.flush()
+                    await request.state.db.refresh(asst)
+                else:
+                    await openai_client.beta.assistants.update(
+                        assistant_id=asst.assistant_id, **openai_update
+                    )
                 # Delete vector store as late as possible to avoid orphaned assistant
                 if vector_store_id_to_delete:
                     await delete_vector_store_oai(
@@ -6109,14 +6164,13 @@ async def delete_assistant(
 
     # Keep the OAI assistant ID for deletion
     assistant_id = asst.assistant_id
-    assistant_version = asst.version
     await models.Assistant.delete(request.state.db, asst.id)
 
     # Delete vector store as late as possible to avoid orphaned assistant
     if vector_store_obj_id:
         await delete_vector_store_oai(openai_client, vector_store_obj_id)
 
-    if assistant_version <= 2:
+    if assistant_id:
         try:
             await openai_client.beta.assistants.delete(assistant_id)
         except openai.NotFoundError:

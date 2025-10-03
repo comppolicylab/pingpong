@@ -188,9 +188,7 @@
   $: latestIncidentUpdateTimestamps = computeLatestIncidentTimestamps(statusComponents);
   $: resolvedAssistantVersion = Number(assistantVersion ?? $version ?? 0);
   $: statusComponentId =
-    resolvedAssistantVersion >= 3
-      ? api.STATUS_COMPONENT_IDS.nextGen
-      : api.STATUS_COMPONENT_IDS.classic;
+    $version >= 3 ? api.STATUS_COMPONENT_IDS.nextGen : api.STATUS_COMPONENT_IDS.classic;
   $: assistantStatusUpdates = filterLatestIncidentUpdates(
     statusComponents[statusComponentId],
     latestIncidentUpdateTimestamps
@@ -403,6 +401,21 @@
 
   const handleDismissError = () => {
     threadMgr.dismissError();
+  };
+
+  const startNewChat = async () => {
+    if (isAnonymousSession) {
+      if (api.hasAnonymousShareToken()) {
+        api.resetAnonymousSessionToken();
+        await goto(
+          `/group/${classId}/shared/assistant/${$assistantId}?share_token=${api.getAnonymousShareToken()}`
+        );
+      } else {
+        sadToast('Cannot start a new chat in this anonymous session.');
+      }
+    } else {
+      await goto(`/group/${classId}?assistant=${$assistantId}`);
+    }
   };
 
   // Fallback link copy handling for environments (e.g., iframes) where Clipboard API is blocked
@@ -903,10 +916,7 @@
             <span class="flex items-center gap-2">
               {getName(message.data)}
               {#if message.data.role !== 'user' && !assistantDeleted}
-                <AssistantVersionBadge
-                  version={assistantVersion ?? $version}
-                  extraClasses="shrink-0"
-                />
+                <AssistantVersionBadge version={$version} extraClasses="shrink-0" />
               {/if}
             </span>
             <span
@@ -1306,8 +1316,11 @@
             {codeInterpreterAttachmentCount}
             upload={handleUpload}
             remove={handleRemove}
+            threadVersion={$version}
+            assistantVersion={resolvedAssistantVersion}
             on:submit={handleSubmit}
             on:dismissError={handleDismissError}
+            on:startNewChat={startNewChat}
           />
         {:else if data.threadInteractionMode === 'voice' && ($messages.length > 0 || assistantInteractionMode === 'chat')}
           {#if threadRecording && $messages.length > 0 && assistantInteractionMode === 'voice'}
