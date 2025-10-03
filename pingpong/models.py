@@ -2496,7 +2496,7 @@ class Assistant(Base):
         stmt = (
             select(Assistant)
             .join(Assistant.class_)
-            .join(Class.api_key_obj)
+            .outerjoin(Class.api_key_obj)
             .where(
                 and_(
                     Assistant.version == version,
