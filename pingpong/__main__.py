@@ -44,6 +44,7 @@ from pingpong.migrations.m02_remove_responses_threads_assistants import (
     remove_responses_threads,
     remove_responses_threads_assistants,
 )
+from pingpong.migrations.m03_migrate_to_next_gen import migrate_to_next_gen
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.summary import send_class_summary_for_class
@@ -784,6 +785,18 @@ def m02_remove_responses_threads_assistants() -> None:
                 logger.info("Done!")
 
     asyncio.run(_remove_responses_threads_assistants())
+
+
+@db.command("m03_migrate_to_next_gen")
+def m03_migrate_to_next_gen() -> None:
+    async def _m03_migrate_to_next_gen() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Migrating to next-gen...")
+            await migrate_to_next_gen(session)
+            await session.commit()
+            logger.info("Done!")
+
+    asyncio.run(_m03_migrate_to_next_gen())
 
 
 @db.command("m02_remove_responses_threads")

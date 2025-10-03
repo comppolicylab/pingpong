@@ -51,6 +51,7 @@
   import DropdownBadge from '$lib/components/DropdownBadge.svelte';
   import Sanitize from '$lib/components/Sanitize.svelte';
   import { page } from '$app/stores';
+  import { tick } from 'svelte';
   export let data;
 
   // Flag indicating whether we should check for changes before navigating away.
@@ -192,13 +193,14 @@
     acc[model.id] = model.name + (model.is_latest ? ' (Latest)' : ' (Pinned Version)');
     return acc;
   }, {});
+  let forcedAssistantVersion: number | null = null;
+  $: assistantVersion = forcedAssistantVersion || assistant?.version || null;
   $: latestModelOptions = (
     data.models.filter(
       (model) =>
         model.is_latest &&
         !(model.hide_in_model_selector ?? false) &&
-        ((data.isCreating && createClassicAssistant) ||
-        (!data.isCreating && assistant?.version !== 3)
+        ((data.isCreating && createClassicAssistant) || (!data.isCreating && assistantVersion !== 3)
           ? model.supports_classic_assistants
           : model.supports_next_gen_assistants) &&
         model.type === interactionMode
@@ -248,8 +250,7 @@
       (model) =>
         !model.is_latest &&
         !(model.hide_in_model_selector ?? false) &&
-        ((data.isCreating && createClassicAssistant) ||
-        (!data.isCreating && assistant?.version !== 3)
+        ((data.isCreating && createClassicAssistant) || (!data.isCreating && assistantVersion !== 3)
           ? model.supports_classic_assistants
           : model.supports_next_gen_assistants) &&
         model.type === interactionMode
@@ -469,9 +470,14 @@
     }
   };
 
-  const changeInteractionMode = (evt: Event) => {
+  const changeInteractionMode = async (evt: Event) => {
     const target = evt.target as HTMLInputElement;
     const mode = target.value as 'chat' | 'voice';
+    if (mode === 'chat') {
+      forcedAssistantVersion = null;
+    } else {
+      forcedAssistantVersion = 2;
+    }
     if (
       assistant?.interaction_mode === mode &&
       assistant?.temperature !== undefined &&
@@ -494,6 +500,7 @@
       instructions = assistant.instructions;
       hasSetInstructions = true;
     } else {
+      await tick();
       setDefaultModelPrompt(selectedModel);
     }
   };
@@ -707,7 +714,7 @@
       webSearchToolSelect &&
       supportsWebSearch &&
       !(supportsReasoning && reasoningEffortValue === -1) &&
-      ((data.isCreating && !createClassicAssistant) || assistant?.version === 3)
+      ((data.isCreating && !createClassicAssistant) || assistantVersion === 3)
     ) {
       tools.push({ type: 'web_search' });
     }
@@ -1081,7 +1088,7 @@
       <div class="flex flex-row gap-2">
         <DropdownContainer
           footer
-          placeholder={selectedModelName}
+          placeholder={selectedModelName || 'Select a model...'}
           optionNodes={modelNodes}
           optionHeaders={modelHeaders}
           disabled={preventEdits}
@@ -1305,7 +1312,7 @@
     </div>
     {#if !data?.enforceClassicAssistants}
       <div class="col-span-2 mb-4">
-        {#if (data.isCreating && createClassicAssistant) || (!data.isCreating && assistant?.version !== 3)}
+        {#if (data.isCreating && createClassicAssistant) || (!data.isCreating && assistantVersion !== 3)}
           <div class="col-span-2 mb-3">
             <div class="flex flex-col gap-y-1">
               <Badge
@@ -1764,9 +1771,9 @@
               <div class="col-span-2 mb-1">
                 <span
                   class="text-sm rtl:text-right font-medium block text-gray-900 dark:text-gray-300"
-                  >Assistant Version: {assistant?.version === 3
+                  >Assistant Version: {assistantVersion === 3
                     ? 'Next-Gen Assistants'
-                    : assistant?.version
+                    : assistantVersion
                       ? 'Classic Assistants'
                       : 'No Version Information'}</span
                 >

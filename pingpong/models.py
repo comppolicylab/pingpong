@@ -2485,6 +2485,33 @@ class Assistant(Base):
         for assistant in result:
             yield assistant.Assistant
 
+    @classmethod
+    async def get_all_openai_assistants_by_version_and_interaction_mode(
+        cls,
+        session: AsyncSession,
+        version: int,
+        interaction_mode: schemas.InteractionMode,
+    ) -> AsyncGenerator["Assistant", None]:
+        """Get all assistants by version and interaction mode."""
+        stmt = (
+            select(Assistant)
+            .join(Assistant.class_)
+            .outerjoin(Class.api_key_obj)
+            .where(
+                and_(
+                    Assistant.version == version,
+                    Assistant.interaction_mode == interaction_mode,
+                    or_(
+                        APIKey.provider == "openai",
+                        Class.api_key.is_not(None),
+                    ),
+                )
+            )
+        )
+        result = await session.execute(stmt)
+        for assistant in result:
+            yield assistant.Assistant
+
 
 class LMSClass(Base):
     __tablename__ = "lms_classes"
@@ -4530,11 +4557,22 @@ class Thread(Base):
 
     @classmethod
     async def update_tools_available(
-        cls, session: AsyncSession, assistant_id: int, tools: str
+        cls,
+        session: AsyncSession,
+        assistant_id: int,
+        tools: str,
+        version: int,
+        interaction_mode: str,
     ) -> None:
         stmt = (
             update(Thread)
-            .where(Thread.assistant_id == int(assistant_id))
+            .where(
+                and_(
+                    Thread.assistant_id == assistant_id,
+                    Thread.version == version,
+                    Thread.interaction_mode == interaction_mode,
+                )
+            )
             .values(tools_available=tools)
         )
         await session.execute(stmt)

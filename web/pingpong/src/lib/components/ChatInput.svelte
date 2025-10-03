@@ -39,6 +39,7 @@
     CloseOutline,
     ExclamationCircleOutline,
     FileImageOutline,
+    InfoCircleOutline,
     QuestionCircleOutline
   } from 'flowbite-svelte-icons';
   import Sanitize from '$lib/components/Sanitize.svelte';
@@ -82,6 +83,9 @@
    * Function to call for deleting files.
    */
   export let remove: FileRemover | null = null;
+
+  export let assistantVersion: number | null = null;
+  export let threadVersion: number | null = null;
 
   /**
    * Files to accept for file search. If null, file search is disabled.
@@ -430,9 +434,39 @@
   <input type="hidden" name="code_interpreter_file_ids" bind:value={codeInterpreterFileIds} />
   <div class="flex px-1 md:px-2 flex-col">
     <div style="opacity: 1; height: auto;">
+      {#if canSubmit && assistantVersion !== null && threadVersion !== null && assistantVersion > threadVersion}
+        <div
+          class="border border-gray-300 -mb-4 relative flex gap-2 flex-wrap rounded-t-2xl border-b-0 pt-2.5 pb-6 px-3.5 bg-gray-50"
+          use:fixFileListHeight={$allFiles}
+          bind:this={allFileListRef}
+        >
+          <div class="w-full">
+            <div class="flex w-full flex-col items-center md:flex-row gap-2">
+              <div class="text-gray-600 flex flex-row items-center gap-4 md:w-full">
+                <div class="flex flex-row items-start gap-2">
+                  <InfoCircleOutline />
+                  <div>
+                    <div class="text-sm">
+                      You are using an older version of this assistant, which relies on an OpenAI
+                      service that may be slower or less reliable. To get the best experience, start
+                      a new chat.
+                    </div>
+                  </div>
+                </div>
+                <Button
+                  class="border border-gray-800 from-gray-800 bg-gradient-to-t to-gray-600  text-white hover:bg-gradient-to-t hover:from-gray-700 hover:to-gray-500 hover:border-gray-700 shrink-0 py-1.5 px-3 text-xs md:text-sm"
+                  on:click={() => dispatcher('startNewChat')}
+                >
+                  Start a new chat
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      {/if}
       {#if $allFiles.length > 0}
         <div
-          class="border border-blue-light-40 relative flex -mb-3 gap-2 flex-wrap rounded-t-2xl pb-5 pt-2.5 bg-blue-light-50"
+          class="border border-blue-light-40 relative flex -mb-3 gap-2 flex-wrap rounded-t-2xl z-10 pb-5 pt-2.5 bg-blue-light-50"
           use:fixFileListHeight={$allFiles}
           bind:this={allFileListRef}
         >
@@ -451,7 +485,7 @@
 
       {#if combinedErrorMessage}
         <div
-          class="border relative z-10 px-3.5 text-brown-dark border-red-light-30 bg-red-light-40 -mb-1 rounded-t-xl border-b-0 pb-2.5 pt-2"
+          class="border relative z-20 px-3.5 text-brown-dark border-red-light-30 bg-red-light-40 -mb-1 rounded-t-xl border-b-0 pb-2.5 pt-2"
         >
           <div class="w-full">
             <div class="flex w-full flex-col items-center md:flex-row gap-2">
