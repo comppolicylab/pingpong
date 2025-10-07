@@ -18,8 +18,8 @@ async def _is_recording_available(recording_id: str) -> bool:
     Attempts to start streaming the file and closes the generator immediately
     to avoid leaking resources.
     """
-    agen = config.audio_store.store.get_file(recording_id)
     try:
+        agen = config.audio_store.store.get_file(recording_id)
         async for _ in agen:
             # We could stream the entire file, but for an existence check, a
             # single successful chunk is sufficient.
@@ -31,10 +31,6 @@ async def _is_recording_available(recording_id: str) -> bool:
             pass
         return True
     except Exception:
-        try:
-            await agen.aclose()
-        except Exception:
-            pass
         return False
 
 
@@ -94,7 +90,54 @@ async def check_voice_mode_recordings(session: AsyncSession) -> None:
         moderator_cache[class_id] = result
         return result
 
-    row_no = 0
+    async def build_csv_row(recording: models.VoiceModeRecording) -> list[str]:
+        """Build a CSV row for a missing or unavailable recording."""
+        class_id = recording.thread.class_id if recording.thread else None
+        thread_id = recording.thread_id
+        thread_url = (
+            config.url(f"/group/{class_id}/thread/{thread_id}")
+            if class_id and thread_id
+            else ""
+        )
+        course_name = (
+            recording.thread.class_.name
+            if recording.thread and recording.thread.class_
+            else ""
+        )
+        # Thread users
+        t_users = recording.thread.users if recording.thread else []
+        user_ids = ", ".join(str(u.id) for u in t_users)
+        user_names = ", ".join(
+            (
+                u.display_name
+                or f"{u.first_name or ''} {u.last_name or ''}".strip()
+                or ""
+            )
+            for u in t_users
+        )
+        user_emails = ", ".join((u.email or "") for u in t_users)
+        mod_names = mod_emails = ""
+        if class_id:
+            mod_names, mod_emails = await get_moderators(int(class_id))
+
+        return [
+            recording.id,
+            recording.recording_id or "",
+            (
+                recording.created_at.astimezone(timezone.utc).isoformat()
+                if recording.created_at
+                else ""
+            ),
+            course_name,
+            thread_id or "",
+            thread_url,
+            user_ids,
+            user_names,
+            user_emails,
+            mod_names,
+            mod_emails,
+        ]
+
     async for recording in models.VoiceModeRecording.get_all_gen(session):
         total += 1
         rid = recording.recording_id
@@ -105,54 +148,7 @@ async def check_voice_mode_recordings(session: AsyncSession) -> None:
                 recording.id,
                 getattr(recording, "thread_id", None),
             )
-            # Build CSV row for missing recording_id
-            class_id = recording.thread.class_id if recording.thread else None
-            thread_id = recording.thread_id
-            thread_url = (
-                config.url(f"/group/{class_id}/thread/{thread_id}")
-                if class_id and thread_id
-                else ""
-            )
-            course_name = (
-                recording.thread.class_.name
-                if recording.thread and recording.thread.class_
-                else ""
-            )
-            # Thread users
-            t_users = recording.thread.users if recording.thread else []
-            user_ids = ", ".join(str(u.id) for u in t_users)
-            user_names = ", ".join(
-                (
-                    u.display_name
-                    or f"{u.first_name or ''} {u.last_name or ''}".strip()
-                    or ""
-                )
-                for u in t_users
-            )
-            user_emails = ", ".join((u.email or "") for u in t_users)
-            mod_names = mod_emails = ""
-            if class_id:
-                mod_names, mod_emails = await get_moderators(int(class_id))
-
-            csvwriter.writerow(
-                [
-                    recording.id,
-                    recording.recording_id or "",
-                    (
-                        recording.created_at.astimezone(timezone.utc).isoformat()
-                        if recording.created_at
-                        else ""
-                    ),
-                    course_name,
-                    thread_id or "",
-                    thread_url,
-                    user_ids,
-                    user_names,
-                    user_emails,
-                    mod_names,
-                    mod_emails,
-                ]
-            )
+            csvwriter.writerow(await build_csv_row(recording))
             continue
 
         available = await _is_recording_available(rid)
@@ -165,55 +161,7 @@ async def check_voice_mode_recordings(session: AsyncSession) -> None:
                 recording.thread_id,
                 recording.thread.class_.name,
             )
-            # Build CSV row for unavailable recording in the store
-            row_no += 1
-            class_id = recording.thread.class_id if recording.thread else None
-            thread_id = recording.thread_id
-            thread_url = (
-                config.url(f"/group/{class_id}/thread/{thread_id}")
-                if class_id and thread_id
-                else ""
-            )
-            course_name = (
-                recording.thread.class_.name
-                if recording.thread and recording.thread.class_
-                else ""
-            )
-            # Thread users
-            t_users = recording.thread.users if recording.thread else []
-            user_ids = ", ".join(str(u.id) for u in t_users)
-            user_names = ", ".join(
-                (
-                    u.display_name
-                    or f"{u.first_name or ''} {u.last_name or ''}".strip()
-                    or ""
-                )
-                for u in t_users
-            )
-            user_emails = ", ".join((u.email or "") for u in t_users)
-            mod_names = mod_emails = ""
-            if class_id:
-                mod_names, mod_emails = await get_moderators(int(class_id))
-
-            csvwriter.writerow(
-                [
-                    recording.id,
-                    recording.recording_id or "",
-                    (
-                        recording.created_at.astimezone(timezone.utc).isoformat()
-                        if recording.created_at
-                        else ""
-                    ),
-                    course_name,
-                    thread_id or "",
-                    thread_url,
-                    user_ids,
-                    user_names,
-                    user_emails,
-                    mod_names,
-                    mod_emails,
-                ]
-            )
+            csvwriter.writerow(await build_csv_row(recording))
 
     logger.info(
         "Checked %s VoiceModeRecording rows. Missing/unavailable: %s",
@@ -223,7 +171,7 @@ async def check_voice_mode_recordings(session: AsyncSession) -> None:
 
     # Save CSV to the local exports store
     csv_buffer.seek(0)
-    filename = f"missing_voice_mode_recordings_{datetime.now().isoformat()}.csv"
+    filename = f"missing_voice_mode_recordings_{datetime.now().strftime('%Y_%m_%d_%H_%M_%S')}.csv"
     await config.artifact_store.store.put(
         filename, csv_buffer, "text/csv;charset=utf-8"
     )
