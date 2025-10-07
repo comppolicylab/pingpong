@@ -174,7 +174,7 @@ async def check_voice_mode_recordings(session: AsyncSession) -> None:
 
     # Save CSV to the local exports store
     csv_buffer.seek(0)
-    filename = f"missing_voice_mode_recordings_{datetime.now().strftime('%Y_%m_%d_%H_%M_%S')}.csv"
+    filename = f"missing_voice_mode_recordings_{datetime.now(timezone.utc).strftime('%Y_%m_%d_%H_%M_%S')}.csv"
     await config.artifact_store.store.put(
         filename, csv_buffer, "text/csv;charset=utf-8"
     )
