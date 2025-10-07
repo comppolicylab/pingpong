@@ -933,9 +933,6 @@
         }
       }
 
-      // Cancel the automatic navigation so we can handle file deletion first
-      nav.cancel();
-
       // Delete any private files that were uploaded but not saved.
       const filesToDelete = [...$privateUploadFSFileInfo, ...$privateUploadCIFileInfo]
         .filter((f) => f.state === 'success')
@@ -951,7 +948,7 @@
 
       // Now manually navigate to the intended destination
       checkForChanges = false;
-      goto(nav.to.url);
+      return;
     }
   });
 </script>
