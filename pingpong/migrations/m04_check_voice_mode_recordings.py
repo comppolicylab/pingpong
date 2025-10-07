@@ -162,7 +162,7 @@ async def check_voice_mode_recordings(session: AsyncSession) -> None:
                 recording.id,
                 rid,
                 recording.thread_id,
-                recording.thread.class_.name,
+                getattr(getattr(recording.thread, "class_", None), "name", None),
             )
             csvwriter.writerow(await build_csv_row(recording))
 
