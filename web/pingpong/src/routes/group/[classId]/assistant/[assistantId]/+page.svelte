@@ -174,16 +174,18 @@
   };
   const defaultTools = [{ type: 'file_search' }];
 
-  let createClassicAssistant = false;
+  let createClassicAssistantByProviderOrUser = false;
   let hasSetCreateClassicAssistant = false;
   $: if (
     data?.enforceClassicAssistants !== undefined &&
     data?.enforceClassicAssistants !== null &&
     !hasSetCreateClassicAssistant
   ) {
-    createClassicAssistant = data?.enforceClassicAssistants;
+    createClassicAssistantByProviderOrUser = data?.enforceClassicAssistants;
     hasSetCreateClassicAssistant = true;
   }
+  $: createClassicAssistant = createClassicAssistantByProviderOrUser || interactionMode === 'voice';
+  $: isClassicRequired = data?.enforceClassicAssistants || interactionMode === 'voice';
 
   $: chatModelCount = data.models.filter((model) => model.type === 'chat').length;
   $: audioModelCount = data.models.filter((model) => model.type === 'voice').length;
@@ -1816,12 +1818,19 @@
                 <Checkbox
                   id="create_classic_assistant"
                   name="create_classic_assistant"
-                  disabled={preventEdits || data?.enforceClassicAssistants}
-                  bind:checked={createClassicAssistant}
+                  class={isClassicRequired ? 'text-gray-400 grayscale contrast-50' : ''}
+                  disabled={preventEdits || isClassicRequired}
+                  checked={createClassicAssistant}
+                  on:change={() => {
+                    createClassicAssistantByProviderOrUser =
+                      !createClassicAssistantByProviderOrUser;
+                  }}
                   ><div class="flex flex-wrap gap-1">
                     <div>Create Classic Assistant</div>
                     {#if data?.enforceClassicAssistants}<div>&middot;</div>
                       <div>Next-Gen Assistants unavailable for your AI Provider</div>{/if}
+                    {#if interactionMode === 'voice'}<div>&middot;</div>
+                      <div>Voice Mode requires Classic Assistants</div>{/if}
                   </div></Checkbox
                 >
                 <Helper
