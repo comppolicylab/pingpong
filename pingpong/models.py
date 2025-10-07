@@ -3344,6 +3344,20 @@ class VoiceModeRecording(Base):
         stmt = delete(VoiceModeRecording).where(VoiceModeRecording.id == id_)
         await session.execute(stmt)
 
+    @classmethod
+    async def get_all_gen(
+        cls, session: AsyncSession
+    ) -> AsyncGenerator["VoiceModeRecording", None]:
+        # Select all recordings
+        # Load thread relationship eagerly
+        # In threads, load the full class_ relationship eagerly
+        stmt = select(VoiceModeRecording).options(
+            joinedload(VoiceModeRecording.thread).joinedload(Thread.class_)
+        )
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.VoiceModeRecording
+
 
 class AnonymousSession(Base):
     __tablename__ = "anonymous_sessions"
