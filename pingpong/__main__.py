@@ -45,6 +45,9 @@ from pingpong.migrations.m02_remove_responses_threads_assistants import (
     remove_responses_threads_assistants,
 )
 from pingpong.migrations.m03_migrate_to_next_gen import migrate_to_next_gen
+from pingpong.migrations.m04_check_voice_mode_recordings import (
+    check_voice_mode_recordings,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.summary import send_class_summary_for_class
@@ -797,6 +800,17 @@ def m03_migrate_to_next_gen() -> None:
             logger.info("Done!")
 
     asyncio.run(_m03_migrate_to_next_gen())
+
+
+@db.command("m04_check_voice_mode_recordings")
+def m04_check_voice_mode_recordings() -> None:
+    async def _m04_check_voice_mode_recordings() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Checking VoiceModeRecording availability...")
+            await check_voice_mode_recordings(session)
+            logger.info("Done!")
+
+    asyncio.run(_m04_check_voice_mode_recordings())
 
 
 @db.command("m02_remove_responses_threads")
