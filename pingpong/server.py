@@ -2656,9 +2656,43 @@ async def get_thread_recording(
             status_code=403,
             detail="You do not have permission to view this recording.",
         )
+
+    async def _prefetch_stream(gen):
+        it = gen.__aiter__()
+        try:
+            first = await it.__anext__()
+        except StopAsyncIteration:
+
+            async def _empty():
+                if False:
+                    yield b""
+
+            return _empty()
+        except AudioStoreError:
+            raise
+
+        async def _wrapped():
+            yield first
+            try:
+                async for chunk in it:
+                    yield chunk
+            except AudioStoreError:
+                logger.info(
+                    "AudioStoreError while streaming recording; aborting stream."
+                )
+                return
+            except Exception:
+                logger.exception("Unexpected error while streaming recording")
+                return
+
+        return _wrapped()
+
     try:
+        stream = await _prefetch_stream(
+            config.audio_store.store.get_file(thread.voice_mode_recording.recording_id)
+        )
         return StreamingResponse(
-            config.audio_store.store.get_file(thread.voice_mode_recording.recording_id),
+            stream,
             media_type="application/octet-stream",
             headers={
                 "Content-Disposition": f'attachment; filename="{thread.voice_mode_recording}"'
