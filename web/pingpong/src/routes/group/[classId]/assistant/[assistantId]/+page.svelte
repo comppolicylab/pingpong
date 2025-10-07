@@ -49,8 +49,10 @@
   import DropdownFooter from '$lib/components/DropdownFooter.svelte';
   import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
   import DropdownBadge from '$lib/components/DropdownBadge.svelte';
+  import StatusErrors from '$lib/components/StatusErrors.svelte';
   import Sanitize from '$lib/components/Sanitize.svelte';
   import { page } from '$app/stores';
+  import { computeLatestIncidentTimestamps, filterLatestIncidentUpdates } from '$lib/statusUpdates';
   import { tick } from 'svelte';
   export let data;
 
@@ -195,6 +197,22 @@
   }, {});
   let forcedAssistantVersion: number | null = null;
   $: assistantVersion = forcedAssistantVersion || assistant?.version || null;
+  $: statusComponents = (data.statusComponents || {}) as Partial<
+    Record<string, api.StatusComponentUpdate[]>
+  >;
+  let latestIncidentUpdateTimestamps: Record<string, number> = {};
+  $: latestIncidentUpdateTimestamps = computeLatestIncidentTimestamps(statusComponents);
+  $: statusComponentId = data.isCreating
+    ? createClassicAssistant
+      ? api.STATUS_COMPONENT_IDS.classic
+      : api.STATUS_COMPONENT_IDS.nextGen
+    : assistantVersion === 3
+      ? api.STATUS_COMPONENT_IDS.nextGen
+      : api.STATUS_COMPONENT_IDS.classic;
+  $: assistantStatusUpdates = filterLatestIncidentUpdates(
+    statusComponents[statusComponentId],
+    latestIncidentUpdateTimestamps
+  );
   $: latestModelOptions = (
     data.models.filter(
       (model) =>
@@ -993,6 +1011,16 @@
       </div>
     {/if}
   </div>
+  {#if assistantStatusUpdates.length > 0}
+    <fieldset class="border border-gray-200 rounded-2xl px-4 py-3 mb-6 -mt-2 bg-white min-w-0">
+      <legend
+        class="ml-2.5 px-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-600"
+      >
+        Issues affecting this assistant
+      </legend>
+      <div class="-mx-3"><StatusErrors {assistantStatusUpdates} /></div>
+    </fieldset>
+  {/if}
   {#if preventEdits}
     <div
       class="flex col-span-2 items-center rounded-lg text-white bg-gradient-to-r from-gray-800 to-gray-600 border-gradient-to-r from-gray-800 to-gray-600 p-4 mb-4"
