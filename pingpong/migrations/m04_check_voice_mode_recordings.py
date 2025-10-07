@@ -18,18 +18,21 @@ async def _is_recording_available(recording_id: str) -> bool:
     Attempts to start streaming the file and closes the generator immediately
     to avoid leaking resources.
     """
+    agen = None
     try:
         agen = config.audio_store.store.get_file(recording_id)
-        async for _ in agen:
-            # We could stream the entire file, but for an existence check, a
-            # single successful chunk is sufficient.
-            break
-        # Ensure the generator is closed to release resources
         try:
-            await agen.aclose()
-        except Exception:
-            pass
-        return True
+            async for _ in agen:
+                # We could stream the entire file, but for an existence check, a
+                # single successful chunk is sufficient.
+                break
+            return True
+        finally:
+            if agen is not None:
+                try:
+                    await agen.aclose()
+                except Exception:
+                    pass
     except Exception:
         return False
 
