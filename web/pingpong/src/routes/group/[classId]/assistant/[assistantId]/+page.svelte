@@ -107,7 +107,7 @@
     instructions = assistant.instructions;
     hasSetInstructions = true;
   }
-  let hidePrompt = true;
+  let hidePrompt = data.isCreating;
   let hasSetHidePrompt = false;
   $: if (
     assistant?.hide_prompt !== undefined &&
@@ -117,7 +117,7 @@
     hidePrompt = assistant?.hide_prompt;
     hasSetHidePrompt = true;
   }
-  let useLatex = true;
+  let useLatex = data.isCreating;
   let hasSetUseLatex = false;
   $: if (assistant?.use_latex !== undefined && assistant?.use_latex !== null && !hasSetUseLatex) {
     useLatex = assistant?.use_latex;
