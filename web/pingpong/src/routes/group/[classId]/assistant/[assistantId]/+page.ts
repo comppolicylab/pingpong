@@ -57,13 +57,14 @@ async function loadAssistantFilesOrNull(
 export const load: PageLoad = async ({ params, fetch, parent }) => {
   const classId = parseInt(params.classId, 10);
   const isCreating = params.assistantId === 'new';
+  const parentData = await parent();
   const { models, defaultPrompts, enforceClassicAssistants } = await ensureModels(fetch, classId);
 
   let assistant: Assistant | null = null;
   let assistantFiles: AssistantFiles | null = null;
 
   if (!isCreating) {
-    const { assistants } = await parent();
+    const assistants = parentData.assistants ?? [];
     const id = parseInt(params.assistantId, 10);
     assistant = assistants.find((a) => a.id === id) ?? null;
 
@@ -80,6 +81,7 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
     selectedCodeInterpreterFiles: assistantFiles ? assistantFiles.code_interpreter_files : [],
     models,
     defaultPrompts,
-    enforceClassicAssistants
+    enforceClassicAssistants,
+    statusComponents: parentData.statusComponents ?? {}
   };
 };
