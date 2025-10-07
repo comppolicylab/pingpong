@@ -853,6 +853,7 @@
 
     for await (const chunk of await res) {
       if ((chunk as { type: string }).type === 'error') {
+        sadToast(`Failed to load recording: ${(chunk as { detail: string }).detail}`);
         return;
       }
       chunks.push(chunk as Uint8Array);
