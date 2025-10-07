@@ -79,7 +79,8 @@ async def check_voice_mode_recordings(session: AsyncSession) -> None:
                 moderator_ids = await c.list_entities(
                     target=f"class:{class_id}", relation="teacher", type_="user"
                 )
-        except Exception:
+        except Exception as e:
+            logger.exception(f"Failed to fetch moderators for class_id={class_id}: {e}")
             moderator_ids = []
         if moderator_ids:
             users = await models.User.get_all_by_id(session, moderator_ids)
