@@ -496,7 +496,6 @@
       forcedAssistantVersion = null;
     } else {
       forcedAssistantVersion = 2;
-      createClassicAssistant = true;
     }
     if (
       assistant?.interaction_mode === mode &&
