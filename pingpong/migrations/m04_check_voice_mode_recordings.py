@@ -32,7 +32,10 @@ async def _is_recording_available(recording_id: str) -> bool:
                 try:
                     await agen.aclose()
                 except Exception:
-                    logger.exception("Exception occurred while closing the async generator for recording_id=%s", recording_id)
+                    logger.exception(
+                        "Exception occurred while closing the async generator for recording_id=%s",
+                        recording_id,
+                    )
     except Exception:
         return False
 
