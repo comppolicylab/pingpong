@@ -185,6 +185,7 @@
     hasSetCreateClassicAssistant = true;
   }
   $: createClassicAssistant = createClassicAssistantByProviderOrUser || interactionMode === 'voice';
+  $: isClassicRequired = data?.enforceClassicAssistants || interactionMode === 'voice';
 
   $: chatModelCount = data.models.filter((model) => model.type === 'chat').length;
   $: audioModelCount = data.models.filter((model) => model.type === 'voice').length;
@@ -1817,12 +1818,8 @@
                 <Checkbox
                   id="create_classic_assistant"
                   name="create_classic_assistant"
-                  class={data?.enforceClassicAssistants || interactionMode === 'voice'
-                    ? 'text-gray-400 grayscale contrast-50'
-                    : ''}
-                  disabled={preventEdits ||
-                    data?.enforceClassicAssistants ||
-                    interactionMode === 'voice'}
+                  class={isClassicRequired ? 'text-gray-400 grayscale contrast-50' : ''}
+                  disabled={preventEdits || isClassicRequired}
                   checked={createClassicAssistant}
                   on:change={() => {
                     createClassicAssistantByProviderOrUser =
