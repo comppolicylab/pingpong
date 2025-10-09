@@ -55,7 +55,10 @@ from pingpong.emails import (
 )
 from pingpong.realtime import browser_realtime_websocket
 from pingpong.session import populate_request
-from pingpong.stats import get_statistics
+from pingpong.stats import (
+    get_statistics,
+    get_statistics_by_institution as get_institution_statistics,
+)
 from pingpong.summary import send_class_summary_to_user_task
 from .animal_hash import name, process_threads, pseudonym, user_names
 from openai.types.beta.assistant_create_params import ToolResources
@@ -953,6 +956,16 @@ async def create_class(
 )
 async def get_stats(request: Request):
     statistics = await get_statistics(request.state.db)
+    return schemas.StatisticsResponse(statistics=statistics)
+
+
+@v1.get(
+    "/stats/{institution_id}",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.StatisticsResponse,
+)
+async def get_stats_by_institution(institution_id: int, request: Request):
+    statistics = await get_institution_statistics(request.state.db, institution_id)
     return schemas.StatisticsResponse(statistics=statistics)
 
 
