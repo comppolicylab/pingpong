@@ -960,16 +960,6 @@ async def get_stats(request: Request):
 
 
 @v1.get(
-    "/stats/{institution_id}",
-    dependencies=[Depends(Authz("admin"))],
-    response_model=schemas.StatisticsResponse,
-)
-async def get_stats_by_institution(institution_id: int, request: Request):
-    statistics = await get_institution_statistics(request.state.db, institution_id)
-    return schemas.StatisticsResponse(statistics=statistics)
-
-
-@v1.get(
     "/stats/models",
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.ModelStatisticsResponse,
@@ -978,6 +968,16 @@ async def get_models_stats(request: Request):
     counts = await models.Assistant.get_count_by_model(request.state.db)
     stats = [{"model": k, "assistant_count": v} for (k, v) in counts]
     return schemas.ModelStatisticsResponse(statistics=stats)
+
+
+@v1.get(
+    "/stats/institutions/{institution_id}",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.StatisticsResponse,
+)
+async def get_stats_by_institution(institution_id: int, request: Request):
+    statistics = await get_institution_statistics(request.state.db, institution_id)
+    return schemas.StatisticsResponse(statistics=statistics)
 
 
 @v1.get(
