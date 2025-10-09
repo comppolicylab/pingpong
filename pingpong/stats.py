@@ -39,7 +39,7 @@ async def get_statistics(session: AsyncSession) -> Statistics:
 async def get_statistics_by_institution(
     session: AsyncSession, institution_id: int
 ) -> Statistics:
-    inst_id = int(institution_id)
+    inst_id = institution_id
 
     classes_count_stmt = (
         select(func.count())
