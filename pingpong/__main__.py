@@ -870,7 +870,7 @@ def get_inactive_s3_files() -> None:
         async with config.db.driver.async_session() as session:
             logger.info("Getting inactive S3 files...")
             async for s3_file in S3File.get_s3_files_without_files(session):
-                logger.info(f"Inactive S3 file found: {s3_file.id}, {s3_file.key}")
+                logger.info(f"Inactive S3 file found: {s3_file.id}")
             logger.info("Done!")
 
     asyncio.run(_get_inactive_s3_files())
