@@ -4542,7 +4542,7 @@ class Thread(Base):
             yield row.Thread
 
     @classmethod
-    async def add_code_interpeter_files(
+    async def add_code_interpreter_files(
         cls, session: AsyncSession, thread_id: int, file_ids: list[str]
     ) -> None:
         if not file_ids:
