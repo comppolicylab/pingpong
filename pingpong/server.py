@@ -4473,7 +4473,7 @@ async def send_message(
                 thread.updated = func.now()
 
         if data.code_interpreter_file_ids:
-            await models.Thread.add_code_interpeter_files(
+            await models.Thread.add_code_interpreter_files(
                 request.state.db, thread.id, data.code_interpreter_file_ids
             )
 
