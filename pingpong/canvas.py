@@ -520,12 +520,12 @@ class CanvasCourseClient(ABC):
         #           term for each course is returned.
 
         params = {"include[]": ["enrollments"]}
-        is_first_page = True
 
+        page_num = 0
         async for result in self._request_all_pages(request_url, params=params):
-            if not result and is_first_page:
-                return False
-            is_first_page = False
+            if not result:
+                return page_num == 0
+            page_num += 1
             for user in result:
                 if (
                     self.config.sso_target
