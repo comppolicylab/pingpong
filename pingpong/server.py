@@ -2850,6 +2850,19 @@ async def export_class_threads_multiple_classes(
 
 
 @v1.get(
+    "/admin/{class_id}/lms",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.ClassLMSInfo,
+)
+async def get_class_lms_data(class_id: str, request: Request):
+    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    if not class_:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    return class_
+
+
+@v1.get(
     "/class/{class_id}/export/download",
     dependencies=[Depends(Authz("supervisor", "class:{class_id}"))],
 )

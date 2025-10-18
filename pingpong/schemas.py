@@ -941,11 +941,11 @@ class CanvasAccessToken(BaseModel):
 
 
 class CanvasStoredAccessToken(BaseModel):
-    user_id: int
-    access_token: str
-    refresh_token: str
-    expires_in: int
-    token_added_at: datetime
+    user_id: int | None = None
+    access_token: str | None = None
+    refresh_token: str | None = None
+    expires_in: int | None = None
+    token_added_at: datetime | None = None
     now: datetime
 
     class Config:
@@ -1034,6 +1034,25 @@ class Class(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ClassLMSInfo(BaseModel):
+    id: int
+    name: str
+    created: datetime
+    updated: datetime | None
+    private: bool | None = None
+    lms_user: LMSUser | None = None
+    lms_type: LMSType | None = None
+    lms_tenant: str | None = None
+    lms_status: LMSStatus | None = None
+    lms_class: LMSClass | None = None
+    lms_course_id: int | None = None
+    lms_access_token: SecretStr | None = None
+    lms_refresh_token: SecretStr | None = None
+    lms_expires_in: int | None = None
+    lms_token_added_at: datetime | None = None
+    lms_last_synced: datetime | None = None
 
 
 class CopyClassRequest(BaseModel):

@@ -181,12 +181,20 @@ class CanvasCourseClient(ABC):
         response = await Class.get_lms_token(self.db, int(self.class_id))
 
         # If no Canvas class is found, the tuple will be None, so we can detect that here
-        if not response.now:
+        if not response or not response.now:
             raise CanvasException("Could not locate PingPong group", code=404)
 
         # No Canvas access token is found for this class
-        if not response.access_token:
-            raise CanvasException("No Canvas access token for class", code=404)
+        if (
+            not response.access_token
+            or not response.refresh_token
+            or not response.expires_in
+            or not response.token_added_at
+        ):
+            raise CanvasException(
+                "No Canvas access token or missing token infromation for class",
+                code=404,
+            )
 
         # Check if the user making the request is the user whose Canvas account is connected for the class
         if check_authorized_user and response.user_id != self.user_id:
