@@ -537,7 +537,7 @@ class CanvasCourseClient(ABC):
                     )
                     raise CanvasException(
                         code=403,
-                        detail="You do not have permission to access SIS information for at least one user in this class. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
+                        detail="You do not have permission to access SSO information for at least one user in this class. Please ask another privileged user to set up Canvas Sync. If you're still facing issues, contact your Canvas administrator.",
                     )
                 if not user.get("email"):
                     if self.sync_with_incomplete_profiles:
