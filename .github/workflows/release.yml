@@ -36,7 +36,51 @@ jobs:
         shell: bash
 
       - name: Extract release version
-        run: echo "VERSION_STRIPPED=$(echo ${{ github.event.release.name }} | sed 's/^v//')" >> $GITHUB_ENV
+        shell: bash
+        run: |
+          RELEASE_NAME="${{ github.event.release.name }}"
+          if [[ -z "$RELEASE_NAME" ]]; then
+            echo "Error: release.name is empty"
+            exit 1
+          fi
+
+          if [[ ! "$RELEASE_NAME" =~ ^v ]]; then
+            echo "Error: release.name must start with 'v'. Found: $RELEASE_NAME"
+            exit 1
+          fi
+
+          # Require: v<major>.<minor>[.<patch>][-<prerelease>]
+          # Examples: v1.0, v2.5.1, v3.2.0-beta.1
+          if [[ ! "$RELEASE_NAME" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Error: release.name must follow v<major>.<minor>[.<patch>][-<prerelease>]"
+            echo "Found: $RELEASE_NAME"
+            exit 1
+          fi
+
+          echo "VERSION_STRIPPED=${RELEASE_NAME#v}" >> $GITHUB_ENV
+
+      - name: Compute RELEASE_VERSION
+        shell: bash
+        run: |
+          RELEASE_TAG="${{ github.event.release.tag_name }}"
+          VERSION_STRIPPED="${VERSION_STRIPPED:-}"
+
+          if [[ -z "$RELEASE_TAG" ]]; then
+            echo "Error: release.tag_name is empty"
+            exit 1
+          fi
+
+          # Extract the build version — everything before first '-'
+          BUILD="${RELEASE_TAG%%-*}"
+
+          if [[ ! "$BUILD" =~ ^[0-9]+$ ]]; then
+            echo "Error: Invalid build number. Expected numeric prefix before '-'. Found: $BUILD"
+            exit 1
+          fi
+
+          RELEASE_VERSION="pingpong@${VERSION_STRIPPED}+${BUILD}"
+          echo "RELEASE_VERSION=$RELEASE_VERSION" >> $GITHUB_ENV
+          echo "Computed RELEASE_VERSION=$RELEASE_VERSION"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@0e613a0980cbf65ed5b322eb7a1e075d28913a83
@@ -89,7 +133,7 @@ jobs:
         run: |
           echo "Building Server Image with tag ${{ env.SRV_VERSION }}"
           docker compose -f docker-compose.yml -f docker-compose.prod.yml build \
-            --build-arg SENTRY_RELEASE=${{ env.VERSION_STRIPPED }} \
+            --build-arg SENTRY_RELEASE=${{ env.RELEASE_VERSION }} \
             srv
 
       - name: Push server image for release
@@ -199,5 +243,5 @@ jobs:
           SENTRY_ORG: ${{ vars.SENTRY_ORG }}
           SENTRY_PROJECT: ${{ github.event.release.prerelease && vars.SENTRY_PROJECT_STAGE || vars.SENTRY_PROJECT_PROD }}
         with:
-          environment: production
-          version: ${{ env.VERSION_STRIPPED }}
+          environment: ${{ github.event.release.prerelease && 'staging' || 'production' }}
+          version: ${{ env.RELEASE_VERSION }}
