@@ -14,5 +14,7 @@ def sentry():
             integrations=[AioHttpIntegration()],
             traces_sample_rate=1.0,
             profiles_sample_rate=1.0,
+            profile_lifecycle="trace",
+            enable_logs=True,
         )
     yield
