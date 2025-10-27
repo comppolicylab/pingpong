@@ -3995,11 +3995,11 @@ async def create_thread(
         thread_db_record = await models.Thread.create(request.state.db, new_thread)
 
         if assistant.version == 3:
-            result.instructions = format_instructions(
+            thread_db_record.instructions = format_instructions(
                 assistant.instructions,
                 assistant.use_latex,
                 assistant.use_image_descriptions,
-                thread_id=result.id,
+                thread_id=thread_db_record.id,
                 user_id=request.state.session.user.id,
             )
             tasks_to_run = []
