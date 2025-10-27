@@ -1245,7 +1245,7 @@ class User(Base):
             .options(selectinload(ExternalLogin.provider_obj))
         )
         result = await session.execute(stmt)
-        return [row[0] for row in result]
+        return result.scalars().all()
 
     @classmethod
     async def get_by_share_token(
@@ -4267,9 +4267,7 @@ class Thread(Base):
         await session.execute(stmt)
 
     @classmethod
-    async def create(
-        cls, session: AsyncSession, data: dict, return_run: bool = False
-    ) -> "Thread":
+    async def create(cls, session: AsyncSession, data: dict) -> "Thread":
         code_interpreter_file_ids = data.pop("code_interpreter_file_ids", [])
         image_file_ids = data.pop("image_file_ids", [])
         thread = Thread(**data)

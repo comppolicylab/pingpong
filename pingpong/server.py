@@ -3988,9 +3988,9 @@ async def create_thread(
         and not class_.private,
     }
 
-    result: None | models.Thread = None
+    thread_db_record: None | models.Thread = None
     try:
-        result = await models.Thread.create(request.state.db, new_thread)
+        thread_db_record = await models.Thread.create(request.state.db, new_thread)
 
         if assistant.version == 3:
             tasks_to_run = []
@@ -4043,20 +4043,20 @@ async def create_thread(
 
             run = models.Run(
                 status=schemas.RunStatus.PENDING,
-                thread_id=result.id,
+                thread_id=thread_db_record.id,
                 creator_id=request.state.session.user.id,
                 assistant_id=assistant.id,
                 model=assistant.model,
                 verbosity=assistant.verbosity,
                 reasoning_effort=assistant.reasoning_effort,
                 temperature=assistant.temperature,
-                tools_available=result.tools_available,
+                tools_available=thread_db_record.tools_available,
                 instructions=inject_timestamp_to_instructions(
-                    result.instructions, result.timezone
+                    thread_db_record.instructions, thread_db_record.timezone
                 ),
                 messages=[
                     models.Message(
-                        thread_id=result.id,
+                        thread_id=thread_db_record.id,
                         output_index=0,
                         message_status=schemas.MessageStatus.COMPLETED,
                         role=schemas.MessageRole.USER,
@@ -4074,15 +4074,17 @@ async def create_thread(
             await request.state.db.flush()
 
         grants = [
-            (f"class:{class_id}", "parent", f"thread:{result.id}"),
-        ] + [(f"user:{p.id}", "party", f"thread:{result.id}") for p in parties]
+            (f"class:{class_id}", "parent", f"thread:{thread_db_record.id}"),
+        ] + [
+            (f"user:{p.id}", "party", f"thread:{thread_db_record.id}") for p in parties
+        ]
         if anonymous_session:
             grants.extend(
                 [
                     (
                         f"anonymous_user:{anonymous_session.session_token}",
                         "anonymous_party",
-                        f"thread:{result.id}",
+                        f"thread:{thread_db_record.id}",
                     ),
                     (
                         f"anonymous_user:{anonymous_session.session_token}",
@@ -4096,7 +4098,7 @@ async def create_thread(
                     (
                         f"user:{request.state.session.user.id}",
                         "anonymous_party",
-                        f"thread:{result.id}",
+                        f"thread:{thread_db_record.id}",
                     )
                 )
             if req.file_search_file_ids or req.code_interpreter_file_ids:
@@ -4122,7 +4124,7 @@ async def create_thread(
         await request.state.authz.write_safe(grant=grants)
 
         return {
-            "thread": result,
+            "thread": thread_db_record,
             "session_token": anonymous_session.session_token
             if anonymous_session
             else None,
@@ -4133,11 +4135,11 @@ async def create_thread(
             await openai_client.vector_stores.delete(vector_store_id)
         if thread:
             await openai_client.beta.threads.delete(thread.id)
-        if result:
+        if thread_db_record:
             # Delete users-threads mapping
-            for user in result.users:
-                result.users.remove(user)
-            await result.delete(request.state.db)
+            for user in thread_db_record.users:
+                thread_db_record.users.remove(user)
+            await thread_db_record.delete(request.state.db)
         raise e
 
 
