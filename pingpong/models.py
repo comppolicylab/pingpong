@@ -4840,7 +4840,6 @@ class Thread(Base):
         before: int | None = None,
         after: int | None = None,
         order: Literal["asc", "desc"] = "desc",
-        load_content: bool = True,
     ) -> list["Message"]:
         stmt = select(Message).where(Message.thread_id == thread_id)
 
@@ -4852,12 +4851,11 @@ class Thread(Base):
         ordering = (
             asc(Message.output_index) if order == "asc" else desc(Message.output_index)
         )
-        stmt = stmt.order_by(ordering).limit(limit)
-
-        if load_content:
-            stmt = stmt.options(
-                selectinload(Message.content).selectinload(MessagePart.annotations),
-            )
+        stmt = (
+            stmt.order_by(ordering)
+            .limit(limit)
+            .stmt.options(selectinload(Message.content))
+        )
 
         result = await session.execute(stmt)
         return result.scalars().all()
