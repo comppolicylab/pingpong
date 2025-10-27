@@ -4353,8 +4353,14 @@ class Thread(Base):
             select(Thread)
             .where(Thread.id == int(id_))
             .options(
-                selectinload(Thread.users).load_only(
-                    User.id, User.created, User.anonymous_link_id
+                joinedload(Thread.users).load_only(
+                    User.id,
+                    User.created,
+                    User.anonymous_link_id,
+                    User.first_name,
+                    User.last_name,
+                    User.display_name,
+                    User.email,
                 ),
                 selectinload(Thread.voice_mode_recording),
             )
