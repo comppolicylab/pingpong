@@ -5600,7 +5600,7 @@ async def update_assistant(
     openai_client: OpenAIClient,
 ):
     # Get the existing assistant.
-    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    asst = await models.Assistant.get_by_id_with_ci_files(request.state.db, int(assistant_id))
     grants = list[Relation]()
     revokes = list[Relation]()
 
@@ -5963,10 +5963,12 @@ async def update_assistant(
                     )
                     tool_resources["file_search"] = {}
     except ValueError as e:
+        logger.exception("Error updating assistant files")
         raise HTTPException(
             400, f"Error updating assistant files: {e}. Please try saving again."
         )
     except Exception:
+        logger.exception("Error updating assistant files")
         raise HTTPException(
             500, "Error updating assistant files. Please try saving again."
         )
