@@ -4726,6 +4726,8 @@ async def send_message(
                 status_code=400,
                 detail="Invalid thread version",
             )
+    except HTTPException:
+        raise
     except Exception:
         logger.exception("Error running thread")
         raise HTTPException(
