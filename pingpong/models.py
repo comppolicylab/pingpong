@@ -4869,9 +4869,7 @@ class Thread(Base):
             asc(Message.output_index) if order == "asc" else desc(Message.output_index)
         )
         stmt = (
-            stmt.order_by(ordering)
-            .limit(limit)
-            .stmt.options(selectinload(Message.content))
+            stmt.order_by(ordering).limit(limit).options(selectinload(Message.content))
         )
 
         result = await session.execute(stmt)
