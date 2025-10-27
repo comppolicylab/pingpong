@@ -4306,7 +4306,14 @@ class Thread(Base):
             )
             await session.execute(stmt)
 
-        return await cls.get_by_id_with_users(session, thread.id)
+        result = await session.execute(
+            select(Thread)
+            .options(selectinload(Thread.users))
+            .where(Thread.id == thread.id)
+        )
+        thread = result.scalar_one()
+
+        return thread
 
     @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "Thread":
