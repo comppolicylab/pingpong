@@ -36,7 +36,7 @@
   $: dnaAcCreate = !!data.subscriptionOpts.dna_as_create || false;
   $: dnaAcJoin = !!data.subscriptionOpts.dna_as_join || false;
   $: sortedLogins =
-    data.me.user?.external_logins?.sort((a: api.ExternalLogin, b: api.ExternalLogin) => {
+    data.externalLogins.sort((a: api.ExternalLogin, b: api.ExternalLogin) => {
       const nameA = a.provider_obj.display_name ?? a.provider_obj.name;
       const nameB = b.provider_obj.display_name ?? b.provider_obj.name;
 

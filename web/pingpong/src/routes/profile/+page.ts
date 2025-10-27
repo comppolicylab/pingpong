@@ -3,6 +3,7 @@ import * as api from '$lib/api';
 
 export const load: PageLoad = async ({ fetch }) => {
   const subscriptionsResponse = await api.getActivitySummaries(fetch).then(api.expandResponse);
+  const externalLoginsResponse = await api.getExternalLogins(fetch).then(api.expandResponse);
 
   let subscriptions: api.ActivitySummarySubscription[] = [];
   let subscriptionOpts: api.ActivitySummarySubscriptionAdvancedOpts = {
@@ -16,8 +17,16 @@ export const load: PageLoad = async ({ fetch }) => {
     subscriptionOpts = subscriptionsResponse.data.advanced_opts;
   }
 
+  let externalLogins: api.ExternalLogin[] = [];
+  if (externalLoginsResponse.data) {
+    externalLogins = externalLoginsResponse.data.external_logins.sort((a, b) =>
+      a.provider.localeCompare(b.provider)
+    );
+  }
+
   return {
     subscriptions,
-    subscriptionOpts
+    subscriptionOpts,
+    externalLogins
   };
 };
