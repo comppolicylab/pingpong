@@ -3981,7 +3981,9 @@ async def create_thread(
             assistant.use_image_descriptions,
             thread_id=thread.id if thread and thread.id else None,
             user_id=request.state.session.user.id,
-        ),
+        )
+        if thread and thread.id
+        else None,
         "timezone": req.timezone,
         "display_user_info": assistant.should_record_user_information
         and not class_.private,
@@ -3992,6 +3994,13 @@ async def create_thread(
         result = await models.Thread.create(request.state.db, new_thread)
 
         if assistant.version == 3:
+            result.instructions = format_instructions(
+                assistant.instructions,
+                assistant.use_latex,
+                assistant.use_image_descriptions,
+                thread_id=result.id,
+                user_id=request.state.session.user.id,
+            )
             tasks_to_run = []
 
             async def empty_file_list() -> list[models.File]:
