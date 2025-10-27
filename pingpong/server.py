@@ -3313,7 +3313,7 @@ async def get_last_run(
 
         return {"thread": thread, "run": last_run}
     elif thread.version == 3:
-        last_run = await models.Run.get_latest_run_by_thread_id(
+        last_run = await models.Thread.get_latest_run_by_thread_id(
             request.state.db, thread.id
         )
 

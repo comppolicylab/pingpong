@@ -4333,7 +4333,13 @@ class Thread(Base):
             .where(Thread.id == int(id_))
             .options(
                 joinedload(Thread.users).load_only(
-                    User.id, User.created, User.anonymous_link_id
+                    User.id,
+                    User.created,
+                    User.anonymous_link_id,
+                    User.first_name,
+                    User.last_name,
+                    User.display_name,
+                    User.email,
                 )
             )
         )
