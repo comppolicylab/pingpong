@@ -4308,7 +4308,17 @@ class Thread(Base):
 
         result = await session.execute(
             select(Thread)
-            .options(selectinload(Thread.users))
+            .options(
+                joinedload(Thread.users).load_only(
+                    User.id,
+                    User.created,
+                    User.anonymous_link_id,
+                    User.first_name,
+                    User.last_name,
+                    User.display_name,
+                    User.email,
+                )
+            )
             .where(Thread.id == thread.id)
         )
         thread = result.scalar_one()
