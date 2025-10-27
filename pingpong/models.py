@@ -1245,7 +1245,7 @@ class User(Base):
             .options(selectinload(ExternalLogin.provider_obj))
         )
         result = await session.execute(stmt)
-        return [row.ExternalLogin for row in result]
+        return [row[0] for row in result]
 
     @classmethod
     async def get_by_share_token(
@@ -4830,7 +4830,7 @@ class Thread(Base):
         before: int | None = None,
         after: int | None = None,
         order: Literal["asc", "desc"] = "desc",
-        load_content: bool = False,
+        load_content: bool = True,
     ) -> list["Message"]:
         stmt = select(Message).where(Message.thread_id == thread_id)
 

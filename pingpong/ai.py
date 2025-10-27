@@ -293,11 +293,7 @@ async def get_thread_conversation_name(
             message_str += "USER: Uploaded an image file\n"
     elif thread_version == 3:
         messages_v3 = await models.Thread.list_messages(
-            session=session,
-            thread_id=int(thread_id),
-            limit=10,
-            order="asc",
-            load_content=True,
+            session=session, thread_id=int(thread_id), limit=10, order="asc"
         )
 
         message_str = ""
@@ -3516,7 +3512,7 @@ async def export_class_threads(
             elif thread.version == 3:
                 while True:
                     messages = await models.Thread.list_messages(
-                        session, thread.id, after=after, order="asc", load_content=True
+                        session, thread.id, after=after, order="asc"
                     )
 
                     for message in messages:

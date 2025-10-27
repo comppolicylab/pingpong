@@ -3313,9 +3313,9 @@ async def get_last_run(
 
         return {"thread": thread, "run": last_run}
     elif thread.version == 3:
-        runs = thread.runs
-        runs.sort(key=lambda r: r.created, reverse=True)
-        last_run = runs[0] if runs else None
+        last_run = await models.Run.get_latest_run_by_thread_id(
+            request.state.db, thread.id
+        )
 
         if not last_run:
             return {"thread": thread, "run": None}
@@ -4427,7 +4427,16 @@ async def send_message(
                 status_code=400,
                 detail="Invalid thread version",
             )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error sending message to thread: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail="We faced an error while sending your message. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+        )
 
+    try:
         asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
 
         # When we reach 3 user messages, or if we failed to generate a title before, generate a new one. Only use the first 100 words of each user and assistant message to maintain a low token count.
