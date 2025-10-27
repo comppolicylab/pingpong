@@ -5600,7 +5600,9 @@ async def update_assistant(
     openai_client: OpenAIClient,
 ):
     # Get the existing assistant.
-    asst = await models.Assistant.get_by_id_with_ci_files(request.state.db, int(assistant_id))
+    asst = await models.Assistant.get_by_id_with_ci_files(
+        request.state.db, int(assistant_id)
+    )
     grants = list[Relation]()
     revokes = list[Relation]()
 
