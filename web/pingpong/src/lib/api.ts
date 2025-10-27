@@ -869,6 +869,14 @@ export const getActivitySummaries = async (f: Fetcher) => {
   return await GET<never, ActivitySummarySubscriptions>(f, 'me/activity_summaries');
 };
 
+export type ExternalLoginsResponse = {
+  external_logins: ExternalLogin[];
+};
+
+export const getExternalLogins = async (f: Fetcher) => {
+  return await GET<never, ExternalLoginsResponse>(f, 'me/external-logins');
+};
+
 /**
  * Information about a summary subscription.
  */

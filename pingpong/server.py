@@ -2219,7 +2219,9 @@ async def audio_stream(
 async def get_thread(
     class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
 ):
-    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    thread = await models.Thread.get_by_id_with_users_voice_mode(
+        request.state.db, int(thread_id)
+    )
     if thread.version <= 2:
         (
             messages,
@@ -2332,12 +2334,14 @@ async def get_thread(
     elif thread.version == 3:
         (
             [messages_v3, tool_calls_v3],
+            latest_run,
             [assistant, file_names, all_files],
             is_supervisor_check,
         ) = await asyncio.gather(
             models.Thread.list_messages_tool_calls(
                 request.state.db, thread.id, limit=20, order="desc"
             ),
+            models.Thread.get_latest_run_by_thread_id(request.state.db, thread.id),
             models.Thread.get_thread_components(request.state.db, thread.id),
             request.state.authz.check(
                 [
@@ -2349,9 +2353,6 @@ async def get_thread(
                 ]
             ),
         )
-        runs = thread.runs
-        runs.sort(key=lambda r: r.created, reverse=True)
-        latest_run = runs[0] if runs else None
 
         current_user_ids = [
             request.state.session.user.id
@@ -2644,7 +2645,7 @@ async def get_thread_recording(
 ):
     user_id = request.state.session.user.id
     thread, is_supervisor_check = await asyncio.gather(
-        models.Thread.get_by_id(request.state.db, int(thread_id)),
+        models.Thread.get_by_id_with_users_voice_mode(request.state.db, int(thread_id)),
         request.state.authz.check(
             [
                 (
@@ -2926,7 +2927,7 @@ async def list_thread_messages(
 
     limit = min(limit, 100)
 
-    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    thread = await models.Thread.get_by_id_with_users(request.state.db, int(thread_id))
     if thread.version <= 2:
         messages_task = openai_client.beta.threads.messages.list(
             thread.thread_id, limit=limit, order="asc", before=before
@@ -3312,9 +3313,9 @@ async def get_last_run(
 
         return {"thread": thread, "run": last_run}
     elif thread.version == 3:
-        runs = thread.runs
-        runs.sort(key=lambda r: r.created, reverse=True)
-        last_run = runs[0] if runs else None
+        last_run = await models.Thread.get_latest_run_by_thread_id(
+            request.state.db, thread.id
+        )
 
         if not last_run:
             return {"thread": thread, "run": None}
@@ -3989,16 +3990,16 @@ async def create_thread(
         and not class_.private,
     }
 
-    result: None | models.Thread = None
+    thread_db_record: None | models.Thread = None
     try:
-        result = await models.Thread.create(request.state.db, new_thread)
+        thread_db_record = await models.Thread.create(request.state.db, new_thread)
 
         if assistant.version == 3:
-            result.instructions = format_instructions(
+            thread_db_record.instructions = format_instructions(
                 assistant.instructions,
                 assistant.use_latex,
                 assistant.use_image_descriptions,
-                thread_id=result.id,
+                thread_id=thread_db_record.id,
                 user_id=request.state.session.user.id,
             )
             tasks_to_run = []
@@ -4049,49 +4050,50 @@ async def create_thread(
                     )
                 part_index += 1
 
-            result.runs = [
-                models.Run(
-                    status=schemas.RunStatus.PENDING,
-                    thread_id=result.id,
-                    creator_id=request.state.session.user.id,
-                    assistant_id=assistant.id,
-                    model=assistant.model,
-                    verbosity=assistant.verbosity,
-                    reasoning_effort=assistant.reasoning_effort,
-                    temperature=assistant.temperature,
-                    tools_available=result.tools_available,
-                    instructions=inject_timestamp_to_instructions(
-                        result.instructions, result.timezone
-                    ),
-                    messages=[
-                        models.Message(
-                            thread_id=result.id,
-                            output_index=0,
-                            message_status=schemas.MessageStatus.COMPLETED,
-                            role=schemas.MessageRole.USER,
-                            user_id=request.state.session.user.id,
-                            content=messageContentParts,
-                            file_search_attachments=file_search_files,
-                            code_interpreter_attachments=code_interpreter_files,
-                        )
-                    ]
-                    if messageContentParts
-                    else [],
-                )
-            ]
-            request.state.db.add(result)
+            run = models.Run(
+                status=schemas.RunStatus.PENDING,
+                thread_id=thread_db_record.id,
+                creator_id=request.state.session.user.id,
+                assistant_id=assistant.id,
+                model=assistant.model,
+                verbosity=assistant.verbosity,
+                reasoning_effort=assistant.reasoning_effort,
+                temperature=assistant.temperature,
+                tools_available=thread_db_record.tools_available,
+                instructions=inject_timestamp_to_instructions(
+                    thread_db_record.instructions, thread_db_record.timezone
+                ),
+                messages=[
+                    models.Message(
+                        thread_id=thread_db_record.id,
+                        output_index=0,
+                        message_status=schemas.MessageStatus.COMPLETED,
+                        role=schemas.MessageRole.USER,
+                        user_id=request.state.session.user.id,
+                        content=messageContentParts,
+                        file_search_attachments=file_search_files,
+                        code_interpreter_attachments=code_interpreter_files,
+                    )
+                ]
+                if messageContentParts
+                else [],
+            )
+
+            request.state.db.add(run)
             await request.state.db.flush()
 
         grants = [
-            (f"class:{class_id}", "parent", f"thread:{result.id}"),
-        ] + [(f"user:{p.id}", "party", f"thread:{result.id}") for p in parties]
+            (f"class:{class_id}", "parent", f"thread:{thread_db_record.id}"),
+        ] + [
+            (f"user:{p.id}", "party", f"thread:{thread_db_record.id}") for p in parties
+        ]
         if anonymous_session:
             grants.extend(
                 [
                     (
                         f"anonymous_user:{anonymous_session.session_token}",
                         "anonymous_party",
-                        f"thread:{result.id}",
+                        f"thread:{thread_db_record.id}",
                     ),
                     (
                         f"anonymous_user:{anonymous_session.session_token}",
@@ -4105,7 +4107,7 @@ async def create_thread(
                     (
                         f"user:{request.state.session.user.id}",
                         "anonymous_party",
-                        f"thread:{result.id}",
+                        f"thread:{thread_db_record.id}",
                     )
                 )
             if req.file_search_file_ids or req.code_interpreter_file_ids:
@@ -4131,7 +4133,7 @@ async def create_thread(
         await request.state.authz.write_safe(grant=grants)
 
         return {
-            "thread": result,
+            "thread": thread_db_record,
             "session_token": anonymous_session.session_token
             if anonymous_session
             else None,
@@ -4142,11 +4144,11 @@ async def create_thread(
             await openai_client.vector_stores.delete(vector_store_id)
         if thread:
             await openai_client.beta.threads.delete(thread.id)
-        if result:
+        if thread_db_record:
             # Delete users-threads mapping
-            for user in result.users:
-                result.users.remove(user)
-            await result.delete(request.state.db)
+            for user in thread_db_record.users:
+                thread_db_record.users.remove(user)
+            await thread_db_record.delete(request.state.db)
         raise e
 
 
@@ -4163,7 +4165,9 @@ async def create_run(
     openai_client: OpenAIClient,
     req: schemas.CreateThreadRunRequest = Body(default=None),
 ):
-    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    thread = await models.Thread.get_by_id_with_ci_file_ids(
+        request.state.db, int(thread_id)
+    )
     asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
 
     if not thread or not asst:
@@ -4174,9 +4178,9 @@ async def create_run(
 
     if thread.version == 3:
         try:
-            runs = thread.runs
-            runs.sort(key=lambda r: r.created, reverse=True)
-            last_run = runs[0] if runs else None
+            last_run = await models.Thread.get_latest_run_by_thread_id(
+                request.state.db, thread.id
+            )
             file_search_file_ids: list[str] = []
 
             if last_run and last_run.status == schemas.RunStatus.PENDING:
@@ -4356,82 +4360,91 @@ async def send_message(
     request: Request,
     openai_client: OpenAIClient,
 ):
-    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
-    tool_resources: ToolResources = {}
+    try:
+        thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+        tool_resources: ToolResources = {}
 
-    # Check that assistant exists
-    if not thread.assistant_id:
+        # Check that assistant exists
+        if not thread.assistant_id:
+            raise HTTPException(
+                status_code=404,
+                detail="The assistant for this thread no longer exists.",
+            )
+
+        # Check user has permission to view this assistant
+        if not (
+            await request.state.authz.check(
+                [
+                    (
+                        request.state.auth_user
+                        if not request.state.is_anonymous
+                        else request.state.anonymous_share_token_auth,
+                        "can_view",
+                        f"assistant:{thread.assistant_id}",
+                    ),
+                ]
+            )
+        )[0]:
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to interact with this assistant.",
+            )
+
+        if thread.version <= 2:
+            last_runs_result = await openai_client.beta.threads.runs.list(
+                thread.thread_id, limit=1, order="desc"
+            )
+            last_run = last_runs_result.data[0] if last_runs_result.data else None
+
+            if not last_run:
+                raise HTTPException(
+                    status_code=500,
+                    detail="OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+                )
+
+            if last_run.status not in {
+                "completed",
+                "failed",
+                "incomplete",
+                "expired",
+                "cancelled",
+            }:
+                raise HTTPException(
+                    status_code=409,
+                    detail="OpenAI is still processing your last request. We're fetching the latest status...",
+                )
+        elif thread.version == 3:
+            last_run = await models.Thread.get_latest_run_by_thread_id(
+                request.state.db, thread.id
+            )
+
+            if not last_run:
+                raise HTTPException(
+                    status_code=500,
+                    detail="We're having trouble fetching information about this conversation. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+                )
+
+            if last_run.status in {
+                schemas.RunStatus.QUEUED,
+                schemas.RunStatus.PENDING,
+                schemas.RunStatus.IN_PROGRESS,
+            }:
+                raise HTTPException(
+                    status_code=409,
+                    detail="OpenAI is still processing your last request. We're fetching the latest status...",
+                )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid thread version",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error sending message to thread: %s", e)
         raise HTTPException(
-            status_code=404,
-            detail="The assistant for this thread no longer exists.",
-        )
-
-    # Check user has permission to view this assistant
-    if not (
-        await request.state.authz.check(
-            [
-                (
-                    request.state.auth_user
-                    if not request.state.is_anonymous
-                    else request.state.anonymous_share_token_auth,
-                    "can_view",
-                    f"assistant:{thread.assistant_id}",
-                ),
-            ]
-        )
-    )[0]:
-        raise HTTPException(
-            status_code=403,
-            detail="You do not have permission to interact with this assistant.",
-        )
-
-    if thread.version <= 2:
-        last_runs_result = await openai_client.beta.threads.runs.list(
-            thread.thread_id, limit=1, order="desc"
-        )
-        last_run = last_runs_result.data[0] if last_runs_result.data else None
-
-        if not last_run:
-            raise HTTPException(
-                status_code=500,
-                detail="OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
-            )
-
-        if last_run.status not in {
-            "completed",
-            "failed",
-            "incomplete",
-            "expired",
-            "cancelled",
-        }:
-            raise HTTPException(
-                status_code=409,
-                detail="OpenAI is still processing your last request. We're fetching the latest status...",
-            )
-    elif thread.version == 3:
-        runs = thread.runs
-        runs.sort(key=lambda r: r.created, reverse=True)
-        last_run = runs[0] if runs else None
-
-        if not last_run:
-            raise HTTPException(
-                status_code=500,
-                detail="We're having trouble fetching information about this conversation. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
-            )
-
-        if last_run.status in {
-            schemas.RunStatus.QUEUED,
-            schemas.RunStatus.PENDING,
-            schemas.RunStatus.IN_PROGRESS,
-        }:
-            raise HTTPException(
-                status_code=409,
-                detail="OpenAI is still processing your last request. We're fetching the latest status...",
-            )
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid thread version",
+            status_code=500,
+            detail="We faced an error while sending your message. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
         )
 
     try:
@@ -4722,6 +4735,8 @@ async def send_message(
                 status_code=400,
                 detail="Invalid thread version",
             )
+    except HTTPException:
+        raise
     except Exception:
         logger.exception("Error running thread")
         raise HTTPException(
@@ -4800,7 +4815,9 @@ async def remove_file_from_thread(
 async def delete_thread(
     class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
 ):
-    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    thread = await models.Thread.get_by_id_with_users_voice_mode(
+        request.state.db, int(thread_id)
+    )
     # Detach the vector store from the thread and delete it
     vector_store_obj_id = None
     file_ids_to_delete = []
@@ -6264,7 +6281,9 @@ async def get_assistant_files(
     assistant_id: str,
     request: Request,
 ):
-    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    asst = await models.Assistant.get_by_id_with_ci_files(
+        request.state.db, int(assistant_id)
+    )
     file_search_files = []
     if asst.vector_store_id:
         file_search_files = await models.VectorStore.get_files_by_id(
@@ -6331,7 +6350,7 @@ async def download_file(
         }
         return Response(content=response.content, headers=headers)
     elif thread.version == 3:
-        file = await models.File.get_by_id(request.state.db, int(file_id))
+        file = await models.File.get_by_id_with_download(request.state.db, int(file_id))
         if not file or not file.s3_file:
             raise HTTPException(
                 status_code=404,
@@ -6368,6 +6387,20 @@ async def update_me(request: Request, update: schemas.UpdateUserInfo):
     return await models.User.update_info(
         request.state.db, request.state.session.user.id, update
     )
+
+
+@v1.get(
+    "/me/external-logins",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.ExternalLoginsResponse,
+)
+async def get_external_logins(request: Request):
+    """Get the user's external logins."""
+    return {
+        "external_logins": await models.User.get_external_logins_by_id(
+            request.state.db, request.state.session.user.id
+        )
+    }
 
 
 @v1.get(

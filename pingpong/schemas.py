@@ -245,7 +245,6 @@ class ExternalLogins(BaseModel):
 class User(BaseModel, UserNameMixin):
     id: int
     state: UserState
-    external_logins: list[ExternalLogin]
     created: datetime
     updated: datetime | None
 
@@ -584,6 +583,10 @@ class ActivitySummarySubscription(BaseModel):
     subscribed: bool
     last_email_sent: datetime | None
     last_summary_empty: bool
+
+
+class ExternalLoginsResponse(BaseModel):
+    external_logins: list[ExternalLogin]
 
 
 class ActivitySummarySubscriptionAdvancedOpts(BaseModel):

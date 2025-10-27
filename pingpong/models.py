@@ -81,7 +81,8 @@ class PeriodicTask(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     task_name = Column(String)
     scheduled_jobs = relationship(
-        "ScheduledJob", back_populates="task", lazy="selectin"
+        "ScheduledJob",
+        back_populates="task",
     )
 
     __table_args__ = (Index("idx_task_name", "task_name", unique=True),)
@@ -101,9 +102,7 @@ class ScheduledJob(Base):
     task_id: Mapped[int] = mapped_column(
         ForeignKey("periodic_tasks.id", ondelete="cascade"), nullable=False
     )
-    task = relationship(
-        "PeriodicTask", back_populates="scheduled_jobs", lazy="selectin"
-    )
+    task = relationship("PeriodicTask", back_populates="scheduled_jobs")
     scheduled_at = Column(DateTime(timezone=True), nullable=False)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     expires_at = Column(DateTime(timezone=True), nullable=True)
@@ -492,12 +491,8 @@ class Agreement(Base):
     name = Column(String, nullable=False)
     body = Column(String, nullable=False)
 
-    policies = relationship(
-        "AgreementPolicy", back_populates="agreement", lazy="selectin"
-    )
-    acceptances = relationship(
-        "AgreementAcceptance", back_populates="agreement", lazy="selectin"
-    )
+    policies = relationship("AgreementPolicy", back_populates="agreement")
+    acceptances = relationship("AgreementAcceptance", back_populates="agreement")
 
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
@@ -570,7 +565,7 @@ class AgreementPolicy(Base):
     agreement_id: Mapped[int] = mapped_column(
         ForeignKey("agreements.id", ondelete="cascade"), nullable=False, index=True
     )
-    agreement = relationship("Agreement", back_populates="policies", lazy="selectin")
+    agreement = relationship("Agreement", back_populates="policies")
 
     not_before = Column(DateTime(timezone=True), nullable=True)
     not_after = Column(DateTime(timezone=True), nullable=True)
@@ -582,9 +577,7 @@ class AgreementPolicy(Base):
         back_populates="agreement_policies",
     )
 
-    acceptances = relationship(
-        "AgreementAcceptance", back_populates="policy", lazy="selectin"
-    )
+    acceptances = relationship("AgreementAcceptance", back_populates="policy")
 
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
@@ -723,19 +716,17 @@ class AgreementAcceptance(Base):
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id"), nullable=False, index=True
     )
-    user = relationship("User", back_populates="acceptances", lazy="selectin")
+    user = relationship("User", back_populates="acceptances")
 
     agreement_id: Mapped[int] = mapped_column(
         ForeignKey("agreements.id"), nullable=False, index=True
     )
-    agreement = relationship("Agreement", back_populates="acceptances", lazy="selectin")
+    agreement = relationship("Agreement", back_populates="acceptances")
 
     policy_id: Mapped[int] = mapped_column(
         ForeignKey("agreement_policies.id"), nullable=False, index=True
     )
-    policy = relationship(
-        "AgreementPolicy", back_populates="acceptances", lazy="selectin"
-    )
+    policy = relationship("AgreementPolicy", back_populates="acceptances")
 
     accepted_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -771,7 +762,7 @@ class ExternalLoginProvider(Base):
     description = Column(String, nullable=True)
     icon = Column(String, nullable=True)
     external_logins: Mapped[List["ExternalLogin"]] = relationship(
-        "ExternalLogin", back_populates="provider_obj", lazy="selectin"
+        "ExternalLogin", back_populates="provider_obj"
     )
     agreement_policies: Mapped[List["AgreementPolicy"]] = relationship(
         "AgreementPolicy",
@@ -838,7 +829,7 @@ class ExternalLogin(Base):
         Integer, ForeignKey("external_login_providers.id"), nullable=True
     )
     provider_obj = relationship(
-        "ExternalLoginProvider", back_populates="external_logins", lazy="selectin"
+        "ExternalLoginProvider", back_populates="external_logins"
     )
     provider = Column(String, nullable=False)
     identifier = Column(String, nullable=False)
@@ -1048,11 +1039,9 @@ class User(Base):
     display_name = Column(String, nullable=True)
     email = Column(String, unique=True)
     state = Column(SQLEnum(schemas.UserState), default=schemas.UserState.UNVERIFIED)
-    classes: Mapped[List["UserClassRole"]] = relationship(
-        back_populates="user", lazy="selectin"
-    )
+    classes: Mapped[List["UserClassRole"]] = relationship(back_populates="user")
     institutions: Mapped[List["UserInstitutionRole"]] = relationship(
-        back_populates="user", lazy="selectin"
+        back_populates="user"
     )
     assistants: Mapped[List["Assistant"]] = relationship(
         "Assistant", back_populates="creator"
@@ -1062,28 +1051,20 @@ class User(Base):
         "Thread", secondary=user_thread_association, back_populates="users"
     )
     external_logins: Mapped[List["ExternalLogin"]] = relationship(
-        "ExternalLogin", back_populates="user", lazy="selectin"
+        "ExternalLogin", back_populates="user"
     )
     # Maps to classes in which the user has connected their LMS account
-    lms_syncs: Mapped[List["Class"]] = relationship(
-        "Class", back_populates="lms_user", lazy="selectin"
-    )
+    lms_syncs: Mapped[List["Class"]] = relationship("Class", back_populates="lms_user")
     anonymous_link_id = Column(Integer, ForeignKey("anonymous_links.id"), nullable=True)
-    anonymous_link = relationship(
-        "AnonymousLink", back_populates="user", lazy="selectin", uselist=False
-    )
-    anonymous_sessions = relationship(
-        "AnonymousSession", back_populates="user", lazy="selectin"
-    )
+    anonymous_link = relationship("AnonymousLink", back_populates="user", uselist=False)
+    anonymous_sessions = relationship("AnonymousSession", back_populates="user")
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
     # Do Not Add - Activity Summaries - Groups I Join
     dna_as_join = Column(Boolean, server_default="false")
     # Do Not Add - Activity Summaries - Groups I Create
     dna_as_create = Column(Boolean, server_default="false")
-    acceptances = relationship(
-        "AgreementAcceptance", back_populates="user", lazy="selectin"
-    )
+    acceptances = relationship("AgreementAcceptance", back_populates="user")
 
     @classmethod
     async def create_anonymous_user(
@@ -1255,12 +1236,25 @@ class User(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_external_logins_by_id(
+        cls, session: AsyncSession, id_: int
+    ) -> List["ExternalLogin"]:
+        stmt = (
+            select(ExternalLogin)
+            .where(ExternalLogin.user_id == int(id_))
+            .options(selectinload(ExternalLogin.provider_obj))
+        )
+        result = await session.execute(stmt)
+        return result.scalars().all()
+
+    @classmethod
     async def get_by_share_token(
         cls, session: AsyncSession, share_token: str
     ) -> "User":
         stmt = (
             select(User)
             .join(AnonymousLink)
+            .options(selectinload(User.anonymous_link))
             .where(AnonymousLink.share_token == share_token)
         )
         return await session.scalar(stmt)
@@ -1272,6 +1266,7 @@ class User(Base):
         stmt = (
             select(User, AnonymousSession)
             .join(AnonymousSession)
+            .options(selectinload(User.anonymous_link))
             .where(AnonymousSession.session_token == session_token)
         )
         result = await session.execute(stmt)
@@ -1474,7 +1469,7 @@ class S3File(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     key = Column(String, nullable=False, unique=True)
-    files = relationship("File", back_populates="s3_file", lazy="selectin")
+    files = relationship("File", back_populates="s3_file")
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
@@ -1531,7 +1526,7 @@ class File(Base):
         ForeignKey("s3_files.id", ondelete="SET NULL", name="fk_files_s3_files"),
         nullable=True,
     )
-    s3_file = relationship("S3File", lazy="selectin", uselist=False)
+    s3_file = relationship("S3File", uselist=False)
     class_ = relationship("Class", back_populates="files")
     classes = relationship(
         "Class", secondary=file_class_association, back_populates="files"
@@ -1574,7 +1569,6 @@ class File(Base):
     anonymous_session = relationship(
         "AnonymousSession",
         back_populates="files",
-        lazy="selectin",
         uselist=False,
     )
     anonymous_link_id = Column(
@@ -1583,7 +1577,6 @@ class File(Base):
     anonymous_link = relationship(
         "AnonymousLink",
         back_populates="files",
-        lazy="selectin",
         uselist=False,
     )
 
@@ -1619,6 +1612,13 @@ class File(Base):
     @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "File":
         stmt = select(File).where(File.id == int(id_))
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_with_download(cls, session: AsyncSession, id_: int) -> "File":
+        stmt = (
+            select(File).where(File.id == int(id_)).options(selectinload(File.s3_file))
+        )
         return await session.scalar(stmt)
 
     @classmethod
@@ -1901,7 +1901,6 @@ class VectorStore(Base):
         "File",
         secondary=file_vector_store_association,
         back_populates="vector_stores",
-        lazy="selectin",
     )
     assistants: Mapped[List["Assistant"]] = relationship(
         "Assistant",
@@ -2128,13 +2127,11 @@ class AnonymousLink(Base):
         secondary=assistant_link_association,
         back_populates="anonymous_links",
         uselist=False,
-        lazy="selectin",
     )
     user = relationship("User", back_populates="anonymous_link")
     files = relationship(
         "File",
         back_populates="anonymous_link",
-        lazy="selectin",
     )
     active = Column(Boolean, default=True)
     activated_at = Column(DateTime(timezone=True), nullable=True)
@@ -2226,7 +2223,6 @@ class Assistant(Base):
         "File",
         secondary=code_interpreter_file_assistant_association,
         back_populates="assistants_v2",
-        lazy="selectin",
     )
     vector_store_id = Column(
         Integer,
@@ -2253,6 +2249,19 @@ class Assistant(Base):
         if not id_:
             return Assistant()
         stmt = select(Assistant).where(Assistant.id == int(id_))
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_with_ci_files(
+        cls, session: AsyncSession, id_: int | None
+    ) -> "Assistant":
+        if not id_:
+            return Assistant()
+        stmt = (
+            select(Assistant)
+            .where(Assistant.id == int(id_))
+            .options(selectinload(Assistant.code_interpreter_files))
+        )
         return await session.scalar(stmt)
 
     @classmethod
@@ -2651,7 +2660,7 @@ class Class(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String)
     institution_id = Column(Integer, ForeignKey("institutions.id"))
-    institution = relationship("Institution", back_populates="classes", lazy="selectin")
+    institution = relationship("Institution", back_populates="classes")
     assistants: Mapped[List["Assistant"]] = relationship(
         "Assistant",
         back_populates="class_",
@@ -2659,15 +2668,15 @@ class Class(Base):
     term = Column(String)
     api_key = Column(String, nullable=True)
     api_key_id = Column(Integer, ForeignKey("api_keys.id"), nullable=True)
-    api_key_obj = relationship("APIKey", back_populates="classes", lazy="selectin")
+    api_key_obj = relationship("APIKey", back_populates="classes")
     private = Column(Boolean, default=False)
     lms_status = Column(SQLEnum(schemas.LMSStatus), default=schemas.LMSStatus.NONE)
     lms_tenant = Column(String, nullable=True)
     lms_type = Column(SQLEnum(schemas.LMSType), nullable=True)
     lms_class_id = Column(Integer, ForeignKey("lms_classes.id"), nullable=True)
-    lms_class = relationship("LMSClass", back_populates="classes", lazy="selectin")
+    lms_class = relationship("LMSClass", back_populates="classes")
     lms_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    lms_user = relationship("User", back_populates="lms_syncs", lazy="selectin")
+    lms_user = relationship("User", back_populates="lms_syncs")
     lms_course_id = Column(Integer, nullable=True)
     lms_access_token = Column(String, nullable=True)
     lms_refresh_token = Column(String, nullable=True)
@@ -2687,7 +2696,6 @@ class Class(Base):
         "File",
         secondary=file_class_association,
         back_populates="classes",
-        lazy="selectin",
     )
     threads = relationship("Thread", back_populates="class_")
     created = Column(DateTime(timezone=True), server_default=func.now())
@@ -3369,13 +3377,10 @@ class AnonymousSession(Base):
     )
     thread = relationship("Thread", back_populates="anonymous_sessions", uselist=False)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="cascade"), nullable=True)
-    user = relationship(
-        "User", back_populates="anonymous_sessions", uselist=False, lazy="selectin"
-    )
+    user = relationship("User", back_populates="anonymous_sessions", uselist=False)
     files = relationship(
         "File",
         back_populates="anonymous_session",
-        lazy="selectin",
     )
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(
@@ -3399,8 +3404,17 @@ class AnonymousSession(Base):
         )
         session.add(session_obj)
         await session.flush()
-        await session.refresh(session_obj)
-        return session_obj
+
+        stmt = (
+            select(AnonymousSession)
+            .where(AnonymousSession.id == session_obj.id)
+            .options(
+                joinedload(AnonymousSession.user),
+            )
+        )
+
+        result = await session.execute(stmt)
+        return result.scalars().first()
 
 
 class Annotation(Base):
@@ -3507,7 +3521,6 @@ class WebSearchCallAction(Base):
     sources = relationship(
         "WebSearchCallSearchSource",
         back_populates="web_search_call_action",
-        lazy="selectin",
     )
 
     created = Column(DateTime(timezone=True), server_default=func.now())
@@ -3614,21 +3627,16 @@ class ToolCall(Base):
     completed = Column(DateTime(timezone=True), nullable=True)
 
     queries = Column(String, nullable=True)
-    results = relationship(
-        "FileSearchCallResult", back_populates="tool_call", lazy="selectin"
-    )
+    results = relationship("FileSearchCallResult", back_populates="tool_call")
 
     code = Column(String, nullable=True)
     container_id = Column(String, nullable=True)
     outputs = relationship(
         "CodeInterpreterCallOutput",
         back_populates="tool_call",
-        lazy="selectin",
     )
 
-    web_search_actions = relationship(
-        "WebSearchCallAction", back_populates="tool_call", lazy="selectin"
-    )
+    web_search_actions = relationship("WebSearchCallAction", back_populates="tool_call")
 
     @classmethod
     async def mark_as_incomplete(cls, session: AsyncSession, id: int) -> None:
@@ -3785,12 +3793,10 @@ class ReasoningStep(Base):
     summary_parts = relationship(
         "ReasoningSummaryPart",
         back_populates="reasoning_step",
-        lazy="selectin",
     )
     content_parts = relationship(
         "ReasoningContentPart",
         back_populates="reasoning_step",
-        lazy="selectin",
     )
     encrypted_content = Column(String, nullable=True)
 
@@ -3890,7 +3896,6 @@ class MessagePart(Base):
     annotations = relationship(
         "Annotation",
         back_populates="message_part",
-        lazy="selectin",
     )
 
     @classmethod
@@ -3944,20 +3949,17 @@ class Message(Base):
         "File",
         secondary=file_search_attachment_association,
         back_populates="message_attachments_file_search",
-        lazy="selectin",
     )
 
     code_interpreter_attachments = relationship(
         "File",
         secondary=code_interpreter_attachment_association,
         back_populates="message_attachments_code_interpreter",
-        lazy="selectin",
     )
 
     content = relationship(
         "MessagePart",
         back_populates="message",
-        lazy="selectin",
     )
 
     created = Column(DateTime(timezone=True), server_default=func.now())
@@ -4033,7 +4035,6 @@ class Run(Base):
     messages = relationship(
         "Message",
         back_populates="run",
-        lazy="selectin",
     )
 
     error_code = Column(String, nullable=True)
@@ -4043,13 +4044,11 @@ class Run(Base):
     tool_calls = relationship(
         "ToolCall",
         back_populates="run",
-        lazy="selectin",
     )
 
     reasoning_steps = relationship(
         "ReasoningStep",
         back_populates="run",
-        lazy="selectin",
     )
 
     thread_id = Column(Integer, ForeignKey("threads.id", ondelete="CASCADE"))
@@ -4196,7 +4195,7 @@ class Thread(Base):
     version = Column(Integer, default=1)
     thread_id = Column(String, unique=True)
     class_id = Column(Integer, ForeignKey("classes.id"))
-    class_ = relationship("Class", back_populates="threads", lazy="selectin")
+    class_ = relationship("Class", back_populates="threads")
     assistant_id = Column(Integer, ForeignKey("assistants.id"), index=True)
     assistant = relationship("Assistant", back_populates="threads", uselist=False)
     interaction_mode = Column(
@@ -4208,7 +4207,6 @@ class Thread(Base):
         "VoiceModeRecording",
         back_populates="thread",
         uselist=False,
-        lazy="selectin",
     )
     instructions = Column(String, nullable=True)
     timezone = Column(String, nullable=True)
@@ -4218,19 +4216,16 @@ class Thread(Base):
         "User",
         secondary=user_thread_association,
         back_populates="threads",
-        lazy="subquery",
     )
     image_files = relationship(
         "File",
         secondary=image_file_thread_association,
         back_populates="threads_images",
-        lazy="selectin",
     )
     code_interpreter_files = relationship(
         "File",
         secondary=code_interpreter_file_thread_association,
         back_populates="threads",
-        lazy="selectin",
     )
     code_interpreter_calls = relationship(
         "CodeInterpreterCall",
@@ -4239,17 +4234,14 @@ class Thread(Base):
     runs = relationship(
         "Run",
         back_populates="thread",
-        lazy="selectin",
     )
     messages = relationship(
         "Message",
         back_populates="thread",
-        lazy="selectin",
     )
     tool_calls = relationship(
         "ToolCall",
         back_populates="thread",
-        lazy="selectin",
     )
     reasoning_steps = relationship(
         "ReasoningStep",
@@ -4264,7 +4256,6 @@ class Thread(Base):
     anonymous_sessions = relationship(
         "AnonymousSession",
         back_populates="thread",
-        lazy="selectin",
     )
     conversation_id = Column(String, nullable=True)
     last_activity = Column(
@@ -4326,13 +4317,82 @@ class Thread(Base):
             )
             await session.execute(stmt)
 
-        await session.refresh(thread)
+        result = await session.execute(
+            select(Thread)
+            .options(
+                joinedload(Thread.users).load_only(
+                    User.id,
+                    User.created,
+                    User.anonymous_link_id,
+                    User.first_name,
+                    User.last_name,
+                    User.display_name,
+                    User.email,
+                )
+            )
+            .where(Thread.id == thread.id)
+        )
+        thread = result.scalars().first()
 
         return thread
 
     @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "Thread":
         stmt = select(Thread).where(Thread.id == int(id_))
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_with_ci_file_ids(
+        cls, session: AsyncSession, id_: int
+    ) -> "Thread":
+        stmt = (
+            select(Thread)
+            .where(Thread.id == int(id_))
+            .options(
+                selectinload(Thread.code_interpreter_files).load_only(File.file_id)
+            )
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_with_users(cls, session: AsyncSession, id_: int) -> "Thread":
+        stmt = (
+            select(Thread)
+            .where(Thread.id == int(id_))
+            .options(
+                joinedload(Thread.users).load_only(
+                    User.id,
+                    User.created,
+                    User.anonymous_link_id,
+                    User.first_name,
+                    User.last_name,
+                    User.display_name,
+                    User.email,
+                )
+            )
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_with_users_voice_mode(
+        cls, session: AsyncSession, id_: int
+    ) -> "Thread":
+        stmt = (
+            select(Thread)
+            .where(Thread.id == int(id_))
+            .options(
+                joinedload(Thread.users).load_only(
+                    User.id,
+                    User.created,
+                    User.anonymous_link_id,
+                    User.first_name,
+                    User.last_name,
+                    User.display_name,
+                    User.email,
+                ),
+                selectinload(Thread.voice_mode_recording),
+            )
+        )
         return await session.scalar(stmt)
 
     @classmethod
@@ -4484,6 +4544,18 @@ class Thread(Base):
             select(Thread)
             .outerjoin(Thread.assistant)
             .options(contains_eager(Thread.assistant).load_only(Assistant.name))
+            .options(
+                selectinload(Thread.users).load_only(
+                    User.id,
+                    User.display_name,
+                    User.first_name,
+                    User.last_name,
+                    User.anonymous_link_id,
+                )
+            )
+            .options(
+                selectinload(Thread.anonymous_sessions).load_only(AnonymousSession.id)
+            )
             .order_by(Thread.last_activity.desc())
             .where(condition)
             .limit(limit)
@@ -4807,7 +4879,9 @@ class Thread(Base):
         ordering = (
             asc(Message.output_index) if order == "asc" else desc(Message.output_index)
         )
-        stmt = stmt.order_by(ordering).limit(limit)
+        stmt = (
+            stmt.order_by(ordering).limit(limit).options(selectinload(Message.content))
+        )
 
         result = await session.execute(stmt)
         return result.scalars().all()
@@ -4818,7 +4892,15 @@ class Thread(Base):
         session: AsyncSession,
         thread_id: int,
     ) -> AsyncGenerator["Message", None]:
-        stmt = select(Message).where(Message.thread_id == thread_id)
+        stmt = (
+            select(Message)
+            .where(Message.thread_id == thread_id)
+            .options(
+                selectinload(Message.content).selectinload(MessagePart.annotations),
+                selectinload(Message.file_search_attachments),
+                selectinload(Message.code_interpreter_attachments),
+            )
+        )
         result = await session.execute(stmt)
         for message in result.scalars().all():
             yield message
@@ -4829,7 +4911,17 @@ class Thread(Base):
         session: AsyncSession,
         thread_id: int,
     ) -> AsyncGenerator["ToolCall", None]:
-        stmt = select(ToolCall).where(ToolCall.thread_id == thread_id)
+        stmt = (
+            select(ToolCall)
+            .where(ToolCall.thread_id == thread_id)
+            .options(
+                selectinload(ToolCall.results),
+                selectinload(ToolCall.outputs),
+                selectinload(ToolCall.web_search_actions).selectinload(
+                    WebSearchCallAction.sources
+                ),
+            )
+        )
         result = await session.execute(stmt)
         for tool_call in result.scalars().all():
             yield tool_call
@@ -4840,7 +4932,14 @@ class Thread(Base):
         session: AsyncSession,
         thread_id: int,
     ) -> AsyncGenerator["ReasoningStep", None]:
-        stmt = select(ReasoningStep).where(ReasoningStep.thread_id == thread_id)
+        stmt = (
+            select(ReasoningStep)
+            .where(ReasoningStep.thread_id == thread_id)
+            .options(
+                selectinload(ReasoningStep.content_parts),
+                selectinload(ReasoningStep.summary_parts),
+            )
+        )
         result = await session.execute(stmt)
         for reasoning_step in result.scalars().all():
             yield reasoning_step
@@ -4890,10 +4989,26 @@ class Thread(Base):
         tool_call_ids = [r.id for r in rows if r.type == "tool_call"]
 
         messages = await session.execute(
-            select(Message).where(Message.id.in_(messages_ids)).order_by(ordering)
+            select(Message)
+            .where(Message.id.in_(messages_ids))
+            .order_by(ordering)
+            .options(
+                selectinload(Message.content).selectinload(MessagePart.annotations),
+                selectinload(Message.file_search_attachments),
+                selectinload(Message.code_interpreter_attachments),
+            )
         )
         tool_calls = await session.execute(
-            select(ToolCall).where(ToolCall.id.in_(tool_call_ids)).order_by(ordering)
+            select(ToolCall)
+            .where(ToolCall.id.in_(tool_call_ids))
+            .order_by(ordering)
+            .options(
+                selectinload(ToolCall.results),
+                selectinload(ToolCall.outputs),
+                selectinload(ToolCall.web_search_actions).selectinload(
+                    WebSearchCallAction.sources
+                ),
+            )
         )
 
         return messages.scalars().all(), tool_calls.scalars().all()
@@ -4907,3 +5022,17 @@ class Thread(Base):
         result = await session.execute(stmt)
         for thread in result:
             yield thread.Thread
+
+    @classmethod
+    async def get_latest_run_by_thread_id(
+        cls, session: AsyncSession, thread_id: int
+    ) -> "Run":
+        """Get the latest run for a specific thread."""
+        stmt = (
+            select(Run)
+            .where(Run.thread_id == thread_id)
+            .order_by(Run.created.desc())
+            .limit(1)
+        )
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
