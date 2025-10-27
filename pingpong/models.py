@@ -1254,6 +1254,7 @@ class User(Base):
         stmt = (
             select(User)
             .join(AnonymousLink)
+            .options(selectinload(User.anonymous_link))
             .where(AnonymousLink.share_token == share_token)
         )
         return await session.scalar(stmt)
@@ -1265,6 +1266,7 @@ class User(Base):
         stmt = (
             select(User, AnonymousSession)
             .join(AnonymousSession)
+            .options(selectinload(User.anonymous_link))
             .where(AnonymousSession.session_token == session_token)
         )
         result = await session.execute(stmt)
@@ -3402,8 +3404,17 @@ class AnonymousSession(Base):
         )
         session.add(session_obj)
         await session.flush()
-        await session.refresh(session_obj)
-        return session_obj
+
+        stmt = (
+            select(AnonymousSession)
+            .where(AnonymousSession.id == session_obj.id)
+            .options(
+                joinedload(AnonymousSession.user),
+            )
+        )
+
+        result = await session.execute(stmt)
+        return result.scalars().first()
 
 
 class Annotation(Base):
@@ -4321,7 +4332,7 @@ class Thread(Base):
             )
             .where(Thread.id == thread.id)
         )
-        thread = result.scalar_one()
+        thread = result.scalars().first()
 
         return thread
 
