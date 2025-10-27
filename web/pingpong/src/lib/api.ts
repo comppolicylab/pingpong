@@ -874,7 +874,7 @@ export type ExternalLoginsResponse = {
 };
 
 export const getExternalLogins = async (f: Fetcher) => {
-  return await GET<never, ExternalLoginsResponse>(f, 'me/external_logins');
+  return await GET<never, ExternalLoginsResponse>(f, 'me/external-logins');
 };
 
 /**

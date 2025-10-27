@@ -6390,7 +6390,7 @@ async def update_me(request: Request, update: schemas.UpdateUserInfo):
 
 
 @v1.get(
-    "/me/external_logins",
+    "/me/external-logins",
     dependencies=[Depends(LoggedIn())],
     response_model=schemas.ExternalLoginsResponse,
 )
