@@ -69,7 +69,7 @@ def replace_random_blocks(prompt: str, thread_id: str, user_id: int) -> str:
                 continue
 
             block = PromptRandomBlock(
-                seed=f"user_{user_id}" if scope == "user" else thread_id,
+                seed=f"user_{user_id}" if scope == "user" else f"thread_{thread_id}",
                 options=options,
                 count=count,
                 allow_repeat=allow_repeat,
