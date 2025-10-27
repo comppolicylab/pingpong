@@ -3998,9 +3998,7 @@ async def create_thread(
                 assistant.instructions,
                 assistant.use_latex,
                 assistant.use_image_descriptions,
-                thread_id=result.id
-                if result and result.id
-                else f"thread_temp_{uuid.uuid4()}",
+                thread_id=result.id,
                 user_id=request.state.session.user.id,
             )
             tasks_to_run = []
