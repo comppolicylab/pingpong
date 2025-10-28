@@ -16,5 +16,6 @@ def sentry():
             profiles_sample_rate=1.0,
             profile_lifecycle="trace",
             enable_logs=True,
+            max_request_body_size="always",
         )
     yield
