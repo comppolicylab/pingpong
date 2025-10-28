@@ -270,6 +270,9 @@ async def copy_assistant(
     target_class_id: int,
     assistant: models.Assistant,
 ):
+    if not assistant.published:
+        return
+
     new_vector_store_id, new_vector_store_obj_id = None, None
     if assistant.vector_store_id:
         new_vector_store_obj_id, new_vector_store_id = await copy_vector_store(
