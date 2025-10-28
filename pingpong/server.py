@@ -3821,11 +3821,17 @@ async def create_thread(
 
     # Check if user file uploads are allowed for this assistant
     if not assistant.allow_user_file_uploads and (
-        req.vision_file_ids or req.file_search_file_ids or req.code_interpreter_file_ids
+        req.file_search_file_ids or req.code_interpreter_file_ids
     ):
         raise HTTPException(
             status_code=403,
-            detail="This assistant does not allow users to upload their own files.",
+            detail="You can't upload files with this assistant. Remove the files and try again.",
+        )
+
+    if not assistant.allow_user_image_uploads and req.vision_file_ids:
+        raise HTTPException(
+            status_code=403,
+            detail="You can't upload photos with this assistant. Remove the photos and try again.",
         )
 
     class_ = await models.Class.get_by_id(request.state.db, int(class_id))
@@ -4498,13 +4504,17 @@ async def send_message(
 
         # Check if user file uploads are allowed for this assistant
         if not asst.allow_user_file_uploads and (
-            data.vision_file_ids
-            or data.file_search_file_ids
-            or data.code_interpreter_file_ids
+            data.file_search_file_ids or data.code_interpreter_file_ids
         ):
             raise HTTPException(
                 status_code=403,
-                detail="This assistant does not allow users to upload their own files.",
+                detail="You can't upload files with this assistant. Remove the files and try again.",
+            )
+
+        if not asst.allow_user_image_uploads and data.vision_file_ids:
+            raise HTTPException(
+                status_code=403,
+                detail="You can't upload photos with this assistant. Remove the photos and try again.",
             )
 
         # When we reach 3 user messages, or if we failed to generate a title before, generate a new one. Only use the first 100 words of each user and assistant message to maintain a low token count.
@@ -6087,6 +6097,12 @@ async def update_assistant(
         and req.allow_user_file_uploads is not None
     ):
         asst.allow_user_file_uploads = req.allow_user_file_uploads
+
+    if (
+        "allow_user_image_uploads" in req.model_fields_set
+        and req.allow_user_image_uploads is not None
+    ):
+        asst.allow_user_image_uploads = req.allow_user_image_uploads
 
     if is_toggling_publish_status:
         ptuple = (f"class:{class_id}#member", "can_view", f"assistant:{asst.id}")

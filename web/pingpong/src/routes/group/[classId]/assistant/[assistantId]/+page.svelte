@@ -415,6 +415,17 @@
     hasSetAllowUserFileUploads = true;
   }
 
+  let allowUserImageUploads = true;
+  let hasSetAllowUserImageUploads = false;
+  $: if (
+    assistant?.allow_user_image_uploads !== undefined &&
+    assistant?.allow_user_image_uploads !== null &&
+    !hasSetAllowUserImageUploads
+  ) {
+    allowUserImageUploads = assistant?.allow_user_image_uploads;
+    hasSetAllowUserImageUploads = true;
+  }
+
   // Handle updates from the file upload component.
   const handleFSPrivateFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
     privateUploadFSFileInfo = e.detail;
@@ -782,7 +793,8 @@
       create_classic_assistant: createClassicAssistant,
       deleted_private_files: [...$trashPrivateFileIds, ...fileSearchCodeInterpreterUnusedFiles],
       should_record_user_information: shouldRecordNameOrVoice,
-      allow_user_file_uploads: allowUserFileUploads
+      allow_user_file_uploads: allowUserFileUploads,
+      allow_user_image_uploads: allowUserImageUploads
     };
     return params;
   };
@@ -1609,6 +1621,23 @@
                 assistant. When unchecked, users will not be able to attach their own files to
                 messages, even if the assistant has file search or code interpreter enabled. Files
                 that you add to the assistant will still be available for the assistant to use.</Helper
+              >
+            </div>
+
+            <div class="col-span-2 mb-1">
+              <Checkbox
+                id="allow_user_image_uploads"
+                name="allow_user_image_uploads"
+                disabled={preventEdits}
+                bind:checked={allowUserImageUploads}
+                ><div class="flex flex-row gap-1">
+                  <div>Allow Users to Upload Images</div>
+                </div></Checkbox
+              >
+              <Helper
+                >Control whether users can upload their own images when interacting with this
+                assistant. When unchecked, users will not be able to attach their own images to
+                messages, even if the assistant's model has Vision capabilities.</Helper
               >
             </div>
 

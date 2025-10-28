@@ -368,6 +368,7 @@ class Assistant(BaseModel):
     assistant_should_message_first: bool | None = None
     should_record_user_information: bool | None = None
     allow_user_file_uploads: bool | None = None
+    allow_user_image_uploads: bool | None = None
     use_latex: bool | None
     use_image_descriptions: bool | None
     hide_prompt: bool | None
@@ -414,6 +415,7 @@ class CreateAssistant(BaseModel):
     assistant_should_message_first: bool = False
     should_record_user_information: bool = False
     allow_user_file_uploads: bool = True
+    allow_user_image_uploads: bool = True
     deleted_private_files: list[int] = []
     create_classic_assistant: bool = False
 
@@ -453,6 +455,7 @@ class UpdateAssistant(BaseModel):
     assistant_should_message_first: bool | None = None
     should_record_user_information: bool | None = None
     allow_user_file_uploads: bool | None = None
+    allow_user_image_uploads: bool | None = None
     use_image_descriptions: bool | None = None
     deleted_private_files: list[int] = []
 

@@ -309,6 +309,7 @@ async def copy_assistant(
         published=assistant.published,
         should_record_user_information=assistant.should_record_user_information,
         allow_user_file_uploads=assistant.allow_user_file_uploads,
+        allow_user_image_uploads=assistant.allow_user_image_uploads,
     )
 
     session.add(new_assistant)

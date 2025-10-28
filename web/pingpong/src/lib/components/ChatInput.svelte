@@ -593,29 +593,48 @@
                       >Experimental<br />Vision Support</span
                     >
                     <QuestionCircleOutline color="white" /></Button
-                  >{/if}<span class="py-2 px-3 text-sm"
-                  >Upload files to thread<br />Documents: {Math.max(
-                    currentFileSearchFileCount,
-                    currentCodeInterpreterFileCount
-                  )}/20</span
-                >
+                  >{/if}<span class="pt-2 px-3 text-sm"
+                  >{finalVisionAcceptedFiles &&
+                  (fileSearchAcceptedFiles || codeInterpreterAcceptedFiles)
+                    ? 'Add photos and files'
+                    : 'Add files'}</span
+                >{#if fileSearchAcceptedFiles || codeInterpreterAcceptedFiles}<span
+                    class="px-3 text-sm"
+                    >Documents: {Math.max(
+                      currentFileSearchFileCount,
+                      currentCodeInterpreterFileCount
+                    )}/20</span
+                  >{/if}
+                {#if finalVisionAcceptedFiles}
+                  <span class="pb-2 px-3 text-sm">Photos: {visionFiles.length}/10</span>
+                {/if}
               </div></Popover
             >
           {:else if tooManyFileSearchFiles || tooManyCodeInterpreterFiles}
             <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
-              >Maximum number of thread document attachments reached{visionFiles.length < 10
-                ? `. You can still upload images${codeInterpreterAcceptedFiles && tooManyCodeInterpreterFiles ? ' (.webp only)' : ''}.`
-                : ''}</Popover
+              >You can't add any more files in this conversation{visionFiles.length < 10
+                ? `. You can still upload photos${codeInterpreterAcceptedFiles && tooManyCodeInterpreterFiles ? ' (.webp only)' : ''}.`
+                : '.'}</Popover
             >
           {:else if tooManyAttachments}
             <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
-              >Maximum number of document attachments reached{tooManyVisionFiles
-                ? '. You can still upload images.'
-                : ''}</Popover
+              ><div class="flex flex-col h-fit align-center">
+                <span class="pb-2 text-sm"
+                  >You can't upload any more files {tooManyVisionFiles ? 'or photos' : ''} with this
+                  message{!tooManyVisionFiles
+                    ? '. You can add more photos to this message.'
+                    : '.'}</span
+                >{#if !tooManyVisionFiles}<span class="text-sm"
+                    >Photos: {visionFiles.length}/10</span
+                  >{/if}
+              </div></Popover
             >
           {:else if tooManyVisionFiles}
             <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
-              >Maximum number of image uploads reached. You can still upload documents.</Popover
+              >Maximum number of image uploads reached.{fileSearchAcceptedFiles ||
+              codeInterpreterAcceptedFiles
+                ? ' You can still upload documents.'
+                : ''}</Popover
             >
           {:else}
             <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
