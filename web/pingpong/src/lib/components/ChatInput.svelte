@@ -597,7 +597,9 @@
                   >{finalVisionAcceptedFiles &&
                   (fileSearchAcceptedFiles || codeInterpreterAcceptedFiles)
                     ? 'Add photos and files'
-                    : 'Add files'}</span
+                    : finalVisionAcceptedFiles
+                      ? 'Add photos'
+                      : 'Add files'}</span
                 >{#if fileSearchAcceptedFiles || codeInterpreterAcceptedFiles}<span
                     class="px-3 text-sm"
                     >Documents: {Math.max(
@@ -622,7 +624,7 @@
                 <span class="pb-2 text-sm"
                   >You can't upload any more files {tooManyVisionFiles ? 'or photos' : ''} with this
                   message{!tooManyVisionFiles
-                    ? '. You can add more photos to this message.'
+                    ? '. You can still add more photos to this message.'
                     : '.'}</span
                 >{#if !tooManyVisionFiles}<span class="text-sm"
                     >Photos: {visionFiles.length}/10</span
