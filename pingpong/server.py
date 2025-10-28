@@ -4498,7 +4498,9 @@ async def send_message(
 
         # Check if user file uploads are allowed for this assistant
         if not asst.allow_user_file_uploads and (
-            data.vision_file_ids or data.file_search_file_ids or data.code_interpreter_file_ids
+            data.vision_file_ids
+            or data.file_search_file_ids
+            or data.code_interpreter_file_ids
         ):
             raise HTTPException(
                 status_code=403,
