@@ -3283,7 +3283,7 @@ async def get_thread_details(
         for step in run.reasoning_steps:
             step._kind = "reasoning_step"
             coalesced.append(step)
-    coalesced.sort(key=lambda x: x.output_index)
+    coalesced.sort(key=lambda x: getattr(x, "output_index", 0))
 
     return {
         "conversation_items": coalesced,
