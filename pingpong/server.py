@@ -3267,7 +3267,7 @@ async def get_thread_details(
         request.state.db, int(thread_id)
     )
 
-    if thread is None:
+    if thread is None or thread.class_id != int(class_id):
         raise HTTPException(status_code=404, detail="Thread not found")
 
     coalesced = []
