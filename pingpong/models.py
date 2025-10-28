@@ -51,6 +51,7 @@ from sqlalchemy.orm import (
     selectinload,
     mapped_column,
     relationship,
+    defer,
 )
 from sqlalchemy.sql import func
 import pingpong.schemas as schemas
@@ -1971,7 +1972,11 @@ class VectorStore(Base):
 
     @classmethod
     async def get_files_by_id(cls, session: AsyncSession, id_: int) -> List["File"]:
-        stmt = select(VectorStore).where(VectorStore.id == int(id_))
+        stmt = (
+            select(VectorStore)
+            .where(VectorStore.id == int(id_))
+            .options(selectinload(VectorStore.files))
+        )
         vector_store = await session.scalar(stmt)
         if not vector_store:
             return []
@@ -1979,7 +1984,11 @@ class VectorStore(Base):
 
     @classmethod
     async def get_file_obj_ids_by_id(cls, session: AsyncSession, id_: int) -> List[str]:
-        stmt = select(VectorStore).where(VectorStore.id == int(id_))
+        stmt = (
+            select(VectorStore)
+            .where(VectorStore.id == int(id_))
+            .options(selectinload(VectorStore.files))
+        )
         vector_store = await session.scalar(stmt)
         if not vector_store:
             return []
@@ -1989,7 +1998,11 @@ class VectorStore(Base):
     async def get_file_ids_by_id(
         cls, session: AsyncSession, id_: int
     ) -> AsyncGenerator[tuple[str, int], None]:
-        stmt = select(VectorStore).where(VectorStore.id == int(id_))
+        stmt = (
+            select(VectorStore)
+            .where(VectorStore.id == int(id_))
+            .options(selectinload(VectorStore.files))
+        )
         vector_store = await session.scalar(stmt)
         if not vector_store:
             return
@@ -2000,7 +2013,11 @@ class VectorStore(Base):
     async def get_file_names_ids_by_id(
         cls, session: AsyncSession, id_: int
     ) -> dict[str, str]:
-        stmt = select(VectorStore).where(VectorStore.id == int(id_))
+        stmt = (
+            select(VectorStore)
+            .where(VectorStore.id == int(id_))
+            .options(selectinload(VectorStore.files))
+        )
         vector_store = await session.scalar(stmt)
         if not vector_store:
             return {}
@@ -4397,6 +4414,54 @@ class Thread(Base):
                     User.email,
                 ),
                 selectinload(Thread.voice_mode_recording),
+            )
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_extended_details(
+        cls, session: AsyncSession, id_: int
+    ) -> "Thread":
+        stmt = (
+            select(Thread)
+            .where(Thread.id == int(id_))
+            .options(
+                selectinload(Thread.users),
+                selectinload(Thread.voice_mode_recording),
+                selectinload(Thread.vector_store).selectinload(VectorStore.files),
+                selectinload(Thread.code_interpreter_files),
+                selectinload(Thread.assistant)
+                .selectinload(Assistant.vector_store)
+                .selectinload(VectorStore.files),
+                selectinload(Thread.class_).options(
+                    defer(Class.api_key),
+                    defer(Class.lms_access_token),
+                    defer(Class.lms_refresh_token),
+                    selectinload(Class.api_key_obj).options(
+                        defer(APIKey.api_key),
+                    ),
+                ),
+                selectinload(Thread.image_files),
+                selectinload(Thread.runs).options(
+                    selectinload(Run.tool_calls).options(
+                        selectinload(ToolCall.outputs),
+                        selectinload(ToolCall.results),
+                        selectinload(ToolCall.web_search_actions).options(
+                            selectinload(WebSearchCallAction.sources),
+                        ),
+                    ),
+                    selectinload(Run.messages).options(
+                        selectinload(Message.content).selectinload(
+                            MessagePart.annotations
+                        ),
+                        selectinload(Message.code_interpreter_attachments),
+                        selectinload(Message.file_search_attachments),
+                    ),
+                    selectinload(Run.reasoning_steps).options(
+                        selectinload(ReasoningStep.summary_parts),
+                        selectinload(ReasoningStep.content_parts),
+                    ),
+                ),
             )
         )
         return await session.scalar(stmt)
