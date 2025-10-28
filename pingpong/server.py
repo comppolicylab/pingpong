@@ -3255,6 +3255,43 @@ async def list_thread_messages(
 
 
 @v1.get(
+    "/class/{class_id}/thread/{thread_id}/details",
+    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+)
+async def get_thread_details(
+    class_id: str,
+    thread_id: str,
+    request: Request,
+):
+    thread = await models.Thread.get_by_id_extended_details(
+        request.state.db, int(thread_id)
+    )
+
+    if thread is None or thread.class_id != int(class_id):
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    coalesced = []
+    for run in thread.runs:
+        for msg in run.messages:
+            msg._kind = "message"  # transient attribute, not persisted
+            coalesced.append(msg)
+
+        for tool_call in run.tool_calls:
+            tool_call._kind = "tool_call"
+            coalesced.append(tool_call)
+
+        for step in run.reasoning_steps:
+            step._kind = "reasoning_step"
+            coalesced.append(step)
+    coalesced.sort(key=lambda x: getattr(x, "output_index", 0))
+
+    return {
+        "conversation_items": coalesced,
+        "thread": thread,
+    }
+
+
+@v1.get(
     "/class/{class_id}/thread/{thread_id}/last_run",
     dependencies=[
         Depends(Authz("can_view", "thread:{thread_id}")),
