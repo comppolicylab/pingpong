@@ -259,7 +259,7 @@
     document.getElementById('message')?.focus();
   };
 
-  $: if (!loading) {
+  $: if (!loading || !uploading) {
     focusMessage();
   }
 
@@ -363,7 +363,7 @@
   const maybeSubmit = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (!disabled) {
+      if (!disabled && canSubmit && !assistantDeleted && canViewAssistant && !loading) {
         submit();
       }
     }
