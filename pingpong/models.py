@@ -2804,17 +2804,6 @@ class Class(Base):
         return class_
 
     @classmethod
-    async def create_return_with_api_obj(
-        cls, session: AsyncSession, inst_id: int, data: schemas.CreateClass
-    ) -> "Class":
-        class_ = Class(institution_id=inst_id, **data.dict())
-        session.add(class_)
-        await session.flush()
-        await session.refresh(class_)
-        await class_.awaitable_attrs.api_key_obj
-        return class_
-
-    @classmethod
     async def update(
         cls, session: AsyncSession, id_: int, data: schemas.UpdateClass
     ) -> "Class":
