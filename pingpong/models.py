@@ -4625,6 +4625,7 @@ class Thread(Base):
                     User.first_name,
                     User.last_name,
                     User.anonymous_link_id,
+                    User.created,
                 )
             )
             .options(
