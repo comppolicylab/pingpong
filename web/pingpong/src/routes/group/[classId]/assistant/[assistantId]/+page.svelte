@@ -404,6 +404,17 @@
     hasSetShouldRecordNameOrVoice = true;
   }
 
+  let allowUserFileUploads = true;
+  let hasSetAllowUserFileUploads = false;
+  $: if (
+    assistant?.allow_user_file_uploads !== undefined &&
+    assistant?.allow_user_file_uploads !== null &&
+    !hasSetAllowUserFileUploads
+  ) {
+    allowUserFileUploads = assistant?.allow_user_file_uploads;
+    hasSetAllowUserFileUploads = true;
+  }
+
   // Handle updates from the file upload component.
   const handleFSPrivateFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
     privateUploadFSFileInfo = e.detail;
@@ -770,7 +781,8 @@
       assistant_should_message_first: assistantShouldMessageFirst,
       create_classic_assistant: createClassicAssistant,
       deleted_private_files: [...$trashPrivateFileIds, ...fileSearchCodeInterpreterUnusedFiles],
-      should_record_user_information: shouldRecordNameOrVoice
+      should_record_user_information: shouldRecordNameOrVoice,
+      allow_user_file_uploads: allowUserFileUploads
     };
     return params;
   };
@@ -1579,6 +1591,24 @@
                     >created while this option is enabled</span
                   > will show the user's name and be recorded.
                 {/if}</Helper
+              >
+            </div>
+
+            <div class="col-span-2 mb-1">
+              <Checkbox
+                id="allow_user_file_uploads"
+                name="allow_user_file_uploads"
+                disabled={preventEdits}
+                bind:checked={allowUserFileUploads}
+                ><div class="flex flex-row gap-1">
+                  <div>Allow Users to Upload Files</div>
+                </div></Checkbox
+              >
+              <Helper
+                >Control whether users can upload their own files when interacting with this
+                assistant. When unchecked, users will not be able to attach their own files to
+                messages, even if the assistant has file search or code interpreter enabled. Files
+                that you add to the assistant will still be available for the assistant to use.</Helper
               >
             </div>
 
