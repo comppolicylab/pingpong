@@ -270,15 +270,21 @@ async def copy_assistant(
     target_class_id: int,
     assistant: models.Assistant,
 ):
+    if not assistant.published:
+        return
+
     new_vector_store_id, new_vector_store_obj_id = None, None
     if assistant.vector_store_id:
         new_vector_store_obj_id, new_vector_store_id = await copy_vector_store(
             session, client, cli, target_class_id, assistant.vector_store_id
         )
 
-    tool_resources: ToolResources = {}
-    if new_vector_store_obj_id:
-        tool_resources["file_search"] = {"vector_store_ids": [new_vector_store_obj_id]}
+    if assistant.version <= 2:
+        tool_resources: ToolResources = {}
+        if new_vector_store_obj_id:
+            tool_resources["file_search"] = {
+                "vector_store_ids": [new_vector_store_obj_id]
+            }
 
     new_assistant = models.Assistant(
         name=assistant.name,
@@ -315,53 +321,58 @@ async def copy_assistant(
             new_assistant.id,
         )
 
-    code_interpreter_file_obj_ids = (
-        await models.Assistant.get_code_interpreter_file_obj_ids_by_assistant_id(
-            session, assistant.id
-        )
-    )
-
-    if code_interpreter_file_obj_ids:
-        tool_resources["code_interpreter"] = {"file_ids": code_interpreter_file_obj_ids}
-
-    if new_assistant.interaction_mode == InteractionMode.VOICE:
-        _model = "gpt-4o"
-    else:
-        _model = (
-            get_azure_model_deployment_name_equivalent(assistant.model)
-            if isinstance(cli, openai.AsyncAzureOpenAI)
-            else assistant.model
+    if assistant.version <= 2:
+        code_interpreter_file_obj_ids = (
+            await models.Assistant.get_code_interpreter_file_obj_ids_by_assistant_id(
+                session, assistant.id
+            )
         )
 
-    reasoning_effort = (
-        REASONING_EFFORT_MAP.get(assistant.reasoning_effort)
-        if assistant.reasoning_effort is not None
-        else None
-    )
-    reasoning_extra_body = (
-        {"reasoning_effort": reasoning_effort} if reasoning_effort is not None else {}
-    )
+        if code_interpreter_file_obj_ids:
+            tool_resources["code_interpreter"] = {
+                "file_ids": code_interpreter_file_obj_ids
+            }
 
-    openai_assistant = await cli.beta.assistants.create(
-        instructions=format_instructions(
-            assistant.instructions,
-            use_latex=assistant.use_latex,
-            use_image_descriptions=assistant.use_image_descriptions,
-        ),
-        model=_model,
-        tools=json.loads(assistant.tools) if assistant.tools else None,
-        temperature=assistant.temperature,
-        metadata={
-            "class_id": str(target_class_id),
-            "creator_id": str(assistant.creator_id),
-        },
-        tool_resources=tool_resources,
-        extra_body=reasoning_extra_body,
-    )
+        if new_assistant.interaction_mode == InteractionMode.VOICE:
+            _model = "gpt-4o"
+        else:
+            _model = (
+                get_azure_model_deployment_name_equivalent(assistant.model)
+                if isinstance(cli, openai.AsyncAzureOpenAI)
+                else assistant.model
+            )
 
-    new_assistant.assistant_id = openai_assistant.id
-    await session.flush()
-    await session.refresh(new_assistant)
+        reasoning_effort = (
+            REASONING_EFFORT_MAP.get(assistant.reasoning_effort)
+            if assistant.reasoning_effort is not None
+            else None
+        )
+        reasoning_extra_body = (
+            {"reasoning_effort": reasoning_effort}
+            if reasoning_effort is not None
+            else {}
+        )
+
+        openai_assistant = await cli.beta.assistants.create(
+            instructions=format_instructions(
+                assistant.instructions,
+                use_latex=assistant.use_latex,
+                use_image_descriptions=assistant.use_image_descriptions,
+            ),
+            model=_model,
+            tools=json.loads(assistant.tools) if assistant.tools else None,
+            temperature=assistant.temperature,
+            metadata={
+                "class_id": str(target_class_id),
+                "creator_id": str(assistant.creator_id),
+            },
+            tool_resources=tool_resources,
+            extra_body=reasoning_extra_body,
+        )
+
+        new_assistant.assistant_id = openai_assistant.id
+        await session.flush()
+        await session.refresh(new_assistant)
 
     grants = [
         (f"class:{target_class_id}", "parent", f"assistant:{new_assistant.id}"),
@@ -394,7 +405,7 @@ async def copy_moderator_published_assistants(
     )
 
     async for assistant in models.Assistant.async_get_published(
-        session, source_class_id, supervisor_ids, version=2
+        session, source_class_id, supervisor_ids
     ):
         await copy_assistant(
             session,
@@ -413,7 +424,7 @@ async def copy_all_published_assistants(
     target_class_id: int,
 ):
     async for assistant in models.Assistant.async_get_published(
-        session, source_class_id, version=2
+        session, source_class_id
     ):
         await copy_assistant(
             session,

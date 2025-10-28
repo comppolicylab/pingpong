@@ -2426,13 +2426,19 @@ class Assistant(Base):
         if version:
             condition.append(Assistant.version == version)
 
-        stmt = select(Assistant).where(
-            and_(
-                Assistant.class_id == class_id,
-                *condition,
+        stmt = (
+            select(Assistant)
+            .where(
+                and_(
+                    Assistant.class_id == class_id,
+                    *condition,
+                )
             )
+            .options(selectinload(Assistant.code_interpreter_files))
         )
+
         result = await session.execute(stmt)
+
         for row in result:
             yield row.Assistant
 
