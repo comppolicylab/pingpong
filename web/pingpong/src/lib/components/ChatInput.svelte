@@ -291,13 +291,6 @@
   let errorMessage: string | null = null;
   $: combinedErrorMessage = errorMessage || threadManagerError;
 
-  // Track if we just submitted to refocus after loading completes
-  let justSubmitted = false;
-  $: if (justSubmitted && !loading && canSubmit) {
-    justSubmitted = false;
-    document.getElementById('message')?.focus();
-  }
-
   const dismissError = () => {
     errorMessage = null;
     dispatcher('dismissError');
@@ -319,7 +312,6 @@
       return;
     }
     errorMessage = null;
-    justSubmitted = true;
     const message = ref.value;
     const realMessage = realRef.value;
     const tempFiles = $allFiles;
