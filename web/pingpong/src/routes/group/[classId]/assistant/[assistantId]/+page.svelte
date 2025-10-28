@@ -644,7 +644,6 @@
     }
 
     if (dirty) {
-      console.debug(`Field ${field} is dirty: ${oldValue} -> ${newValue}`);
       return true;
     }
 

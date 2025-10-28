@@ -652,7 +652,6 @@ export class ThreadManager {
     chunk: api.ThreadStreamChunk,
     callback: ({ success, errorMessage, message_sent }: CallbackParams) => void = () => {}
   ) {
-    console.debug('Received chunk', chunk);
     switch (chunk.type) {
       case 'message_created':
         this.#data.update((d) => {

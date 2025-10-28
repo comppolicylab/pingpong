@@ -21,6 +21,7 @@
   import type { Writable } from 'svelte/store';
   import { Button, Heading, Li, List, Modal, P, Popover } from 'flowbite-svelte';
   import { page } from '$app/stores';
+  import { browser } from '$app/environment';
   import type {
     MimeTypeLookupFn,
     FileRemover,
@@ -251,6 +252,17 @@
     (tooManyAttachments || tooManyFileSearchFiles || tooManyCodeInterpreterFiles) &&
     tooManyVisionFiles;
 
+  const focusMessage = () => {
+    if (!browser) {
+      return;
+    }
+    document.getElementById('message')?.focus();
+  };
+
+  $: if (!loading) {
+    focusMessage();
+  }
+
   // Fix the height of the textarea to match the content.
   // The technique is to render an off-screen textarea with a scrollheight,
   // then set the height of the visible textarea to match. Other techniques
@@ -280,10 +292,10 @@
   // native DOM elements, we need to wrap the textarea in a div and then
   // access its child to imperatively focus it.
   const init = (node: HTMLDivElement, newThreadId: string) => {
-    document.getElementById('message')?.focus();
+    focusMessage();
     return {
       update: () => {
-        document.getElementById('message')?.focus();
+        focusMessage();
       }
     };
   };
@@ -316,7 +328,7 @@
     const realMessage = realRef.value;
     const tempFiles = $allFiles;
     $allFiles = [];
-    document.getElementById('message')?.focus();
+    focusMessage();
     ref.value = '';
     realRef.value = '';
     fixHeight(realRef);
@@ -527,8 +539,7 @@
               ? "You can't reply in this thread."
               : 'Read-only thread: You no longer have permissions to interact with this assistant.'}
         class:text-gray-700={disabled}
-        class:animate-pulse={loading}
-        disabled={loading || disabled || !canSubmit || assistantDeleted || !canViewAssistant}
+        disabled={!canSubmit || assistantDeleted || !canViewAssistant}
         on:keydown={maybeSubmit}
         on:input={handleTextAreaInput}
         style={`max-height: ${maxHeight}px; font-size: 1rem; line-height: 1.5rem;`}
