@@ -116,8 +116,8 @@
       if (selectedAssistant) {
         assistant = selectedAssistant;
         useImageDescriptions = assistant.use_image_descriptions || false;
-        allowUserFileUploads = assistant.allow_user_file_uploads || true;
-        allowUserImageUploads = assistant.allow_user_image_uploads || true;
+        allowUserFileUploads = assistant.allow_user_file_uploads ?? true;
+        allowUserImageUploads = assistant.allow_user_image_uploads ?? true;
       }
     }
   }
