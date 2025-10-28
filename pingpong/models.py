@@ -4709,7 +4709,13 @@ class Thread(Base):
     async def get_file_ids_by_id(
         cls, session: AsyncSession, id_: int
     ) -> AsyncGenerator[str, None]:
-        stmt = select(Thread).where(Thread.id == int(id_))
+        stmt = (
+            select(Thread)
+            .where(Thread.id == int(id_))
+            .options(
+                selectinload(Thread.code_interpreter_files).load_only(File.file_id)
+            )
+        )
         thread = await session.scalar(stmt)
         if not thread:
             return
