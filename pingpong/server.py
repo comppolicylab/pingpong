@@ -3267,6 +3267,9 @@ async def get_thread_details(
         request.state.db, int(thread_id)
     )
 
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
     coalesced = []
     for run in thread.runs:
         for msg in run.messages:
