@@ -4430,9 +4430,12 @@ class Thread(Base):
                 selectinload(Thread.voice_mode_recording),
                 selectinload(Thread.vector_store).selectinload(VectorStore.files),
                 selectinload(Thread.code_interpreter_files),
-                selectinload(Thread.assistant)
-                .selectinload(Assistant.vector_store)
-                .selectinload(VectorStore.files),
+                selectinload(Thread.assistant).options(
+                    selectinload(Assistant.vector_store).selectinload(
+                        VectorStore.files
+                    ),
+                    selectinload(Assistant.code_interpreter_files),
+                ),
                 selectinload(Thread.class_).options(
                     defer(Class.api_key),
                     defer(Class.lms_access_token),
