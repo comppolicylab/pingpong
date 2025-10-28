@@ -162,6 +162,7 @@
   let useImageDescriptions = false;
   let assistantVersion: number | null = null;
   let assistantInteractionMode: 'voice' | 'chat' | null = null;
+  let allowUserFileUploads = true;
   $: {
     const assistant = data.assistants.find(
       (assistant: api.Assistant) => assistant.id === $assistantId
@@ -171,11 +172,13 @@
       useImageDescriptions = assistant.use_image_descriptions || false;
       assistantInteractionMode = assistant.interaction_mode;
       assistantVersion = assistant.version ?? null;
+      allowUserFileUploads = assistant.allow_user_file_uploads ?? true;
     } else {
       useLatex = false;
       useImageDescriptions = false;
       assistantInteractionMode = null;
       assistantVersion = null;
+      allowUserFileUploads = true;
       if (data.threadData.anonymous_session) {
         console.warn(`Definition for assistant ${$assistantId} not found.`);
       }
@@ -1315,7 +1318,7 @@
             loading={$submitting || $waiting}
             {fileSearchAttachmentCount}
             {codeInterpreterAttachmentCount}
-            upload={handleUpload}
+            upload={allowUserFileUploads ? handleUpload : null}
             remove={handleRemove}
             threadVersion={$version}
             assistantVersion={resolvedAssistantVersion}
