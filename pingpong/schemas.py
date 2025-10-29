@@ -1378,6 +1378,7 @@ class ThreadParticipants(BaseModel):
 class ThreadMessages(BaseModel):
     limit: int
     messages: list[OpenAIMessage]
+    fs_messages: list[FileSearchMessage] | None = None
     ci_messages: list[CodeInterpreterMessage] | None
 
 

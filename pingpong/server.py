@@ -3075,6 +3075,7 @@ async def list_thread_messages(
 
         thread_messages: list[OpenAIMessage] = []
         placeholder_ci_calls = []
+        file_search_calls: list[schemas.FileSearchMessage] = []
         file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
         for tool_call in tool_calls_v3:
             if tool_call.type == schemas.ToolCallType.CODE_INTERPRETER:
@@ -3129,6 +3130,32 @@ async def list_thread_messages(
                             )
                         )
 
+                file_search_calls.append(
+                    schemas.FileSearchMessage(
+                        id=str(tool_call.id),
+                        assistant_id=str(thread.assistant_id)
+                        if thread.assistant_id
+                        else "",
+                        created_at=int(tool_call.created.timestamp()),
+                        content=[
+                            schemas.FileSearchCall(
+                                step_id=str(tool_call.id),
+                                type="file_search_call",
+                                status=tool_call.status.value,
+                                queries=json.loads(tool_call.queries)
+                                if tool_call.queries
+                                else [],
+                            )
+                        ],
+                        metadata={},
+                        object="thread.message",
+                        role="assistant",
+                        run_id=str(tool_call.run_id),
+                        thread_id=str(thread.id),
+                        message_type="file_search_call",
+                    )
+                )
+
         for message in messages_v3:
             _message = OpenAIMessage(
                 id=str(message.id),
@@ -3141,6 +3168,7 @@ async def list_thread_messages(
                 status=message.message_status.value
                 if message.message_status != "pending"
                 else "in_progress",
+                run_id=str(message.run_id) if message.run_id else None,
             )
             attachments: list[Attachment] = []
             attachments_dict: dict[str, list[dict[str, str]]] = {}
@@ -3278,7 +3306,12 @@ async def list_thread_messages(
                     else pseudonym(thread, users[str(message.user_id)])
                 )
             thread_messages.append(_message)
-        return {"messages": thread_messages, "ci_messages": [], "limit": limit}
+        return {
+            "messages": thread_messages,
+            "ci_messages": [],
+            "fs_messages": file_search_calls,
+            "limit": limit,
+        }
     else:
         raise HTTPException(status_code=400, detail="Invalid thread version")
 
