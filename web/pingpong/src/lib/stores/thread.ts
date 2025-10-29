@@ -171,16 +171,72 @@ export class ThreadManager {
         error: null,
         persisted: true
       }));
+      const fs_messages = ($data.data?.fs_messages || []).map((message) => ({
+        data: message,
+        error: null,
+        persisted: true
+      }));
       const optimisticMessages = $data.optimistic.map((message) => ({
         data: message,
         error: null,
         persisted: false
       }));
-      // Sort messages together by created_at timestamp
-      return realMessages
+
+      const allMessages = realMessages
         .concat(ci_messages)
+        .concat(fs_messages)
         .concat(optimisticMessages)
         .sort((a, b) => a.data.created_at - b.data.created_at);
+
+      const finalMessages: Message[] = [];
+      for (let i = 0; i < allMessages.length; ) {
+        const current = allMessages[i];
+
+        if (current.data.role !== 'assistant') {
+          finalMessages.push(current);
+          i += 1;
+          continue;
+        }
+
+        const currentRunId = current.data.run_id ?? null;
+        const group: Message[] = [current];
+        let j = i + 1;
+
+        while (j < allMessages.length) {
+          const next = allMessages[j];
+          if (next.data.role !== 'assistant') {
+            break;
+          }
+          const nextRunId = next.data.run_id ?? null;
+          if (nextRunId !== currentRunId) {
+            break;
+          }
+          group.push(next);
+          j += 1;
+        }
+
+        if (group.length === 1) {
+          finalMessages.push(current);
+        } else {
+          const responseIndex = group.findIndex((message) => !message.data.message_type);
+          const base = responseIndex >= 0 ? group[responseIndex] : group[0];
+          const mergedContent = group.flatMap((message) => message.data.content || []);
+
+          const merged: Message = {
+            ...base,
+            data: {
+              ...base.data,
+              content: mergedContent
+            }
+          };
+
+          finalMessages.push(merged);
+        }
+
+        i = j;
+      }
+
+      return finalMessages;
     });
 
     this.loading = derived(this.#data, ($data) => !!$data?.loading);
@@ -400,6 +456,7 @@ export class ThreadManager {
         data: {
           ...d.data,
           ci_messages: [...response.ci_messages, ...d.data.ci_messages],
+          fs_messages: [...response.fs_messages, ...d.data.fs_messages],
           messages: [...response.messages, ...d.data.messages].sort(
             (a, b) => a.created_at - b.created_at
           )
@@ -735,7 +792,10 @@ export class ThreadManager {
         return d;
       }
 
-      if (lastMessage.data.role !== 'assistant' && call.type === 'code_interpreter') {
+      if (
+        lastMessage.data.role !== 'assistant' &&
+        (call.type === 'code_interpreter' || call.type === 'file_search')
+      ) {
         d.data?.messages.push({
           role: 'assistant',
           content: [],
@@ -746,7 +806,7 @@ export class ThreadManager {
           file_search_file_ids: [],
           code_interpreter_file_ids: [],
           object: 'thread.message',
-          run_id: null,
+          run_id: call.run_id || null,
           attachments: []
         });
       }
@@ -809,6 +869,22 @@ export class ThreadManager {
             }
           }
         }
+      } else if (chunk.type === 'file_search') {
+        const placeholder = lastMessage.content.find(
+          (c) => c.type === 'file_search_call' && c.step_id === chunk.id
+        ) as api.FileSearchCallItem | undefined;
+
+        if (placeholder) {
+          placeholder.queries = chunk.queries || [];
+          placeholder.status = chunk.status;
+        } else {
+          lastMessage.content.push({
+            type: 'file_search_call',
+            step_id: chunk.id,
+            status: chunk.status,
+            queries: chunk.queries || []
+          });
+        }
       }
 
       return { ...d };
@@ -820,7 +896,9 @@ export class ThreadManager {
    */
   #appendDelta(chunk: api.OpenAIMessageDelta) {
     this.#data.update((d) => {
-      const lastMessage = d.data?.messages[d.data!.messages.length - 1];
+      const messages = d.data?.messages || [];
+      const sortedMessages = messages.sort((a, b) => b.created_at - a.created_at);
+      const lastMessage = sortedMessages[0];
       if (!lastMessage) {
         console.warn('Received a message delta without a previous message.');
         return d;

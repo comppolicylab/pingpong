@@ -991,6 +991,7 @@ class BufferedResponseStreamHandler:
                     "id": str(self.message_id),
                     "thread_id": str(self.thread_id),
                     "assistant_id": None,
+                    "run_id": str(self.run_id),
                     "created_at": int(self.message_created_at.timestamp())
                     if self.message_created_at
                     else None,
@@ -1874,6 +1875,20 @@ class BufferedResponseStreamHandler:
         self.tool_call_id = tool_call.id
         self.tool_call_external_id = tool_call.tool_call_id
 
+        self.enqueue(
+            {
+                "type": "tool_call_created",
+                "tool_call": {
+                    "id": str(data.id),
+                    "index": self.prev_output_index,
+                    "type": "file_search",
+                    "queries": data.queries,
+                    "status": data.status,
+                    "run_id": str(self.run_id),
+                },
+            }
+        )
+
     async def on_file_search_call_in_progress(
         self, data: ResponseFileSearchCallInProgressEvent
     ):
@@ -2038,6 +2053,20 @@ class BufferedResponseStreamHandler:
             await session_.commit()
 
         await update_status_queries_on_file_search_call_done()
+
+        self.enqueue(
+            {
+                "type": "tool_call_delta",
+                "delta": {
+                    "type": "file_search",
+                    "id": data.id,
+                    "index": self.prev_output_index,
+                    "run_id": str(self.run_id),
+                    "queries": data.queries,
+                    "status": data.status,
+                },
+            }
+        )
 
         self.tool_call_id = None
         self.tool_call_external_id = None

@@ -57,6 +57,7 @@
   import { tick } from 'svelte';
   import FileCitation from './FileCitation.svelte';
   import StatusErrors from './StatusErrors.svelte';
+  import FileSearchCallItem from './FileSearchCallItem.svelte';
   export let data;
 
   let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -1012,6 +1013,8 @@
                   </Button>
                 </div></Card
               >
+            {:else if content.type === 'file_search_call'}
+              <FileSearchCallItem {content} />
             {:else if content.type === 'code_output_image_file'}
               <Accordion flush>
                 <AccordionItem>
