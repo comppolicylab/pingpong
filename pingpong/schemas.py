@@ -1358,6 +1358,7 @@ class ThreadMessages(BaseModel):
     limit: int
     messages: list[OpenAIMessage]
     ci_messages: list[CodeInterpreterMessage] | None
+    has_more: bool
 
 
 class VoiceModeRecording(BaseModel):

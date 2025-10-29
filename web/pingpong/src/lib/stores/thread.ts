@@ -141,7 +141,7 @@ export class ThreadManager {
       data: expanded.data || null,
       error: expanded.error ? { detail: expanded.error?.detail, wasSent: true } : null,
       limit: expanded.data?.limit || 20,
-      canFetchMore: expanded.data ? expanded.data.messages.length === expanded.data.limit : false,
+      canFetchMore: expanded.data?.has_more ?? false,
       supportsFileSearch: expanded.data?.thread?.tools_available?.includes('file_search') || false,
       supportsCodeInterpreter:
         expanded.data?.thread?.tools_available?.includes('code_interpreter') || false,
@@ -407,7 +407,7 @@ export class ThreadManager {
         limit: response.limit || d.limit,
         error: response.error ? { detail: response.error?.detail, wasSent: true } : null,
         loading: false,
-        canFetchMore: !response.lastPage
+        canFetchMore: response.has_more ?? false
       };
     });
   }

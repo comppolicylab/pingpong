@@ -2330,6 +2330,7 @@ async def get_thread(
             "recording": thread.voice_mode_recording
             if is_supervisor or is_current_user
             else None,
+            "has_more": messages.has_more,
         }
     elif thread.version == 3:
         (
@@ -2611,6 +2612,11 @@ async def get_thread(
                 object="thread.run",
                 tools=[],
             )
+        # For version 3, determine if there are more messages by checking if we
+        # received exactly the limit. If we got fewer than limit, there are no more.
+        # Note: We need to count both messages and tool_calls since they're interleaved
+        total_items = len(messages_v3) + len(tool_calls_v3)
+        has_more_v3 = total_items >= 20
         return {
             "thread": thread,
             "model": assistant.model if assistant else "None",
@@ -2624,6 +2630,7 @@ async def get_thread(
             "recording": thread.voice_mode_recording
             if is_supervisor or is_current_user
             else None,
+            "has_more": has_more_v3,
         }
     else:
         raise HTTPException(status_code=400, detail="Invalid thread version")
@@ -3012,6 +3019,7 @@ async def list_thread_messages(
             "messages": list(messages.data),
             "ci_messages": placeholder_ci_calls,
             "limit": limit,
+            "has_more": messages.has_more,
         }
     elif thread.version == 3:
         (
@@ -3020,7 +3028,7 @@ async def list_thread_messages(
             is_supervisor_check,
         ) = await asyncio.gather(
             models.Thread.list_messages_tool_calls(
-                request.state.db, thread.id, limit=20, order="asc", before=before
+                request.state.db, thread.id, limit=limit, order="asc", before=before
             ),
             models.Thread.get_file_search_files(request.state.db, thread.id),
             request.state.authz.check(
@@ -3249,7 +3257,12 @@ async def list_thread_messages(
                     else pseudonym(thread, users[str(message.user_id)])
                 )
             thread_messages.append(_message)
-        return {"messages": thread_messages, "ci_messages": [], "limit": limit}
+        # For version 3, determine if there are more messages by checking if we
+        # received exactly the limit. If we got fewer than limit, there are no more.
+        # Note: We need to count both messages and tool_calls since they're interleaved
+        total_items = len(messages_v3) + len(tool_calls_v3)
+        has_more = total_items >= limit
+        return {"messages": thread_messages, "ci_messages": [], "limit": limit, "has_more": has_more}
     else:
         raise HTTPException(status_code=400, detail="Invalid thread version")
 

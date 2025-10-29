@@ -2217,6 +2217,7 @@ export type ThreadWithMeta = {
   attachments: Record<string, ServerFile>;
   instructions: string | null;
   recording: VoiceModeRecordingInfo | null;
+  has_more: boolean;
 };
 
 /**
@@ -2282,6 +2283,7 @@ export type ThreadMessages = {
   messages: OpenAIMessage[];
   ci_messages: OpenAIMessage[];
   limit: number;
+  has_more: boolean;
 };
 
 /**
