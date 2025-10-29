@@ -2152,6 +2152,19 @@ class BufferedResponseStreamHandler:
         self.current_reasoning_summary_index = data.summary_index
         self.current_summary_part_id = summary_part.id
 
+        # Enqueue event to stream to frontend
+        self.enqueue(
+            {
+                "type": "reasoning_summary_part_added",
+                "item_id": data.item_id,
+                "summary_index": data.summary_index,
+                "part": {
+                    "text": data.part.text,
+                    "type": data.part.type,
+                },
+            }
+        )
+
     async def on_reasoning_summary_text_delta(
         self, data: ResponseReasoningSummaryTextDeltaEvent
     ):
@@ -2189,6 +2202,16 @@ class BufferedResponseStreamHandler:
             self.current_summary_part_id, data.delta
         )
 
+        # Enqueue event to stream to frontend
+        self.enqueue(
+            {
+                "type": "reasoning_summary_text_delta",
+                "item_id": data.item_id,
+                "summary_index": data.summary_index,
+                "delta": data.delta,
+            }
+        )
+
     async def on_reasoning_summary_part_done(
         self, data: ResponseReasoningSummaryPartDoneEvent
     ):
@@ -2212,6 +2235,19 @@ class BufferedResponseStreamHandler:
                 f"Received reasoning summary part done without a current summary part ID. Data: {data}"
             )
             return
+
+        # Enqueue event to stream to frontend
+        self.enqueue(
+            {
+                "type": "reasoning_summary_part_done",
+                "item_id": data.item_id,
+                "summary_index": data.summary_index,
+                "part": {
+                    "text": data.part.text,
+                    "type": data.part.type,
+                },
+            }
+        )
 
         self.current_summary_part_id = None
         self.current_reasoning_summary_index = None

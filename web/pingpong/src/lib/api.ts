@@ -2432,6 +2432,32 @@ export type ThreadValidationError = {
   }[];
 };
 
+export type ReasoningSummaryPart = {
+  text: string;
+  type: string;
+};
+
+export type ThreadStreamReasoningSummaryPartAddedChunk = {
+  type: 'reasoning_summary_part_added';
+  item_id: string;
+  summary_index: number;
+  part: ReasoningSummaryPart;
+};
+
+export type ThreadStreamReasoningSummaryTextDeltaChunk = {
+  type: 'reasoning_summary_text_delta';
+  item_id: string;
+  summary_index: number;
+  delta: string;
+};
+
+export type ThreadStreamReasoningSummaryPartDoneChunk = {
+  type: 'reasoning_summary_part_done';
+  item_id: string;
+  summary_index: number;
+  part: ReasoningSummaryPart;
+};
+
 export type ThreadStreamChunk =
   | ThreadStreamMessageDeltaChunk
   | ThreadStreamMessageCreatedChunk
@@ -2443,7 +2469,10 @@ export type ThreadStreamChunk =
   | ThreadStreamToolCallCreatedChunk
   | MessageContentCodeOutputImageURL
   | MessageContentCodeOutputLogs
-  | ThreadStreamToolCallDeltaChunk;
+  | ThreadStreamToolCallDeltaChunk
+  | ThreadStreamReasoningSummaryPartAddedChunk
+  | ThreadStreamReasoningSummaryTextDeltaChunk
+  | ThreadStreamReasoningSummaryPartDoneChunk;
 
 /**
  * Stream chunks from a thread.
