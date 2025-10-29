@@ -2171,6 +2171,12 @@ export type CodeInterpreterCallPlaceholder = {
   type: 'code_interpreter_call_placeholder';
 };
 
+export type FileSearchCallPlaceholder = {
+  run_id: string;
+  step_id: string;
+  type: 'file_search_call_placeholder';
+};
+
 export type Content =
   | MessageContentImageFile
   | MessageContentText
@@ -2178,7 +2184,8 @@ export type Content =
   | MessageContentCodeOutputImageFile
   | MessageContentCodeOutputImageURL
   | MessageContentCodeOutputLogs
-  | CodeInterpreterCallPlaceholder;
+  | CodeInterpreterCallPlaceholder
+  | FileSearchCallPlaceholder;
 
 export type OpenAIMessage = {
   id: string;

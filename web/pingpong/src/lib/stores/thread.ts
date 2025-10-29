@@ -735,7 +735,10 @@ export class ThreadManager {
         return d;
       }
 
-      if (lastMessage.data.role !== 'assistant' && call.type === 'code_interpreter') {
+      if (
+        lastMessage.data.role !== 'assistant' &&
+        (call.type === 'code_interpreter' || call.type === 'file_search')
+      ) {
         d.data?.messages.push({
           role: 'assistant',
           content: [],
@@ -808,6 +811,15 @@ export class ThreadManager {
                 break;
             }
           }
+        }
+      } else if (chunk.type === 'file_search') {
+        // Add a placeholder for file search call
+        if (!lastChunk || lastChunk.type !== 'file_search_call_placeholder') {
+          lastMessage.content.push({
+            type: 'file_search_call_placeholder',
+            run_id: lastMessage.run_id || '',
+            step_id: chunk.id
+          });
         }
       }
 

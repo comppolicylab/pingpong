@@ -41,7 +41,8 @@
     MicrophoneSlashOutline,
     UsersSolid,
     LinkOutline,
-    TerminalOutline
+    TerminalOutline,
+    FileSearchOutline
   } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
@@ -1012,6 +1013,13 @@
                   </Button>
                 </div></Card
               >
+            {:else if content.type === 'file_search_call_placeholder'}
+              <Card padding="md" class="max-w-full flex-row flex items-center justify-between">
+                <div class="flex-row flex items-center space-x-2">
+                  <div><FileSearchOutline size="lg" /></div>
+                  <div>Searching files...</div>
+                </div>
+              </Card>
             {:else if content.type === 'code_output_image_file'}
               <Accordion flush>
                 <AccordionItem>

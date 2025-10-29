@@ -1874,6 +1874,17 @@ class BufferedResponseStreamHandler:
         self.tool_call_id = tool_call.id
         self.tool_call_external_id = tool_call.tool_call_id
 
+        self.enqueue(
+            {
+                "type": "tool_call_created",
+                "tool_call": {
+                    "id": str(data.id),
+                    "type": "file_search",
+                    "file_search": {},
+                },
+            }
+        )
+
     async def on_file_search_call_in_progress(
         self, data: ResponseFileSearchCallInProgressEvent
     ):
