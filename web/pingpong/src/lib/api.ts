@@ -1293,6 +1293,8 @@ export type Assistant = {
   locked: boolean | null;
   assistant_should_message_first: boolean | null;
   should_record_user_information: boolean | null;
+  allow_user_file_uploads: boolean | null;
+  allow_user_image_uploads: boolean | null;
   endorsed: boolean | null;
   created: string;
   updated: string | null;
@@ -1372,6 +1374,8 @@ export type CreateAssistantRequest = {
   deleted_private_files?: number[];
   assistant_should_message_first?: boolean;
   should_record_user_information?: boolean;
+  allow_user_file_uploads?: boolean;
+  allow_user_image_uploads?: boolean;
 };
 
 /**
@@ -1397,6 +1401,8 @@ export type UpdateAssistantRequest = {
   deleted_private_files?: number[];
   assistant_should_message_first?: boolean;
   should_record_user_information?: boolean;
+  allow_user_file_uploads?: boolean;
+  allow_user_image_uploads?: boolean;
 };
 
 /**

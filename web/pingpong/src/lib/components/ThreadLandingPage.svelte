@@ -106,6 +106,8 @@
   // The assistant ID from the URL.
   $: linkedAssistant = parseInt($page.url.searchParams.get('assistant') || '0', 10);
   let useImageDescriptions = false;
+  let allowUserFileUploads = true;
+  let allowUserImageUploads = true;
   $: {
     if (linkedAssistant && assistants) {
       const selectedAssistant = (assistants || []).find(
@@ -114,6 +116,8 @@
       if (selectedAssistant) {
         assistant = selectedAssistant;
         useImageDescriptions = assistant.use_image_descriptions || false;
+        allowUserFileUploads = assistant.allow_user_file_uploads ?? true;
+        allowUserImageUploads = assistant.allow_user_image_uploads ?? true;
       }
     }
   }
@@ -573,7 +577,7 @@
               maxSize={data.uploadInfo.private_file_max_size}
               loading={$loading || !!$navigating}
               canSubmit={true}
-              visionAcceptedFiles={supportsVision && allowVisionUpload
+              visionAcceptedFiles={allowUserImageUploads && supportsVision && allowVisionUpload
                 ? data.uploadInfo.fileTypes({
                     file_search: false,
                     code_interpreter: false,
@@ -582,14 +586,14 @@
                 : null}
               {visionSupportOverride}
               {useImageDescriptions}
-              fileSearchAcceptedFiles={supportsFileSearch
+              fileSearchAcceptedFiles={allowUserFileUploads && supportsFileSearch
                 ? data.uploadInfo.fileTypes({
                     file_search: true,
                     code_interpreter: false,
                     vision: false
                   })
                 : null}
-              codeInterpreterAcceptedFiles={supportsCodeInterpreter
+              codeInterpreterAcceptedFiles={allowUserFileUploads && supportsCodeInterpreter
                 ? data.uploadInfo.fileTypes({
                     file_search: false,
                     code_interpreter: true,

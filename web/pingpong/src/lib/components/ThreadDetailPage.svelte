@@ -162,6 +162,8 @@
   let useImageDescriptions = false;
   let assistantVersion: number | null = null;
   let assistantInteractionMode: 'voice' | 'chat' | null = null;
+  let allowUserFileUploads = true;
+  let allowUserImageUploads = true;
   $: {
     const assistant = data.assistants.find(
       (assistant: api.Assistant) => assistant.id === $assistantId
@@ -171,11 +173,15 @@
       useImageDescriptions = assistant.use_image_descriptions || false;
       assistantInteractionMode = assistant.interaction_mode;
       assistantVersion = assistant.version ?? null;
+      allowUserFileUploads = assistant.allow_user_file_uploads ?? true;
+      allowUserImageUploads = assistant.allow_user_image_uploads ?? true;
     } else {
       useLatex = false;
       useImageDescriptions = false;
       assistantInteractionMode = null;
       assistantVersion = null;
+      allowUserFileUploads = true;
+      allowUserImageUploads = true;
       if (data.threadData.anonymous_session) {
         console.warn(`Definition for assistant ${$assistantId} not found.`);
       }
@@ -1303,9 +1309,11 @@
             maxSize={data.uploadInfo.private_file_max_size}
             bind:attachments={currentMessageAttachments}
             {threadManagerError}
-            {visionAcceptedFiles}
-            {fileSearchAcceptedFiles}
-            {codeInterpreterAcceptedFiles}
+            visionAcceptedFiles={allowUserImageUploads ? visionAcceptedFiles : null}
+            fileSearchAcceptedFiles={allowUserFileUploads ? fileSearchAcceptedFiles : null}
+            codeInterpreterAcceptedFiles={allowUserFileUploads
+              ? codeInterpreterAcceptedFiles
+              : null}
             {visionSupportOverride}
             {useImageDescriptions}
             {assistantDeleted}

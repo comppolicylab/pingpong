@@ -2233,6 +2233,8 @@ class Assistant(Base):
     verbosity = Column(Integer, nullable=True)
     assistant_should_message_first = Column(Boolean, server_default="false")
     should_record_user_information = Column(Boolean, server_default="false")
+    allow_user_file_uploads = Column(Boolean, server_default="true")
+    allow_user_image_uploads = Column(Boolean, server_default="true")
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="assistants", foreign_keys=[class_id])
     threads = relationship("Thread", back_populates="assistant")
