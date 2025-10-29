@@ -1015,27 +1015,39 @@
             {:else if content.type === 'reasoning_summary'}
               {#each content.summary_parts as summary_part (summary_part.part_index)}
                 {@const lines = summary_part.text.split('\n')}
-                {@const title = lines[0] || 'Reasoning'}
+                {@const titleComplete = lines.length > 0 && lines[0].trim().length > 0}
+                {@const title = titleComplete ? lines[0] : ''}
                 {@const body = lines.slice(1).join('\n').trim()}
                 
-                {#if body}
-                  <Accordion flush>
-                    <AccordionItem>
-                      <span slot="header">
-                        <div class="flex-row flex items-center space-x-2">
-                          <div><CheckOutline size="lg" /></div>
-                          <div class="animate-pulse">{title}</div>
+                {#if titleComplete}
+                  {#if body}
+                    <Accordion flush class="border-none">
+                      <AccordionItem class="border-none">
+                        <div slot="header" class="flex items-center space-x-2 py-1">
+                          <CheckOutline size="md" class="flex-shrink-0" />
+                          <div class="text-sm">
+                            <Markdown markdown={title} />
+                          </div>
                         </div>
-                      </span>
-                      <div class="leading-6 w-full whitespace-pre-wrap">
-                        {body}
+                        <div class="leading-6 text-sm pl-6">
+                          <Markdown markdown={body} />
+                        </div>
+                      </AccordionItem>
+                    </Accordion>
+                  {:else}
+                    <div class="flex items-center space-x-2 py-1">
+                      <CheckOutline size="md" class="flex-shrink-0" />
+                      <div class="text-sm">
+                        <Markdown markdown={title} />
                       </div>
-                    </AccordionItem>
-                  </Accordion>
+                    </div>
+                  {/if}
                 {:else}
-                  <div class="flex-row flex items-center space-x-2 my-2">
-                    <div><CheckOutline size="lg" /></div>
-                    <div class="animate-pulse">{title}</div>
+                  <div class="flex items-center space-x-2 py-1">
+                    <CheckOutline size="md" class="flex-shrink-0" />
+                    <div class="text-sm animate-shimmer bg-gradient-to-r from-gray-400 via-gray-600 to-gray-400 bg-[length:200%_100%] text-transparent bg-clip-text">
+                      Thinking...
+                    </div>
                   </div>
                 {/if}
               {/each}

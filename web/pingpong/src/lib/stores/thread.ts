@@ -829,12 +829,12 @@ export class ThreadManager {
    */
   #createReasoningSummary(chunk: api.ThreadStreamReasoningSummaryPartAddedChunk) {
     this.#data.update((d) => {
-      const messages = get(this.messages);
+      const messages = d.data?.messages;
       if (!messages?.length) {
         console.warn('Received a reasoning summary without any messages.');
         return d;
       }
-      const sortedMessages = messages.sort((a, b) => b.data.created_at - a.data.created_at);
+      const sortedMessages = messages.sort((a, b) => b.created_at - a.created_at);
       const lastMessage = sortedMessages[0];
       if (!lastMessage) {
         console.warn('Received a reasoning summary without a previous message.');
@@ -842,7 +842,7 @@ export class ThreadManager {
       }
 
       // Add reasoning summary as a new message if not already an assistant message
-      if (lastMessage.data.role !== 'assistant') {
+      if (lastMessage.role !== 'assistant') {
         d.data?.messages.push({
           role: 'assistant',
           content: [],
@@ -857,6 +857,30 @@ export class ThreadManager {
           attachments: []
         });
       }
+
+      // Get the last message again after potentially adding one
+      const currentLastMessage = messages.sort((a, b) => b.created_at - a.created_at)[0];
+
+      // Find or create the reasoning summary content
+      let reasoningContent = currentLastMessage.content.find(
+        (c) => c.type === 'reasoning_summary' && c.reasoning_id === chunk.item_id
+      ) as api.ReasoningSummaryContent | undefined;
+
+      if (!reasoningContent) {
+        reasoningContent = {
+          reasoning_id: chunk.item_id,
+          summary_parts: [],
+          type: 'reasoning_summary'
+        };
+        currentLastMessage.content.push(reasoningContent);
+      }
+
+      // Add the initial part with text from the chunk
+      reasoningContent.summary_parts.push({
+        text: chunk.part.text,
+        part_index: chunk.summary_index
+      });
+
       return { ...d };
     });
   }
