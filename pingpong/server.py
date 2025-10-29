@@ -2367,6 +2367,7 @@ async def get_thread(
         thread_messages: list[OpenAIMessage] = []
         placeholder_ci_calls = []
         file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
+        file_search_by_output_index: dict[int, int] = {}  # output_index -> results_count
         for tool_call in tool_calls_v3:
             if tool_call.type == schemas.ToolCallType.CODE_INTERPRETER:
                 tool_content: list[schemas.CodeInterpreterMessageContent] = []
@@ -2404,6 +2405,9 @@ async def get_thread(
                     )
                 )
             elif tool_call.type == schemas.ToolCallType.FILE_SEARCH:
+                # Track the results count for this output_index
+                file_search_by_output_index[tool_call.output_index] = len(tool_call.results)
+
                 for result in tool_call.results:
                     if file_search_results.get(result.file_id):
                         file_search_results[result.file_id].text += (
@@ -2446,6 +2450,18 @@ async def get_thread(
                 attachments.append({"file_id": file_id, "tools": tools})
 
             _message.attachments = attachments
+            # Add file_search placeholder if there was a file_search before this message
+            if message.output_index > 0:
+                prev_output_index = message.output_index - 1
+                if prev_output_index in file_search_by_output_index:
+                    _message.content.append({
+                        "type": "file_search_call_placeholder",
+                        "run_id": str(message.run_id) if message.run_id else "",
+                        "step_id": "",
+                        "results_count": file_search_by_output_index[prev_output_index],
+                        "completed": True,
+                    })
+            
             for content in message.content:
                 match content.type:
                     case schemas.MessagePartType.INPUT_TEXT:
@@ -3047,6 +3063,7 @@ async def list_thread_messages(
         thread_messages: list[OpenAIMessage] = []
         placeholder_ci_calls = []
         file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
+        file_search_by_output_index: dict[int, int] = {}  # output_index -> results_count
         for tool_call in tool_calls_v3:
             if tool_call.type == schemas.ToolCallType.CODE_INTERPRETER:
                 tool_content: list[schemas.CodeInterpreterMessageContent] = []
@@ -3086,6 +3103,9 @@ async def list_thread_messages(
                     )
                 )
             elif tool_call.type == schemas.ToolCallType.FILE_SEARCH:
+                # Track the results count for this output_index
+                file_search_by_output_index[tool_call.output_index] = len(tool_call.results)
+
                 for result in tool_call.results:
                     if file_search_results.get(result.file_id):
                         file_search_results[result.file_id].text += (
@@ -3128,6 +3148,18 @@ async def list_thread_messages(
                 attachments.append({"file_id": file_id, "tools": tools})
 
             _message.attachments = attachments
+            # Add file_search placeholder if there was a file_search before this message
+            if message.output_index > 0:
+                prev_output_index = message.output_index - 1
+                if prev_output_index in file_search_by_output_index:
+                    _message.content.append({
+                        "type": "file_search_call_placeholder",
+                        "run_id": str(message.run_id) if message.run_id else "",
+                        "step_id": "",
+                        "results_count": file_search_by_output_index[prev_output_index],
+                        "completed": True,
+                    })
+            
             for content in message.content:
                 match content.type:
                     case schemas.MessagePartType.INPUT_TEXT:

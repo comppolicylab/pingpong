@@ -1323,6 +1323,14 @@ class CodeInterpreterPlaceholderContent(BaseModel):
     type: Literal["code_interpreter_call_placeholder"]
 
 
+class FileSearchCallPlaceholder(BaseModel):
+    run_id: str
+    step_id: str
+    type: Literal["file_search_call_placeholder"]
+    results_count: int | None = None
+    completed: bool | None = None
+
+
 class CodeInterpreterMessage(BaseModel):
     id: str
     assistant_id: str
