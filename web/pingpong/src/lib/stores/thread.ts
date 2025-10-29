@@ -712,6 +712,15 @@ export class ThreadManager {
       case 'tool_call_delta':
         this.#appendToolCallDelta(chunk.delta);
         break;
+      case 'reasoning_summary_part_added':
+        this.#createReasoningSummary(chunk);
+        break;
+      case 'reasoning_summary_text_delta':
+        this.#appendReasoningSummaryDelta(chunk);
+        break;
+      case 'reasoning_summary_part_done':
+        // Summary part is complete, no action needed
+        break;
       default:
         console.warn('Unhandled chunk', chunk);
         break;
@@ -809,6 +818,93 @@ export class ThreadManager {
             }
           }
         }
+      }
+
+      return { ...d };
+    });
+  }
+
+  /**
+   * Create a new reasoning summary content item.
+   */
+  #createReasoningSummary(chunk: api.ThreadStreamReasoningSummaryPartAddedChunk) {
+    this.#data.update((d) => {
+      const messages = get(this.messages);
+      if (!messages?.length) {
+        console.warn('Received a reasoning summary without any messages.');
+        return d;
+      }
+      const sortedMessages = messages.sort((a, b) => b.data.created_at - a.data.created_at);
+      const lastMessage = sortedMessages[0];
+      if (!lastMessage) {
+        console.warn('Received a reasoning summary without a previous message.');
+        return d;
+      }
+
+      // Add reasoning summary as a new message if not already an assistant message
+      if (lastMessage.data.role !== 'assistant') {
+        d.data?.messages.push({
+          role: 'assistant',
+          content: [],
+          created_at: Math.floor(Date.now() / 1000),
+          id: `optimistic-${(Math.random() + 1).toString(36).substring(2)}`,
+          assistant_id: '',
+          metadata: {},
+          file_search_file_ids: [],
+          code_interpreter_file_ids: [],
+          object: 'thread.message',
+          run_id: null,
+          attachments: []
+        });
+      }
+      return { ...d };
+    });
+  }
+
+  /**
+   * Append reasoning summary text delta.
+   */
+  #appendReasoningSummaryDelta(chunk: api.ThreadStreamReasoningSummaryTextDeltaChunk) {
+    this.#data.update((d) => {
+      const messages = d.data?.messages;
+      if (!messages?.length) {
+        console.warn('Received a reasoning summary delta without any messages.');
+        return d;
+      }
+      const sortedMessages = messages.sort((a, b) => b.created_at - a.created_at);
+      const lastMessage = sortedMessages[0];
+      if (!lastMessage) {
+        console.warn('Received a reasoning summary delta without a previous message.');
+        return d;
+      }
+
+      // Find or create the reasoning summary content
+      let reasoningContent = lastMessage.content.find(
+        (c) => c.type === 'reasoning_summary' && c.reasoning_id === chunk.item_id
+      ) as api.ReasoningSummaryContent | undefined;
+
+      if (!reasoningContent) {
+        reasoningContent = {
+          reasoning_id: chunk.item_id,
+          summary_parts: [],
+          type: 'reasoning_summary'
+        };
+        lastMessage.content.push(reasoningContent);
+      }
+
+      // Find or create the summary part at the given index
+      let summaryPart = reasoningContent.summary_parts.find(
+        (p) => p.part_index === chunk.summary_index
+      );
+
+      if (!summaryPart) {
+        summaryPart = {
+          text: chunk.delta,
+          part_index: chunk.summary_index
+        };
+        reasoningContent.summary_parts.push(summaryPart);
+      } else {
+        summaryPart.text += chunk.delta;
       }
 
       return { ...d };

@@ -7,6 +7,7 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .env.*
 !env.example
+package-lock.json
 
 # Sentry Config File
 .sentryclirc

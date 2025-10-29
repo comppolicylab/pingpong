@@ -2171,6 +2171,15 @@ export type CodeInterpreterCallPlaceholder = {
   type: 'code_interpreter_call_placeholder';
 };
 
+export type ReasoningSummaryContent = {
+  reasoning_id: string;
+  summary_parts: Array<{
+    text: string;
+    part_index: number;
+  }>;
+  type: 'reasoning_summary';
+};
+
 export type Content =
   | MessageContentImageFile
   | MessageContentText
@@ -2178,7 +2187,8 @@ export type Content =
   | MessageContentCodeOutputImageFile
   | MessageContentCodeOutputImageURL
   | MessageContentCodeOutputLogs
-  | CodeInterpreterCallPlaceholder;
+  | CodeInterpreterCallPlaceholder
+  | ReasoningSummaryContent;
 
 export type OpenAIMessage = {
   id: string;

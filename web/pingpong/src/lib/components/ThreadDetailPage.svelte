@@ -1012,6 +1012,33 @@
                   </Button>
                 </div></Card
               >
+            {:else if content.type === 'reasoning_summary'}
+              {#each content.summary_parts as summary_part (summary_part.part_index)}
+                {@const lines = summary_part.text.split('\n')}
+                {@const title = lines[0] || 'Reasoning'}
+                {@const body = lines.slice(1).join('\n').trim()}
+                
+                {#if body}
+                  <Accordion flush>
+                    <AccordionItem>
+                      <span slot="header">
+                        <div class="flex-row flex items-center space-x-2">
+                          <div><CheckOutline size="lg" /></div>
+                          <div class="animate-pulse">{title}</div>
+                        </div>
+                      </span>
+                      <div class="leading-6 w-full whitespace-pre-wrap">
+                        {body}
+                      </div>
+                    </AccordionItem>
+                  </Accordion>
+                {:else}
+                  <div class="flex-row flex items-center space-x-2 my-2">
+                    <div><CheckOutline size="lg" /></div>
+                    <div class="animate-pulse">{title}</div>
+                  </div>
+                {/if}
+              {/each}
             {:else if content.type === 'code_output_image_file'}
               <Accordion flush>
                 <AccordionItem>

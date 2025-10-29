@@ -5097,6 +5097,100 @@ class Thread(Base):
         return messages.scalars().all(), tool_calls.scalars().all()
 
     @classmethod
+    async def list_messages_tool_calls_reasoning(
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        limit: int = 100,
+        before: str | None = None,
+        after: str | None = None,
+        order: Literal["asc", "desc"] = "desc",
+    ) -> tuple[list["Message"], list["ToolCall"], list["ReasoningStep"]]:
+        """List messages, tool calls, and reasoning steps for a thread."""
+        msg_stmt = select(
+            Message.id.label("id"),
+            Message.output_index.label("output_index"),
+            literal_column("'message'").label("type"),
+        ).where(Message.thread_id == thread_id)
+        if before is not None:
+            msg_stmt = msg_stmt.where(Message.id < int(before))
+        if after is not None:
+            msg_stmt = msg_stmt.where(Message.id > int(after))
+
+        tool_stmt = select(
+            ToolCall.id.label("id"),
+            ToolCall.output_index.label("output_index"),
+            literal_column("'tool_call'").label("type"),
+        ).where(ToolCall.thread_id == thread_id)
+        if before is not None:
+            tool_stmt = tool_stmt.where(ToolCall.id < int(before))
+        if after is not None:
+            tool_stmt = tool_stmt.where(ToolCall.id > int(after))
+
+        reasoning_stmt = select(
+            ReasoningStep.id.label("id"),
+            ReasoningStep.output_index.label("output_index"),
+            literal_column("'reasoning'").label("type"),
+        ).where(ReasoningStep.thread_id == thread_id)
+        if before is not None:
+            reasoning_stmt = reasoning_stmt.where(ReasoningStep.id < int(before))
+        if after is not None:
+            reasoning_stmt = reasoning_stmt.where(ReasoningStep.id > int(after))
+
+        combined_stmt = union_all(msg_stmt, tool_stmt, reasoning_stmt)
+        ordering = asc("output_index") if order == "asc" else desc("output_index")
+        stmt = (
+            select(combined_stmt.c.id, combined_stmt.c.type)
+            .order_by(ordering)
+            .limit(limit)
+        )
+
+        result = await session.execute(stmt)
+        rows = result.all()
+
+        messages_ids = [r.id for r in rows if r.type == "message"]
+        tool_call_ids = [r.id for r in rows if r.type == "tool_call"]
+        reasoning_ids = [r.id for r in rows if r.type == "reasoning"]
+
+        messages = await session.execute(
+            select(Message)
+            .where(Message.id.in_(messages_ids))
+            .order_by(ordering)
+            .options(
+                selectinload(Message.content).selectinload(MessagePart.annotations),
+                selectinload(Message.file_search_attachments),
+                selectinload(Message.code_interpreter_attachments),
+            )
+        )
+        tool_calls = await session.execute(
+            select(ToolCall)
+            .where(ToolCall.id.in_(tool_call_ids))
+            .order_by(ordering)
+            .options(
+                selectinload(ToolCall.results),
+                selectinload(ToolCall.outputs),
+                selectinload(ToolCall.web_search_actions).selectinload(
+                    WebSearchCallAction.sources
+                ),
+            )
+        )
+        reasoning_steps = await session.execute(
+            select(ReasoningStep)
+            .where(ReasoningStep.id.in_(reasoning_ids))
+            .order_by(ordering)
+            .options(
+                selectinload(ReasoningStep.summary_parts),
+                selectinload(ReasoningStep.content_parts),
+            )
+        )
+
+        return (
+            messages.scalars().all(),
+            tool_calls.scalars().all(),
+            reasoning_steps.scalars().all(),
+        )
+
+    @classmethod
     async def get_all_threads_by_version(
         cls, session: AsyncSession, version: int
     ) -> AsyncGenerator["Thread", None]:

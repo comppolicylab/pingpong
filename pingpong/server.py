@@ -2333,12 +2333,12 @@ async def get_thread(
         }
     elif thread.version == 3:
         (
-            [messages_v3, tool_calls_v3],
+            [messages_v3, tool_calls_v3, reasoning_steps_v3],
             latest_run,
             [assistant, file_names, all_files],
             is_supervisor_check,
         ) = await asyncio.gather(
-            models.Thread.list_messages_tool_calls(
+            models.Thread.list_messages_tool_calls_reasoning(
                 request.state.db, thread.id, limit=20, order="desc"
             ),
             models.Thread.get_latest_run_by_thread_id(request.state.db, thread.id),
@@ -2367,6 +2367,43 @@ async def get_thread(
         thread_messages: list[OpenAIMessage] = []
         placeholder_ci_calls = []
         file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
+        
+        # Process reasoning steps and add as messages
+        for reasoning_step in reasoning_steps_v3:
+            reasoning_content = []
+            # Add reasoning summary parts to content
+            for summary_part in sorted(
+                reasoning_step.summary_parts, key=lambda x: x.part_index
+            ):
+                reasoning_content.append(
+                    {
+                        "reasoning_id": reasoning_step.reasoning_id,
+                        "summary_parts": [
+                            {
+                                "text": summary_part.summary_text,
+                                "part_index": summary_part.part_index,
+                            }
+                        ],
+                        "type": "reasoning_summary",
+                    }
+                )
+            
+            if reasoning_content:
+                thread_messages.append(
+                    OpenAIMessage(
+                        id=f"reasoning-{reasoning_step.id}",
+                        thread_id=str(thread.id),
+                        assistant_id=str(assistant.id) if assistant and assistant.id else None,
+                        created_at=int(reasoning_step.created.timestamp()),
+                        object="thread.message",
+                        role="assistant",
+                        content=reasoning_content,
+                        status="completed"
+                        if reasoning_step.status == schemas.ReasoningStatus.COMPLETED
+                        else "in_progress",
+                    )
+                )
+
         for tool_call in tool_calls_v3:
             if tool_call.type == schemas.ToolCallType.CODE_INTERPRETER:
                 tool_content: list[schemas.CodeInterpreterMessageContent] = []
