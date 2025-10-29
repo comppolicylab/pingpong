@@ -2050,6 +2050,21 @@ class BufferedResponseStreamHandler:
 
         await update_status_queries_on_file_search_call_done()
 
+        # Send completion event with result count
+        self.enqueue(
+            {
+                "type": "tool_call_delta",
+                "delta": {
+                    "index": self.prev_output_index,
+                    "type": "file_search",
+                    "id": data.id,
+                    "file_search": {
+                        "results_count": len(data.results),
+                    },
+                },
+            }
+        )
+
         self.tool_call_id = None
         self.tool_call_external_id = None
 

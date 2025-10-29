@@ -120,6 +120,7 @@ export class ThreadManager {
 
   #data: Writable<ThreadManagerState>;
   #fetcher: api.Fetcher;
+  #pendingFileSearchPlaceholders: Map<string, api.FileSearchCallPlaceholder> = new Map();
 
   /**
    * Create a new thread manager.
@@ -655,21 +656,27 @@ export class ThreadManager {
     switch (chunk.type) {
       case 'message_created':
         this.#data.update((d) => {
+          const newMessage = {
+            ...chunk.message,
+            // Note: make sure the message here has a timestamp that
+            // will be sequential to the optimistic messages.
+            // When the thread is reloaded, the real timestamps will be
+            // somewhat different.
+            created_at: Math.floor(Date.now() / 1000)
+          };
+          
+          // Add any pending file search placeholders to this message
+          if (this.#pendingFileSearchPlaceholders.size > 0) {
+            const placeholders = Array.from(this.#pendingFileSearchPlaceholders.values());
+            newMessage.content = [...placeholders, ...newMessage.content];
+            this.#pendingFileSearchPlaceholders.clear();
+          }
+
           return {
             ...d,
             data: {
               ...d.data!,
-              messages: [
-                ...(d.data?.messages || []),
-                {
-                  ...chunk.message,
-                  // Note: make sure the message here has a timestamp that
-                  // will be sequential to the optimistic messages.
-                  // When the thread is reloaded, the real timestamps will be
-                  // somewhat different.
-                  created_at: Math.floor(Date.now() / 1000)
-                }
-              ]
+              messages: [...(d.data?.messages || []), newMessage]
             }
           };
         });
@@ -722,6 +729,18 @@ export class ThreadManager {
    * Create a new tool call message.
    */
   #createToolCall(call: api.ToolCallDelta) {
+    // For file_search, track the placeholder but don't create a message yet
+    if (call.type === 'file_search') {
+      this.#pendingFileSearchPlaceholders.set(call.id, {
+        type: 'file_search_call_placeholder',
+        run_id: '',
+        step_id: call.id,
+        completed: false
+      });
+      return;
+    }
+
+    // For code_interpreter, create a message if needed
     this.#data.update((d) => {
       const messages = get(this.messages);
       if (!messages?.length) {
@@ -735,10 +754,7 @@ export class ThreadManager {
         return d;
       }
 
-      if (
-        lastMessage.data.role !== 'assistant' &&
-        (call.type === 'code_interpreter' || call.type === 'file_search')
-      ) {
+      if (lastMessage.data.role !== 'assistant' && call.type === 'code_interpreter') {
         d.data?.messages.push({
           role: 'assistant',
           content: [],
@@ -813,13 +829,21 @@ export class ThreadManager {
           }
         }
       } else if (chunk.type === 'file_search') {
-        // Add a placeholder for file search call
-        if (!lastChunk || lastChunk.type !== 'file_search_call_placeholder') {
-          lastMessage.content.push({
-            type: 'file_search_call_placeholder',
-            run_id: lastMessage.run_id || '',
-            step_id: chunk.id
-          });
+        // Update pending placeholder or find it in the message
+        const pending = this.#pendingFileSearchPlaceholders.get(chunk.id);
+        if (pending && chunk.file_search.results_count !== undefined) {
+          // Update the pending placeholder
+          pending.results_count = chunk.file_search.results_count;
+          pending.completed = true;
+        } else {
+          // Try to find the placeholder in the last message
+          const placeholder = lastMessage.content.find(
+            (c) => c.type === 'file_search_call_placeholder' && c.step_id === chunk.id
+          ) as api.FileSearchCallPlaceholder | undefined;
+          if (placeholder && chunk.file_search.results_count !== undefined) {
+            placeholder.results_count = chunk.file_search.results_count;
+            placeholder.completed = true;
+          }
         }
       }
 

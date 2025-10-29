@@ -1014,12 +1014,16 @@
                 </div></Card
               >
             {:else if content.type === 'file_search_call_placeholder'}
-              <Card padding="md" class="max-w-full flex-row flex items-center justify-between">
-                <div class="flex-row flex items-center space-x-2">
-                  <div><FileSearchOutline size="lg" /></div>
-                  <div>Searching files...</div>
-                </div>
-              </Card>
+              <div class="flex items-center space-x-2 text-gray-500 text-sm my-2">
+                <FileSearchOutline size="sm" />
+                <span class:shimmer={!content.completed}>
+                  {#if content.completed && content.results_count !== undefined}
+                    Searched {content.results_count} file{content.results_count !== 1 ? 's' : ''}
+                  {:else}
+                    Searching files...
+                  {/if}
+                </span>
+              </div>
             {:else if content.type === 'code_output_image_file'}
               <Accordion flush>
                 <AccordionItem>
@@ -1538,5 +1542,21 @@
 <style lang="css">
   .img-attachment {
     max-width: min(95%, 700px);
+  }
+
+  @keyframes shimmer {
+    0% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+
+  .shimmer {
+    animation: shimmer 1.5s ease-in-out infinite;
   }
 </style>

@@ -2175,6 +2175,8 @@ export type FileSearchCallPlaceholder = {
   run_id: string;
   step_id: string;
   type: 'file_search_call_placeholder';
+  results_count?: number;
+  completed?: boolean;
 };
 
 export type Content =
@@ -2387,7 +2389,9 @@ export type FileSearchCall = {
   id: string;
   index: number;
   type: 'file_search';
-  file_search: object;
+  file_search: {
+    results_count?: number;
+  };
 };
 
 // TODO(jnu): support function calling, updates for v2
