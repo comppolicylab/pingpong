@@ -120,7 +120,6 @@ export class ThreadManager {
 
   #data: Writable<ThreadManagerState>;
   #fetcher: api.Fetcher;
-  #pendingFileSearchPlaceholders: Map<string, api.FileSearchCallPlaceholder> = new Map();
 
   /**
    * Create a new thread manager.
@@ -664,19 +663,35 @@ export class ThreadManager {
             // somewhat different.
             created_at: Math.floor(Date.now() / 1000)
           };
+
+          // Check if there's already an assistant message with tool calls (file_search, code_interpreter)
+          // If so, merge this message content into that existing message instead of creating a new one
+          const messages = d.data?.messages || [];
+          const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
           
-          // Add any pending file search placeholders to this message
-          if (this.#pendingFileSearchPlaceholders.size > 0) {
-            const placeholders = Array.from(this.#pendingFileSearchPlaceholders.values());
-            newMessage.content = [...placeholders, ...newMessage.content];
-            this.#pendingFileSearchPlaceholders.clear();
+          if (lastMessage && lastMessage.role === 'assistant' && !lastMessage.run_id) {
+            // This is an optimistic assistant message created for a tool call
+            // Merge the new message content into it and update with real data
+            lastMessage.id = newMessage.id;
+            lastMessage.created_at = newMessage.created_at;
+            lastMessage.assistant_id = newMessage.assistant_id;
+            lastMessage.run_id = newMessage.run_id;
+            lastMessage.metadata = newMessage.metadata;
+            lastMessage.attachments = newMessage.attachments;
+            lastMessage.object = newMessage.object;
+            // Don't replace content - the tool call placeholders are already there
+            // Just append new content from the message
+            lastMessage.content = [...lastMessage.content, ...newMessage.content];
+            
+            return { ...d };
           }
 
+          // No existing assistant message, add the new one
           return {
             ...d,
             data: {
               ...d.data!,
-              messages: [...(d.data?.messages || []), newMessage]
+              messages: [...messages, newMessage]
             }
           };
         });
@@ -729,18 +744,6 @@ export class ThreadManager {
    * Create a new tool call message.
    */
   #createToolCall(call: api.ToolCallDelta) {
-    // For file_search, track the placeholder but don't create a message yet
-    if (call.type === 'file_search') {
-      this.#pendingFileSearchPlaceholders.set(call.id, {
-        type: 'file_search_call_placeholder',
-        run_id: '',
-        step_id: call.id,
-        completed: false
-      });
-      return;
-    }
-
-    // For code_interpreter, create a message if needed
     this.#data.update((d) => {
       const messages = get(this.messages);
       if (!messages?.length) {
@@ -754,7 +757,11 @@ export class ThreadManager {
         return d;
       }
 
-      if (lastMessage.data.role !== 'assistant' && call.type === 'code_interpreter') {
+      // Create an assistant message if needed for both code_interpreter and file_search
+      if (
+        lastMessage.data.role !== 'assistant' &&
+        (call.type === 'code_interpreter' || call.type === 'file_search')
+      ) {
         d.data?.messages.push({
           role: 'assistant',
           content: [],
@@ -829,21 +836,25 @@ export class ThreadManager {
           }
         }
       } else if (chunk.type === 'file_search') {
-        // Update pending placeholder or find it in the message
-        const pending = this.#pendingFileSearchPlaceholders.get(chunk.id);
-        if (pending && chunk.file_search.results_count !== undefined) {
-          // Update the pending placeholder
-          pending.results_count = chunk.file_search.results_count;
-          pending.completed = true;
-        } else {
-          // Try to find the placeholder in the last message
-          const placeholder = lastMessage.content.find(
-            (c) => c.type === 'file_search_call_placeholder' && c.step_id === chunk.id
-          ) as api.FileSearchCallPlaceholder | undefined;
-          if (placeholder && chunk.file_search.results_count !== undefined) {
+        // Add or update file_search placeholder in the message
+        const placeholder = lastMessage.content.find(
+          (c) => c.type === 'file_search_call_placeholder' && c.step_id === chunk.id
+        ) as api.FileSearchCallPlaceholder | undefined;
+        
+        if (placeholder) {
+          // Update existing placeholder with completion data
+          if (chunk.file_search.results_count !== undefined) {
             placeholder.results_count = chunk.file_search.results_count;
             placeholder.completed = true;
           }
+        } else {
+          // Add new placeholder (when tool_call_created is received)
+          lastMessage.content.push({
+            type: 'file_search_call_placeholder',
+            run_id: lastMessage.run_id || '',
+            step_id: chunk.id,
+            completed: false
+          });
         }
       }
 
