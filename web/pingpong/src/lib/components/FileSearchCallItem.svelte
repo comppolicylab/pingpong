@@ -15,7 +15,13 @@
       <FileSearchOutline class="h-4 w-4 text-gray-600" />
       <button class="flex flex-row items-bottom" on:click={handleClick}>
         {#if content.status === 'completed'}
-          <span class="text-sm font-medium text-gray-600">Searched files</span>
+          <span class="text-sm font-medium text-gray-600"
+            >Searched files {#if open}<span>for...</span>{/if}</span
+          >
+        {:else if content.status === 'failed'}
+          <span class="text-sm font-medium text-red-600">File search failed</span>
+        {:else if content.status === 'incomplete'}
+          <span class="text-sm font-medium text-yellow-600">File search was canceled</span>
         {:else}
           <span class="text-sm font-medium shimmer">Searching files...</span>
         {/if}
@@ -28,7 +34,7 @@
     </div>
     {#if open}
       <div
-        class="ml-2 mt-1 border-l border-gray-200 pl-3.5 text-sm text-gray-600 font-light"
+        class="ml-2 mt-1 border-l border-gray-200 pl-4 text-sm text-gray-600 font-light"
         transition:slide={{ duration: 250 }}
       >
         {#each content.queries as query, i (query)}
