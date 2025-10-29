@@ -877,7 +877,6 @@ export class ThreadManager {
           placeholder.queries = chunk.queries || [];
           placeholder.status = chunk.status;
         } else {
-          // Add new placeholder (when tool_call_created is received)
           lastMessage.content.push({
             type: 'file_search_call',
             step_id: chunk.id,

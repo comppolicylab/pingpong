@@ -2389,6 +2389,7 @@ export type CodeInterpreterCall = {
 
 export type FileSearchCall = {
   id: string;
+  index: number;
   type: 'file_search';
   queries: string[] | null;
   run_id: string | null;

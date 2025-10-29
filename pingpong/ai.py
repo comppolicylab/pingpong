@@ -1880,6 +1880,7 @@ class BufferedResponseStreamHandler:
                 "type": "tool_call_created",
                 "tool_call": {
                     "id": str(data.id),
+                    "index": self.prev_output_index,
                     "type": "file_search",
                     "queries": data.queries,
                     "status": data.status,
@@ -2059,6 +2060,7 @@ class BufferedResponseStreamHandler:
                 "delta": {
                     "type": "file_search",
                     "id": data.id,
+                    "index": self.prev_output_index,
                     "run_id": str(self.run_id),
                     "queries": data.queries,
                     "status": data.status,
