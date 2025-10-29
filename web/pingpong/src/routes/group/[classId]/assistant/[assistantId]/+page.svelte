@@ -1620,7 +1620,10 @@
                 >Control whether users can upload their own files when interacting with this
                 assistant. When unchecked, users will not be able to attach their own files to
                 messages, even if the assistant has file search or code interpreter enabled. Files
-                that you add to the assistant will still be available for the assistant to use.</Helper
+                that you add to the assistant will still be available for the assistant to use. <b
+                  >This setting will only apply when you enable File Search or Code Interpreter in
+                  Chat Mode models.</b
+                ></Helper
               >
             </div>
 
@@ -1637,7 +1640,12 @@
               <Helper
                 >Control whether users can upload their own images when interacting with this
                 assistant. When unchecked, users will not be able to attach their own images to
-                messages, even if the assistant's model has Vision capabilities.</Helper
+                messages, even if the assistant's model has Vision capabilities. <b
+                  >This setting will only apply to Chat Mode models with Vision capabilities{visionSupportOverride ===
+                  false
+                    ? ', or when you enable Vision capabilities through Image Descriptions.'
+                    : '.'}</b
+                ></Helper
               >
             </div>
 
