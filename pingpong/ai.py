@@ -991,6 +991,7 @@ class BufferedResponseStreamHandler:
                     "id": str(self.message_id),
                     "thread_id": str(self.thread_id),
                     "assistant_id": None,
+                    "run_id": str(self.run_id),
                     "created_at": int(self.message_created_at.timestamp())
                     if self.message_created_at
                     else None,
@@ -1880,7 +1881,9 @@ class BufferedResponseStreamHandler:
                 "tool_call": {
                     "id": str(data.id),
                     "type": "file_search",
-                    "file_search": {},
+                    "queries": data.queries,
+                    "status": data.status,
+                    "run_id": str(self.run_id),
                 },
             }
         )
@@ -2050,17 +2053,15 @@ class BufferedResponseStreamHandler:
 
         await update_status_queries_on_file_search_call_done()
 
-        # Send completion event with result count
         self.enqueue(
             {
                 "type": "tool_call_delta",
                 "delta": {
-                    "index": self.prev_output_index,
                     "type": "file_search",
                     "id": data.id,
-                    "file_search": {
-                        "results_count": len(data.results),
-                    },
+                    "run_id": str(self.run_id),
+                    "queries": data.queries,
+                    "status": data.status,
                 },
             }
         )

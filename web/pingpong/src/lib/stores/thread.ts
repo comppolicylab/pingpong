@@ -171,16 +171,72 @@ export class ThreadManager {
         error: null,
         persisted: true
       }));
+      const fs_messages = ($data.data?.fs_messages || []).map((message) => ({
+        data: message,
+        error: null,
+        persisted: true
+      }));
       const optimisticMessages = $data.optimistic.map((message) => ({
         data: message,
         error: null,
         persisted: false
       }));
-      // Sort messages together by created_at timestamp
-      return realMessages
+
+      const allMessages = realMessages
         .concat(ci_messages)
+        .concat(fs_messages)
         .concat(optimisticMessages)
         .sort((a, b) => a.data.created_at - b.data.created_at);
+
+      const finalMessages: Message[] = [];
+      for (let i = 0; i < allMessages.length; ) {
+        const current = allMessages[i];
+
+        if (current.data.role !== 'assistant') {
+          finalMessages.push(current);
+          i += 1;
+          continue;
+        }
+
+        const currentRunId = current.data.run_id ?? null;
+        const group: Message[] = [current];
+        let j = i + 1;
+
+        while (j < allMessages.length) {
+          const next = allMessages[j];
+          if (next.data.role !== 'assistant') {
+            break;
+          }
+          const nextRunId = next.data.run_id ?? null;
+          if (nextRunId !== currentRunId) {
+            break;
+          }
+          group.push(next);
+          j += 1;
+        }
+
+        if (group.length === 1) {
+          finalMessages.push(current);
+        } else {
+          const responseIndex = group.findIndex((message) => !message.data.message_type);
+          const base = responseIndex >= 0 ? group[responseIndex] : group[0];
+          const mergedContent = group.flatMap((message) => message.data.content || []);
+
+          const merged: Message = {
+            ...base,
+            data: {
+              ...base.data,
+              content: mergedContent
+            }
+          };
+
+          finalMessages.push(merged);
+        }
+
+        i = j;
+      }
+
+      return finalMessages;
     });
 
     this.loading = derived(this.#data, ($data) => !!$data?.loading);
@@ -655,43 +711,21 @@ export class ThreadManager {
     switch (chunk.type) {
       case 'message_created':
         this.#data.update((d) => {
-          const newMessage = {
-            ...chunk.message,
-            // Note: make sure the message here has a timestamp that
-            // will be sequential to the optimistic messages.
-            // When the thread is reloaded, the real timestamps will be
-            // somewhat different.
-            created_at: Math.floor(Date.now() / 1000)
-          };
-
-          // Check if there's already an assistant message with tool calls (file_search, code_interpreter)
-          // If so, merge this message content into that existing message instead of creating a new one
-          const messages = d.data?.messages || [];
-          const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
-          
-          if (lastMessage && lastMessage.role === 'assistant' && !lastMessage.run_id) {
-            // This is an optimistic assistant message created for a tool call
-            // Merge the new message content into it and update with real data
-            lastMessage.id = newMessage.id;
-            lastMessage.created_at = newMessage.created_at;
-            lastMessage.assistant_id = newMessage.assistant_id;
-            lastMessage.run_id = newMessage.run_id;
-            lastMessage.metadata = newMessage.metadata;
-            lastMessage.attachments = newMessage.attachments;
-            lastMessage.object = newMessage.object;
-            // Don't replace content - the tool call placeholders are already there
-            // Just append new content from the message
-            lastMessage.content = [...lastMessage.content, ...newMessage.content];
-            
-            return { ...d };
-          }
-
-          // No existing assistant message, add the new one
           return {
             ...d,
             data: {
               ...d.data!,
-              messages: [...messages, newMessage]
+              messages: [
+                ...(d.data?.messages || []),
+                {
+                  ...chunk.message,
+                  // Note: make sure the message here has a timestamp that
+                  // will be sequential to the optimistic messages.
+                  // When the thread is reloaded, the real timestamps will be
+                  // somewhat different.
+                  created_at: Math.floor(Date.now() / 1000)
+                }
+              ]
             }
           };
         });
@@ -745,21 +779,20 @@ export class ThreadManager {
    */
   #createToolCall(call: api.ToolCallDelta) {
     this.#data.update((d) => {
-      const messages = get(this.messages);
+      const messages = d.data?.messages;
       if (!messages?.length) {
         console.warn('Received a tool call without any messages.');
         return d;
       }
-      const sortedMessages = messages.sort((a, b) => b.data.created_at - a.data.created_at);
+      const sortedMessages = messages.sort((a, b) => b.created_at - a.created_at);
       const lastMessage = sortedMessages[0];
       if (!lastMessage) {
         console.warn('Received a tool call without a previous message.');
         return d;
       }
 
-      // Create an assistant message if needed for both code_interpreter and file_search
       if (
-        lastMessage.data.role !== 'assistant' &&
+        lastMessage.role !== 'assistant' &&
         (call.type === 'code_interpreter' || call.type === 'file_search')
       ) {
         d.data?.messages.push({
@@ -772,7 +805,7 @@ export class ThreadManager {
           file_search_file_ids: [],
           code_interpreter_file_ids: [],
           object: 'thread.message',
-          run_id: null,
+          run_id: call.run_id || null,
           attachments: []
         });
       }
@@ -836,24 +869,20 @@ export class ThreadManager {
           }
         }
       } else if (chunk.type === 'file_search') {
-        // Add or update file_search placeholder in the message
         const placeholder = lastMessage.content.find(
-          (c) => c.type === 'file_search_call_placeholder' && c.step_id === chunk.id
-        ) as api.FileSearchCallPlaceholder | undefined;
-        
+          (c) => c.type === 'file_search_call' && c.step_id === chunk.id
+        ) as api.FileSearchCallItem | undefined;
+
         if (placeholder) {
-          // Update existing placeholder with completion data
-          if (chunk.file_search.results_count !== undefined) {
-            placeholder.results_count = chunk.file_search.results_count;
-            placeholder.completed = true;
-          }
+          placeholder.queries = chunk.queries || [];
+          placeholder.status = chunk.status;
         } else {
           // Add new placeholder (when tool_call_created is received)
           lastMessage.content.push({
-            type: 'file_search_call_placeholder',
-            run_id: lastMessage.run_id || '',
+            type: 'file_search_call',
             step_id: chunk.id,
-            completed: false
+            status: chunk.status,
+            queries: chunk.queries || []
           });
         }
       }
@@ -867,7 +896,9 @@ export class ThreadManager {
    */
   #appendDelta(chunk: api.OpenAIMessageDelta) {
     this.#data.update((d) => {
-      const lastMessage = d.data?.messages[d.data!.messages.length - 1];
+      const messages = d.data?.messages || [];
+      const sortedMessages = messages.sort((a, b) => b.created_at - a.created_at);
+      const lastMessage = sortedMessages[0];
       if (!lastMessage) {
         console.warn('Received a message delta without a previous message.');
         return d;

@@ -41,8 +41,7 @@
     MicrophoneSlashOutline,
     UsersSolid,
     LinkOutline,
-    TerminalOutline,
-    FileSearchOutline
+    TerminalOutline
   } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
@@ -58,6 +57,7 @@
   import { tick } from 'svelte';
   import FileCitation from './FileCitation.svelte';
   import StatusErrors from './StatusErrors.svelte';
+  import FileSearchCallItem from './FileSearchCallItem.svelte';
   export let data;
 
   let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -1013,17 +1013,8 @@
                   </Button>
                 </div></Card
               >
-            {:else if content.type === 'file_search_call_placeholder'}
-              <div class="flex items-center space-x-2 text-gray-500 text-sm my-2">
-                <FileSearchOutline size="sm" />
-                <span class:shimmer={!content.completed}>
-                  {#if content.completed && content.results_count !== undefined}
-                    Searched {content.results_count} file{content.results_count !== 1 ? 's' : ''}
-                  {:else}
-                    Searching files...
-                  {/if}
-                </span>
-              </div>
+            {:else if content.type === 'file_search_call'}
+              <FileSearchCallItem {content} />
             {:else if content.type === 'code_output_image_file'}
               <Accordion flush>
                 <AccordionItem>
@@ -1544,19 +1535,27 @@
     max-width: min(95%, 700px);
   }
 
-  @keyframes shimmer {
-    0% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.5;
-    }
-    100% {
-      opacity: 1;
-    }
+  .shimmer {
+    -webkit-text-fill-color: transparent;
+    animation-delay: 0s;
+    animation-duration: 2s;
+    animation-iteration-count: infinite;
+    animation-name: shimmer;
+    background: #4b5563 -webkit-gradient(linear, 100% 0, 0 0, from(#5d5d5d), color-stop(0.4, #ffffffbf), to(#4b5563), color-stop(0.6, #ffffffbf), to(#4b5563));
+    -webkit-background-clip: text;
+    background-clip: text;
+    background-position: -100% 0;
+    background-position: unset top;
+    background-repeat: no-repeat;
+    background-size: 50% 200%;
   }
 
-  .shimmer {
-    animation: shimmer 1.5s ease-in-out infinite;
+  @keyframes shimmer {
+    0% {
+      background-position: -100% 0;
+    }
+    100% {
+      background-position: 250% 0;
+    }
   }
 </style>

@@ -2171,12 +2171,11 @@ export type CodeInterpreterCallPlaceholder = {
   type: 'code_interpreter_call_placeholder';
 };
 
-export type FileSearchCallPlaceholder = {
-  run_id: string;
+export type FileSearchCallItem = {
   step_id: string;
-  type: 'file_search_call_placeholder';
-  results_count?: number;
-  completed?: boolean;
+  type: 'file_search_call';
+  queries?: string[];
+  status?: 'in_progress' | 'searching' | 'completed' | 'incomplete' | 'failed';
 };
 
 export type Content =
@@ -2187,7 +2186,7 @@ export type Content =
   | MessageContentCodeOutputImageURL
   | MessageContentCodeOutputLogs
   | CodeInterpreterCallPlaceholder
-  | FileSearchCallPlaceholder;
+  | FileSearchCallItem;
 
 export type OpenAIMessage = {
   id: string;
@@ -2199,6 +2198,7 @@ export type OpenAIMessage = {
   vision_file_ids?: string[];
   metadata: Record<string, unknown> | null;
   object: 'thread.message' | 'code_interpreter_call_placeholder';
+  message_type?: 'file_search_call' | 'code_interpreter_call' | null;
   role: 'user' | 'assistant';
   run_id: string | null;
   attachments: OpenAIAttachment[] | null;
@@ -2223,6 +2223,7 @@ export type ThreadWithMeta = {
   limit: number;
   messages: OpenAIMessage[];
   ci_messages: OpenAIMessage[];
+  fs_messages: OpenAIMessage[];
   attachments: Record<string, ServerFile>;
   instructions: string | null;
   recording: VoiceModeRecordingInfo | null;
@@ -2383,15 +2384,15 @@ export type CodeInterpreterCall = {
   id: string;
   index: number;
   type: 'code_interpreter';
+  run_id: string | null;
 };
 
 export type FileSearchCall = {
   id: string;
-  index: number;
   type: 'file_search';
-  file_search: {
-    results_count?: number;
-  };
+  queries: string[] | null;
+  run_id: string | null;
+  status: 'in_progress' | 'searching' | 'completed' | 'incomplete' | 'failed';
 };
 
 // TODO(jnu): support function calling, updates for v2

@@ -1323,12 +1323,24 @@ class CodeInterpreterPlaceholderContent(BaseModel):
     type: Literal["code_interpreter_call_placeholder"]
 
 
-class FileSearchCallPlaceholder(BaseModel):
-    run_id: str
+class FileSearchCall(BaseModel):
     step_id: str
-    type: Literal["file_search_call_placeholder"]
-    results_count: int | None = None
-    completed: bool | None = None
+    type: Literal["file_search_call"]
+    queries: list[str]
+    status: Literal["in_progress", "searching", "completed", "incomplete", "failed"]
+
+
+class FileSearchMessage(BaseModel):
+    id: str
+    assistant_id: str
+    created_at: int
+    content: list[FileSearchCall]
+    metadata: dict[str, str]
+    object: Literal["thread.message"]
+    message_type: Literal["file_search_call"]
+    role: Literal["assistant"]
+    run_id: str
+    thread_id: str
 
 
 class CodeInterpreterMessage(BaseModel):
@@ -1340,6 +1352,7 @@ class CodeInterpreterMessage(BaseModel):
     )
     metadata: dict[str, str]
     object: Literal["thread.message"] | Literal["code_interpreter_call_placeholder"]
+    message_type: Literal["code_interpreter_call"] | None = None
     role: Literal["assistant"]
     run_id: str
     thread_id: str
@@ -1384,6 +1397,7 @@ class ThreadWithMeta(BaseModel):
     messages: list[OpenAIMessage]
     limit: int
     ci_messages: list[CodeInterpreterMessage] | None
+    fs_messages: list[FileSearchMessage] | None = None
     attachments: dict[str, File] | None
     instructions: str | None
     recording: VoiceModeRecording | None = None
