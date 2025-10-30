@@ -49,7 +49,7 @@ from pingpong.migrations.m04_check_voice_mode_recordings import (
     check_voice_mode_recordings,
 )
 from pingpong.now import _get_next_run_time, croner, utcnow
-from pingpong.schemas import LMSType, MessageRole, RunStatus
+from pingpong.schemas import LMSType, RunStatus
 from pingpong.summary import send_class_summary_for_class
 
 from .auth import encode_auth_token
@@ -61,7 +61,6 @@ from .models import (
     Assistant,
     Base,
     ExternalLogin,
-    Message,
     Run,
     S3File,
     ScheduledJob,
@@ -609,7 +608,6 @@ def mark_stale_queued_runs(hours: int) -> None:
             logger.info("Done!")
 
     asyncio.run(_mark_stale())
-
 
 
 @db.command("migrate_lms_tenants")

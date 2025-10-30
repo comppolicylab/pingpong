@@ -193,13 +193,10 @@ async def get_runs_with_multiple_assistant_messages_stats(
         .order_by(recent_runs.c.run_day)
     )
 
-    daily_matches_stmt = (
-        select(
-            multi_runs.c.run_day,
-            func.count().label("matching_runs"),
-        )
-        .group_by(multi_runs.c.run_day)
-    )
+    daily_matches_stmt = select(
+        multi_runs.c.run_day,
+        func.count().label("matching_runs"),
+    ).group_by(multi_runs.c.run_day)
 
     totals_rows = (await session.execute(daily_totals_stmt)).all()
     matches_rows = (await session.execute(daily_matches_stmt)).all()
@@ -212,8 +209,7 @@ async def get_runs_with_multiple_assistant_messages_stats(
         raise ValueError("run_day cannot be null")
 
     totals_map: dict[date, int] = {
-        _normalize_date(row.run_day): int(row.total_runs or 0)
-        for row in totals_rows
+        _normalize_date(row.run_day): int(row.total_runs or 0) for row in totals_rows
     }
     matches_map: dict[date, int] = {
         _normalize_date(row.run_day): int(row.matching_runs or 0)
@@ -234,14 +230,11 @@ async def get_runs_with_multiple_assistant_messages_stats(
             .order_by(recent_runs.c.run_day, recent_runs.c.model)
         )
 
-        model_matches_stmt = (
-            select(
-                multi_runs.c.run_day,
-                multi_runs.c.model,
-                func.count().label("matching_runs"),
-            )
-            .group_by(multi_runs.c.run_day, multi_runs.c.model)
-        )
+        model_matches_stmt = select(
+            multi_runs.c.run_day,
+            multi_runs.c.model,
+            func.count().label("matching_runs"),
+        ).group_by(multi_runs.c.run_day, multi_runs.c.model)
 
         model_totals_rows = (await session.execute(model_totals_stmt)).all()
         model_matches_rows = (await session.execute(model_matches_stmt)).all()
@@ -271,11 +264,7 @@ async def get_runs_with_multiple_assistant_messages_stats(
         models_stats: list[RunDailyAssistantMessageModelStats] | None = None
 
         if group_by_model:
-            model_keys = [
-                key
-                for key in model_totals_map.keys()
-                if key[0] == day_key
-            ]
+            model_keys = [key for key in model_totals_map.keys() if key[0] == day_key]
 
             if model_keys:
                 model_keys.sort(key=lambda item: item[1] or "")
