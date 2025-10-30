@@ -236,6 +236,22 @@ export class ThreadManager {
         i = j;
       }
 
+      const firstMessage = finalMessages[0];
+      if (firstMessage?.data.role === 'user') {
+        const hasAttachments = (firstMessage.data.attachments || []).length > 0;
+        const hasMeaningfulContent = (firstMessage.data.content || []).some((content) => {
+          if (content.type === 'text') {
+            const value = content.text?.value || '';
+            return value.trim().length > 0;
+          }
+          return true;
+        });
+
+        if (!hasAttachments && !hasMeaningfulContent) {
+          finalMessages.shift();
+        }
+      }
+
       return finalMessages;
     });
 
