@@ -135,10 +135,7 @@ async def get_statistics_by_institution(
 
 
 async def get_runs_with_multiple_assistant_messages_stats(
-    session: AsyncSession,
-    *,
-    days: int = 14,
-    group_by_model: bool = False,
+    session: AsyncSession, *, days: int = 14
 ) -> list[RunDailyAssistantMessageStats]:
     """Return daily run statistics for runs with multiple assistant messages."""
 
@@ -219,7 +216,7 @@ async def get_runs_with_multiple_assistant_messages_stats(
     model_totals_map: dict[tuple[date, str | None], int] = {}
     model_matches_map: dict[tuple[date, str | None], int] = {}
 
-    if group_by_model and totals_map:
+    if totals_map:
         model_totals_stmt = (
             select(
                 recent_runs.c.run_day,
@@ -263,28 +260,27 @@ async def get_runs_with_multiple_assistant_messages_stats(
 
         models_stats: list[RunDailyAssistantMessageModelStats] | None = None
 
-        if group_by_model:
-            model_keys = [key for key in model_totals_map.keys() if key[0] == day_key]
+        model_keys = [key for key in model_totals_map.keys() if key[0] == day_key]
 
-            if model_keys:
-                model_keys.sort(key=lambda item: item[1] or "")
-                models_stats = []
-                for _, model_name in model_keys:
-                    model_total = model_totals_map[(day_key, model_name)]
-                    model_matching = model_matches_map.get((day_key, model_name), 0)
-                    model_percentage = (
-                        round((model_matching / model_total) * 100, 2)
-                        if model_total
-                        else 0.0
+        if model_keys:
+            model_keys.sort(key=lambda item: item[1] or "")
+            models_stats = []
+            for _, model_name in model_keys:
+                model_total = model_totals_map[(day_key, model_name)]
+                model_matching = model_matches_map.get((day_key, model_name), 0)
+                model_percentage = (
+                    round((model_matching / model_total) * 100, 2)
+                    if model_total
+                    else 0.0
+                )
+                models_stats.append(
+                    RunDailyAssistantMessageModelStats(
+                        model=model_name,
+                        total_runs=model_total,
+                        runs_with_multiple_assistant_messages=model_matching,
+                        percentage=model_percentage,
                     )
-                    models_stats.append(
-                        RunDailyAssistantMessageModelStats(
-                            model=model_name,
-                            total_runs=model_total,
-                            runs_with_multiple_assistant_messages=model_matching,
-                            percentage=model_percentage,
-                        )
-                    )
+                )
 
         statistics.append(
             RunDailyAssistantMessageStats(

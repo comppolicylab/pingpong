@@ -17,7 +17,6 @@ from fastapi import (
     FastAPI,
     Form,
     HTTPException,
-    Query,
     Request,
     Response,
     UploadFile,
@@ -974,20 +973,15 @@ async def get_models_stats(request: Request):
 
 
 @v1.get(
-    "/stats/runs/multi-assistant-messages",
+    "/stats/runs",
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.RunDailyAssistantMessageStatsResponse,
 )
 async def get_runs_multi_assistant_stats(
     request: Request,
-    group_by_model: bool = Query(
-        False,
-        description="When true, include per-model breakdowns for each day.",
-    ),
 ):
     statistics = await get_runs_with_multiple_assistant_messages_stats(
         request.state.db,
-        group_by_model=group_by_model,
     )
     return schemas.RunDailyAssistantMessageStatsResponse(statistics=statistics)
 
