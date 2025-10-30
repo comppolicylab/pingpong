@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum, StrEnum, auto
 from typing import Generic, Literal, NotRequired, TypeVar, Union
 from typing_extensions import TypedDict
@@ -43,6 +43,25 @@ class ModelStatistics(BaseModel):
 
 class ModelStatisticsResponse(BaseModel):
     statistics: list[ModelStatistics]
+
+
+class RunDailyAssistantMessageModelStats(BaseModel):
+    model: str | None
+    total_runs: int
+    runs_with_multiple_assistant_messages: int
+    percentage: float
+
+
+class RunDailyAssistantMessageStats(BaseModel):
+    date: date
+    total_runs: int
+    runs_with_multiple_assistant_messages: int
+    percentage: float
+    models: list[RunDailyAssistantMessageModelStats] | None = None
+
+
+class RunDailyAssistantMessageStatsResponse(BaseModel):
+    statistics: list[RunDailyAssistantMessageStats]
 
 
 class AssistantModelInfo(BaseModel):

@@ -1,7 +1,15 @@
 import asyncio
+from datetime import date, datetime, timedelta, timezone
+
 from sqlalchemy import func, select
+
 import pingpong.models as models
-from pingpong.schemas import Statistics
+from pingpong.schemas import (
+    MessageRole,
+    RunDailyAssistantMessageModelStats,
+    RunDailyAssistantMessageStats,
+    Statistics,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -124,3 +132,164 @@ async def get_statistics_by_institution(
         threads=threads_count,
         files=files_count,
     )
+
+
+async def get_runs_with_multiple_assistant_messages_stats(
+    session: AsyncSession, *, days: int = 14
+) -> list[RunDailyAssistantMessageStats]:
+    """Return daily run statistics for runs with multiple assistant messages."""
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=days)
+
+    run_day = func.date_trunc("day", models.Run.created).label("run_day")
+
+    recent_runs = (
+        select(
+            models.Run.id.label("run_id"),
+            run_day,
+            models.Run.model.label("model"),
+        )
+        .where(models.Run.created >= cutoff)
+        .cte("recent_runs")
+    )
+
+    assistant_counts = (
+        select(
+            recent_runs.c.run_id,
+            recent_runs.c.run_day,
+            recent_runs.c.model,
+            func.count(models.Message.id).label("assistant_message_count"),
+        )
+        .join(models.Message, models.Message.run_id == recent_runs.c.run_id)
+        .where(models.Message.role == MessageRole.ASSISTANT)
+        .group_by(
+            recent_runs.c.run_id,
+            recent_runs.c.run_day,
+            recent_runs.c.model,
+        )
+        .cte("assistant_counts")
+    )
+
+    multi_runs = (
+        select(
+            assistant_counts.c.run_day,
+            assistant_counts.c.model,
+            assistant_counts.c.run_id,
+        )
+        .where(assistant_counts.c.assistant_message_count > 1)
+        .cte("multi_runs")
+    )
+
+    daily_totals_stmt = (
+        select(
+            recent_runs.c.run_day,
+            func.count().label("total_runs"),
+        )
+        .group_by(recent_runs.c.run_day)
+        .order_by(recent_runs.c.run_day)
+    )
+
+    daily_matches_stmt = select(
+        multi_runs.c.run_day,
+        func.count().label("matching_runs"),
+    ).group_by(multi_runs.c.run_day)
+
+    totals_rows = (await session.execute(daily_totals_stmt)).all()
+    matches_rows = (await session.execute(daily_matches_stmt)).all()
+
+    def _normalize_date(value: date | datetime | None) -> date:
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        raise ValueError("run_day cannot be null")
+
+    totals_map: dict[date, int] = {
+        _normalize_date(row.run_day): int(row.total_runs or 0) for row in totals_rows
+    }
+    matches_map: dict[date, int] = {
+        _normalize_date(row.run_day): int(row.matching_runs or 0)
+        for row in matches_rows
+    }
+
+    model_totals_map: dict[tuple[date, str | None], int] = {}
+    model_matches_map: dict[tuple[date, str | None], int] = {}
+
+    if totals_map:
+        model_totals_stmt = (
+            select(
+                recent_runs.c.run_day,
+                recent_runs.c.model,
+                func.count().label("total_runs"),
+            )
+            .group_by(recent_runs.c.run_day, recent_runs.c.model)
+            .order_by(recent_runs.c.run_day, recent_runs.c.model)
+        )
+
+        model_matches_stmt = select(
+            multi_runs.c.run_day,
+            multi_runs.c.model,
+            func.count().label("matching_runs"),
+        ).group_by(multi_runs.c.run_day, multi_runs.c.model)
+
+        model_totals_rows = (await session.execute(model_totals_stmt)).all()
+        model_matches_rows = (await session.execute(model_matches_stmt)).all()
+
+        model_totals_map = {
+            (
+                _normalize_date(row.run_day),
+                row.model,
+            ): int(row.total_runs or 0)
+            for row in model_totals_rows
+        }
+        model_matches_map = {
+            (
+                _normalize_date(row.run_day),
+                row.model,
+            ): int(row.matching_runs or 0)
+            for row in model_matches_rows
+        }
+
+    statistics: list[RunDailyAssistantMessageStats] = []
+
+    for day_key in sorted(totals_map.keys()):
+        total_runs = totals_map[day_key]
+        matching_runs = matches_map.get(day_key, 0)
+        percentage = round((matching_runs / total_runs) * 100, 2) if total_runs else 0.0
+
+        models_stats: list[RunDailyAssistantMessageModelStats] | None = None
+
+        model_keys = [key for key in model_totals_map.keys() if key[0] == day_key]
+
+        if model_keys:
+            model_keys.sort(key=lambda item: item[1] or "")
+            models_stats = []
+            for _, model_name in model_keys:
+                model_total = model_totals_map[(day_key, model_name)]
+                model_matching = model_matches_map.get((day_key, model_name), 0)
+                model_percentage = (
+                    round((model_matching / model_total) * 100, 2)
+                    if model_total
+                    else 0.0
+                )
+                models_stats.append(
+                    RunDailyAssistantMessageModelStats(
+                        model=model_name,
+                        total_runs=model_total,
+                        runs_with_multiple_assistant_messages=model_matching,
+                        percentage=model_percentage,
+                    )
+                )
+
+        statistics.append(
+            RunDailyAssistantMessageStats(
+                date=day_key,
+                total_runs=total_runs,
+                runs_with_multiple_assistant_messages=matching_runs,
+                percentage=percentage,
+                models=models_stats,
+            )
+        )
+
+    return statistics

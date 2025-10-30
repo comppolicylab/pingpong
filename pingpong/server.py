@@ -57,6 +57,7 @@ from pingpong.emails import (
 from pingpong.realtime import browser_realtime_websocket
 from pingpong.session import populate_request
 from pingpong.stats import (
+    get_runs_with_multiple_assistant_messages_stats,
     get_statistics,
     get_statistics_by_institution as get_institution_statistics,
 )
@@ -969,6 +970,20 @@ async def get_models_stats(request: Request):
     counts = await models.Assistant.get_count_by_model(request.state.db)
     stats = [{"model": k, "assistant_count": v} for (k, v) in counts]
     return schemas.ModelStatisticsResponse(statistics=stats)
+
+
+@v1.get(
+    "/stats/runs",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.RunDailyAssistantMessageStatsResponse,
+)
+async def get_runs_multi_assistant_stats(
+    request: Request,
+):
+    statistics = await get_runs_with_multiple_assistant_messages_stats(
+        request.state.db,
+    )
+    return schemas.RunDailyAssistantMessageStatsResponse(statistics=statistics)
 
 
 @v1.get(
