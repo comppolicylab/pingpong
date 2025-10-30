@@ -3,6 +3,7 @@ import json
 import logging
 import time
 from datetime import datetime, timedelta
+from math import ceil
 from typing import Annotated, Any, Optional, Union
 import uuid_utils as uuid
 from aiohttp import ClientResponseError
@@ -64,6 +65,7 @@ from .animal_hash import name, process_threads, pseudonym, user_names
 from openai.types.beta.assistant_create_params import ToolResources
 from openai.types.beta.threads import MessageContentPartParam
 from sqlalchemy.sql import func, delete, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.metrics as metrics
 import pingpong.models as models
@@ -2330,8 +2332,18 @@ async def get_thread(
             "recording": thread.voice_mode_recording
             if is_supervisor or is_current_user
             else None,
+            "has_more": messages.has_more,
         }
     elif thread.version == 3:
+        limit = 20
+        run_limit = max(1, ceil(limit / 2))
+        run_ids, has_more_runs = await models.Run.get_run_window(
+            request.state.db,
+            thread.id,
+            run_limit,
+            order="desc",
+        )
+
         (
             [messages_v3, tool_calls_v3],
             latest_run,
@@ -2339,7 +2351,10 @@ async def get_thread(
             is_supervisor_check,
         ) = await asyncio.gather(
             models.Thread.list_messages_tool_calls(
-                request.state.db, thread.id, limit=20, order="desc"
+                request.state.db,
+                thread.id,
+                run_ids=run_ids,
+                order="desc",
             ),
             models.Thread.get_latest_run_by_thread_id(request.state.db, thread.id),
             models.Thread.get_thread_components(request.state.db, thread.id),
@@ -2353,7 +2368,6 @@ async def get_thread(
                 ]
             ),
         )
-
         current_user_ids = [
             request.state.session.user.id
         ] + await models.User.get_previous_ids_by_id(
@@ -2653,6 +2667,7 @@ async def get_thread(
             "recording": thread.voice_mode_recording
             if is_supervisor or is_current_user
             else None,
+            "has_more": has_more_runs,
         }
     else:
         raise HTTPException(status_code=400, detail="Invalid thread version")
@@ -3040,16 +3055,49 @@ async def list_thread_messages(
         return {
             "messages": list(messages.data),
             "ci_messages": placeholder_ci_calls,
+            "fs_messages": [],
             "limit": limit,
+            "has_more": messages.has_more,
         }
     elif thread.version == 3:
+        run_limit = max(1, ceil(limit / 2))
+        before_run_id: int | None = None
+        if before is not None:
+            try:
+                before_run_id = int(before)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid before parameter",
+                )
+
+        run_ids, has_more_runs = await models.Run.get_run_window(
+            request.state.db,
+            thread.id,
+            run_limit,
+            before_run_pk=before_run_id,
+            order="asc",
+        )
+
+        if not run_ids:
+            return {
+                "messages": [],
+                "ci_messages": [],
+                "fs_messages": [],
+                "limit": limit,
+                "has_more": False,
+            }
+
         (
             [messages_v3, tool_calls_v3],
             file_names,
             is_supervisor_check,
         ) = await asyncio.gather(
             models.Thread.list_messages_tool_calls(
-                request.state.db, thread.id, limit=20, order="asc", before=before
+                request.state.db,
+                thread.id,
+                run_ids=run_ids,
+                order="asc",
             ),
             models.Thread.get_file_search_files(request.state.db, thread.id),
             request.state.authz.check(
@@ -3306,11 +3354,13 @@ async def list_thread_messages(
                     else pseudonym(thread, users[str(message.user_id)])
                 )
             thread_messages.append(_message)
+
         return {
             "messages": thread_messages,
             "ci_messages": [],
             "fs_messages": file_search_calls,
             "limit": limit,
+            "has_more": has_more_runs,
         }
     else:
         raise HTTPException(status_code=400, detail="Invalid thread version")

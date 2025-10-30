@@ -2227,6 +2227,7 @@ export type ThreadWithMeta = {
   attachments: Record<string, ServerFile>;
   instructions: string | null;
   recording: VoiceModeRecordingInfo | null;
+  has_more: boolean;
 };
 
 /**
@@ -2293,6 +2294,7 @@ export type ThreadMessages = {
   ci_messages: OpenAIMessage[];
   fs_messages: OpenAIMessage[];
   limit: number;
+  has_more: boolean;
 };
 
 /**
@@ -2313,17 +2315,19 @@ export const getThreadMessages = async (
       messages: [],
       fs_messages: [],
       ci_messages: [],
+      has_more: false,
       error: expanded.error
     };
   }
 
-  const n = expanded.data.messages.length;
-  const lastPage = n < expanded.data.limit;
+  const hasMore = expanded.data.has_more;
+  const lastPage = !hasMore;
   return {
     messages: expanded.data.messages,
     ci_messages: expanded.data.ci_messages,
     fs_messages: expanded.data.fs_messages,
     limit: expanded.data.limit,
+    has_more: hasMore,
     lastPage,
     error: null
   };

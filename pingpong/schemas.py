@@ -1380,6 +1380,7 @@ class ThreadMessages(BaseModel):
     messages: list[OpenAIMessage]
     fs_messages: list[FileSearchMessage] | None = None
     ci_messages: list[CodeInterpreterMessage] | None
+    has_more: bool
 
 
 class VoiceModeRecording(BaseModel):
@@ -1402,6 +1403,7 @@ class ThreadWithMeta(BaseModel):
     attachments: dict[str, File] | None
     instructions: str | None
     recording: VoiceModeRecording | None = None
+    has_more: bool
 
     class Config:
         from_attributes = True

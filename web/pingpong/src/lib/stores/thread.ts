@@ -141,7 +141,7 @@ export class ThreadManager {
       data: expanded.data || null,
       error: expanded.error ? { detail: expanded.error?.detail, wasSent: true } : null,
       limit: expanded.data?.limit || 20,
-      canFetchMore: expanded.data ? expanded.data.messages.length === expanded.data.limit : false,
+      canFetchMore: expanded.data?.has_more || false,
       supportsFileSearch: expanded.data?.thread?.tools_available?.includes('file_search') || false,
       supportsCodeInterpreter:
         expanded.data?.thread?.tools_available?.includes('code_interpreter') || false,
@@ -438,12 +438,26 @@ export class ThreadManager {
     }
 
     this.#data.update((d) => ({ ...d, error: null, loading: true }));
-    const earliestMessage = currentData.data?.messages.sort(
+    const sortedMessages = [...(currentData.data?.messages || [])].sort(
       (a, b) => a.created_at - b.created_at
-    )[0];
+    );
+    const earliestMessage = sortedMessages[0];
+    const earliestRunMessage = sortedMessages.find((message) => message.run_id);
+    const threadVersion = currentData.data?.thread.version;
+    const before =
+      threadVersion === 3 ? earliestRunMessage?.run_id : earliestMessage?.id;
+
+    if (threadVersion === 3 && !before) {
+      this.#data.update((d) => ({
+        ...d,
+        loading: false,
+        canFetchMore: false
+      }));
+      return;
+    }
     const response = await api.getThreadMessages(this.#fetcher, this.classId, this.threadId, {
       limit: currentData.limit,
-      before: earliestMessage?.id
+      before
     });
 
     // Merge the new messages into the existing messages.
@@ -464,7 +478,7 @@ export class ThreadManager {
         limit: response.limit || d.limit,
         error: response.error ? { detail: response.error?.detail, wasSent: true } : null,
         loading: false,
-        canFetchMore: !response.lastPage
+        canFetchMore: response.has_more
       };
     });
   }
