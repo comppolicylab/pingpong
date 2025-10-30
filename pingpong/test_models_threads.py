@@ -148,6 +148,9 @@ async def test_get_run_window_continuous_pagination(db):
 
 @pytest.mark.asyncio
 async def test_list_messages_tool_calls_filters_and_orders(db):
+    """
+    Test filtering and ordering of messages and tool calls.
+    """
     async with db.async_session() as session:
         thread = models.Thread(thread_id="thread_messages_tool_calls", version=3)
         session.add(thread)
