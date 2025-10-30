@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 from typing import (
     AsyncGenerator,
+    Collection,
     List,
     Literal,
     Optional,
@@ -22,7 +23,6 @@ from sqlalchemy import (
     desc,
     distinct,
     literal,
-    literal_column,
     not_,
     or_,
     union_all,
@@ -4132,6 +4132,99 @@ class Run(Base):
             yield row.Run
 
     @classmethod
+    async def get_runs_by_ids(
+        cls, session: AsyncSession, run_ids: Collection[int]
+    ) -> dict[int, "Run"]:
+        """Fetch runs by their primary keys."""
+        if not run_ids:
+            return {}
+
+        stmt = select(Run).where(Run.id.in_(run_ids))
+        result = await session.execute(stmt)
+        return {run.id: run for run in result.scalars()}
+
+    @classmethod
+    async def count_runs_before_run(
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        created: datetime,
+        run_pk: int,
+    ) -> int:
+        """Count runs older than the provided run within a thread."""
+
+        stmt = select(func.count(Run.id)).where(
+            Run.thread_id == thread_id,
+            or_(
+                Run.created < created,
+                and_(Run.created == created, Run.id < run_pk),
+            ),
+        )
+        result = await session.execute(stmt)
+        count = result.scalar()
+        return count or 0
+
+    @classmethod
+    async def get_run_window(
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        limit: int,
+        before_run_pk: int | None = None,
+        order: Literal["asc", "desc"] = "desc",
+    ) -> tuple[list[int], bool]:
+        """Return run primary keys for a thread respecting pagination semantics."""
+
+        if limit <= 0:
+            return [], False
+
+        stmt = select(Run.id, Run.created).where(Run.thread_id == thread_id)
+
+        pivot_run: Optional["Run"] = None
+        if before_run_pk is not None:
+            pivot_run = await cls.get_by_id(session, before_run_pk)
+            if pivot_run is None or pivot_run.thread_id != thread_id:
+                return [], False
+
+            stmt = stmt.where(
+                or_(
+                    Run.created < pivot_run.created,
+                    and_(
+                        Run.created == pivot_run.created,
+                        Run.id < pivot_run.id,
+                    ),
+                )
+            )
+
+        query_order_desc = order == "desc" or before_run_pk is not None
+
+        ordering = (
+            (
+                desc(Run.created),
+                desc(Run.id),
+            )
+            if query_order_desc
+            else (
+                asc(Run.created),
+                asc(Run.id),
+            )
+        )
+
+        stmt = stmt.order_by(*ordering).limit(limit + 1)
+
+        result = await session.execute(stmt)
+        rows = result.all()
+
+        has_more = len(rows) > limit
+        run_rows = rows[:limit]
+        run_ids = [row[0] for row in run_rows]
+
+        if query_order_desc and order == "asc":
+            run_ids = run_ids[::-1]
+
+        return run_ids, has_more
+
+    @classmethod
     async def get_by_id(cls, session: AsyncSession, id: int) -> "Run":
         """Get a run by its ID."""
         stmt = select(Run).where(Run.id == id)
@@ -5032,48 +5125,27 @@ class Thread(Base):
         cls,
         session: AsyncSession,
         thread_id: int,
-        limit: int = 100,
-        before: str | None = None,
-        after: str | None = None,
+        run_ids: Collection[int],
         order: Literal["asc", "desc"] = "desc",
     ) -> tuple[list["Message"], list["ToolCall"]]:
-        msg_stmt = select(
-            Message.id.label("id"),
-            Message.output_index.label("output_index"),
-            literal_column("'message'").label("type"),
-        ).where(Message.thread_id == thread_id)
-        if before is not None:
-            msg_stmt = msg_stmt.where(Message.id < int(before))
-        if after is not None:
-            msg_stmt = msg_stmt.where(Message.id > int(after))
+        if not run_ids:
+            return [], []
 
-        tool_stmt = select(
-            ToolCall.id.label("id"),
-            ToolCall.output_index.label("output_index"),
-            literal_column("'tool_call'").label("type"),
-        ).where(ToolCall.thread_id == thread_id)
-        if before is not None:
-            tool_stmt = tool_stmt.where(ToolCall.id < int(before))
-        if after is not None:
-            tool_stmt = tool_stmt.where(ToolCall.id > int(after))
-
-        combined_stmt = union_all(msg_stmt, tool_stmt)
-        ordering = asc("output_index") if order == "asc" else desc("output_index")
-        stmt = (
-            select(combined_stmt.c.id, combined_stmt.c.type)
-            .order_by(ordering)
-            .limit(limit)
+        ordering = (
+            asc(Message.output_index) if order == "asc" else desc(Message.output_index)
         )
-
-        result = await session.execute(stmt)
-        rows = result.all()
-
-        messages_ids = [r.id for r in rows if r.type == "message"]
-        tool_call_ids = [r.id for r in rows if r.type == "tool_call"]
+        tool_ordering = (
+            asc(ToolCall.output_index)
+            if order == "asc"
+            else desc(ToolCall.output_index)
+        )
 
         messages = await session.execute(
             select(Message)
-            .where(Message.id.in_(messages_ids))
+            .where(
+                Message.thread_id == thread_id,
+                Message.run_id.in_(run_ids),
+            )
             .order_by(ordering)
             .options(
                 selectinload(Message.content).selectinload(MessagePart.annotations),
@@ -5083,8 +5155,11 @@ class Thread(Base):
         )
         tool_calls = await session.execute(
             select(ToolCall)
-            .where(ToolCall.id.in_(tool_call_ids))
-            .order_by(ordering)
+            .where(
+                ToolCall.thread_id == thread_id,
+                ToolCall.run_id.in_(run_ids),
+            )
+            .order_by(tool_ordering)
             .options(
                 selectinload(ToolCall.results),
                 selectinload(ToolCall.outputs),
