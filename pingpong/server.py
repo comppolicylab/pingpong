@@ -65,7 +65,6 @@ from .animal_hash import name, process_threads, pseudonym, user_names
 from openai.types.beta.assistant_create_params import ToolResources
 from openai.types.beta.threads import MessageContentPartParam
 from sqlalchemy.sql import func, delete, update
-from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.metrics as metrics
 import pingpong.models as models

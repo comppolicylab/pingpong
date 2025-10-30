@@ -4186,33 +4186,28 @@ class Run(Base):
             if pivot_run is None or pivot_run.thread_id != thread_id:
                 return [], False
 
-            if order == "asc":
-                stmt = stmt.where(
-                    or_(
-                        Run.created < pivot_run.created,
-                        and_(
-                            Run.created == pivot_run.created,
-                            Run.id < pivot_run.id,
-                        ),
-                    )
+            stmt = stmt.where(
+                or_(
+                    Run.created < pivot_run.created,
+                    and_(
+                        Run.created == pivot_run.created,
+                        Run.id < pivot_run.id,
+                    ),
                 )
-            else:
-                stmt = stmt.where(
-                    or_(
-                        Run.created > pivot_run.created,
-                        and_(
-                            Run.created == pivot_run.created,
-                            Run.id > pivot_run.id,
-                        ),
-                    )
-                )
+            )
+
+        query_order_desc = order == "desc" or before_run_pk is not None
 
         ordering = (
-            asc(Run.created),
-            asc(Run.id),
-        ) if order == "asc" else (
-            desc(Run.created),
-            desc(Run.id),
+            (
+                desc(Run.created),
+                desc(Run.id),
+            )
+            if query_order_desc
+            else (
+                asc(Run.created),
+                asc(Run.id),
+            )
         )
 
         stmt = stmt.order_by(*ordering).limit(limit + 1)
@@ -4223,6 +4218,9 @@ class Run(Base):
         has_more = len(rows) > limit
         run_rows = rows[:limit]
         run_ids = [row[0] for row in run_rows]
+
+        if query_order_desc and order == "asc":
+            run_ids = run_ids[::-1]
 
         return run_ids, has_more
 
@@ -5134,9 +5132,7 @@ class Thread(Base):
             return [], []
 
         ordering = (
-            asc(Message.output_index)
-            if order == "asc"
-            else desc(Message.output_index)
+            asc(Message.output_index) if order == "asc" else desc(Message.output_index)
         )
         tool_ordering = (
             asc(ToolCall.output_index)
