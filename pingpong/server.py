@@ -17,6 +17,7 @@ from fastapi import (
     FastAPI,
     Form,
     HTTPException,
+    Query,
     Request,
     Response,
     UploadFile,
@@ -57,6 +58,7 @@ from pingpong.emails import (
 from pingpong.realtime import browser_realtime_websocket
 from pingpong.session import populate_request
 from pingpong.stats import (
+    get_runs_with_multiple_assistant_messages_stats,
     get_statistics,
     get_statistics_by_institution as get_institution_statistics,
 )
@@ -969,6 +971,25 @@ async def get_models_stats(request: Request):
     counts = await models.Assistant.get_count_by_model(request.state.db)
     stats = [{"model": k, "assistant_count": v} for (k, v) in counts]
     return schemas.ModelStatisticsResponse(statistics=stats)
+
+
+@v1.get(
+    "/stats/runs/multi-assistant-messages",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.RunDailyAssistantMessageStatsResponse,
+)
+async def get_runs_multi_assistant_stats(
+    request: Request,
+    group_by_model: bool = Query(
+        False,
+        description="When true, include per-model breakdowns for each day.",
+    ),
+):
+    statistics = await get_runs_with_multiple_assistant_messages_stats(
+        request.state.db,
+        group_by_model=group_by_model,
+    )
+    return schemas.RunDailyAssistantMessageStatsResponse(statistics=statistics)
 
 
 @v1.get(
