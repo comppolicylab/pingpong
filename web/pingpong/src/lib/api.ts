@@ -2283,7 +2283,7 @@ export const getCIMessages = async (
  */
 export type GetThreadMessagesOpts = {
   limit?: number;
-  before?: string;
+  before?: string | null;
 };
 
 /**

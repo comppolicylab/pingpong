@@ -444,8 +444,7 @@ export class ThreadManager {
     const earliestMessage = sortedMessages[0];
     const earliestRunMessage = sortedMessages.find((message) => message.run_id);
     const threadVersion = currentData.data?.thread.version;
-    const before =
-      threadVersion === 3 ? earliestRunMessage?.run_id : earliestMessage?.id;
+    const before = threadVersion === 3 ? earliestRunMessage?.run_id : earliestMessage?.id;
 
     if (threadVersion === 3 && !before) {
       this.#data.update((d) => ({

@@ -4208,11 +4208,15 @@ class Run(Base):
                 )
 
         ordering = (
-            asc(Run.created),
-            asc(Run.id),
-        ) if order == "asc" else (
-            desc(Run.created),
-            desc(Run.id),
+            (
+                asc(Run.created),
+                asc(Run.id),
+            )
+            if order == "asc"
+            else (
+                desc(Run.created),
+                desc(Run.id),
+            )
         )
 
         stmt = stmt.order_by(*ordering).limit(limit + 1)
@@ -5134,9 +5138,7 @@ class Thread(Base):
             return [], []
 
         ordering = (
-            asc(Message.output_index)
-            if order == "asc"
-            else desc(Message.output_index)
+            asc(Message.output_index) if order == "asc" else desc(Message.output_index)
         )
         tool_ordering = (
             asc(ToolCall.output_index)
