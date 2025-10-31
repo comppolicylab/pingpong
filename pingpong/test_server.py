@@ -851,15 +851,9 @@ async def test_get_institution_thread_counts(api, db, valid_user_token, institut
 
         session.add_all(
             [
-                models.Thread(
-                    thread_id="thread-a-1", version=1, class_id=class_a_id
-                ),
-                models.Thread(
-                    thread_id="thread-a-2", version=1, class_id=class_a_id
-                ),
-                models.Thread(
-                    thread_id="thread-b-1", version=1, class_id=class_b_id
-                ),
+                models.Thread(thread_id="thread-a-1", version=1, class_id=class_a_id),
+                models.Thread(thread_id="thread-a-2", version=1, class_id=class_a_id),
+                models.Thread(thread_id="thread-b-1", version=1, class_id=class_b_id),
                 models.Thread(
                     thread_id="thread-other-1", version=1, class_id=other_class_id
                 ),

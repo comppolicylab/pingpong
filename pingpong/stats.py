@@ -150,9 +150,7 @@ async def get_thread_counts_by_class(
             func.count(models.Thread.id).label("thread_count"),
         )
         .select_from(models.Class)
-        .join(
-            models.Thread, models.Thread.class_id == models.Class.id, isouter=True
-        )
+        .join(models.Thread, models.Thread.class_id == models.Class.id, isouter=True)
         .where(models.Class.institution_id == institution_id)
         .group_by(models.Class.id, models.Class.name)
         .order_by(models.Class.name, models.Class.id)
