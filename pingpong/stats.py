@@ -143,19 +143,15 @@ async def get_runs_with_multiple_assistant_messages_stats(
     session: AsyncSession,
     *,
     days: int = 14,
-    group_by: Literal["model", "assistant"] | None = None,
+    group_by: Literal["model", "assistant"] = "model",
     limit: int = 10,
     summary_only: bool = False,
 ) -> tuple[list[RunDailyAssistantMessageStats], RunDailyAssistantMessageSummary]:
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=days)
 
-    group_mode: Literal["model", "assistant"] = (
-        group_by if group_by is not None else "model"
-    )
-
     run_day = cast(func.date_trunc("day", models.Run.created), Date).label("run_day")
-    group_field = models.Run.model if group_mode == "model" else models.Run.assistant_id
+    group_field = models.Run.model if group_by == "model" else models.Run.assistant_id
 
     # ---- Step 1: Count assistant messages per run ----
     run_message_counts = (
@@ -197,8 +193,8 @@ async def get_runs_with_multiple_assistant_messages_stats(
             total_runs=0,
             runs_with_multiple_assistant_messages=0,
             percentage=0.0,
-            models=[] if group_mode == "model" else None,
-            assistants=[] if group_mode == "assistant" else None,
+            models=[] if group_by == "model" else None,
+            assistants=[] if group_by == "assistant" else None,
         )
         return [], summary
 
@@ -207,7 +203,7 @@ async def get_runs_with_multiple_assistant_messages_stats(
     assistant_class_ids = {}
     assistant_class_names = {}
 
-    if group_mode == "assistant":
+    if group_by == "assistant":
         assistant_ids = {r.group_field for r in rows if r.group_field is not None}
         if assistant_ids:
             assistants = (
@@ -230,7 +226,7 @@ async def get_runs_with_multiple_assistant_messages_stats(
     # ---- Step 4: Aggregate in Python ----
     daily_totals: dict[date, int] = defaultdict(int)
     daily_matches: dict[date, int] = defaultdict(int)
-    collect_daily = group_by is not None and not summary_only
+    collect_daily = not summary_only
     grouped_stats = defaultdict(list)
     summary_totals: dict[str | int | None, int] = defaultdict(int)
     summary_matches: dict[str | int | None, int] = defaultdict(int)
@@ -248,7 +244,7 @@ async def get_runs_with_multiple_assistant_messages_stats(
 
         pct = round(matches / total * 100, 2) if total else 0.0
 
-        if collect_daily and group_mode == "model":
+        if collect_daily and group_by == "model":
             grouped_stats[run_day].append(
                 RunDailyAssistantMessageModelStats(
                     model=key,
@@ -257,7 +253,7 @@ async def get_runs_with_multiple_assistant_messages_stats(
                     percentage=pct,
                 )
             )
-        elif collect_daily and group_mode == "assistant":
+        elif collect_daily and group_by == "assistant":
             grouped_stats[run_day].append(
                 RunDailyAssistantMessageAssistantStats(
                     assistant_id=key,
@@ -280,7 +276,7 @@ async def get_runs_with_multiple_assistant_messages_stats(
             entries = grouped_stats.get(day)
 
             if entries:
-                if group_mode == "model":
+                if group_by == "model":
                     entries.sort(
                         key=lambda item: (
                             -item.percentage,
@@ -312,8 +308,8 @@ async def get_runs_with_multiple_assistant_messages_stats(
                     total_runs=total,
                     runs_with_multiple_assistant_messages=matches,
                     percentage=pct,
-                    models=entries if group_mode == "model" else None,
-                    assistants=entries if group_mode == "assistant" else None,
+                    models=entries if group_by == "model" else None,
+                    assistants=entries if group_by == "assistant" else None,
                 )
             )
 
@@ -324,7 +320,7 @@ async def get_runs_with_multiple_assistant_messages_stats(
         round(summary_matching / summary_total * 100, 2) if summary_total else 0.0
     )
 
-    if group_mode == "model":
+    if group_by == "model":
         summary_entries = [
             RunDailyAssistantMessageModelStats(
                 model=m,
@@ -352,7 +348,7 @@ async def get_runs_with_multiple_assistant_messages_stats(
             for a in summary_totals
         ]
 
-    if group_mode == "model":
+    if group_by == "model":
         summary_entries.sort(
             key=lambda item: (
                 -item.percentage,
@@ -380,8 +376,8 @@ async def get_runs_with_multiple_assistant_messages_stats(
         total_runs=summary_total,
         runs_with_multiple_assistant_messages=summary_matching,
         percentage=summary_pct,
-        models=summary_entries if group_mode == "model" else None,
-        assistants=summary_entries if group_mode == "assistant" else None,
+        models=summary_entries if group_by == "model" else None,
+        assistants=summary_entries if group_by == "assistant" else None,
     )
 
     return daily_stats, summary

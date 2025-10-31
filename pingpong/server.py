@@ -980,7 +980,7 @@ async def get_models_stats(request: Request):
 async def get_runs_multi_assistant_stats(
     request: Request,
     days: int = 14,
-    group_by: Literal["model", "assistant"] | None = "model",
+    group_by: Literal["model", "assistant"] = "model",
     top_n: int = 10,
     summary_only: bool = False,
 ):
