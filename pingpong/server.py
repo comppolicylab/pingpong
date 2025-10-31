@@ -983,6 +983,7 @@ async def get_runs_multi_assistant_stats(
     group_by: Literal["model", "assistant"] = "model",
     top_n: int = 10,
     summary_only: bool = False,
+    sort_priority: Literal["count", "percentage"] = "percentage",
 ):
     statistics, summary = await get_runs_with_multiple_assistant_messages_stats(
         request.state.db,
@@ -990,6 +991,7 @@ async def get_runs_multi_assistant_stats(
         group_by=group_by,
         limit=top_n,
         summary_only=summary_only,
+        sort_priority=sort_priority,
     )
     return schemas.RunDailyAssistantMessageStatsResponse(
         statistics=statistics, summary=summary
