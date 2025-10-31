@@ -305,6 +305,9 @@ async def get_runs_with_multiple_assistant_messages_stats(
             if row.assistant_id is not None
         }
 
+        assistant_names = {}
+        assistant_class_ids = {}
+        assistant_class_names = {}
         if assistant_ids:
             assistants_with_class = (
                 (
