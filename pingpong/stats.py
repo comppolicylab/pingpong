@@ -13,6 +13,7 @@ from pingpong.schemas import (
     Statistics,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 
 async def get_statistics(session: AsyncSession) -> Statistics:
@@ -141,7 +142,7 @@ async def get_runs_with_multiple_assistant_messages_stats(
     *,
     days: int = 14,
     group_by: Literal["model", "assistant"] = "model",
-    assistant_limit: int | None = None,
+    limit: int = 10,
 ) -> list[RunDailyAssistantMessageStats]:
     """Return daily run statistics for runs with multiple assistant messages."""
 
@@ -274,14 +275,11 @@ async def get_runs_with_multiple_assistant_messages_stats(
             .order_by(recent_runs.c.run_day, recent_runs.c.assistant_id)
         )
 
-        assistant_matches_stmt = (
-            select(
-                multi_runs.c.run_day,
-                multi_runs.c.assistant_id,
-                func.count().label("matching_runs"),
-            )
-            .group_by(multi_runs.c.run_day, multi_runs.c.assistant_id)
-        )
+        assistant_matches_stmt = select(
+            multi_runs.c.run_day,
+            multi_runs.c.assistant_id,
+            func.count().label("matching_runs"),
+        ).group_by(multi_runs.c.run_day, multi_runs.c.assistant_id)
 
         assistant_totals_rows = (await session.execute(assistant_totals_stmt)).all()
         assistant_matches_rows = (await session.execute(assistant_matches_stmt)).all()
@@ -308,14 +306,22 @@ async def get_runs_with_multiple_assistant_messages_stats(
         }
 
         if assistant_ids:
-            name_rows = (
-                await session.execute(
-                    select(models.Assistant.id, models.Assistant.name).where(
-                        models.Assistant.id.in_(list(assistant_ids))
+            assistants_with_class = (
+                (
+                    await session.execute(
+                        select(models.Assistant)
+                        .options(selectinload(models.Assistant.class_))
+                        .where(models.Assistant.id.in_(list(assistant_ids)))
                     )
                 )
-            ).all()
-            assistant_names = {row.id: row.name for row in name_rows}
+                .scalars()
+                .all()
+            )
+            assistant_names = {a.id: a.name for a in assistants_with_class}
+            assistant_class_ids = {a.id: a.class_id for a in assistants_with_class}
+            assistant_class_names = {
+                a.id: a.class_.name if a.class_ else None for a in assistants_with_class
+            }
 
     statistics: list[RunDailyAssistantMessageStats] = []
 
@@ -349,6 +355,16 @@ async def get_runs_with_multiple_assistant_messages_stats(
                             percentage=model_percentage,
                         )
                     )
+
+                models_stats.sort(
+                    key=lambda item: (
+                        -item.percentage,
+                        -item.runs_with_multiple_assistant_messages,
+                        -item.total_runs,
+                        item.model is None,
+                        item.model or "",
+                    )
+                )
         elif group_by == "assistant":
             assistant_keys = [
                 key for key in assistant_totals_map.keys() if key[0] == day_key
@@ -375,21 +391,26 @@ async def get_runs_with_multiple_assistant_messages_stats(
                             total_runs=assistant_total,
                             runs_with_multiple_assistant_messages=assistant_matching,
                             percentage=assistant_percentage,
+                            class_id=assistant_class_ids.get(assistant_id),
+                            class_name=assistant_class_names.get(assistant_id),
                         )
                     )
 
                 assistants_stats.sort(
                     key=lambda item: (
+                        -item.percentage,
                         -item.runs_with_multiple_assistant_messages,
                         -item.total_runs,
                         item.assistant_name is None,
                         item.assistant_name or "",
-                        item.assistant_id if item.assistant_id is not None else float("inf"),
+                        item.assistant_id
+                        if item.assistant_id is not None
+                        else float("inf"),
                     )
                 )
 
-                if assistant_limit is not None and assistant_limit > 0:
-                    assistants_stats = assistants_stats[:assistant_limit]
+                if limit > 0:
+                    assistants_stats = assistants_stats[:limit]
 
         statistics.append(
             RunDailyAssistantMessageStats(

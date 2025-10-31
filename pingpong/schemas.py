@@ -55,6 +55,8 @@ class RunDailyAssistantMessageModelStats(BaseModel):
 class RunDailyAssistantMessageAssistantStats(BaseModel):
     assistant_id: int | None
     assistant_name: str | None = None
+    class_id: int | None = None
+    class_name: str | None = None
     total_runs: int
     runs_with_multiple_assistant_messages: int
     percentage: float
