@@ -3,6 +3,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from pingpong import models
+
 from .auth import encode_session_token
 from .now import offset
 from .testutil import with_authz, with_authz_series, with_user, with_institution
@@ -822,3 +824,53 @@ async def test_create_class_private(api, now, institution, valid_user_token, aut
         ("grant", "institution:11", "parent", "class:1"),
         ("grant", "user:123", "teacher", "class:1"),
     ]
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(grants=[("user:123", "admin", "root:0")])
+async def test_get_institution_thread_counts(api, db, valid_user_token, institution):
+    async with db.async_session() as session:
+        class_a = models.Class(name="Class A", institution_id=institution.id)
+        class_b = models.Class(name="Class B", institution_id=institution.id)
+        class_c = models.Class(name="Class C", institution_id=institution.id)
+        session.add_all([class_a, class_b, class_c])
+        await session.flush()
+        class_a_id, class_b_id, class_c_id = class_a.id, class_b.id, class_c.id
+
+        other_institution = models.Institution(name="Other Institution")
+        session.add(other_institution)
+        await session.flush()
+
+        other_class = models.Class(
+            name="Other Class", institution_id=other_institution.id
+        )
+        session.add(other_class)
+        await session.flush()
+        other_class_id = other_class.id
+
+        session.add_all(
+            [
+                models.Thread(thread_id="thread-a-1", version=1, class_id=class_a_id),
+                models.Thread(thread_id="thread-a-2", version=1, class_id=class_a_id),
+                models.Thread(thread_id="thread-b-1", version=1, class_id=class_b_id),
+                models.Thread(
+                    thread_id="thread-other-1", version=1, class_id=other_class_id
+                ),
+            ]
+        )
+        await session.commit()
+
+    response = api.get(
+        f"/api/v1/stats/institutions/{institution.id}/threads",
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "institution_id": institution.id,
+        "classes": [
+            {"class_id": class_a_id, "class_name": "Class A", "thread_count": 2},
+            {"class_id": class_b_id, "class_name": "Class B", "thread_count": 1},
+            {"class_id": class_c_id, "class_name": "Class C", "thread_count": 0},
+        ],
+    }

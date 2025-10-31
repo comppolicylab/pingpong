@@ -5,6 +5,7 @@ from typing import Literal
 
 import pingpong.models as models
 from pingpong.schemas import (
+    ClassThreadCount,
     MessageRole,
     RunDailyAssistantMessageAssistantStats,
     RunDailyAssistantMessageModelStats,
@@ -137,6 +138,33 @@ async def get_statistics_by_institution(
         threads=threads_count,
         files=files_count,
     )
+
+
+async def get_thread_counts_by_class(
+    session: AsyncSession, institution_id: int
+) -> list[ClassThreadCount]:
+    stmt = (
+        select(
+            models.Class.id.label("class_id"),
+            models.Class.name.label("class_name"),
+            func.count(models.Thread.id).label("thread_count"),
+        )
+        .select_from(models.Class)
+        .join(models.Thread, models.Thread.class_id == models.Class.id, isouter=True)
+        .where(models.Class.institution_id == institution_id)
+        .group_by(models.Class.id, models.Class.name)
+        .order_by(models.Class.name, models.Class.id)
+    )
+
+    result = await session.execute(stmt)
+    return [
+        ClassThreadCount(
+            class_id=row.class_id,
+            class_name=row.class_name,
+            thread_count=row.thread_count,
+        )
+        for row in result
+    ]
 
 
 async def get_runs_with_multiple_assistant_messages_stats(

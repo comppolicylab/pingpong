@@ -60,6 +60,7 @@ from pingpong.stats import (
     get_runs_with_multiple_assistant_messages_stats,
     get_statistics,
     get_statistics_by_institution as get_institution_statistics,
+    get_thread_counts_by_class,
 )
 from pingpong.summary import send_class_summary_to_user_task
 from .animal_hash import name, process_threads, pseudonym, user_names
@@ -1006,6 +1007,18 @@ async def get_runs_multi_assistant_stats(
 async def get_stats_by_institution(institution_id: int, request: Request):
     statistics = await get_institution_statistics(request.state.db, institution_id)
     return schemas.StatisticsResponse(statistics=statistics)
+
+
+@v1.get(
+    "/stats/institutions/{institution_id}/threads",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.InstitutionClassThreadCountsResponse,
+)
+async def get_thread_counts_for_institution(institution_id: int, request: Request):
+    thread_counts = await get_thread_counts_by_class(request.state.db, institution_id)
+    return schemas.InstitutionClassThreadCountsResponse(
+        institution_id=institution_id, classes=thread_counts
+    )
 
 
 @v1.get(

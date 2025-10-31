@@ -36,6 +36,17 @@ class StatisticsResponse(BaseModel):
     statistics: Statistics
 
 
+class ClassThreadCount(BaseModel):
+    class_id: int
+    class_name: str | None = None
+    thread_count: int
+
+
+class InstitutionClassThreadCountsResponse(BaseModel):
+    institution_id: int
+    classes: list[ClassThreadCount]
+
+
 class ModelStatistics(BaseModel):
     model: str
     assistant_count: int
