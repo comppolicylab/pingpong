@@ -1,8 +1,7 @@
 import asyncio
+from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal
-
-from sqlalchemy import func, select
 
 import pingpong.models as models
 from pingpong.schemas import (
@@ -10,10 +9,13 @@ from pingpong.schemas import (
     RunDailyAssistantMessageAssistantStats,
     RunDailyAssistantMessageModelStats,
     RunDailyAssistantMessageStats,
+    RunDailyAssistantMessageSummary,
     Statistics,
 )
+from sqlalchemy import case, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.sql.sqltypes import Date
 
 
 async def get_statistics(session: AsyncSession) -> Statistics:
@@ -141,175 +143,74 @@ async def get_runs_with_multiple_assistant_messages_stats(
     session: AsyncSession,
     *,
     days: int = 14,
-    group_by: Literal["model", "assistant"] = "model",
+    group_by: Literal["model", "assistant"] | None = None,
     limit: int = 10,
-) -> list[RunDailyAssistantMessageStats]:
-    """Return daily run statistics for runs with multiple assistant messages."""
-
+    summary_only: bool = False,
+) -> tuple[list[RunDailyAssistantMessageStats], RunDailyAssistantMessageSummary]:
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=days)
 
-    run_day = func.date_trunc("day", models.Run.created).label("run_day")
+    group_mode: Literal["model", "assistant"] = (
+        group_by if group_by is not None else "model"
+    )
 
-    recent_runs = (
+    run_day = cast(func.date_trunc("day", models.Run.created), Date).label("run_day")
+    group_field = models.Run.model if group_mode == "model" else models.Run.assistant_id
+
+    # ---- Step 1: Count assistant messages per run ----
+    run_message_counts = (
         select(
             models.Run.id.label("run_id"),
             run_day,
-            models.Run.model.label("model"),
-            models.Run.assistant_id.label("assistant_id"),
+            group_field.label("group_field"),
+            func.count(models.Message.id)
+            .filter(models.Message.role == MessageRole.ASSISTANT)
+            .label("assistant_message_count"),
         )
+        .join(models.Message, models.Message.run_id == models.Run.id)
         .where(models.Run.created >= cutoff)
-        .cte("recent_runs")
+        .group_by(models.Run.id, run_day, group_field)
+        .cte("run_message_counts")
     )
 
-    assistant_counts = (
+    # ---- Step 2: Aggregate daily totals ----
+    agg_stmt = (
         select(
-            recent_runs.c.run_id,
-            recent_runs.c.run_day,
-            recent_runs.c.model,
-            recent_runs.c.assistant_id,
-            func.count(models.Message.id).label("assistant_message_count"),
-        )
-        .join(models.Message, models.Message.run_id == recent_runs.c.run_id)
-        .where(models.Message.role == MessageRole.ASSISTANT)
-        .group_by(
-            recent_runs.c.run_id,
-            recent_runs.c.run_day,
-            recent_runs.c.model,
-            recent_runs.c.assistant_id,
-        )
-        .cte("assistant_counts")
-    )
-
-    multi_runs = (
-        select(
-            assistant_counts.c.run_day,
-            assistant_counts.c.model,
-            assistant_counts.c.run_id,
-            assistant_counts.c.assistant_id,
-        )
-        .where(assistant_counts.c.assistant_message_count > 1)
-        .cte("multi_runs")
-    )
-
-    daily_totals_stmt = (
-        select(
-            recent_runs.c.run_day,
+            run_message_counts.c.run_day,
+            run_message_counts.c.group_field,
             func.count().label("total_runs"),
+            func.sum(
+                case(
+                    (run_message_counts.c.assistant_message_count > 1, 1),
+                    else_=0,
+                )
+            ).label("matching_runs"),
         )
-        .group_by(recent_runs.c.run_day)
-        .order_by(recent_runs.c.run_day)
+        .group_by(run_message_counts.c.run_day, run_message_counts.c.group_field)
+        .order_by(run_message_counts.c.run_day)
     )
 
-    daily_matches_stmt = select(
-        multi_runs.c.run_day,
-        func.count().label("matching_runs"),
-    ).group_by(multi_runs.c.run_day)
+    rows = (await session.execute(agg_stmt)).all()
 
-    totals_rows = (await session.execute(daily_totals_stmt)).all()
-    matches_rows = (await session.execute(daily_matches_stmt)).all()
-
-    def _normalize_date(value: date | datetime | None) -> date:
-        if isinstance(value, datetime):
-            return value.date()
-        if isinstance(value, date):
-            return value
-        raise ValueError("run_day cannot be null")
-
-    totals_map: dict[date, int] = {
-        _normalize_date(row.run_day): int(row.total_runs or 0) for row in totals_rows
-    }
-    matches_map: dict[date, int] = {
-        _normalize_date(row.run_day): int(row.matching_runs or 0)
-        for row in matches_rows
-    }
-
-    model_totals_map: dict[tuple[date, str | None], int] = {}
-    model_matches_map: dict[tuple[date, str | None], int] = {}
-    assistant_totals_map: dict[tuple[date, int | None], int] = {}
-    assistant_matches_map: dict[tuple[date, int | None], int] = {}
-    assistant_names: dict[int, str] = {}
-
-    if totals_map and group_by == "model":
-        model_totals_stmt = (
-            select(
-                recent_runs.c.run_day,
-                recent_runs.c.model,
-                func.count().label("total_runs"),
-            )
-            .group_by(recent_runs.c.run_day, recent_runs.c.model)
-            .order_by(recent_runs.c.run_day, recent_runs.c.model)
+    if not rows:
+        summary = RunDailyAssistantMessageSummary(
+            total_runs=0,
+            runs_with_multiple_assistant_messages=0,
+            percentage=0.0,
+            models=[] if group_mode == "model" else None,
+            assistants=[] if group_mode == "assistant" else None,
         )
+        return [], summary
 
-        model_matches_stmt = select(
-            multi_runs.c.run_day,
-            multi_runs.c.model,
-            func.count().label("matching_runs"),
-        ).group_by(multi_runs.c.run_day, multi_runs.c.model)
+    # ---- Step 3: Fetch assistant metadata (only if grouping by assistant) ----
+    assistant_names = {}
+    assistant_class_ids = {}
+    assistant_class_names = {}
 
-        model_totals_rows = (await session.execute(model_totals_stmt)).all()
-        model_matches_rows = (await session.execute(model_matches_stmt)).all()
-
-        model_totals_map = {
-            (
-                _normalize_date(row.run_day),
-                row.model,
-            ): int(row.total_runs or 0)
-            for row in model_totals_rows
-        }
-        model_matches_map = {
-            (
-                _normalize_date(row.run_day),
-                row.model,
-            ): int(row.matching_runs or 0)
-            for row in model_matches_rows
-        }
-    elif totals_map and group_by == "assistant":
-        assistant_totals_stmt = (
-            select(
-                recent_runs.c.run_day,
-                recent_runs.c.assistant_id,
-                func.count().label("total_runs"),
-            )
-            .group_by(recent_runs.c.run_day, recent_runs.c.assistant_id)
-            .order_by(recent_runs.c.run_day, recent_runs.c.assistant_id)
-        )
-
-        assistant_matches_stmt = select(
-            multi_runs.c.run_day,
-            multi_runs.c.assistant_id,
-            func.count().label("matching_runs"),
-        ).group_by(multi_runs.c.run_day, multi_runs.c.assistant_id)
-
-        assistant_totals_rows = (await session.execute(assistant_totals_stmt)).all()
-        assistant_matches_rows = (await session.execute(assistant_matches_stmt)).all()
-
-        assistant_totals_map = {
-            (
-                _normalize_date(row.run_day),
-                row.assistant_id,
-            ): int(row.total_runs or 0)
-            for row in assistant_totals_rows
-        }
-        assistant_matches_map = {
-            (
-                _normalize_date(row.run_day),
-                row.assistant_id,
-            ): int(row.matching_runs or 0)
-            for row in assistant_matches_rows
-        }
-
-        assistant_ids = {
-            row.assistant_id
-            for row in assistant_totals_rows + assistant_matches_rows
-            if row.assistant_id is not None
-        }
-
-        assistant_names = {}
-        assistant_class_ids = {}
-        assistant_class_names = {}
+    if group_mode == "assistant":
+        assistant_ids = {r.group_field for r in rows if r.group_field is not None}
         if assistant_ids:
-            assistants_with_class = (
+            assistants = (
                 (
                     await session.execute(
                         select(models.Assistant)
@@ -320,110 +221,167 @@ async def get_runs_with_multiple_assistant_messages_stats(
                 .scalars()
                 .all()
             )
-            assistant_names = {a.id: a.name for a in assistants_with_class}
-            assistant_class_ids = {a.id: a.class_id for a in assistants_with_class}
+            assistant_names = {a.id: a.name for a in assistants}
+            assistant_class_ids = {a.id: a.class_id for a in assistants}
             assistant_class_names = {
-                a.id: a.class_.name if a.class_ else None for a in assistants_with_class
+                a.id: a.class_.name if a.class_ else None for a in assistants
             }
 
-    statistics: list[RunDailyAssistantMessageStats] = []
+    # ---- Step 4: Aggregate in Python ----
+    daily_totals: dict[date, int] = defaultdict(int)
+    daily_matches: dict[date, int] = defaultdict(int)
+    collect_daily = group_by is not None and not summary_only
+    grouped_stats = defaultdict(list)
+    summary_totals: dict[str | int | None, int] = defaultdict(int)
+    summary_matches: dict[str | int | None, int] = defaultdict(int)
 
-    for day_key in sorted(totals_map.keys()):
-        total_runs = totals_map[day_key]
-        matching_runs = matches_map.get(day_key, 0)
-        percentage = round((matching_runs / total_runs) * 100, 2) if total_runs else 0.0
+    for row in rows:
+        run_day = row.run_day
+        key = row.group_field
+        total = int(row.total_runs or 0)
+        matches = int(row.matching_runs or 0)
 
-        models_stats: list[RunDailyAssistantMessageModelStats] | None = None
-        assistants_stats: list[RunDailyAssistantMessageAssistantStats] | None = None
+        daily_totals[run_day] += total
+        daily_matches[run_day] += matches
+        summary_totals[key] += total
+        summary_matches[key] += matches
 
-        if group_by == "model":
-            model_keys = [key for key in model_totals_map.keys() if key[0] == day_key]
+        pct = round(matches / total * 100, 2) if total else 0.0
 
-            if model_keys:
-                model_keys.sort(key=lambda item: item[1] or "")
-                models_stats = []
-                for _, model_name in model_keys:
-                    model_total = model_totals_map[(day_key, model_name)]
-                    model_matching = model_matches_map.get((day_key, model_name), 0)
-                    model_percentage = (
-                        round((model_matching / model_total) * 100, 2)
-                        if model_total
-                        else 0.0
-                    )
-                    models_stats.append(
-                        RunDailyAssistantMessageModelStats(
-                            model=model_name,
-                            total_runs=model_total,
-                            runs_with_multiple_assistant_messages=model_matching,
-                            percentage=model_percentage,
+        if collect_daily and group_mode == "model":
+            grouped_stats[run_day].append(
+                RunDailyAssistantMessageModelStats(
+                    model=key,
+                    total_runs=total,
+                    runs_with_multiple_assistant_messages=matches,
+                    percentage=pct,
+                )
+            )
+        elif collect_daily and group_mode == "assistant":
+            grouped_stats[run_day].append(
+                RunDailyAssistantMessageAssistantStats(
+                    assistant_id=key,
+                    assistant_name=assistant_names.get(key),
+                    total_runs=total,
+                    runs_with_multiple_assistant_messages=matches,
+                    percentage=pct,
+                    class_id=assistant_class_ids.get(key),
+                    class_name=assistant_class_names.get(key),
+                )
+            )
+
+    # ---- Step 5: Per-day stats ----
+    daily_stats: list[RunDailyAssistantMessageStats] = []
+    if collect_daily:
+        for day in sorted(daily_totals.keys()):
+            total = daily_totals[day]
+            matches = daily_matches[day]
+            pct = round(matches / total * 100, 2) if total else 0.0
+            entries = grouped_stats.get(day)
+
+            if entries:
+                if group_mode == "model":
+                    entries.sort(
+                        key=lambda item: (
+                            -item.percentage,
+                            -item.runs_with_multiple_assistant_messages,
+                            -item.total_runs,
+                            item.model is None,
+                            item.model or "",
                         )
                     )
-
-                models_stats.sort(
-                    key=lambda item: (
-                        -item.percentage,
-                        -item.runs_with_multiple_assistant_messages,
-                        -item.total_runs,
-                        item.model is None,
-                        item.model or "",
-                    )
-                )
-        elif group_by == "assistant":
-            assistant_keys = [
-                key for key in assistant_totals_map.keys() if key[0] == day_key
-            ]
-
-            if assistant_keys:
-                assistants_stats = []
-                for _, assistant_id in assistant_keys:
-                    assistant_total = assistant_totals_map[(day_key, assistant_id)]
-                    assistant_matching = assistant_matches_map.get(
-                        (day_key, assistant_id), 0
-                    )
-                    assistant_percentage = (
-                        round((assistant_matching / assistant_total) * 100, 2)
-                        if assistant_total
-                        else 0.0
-                    )
-                    assistants_stats.append(
-                        RunDailyAssistantMessageAssistantStats(
-                            assistant_id=assistant_id,
-                            assistant_name=assistant_names.get(assistant_id)
-                            if assistant_id is not None
-                            else None,
-                            total_runs=assistant_total,
-                            runs_with_multiple_assistant_messages=assistant_matching,
-                            percentage=assistant_percentage,
-                            class_id=assistant_class_ids.get(assistant_id),
-                            class_name=assistant_class_names.get(assistant_id),
+                else:
+                    entries.sort(
+                        key=lambda item: (
+                            -item.percentage,
+                            -item.runs_with_multiple_assistant_messages,
+                            -item.total_runs,
+                            item.assistant_name is None,
+                            item.assistant_name or "",
+                            item.assistant_id
+                            if item.assistant_id is not None
+                            else float("inf"),
                         )
                     )
-
-                assistants_stats.sort(
-                    key=lambda item: (
-                        -item.percentage,
-                        -item.runs_with_multiple_assistant_messages,
-                        -item.total_runs,
-                        item.assistant_name is None,
-                        item.assistant_name or "",
-                        item.assistant_id
-                        if item.assistant_id is not None
-                        else float("inf"),
-                    )
-                )
-
                 if limit > 0:
-                    assistants_stats = assistants_stats[:limit]
+                    entries = entries[:limit]
 
-        statistics.append(
-            RunDailyAssistantMessageStats(
-                date=day_key,
-                total_runs=total_runs,
-                runs_with_multiple_assistant_messages=matching_runs,
-                percentage=percentage,
-                models=models_stats,
-                assistants=assistants_stats,
+            daily_stats.append(
+                RunDailyAssistantMessageStats(
+                    date=day,
+                    total_runs=total,
+                    runs_with_multiple_assistant_messages=matches,
+                    percentage=pct,
+                    models=entries if group_mode == "model" else None,
+                    assistants=entries if group_mode == "assistant" else None,
+                )
+            )
+
+    # ---- Step 6: Summary ----
+    summary_total = sum(daily_totals.values())
+    summary_matching = sum(daily_matches.values())
+    summary_pct = (
+        round(summary_matching / summary_total * 100, 2) if summary_total else 0.0
+    )
+
+    if group_mode == "model":
+        summary_entries = [
+            RunDailyAssistantMessageModelStats(
+                model=m,
+                total_runs=summary_totals[m],
+                runs_with_multiple_assistant_messages=summary_matches[m],
+                percentage=round(summary_matches[m] / summary_totals[m] * 100, 2)
+                if summary_totals[m]
+                else 0.0,
+            )
+            for m in summary_totals
+        ]
+    else:
+        summary_entries = [
+            RunDailyAssistantMessageAssistantStats(
+                assistant_id=a,
+                assistant_name=assistant_names.get(a),
+                total_runs=summary_totals[a],
+                runs_with_multiple_assistant_messages=summary_matches[a],
+                percentage=round(summary_matches[a] / summary_totals[a] * 100, 2)
+                if summary_totals[a]
+                else 0.0,
+                class_id=assistant_class_ids.get(a),
+                class_name=assistant_class_names.get(a),
+            )
+            for a in summary_totals
+        ]
+
+    if group_mode == "model":
+        summary_entries.sort(
+            key=lambda item: (
+                -item.percentage,
+                -item.runs_with_multiple_assistant_messages,
+                -item.total_runs,
+                item.model is None,
+                item.model or "",
             )
         )
+    else:
+        summary_entries.sort(
+            key=lambda item: (
+                -item.percentage,
+                -item.runs_with_multiple_assistant_messages,
+                -item.total_runs,
+                item.assistant_name is None,
+                item.assistant_name or "",
+                item.assistant_id if item.assistant_id is not None else float("inf"),
+            )
+        )
+    if limit > 0:
+        summary_entries = summary_entries[:limit]
 
-    return statistics
+    summary = RunDailyAssistantMessageSummary(
+        total_runs=summary_total,
+        runs_with_multiple_assistant_messages=summary_matching,
+        percentage=summary_pct,
+        models=summary_entries if group_mode == "model" else None,
+        assistants=summary_entries if group_mode == "assistant" else None,
+    )
+
+    return daily_stats, summary

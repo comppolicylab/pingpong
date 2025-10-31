@@ -71,8 +71,17 @@ class RunDailyAssistantMessageStats(BaseModel):
     assistants: list[RunDailyAssistantMessageAssistantStats] | None = None
 
 
+class RunDailyAssistantMessageSummary(BaseModel):
+    total_runs: int
+    runs_with_multiple_assistant_messages: int
+    percentage: float
+    models: list[RunDailyAssistantMessageModelStats] | None = None
+    assistants: list[RunDailyAssistantMessageAssistantStats] | None = None
+
+
 class RunDailyAssistantMessageStatsResponse(BaseModel):
     statistics: list[RunDailyAssistantMessageStats]
+    summary: RunDailyAssistantMessageSummary | None = None
 
 
 class AssistantModelInfo(BaseModel):
