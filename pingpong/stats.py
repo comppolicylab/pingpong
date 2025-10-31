@@ -146,12 +146,65 @@ async def get_runs_with_multiple_assistant_messages_stats(
     group_by: Literal["model", "assistant"] = "model",
     limit: int = 10,
     summary_only: bool = False,
+    sort_priority: Literal["count", "percentage"] = "count",
 ) -> tuple[list[RunDailyAssistantMessageStats], RunDailyAssistantMessageSummary]:
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=days)
 
     run_day = cast(func.date_trunc("day", models.Run.created), Date).label("run_day")
     group_field = models.Run.model if group_by == "model" else models.Run.assistant_id
+
+    def _sort_model_entries(items: list[RunDailyAssistantMessageModelStats]) -> None:
+        if sort_priority == "percentage":
+            items.sort(
+                key=lambda item: (
+                    -item.percentage,
+                    -item.runs_with_multiple_assistant_messages,
+                    -item.total_runs,
+                    item.model is None,
+                    item.model or "",
+                )
+            )
+        else:
+            items.sort(
+                key=lambda item: (
+                    -item.runs_with_multiple_assistant_messages,
+                    -item.total_runs,
+                    -item.percentage,
+                    item.model is None,
+                    item.model or "",
+                )
+            )
+
+    def _sort_assistant_entries(
+        items: list[RunDailyAssistantMessageAssistantStats],
+    ) -> None:
+        if sort_priority == "percentage":
+            items.sort(
+                key=lambda item: (
+                    -item.percentage,
+                    -item.runs_with_multiple_assistant_messages,
+                    -item.total_runs,
+                    item.assistant_name is None,
+                    item.assistant_name or "",
+                    item.assistant_id
+                    if item.assistant_id is not None
+                    else float("inf"),
+                )
+            )
+        else:
+            items.sort(
+                key=lambda item: (
+                    -item.runs_with_multiple_assistant_messages,
+                    -item.total_runs,
+                    -item.percentage,
+                    item.assistant_name is None,
+                    item.assistant_name or "",
+                    item.assistant_id
+                    if item.assistant_id is not None
+                    else float("inf"),
+                )
+            )
 
     # ---- Step 1: Count assistant messages per run ----
     run_message_counts = (
@@ -277,28 +330,9 @@ async def get_runs_with_multiple_assistant_messages_stats(
 
             if entries:
                 if group_by == "model":
-                    entries.sort(
-                        key=lambda item: (
-                            -item.percentage,
-                            -item.runs_with_multiple_assistant_messages,
-                            -item.total_runs,
-                            item.model is None,
-                            item.model or "",
-                        )
-                    )
+                    _sort_model_entries(entries)
                 else:
-                    entries.sort(
-                        key=lambda item: (
-                            -item.percentage,
-                            -item.runs_with_multiple_assistant_messages,
-                            -item.total_runs,
-                            item.assistant_name is None,
-                            item.assistant_name or "",
-                            item.assistant_id
-                            if item.assistant_id is not None
-                            else float("inf"),
-                        )
-                    )
+                    _sort_assistant_entries(entries)
                 if limit > 0:
                     entries = entries[:limit]
 
@@ -349,26 +383,9 @@ async def get_runs_with_multiple_assistant_messages_stats(
         ]
 
     if group_by == "model":
-        summary_entries.sort(
-            key=lambda item: (
-                -item.percentage,
-                -item.runs_with_multiple_assistant_messages,
-                -item.total_runs,
-                item.model is None,
-                item.model or "",
-            )
-        )
+        _sort_model_entries(summary_entries)
     else:
-        summary_entries.sort(
-            key=lambda item: (
-                -item.percentage,
-                -item.runs_with_multiple_assistant_messages,
-                -item.total_runs,
-                item.assistant_name is None,
-                item.assistant_name or "",
-                item.assistant_id if item.assistant_id is not None else float("inf"),
-            )
-        )
+        _sort_assistant_entries(summary_entries)
     if limit > 0:
         summary_entries = summary_entries[:limit]
 
