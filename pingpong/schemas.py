@@ -52,12 +52,23 @@ class RunDailyAssistantMessageModelStats(BaseModel):
     percentage: float
 
 
+class RunDailyAssistantMessageAssistantStats(BaseModel):
+    assistant_id: int | None
+    assistant_name: str | None = None
+    class_id: int | None = None
+    class_name: str | None = None
+    total_runs: int
+    runs_with_multiple_assistant_messages: int
+    percentage: float
+
+
 class RunDailyAssistantMessageStats(BaseModel):
     date: date
     total_runs: int
     runs_with_multiple_assistant_messages: int
     percentage: float
     models: list[RunDailyAssistantMessageModelStats] | None = None
+    assistants: list[RunDailyAssistantMessageAssistantStats] | None = None
 
 
 class RunDailyAssistantMessageStatsResponse(BaseModel):

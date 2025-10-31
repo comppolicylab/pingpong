@@ -4,7 +4,7 @@ import logging
 import time
 from datetime import datetime, timedelta
 from math import ceil
-from typing import Annotated, Any, Optional, Union
+from typing import Annotated, Any, Literal, Optional, Union
 import uuid_utils as uuid
 from aiohttp import ClientResponseError
 import jwt
@@ -979,9 +979,15 @@ async def get_models_stats(request: Request):
 )
 async def get_runs_multi_assistant_stats(
     request: Request,
+    days: int = 14,
+    group_by: Literal["model", "assistant"] = "model",
+    top_n: int = 10,
 ):
     statistics = await get_runs_with_multiple_assistant_messages_stats(
         request.state.db,
+        days=days,
+        group_by=group_by,
+        limit=top_n,
     )
     return schemas.RunDailyAssistantMessageStatsResponse(statistics=statistics)
 
