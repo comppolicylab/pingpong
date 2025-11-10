@@ -1427,9 +1427,40 @@ class ThreadParticipants(BaseModel):
     assistant: dict[int, str]
 
 
+class ThreadMessage(OpenAIMessage):
+    status: Literal["processing", "completed", "failed"] | None
+    """
+    The status of the message, which can be either `in_progress`, `incomplete`, or
+    `completed`. Can be `None` for Classic Assistants.
+    """
+
+    created_at: float | int
+    """Classic Assistants:
+    The Unix timestamp (in seconds) for when the message was created.
+
+    Next-Gen Assistants:
+    The Unix timestamp (in milliseconds) for when the message was created."""
+
+    output_index: int | None = None
+    """The output index of the message, if applicable for Next-Gen Assistants."""
+
+    metadata: dict[str, str | bool] | None = None
+    """Set of 16 key-value pairs that can be attached to an object.
+
+    This can be useful for storing additional information about the object in a
+    structured format, and querying for objects via API or the dashboard.
+
+    Keys are strings with a maximum length of 64 characters. Values are strings with
+    a maximum length of 512 characters.
+
+    **Departure from OpenAI API:** This field can also include boolean values, in addition
+    to strings.
+    """
+
+
 class ThreadMessages(BaseModel):
     limit: int
-    messages: list[OpenAIMessage]
+    messages: list[ThreadMessage]
     fs_messages: list[FileSearchMessage] | None = None
     ci_messages: list[CodeInterpreterMessage] | None
     has_more: bool
@@ -1448,7 +1479,7 @@ class ThreadWithMeta(BaseModel):
     model: str
     tools_available: str
     run: OpenAIRun | None
-    messages: list[OpenAIMessage]
+    messages: list[ThreadMessage]
     limit: int
     ci_messages: list[CodeInterpreterMessage] | None
     fs_messages: list[FileSearchMessage] | None = None
