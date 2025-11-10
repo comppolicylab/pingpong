@@ -2456,6 +2456,7 @@ async def get_thread(
                         run_id=str(tool_call.run_id),
                         thread_id=str(thread.id),
                         message_type="code_interpreter_call",
+                        output_index=tool_call.output_index,
                     )
                 )
             elif tool_call.type == schemas.ToolCallType.FILE_SEARCH:
@@ -2495,6 +2496,7 @@ async def get_thread(
                         run_id=str(tool_call.run_id),
                         thread_id=str(thread.id),
                         message_type="file_search_call",
+                        output_index=tool_call.output_index,
                     )
                 )
 
@@ -2512,6 +2514,7 @@ async def get_thread(
                 else "in_progress",
                 run_id=str(message.run_id) if message.run_id else None,
             )
+            _message.output_index = message.output_index
             attachments: list[Attachment] = []
             attachments_dict: dict[str, list[dict[str, str]]] = {}
             for attachment in message.file_search_attachments:
@@ -3200,6 +3203,7 @@ async def list_thread_messages(
                         role="assistant",
                         run_id=str(tool_call.run_id),
                         thread_id=str(thread.id),
+                        output_index=tool_call.output_index,
                     )
                 )
             elif tool_call.type == schemas.ToolCallType.FILE_SEARCH:
@@ -3240,6 +3244,7 @@ async def list_thread_messages(
                         run_id=str(tool_call.run_id),
                         thread_id=str(thread.id),
                         message_type="file_search_call",
+                        output_index=tool_call.output_index,
                     )
                 )
 
@@ -3248,7 +3253,7 @@ async def list_thread_messages(
                 id=str(message.id),
                 thread_id=str(thread.id),
                 assistant_id=str(thread.assistant_id) if thread.assistant_id else "",
-                created_at=int(message.created.timestamp()),
+                created_at=message.created.timestamp(),
                 object="thread.message",
                 role=message.role.value,
                 content=[],
@@ -3257,6 +3262,7 @@ async def list_thread_messages(
                 else "in_progress",
                 run_id=str(message.run_id) if message.run_id else None,
             )
+            _message.output_index = message.output_index
             attachments: list[Attachment] = []
             attachments_dict: dict[str, list[dict[str, str]]] = {}
             for attachment in message.file_search_attachments:
