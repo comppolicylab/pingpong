@@ -43,7 +43,6 @@ class _MockFgaAuthzServer:
         with open(driver.model_config) as f:
             self._test_model = json.load(f)
             self._test_model["id"] = self._test_model_id
-
         self.app = FastAPI()
         self.app.exception_handler(Exception)(self._api_middleware_exception)
         self.app.get("/stores")(self._api_stores)
