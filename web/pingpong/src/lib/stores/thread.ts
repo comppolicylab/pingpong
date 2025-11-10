@@ -768,7 +768,7 @@ export class ThreadManager {
     if (!indices.length) {
       return undefined;
     }
-    return Math.max(...indices);
+    return indices.reduce((max, index) => Math.max(max, index), -Infinity);
   }
 
   #getNextOutputIndex(state: ThreadManagerState | null) {
