@@ -1414,11 +1414,6 @@ class CodeInterpreterMessages(BaseModel):
     ci_messages: list[CodeInterpreterMessage]
 
 
-class ThreadMessage(OpenAIMessage):
-    created_at: float
-    output_index: int | None = None
-
-
 class ThreadRun(BaseModel):
     thread: Thread
     run: OpenAIRun | None
@@ -1434,7 +1429,7 @@ class ThreadParticipants(BaseModel):
 
 class ThreadMessages(BaseModel):
     limit: int
-    messages: list[ThreadMessage]
+    messages: list[OpenAIMessage]
     fs_messages: list[FileSearchMessage] | None = None
     ci_messages: list[CodeInterpreterMessage] | None
     has_more: bool
@@ -1453,7 +1448,7 @@ class ThreadWithMeta(BaseModel):
     model: str
     tools_available: str
     run: OpenAIRun | None
-    messages: list[ThreadMessage]
+    messages: list[OpenAIMessage]
     limit: int
     ci_messages: list[CodeInterpreterMessage] | None
     fs_messages: list[FileSearchMessage] | None = None
