@@ -1415,6 +1415,7 @@ class CodeInterpreterMessages(BaseModel):
 
 
 class ThreadMessage(OpenAIMessage):
+    created_at: float
     output_index: int | None = None
 
 
