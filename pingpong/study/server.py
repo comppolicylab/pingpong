@@ -34,7 +34,15 @@ from pingpong.study.airtable import (
 from pingpong.template import email_template as message_template
 from pingpong.time import convert_seconds
 
-study = FastAPI()
+if config.development:
+    study = FastAPI()
+else:
+    study = FastAPI(
+        openapi_url=None,
+        docs_url=None,
+        redoc_url=None,
+        swagger_ui_oauth2_redirect_url=None,
+    )
 
 
 class LoggedIn(StudyExpression):

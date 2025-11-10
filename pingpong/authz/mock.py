@@ -44,7 +44,15 @@ class _MockFgaAuthzServer:
             self._test_model = json.load(f)
             self._test_model["id"] = self._test_model_id
 
-        self.app = FastAPI()
+        if driver.config.development:
+            self.app = FastAPI()
+        else:
+            self.app = FastAPI(
+                openapi_url=None,
+                docs_url=None,
+                redoc_url=None,
+                swagger_ui_oauth2_redirect_url=None,
+            )
         self.app.exception_handler(Exception)(self._api_middleware_exception)
         self.app.get("/stores")(self._api_stores)
         self.app.get(f"/stores/{self._test_store_id}/authorization-models")(

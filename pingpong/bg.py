@@ -3,13 +3,22 @@ import logging
 import threading
 import time
 import uvicorn
+import config
 
 from fastapi import FastAPI
 from typing import Generator
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+if config.development:
+    app = FastAPI()
+else:
+    app = FastAPI(
+        openapi_url=None,
+        docs_url=None,
+        redoc_url=None,
+        swagger_ui_oauth2_redirect_url=None,
+    )
 
 
 @app.get("/")

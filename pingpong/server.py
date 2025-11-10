@@ -145,7 +145,15 @@ from .merge import list_all_permissions, merge
 logger = logging.getLogger(__name__)
 responses_api_transition_logger = logging.getLogger("responses_api_transition")
 
-v1 = FastAPI()
+if config.development:
+    v1 = FastAPI()
+else:
+    v1 = FastAPI(
+        openapi_url=None,
+        docs_url=None,
+        redoc_url=None,
+        swagger_ui_oauth2_redirect_url=None,
+    )
 
 
 def get_now_fn(req: Request) -> NowFn:
@@ -7234,7 +7242,13 @@ async def lifespan(app: FastAPI):
         yield
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    lifespan=lifespan,
+    openapi_url=None,
+    docs_url=None,
+    redoc_url=None,
+    swagger_ui_oauth2_redirect_url=None,
+)
 
 
 @app.exception_handler(Exception)
