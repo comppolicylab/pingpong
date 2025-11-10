@@ -1428,7 +1428,7 @@ class ThreadParticipants(BaseModel):
 
 
 class ThreadMessage(OpenAIMessage):
-    status: Literal["processing", "completed", "failed"] | None
+    status: Literal["in_progress", "incomplete", "completed"] | None
     """
     The status of the message, which can be either `in_progress`, `incomplete`, or
     `completed`. Can be `None` for user messages.
@@ -1439,7 +1439,7 @@ class ThreadMessage(OpenAIMessage):
     The Unix timestamp (in seconds) for when the message was created.
 
     Next-Gen Assistants:
-    The Unix timestamp (in milliseconds) for when the message was created."""
+    The Unix timestamp (in fractional seconds) for when the message was created."""
 
     output_index: int | None = None
     """The output index of the message, if applicable for Next-Gen Assistants."""
