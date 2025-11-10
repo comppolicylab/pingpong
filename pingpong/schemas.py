@@ -1431,7 +1431,7 @@ class ThreadMessage(OpenAIMessage):
     status: Literal["processing", "completed", "failed"] | None
     """
     The status of the message, which can be either `in_progress`, `incomplete`, or
-    `completed`. Can be `None` for Classic Assistants.
+    `completed`. Can be `None` for user messages.
     """
 
     created_at: float | int
