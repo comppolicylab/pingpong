@@ -1308,7 +1308,7 @@ class OpenAIRun(BaseModel):
     assistant_id: str
     cancelled_at: int | None
     completed_at: int | None
-    created_at: int
+    created_at: float
     expires_at: int | None
     failed_at: int | None
     instructions: SecretStr
@@ -1383,7 +1383,7 @@ class FileSearchCall(BaseModel):
 class FileSearchMessage(BaseModel):
     id: str
     assistant_id: str
-    created_at: int
+    created_at: float
     content: list[FileSearchCall]
     metadata: dict[str, str]
     object: Literal["thread.message"]
@@ -1391,12 +1391,13 @@ class FileSearchMessage(BaseModel):
     role: Literal["assistant"]
     run_id: str
     thread_id: str
+    output_index: int | None = None
 
 
 class CodeInterpreterMessage(BaseModel):
     id: str
     assistant_id: str
-    created_at: int
+    created_at: float
     content: (
         list[CodeInterpreterMessageContent] | list[CodeInterpreterPlaceholderContent]
     )
@@ -1406,6 +1407,7 @@ class CodeInterpreterMessage(BaseModel):
     role: Literal["assistant"]
     run_id: str
     thread_id: str
+    output_index: int | None = None
 
 
 class CodeInterpreterMessages(BaseModel):
@@ -1425,9 +1427,40 @@ class ThreadParticipants(BaseModel):
     assistant: dict[int, str]
 
 
+class ThreadMessage(OpenAIMessage):
+    status: Literal["in_progress", "incomplete", "completed"] | None
+    """
+    The status of the message, which can be either `in_progress`, `incomplete`, or
+    `completed`. Can be `None` for user messages.
+    """
+
+    created_at: float | int
+    """Classic Assistants:
+    The Unix timestamp (in seconds) for when the message was created.
+
+    Next-Gen Assistants:
+    The Unix timestamp (in fractional seconds) for when the message was created."""
+
+    output_index: int | None = None
+    """The output index of the message, if applicable for Next-Gen Assistants."""
+
+    metadata: dict[str, str | bool] | None = None
+    """Set of 16 key-value pairs that can be attached to an object.
+
+    This can be useful for storing additional information about the object in a
+    structured format, and querying for objects via API or the dashboard.
+
+    Keys are strings with a maximum length of 64 characters. Values are strings with
+    a maximum length of 512 characters.
+
+    **Departure from OpenAI API:** This field can also include boolean values, in addition
+    to strings.
+    """
+
+
 class ThreadMessages(BaseModel):
     limit: int
-    messages: list[OpenAIMessage]
+    messages: list[ThreadMessage]
     fs_messages: list[FileSearchMessage] | None = None
     ci_messages: list[CodeInterpreterMessage] | None
     has_more: bool
@@ -1446,7 +1479,7 @@ class ThreadWithMeta(BaseModel):
     model: str
     tools_available: str
     run: OpenAIRun | None
-    messages: list[OpenAIMessage]
+    messages: list[ThreadMessage]
     limit: int
     ci_messages: list[CodeInterpreterMessage] | None
     fs_messages: list[FileSearchMessage] | None = None

@@ -35,7 +35,9 @@ async def get_placeholder_ci_calls(
             {
                 "id": str(tool_call.id),
                 "assistant_id": assistant_id,
-                "created_at": tool_call.created_at,
+                "created_at": float(
+                    tool_call.created_at
+                ),  # Comes from OpenAI API as seconds
                 "content": [
                     {
                         "run_id": tool_call.run_id,

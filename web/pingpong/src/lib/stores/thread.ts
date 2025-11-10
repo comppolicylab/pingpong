@@ -42,6 +42,35 @@ export type Message = {
   persisted: boolean;
 };
 
+function getOrderValue(a: api.OpenAIMessage, b: api.OpenAIMessage): [number, number] {
+  const aHasOutputIndex = typeof a.output_index === 'number';
+  const bHasOutputIndex = typeof b.output_index === 'number';
+  if (aHasOutputIndex && bHasOutputIndex) {
+    return [a.output_index as number, b.output_index as number];
+  }
+  // Fallback to created_at (should always be present)
+  const aCreated = typeof a.created_at === 'number' ? a.created_at : 0;
+  const bCreated = typeof b.created_at === 'number' ? b.created_at : 0;
+  return [aCreated, bCreated];
+}
+
+const compareMessageDataAsc = (a: Message, b: Message) => {
+  const [aVal, bVal] = getOrderValue(a.data, b.data);
+  return aVal - bVal;
+};
+const compareMessageDataDesc = (a: Message, b: Message) => {
+  const [aVal, bVal] = getOrderValue(a.data, b.data);
+  return bVal - aVal;
+};
+const compareApiMessagesAsc = (a: api.OpenAIMessage, b: api.OpenAIMessage) => {
+  const [aVal, bVal] = getOrderValue(a, b);
+  return aVal - bVal;
+};
+const compareApiMessagesDesc = (a: api.OpenAIMessage, b: api.OpenAIMessage) => {
+  const [aVal, bVal] = getOrderValue(a, b);
+  return bVal - aVal;
+};
+
 /**
  * Manager for a single conversation thread.
  */
@@ -186,7 +215,7 @@ export class ThreadManager {
         .concat(ci_messages)
         .concat(fs_messages)
         .concat(optimisticMessages)
-        .sort((a, b) => a.data.created_at - b.data.created_at);
+        .sort(compareMessageDataAsc);
 
       const finalMessages: Message[] = [];
       for (let i = 0; i < allMessages.length; ) {
@@ -454,9 +483,7 @@ export class ThreadManager {
     }
 
     this.#data.update((d) => ({ ...d, error: null, loading: true }));
-    const sortedMessages = [...(currentData.data?.messages || [])].sort(
-      (a, b) => a.created_at - b.created_at
-    );
+    const sortedMessages = [...(currentData.data?.messages || [])].sort(compareApiMessagesAsc);
     const earliestMessage = sortedMessages[0];
     const earliestRunMessage = sortedMessages.find((message) => message.run_id);
     const threadVersion = currentData.data?.thread.version;
@@ -486,9 +513,7 @@ export class ThreadManager {
           ...d.data,
           ci_messages: [...response.ci_messages, ...d.data.ci_messages],
           fs_messages: [...response.fs_messages, ...d.data.fs_messages],
-          messages: [...response.messages, ...d.data.messages].sort(
-            (a, b) => a.created_at - b.created_at
-          )
+          messages: [...response.messages, ...d.data.messages].sort(compareApiMessagesAsc)
         },
         limit: response.limit || d.limit,
         error: response.error ? { detail: response.error?.detail, wasSent: true } : null,
@@ -520,7 +545,7 @@ export class ThreadManager {
           data: {
             ...d.data,
             ci_messages: [...result.ci_messages, ...d.data.ci_messages]
-              .sort((a, b) => a.created_at - b.created_at)
+              .sort(compareApiMessagesAsc)
               .filter((message) => {
                 return !(
                   message.object === 'code_interpreter_call_placeholder' &&
@@ -617,6 +642,10 @@ export class ThreadManager {
     }
 
     const optimisticMessageContent = message + visionImageDescriptionsString;
+    const threadVersion = get(this.version);
+    const currentState = get(this.#data);
+    const optimisticOutputIndex =
+      threadVersion === 3 ? this.#getNextOutputIndex(currentState) : undefined;
     const optimistic: api.OpenAIMessage = {
       id: optimisticMsgId,
       role: 'user',
@@ -632,6 +661,7 @@ export class ThreadManager {
       vision_file_ids: vision_file_ids || [],
       run_id: null,
       object: 'thread.message',
+      output_index: optimisticOutputIndex,
       attachments: (attachments || []).map((file) => ({ file_id: file.file_id, tools: [] }))
     };
 
@@ -722,6 +752,33 @@ export class ThreadManager {
     }
   }
 
+  #getHighestOutputIndex(state: ThreadManagerState | null) {
+    if (!state) {
+      return undefined;
+    }
+    const messages: api.OpenAIMessage[] = [
+      ...(state.data?.messages ?? []),
+      ...(state.data?.ci_messages ?? []),
+      ...(state.data?.fs_messages ?? []),
+      ...state.optimistic
+    ];
+    const indices = messages
+      .map((message) => message.output_index)
+      .filter((index): index is number => typeof index === 'number');
+    if (!indices.length) {
+      return undefined;
+    }
+    return indices.reduce((max, index) => Math.max(max, index), -Infinity);
+  }
+
+  #getNextOutputIndex(state: ThreadManagerState | null) {
+    const highest = this.#getHighestOutputIndex(state);
+    if (highest === undefined) {
+      return 0;
+    }
+    return highest + 1;
+  }
+
   /**
    * Set the thread data.
    */
@@ -741,21 +798,21 @@ export class ThreadManager {
     switch (chunk.type) {
       case 'message_created':
         this.#data.update((d) => {
+          const version = get(this.version);
+          const createdAt =
+            version === 3 ? (chunk.message.created_at ?? Date.now() / 1000) : Date.now() / 1000;
+          const outputIndex =
+            version === 3 ? (chunk.message.output_index ?? this.#getNextOutputIndex(d)) : undefined;
+          const message: api.OpenAIMessage = {
+            ...chunk.message,
+            created_at: createdAt,
+            output_index: outputIndex
+          };
           return {
             ...d,
             data: {
               ...d.data!,
-              messages: [
-                ...(d.data?.messages || []),
-                {
-                  ...chunk.message,
-                  // Note: make sure the message here has a timestamp that
-                  // will be sequential to the optimistic messages.
-                  // When the thread is reloaded, the real timestamps will be
-                  // somewhat different.
-                  created_at: Math.floor(Date.now() / 1000)
-                }
-              ]
+              messages: [...(d.data?.messages || []), message]
             }
           };
         });
@@ -814,7 +871,7 @@ export class ThreadManager {
         console.warn('Received a tool call without any messages.');
         return d;
       }
-      const sortedMessages = messages.sort((a, b) => b.data.created_at - a.data.created_at);
+      const sortedMessages = [...messages].sort(compareMessageDataDesc);
       const lastMessage = sortedMessages[0];
       if (!lastMessage) {
         console.warn('Received a tool call without a previous message.');
@@ -825,10 +882,15 @@ export class ThreadManager {
         lastMessage.data.role !== 'assistant' &&
         (call.type === 'code_interpreter' || call.type === 'file_search')
       ) {
+        const version = get(this.version);
+        const callOutputIndex =
+          call.output_index ??
+          (typeof call.index === 'number' ? call.index : undefined) ??
+          (version === 3 ? this.#getNextOutputIndex(d) : undefined);
         d.data?.messages.push({
           role: 'assistant',
           content: [],
-          created_at: Math.floor(Date.now() / 1000),
+          created_at: Date.now() / 1000,
           id: `optimistic-${(Math.random() + 1).toString(36).substring(2)}`,
           assistant_id: '',
           metadata: {},
@@ -836,7 +898,8 @@ export class ThreadManager {
           code_interpreter_file_ids: [],
           object: 'thread.message',
           run_id: call.run_id || null,
-          attachments: []
+          attachments: [],
+          output_index: callOutputIndex
         });
       }
       return { ...d };
@@ -850,7 +913,7 @@ export class ThreadManager {
         console.warn('Received a tool call without any messages.');
         return d;
       }
-      const sortedMessages = messages.sort((a, b) => b.created_at - a.created_at);
+      const sortedMessages = [...messages].sort(compareApiMessagesDesc);
       const lastMessage = sortedMessages[0];
       if (!lastMessage) {
         console.warn('Received a tool call without a previous message.');
@@ -926,7 +989,7 @@ export class ThreadManager {
   #appendDelta(chunk: api.OpenAIMessageDelta) {
     this.#data.update((d) => {
       const messages = d.data?.messages || [];
-      const sortedMessages = messages.sort((a, b) => b.created_at - a.created_at);
+      const sortedMessages = [...messages].sort(compareApiMessagesDesc);
       const lastMessage = sortedMessages[0];
       if (!lastMessage) {
         console.warn('Received a message delta without a previous message.');

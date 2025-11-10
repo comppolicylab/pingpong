@@ -992,13 +992,14 @@ class BufferedResponseStreamHandler:
                     "thread_id": str(self.thread_id),
                     "assistant_id": None,
                     "run_id": str(self.run_id),
-                    "created_at": int(self.message_created_at.timestamp())
+                    "created_at": self.message_created_at.timestamp()
                     if self.message_created_at
                     else None,
                     "object": "thread.message",
                     "role": "assistant",
                     "content": [],
                     "status": "in_progress",
+                    "output_index": self.prev_output_index,
                 },
             }
         )
@@ -1380,6 +1381,8 @@ class BufferedResponseStreamHandler:
                 "type": "tool_call_created",
                 "tool_call": {
                     "id": str(data.id),
+                    "index": self.prev_output_index,
+                    "output_index": self.prev_output_index,
                     "type": "code_interpreter",
                     "code_interpreter": {"input": data.code or "", "outputs": None},
                 },
@@ -1881,6 +1884,7 @@ class BufferedResponseStreamHandler:
                 "tool_call": {
                     "id": str(data.id),
                     "index": self.prev_output_index,
+                    "output_index": self.prev_output_index,
                     "type": "file_search",
                     "queries": data.queries,
                     "status": data.status,

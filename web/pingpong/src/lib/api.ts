@@ -2193,6 +2193,7 @@ export type OpenAIMessage = {
   assistant_id: string | null;
   content: Content[];
   created_at: number;
+  output_index?: number;
   file_search_file_ids?: string[];
   code_interpreter_file_ids?: string[];
   vision_file_ids?: string[];
@@ -2390,6 +2391,7 @@ export type CodeInterpreterCall = {
   code_interpreter: ToolCallIO;
   id: string;
   index: number;
+  output_index?: number;
   type: 'code_interpreter';
   run_id: string | null;
 };
@@ -2397,6 +2399,7 @@ export type CodeInterpreterCall = {
 export type FileSearchCall = {
   id: string;
   index: number;
+  output_index?: number;
   type: 'file_search';
   queries: string[] | null;
   run_id: string | null;
