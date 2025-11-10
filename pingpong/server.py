@@ -24,7 +24,6 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import PositiveInt
-from openai.types.beta.threads import Message as OpenAIMessage
 from openai.types.beta.threads.message import Attachment
 from openai.types.beta.threads.text_content_block import TextContentBlock
 from openai.types.beta.threads.image_file_content_block import ImageFileContentBlock
@@ -2358,12 +2357,17 @@ async def get_thread(
                 f"assistant:{assistant.id}",
             )
 
+        thread_messages_with_output_index = [
+            schemas.ThreadMessage.model_validate(message.model_dump())
+            for message in messages.data
+        ]
+
         return {
             "thread": thread,
             "model": assistant.model if assistant else "None",
             "tools_available": thread.tools_available,
             "run": last_run[0] if last_run else None,
-            "messages": list(messages.data),
+            "messages": thread_messages_with_output_index,
             "limit": 20,
             "ci_messages": placeholder_ci_calls,
             "attachments": all_files,
@@ -2417,7 +2421,7 @@ async def get_thread(
         is_supervisor = is_supervisor_check[0]
         is_current_user = False
 
-        thread_messages: list[OpenAIMessage] = []
+        thread_messages: list[schemas.ThreadMessage] = []
         placeholder_ci_calls = []
         file_search_calls: list[schemas.FileSearchMessage] = []
         file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
@@ -2448,7 +2452,7 @@ async def get_thread(
                     schemas.CodeInterpreterMessage(
                         id=str(tool_call.id),
                         assistant_id=str(assistant.id) if assistant else "",
-                        created_at=int(tool_call.created.timestamp()),
+                        created_at=tool_call.created.timestamp(),
                         content=tool_content,
                         metadata={},
                         object="thread.message",
@@ -2501,11 +2505,11 @@ async def get_thread(
                 )
 
         for message in messages_v3:
-            _message = OpenAIMessage(
+            _message = schemas.ThreadMessage(
                 id=str(message.id),
                 thread_id=str(thread.id),
                 assistant_id=str(assistant.id) if assistant and assistant.id else None,
-                created_at=int(message.created.timestamp()),
+                created_at=message.created.timestamp(),
                 object="thread.message",
                 role=message.role.value,
                 content=[],
@@ -2513,8 +2517,8 @@ async def get_thread(
                 if message.message_status != "pending"
                 else "in_progress",
                 run_id=str(message.run_id) if message.run_id else None,
+                output_index=message.output_index,
             )
-            _message.output_index = message.output_index
             attachments: list[Attachment] = []
             attachments_dict: dict[str, list[dict[str, str]]] = {}
             for attachment in message.file_search_attachments:
@@ -3094,8 +3098,13 @@ async def list_thread_messages(
                 messages.data[-1].created_at,
             )
 
+        thread_messages_with_output_index = [
+            schemas.ThreadMessage.model_validate(message.model_dump())
+            for message in messages.data
+        ]
+
         return {
-            "messages": list(messages.data),
+            "messages": thread_messages_with_output_index,
             "ci_messages": placeholder_ci_calls,
             "fs_messages": [],
             "limit": limit,
@@ -3163,7 +3172,7 @@ async def list_thread_messages(
         is_supervisor = is_supervisor_check[0]
         is_current_user = False
 
-        thread_messages: list[OpenAIMessage] = []
+        thread_messages: list[schemas.ThreadMessage] = []
         placeholder_ci_calls = []
         file_search_calls: list[schemas.FileSearchMessage] = []
         file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
@@ -3249,7 +3258,7 @@ async def list_thread_messages(
                 )
 
         for message in messages_v3:
-            _message = OpenAIMessage(
+            _message = schemas.ThreadMessage(
                 id=str(message.id),
                 thread_id=str(thread.id),
                 assistant_id=str(thread.assistant_id) if thread.assistant_id else "",
@@ -3261,8 +3270,8 @@ async def list_thread_messages(
                 if message.message_status != "pending"
                 else "in_progress",
                 run_id=str(message.run_id) if message.run_id else None,
+                output_index=message.output_index,
             )
-            _message.output_index = message.output_index
             attachments: list[Attachment] = []
             attachments_dict: dict[str, list[dict[str, str]]] = {}
             for attachment in message.file_search_attachments:
