@@ -2514,13 +2514,14 @@ async def get_thread(
         messages_v3.reverse()
         run_ids_set = set()
         for message in messages_v3:
-            if message.run_id in run_ids_set:
+            if message.run_id in run_ids_set and message.role == "assistant":
                 logger.info(
                     "RESPONSES_MULTI_MESSAGE_THREAD_SKIP: Skipping duplicate message with run_id %s",
                     message.run_id,
                 )
                 continue
-            run_ids_set.add(message.run_id)
+            if message.role == "assistant":
+                run_ids_set.add(message.run_id)
             _message = schemas.ThreadMessage(
                 id=str(message.id),
                 thread_id=str(thread.id),
@@ -3276,13 +3277,14 @@ async def list_thread_messages(
         messages_v3.reverse()
         run_ids_set = set()
         for message in messages_v3:
-            if message.run_id in run_ids_set:
+            if message.run_id in run_ids_set and message.role == "assistant":
                 logger.info(
                     "RESPONSES_MULTI_MESSAGE_LIST_MESSAGES_SKIP: Skipping duplicate message with run_id %s",
                     message.run_id,
                 )
                 continue
-            run_ids_set.add(message.run_id)
+            if message.role == "assistant":
+                run_ids_set.add(message.run_id)
             _message = schemas.ThreadMessage(
                 id=str(message.id),
                 thread_id=str(thread.id),
