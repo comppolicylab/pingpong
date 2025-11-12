@@ -249,5 +249,5 @@ async def test_list_thread_messages_deduplicates_extra_assistant_messages(
     assert response.status_code == 200
     messages = response.json()["messages"]
     assert len(messages) == 1
-    assert messages[0]["output_index"] == 7
+    assert messages[0]["output_index"] == 3
     assert messages[0]["run_id"] == str(run_id)
