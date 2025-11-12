@@ -3278,7 +3278,6 @@ async def list_thread_messages(
                     )
                 )
 
-        messages_v3.reverse()
         run_ids_set = set()
         for message in messages_v3:
             if (
