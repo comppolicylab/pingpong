@@ -1,16 +1,15 @@
 import asyncio
 import base64
-from functools import partial
 import json
 import logging
 import struct
-from typing import cast
+from typing import Awaitable, Callable, cast
 from fastapi import WebSocket, WebSocketDisconnect
 from openai import OpenAIError
 from sqlalchemy import func
 
-from openai.resources.beta.realtime.realtime import AsyncRealtimeConnection
-from openai.types.beta.realtime import (
+from openai.resources.realtime.realtime import AsyncRealtimeConnection
+from openai.types.realtime import (
     ConversationItemInputAudioTranscriptionCompletedEvent,
     ResponseAudioTranscriptDoneEvent,
 )
@@ -34,6 +33,68 @@ from pingpong.websocket import (
 browser_connection_logger = logging.getLogger("realtime_browser")
 openai_connection_logger = logging.getLogger("realtime_openai")
 
+TaskFunc = Callable[[], Awaitable[object]]
+TaskFactory = Callable[[str], TaskFunc]
+
+
+class ConversationItemOrderingBuffer:
+    """Ensures thread messages are enqueued in the order items appear in the conversation."""
+
+    def __init__(self, task_queue: asyncio.Queue, logger: logging.Logger):
+        self._task_queue = task_queue
+        self._logger = logger
+        self.relevant_item_order: list[str] = []
+        self.relevant_item_positions: dict[str, int] = {}
+        self.pending_message_tasks: dict[str, TaskFactory] = {}
+        self.next_relevant_index_to_dispatch = 0
+        self.next_output_index = 0
+
+    @staticmethod
+    def is_relevant_conversation_item(item) -> bool:
+        item_role = getattr(item, "role", None)
+        item_type = getattr(item, "type", None)
+        return item_type == "message" and item_role in {"user", "assistant"}
+
+    def register_relevant_item(self, item_id: str | None, previous_item_id: str | None):
+        if not item_id or item_id in self.relevant_item_positions:
+            return
+
+        insert_idx = len(self.relevant_item_order)
+        if previous_item_id and previous_item_id in self.relevant_item_positions:
+            insert_idx = self.relevant_item_positions[previous_item_id] + 1
+
+        self.relevant_item_order.insert(insert_idx, item_id)
+        for idx in range(insert_idx, len(self.relevant_item_order)):
+            self.relevant_item_positions[self.relevant_item_order[idx]] = idx
+
+    async def dispatch_ready_messages(self):
+        while self.next_relevant_index_to_dispatch < len(self.relevant_item_order):
+            current_item_id = self.relevant_item_order[
+                self.next_relevant_index_to_dispatch
+            ]
+            task_factory = self.pending_message_tasks.get(current_item_id)
+            if not task_factory:
+                break
+
+            output_index_str = str(self.next_output_index)
+            task = task_factory(output_index_str)
+            self.pending_message_tasks.pop(current_item_id, None)
+            self.next_relevant_index_to_dispatch += 1
+            self.next_output_index += 1
+            await self._task_queue.put(task)
+
+    async def enqueue_message_task(
+        self, item_id: str | None, task_factory: TaskFactory
+    ):
+        if not item_id:
+            self._logger.warning(
+                "Received transcript event without an item_id. Skipping message ordering."
+            )
+            return
+
+        self.pending_message_tasks[item_id] = task_factory
+        await self.dispatch_ready_messages()
+
 
 async def add_message_to_thread(
     openai_client: OpenAIClientType,
@@ -43,11 +104,14 @@ async def add_message_to_thread(
     | ResponseAudioTranscriptDoneEvent,
     realtime_recorder: RealtimeRecorder | None = None,
     is_user_message: bool = False,
+    output_index: str | None = None,
 ):
     try:
         metadata = {
             "item_id": event.item_id,
         }
+        if output_index is not None:
+            metadata["output_index"] = str(output_index)
         if is_user_message:
             metadata["user_id"] = str(browser_connection.state.session.user.id)
 
@@ -93,6 +157,33 @@ async def add_message_to_thread(
             openai_connection_logger.exception(
                 f"Failed to update thread in database: {e}"
             )
+
+
+def _build_thread_message_task_factory(
+    *,
+    event: ConversationItemInputAudioTranscriptionCompletedEvent
+    | ResponseAudioTranscriptDoneEvent,
+    is_user_message: bool,
+    openai_client: OpenAIClientType,
+    browser_connection: WebSocket,
+    thread: Thread,
+    realtime_recorder: RealtimeRecorder | None,
+) -> TaskFactory:
+    def factory(output_index: str) -> TaskFunc:
+        async def task():
+            await add_message_to_thread(
+                openai_client,
+                browser_connection,
+                thread,
+                event,
+                realtime_recorder=realtime_recorder,
+                is_user_message=is_user_message,
+                output_index=output_index,
+            )
+
+        return task
+
+    return factory
 
 
 async def handle_browser_messages(
@@ -201,20 +292,37 @@ async def handle_openai_events(
     openai_task_queue: asyncio.Queue,
     realtime_recorder: RealtimeRecorder | None = None,
 ):
+    ordering_buffer = ConversationItemOrderingBuffer(
+        openai_task_queue, openai_connection_logger
+    )
+
     try:
         async for event in realtime_connection:
             match event.type:
-                case "response.audio_transcript.done":
-                    await openai_task_queue.put(
-                        partial(
-                            add_message_to_thread,
-                            openai_client,
-                            browser_connection,
-                            thread,
-                            event,
-                            realtime_recorder=realtime_recorder,
-                            is_user_message=False,
+                case "conversation.item.added":
+                    item = getattr(event, "item", None)
+                    if (
+                        item
+                        and ConversationItemOrderingBuffer.is_relevant_conversation_item(
+                            item
                         )
+                    ):
+                        ordering_buffer.register_relevant_item(
+                            getattr(item, "id", None),
+                            getattr(event, "previous_item_id", None),
+                        )
+                        await ordering_buffer.dispatch_ready_messages()
+                case "response.output_audio_transcript.done":
+                    await ordering_buffer.enqueue_message_task(
+                        event.item_id,
+                        _build_thread_message_task_factory(
+                            event=event,
+                            is_user_message=False,
+                            openai_client=openai_client,
+                            browser_connection=browser_connection,
+                            thread=thread,
+                            realtime_recorder=realtime_recorder,
+                        ),
                     )
                 case "session.created":
                     openai_connection_logger.debug(
@@ -230,7 +338,7 @@ async def handle_openai_events(
                             "message": "Connected to OpenAI.",
                         }
                     )
-                case "session.error":
+                case "session.error" | "error":
                     openai_connection_logger.exception(f"Session error: {event.error}")
                 case "session.ended":
                     openai_connection_logger.debug(f"Session ended: {event.session}")
@@ -241,18 +349,18 @@ async def handle_openai_events(
                         }
                     )
                 case "conversation.item.input_audio_transcription.completed":
-                    await openai_task_queue.put(
-                        partial(
-                            add_message_to_thread,
-                            openai_client,
-                            browser_connection,
-                            thread,
-                            event,
-                            realtime_recorder=realtime_recorder,
+                    await ordering_buffer.enqueue_message_task(
+                        event.item_id,
+                        _build_thread_message_task_factory(
+                            event=event,
                             is_user_message=True,
-                        )
+                            openai_client=openai_client,
+                            browser_connection=browser_connection,
+                            thread=thread,
+                            realtime_recorder=realtime_recorder,
+                        ),
                     )
-                case "response.audio.delta":
+                case "response.output_audio.delta":
                     delta_audio_b64 = event.delta
                     await browser_connection.send_json(
                         {
@@ -280,7 +388,9 @@ async def handle_openai_events(
                     | "conversation.item.created"
                     | "conversation.item.input_audio_transcription.delta"
                     | "conversation.item.input_audio_transcription.failed"
+                    | "conversation.item.retrieved"
                     | "conversation.item.truncated"
+                    | "conversation.item.done"
                     | "conversation.item.deleted"
                     | "input_audio_buffer.committed"
                     | "input_audio_buffer.cleared"
@@ -293,12 +403,16 @@ async def handle_openai_events(
                     | "response.content_part.done"
                     | "response.text.delta"
                     | "response.text.done"
-                    | "response.audio_transcript.delta"
-                    | "response.audio.done"
+                    | "response.output_audio_transcript.delta"
+                    | "response.output_audio.done"
+                    | "response.output_text.delta"
+                    | "response.output_text.done"
                     | "response.function_call_arguments.delta"
                     | "response.function_call_arguments.done"
                     | "transcription_session.updated"
                     | "rate_limits.updated"
+                    | "input_audio_buffer.timeout_triggered"
+                    | "conversation.item.input_audio_transcription.segment"
                 ):
                     # Making sure we don't miss any events
                     continue

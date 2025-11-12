@@ -178,25 +178,33 @@ def ws_with_realtime_connection(func):
             browser_connection.state.conversation_instructions
         )
         try:
-            async with openai_client.beta.realtime.connect(
+            async with openai_client.realtime.connect(
                 model=assistant.model,
             ) as realtime_connection:
                 browser_connection.state.realtime_connection = realtime_connection
                 await realtime_connection.session.update(
                     session={
-                        "input_audio_transcription": {
-                            "model": "whisper-1",
-                            "language": "en",
+                        "type": "realtime",
+                        "audio": {
+                            "input": {
+                                "noise_reduction": {"type": "far_field"},
+                                "transcription": {
+                                    "model": "whisper-1",
+                                    "language": "en",
+                                },
+                                "turn_detection": {
+                                    "create_response": True,
+                                    "eagerness": "high",
+                                    "type": "semantic_vad",
+                                    "interrupt_response": False,
+                                },
+                            },
+                            "output": {"voice": "alloy", "speed": 1.2},
                         },
-                        "temperature": assistant.temperature,
-                        "tool_choice": "none",
-                        "voice": "alloy",
-                        "turn_detection": {
-                            "type": "semantic_vad",
-                            "eagerness": "high",
-                        },
-                        "input_audio_noise_reduction": {"type": "far_field"},
                         "instructions": conversation_instructions,
+                        "output_modalities": ["audio"],
+                        "tool_choice": "none",
+                        "tools": [],
                     }
                 )
                 if assistant.assistant_should_message_first:
