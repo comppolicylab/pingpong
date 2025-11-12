@@ -48,6 +48,11 @@ function getOrderValue(a: api.OpenAIMessage, b: api.OpenAIMessage): [number, num
   if (aHasOutputIndex && bHasOutputIndex) {
     return [a.output_index as number, b.output_index as number];
   }
+  const aHasMetadataIndex = a.metadata && !isNaN(Number(a.metadata.output_index));
+  const bHasMetadataIndex = b.metadata && !isNaN(Number(b.metadata.output_index));
+  if (aHasMetadataIndex && bHasMetadataIndex) {
+    return [Number(a.metadata?.output_index), Number(b.metadata?.output_index)];
+  }
   // Fallback to created_at (should always be present)
   const aCreated = typeof a.created_at === 'number' ? a.created_at : 0;
   const bCreated = typeof b.created_at === 'number' ? b.created_at : 0;
