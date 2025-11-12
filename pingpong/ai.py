@@ -3351,7 +3351,11 @@ async def export_threads_multiple_classes(
                 elif thread.version == 3:
                     while True:
                         messages = await models.Thread.list_messages(
-                            session, thread.id, after=after, order="asc"
+                            session,
+                            thread.id,
+                            after=after,
+                            order="asc",
+                            include_annotations=True,
                         )
 
                         for message in messages:
@@ -3545,7 +3549,11 @@ async def export_class_threads(
             elif thread.version == 3:
                 while True:
                     messages = await models.Thread.list_messages(
-                        session, thread.id, after=after, order="asc"
+                        session,
+                        thread.id,
+                        after=after,
+                        order="asc",
+                        include_annotations=True,
                     )
 
                     for message in messages:
