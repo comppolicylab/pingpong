@@ -1100,6 +1100,8 @@ AZURE_UNAVAILABLE_MODELS = [
     "o1-2024-12-17",
     "gpt-4.5-preview",
     "gpt-4.5-preview-2025-02-27",
+    "gpt-realtime",
+    "gpt-realtime-mini",
     "gpt-4o-realtime-preview",
     "gpt-4o-mini-realtime-preview",
     "gpt-4o-realtime-preview-2024-12-17",
@@ -1111,6 +1113,8 @@ AZURE_UNAVAILABLE_MODELS = [
     "gpt-4.1-2025-04-14",
     "gpt-4.1-mini-2025-04-14",
     "gpt-4.1-nano-2025-04-14",
+    "gpt-realtime-2025-08-28",
+    "gpt-realtime-mini-2025-10-06",
 ]
 
 DEFAULT_PROMPTS = {
