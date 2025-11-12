@@ -1382,7 +1382,6 @@ class BufferedResponseStreamHandler:
             "RESPONSES_MULTI_MESSAGE_TRUNCATE: Stopping response due to multiple output messages."
         )
         await self._finalize_active_message()
-        self.run_status = RunStatus.COMPLETED
         await self.on_response_completed(None)
 
     async def on_code_interpreter_tool_call_created(
