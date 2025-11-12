@@ -857,6 +857,9 @@ class BufferedResponseStreamHandler:
         self.prev_part_index = -1
         self.file_search_results: dict[str, FileSearchToolAnnotationResult] = {}
         self.file_ids_file_citation_annotation: set[str] = set()
+        self.force_stopped = False
+        self.output_message_created_count = 0
+        self.force_stop_incomplete_reason: str | None = None
 
     def enqueue(self, data: Dict) -> None:
         self.__buffer.write(orjson.dumps(data))
@@ -923,6 +926,15 @@ class BufferedResponseStreamHandler:
             )
             return
 
+        if self.output_message_created_count >= 1:
+            logger.warning(
+                "RESPONSES_MULTI_MESSAGE_CATCH: Received more than one assistant message in a single response. "
+                "Ignoring additional messages."
+            )
+            await self.stop_after_additional_output_message()
+            return
+
+        self.output_message_created_count += 1
         self.prev_output_index += 1
 
         message_data = {
@@ -1335,6 +1347,42 @@ class BufferedResponseStreamHandler:
 
         await add_cached_message_add_cached_message()
         self.message_id = None
+
+    async def _finalize_active_message(
+        self, status: MessageStatus = MessageStatus.COMPLETED
+    ) -> None:
+        if not self.message_id:
+            self.message_part_id = None
+            return
+
+        completed_time = utcnow()
+
+        @db_session_handler
+        async def finalize_message(session_: AsyncSession):
+            if not self.message_id:
+                return
+            await models.Message.mark_status(
+                session_,
+                self.message_id,
+                status,
+                completed=completed_time,
+            )
+            await session_.commit()
+
+        await finalize_message()
+        self.message_id = None
+        self.message_part_id = None
+
+    async def stop_after_additional_output_message(self) -> None:
+        if self.force_stopped:
+            return
+        self.force_stopped = True
+        self.force_stop_incomplete_reason = "multi_message_truncate"
+        logger.info(
+            "RESPONSES_MULTI_MESSAGE_TRUNCATE: Stopping response due to multiple output messages."
+        )
+        await self._finalize_active_message()
+        await self.on_response_completed(None)
 
     async def on_code_interpreter_tool_call_created(
         self, data: ResponseCodeInterpreterToolCall
@@ -2398,7 +2446,10 @@ class BufferedResponseStreamHandler:
     async def on_response_completed(
         self,
         data: Union[
-            ResponseCompletedEvent, ResponseFailedEvent, ResponseIncompleteEvent
+            ResponseCompletedEvent,
+            ResponseFailedEvent,
+            ResponseIncompleteEvent,
+            None,
         ],
     ):
         if not self.run_id:
@@ -2407,24 +2458,14 @@ class BufferedResponseStreamHandler:
             )
             return
 
-        @db_session_handler
-        async def update_encrypted_response_content_on_response_completed(
-            session_: AsyncSession, item_id: str, encrypted_content: str | None
-        ):
-            if not item_id or not encrypted_content:
-                return
-            await models.ReasoningStep.update_encrypted_content(
-                session_, item_id, encrypted_content
+        if data is None:
+            self.run_status = RunStatus.COMPLETED
+            await self.cleanup(
+                run_status=RunStatus.COMPLETED,
+                response_incomplete_reason=self.force_stop_incomplete_reason,
             )
-            await session_.commit()
-
-        if isinstance(data, ResponseCompletedEvent):
-            for output_item in data.response.output:
-                if output_item.type == "reasoning" and output_item.encrypted_content:
-                    await update_encrypted_response_content_on_response_completed(
-                        item_id=output_item.id,
-                        encrypted_content=output_item.encrypted_content,
-                    )
+            self.force_stop_incomplete_reason = None
+            return
 
         await self.cleanup(
             run_status=RunStatus(data.response.status),
@@ -2622,7 +2663,15 @@ async def run_response(
                         case "response.output_item.added":
                             match event.item.type:
                                 case "message":
+                                    if handler.output_message_created_count >= 1:
+                                        logger.info(
+                                            "RESPONSES_MULTI_MESSAGE_FIX: Stopping response due to multiple output messages in event streamer."
+                                        )
+                                        await handler.stop_after_additional_output_message()
+                                        break
                                     await handler.on_output_message_created(event.item)
+                                    if handler.force_stopped:
+                                        break
                                 case "code_interpreter_call":
                                     await handler.on_code_interpreter_tool_call_created(
                                         event.item
