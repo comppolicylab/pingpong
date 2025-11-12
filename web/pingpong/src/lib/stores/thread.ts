@@ -1009,7 +1009,6 @@ export class ThreadManager {
    */
   #mergeContent(contents: api.Content[], newContent: api.Content) {
     const lastContent = contents[contents.length - 1];
-
     if (!lastContent) {
       contents.push(newContent);
       return;
