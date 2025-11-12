@@ -2541,7 +2541,14 @@ async def get_thread(
                 attachments.append({"file_id": file_id, "tools": tools})
 
             _message.attachments = attachments
+            output_text_count = 0
             for content in message.content:
+                if (
+                    message.role == schemas.MessageRole.ASSISTANT
+                    and content.type == schemas.MessagePartType.OUTPUT_TEXT
+                    and output_text_count >= 1
+                ):
+                    break
                 match content.type:
                     case schemas.MessagePartType.INPUT_TEXT:
                         _message.content.append(
@@ -2560,6 +2567,7 @@ async def get_thread(
                             )
                         )
                     case schemas.MessagePartType.OUTPUT_TEXT:
+                        output_text_count += 1
                         _annotations: list[Annotation] = []
                         _file_ids_file_citation_annotation: set[str] = set()
                         if content.annotations:
@@ -3294,7 +3302,14 @@ async def list_thread_messages(
                 attachments.append({"file_id": file_id, "tools": tools})
 
             _message.attachments = attachments
+            output_text_count = 0
             for content in message.content:
+                if (
+                    message.role == schemas.MessageRole.ASSISTANT
+                    and content.type == schemas.MessagePartType.OUTPUT_TEXT
+                    and output_text_count >= 1
+                ):
+                    break
                 match content.type:
                     case schemas.MessagePartType.INPUT_TEXT:
                         _message.content.append(
@@ -3313,6 +3328,7 @@ async def list_thread_messages(
                             )
                         )
                     case schemas.MessagePartType.OUTPUT_TEXT:
+                        output_text_count += 1
                         _annotations: list[Annotation] = []
                         _file_ids_file_citation_annotation: set[str] = set()
                         if content.annotations:

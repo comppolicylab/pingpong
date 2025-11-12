@@ -857,6 +857,11 @@ class BufferedResponseStreamHandler:
         self.prev_part_index = -1
         self.file_search_results: dict[str, FileSearchToolAnnotationResult] = {}
         self.file_ids_file_citation_annotation: set[str] = set()
+        self.force_stopped = False
+        self.output_message_created_count = 0
+        self.force_stop_error_code: str | None = None
+        self.force_stop_error_message: str | None = None
+        self.force_stop_incomplete_reason: str | None = None
 
     def enqueue(self, data: Dict) -> None:
         self.__buffer.write(orjson.dumps(data))
@@ -923,6 +928,14 @@ class BufferedResponseStreamHandler:
             )
             return
 
+        if self.output_message_created_count >= 1:
+            logger.warning(
+                "Received more than one assistant message in a single response. "
+                "Ignoring additional messages."
+            )
+            return
+
+        self.output_message_created_count += 1
         self.prev_output_index += 1
 
         message_data = {
@@ -1335,6 +1348,44 @@ class BufferedResponseStreamHandler:
 
         await add_cached_message_add_cached_message()
         self.message_id = None
+
+    async def _finalize_active_message(
+        self, status: MessageStatus = MessageStatus.COMPLETED
+    ) -> None:
+        if not self.message_id:
+            self.message_part_id = None
+            return
+
+        completed_time = utcnow()
+
+        @db_session_handler
+        async def finalize_message(session_: AsyncSession):
+            if not self.message_id:
+                return
+            await models.Message.mark_status(
+                session_,
+                self.message_id,
+                status,
+                completed=completed_time,
+            )
+            await session_.commit()
+
+        await finalize_message()
+        self.message_id = None
+        self.message_part_id = None
+
+    async def stop_after_additional_output_message(self) -> None:
+        if self.force_stopped:
+            return
+        self.force_stopped = True
+        self.force_stop_error_code = "second_output_truncated"
+        self.force_stop_error_message = (
+            "Run truncated after second assistant output to enforce a single response"
+        )
+        self.force_stop_incomplete_reason = "forced_single_response_truncation"
+        await self._finalize_active_message()
+        self.run_status = RunStatus.COMPLETED
+        await self.on_response_completed(None)
 
     async def on_code_interpreter_tool_call_created(
         self, data: ResponseCodeInterpreterToolCall
@@ -2398,13 +2449,29 @@ class BufferedResponseStreamHandler:
     async def on_response_completed(
         self,
         data: Union[
-            ResponseCompletedEvent, ResponseFailedEvent, ResponseIncompleteEvent
+            ResponseCompletedEvent,
+            ResponseFailedEvent,
+            ResponseIncompleteEvent,
+            None,
         ],
     ):
         if not self.run_id:
             logger.exception(
                 f"Received response completed event without a cached run. Data: {data}"
             )
+            return
+
+        if data is None:
+            self.run_status = RunStatus.COMPLETED
+            await self.cleanup(
+                run_status=RunStatus.COMPLETED,
+                response_error_code=self.force_stop_error_code,
+                response_error_message=self.force_stop_error_message,
+                response_incomplete_reason=self.force_stop_incomplete_reason,
+            )
+            self.force_stop_error_code = None
+            self.force_stop_error_message = None
+            self.force_stop_incomplete_reason = None
             return
 
         @db_session_handler
@@ -2622,6 +2689,10 @@ async def run_response(
                         case "response.output_item.added":
                             match event.item.type:
                                 case "message":
+                                    if handler.output_message_created_count >= 1:
+                                        await handler.stop_after_additional_output_message()
+                                        await stream.close()
+                                        break
                                     await handler.on_output_message_created(event.item)
                                 case "code_interpreter_call":
                                     await handler.on_code_interpreter_tool_call_created(
