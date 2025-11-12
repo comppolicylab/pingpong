@@ -2511,7 +2511,16 @@ async def get_thread(
                     )
                 )
 
+        messages_v3.reverse()
+        run_ids_set = set()
         for message in messages_v3:
+            if message.run_id in run_ids_set:
+                logger.info(
+                    "RESPONSES_MULTI_MESSAGE_THREAD_SKIP: Skipping duplicate message with run_id %s",
+                    message.run_id,
+                )
+                continue
+            run_ids_set.add(message.run_id)
             _message = schemas.ThreadMessage(
                 id=str(message.id),
                 thread_id=str(thread.id),
@@ -2541,14 +2550,7 @@ async def get_thread(
                 attachments.append({"file_id": file_id, "tools": tools})
 
             _message.attachments = attachments
-            output_text_count = 0
             for content in message.content:
-                if (
-                    message.role == schemas.MessageRole.ASSISTANT
-                    and content.type == schemas.MessagePartType.OUTPUT_TEXT
-                    and output_text_count >= 1
-                ):
-                    break
                 match content.type:
                     case schemas.MessagePartType.INPUT_TEXT:
                         _message.content.append(
@@ -2567,7 +2569,6 @@ async def get_thread(
                             )
                         )
                     case schemas.MessagePartType.OUTPUT_TEXT:
-                        output_text_count += 1
                         _annotations: list[Annotation] = []
                         _file_ids_file_citation_annotation: set[str] = set()
                         if content.annotations:
@@ -3272,7 +3273,16 @@ async def list_thread_messages(
                     )
                 )
 
+        messages_v3.reverse()
+        run_ids_set = set()
         for message in messages_v3:
+            if message.run_id in run_ids_set:
+                logger.info(
+                    "RESPONSES_MULTI_MESSAGE_LIST_MESSAGES_SKIP: Skipping duplicate message with run_id %s",
+                    message.run_id,
+                )
+                continue
+            run_ids_set.add(message.run_id)
             _message = schemas.ThreadMessage(
                 id=str(message.id),
                 thread_id=str(thread.id),
@@ -3302,14 +3312,7 @@ async def list_thread_messages(
                 attachments.append({"file_id": file_id, "tools": tools})
 
             _message.attachments = attachments
-            output_text_count = 0
             for content in message.content:
-                if (
-                    message.role == schemas.MessageRole.ASSISTANT
-                    and content.type == schemas.MessagePartType.OUTPUT_TEXT
-                    and output_text_count >= 1
-                ):
-                    break
                 match content.type:
                     case schemas.MessagePartType.INPUT_TEXT:
                         _message.content.append(
@@ -3328,7 +3331,6 @@ async def list_thread_messages(
                             )
                         )
                     case schemas.MessagePartType.OUTPUT_TEXT:
-                        output_text_count += 1
                         _annotations: list[Annotation] = []
                         _file_ids_file_citation_annotation: set[str] = set()
                         if content.annotations:

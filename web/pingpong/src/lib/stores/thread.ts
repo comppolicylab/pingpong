@@ -42,57 +42,6 @@ export type Message = {
   persisted: boolean;
 };
 
-const limitAssistantOutputText = (
-  message: api.OpenAIMessage
-): api.OpenAIMessage => {
-  if (message.role !== 'assistant') {
-    return message;
-  }
-
-  let seenOutputText = 0;
-  let hasChanged = false;
-  const limitedContent = message.content.reduce<api.Content[]>((acc, part) => {
-    if (part.type === 'text') {
-      if (seenOutputText >= 1) {
-        hasChanged = true;
-        return acc;
-      }
-      seenOutputText += 1;
-    }
-
-    acc.push(part);
-    return acc;
-  }, []);
-
-  if (!hasChanged) {
-    return message;
-  }
-
-  return {
-    ...message,
-    content: limitedContent
-  };
-};
-
-const sanitizeMessages = (
-  messages: api.OpenAIMessage[]
-): api.OpenAIMessage[] => messages.map(limitAssistantOutputText);
-
-const sanitizeThreadData = (
-  data: (BaseResponse & ThreadWithMeta) | null
-): (BaseResponse & ThreadWithMeta) | null => {
-  if (!data) {
-    return data;
-  }
-
-  return {
-    ...data,
-    messages: sanitizeMessages(data.messages),
-    ci_messages: sanitizeMessages(data.ci_messages),
-    fs_messages: sanitizeMessages(data.fs_messages)
-  };
-};
-
 function getOrderValue(a: api.OpenAIMessage, b: api.OpenAIMessage): [number, number] {
   const aHasOutputIndex = typeof a.output_index === 'number';
   const bHasOutputIndex = typeof b.output_index === 'number';
@@ -213,25 +162,24 @@ export class ThreadManager {
     timezone?: string
   ) {
     const expanded = api.expandResponse(threadData);
-    const initialData = sanitizeThreadData(expanded.data || null);
     this.#fetcher = fetcher;
     this.classId = classId;
     this.threadId = threadId;
     this.timezone = timezone;
     this.#data = writable({
-      data: initialData,
+      data: expanded.data || null,
       error: expanded.error ? { detail: expanded.error?.detail, wasSent: true } : null,
-      limit: initialData?.limit || 20,
-      canFetchMore: initialData?.has_more || false,
-      supportsFileSearch: initialData?.thread?.tools_available?.includes('file_search') || false,
+      limit: expanded.data?.limit || 20,
+      canFetchMore: expanded.data?.has_more || false,
+      supportsFileSearch: expanded.data?.thread?.tools_available?.includes('file_search') || false,
       supportsCodeInterpreter:
-        initialData?.thread?.tools_available?.includes('code_interpreter') || false,
+        expanded.data?.thread?.tools_available?.includes('code_interpreter') || false,
       optimistic: [],
       loading: false,
       waiting: false,
       submitting: false,
-      attachments: initialData?.attachments || {},
-      instructions: initialData?.instructions || null
+      attachments: expanded.data?.attachments || {},
+      instructions: expanded.data?.instructions || null
     });
 
     if (interactionMode === 'chat') {
@@ -440,12 +388,11 @@ export class ThreadManager {
     const interval = setInterval(async () => {
       const response = await api.getThread(this.#fetcher, this.classId, this.threadId);
       const expanded = api.expandResponse(response);
-      const sanitizedData = sanitizeThreadData(expanded.data || null);
-      if (api.finished(sanitizedData?.run)) {
+      if (api.finished(expanded.data?.run)) {
         clearInterval(interval);
         this.#data.update((d) => ({
           ...d,
-          data: sanitizedData,
+          data: expanded.data,
           error: expanded.error ? { detail: expanded.error?.detail, wasSent: true } : null,
           waiting: false
         }));
@@ -555,13 +502,6 @@ export class ThreadManager {
       before: before || undefined
     });
 
-    const sanitizedResponse = {
-      ...response,
-      messages: sanitizeMessages(response.messages || []),
-      ci_messages: sanitizeMessages(response.ci_messages || []),
-      fs_messages: sanitizeMessages(response.fs_messages || [])
-    };
-
     // Merge the new messages into the existing messages.
     this.#data.update((d) => {
       if (!d.data) {
@@ -571,18 +511,14 @@ export class ThreadManager {
         ...d,
         data: {
           ...d.data,
-          ci_messages: [...sanitizedResponse.ci_messages, ...d.data.ci_messages],
-          fs_messages: [...sanitizedResponse.fs_messages, ...d.data.fs_messages],
-          messages: [...sanitizedResponse.messages, ...d.data.messages].sort(
-            compareApiMessagesAsc
-          )
+          ci_messages: [...response.ci_messages, ...d.data.ci_messages],
+          fs_messages: [...response.fs_messages, ...d.data.fs_messages],
+          messages: [...response.messages, ...d.data.messages].sort(compareApiMessagesAsc)
         },
-        limit: sanitizedResponse.limit || d.limit,
-        error: sanitizedResponse.error
-          ? { detail: sanitizedResponse.error?.detail, wasSent: true }
-          : null,
+        limit: response.limit || d.limit,
+        error: response.error ? { detail: response.error?.detail, wasSent: true } : null,
         loading: false,
-        canFetchMore: sanitizedResponse.has_more
+        canFetchMore: response.has_more
       };
     });
   }
@@ -600,7 +536,6 @@ export class ThreadManager {
       if (result.error) {
         throw result.error;
       }
-      const sanitizedMessages = sanitizeMessages(result.ci_messages || []);
       this.#data.update((d) => {
         if (!d.data) {
           return d;
@@ -609,7 +544,7 @@ export class ThreadManager {
           ...d,
           data: {
             ...d.data,
-            ci_messages: [...sanitizedMessages, ...d.data.ci_messages]
+            ci_messages: [...result.ci_messages, ...d.data.ci_messages]
               .sort(compareApiMessagesAsc)
               .filter((message) => {
                 return !(
@@ -623,7 +558,7 @@ export class ThreadManager {
           waiting: false
         };
       });
-      return { ...result, ci_messages: sanitizedMessages };
+      return result;
     } catch (e) {
       this.#data.update((d) => ({
         ...d,
@@ -1062,7 +997,7 @@ export class ThreadManager {
       }
 
       for (const content of chunk.content) {
-        this.#mergeContent(lastMessage, content);
+        this.#mergeContent(lastMessage.content, content);
       }
 
       return { ...d };
@@ -1072,20 +1007,8 @@ export class ThreadManager {
   /**
    * Merge a message delta into the last message in the thread data.
    */
-  #mergeContent(message: api.OpenAIMessage, newContent: api.Content) {
-    const contents = message.content;
+  #mergeContent(contents: api.Content[], newContent: api.Content) {
     const lastContent = contents[contents.length - 1];
-
-    if (
-      message.role === 'assistant' &&
-      newContent.type === 'text' &&
-      !(lastContent && lastContent.type === 'text')
-    ) {
-      const hasExistingText = contents.some((content) => content.type === 'text');
-      if (hasExistingText) {
-        return;
-      }
-    }
 
     if (!lastContent) {
       contents.push(newContent);

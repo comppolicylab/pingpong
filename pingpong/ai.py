@@ -859,8 +859,6 @@ class BufferedResponseStreamHandler:
         self.file_ids_file_citation_annotation: set[str] = set()
         self.force_stopped = False
         self.output_message_created_count = 0
-        self.force_stop_error_code: str | None = None
-        self.force_stop_error_message: str | None = None
         self.force_stop_incomplete_reason: str | None = None
 
     def enqueue(self, data: Dict) -> None:
@@ -930,9 +928,10 @@ class BufferedResponseStreamHandler:
 
         if self.output_message_created_count >= 1:
             logger.warning(
-                "Received more than one assistant message in a single response. "
+                "RESPONSES_MULTI_MESSAGE_CATCH: Received more than one assistant message in a single response. "
                 "Ignoring additional messages."
             )
+            await self.stop_after_additional_output_message()
             return
 
         self.output_message_created_count += 1
@@ -1378,11 +1377,10 @@ class BufferedResponseStreamHandler:
         if self.force_stopped:
             return
         self.force_stopped = True
-        self.force_stop_error_code = "second_output_truncated"
-        self.force_stop_error_message = (
-            "Run truncated after second assistant output to enforce a single response"
+        self.force_stop_incomplete_reason = "multi_message_truncate"
+        logger.info(
+            "RESPONSES_MULTI_MESSAGE_TRUNCATE: Stopping response due to multiple output messages."
         )
-        self.force_stop_incomplete_reason = "forced_single_response_truncation"
         await self._finalize_active_message()
         self.run_status = RunStatus.COMPLETED
         await self.on_response_completed(None)
@@ -2465,33 +2463,10 @@ class BufferedResponseStreamHandler:
             self.run_status = RunStatus.COMPLETED
             await self.cleanup(
                 run_status=RunStatus.COMPLETED,
-                response_error_code=self.force_stop_error_code,
-                response_error_message=self.force_stop_error_message,
                 response_incomplete_reason=self.force_stop_incomplete_reason,
             )
-            self.force_stop_error_code = None
-            self.force_stop_error_message = None
             self.force_stop_incomplete_reason = None
             return
-
-        @db_session_handler
-        async def update_encrypted_response_content_on_response_completed(
-            session_: AsyncSession, item_id: str, encrypted_content: str | None
-        ):
-            if not item_id or not encrypted_content:
-                return
-            await models.ReasoningStep.update_encrypted_content(
-                session_, item_id, encrypted_content
-            )
-            await session_.commit()
-
-        if isinstance(data, ResponseCompletedEvent):
-            for output_item in data.response.output:
-                if output_item.type == "reasoning" and output_item.encrypted_content:
-                    await update_encrypted_response_content_on_response_completed(
-                        item_id=output_item.id,
-                        encrypted_content=output_item.encrypted_content,
-                    )
 
         await self.cleanup(
             run_status=RunStatus(data.response.status),
@@ -2690,10 +2665,14 @@ async def run_response(
                             match event.item.type:
                                 case "message":
                                     if handler.output_message_created_count >= 1:
+                                        logger.info(
+                                            "RESPONSES_MULTI_MESSAGE_FIX: Stopping response due to multiple output messages in event streamer."
+                                        )
                                         await handler.stop_after_additional_output_message()
-                                        await stream.close()
                                         break
                                     await handler.on_output_message_created(event.item)
+                                    if handler.force_stopped:
+                                        break
                                 case "code_interpreter_call":
                                     await handler.on_code_interpreter_tool_call_created(
                                         event.item
