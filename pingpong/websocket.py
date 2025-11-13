@@ -199,7 +199,7 @@ def ws_with_realtime_connection(func):
                                     "interrupt_response": False,
                                 },
                             },
-                            "output": {"voice": "alloy", "speed": 1.2},
+                            "output": {"voice": "alloy", "speed": 1.15},
                         },
                         "instructions": conversation_instructions,
                         "output_modalities": ["audio"],
