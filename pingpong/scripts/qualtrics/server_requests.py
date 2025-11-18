@@ -32,7 +32,7 @@ async def import_qsf(session, qsf: str) -> scripts_schemas.QualtricsAddSurveyRes
         for line_number, line in enumerate(lines):
             next_pos = current_pos + len(line) + 1  # +1 for the newline character
             if current_pos <= error_pos < next_pos:
-                raise ValueError(f"Offending line {line_number + 1}: {line.strip()}")
+                raise ValueError(rf"Offending line {line_number + 1}: {line.strip()}")
             current_pos = next_pos
 
     async with session.post(

@@ -1,16 +1,29 @@
 import json
 import re
 from string import Template
-from pingpong.scripts.qualtrics.schemas import ExamJSON, AirtableClass
+from pingpong.scripts.qualtrics.schemas import ExamJSON, AirtableClass, ExamQuestion
 
 
 def escape_latex_within_span(text):
+    text = text.replace(r"''(", r"temp_prime_prime(")
+    text = text.replace(r"'(", r"temp_prime(")
+
+    text = text.replace('\\"', '"')
+    text = text.replace("'", '"')
+
+    text = text.replace(r"temp_prime_prime(", r"''(")
+    text = text.replace(r"temp_prime(", r"'(")
     pattern = r"(<span class=\"katex\">)(.*?)(</span>)"
 
     def escape(match):
         content = match.group(2)
+        print("SPAN CONTENT:", content)
+        # Remove LaTeX delimiters
+        # Preserve escaped dollar signs
+        content = content.replace(r"\$", r"\dollars")
         # Remove LaTeX delimiters
         content = content.replace("$", "")
+        content = content.replace(r"\dollars", r"\$")  # Restore escaped dollar signs
         content = content.replace("\\(", "")
         content = content.replace("\\)", "")
         content = content.replace("\\[", "")
@@ -19,6 +32,11 @@ def escape_latex_within_span(text):
         content = content.replace("\n", "")
         # Fix special characters
         content = content.replace("&gt;", " \gt ")
+        content = content.replace("&lt;", " \lt ")
+        content = content.replace("=>", "=\textgreater{}")
+        print("AFTER FIX:", content)
+        content = content.replace("geom_", "geom\_")
+        content = content.replace(r"\vec ", r"\overrightarrow")
         content = content.replace("<", " \lt ")
         content = content.replace(">", " \gt ")
         content = content.replace("u2264", " leq ")
@@ -26,6 +44,7 @@ def escape_latex_within_span(text):
         # Escape special characters
         content = re.sub(r"\\", r"\\\\", content)
         content = re.sub(r'"', r'\\"', content)
+        print("ESCAPED CONTENT:", content)
         if "{array}" in content:
             return rf"<br><br><span class=\"katex\" style=\"font-size: 0.9em;white-space: nowrap;\">{content}{match.group(3)}<br><br>"
         else:
@@ -37,6 +56,7 @@ def escape_latex_within_span(text):
 
 def escape_non_span(text):
     text = text.replace("\n", "<br>")
+    text = text.replace("· ", "<br>&middot; ")
     text = text.replace("\%", "&#37;")
     text = text.replace("\\u2265", "&ge;")
     text = text.replace("\u2265", "&ge;")
@@ -49,7 +69,9 @@ def escape_non_span(text):
 
 def escape_non_span_options(text):
     text = text.replace("\n", "<br>")
+    text = text.replace("· ", "<br>&middot; ")
     text = text.replace("\%", "&#37;")
+    text = text.replace("\\u00026le", "&le;")
     text = text.replace("\\u2265", "&ge;")
     text = text.replace("\u2265", "&ge;")
     text = text.replace("\\u2264", "&le;")
@@ -59,12 +81,24 @@ def escape_non_span_options(text):
 
 
 def escape_latex_within_span_options(text):
+    text = text.replace(r"''(", r"temp_prime_prime(")
+    text = text.replace(r"'(", r"temp_prime(")
+
+    text = text.replace('\\"', '"')
+    text = text.replace("'", '"')
+
+    text = text.replace(r"temp_prime_prime(", r"''(")
+    text = text.replace(r"temp_prime(", r"'(")
     pattern = r"(<span class=\"katex\">)(.*?)(</span>)"
 
     def escape(match):
         content = match.group(2)
+        print("SPAN CONTENT:", content)
+        # Preserve escaped dollar signs
+        content = content.replace(r"\$", r"\dollars")
         # Remove LaTeX delimiters
         content = content.replace("$", "")
+        content = content.replace(r"\dollars", r"\$")  # Restore escaped dollar signs
         content = content.replace("\\(", "")
         content = content.replace("\\)", "")
         content = content.replace("\\[", "")
@@ -72,38 +106,52 @@ def escape_latex_within_span_options(text):
         # Remove newline characters
         content = content.replace("\n", "")
         # Fix special characters
+        content = content.replace("=>", "=\\textgreater{}")
+        content = content.replace("\\langlet ", "\\textless{}")
+        content = content.replace("\\langlet", "\\textless{}")
+        content = content.replace("\\ranglet ", "\\textgreater{}")
+        content = content.replace("\\ranglet", "\\textgreater{}")
+        content = content.replace("geom_", "geom\\_")
         content = content.replace("&gt;", " \\gt ")
+        content = content.replace("&lt;", " \\lt ")
         content = content.replace("<", " \\lt ")
         content = content.replace(">", " \\gt ")
         content = content.replace("u2264", " leq ")
         content = content.replace("u2265", " geq ")
+        print("ESCAPED CONTENT:", content)
         return f'<span class="katex" style="font-size: 0.9em;white-space: nowrap;">{content}{match.group(3)}'
 
     text = re.sub(pattern, escape, text, flags=re.DOTALL)
     return text
 
 
-def escape_text(text):
-    pattern = r"(<span\s+class=\"katex\">.*?</span>)"
+def escape_text(text, question_number):
+    if not text.startswith("Question") and not text.endswith("<b>Question"):
+        text = "<b>Question " + str(question_number) + "/10:</b><br>" + text
+    pattern = r'(<span\s+class=\\?["\']?katex\\?["\']?>.*?</span>)'
     segments = re.split(pattern, text, flags=re.DOTALL)
 
     for i, seg in enumerate(segments):
         if re.fullmatch(pattern, seg, flags=re.DOTALL):
+            print("SPAN", seg)
             segments[i] = escape_latex_within_span(seg)
         else:
+            print("NOT SPAN", seg)
             segments[i] = escape_non_span(seg)
 
     return "".join(segments)
 
 
 def escape_option_text(text):
-    pattern = r"(<span\s+class=\"katex\">.*?</span>)"
+    pattern = r'(<span\s+class=\\?["\']?katex\\?["\']?>.*?</span>)'
     segments = re.split(pattern, text)
 
     for i, seg in enumerate(segments):
         if re.fullmatch(pattern, seg):
+            print("SPAN", seg)
             segments[i] = escape_latex_within_span_options(seg)
         else:
+            print("NOT SPAN", seg)
             segments[i] = escape_non_span_options(seg)
 
     return "".join(segments)
@@ -124,6 +172,16 @@ def qsf_recoded_values(options: list[str]) -> str:
     return json.dumps({str(i): str(i) for i in range(1, len(options) + 1)})
 
 
+def correct_choice_id(question: ExamQuestion) -> str:
+    """Return Qualtrics choice ID (1-indexed) for the provided correct answer."""
+    try:
+        return str(question.options.index(question.answer) + 1)
+    except ValueError as exc:  # pragma: no cover - defensive guard
+        raise ValueError(
+            f"Answer '{question.answer}' not found in options for question '{question.question}'"
+        ) from exc
+
+
 def generate_qsf(exam: ExamJSON, class_: AirtableClass) -> str:
     return EXAM_QSF_TEMPLATE.substitute(
         CourseName=class_.name,
@@ -131,56 +189,69 @@ def generate_qsf(exam: ExamJSON, class_: AirtableClass) -> str:
         PingPongClassID=class_.pingpong_class_id[0] if class_.pingpong_class_id else -1,
         CourseRandomization=class_.randomization,
         Footer=KATEX_FOOTER if exam.uses_latex else NON_KATEX_FOOTER,
-        A1QuestionText=escape_text(exam.questions[0].question),
+        A1QuestionText=escape_text(exam.questions[0].question, 1),
         A1Choices=qsf_choices(exam.questions[0].options),
         A1ChoiceOrder=qsf_choice_order(exam.questions[0].options),
         A1RecodeValues=qsf_recoded_values(exam.questions[0].options),
         A1JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[0].uses_latex else '""',
-        A2QuestionText=escape_text(exam.questions[1].question),
+        A1CorrectChoiceID=correct_choice_id(exam.questions[0]),
+        A2QuestionText=escape_text(exam.questions[1].question, 2),
         A2Choices=qsf_choices(exam.questions[1].options),
         A2ChoiceOrder=qsf_choice_order(exam.questions[1].options),
         A2RecodeValues=qsf_recoded_values(exam.questions[1].options),
         A2JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[1].uses_latex else '""',
-        A3QuestionText=escape_text(exam.questions[2].question),
+        A2CorrectChoiceID=correct_choice_id(exam.questions[1]),
+        A3QuestionText=escape_text(exam.questions[2].question, 3),
         A3Choices=qsf_choices(exam.questions[2].options),
         A3ChoiceOrder=qsf_choice_order(exam.questions[2].options),
         A3RecodeValues=qsf_recoded_values(exam.questions[2].options),
         A3JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[2].uses_latex else '""',
-        A4QuestionText=escape_text(exam.questions[3].question),
+        A3CorrectChoiceID=correct_choice_id(exam.questions[2]),
+        A4QuestionText=escape_text(exam.questions[3].question, 4),
         A4Choices=qsf_choices(exam.questions[3].options),
         A4ChoiceOrder=qsf_choice_order(exam.questions[3].options),
         A4RecodeValues=qsf_recoded_values(exam.questions[3].options),
         A4JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[3].uses_latex else '""',
-        A5QuestionText=escape_text(exam.questions[4].question),
+        A4CorrectChoiceID=correct_choice_id(exam.questions[3]),
+        A5QuestionText=escape_text(exam.questions[4].question, 5),
         A5Choices=qsf_choices(exam.questions[4].options),
         A5ChoiceOrder=qsf_choice_order(exam.questions[4].options),
         A5RecodeValues=qsf_recoded_values(exam.questions[4].options),
         A5JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[4].uses_latex else '""',
-        A6QuestionText=escape_text(exam.questions[5].question),
+        A5CorrectChoiceID=correct_choice_id(exam.questions[4]),
+        A6QuestionText=escape_text(exam.questions[5].question, 6),
         A6Choices=qsf_choices(exam.questions[5].options),
         A6ChoiceOrder=qsf_choice_order(exam.questions[5].options),
         A6RecodeValues=qsf_recoded_values(exam.questions[5].options),
         A6JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[5].uses_latex else '""',
-        A7QuestionText=escape_text(exam.questions[6].question),
+        A6CorrectChoiceID=correct_choice_id(exam.questions[5]),
+        A7QuestionText=escape_text(exam.questions[6].question, 7),
         A7Choices=qsf_choices(exam.questions[6].options),
         A7ChoiceOrder=qsf_choice_order(exam.questions[6].options),
         A7RecodeValues=qsf_recoded_values(exam.questions[6].options),
         A7JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[6].uses_latex else '""',
-        A8QuestionText=escape_text(exam.questions[7].question),
+        A7CorrectChoiceID=correct_choice_id(exam.questions[6]),
+        A8QuestionText=escape_text(exam.questions[7].question, 8),
         A8Choices=qsf_choices(exam.questions[7].options),
         A8ChoiceOrder=qsf_choice_order(exam.questions[7].options),
         A8RecodeValues=qsf_recoded_values(exam.questions[7].options),
         A8JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[7].uses_latex else '""',
-        A9QuestionText=escape_text(exam.questions[8].question),
+        A8CorrectChoiceID=correct_choice_id(exam.questions[7]),
+        A9QuestionText=escape_text(exam.questions[8].question, 9),
         A9Choices=qsf_choices(exam.questions[8].options),
         A9ChoiceOrder=qsf_choice_order(exam.questions[8].options),
         A9RecodeValues=qsf_recoded_values(exam.questions[8].options),
         A9JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[8].uses_latex else '""',
-        A10QuestionText=escape_text(exam.questions[9].question),
+        A9CorrectChoiceID=correct_choice_id(exam.questions[8]),
+        A10QuestionText=escape_text(exam.questions[9].question, 10),
         A10Choices=qsf_choices(exam.questions[9].options),
         A10ChoiceOrder=qsf_choice_order(exam.questions[9].options),
         A10RecodeValues=qsf_recoded_values(exam.questions[9].options),
         A10JavaScript=f'"{KATEX_QS_JS}"' if exam.questions[9].uses_latex else '""',
+        A10CorrectChoiceID=correct_choice_id(exam.questions[9]),
+        TestJavaScript=f'"{KATEX_QS_JS}"'
+        if any(q.uses_latex for q in exam.questions)
+        else '""',
     )
 
 
@@ -601,6 +672,59 @@ EXAM_QSF_TEMPLATE = Template(r"""
             "RandomizeQuestions": "false",
             "BlockVisibility": "Expanded"
           }
+        },
+        "21":{
+          "Type":"Standard",
+          "SubType":"",
+          "Description":"Review Block",
+          "ID":"BL_d3RPBjSzEtPopbU",
+          "BlockElements":[
+            {
+                "Type":"Question",
+                "QuestionID":"QID76"
+            },
+            {
+                "Type":"Question",
+                "QuestionID":"QID77"
+            },
+            {
+                "Type":"Question",
+                "QuestionID":"QID79"
+            },
+            {
+                "Type":"Question",
+                "QuestionID":"QID75"
+            },
+            {
+                "Type":"Question",
+                "QuestionID":"QID80"
+            },
+            {
+                "Type":"Question",
+                "QuestionID":"QID81"
+            },
+            {
+                "Type":"Question",
+                "QuestionID":"QID82"
+            },
+            {
+                "Type":"Question",
+                "QuestionID":"QID83"
+            },
+            {
+                "Type":"Question",
+                "QuestionID":"QID84"
+            },
+            {
+                "Type":"Question",
+                "QuestionID":"QID85"
+            }
+          ],
+          "Options": {
+            "BlockLocking": "false",
+            "RandomizeQuestions": "false",
+            "BlockVisibility": "Expanded"
+          }
         }
       }
     },
@@ -670,7 +794,63 @@ EXAM_QSF_TEMPLATE = Template(r"""
                 "DataVisibility": [],
                 "AnalyzeText": false,
                 "Value": "0"
+              },
+              {
+                "Description":"__js_airtable_bypass_survey",
+                "Type":"Recipient",
+                "Field":"__js_airtable_bypass_survey",
+                "VariableType":"String",
+                "DataVisibility":[
+
+                ],
+                "AnalyzeText":false
               }
+            ]
+          },
+          {
+            "Type":"Branch",
+            "FlowID":"FL_61",
+            "Description":"New Branch",
+            "BranchLogic":{
+                "0":{
+                  "0":{
+                      "LogicType":"EmbeddedField",
+                      "LeftOperand":"__js_airtable_bypass_survey",
+                      "Operator":"Contains",
+                      "RightOperand":"@rct@",
+                      "_HiddenExpression":false,
+                      "Type":"Expression",
+                      "Description":"<span class=\"ConjDesc\">If<\/span> <span class=\"LeftOpDesc\">__js_airtable_bypass_survey<\/span> <span class=\"OpDesc\">Contains<\/span> <span class=\"RightOpDesc\"> @rct@ <\/span>"
+                  },
+                  "Type":"If"
+                },
+                "Type":"BooleanExpression"
+            },
+            "Flow":[
+                {
+                  "Type":"Block",
+                  "ID":"BL_d3RPBjSzEtPopbU",
+                  "FlowID":"FL_62",
+                  "Autofill":[
+
+                  ]
+                },
+                {
+                  "Type":"EndSurvey",
+                  "FlowID":"FL_63",
+                  "EndingType":"Advanced",
+                  "Options":{
+                      "Advanced":"true",
+                      "SurveyTermination":"DisplayMessage",
+                      "EOSMessageLibrary":"UR_bQHormGseyEZkzz",
+                      "EOSMessage":"MS_d4CsfOr3LWsJfwy",
+                      "CountQuotas":"No",
+                      "AnonymizeResponse":"Yes",
+                      "EmailThankYou":"",
+                      "IgnoreResponse":"Yes",
+                      "ResponseFlag":"Screened"
+                  }
+                }
             ]
           },
           {
@@ -678,6 +858,56 @@ EXAM_QSF_TEMPLATE = Template(r"""
             "ID": "BL_3xyVR7mBcg6zsy2",
             "FlowID": "FL_2",
             "Autofill": []
+          },
+          {
+            "Type":"Branch",
+            "FlowID":"FL_55",
+            "Description":"New Branch",
+            "BranchLogic":{
+                "0":{
+                  "0":{
+                      "LogicType":"Question",
+                      "QuestionID":"QID3",
+                      "QuestionIsInLoop":"no",
+                      "ChoiceLocator":"q:\/\/QID3\/ChoiceTextEntryValue",
+                      "Operator":"Contains",
+                      "QuestionIDFromLocator":"QID3",
+                      "LeftOperand":"q:\/\/QID3\/ChoiceTextEntryValue",
+                      "RightOperand":"@RCT@",
+                      "IgnoreCase":1,
+                      "Type":"Expression",
+                      "Description":"<span class=\"ConjDesc\">If<\/span> <span class=\"QuestionDesc\">Academic Email Use the same email you used to complete the assignment earlier this semester, even...<\/span> <span class=\"LeftOpDesc\">Text Response<\/span> <span class=\"OpDesc\">Contains<\/span> <span class=\"RightOpDesc\"> @RCT@ <\/span>"
+                  },
+                  "Type":"If"
+                },
+                "Type":"BooleanExpression"
+            },
+            "Flow":[
+                {
+                  "Type":"Standard",
+                  "ID":"BL_d3RPBjSzEtPopbU",
+                  "FlowID":"FL_58",
+                  "Autofill":[
+
+                  ]
+                },
+                {
+                  "Type":"EndSurvey",
+                  "FlowID":"FL_56",
+                  "EndingType":"Advanced",
+                  "Options":{
+                      "Advanced":"true",
+                      "SurveyTermination":"DisplayMessage",
+                      "EOSMessageLibrary":"UR_bQHormGseyEZkzz",
+                      "EOSMessage":"MS_d4CsfOr3LWsJfwy",
+                      "CountQuotas":"No",
+                      "AnonymizeResponse":"Yes",
+                      "EmailThankYou":"",
+                      "IgnoreResponse":"Yes",
+                      "ResponseFlag":"Screened"
+                  }
+                }
+            ]
           },
           {
             "Type": "Branch",
@@ -721,7 +951,7 @@ EXAM_QSF_TEMPLATE = Template(r"""
               {
                 "Type": "WebService",
                 "FlowID": "FL_34",
-                "URL": "https://hooks.airtable.com/workflows/v1/genericWebhook/appkYePjv3xImn60Z/wflXjGYq8j3n31dRg/wtrW3iL7AWJdE34uY",
+                "URL": "https://hooks.airtable.com/workflows/v1/genericWebhook/appVTPUUDF3ADmhzt/wflXjGYq8j3n31dRg/wtrW3iL7AWJdE34uY",
                 "Method": "POST",
                 "RequestParams": [],
                 "EditBodyParams": [
@@ -776,7 +1006,7 @@ EXAM_QSF_TEMPLATE = Template(r"""
                   {
                     "Type": "WebService",
                     "FlowID": "FL_47",
-                    "URL": "https://hooks.airtable.com/workflows/v1/genericWebhook/appkYePjv3xImn60Z/wflXjGYq8j3n31dRg/wtrW3iL7AWJdE34uY",
+                    "URL": "https://hooks.airtable.com/workflows/v1/genericWebhook/appVTPUUDF3ADmhzt/wflXjGYq8j3n31dRg/wtrW3iL7AWJdE34uY",
                     "Method": "POST",
                     "RequestParams": [],
                     "EditBodyParams": [
@@ -894,7 +1124,7 @@ EXAM_QSF_TEMPLATE = Template(r"""
                   {
                     "Type": "WebService",
                     "FlowID": "FL_42",
-                    "URL": "https://hooks.airtable.com/workflows/v1/genericWebhook/appkYePjv3xImn60Z/wflXjGYq8j3n31dRg/wtrW3iL7AWJdE34uY",
+                    "URL": "https://hooks.airtable.com/workflows/v1/genericWebhook/appVTPUUDF3ADmhzt/wflXjGYq8j3n31dRg/wtrW3iL7AWJdE34uY",
                     "Method": "POST",
                     "RequestParams": [],
                     "EditBodyParams": [
@@ -969,6 +1199,48 @@ EXAM_QSF_TEMPLATE = Template(r"""
             ]
           },
           {
+            "Type":"Branch",
+            "FlowID":"FL_59",
+            "Description":"New Branch",
+            "BranchLogic":{
+                "0":{
+                  "0":{
+                      "LogicType":"Question",
+                      "QuestionID":"QID3",
+                      "QuestionIsInLoop":"no",
+                      "ChoiceLocator":"q:\/\/QID3\/ChoiceTextEntryValue",
+                      "Operator":"Contains",
+                      "QuestionIDFromLocator":"QID3",
+                      "LeftOperand":"q:\/\/QID3\/ChoiceTextEntryValue",
+                      "RightOperand":"@RCT@",
+                      "IgnoreCase":1,
+                      "Type":"Expression",
+                      "Description":"<span class=\"ConjDesc\">If<\/span> <span class=\"QuestionDesc\">Academic Email Use the same email you used to complete the assignment earlier this semester, even...<\/span> <span class=\"LeftOpDesc\">Text Response<\/span> <span class=\"OpDesc\">Contains<\/span> <span class=\"RightOpDesc\"> @RCT@ <\/span>"
+                  },
+                  "Type":"If"
+                },
+                "Type":"BooleanExpression"
+            },
+            "Flow":[
+                {
+                  "Type":"EndSurvey",
+                  "FlowID":"FL_60",
+                  "EndingType":"Advanced",
+                  "Options":{
+                      "Advanced":"true",
+                      "SurveyTermination":"DisplayMessage",
+                      "EOSMessageLibrary":"UR_bQHormGseyEZkzz",
+                      "EOSMessage":"MS_d4CsfOr3LWsJfwy",
+                      "CountQuotas":"No",
+                      "AnonymizeResponse":"Yes",
+                      "EmailThankYou":"",
+                      "IgnoreResponse":"Yes",
+                      "ResponseFlag":"Screened"
+                  }
+                }
+            ]
+          },
+          {
             "Type": "Standard",
             "ID": "BL_b9Gvnb6ouT0YN3U",
             "FlowID": "FL_15",
@@ -1035,48 +1307,6 @@ EXAM_QSF_TEMPLATE = Template(r"""
             "Autofill": []
           },
           {
-            "Type": "Branch",
-            "FlowID": "FL_55",
-            "Description": "New Branch",
-            "BranchLogic": {
-              "0": {
-                "0": {
-                  "LogicType": "Question",
-                  "QuestionID": "QID3",
-                  "QuestionIsInLoop": "no",
-                  "ChoiceLocator": "q://QID3/ChoiceTextEntryValue",
-                  "Operator": "Contains",
-                  "QuestionIDFromLocator": "QID3",
-                  "LeftOperand": "q://QID3/ChoiceTextEntryValue",
-                  "RightOperand": "@RCT@",
-                  "IgnoreCase": 1,
-                  "Type": "Expression",
-                  "Description": "<span class=\"ConjDesc\">If</span> <span class=\"QuestionDesc\">Academic Email Use the same email you used to complete the assignment earlier this semester, even...</span> <span class=\"LeftOpDesc\">Text Response</span> <span class=\"OpDesc\">Contains</span> <span class=\"RightOpDesc\"> @RCT@ </span>"
-                },
-                "Type": "If"
-              },
-              "Type": "BooleanExpression"
-            },
-            "Flow": [
-              {
-                "Type": "EndSurvey",
-                "FlowID": "FL_56",
-                "EndingType": "Advanced",
-                "Options": {
-                  "Advanced": "true",
-                  "SurveyTermination": "DisplayMessage",
-                  "EOSMessageLibrary": "UR_bQHormGseyEZkzz",
-                  "EOSMessage": "MS_d4CsfOr3LWsJfwy",
-                  "CountQuotas": "No",
-                  "AnonymizeResponse": "Yes",
-                  "EmailThankYou": "",
-                  "IgnoreResponse": "Yes",
-                  "ResponseFlag": "Screened"
-                }
-              }
-            ]
-          },
-          {
             "Type": "Standard",
             "ID": "BL_2gwh3Zh9Q3Nsn3g",
             "FlowID": "FL_4",
@@ -1131,20 +1361,28 @@ EXAM_QSF_TEMPLATE = Template(r"""
       "Payload": null
     },
     {
-      "SurveyID": "SV_eP5ggSR1YMcI2HA",
-      "Element": "SCO",
-      "PrimaryAttribute": "Scoring",
-      "SecondaryAttribute": null,
-      "TertiaryAttribute": null,
-      "Payload": {
-        "ScoringCategories": [],
-        "ScoringCategoryGroups": [],
-        "ScoringSummaryCategory": null,
-        "ScoringSummaryAfterQuestions": 0,
-        "ScoringSummaryAfterSurvey": 0,
-        "DefaultScoringCategory": null,
-        "AutoScoringCategory": null
-      }
+        "SurveyID":"SV_eP5ggSR1YMcI2HA",
+        "Element":"SCO",
+        "PrimaryAttribute":"Scoring",
+        "SecondaryAttribute":null,
+        "TertiaryAttribute":null,
+        "Payload":{
+          "ScoringCategories":[
+              {
+                "ID":"SC_78JgOoF7SGSRmAe",
+                "Name":"Assignment Score",
+                "Description":""
+              }
+          ],
+          "ScoringCategoryGroups":[
+
+          ],
+          "DefaultScoringCategory":"SC_78JgOoF7SGSRmAe",
+          "ScoringSummaryCategory":null,
+          "ScoringSummaryAfterQuestions":0,
+          "ScoringSummaryAfterSurvey":0,
+          "AutoScoringCategory":null
+        }
     },
     {
       "SurveyID": "SV_eP5ggSR1YMcI2HA",
@@ -1281,7 +1519,15 @@ EXAM_QSF_TEMPLATE = Template(r"""
           "Private": false
         },
         "DefaultChoices": false,
-        "GradingData": [],
+        "GradingData":[
+            {
+              "ChoiceID":"$A2CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
         "Language": [],
         "NextAnswerId": 1,
         "NextChoiceId": 6,
@@ -1380,7 +1626,15 @@ EXAM_QSF_TEMPLATE = Template(r"""
             "Type": "None"
           }
         },
-        "GradingData": [],
+        "GradingData":[
+            {
+              "ChoiceID":"$A3CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
         "Language": [],
         "NextChoiceId": 9,
         "NextAnswerId": 1,
@@ -1455,7 +1709,15 @@ EXAM_QSF_TEMPLATE = Template(r"""
           "Private": false
         },
         "DefaultChoices": false,
-        "GradingData": [],
+        "GradingData":[
+            {
+              "ChoiceID":"$A4CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
         "Language": [],
         "NextAnswerId": 1,
         "NextChoiceId": 6,
@@ -1542,7 +1804,15 @@ EXAM_QSF_TEMPLATE = Template(r"""
           "Private": false
         },
         "DefaultChoices": false,
-        "GradingData": [],
+        "GradingData":[
+            {
+              "ChoiceID":"$A5CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
         "Language": [],
         "NextAnswerId": 1,
         "NextChoiceId": 6,
@@ -1627,7 +1897,15 @@ EXAM_QSF_TEMPLATE = Template(r"""
           "Private": false
         },
         "DefaultChoices": false,
-        "GradingData": [],
+        "GradingData":[
+            {
+              "ChoiceID":"$A6CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
         "Language": [],
         "NextAnswerId": 1,
         "NextChoiceId": 6,
@@ -1760,7 +2038,15 @@ EXAM_QSF_TEMPLATE = Template(r"""
           "Private": false
         },
         "DefaultChoices": false,
-        "GradingData": [],
+        "GradingData":[
+            {
+              "ChoiceID":"$A8CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
         "Language": [],
         "NextAnswerId": 1,
         "NextChoiceId": 11,
@@ -1859,7 +2145,15 @@ EXAM_QSF_TEMPLATE = Template(r"""
             "Type": "None"
           }
         },
-        "GradingData": [],
+        "GradingData":[
+            {
+              "ChoiceID":"$A7CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
         "Language": [],
         "NextChoiceId": 9,
         "NextAnswerId": 1,
@@ -2019,7 +2313,7 @@ EXAM_QSF_TEMPLATE = Template(r"""
         "SearchSource": {
           "AllowFreeResponse": "false"
         },
-        "QuestionJS": "Qualtrics.SurveyEngine.addOnload(function() {\n    let questionElement = document.getElementById(\"question-QID73\");\n\tlet initCounter = parseInt(Qualtrics.SurveyEngine.getJSEmbeddedData('failed_attempts_email'), 10);\n\tif (initCounter < 2) {\n\t\tquestionElement.style.display = 'none';\n\t}\n\t\n    var qthis = this;  // Reference to the current question context\n\n    // Update this selector based on which input holds the email.\n    var codeSelector = \"#question-QID3 .text-input\";  // adjust as needed\n\n    // Intercept the Next button using its current ID in the new layout.\n    jQuery(\"#next-button\").off(\"click.emailCheck\").on(\"click.emailCheck\", function(event) {\n        // Prevent default actions and propagation.\n        event.preventDefault();\n        event.stopImmediatePropagation();\n\t\t\n\t\tlet overrideCheckbox = document.getElementById(\"mc-choice-input-QID73-1\");\n\t\tif (overrideCheckbox.checked) {\n\t\t\tqthis.clickNextButton();\n\t\t\treturn false;\n\t\t};\n\n        // Get the code entered by the user.\n        var userEmail = jQuery(codeSelector).val();\n\t\t\n\t\tif (userEmail.toLowerCase().trim()===\"@rct@\") {\n\t\t\tqthis.clickNextButton();\n\t\t\treturn false;\n\t\t};\n\t\t\n\t\tvar courseId = \"$${e://Field/pp_airtable_class_RID}\"\n\n        // Make an API call to Airtable to verify the code.\n\t\tvar formula = \"https://api.airtable.com/v0/appkYePjv3xImn60Z/Students?filterByFormula=\" + \"AND(FIND('$$' %26 LOWER(TRIM('\"+ userEmail.trim() + \"')) %26 '$$', LOWER({fld7N2h5AZWxdpKZq})) > 0, FIND('\" + courseId + \"', {fld3PVyJIkRa5Cxh5}) > 0)\";\n\n\t\tjQuery.ajax({\n            url: formula,\n            method: \"GET\",\n            headers: {\n                \"Authorization\": \"Bearer patI8DqO3lh0f9BHP.df50e1a9e6f4564beb814476e4b3c0d6500ff91bce307e61261a9960a9549ca7\"\n            },\n            success: function(response) {\n                // Check if at least one record is returned\n                if (response.records && response.records.length > 0 && response.records[0].id) {\n                    // Email is valid – proceed to the next page.\n\t\t\t\t\tQualtrics.SurveyEngine.setJSEmbeddedData(\"airtable_student_RID\", response.records[0].id);\n                    qthis.clickNextButton();\n                } else {\n                    // No valid records were found.\n\t\t\t\t\tvar counter = parseInt(Qualtrics.SurveyEngine.getJSEmbeddedData('failed_attempts_email'), 10);\n\t\t\t\t\tQualtrics.SurveyEngine.setJSEmbeddedData(\"failed_attempts_email\", counter + 1);\n\t\t\t\t\tcounter = parseInt(Qualtrics.SurveyEngine.getJSEmbeddedData('failed_attempts_email'), 10);\n\t\t\t\t\tif (counter > 1) {\n\t\t\t\t\t\talert(\"We're still having trouble finding your record.\\n\\nIf you're certain you completed the previous assignment for this class with this email, check the \\\"Still having issues\\\" checkbox to continue.\");\n\t\t\t\t\t\tquestionElement.style.display = 'block';\n\t\t\t\t\t\treturn false;\n\t\t\t\t\t}\n                    alert(\"We don't have a record of the email address you entered as enrolled in this class.\\n\\nPlease try again. Make sure to use the same email you used to complete the assignment earlier this semester, even if it was not your academic email.\");\n                }\n            },\n            error: function(error) {\n                // Handle errors in the API call\n\t\t\t\tconsole.log(error);\n                alert(\"There was an error contacting the server. Please try again later. If the issue persists, contact your instructor or email pingpongedu@hks.harvard.edu\");\n            }\n        });\n\n        // Returning false ensures that no other click events are triggered.\n        return false;\n    });\n});\n\nQualtrics.SurveyEngine.addOnReady(function()\n{\n\t/*Place your JavaScript here to run when the page is fully displayed*/\n\n});\n\nQualtrics.SurveyEngine.addOnUnload(function()\n{\n\tQualtrics.SurveyEngine.setJSEmbeddedData(\"failed_attempts_email\", 0);\n\t/*Place your JavaScript here to run when the page is unloaded*/\n\tjQuery(\"#next-button\").off(\"click.emailCheck\");\n\n});"
+        "QuestionJS": "Qualtrics.SurveyEngine.addOnload(function() {\n    let questionElement = document.getElementById(\"question-QID73\");\n\tlet initCounter = parseInt(Qualtrics.SurveyEngine.getJSEmbeddedData('failed_attempts_email'), 10);\n\tif (initCounter < 2) {\n\t\tquestionElement.style.display = 'none';\n\t}\n\t\n    var qthis = this;  // Reference to the current question context\n\n    // Update this selector based on which input holds the email.\n    var codeSelector = \"#question-QID3 .text-input\";  // adjust as needed\n\n    // Intercept the Next button using its current ID in the new layout.\n    jQuery(\"#next-button\").off(\"click.emailCheck\").on(\"click.emailCheck\", function(event) {\n        // Prevent default actions and propagation.\n        event.preventDefault();\n        event.stopImmediatePropagation();\n\t\t\n\t\tlet overrideCheckbox = document.getElementById(\"mc-choice-input-QID73-1\");\n\t\tif (overrideCheckbox.checked) {\n\t\t\tqthis.clickNextButton();\n\t\t\treturn false;\n\t\t};\n\n        // Get the code entered by the user.\n        var userEmail = jQuery(codeSelector).val();\n\t\t\n\t\tif (userEmail.toLowerCase().trim()===\"@rct@\") {\n\t\t\tqthis.clickNextButton();\n\t\t\treturn false;\n\t\t};\n\t\t\n\t\tvar courseId = \"$${e://Field/pp_airtable_class_RID}\"\n\n        // Make an API call to Airtable to verify the code.\n\t\tvar formula = \"https://api.airtable.com/v0/appVTPUUDF3ADmhzt/tbllpDp4BmwvAwcBi?filterByFormula=\" + \"AND(FIND('$$' %26 LOWER(TRIM('\"+ encodeURIComponent(userEmail.trim()) + \"')) %26 '$$', LOWER({fldUdjbup523cqlXV})) > 0, FIND('\" + courseId + \"', {fldmegozy8Ixm3GTZ}) > 0)\";\n\n\t\tjQuery.ajax({\n            url: formula,\n            method: \"GET\",\n            headers: {\n                \"Authorization\": \"Bearer patn1udOzwDD2iUiM.5bb8f4e3568c1d149df9c401ae6a312bdb4c94c0b26e52fc47592043d4c1d177\"\n            },\n            success: function(response) {\n                // Check if at least one record is returned\n                if (response.records && response.records.length > 0 && response.records[0].id) {\n                    // Email is valid – proceed to the next page.\n\t\t\t\t\tQualtrics.SurveyEngine.setJSEmbeddedData(\"airtable_student_RID\", response.records[0].id);\n                    qthis.clickNextButton();\n                } else {\n                    // No valid records were found.\n\t\t\t\t\tvar counter = parseInt(Qualtrics.SurveyEngine.getJSEmbeddedData('failed_attempts_email'), 10);\n\t\t\t\t\tQualtrics.SurveyEngine.setJSEmbeddedData(\"failed_attempts_email\", counter + 1);\n\t\t\t\t\tcounter = parseInt(Qualtrics.SurveyEngine.getJSEmbeddedData('failed_attempts_email'), 10);\n\t\t\t\t\tif (counter > 1) {\n\t\t\t\t\t\talert(\"We're still having trouble finding your record.\\n\\nIf you're certain you completed the previous assignment for this class with this email, check the \\\"Still having issues\\\" checkbox to continue.\");\n\t\t\t\t\t\tquestionElement.style.display = 'block';\n\t\t\t\t\t\treturn false;\n\t\t\t\t\t}\n                    alert(\"We don't have a record of the email address you entered as enrolled in this class.\\n\\nPlease try again. Make sure to use the same email you used to complete the assignment earlier this semester, even if it was not your academic email.\");\n                }\n            },\n            error: function(error) {\n                // Handle errors in the API call\n\t\t\t\tconsole.log(error);\n                alert(\"There was an error contacting the server. Please try again later. If the issue persists, contact your instructor or email pingpongedu@hks.harvard.edu\");\n            }\n        });\n\n        // Returning false ensures that no other click events are triggered.\n        return false;\n    });\n});\n\nQualtrics.SurveyEngine.addOnReady(function()\n{\n\t/*Place your JavaScript here to run when the page is fully displayed*/\n\n});\n\nQualtrics.SurveyEngine.addOnUnload(function()\n{\n\tQualtrics.SurveyEngine.setJSEmbeddedData(\"failed_attempts_email\", 0);\n\t/*Place your JavaScript here to run when the page is unloaded*/\n\tjQuery(\"#next-button\").off(\"click.emailCheck\");\n\n});"
       }
     },
     {
@@ -2458,7 +2752,15 @@ EXAM_QSF_TEMPLATE = Template(r"""
           "Private": false
         },
         "DefaultChoices": false,
-        "GradingData": [],
+        "GradingData":[
+            {
+              "ChoiceID":"$A9CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
         "Language": [],
         "NextAnswerId": 1,
         "NextChoiceId": 9,
@@ -2589,7 +2891,15 @@ EXAM_QSF_TEMPLATE = Template(r"""
           "Private": false
         },
         "DefaultChoices": false,
-        "GradingData": [],
+        "GradingData":[
+            {
+              "ChoiceID":"$A10CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
         "Language": [],
         "NextAnswerId": 1,
         "NextChoiceId": 9,
@@ -2644,7 +2954,15 @@ EXAM_QSF_TEMPLATE = Template(r"""
             "Type": "None"
           }
         },
-        "GradingData": [],
+        "GradingData":[
+            {
+              "ChoiceID":"$A1CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
         "Language": [],
         "NextChoiceId": 9,
         "NextAnswerId": 1,
@@ -3298,6 +3616,218 @@ EXAM_QSF_TEMPLATE = Template(r"""
       }
     },
     {
+      "SurveyID":"SV_eyerBD842srQPYO",
+      "Element":"SQ",
+      "PrimaryAttribute":"QID75",
+      "SecondaryAttribute":"Question 4/10.",
+      "TertiaryAttribute":null,
+      "Payload":{
+        "QuestionText": "$A4QuestionText",
+        "DefaultChoices":false,
+        "DataExportTag":"TEST_A4",
+        "QuestionType":"MC",
+        "Selector":"SAVR",
+        "SubSelector":"TX",
+        "DataVisibility":{
+            "Private":false,
+            "Hidden":false
+        },
+        "Configuration":{
+            "QuestionDescriptionOption":"UseText"
+        },
+        "Choices": $A4Choices,
+        "ChoiceOrder": $A4ChoiceOrder,
+        "Randomization":{
+            "Advanced":null,
+            "TotalRandSubset":"",
+            "Type":"None"
+        },
+        "Validation":{
+            "Settings":{
+              "ForceResponse":"OFF",
+              "ForceResponseType":"ON",
+              "Type":"None"
+            }
+        },
+        "RecodeValues": $A4RecodeValues,
+        "QuestionJS": "",
+        "GradingData":[
+            {
+              "ChoiceID":"$A4CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
+        "Language":[
+
+        ],
+        "NextChoiceId":6,
+        "NextAnswerId":1,
+        "QuestionID":"QID75"
+      }
+    },
+    {
+      "SurveyID":"SV_eyerBD842srQPYO",
+      "Element":"SQ",
+      "PrimaryAttribute":"QID76",
+      "SecondaryAttribute": "Question 1/10.",
+      "TertiaryAttribute":null,
+      "Payload":{
+        "QuestionText": "$A1QuestionText",
+        "DefaultChoices":false,
+        "DataExportTag":"TEST_A1",
+        "QuestionType":"MC",
+        "Selector":"SAVR",
+        "SubSelector":"TX",
+        "DataVisibility":{
+            "Private":false,
+            "Hidden":false
+        },
+        "Configuration":{
+            "QuestionDescriptionOption":"UseText"
+        },
+        "Choices": $A1Choices,
+        "ChoiceOrder": $A1ChoiceOrder,
+        "Randomization":{
+            "Advanced":null,
+            "TotalRandSubset":"",
+            "Type":"None"
+        },
+        "Validation":{
+            "Settings":{
+              "ForceResponse":"OFF",
+              "ForceResponseType":"ON",
+              "Type":"None"
+            }
+        },
+        "RecodeValues": $A1RecodeValues,
+        "GradingData":[
+            {
+              "ChoiceID":"$A1CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
+        "Language":[
+
+        ],
+        "NextChoiceId":9,
+        "NextAnswerId":1,
+        "QuestionJS": $TestJavaScript,
+        "QuestionID":"QID76"
+      }
+    },
+    {
+      "SurveyID":"SV_eyerBD842srQPYO",
+      "Element":"SQ",
+      "PrimaryAttribute":"QID77",
+      "SecondaryAttribute": "Question 2/10.",
+      "TertiaryAttribute":null,
+      "Payload":{
+        "QuestionText": "$A2QuestionText",
+        "DefaultChoices":false,
+        "DataExportTag":"TEST_A2",
+        "QuestionType":"MC",
+        "Selector":"SAVR",
+        "SubSelector":"TX",
+        "DataVisibility":{
+            "Private":false,
+            "Hidden":false
+        },
+        "Configuration":{
+            "QuestionDescriptionOption":"UseText"
+        },
+        "Choices": $A2Choices,
+        "ChoiceOrder": $A2ChoiceOrder,
+        "Randomization":{
+            "Advanced":null,
+            "TotalRandSubset":"",
+            "Type":"None"
+        },
+        "Validation":{
+            "Settings":{
+              "ForceResponse":"OFF",
+              "ForceResponseType":"ON",
+              "Type":"None"
+            }
+        },
+        "RecodeValues": $A2RecodeValues,
+        "GradingData":[
+            {
+              "ChoiceID":"$A2CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
+        "Language":[
+
+        ],
+        "NextChoiceId":6,
+        "NextAnswerId":1,
+        "QuestionID":"QID77",
+        "QuestionJS": ""
+      }
+    },
+    {
+      "SurveyID":"SV_eyerBD842srQPYO",
+      "Element":"SQ",
+      "PrimaryAttribute":"QID79",
+      "SecondaryAttribute": "Question 3/10.",
+      "TertiaryAttribute":null,
+      "Payload":{
+        "QuestionText": "$A3QuestionText",
+        "DefaultChoices":false,
+        "DataExportTag":"TEST_A3",
+        "QuestionType":"MC",
+        "Selector":"SAVR",
+        "SubSelector":"TX",
+        "DataVisibility":{
+            "Private":false,
+            "Hidden":false
+        },
+        "Configuration":{
+            "QuestionDescriptionOption":"UseText"
+        },
+        "Choices": $A3Choices,
+        "ChoiceOrder": $A3ChoiceOrder,
+        "Randomization":{
+            "Advanced":null,
+            "TotalRandSubset":"",
+            "Type":"None"
+        },
+        "Validation":{
+            "Settings":{
+              "ForceResponse":"OFF",
+              "ForceResponseType":"ON",
+              "Type":"None"
+            }
+        },
+        "RecodeValues": $A3RecodeValues,
+        "GradingData":[
+            {
+              "ChoiceID":"$A3CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
+        "Language":[
+
+        ],
+        "NextChoiceId":9,
+        "NextAnswerId":1,
+        "QuestionID":"QID79",
+        "QuestionJS": ""
+      }
+    },
+    {
       "SurveyID": "SV_eP5ggSR1YMcI2HA",
       "Element": "SQ",
       "PrimaryAttribute": "QID8",
@@ -3328,6 +3858,324 @@ EXAM_QSF_TEMPLATE = Template(r"""
         "NextChoiceId": 4,
         "NextAnswerId": 1,
         "QuestionID": "QID8"
+      }
+    },
+    {
+      "SurveyID":"SV_eyerBD842srQPYO",
+      "Element":"SQ",
+      "PrimaryAttribute":"QID80",
+      "SecondaryAttribute": "Question 5/10.",
+      "TertiaryAttribute":null,
+      "Payload":{
+        "QuestionText": "$A5QuestionText",
+        "DefaultChoices":false,
+        "DataExportTag":"TEST_A5",
+        "QuestionType":"MC",
+        "Selector":"SAVR",
+        "SubSelector":"TX",
+        "DataVisibility":{
+            "Private":false,
+            "Hidden":false
+        },
+        "Configuration":{
+            "QuestionDescriptionOption":"UseText"
+        },
+        "Choices": $A5Choices,
+        "ChoiceOrder": $A5ChoiceOrder,
+        "Randomization":{
+            "Advanced":null,
+            "TotalRandSubset":"",
+            "Type":"None"
+        },
+        "Validation":{
+            "Settings":{
+              "ForceResponse":"OFF",
+              "ForceResponseType":"ON",
+              "Type":"None"
+            }
+        },
+        "RecodeValues": $A5RecodeValues,
+        "GradingData":[
+            {
+              "ChoiceID":"$A5CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
+        "Language":[
+
+        ],
+        "NextChoiceId":6,
+        "NextAnswerId":1,
+        "QuestionID":"QID80",
+        "QuestionJS": ""
+      }
+    },
+    {
+      "SurveyID":"SV_eyerBD842srQPYO",
+      "Element":"SQ",
+      "PrimaryAttribute":"QID81",
+      "SecondaryAttribute": "Question 6/10.",
+      "TertiaryAttribute":null,
+      "Payload":{
+        "QuestionText": "$A6QuestionText",
+        "DefaultChoices":false,
+        "DataExportTag":"TEST_A6",
+        "QuestionType":"MC",
+        "Selector":"SAVR",
+        "SubSelector":"TX",
+        "DataVisibility":{
+            "Private":false,
+            "Hidden":false
+        },
+        "Configuration":{
+            "QuestionDescriptionOption":"UseText"
+        },
+        "Choices": $A6Choices,
+        "ChoiceOrder": $A6ChoiceOrder,
+        "Randomization":{
+            "Advanced":null,
+            "TotalRandSubset":"",
+            "Type":"None"
+        },
+        "Validation":{
+            "Settings":{
+              "ForceResponse":"OFF",
+              "ForceResponseType":"ON",
+              "Type":"None"
+            }
+        },
+        "RecodeValues": $A6RecodeValues,
+        "GradingData":[
+            {
+              "ChoiceID":"$A6CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
+        "Language":[
+
+        ],
+        "NextChoiceId":6,
+        "NextAnswerId":1,
+        "QuestionID":"QID81",
+        "QuestionJS": ""
+      }
+    },
+    {
+      "SurveyID":"SV_eyerBD842srQPYO",
+      "Element":"SQ",
+      "PrimaryAttribute":"QID82",
+      "SecondaryAttribute": "Question 7/10.",
+      "TertiaryAttribute":null,
+      "Payload":{
+        "QuestionText": "$A7QuestionText",
+        "DefaultChoices":false,
+        "DataExportTag":"TEST_A7",
+        "QuestionType":"MC",
+        "Selector":"SAVR",
+        "SubSelector":"TX",
+        "DataVisibility":{
+            "Private":false,
+            "Hidden":false
+        },
+        "Configuration":{
+            "QuestionDescriptionOption":"UseText"
+        },
+        "Choices": $A7Choices,
+        "ChoiceOrder": $A7ChoiceOrder,
+        "Randomization":{
+            "Advanced":null,
+            "TotalRandSubset":"",
+            "Type":"None"
+        },
+        "Validation":{
+            "Settings":{
+              "ForceResponse":"OFF",
+              "ForceResponseType":"ON",
+              "Type":"None"
+            }
+        },
+        "RecodeValues": $A7RecodeValues,
+        "GradingData":[
+            {
+              "ChoiceID":"$A7CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
+        "Language":[
+
+        ],
+        "NextChoiceId":9,
+        "NextAnswerId":1,
+        "QuestionID":"QID82",
+        "QuestionJS": ""
+      }
+    },
+    {
+      "SurveyID":"SV_eyerBD842srQPYO",
+      "Element":"SQ",
+      "PrimaryAttribute":"QID83",
+      "SecondaryAttribute": "Question 8/10.",
+      "TertiaryAttribute":null,
+      "Payload":{
+        "QuestionText": "$A8QuestionText",
+        "DefaultChoices":false,
+        "DataExportTag":"TEST_A8",
+        "QuestionType":"MC",
+        "Selector":"SAVR",
+        "SubSelector":"TX",
+        "DataVisibility":{
+            "Private":false,
+            "Hidden":false
+        },
+        "Configuration":{
+            "QuestionDescriptionOption":"UseText"
+        },
+        "Choices": $A8Choices,
+        "ChoiceOrder": $A8ChoiceOrder,
+        "Randomization":{
+            "Advanced":null,
+            "TotalRandSubset":"",
+            "Type":"None"
+        },
+        "Validation":{
+            "Settings":{
+              "ForceResponse":"OFF",
+              "ForceResponseType":"ON",
+              "Type":"None"
+            }
+        },
+        "RecodeValues": $A8RecodeValues,
+        "GradingData":[
+            {
+              "ChoiceID":"$A8CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
+        "Language":[
+
+        ],
+        "NextChoiceId":11,
+        "NextAnswerId":1,
+        "QuestionID":"QID83",
+        "QuestionJS": ""
+      }
+    },
+    {
+      "SurveyID":"SV_eyerBD842srQPYO",
+      "Element":"SQ",
+      "PrimaryAttribute":"QID84",
+      "SecondaryAttribute": "Question 9/10.",
+      "TertiaryAttribute":null,
+      "Payload":{
+        "QuestionText": "$A9QuestionText",
+        "DefaultChoices":false,
+        "DataExportTag":"TEST_A9",
+        "QuestionType":"MC",
+        "Selector":"SAVR",
+        "SubSelector":"TX",
+        "DataVisibility":{
+            "Private":false,
+            "Hidden":false
+        },
+        "Configuration":{
+            "QuestionDescriptionOption":"UseText"
+        },
+        "Choices": $A9Choices,
+        "ChoiceOrder": $A9ChoiceOrder,
+        "Randomization":{
+            "Advanced":null,
+            "TotalRandSubset":"",
+            "Type":"None"
+        },
+        "Validation":{
+            "Settings":{
+              "ForceResponse":"OFF",
+              "ForceResponseType":"ON",
+              "Type":"None"
+            }
+        },
+        "RecodeValues": $A9RecodeValues,
+        "GradingData":[
+            {
+              "ChoiceID":"$A9CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
+        "Language":[
+
+        ],
+        "NextChoiceId":9,
+        "NextAnswerId":1,
+        "QuestionID":"QID84",
+        "QuestionJS": ""
+      }
+    },
+    {
+      "SurveyID":"SV_eyerBD842srQPYO",
+      "Element":"SQ",
+      "PrimaryAttribute":"QID85",
+      "SecondaryAttribute": "Question 10/10.",
+      "TertiaryAttribute":null,
+      "Payload":{
+        "QuestionText": "$A10QuestionText",
+        "DefaultChoices":false,
+        "DataExportTag":"TEST_A10 ",
+        "QuestionType":"MC",
+        "Selector":"SAVR",
+        "SubSelector":"TX",
+        "DataVisibility":{
+            "Private":false,
+            "Hidden":false
+        },
+        "Configuration":{
+            "QuestionDescriptionOption":"UseText"
+        },
+        "Choices": $A10Choices,
+        "ChoiceOrder": $A10ChoiceOrder,
+        "Randomization":{
+            "Advanced":null,
+            "TotalRandSubset":"",
+            "Type":"None"
+        },
+        "Validation":{
+            "Settings":{
+              "ForceResponse":"OFF",
+              "ForceResponseType":"ON",
+              "Type":"None"
+            }
+        },
+        "RecodeValues": $A10RecodeValues,
+        "GradingData":[
+            {
+              "ChoiceID":"$A10CorrectChoiceID",
+              "Grades":{
+                  "SC_78JgOoF7SGSRmAe":"1"
+              },
+              "index":0
+            }
+        ],
+        "Language":[
+
+        ],
+        "NextChoiceId":9,
+        "NextAnswerId":1,
+        "QuestionID":"QID85",
+        "QuestionJS": ""
       }
     },
     {

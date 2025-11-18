@@ -60,6 +60,9 @@ async def process_exams(email: str) -> None:
                     f"Class {class_.name} postassessment URL: {class_.postassessment_url}"
                 )
             except Exception as e:
+                class_.postassessment_status = "Script Error"
+                class_.postassessment_error = str(e)
+                class_.save()
                 logger.warning(
                     f"Error processing class {class_.name} {class_.id}: {e}",
                     exc_info=True,
