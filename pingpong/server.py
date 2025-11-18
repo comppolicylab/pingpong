@@ -2121,8 +2121,8 @@ async def list_class_models(
             "supports_next_gen_assistants": KNOWN_MODELS[m.id][
                 "supports_next_gen_assistants"
             ],
-            "supports_expanded_reasoning_effort": KNOWN_MODELS[m.id][
-                "supports_expanded_reasoning_effort"
+            "supports_minimal_reasoning_effort": KNOWN_MODELS[m.id][
+                "supports_minimal_reasoning_effort"
             ],
             "supports_verbosity": KNOWN_MODELS[m.id]["supports_verbosity"],
             "supports_web_search": KNOWN_MODELS[m.id]["supports_web_search"],
@@ -2153,7 +2153,7 @@ async def list_class_models(
                 "supports_reasoning": False,
                 "supports_classic_assistants": True,
                 "supports_next_gen_assistants": False,
-                "supports_expanded_reasoning_effort": False,
+                "supports_minimal_reasoning_effort": False,
                 "supports_verbosity": False,
                 "supports_web_search": False,
                 "description": "The latest GPT-4 Turbo model.",
@@ -2180,7 +2180,7 @@ async def list_class_models(
                 "supports_reasoning": False,
                 "supports_classic_assistants": True,
                 "supports_next_gen_assistants": False,
-                "supports_expanded_reasoning_effort": False,
+                "supports_minimal_reasoning_effort": False,
                 "supports_verbosity": False,
                 "supports_web_search": False,
                 "description": "The latest GPT-4 Turbo preview model.",
@@ -5565,7 +5565,7 @@ async def create_assistant(
                     else req.model
                 )
 
-            if model_record.supports_expanded_reasoning_effort:
+            if model_record.supports_minimal_reasoning_effort:
                 reasoning_effort = (
                     REASONING_EFFORT_EXPANDED_MAP.get(req.reasoning_effort)
                     if req.reasoning_effort is not None
@@ -6052,7 +6052,7 @@ async def update_assistant(
 
     new_reasoning_effort_body = None
     if "reasoning_effort" in req.model_fields_set:
-        if model_record and model_record.supports_expanded_reasoning_effort:
+        if model_record and model_record.supports_minimal_reasoning_effort:
             reasoning_effort = (
                 REASONING_EFFORT_EXPANDED_MAP.get(req.reasoning_effort)
                 if req.reasoning_effort is not None

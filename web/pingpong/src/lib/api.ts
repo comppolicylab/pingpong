@@ -1099,7 +1099,7 @@ export type AssistantModel = {
   supports_temperature: boolean;
   supports_classic_assistants: boolean;
   supports_next_gen_assistants: boolean;
-  supports_expanded_reasoning_effort: boolean;
+  supports_minimal_reasoning_effort: boolean;
   supports_verbosity: boolean;
   supports_web_search: boolean;
   supports_reasoning: boolean;

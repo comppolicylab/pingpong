@@ -257,9 +257,11 @@
     ) {
       selectedModel = assistant?.model || versionedModelOptions[0].value;
     } else if (latestModelOptions.length > 0) {
-      selectedModel = latestModelOptions[0].value;
+      const highlighted = latestModelOptions.find((m) => m.highlight);
+      selectedModel = highlighted ? highlighted.value : latestModelOptions[0].value;
     } else if (versionedModelOptions.length > 0) {
-      selectedModel = versionedModelOptions[0].value;
+      const highlighted = versionedModelOptions.find((m) => m.highlight);
+      selectedModel = highlighted ? highlighted.value : versionedModelOptions[0].value;
     } else {
       selectedModel = '';
     }
@@ -303,11 +305,11 @@
   $: supportReasoningModels = (data.models.filter((model) => model.supports_reasoning) || []).map(
     (model) => model.id
   );
-  $: supportExpandedReasoningEffortModels = (
-    data.models.filter((model) => model.supports_expanded_reasoning_effort) || []
+  $: supportMinimalReasoningEffortModels = (
+    data.models.filter((model) => model.supports_minimal_reasoning_effort) || []
   ).map((model) => model.id);
   $: supportsReasoning = supportReasoningModels.includes(selectedModel);
-  $: supportsExpandedReasoningEffort = supportExpandedReasoningEffortModels.includes(selectedModel);
+  $: supportsMinimalReasoningEffort = supportMinimalReasoningEffortModels.includes(selectedModel);
   $: supportsVerbosityModels = (data.models.filter((model) => model.supports_verbosity) || []).map(
     (model) => model.id
   );
@@ -1659,7 +1661,7 @@
                     answers, choose a temperature closer to 0.2. For more varied or creative
                     responses, try a setting closer to 1. Avoid setting the temperature much above 1
                     unless you need very experimental responses, as it may lead to less predictable
-                    and more random answers. You can change this setting anytime.</Helper
+                    and more random answers.</Helper
                   >
                 {:else if interactionMode === 'voice'}
                   <Helper class="pb-1"
@@ -1781,7 +1783,7 @@
                 <Helper class="pb-1"
                   >Select your desired reasoning effort, which gives the model guidance on how much
                   time it should spend "reasoning" before creating a response to the prompt. You can
-                  specify one of {#if supportsExpandedReasoningEffort}<span class="font-mono"
+                  specify one of {#if supportsMinimalReasoningEffort}<span class="font-mono"
                       >minimal</span
                     >,
                   {/if}<span class="font-mono">low</span>,
@@ -1792,24 +1794,24 @@
                   will favor more complete reasoning at the cost of slower responses. The default value
                   is
                   <span class="font-mono">low</span>, which is a balance between speed and reasoning
-                  accuracy. You can change this setting anytime.</Helper
+                  accuracy.</Helper
                 >
               </div>
               <Range
                 id="reasoning-effort"
                 name="reasoning-effort"
-                min={supportsExpandedReasoningEffort ? -1 : 0}
+                min={supportsMinimalReasoningEffort ? -1 : 0}
                 max="2"
                 bind:value={reasoningEffortValue}
                 step="1"
                 disabled={preventEdits}
               />
               <div class="mt-2 flex flex-row justify-between">
-                {#if supportsExpandedReasoningEffort}
+                {#if supportsMinimalReasoningEffort}
                   <p class="text-sm">minimal</p>
                 {/if}
-                <p class={(supportsExpandedReasoningEffort ? '-ml-1' : '') + ' text-sm'}>low</p>
-                <p class={(supportsExpandedReasoningEffort ? 'ml-2' : '') + ' text-sm'}>medium</p>
+                <p class={(supportsMinimalReasoningEffort ? '-ml-1' : '') + ' text-sm'}>low</p>
+                <p class={(supportsMinimalReasoningEffort ? 'ml-2' : '') + ' text-sm'}>medium</p>
                 <p class="text-sm">high</p>
               </div>
             {/if}
@@ -1833,7 +1835,7 @@
                     </li>
                   </ol>
                   Models before GPT-5 have used medium verbosity by default. With GPT-5, this option
-                  is configurable as one of<span class="font-mono">high</span>,
+                  is configurable as one of <span class="font-mono">high</span>,
                   <span class="font-mono">medium</span>, or <span class="font-mono">low</span>. When
                   generating code, <span class="font-mono">medium</span> and
                   <span class="font-mono">high</span>
@@ -1841,7 +1843,7 @@
                   <span class="font-mono">low</span>
                   verbosity produces shorter, more concise code with minimal commentary. The default
                   value is
-                  <span class="font-mono">medium</span>. You can change this setting anytime.</Helper
+                  <span class="font-mono">medium</span>.</Helper
                 >
               </div>
               <Range

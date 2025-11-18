@@ -1233,7 +1233,7 @@ class AssistantModel(BaseModel):
     highlight: bool
     supports_classic_assistants: bool
     supports_next_gen_assistants: bool
-    supports_expanded_reasoning_effort: bool
+    supports_minimal_reasoning_effort: bool
     supports_verbosity: bool
     supports_web_search: bool
     supports_vision: bool
@@ -1267,7 +1267,7 @@ class AssistantModelDict(TypedDict):
     type: Literal["chat", "voice"]
     supports_classic_assistants: bool
     supports_next_gen_assistants: bool
-    supports_expanded_reasoning_effort: bool
+    supports_minimal_reasoning_effort: bool
     supports_verbosity: bool
     supports_web_search: bool
     supports_vision: bool
