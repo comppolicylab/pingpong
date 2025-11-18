@@ -7,6 +7,9 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+import logging
+
+logging.getLogger("selenium").setLevel(logging.INFO)
 
 if not QUALTRICS_BASE_URL:
     raise ValueError("Missing Qualtrics Base URL in environment.")
@@ -49,6 +52,12 @@ class QualtricsWebDriver:
             )
         )
         input.click()
+        input = self.wait.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//button[contains(.,'Yes, this is my device')]")
+            )
+        )
+        input.click()
         self.wait.until(
             EC.visibility_of_element_located((By.XPATH, "//h1[contains(., 'Home')]"))
         )
@@ -75,8 +84,8 @@ class QualtricsWebDriver:
         input = self.wait.until(
             EC.element_to_be_clickable(
                 (
-                    By.CSS_SELECTOR,
-                    "div._13uaN:nth-child(2) > div:nth-child(2) > button:nth-child(1)",
+                    By.XPATH,
+                    "//button[@data-testid='navigation-activate-modal-resume']",
                 )
             )
         )
