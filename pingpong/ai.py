@@ -8,6 +8,7 @@ import logging
 from fastapi import UploadFile
 import openai
 import orjson
+from pingpong.ai_models import VERBOSITY_MAP, get_reasoning_effort_map
 from pingpong.auth import encode_auth_token
 from pingpong.authz.base import AuthzClient
 from pingpong.db import db_session_handler
@@ -22,6 +23,7 @@ from pingpong.prompt import replace_random_blocks
 from pingpong.schemas import (
     APIKeyValidationResponse,
     AnnotationType,
+    Assistant,
     CodeInterpreterOutputType,
     FileSearchToolAnnotationResult,
     MessageStatus,
@@ -142,34 +144,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
 responses_api_transition_logger = logging.getLogger("responses_api_transition")
+OpenAIClientType = Union[openai.AsyncClient, openai.AsyncAzureOpenAI]
 
 
 class GetOpenAIClientException(Exception):
     def __init__(self, detail: str = "", code: int | None = None):
         self.code = code
         self.detail = detail
-
-
-REASONING_EFFORT_MAP = {
-    0: "low",
-    1: "medium",
-    2: "high",
-}
-
-REASONING_EFFORT_EXPANDED_MAP = {
-    -1: "minimal",
-    0: "low",
-    1: "medium",
-    2: "high",
-}
-
-VERBOSITY_MAP = {
-    0: "low",
-    1: "medium",
-    2: "high",
-}
-
-OpenAIClientType = Union[openai.AsyncClient, openai.AsyncAzureOpenAI]
 
 
 async def get_openai_client_by_class_id(
@@ -197,6 +178,48 @@ async def get_openai_client_by_class_id(
         return get_openai_client(result.api_key)
     else:
         raise GetOpenAIClientException(code=401, detail="No API key for class")
+
+
+async def upgrade_assistants_model(
+    deprecated_model: str, replacement_model: str
+) -> None:
+    async with config.db.driver.async_session() as session:
+        assistants_to_upgrade = await Assistant.get_by_model(session, deprecated_model)
+        if not assistants_to_upgrade:
+            logger.info(f"No assistants found with model name {deprecated_model}")
+            return
+
+        for assistant in assistants_to_upgrade:
+            logger.info(
+                f"Upgrading model for assistant {assistant.name} ({assistant.assistant_id}) from {deprecated_model} to {replacement_model}"
+            )
+            async with session.begin_nested() as session_:
+                try:
+                    # Update the model on OpenAI
+                    await update_model_on_openai(session, assistant, replacement_model)
+                    # Update the model in the database
+                    assistant.model = replacement_model
+                    session.add(assistant)
+                except Exception as e:
+                    logger.exception(
+                        f"Failed to upgrade model for assistant {assistant.assistant_id} from {deprecated_model} to {replacement_model}: {e}"
+                    )
+                    await session_.rollback()
+                    continue
+
+        await session.commit()
+        logger.info(
+            f"Completed upgrading assistant models from {deprecated_model} to {replacement_model}"
+        )
+
+
+async def update_model_on_openai(
+    session: AsyncSession, assistant: Assistant, new_model: str
+) -> None:
+    oai_client = await get_openai_client_by_class_id(session, assistant.class_id)
+    return await oai_client.beta.assistants.update(
+        assistant.assistant_id, model=new_model
+    )
 
 
 def get_azure_model_deployment_name_equivalent(model_name: str) -> str:
@@ -2543,14 +2566,15 @@ async def run_response(
             reasoning_settings: Reasoning | openai.NotGiven = openai.NOT_GIVEN
             text_settings: ResponseTextConfigParam | openai.NotGiven = openai.NOT_GIVEN
             include_with = []
+            reasoning_effort_map = get_reasoning_effort_map(run.model)
 
             if run.reasoning_effort is not None:
-                if run.reasoning_effort not in REASONING_EFFORT_EXPANDED_MAP:
+                if run.reasoning_effort not in reasoning_effort_map:
                     raise ValueError(
-                        f"Invalid reasoning effort: {run.reasoning_effort}. Must be one of {list(REASONING_EFFORT_EXPANDED_MAP.keys())}."
+                        f"Invalid reasoning effort: {run.reasoning_effort}. Must be one of {list(reasoning_effort_map.keys())}."
                     )
                 reasoning_settings = Reasoning(
-                    effort=REASONING_EFFORT_EXPANDED_MAP[run.reasoning_effort],
+                    effort=reasoning_effort_map[run.reasoning_effort],
                     summary="auto",
                 )
                 include_with.append("reasoning.encrypted_content")

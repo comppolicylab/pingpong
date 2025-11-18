@@ -1100,10 +1100,12 @@ export type AssistantModel = {
   supports_classic_assistants: boolean;
   supports_next_gen_assistants: boolean;
   supports_minimal_reasoning_effort: boolean;
+  supports_none_reasoning_effort: boolean;
   supports_verbosity: boolean;
   supports_web_search: boolean;
   supports_reasoning: boolean;
   hide_in_model_selector?: boolean;
+  reasoning_effort_levels?: number[];
   default_prompt_id?: string | null;
 };
 

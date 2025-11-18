@@ -1234,6 +1234,7 @@ class AssistantModel(BaseModel):
     supports_classic_assistants: bool
     supports_next_gen_assistants: bool
     supports_minimal_reasoning_effort: bool
+    supports_none_reasoning_effort: bool
     supports_verbosity: bool
     supports_web_search: bool
     supports_vision: bool
@@ -1243,6 +1244,7 @@ class AssistantModel(BaseModel):
     supports_temperature: bool
     supports_reasoning: bool
     hide_in_model_selector: bool | None = None
+    reasoning_effort_levels: list[int] | None = None
 
 
 class AssistantModelLite(BaseModel):
@@ -1268,6 +1270,7 @@ class AssistantModelDict(TypedDict):
     supports_classic_assistants: bool
     supports_next_gen_assistants: bool
     supports_minimal_reasoning_effort: bool
+    supports_none_reasoning_effort: bool
     supports_verbosity: bool
     supports_web_search: bool
     supports_vision: bool
@@ -1276,6 +1279,7 @@ class AssistantModelDict(TypedDict):
     supports_temperature: bool
     supports_reasoning: bool
     description: str
+    reasoning_effort_levels: NotRequired[list[int]]
     default_prompt_id: NotRequired[str]
 
 
