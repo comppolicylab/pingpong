@@ -47,7 +47,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": True,
         "supports_verbosity": False,
         "supports_web_search": True,
-        "description": "Previous intelligent reasoning model for coding, reasoning and tasks across domains. Tune how long the model spends thinking in Advanced Options.",
+        "description": "Previous intelligent reasoning model for coding, reasoning and tasks across domains. Control how long the model spends thinking in Advanced Options.",
     },
     "gpt-5-mini": {
         "name": "GPT-5 mini",

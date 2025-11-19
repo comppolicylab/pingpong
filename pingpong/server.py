@@ -5465,7 +5465,7 @@ async def create_assistant(
         req.reasoning_effort == -1
         and req.tools
         and len(req.tools) > 0
-        and "minimal" not in reasoning_effort_map.values()
+        and "minimal" in reasoning_effort_map.values()
     ):
         raise HTTPException(
             400,
