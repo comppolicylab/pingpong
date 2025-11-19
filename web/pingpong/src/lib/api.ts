@@ -1099,11 +1099,13 @@ export type AssistantModel = {
   supports_temperature: boolean;
   supports_classic_assistants: boolean;
   supports_next_gen_assistants: boolean;
-  supports_expanded_reasoning_effort: boolean;
+  supports_minimal_reasoning_effort: boolean;
+  supports_none_reasoning_effort: boolean;
   supports_verbosity: boolean;
   supports_web_search: boolean;
   supports_reasoning: boolean;
   hide_in_model_selector?: boolean;
+  reasoning_effort_levels?: number[];
   default_prompt_id?: string | null;
 };
 
@@ -1112,6 +1114,7 @@ export type AssistantModelOptions = {
   name: string;
   description: string;
   supports_vision: boolean;
+  supports_reasoning: boolean;
   is_new: boolean;
   highlight: boolean;
 };

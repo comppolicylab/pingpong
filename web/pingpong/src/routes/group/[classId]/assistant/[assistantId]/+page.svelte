@@ -38,7 +38,8 @@
     MessageDotsSolid,
     MessageDotsOutline,
     MicrophoneOutline,
-    MicrophoneSolid
+    MicrophoneSolid,
+    ArchiveOutline
   } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
   import { writable, type Writable } from 'svelte/store';
@@ -58,6 +59,7 @@
 
   // Flag indicating whether we should check for changes before navigating away.
   let checkForChanges = true;
+  let advancedOptionsOpen = false;
   let assistantForm: HTMLFormElement;
   let deleteModal = false;
   $: assistant = data.assistant;
@@ -232,6 +234,7 @@
     supports_vision:
       model.supports_vision &&
       (model.vision_support_override === undefined || model.vision_support_override),
+    supports_reasoning: model.supports_reasoning,
     is_new: model.is_new,
     highlight: model.highlight
   }));
@@ -257,14 +260,18 @@
     ) {
       selectedModel = assistant?.model || versionedModelOptions[0].value;
     } else if (latestModelOptions.length > 0) {
-      selectedModel = latestModelOptions[0].value;
+      const highlighted = latestModelOptions.find((m) => m.highlight);
+      selectedModel = highlighted ? highlighted.value : latestModelOptions[0].value;
     } else if (versionedModelOptions.length > 0) {
-      selectedModel = versionedModelOptions[0].value;
+      const highlighted = versionedModelOptions.find((m) => m.highlight);
+      selectedModel = highlighted ? highlighted.value : versionedModelOptions[0].value;
     } else {
       selectedModel = '';
     }
   }
   $: selectedModelName = modelNameDict[selectedModel];
+  let selectedModelRecord: api.AssistantModel | undefined;
+  $: selectedModelRecord = data.models.find((model) => model.id === selectedModel);
   $: versionedModelOptions = (
     data.models.filter(
       (model) =>
@@ -282,9 +289,16 @@
     supports_vision:
       model.supports_vision &&
       (model.vision_support_override === undefined || model.vision_support_override),
+    supports_reasoning: model.supports_reasoning,
     is_new: model.is_new,
     highlight: model.highlight
   }));
+  let availableModelIds: string[] = [];
+  let selectedModelDeprecated = false;
+  $: availableModelIds = [...latestModelOptions, ...versionedModelOptions].map(
+    (model) => model.value
+  );
+  $: selectedModelDeprecated = !!selectedModel && !availableModelIds.includes(selectedModel);
   $: supportVisionModels = (data.models.filter((model) => model.supports_vision) || []).map(
     (model) => model.id
   );
@@ -303,11 +317,15 @@
   $: supportReasoningModels = (data.models.filter((model) => model.supports_reasoning) || []).map(
     (model) => model.id
   );
-  $: supportExpandedReasoningEffortModels = (
-    data.models.filter((model) => model.supports_expanded_reasoning_effort) || []
+  $: supportMinimalReasoningEffortModels = (
+    data.models.filter((model) => model.supports_minimal_reasoning_effort) || []
+  ).map((model) => model.id);
+  $: supportNoneReasoningEffortModels = (
+    data.models.filter((model) => model.supports_none_reasoning_effort) || []
   ).map((model) => model.id);
   $: supportsReasoning = supportReasoningModels.includes(selectedModel);
-  $: supportsExpandedReasoningEffort = supportExpandedReasoningEffortModels.includes(selectedModel);
+  $: supportsMinimalReasoningEffort = supportMinimalReasoningEffortModels.includes(selectedModel);
+  $: supportsNoneReasoningEffort = supportNoneReasoningEffortModels.includes(selectedModel);
   $: supportsVerbosityModels = (data.models.filter((model) => model.supports_verbosity) || []).map(
     (model) => model.id
   );
@@ -547,6 +565,11 @@
     }
   };
   let reasoningEffortValue: number;
+  let reasoningEffortLevels: number[] = [];
+  let reasoningEffortMin = -1;
+  let reasoningEffortMax = 2;
+  let reasoningEffortLabels: string[] = [];
+  let defaultReasoningLabel = 'low';
   $: if (
     assistant?.reasoning_effort !== undefined &&
     assistant?.reasoning_effort !== null &&
@@ -573,6 +596,38 @@
       assistant?.reasoning_effort === null)
   ) {
     reasoningEffortValue = 0;
+  }
+  const getReasoningEffortLabel = (level: number) => {
+    switch (level) {
+      case -1:
+        return supportsNoneReasoningEffort ? 'none' : 'minimal';
+      case 0:
+        return 'low';
+      case 1:
+        return 'medium';
+      case 2:
+        return 'high';
+      default:
+        return '';
+    }
+  };
+  $: reasoningEffortLevels =
+    selectedModelRecord?.reasoning_effort_levels ??
+    (supportsNoneReasoningEffort || supportsMinimalReasoningEffort ? [-1, 0, 1, 2] : [0, 1, 2]);
+  $: reasoningEffortMin = reasoningEffortLevels.length ? Math.min(...reasoningEffortLevels) : 0;
+  $: reasoningEffortMax = reasoningEffortLevels.length ? Math.max(...reasoningEffortLevels) : 2;
+  $: reasoningEffortLabels = reasoningEffortLevels
+    .map(getReasoningEffortLabel)
+    .filter((label) => label);
+  $: defaultReasoningLabel = reasoningEffortLevels.includes(0)
+    ? getReasoningEffortLabel(0)
+    : getReasoningEffortLabel(reasoningEffortLevels[0] ?? 0);
+  $: if (
+    supportsReasoning &&
+    reasoningEffortLevels.length > 0 &&
+    !reasoningEffortLevels.includes(reasoningEffortValue)
+  ) {
+    reasoningEffortValue = reasoningEffortLevels[0];
   }
   let verbosityValue: number;
   $: if (
@@ -736,7 +791,7 @@
     if (
       fileSearchToolSelect &&
       supportsFileSearch &&
-      !(supportsReasoning && reasoningEffortValue === -1)
+      !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort)
     ) {
       tools.push({ type: 'file_search' });
     } else {
@@ -745,7 +800,7 @@
     if (
       codeInterpreterToolSelect &&
       supportsCodeInterpreter &&
-      !(supportsReasoning && reasoningEffortValue === -1)
+      !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort)
     ) {
       tools.push({ type: 'code_interpreter' });
     } else {
@@ -754,7 +809,7 @@
     if (
       webSearchToolSelect &&
       supportsWebSearch &&
-      !(supportsReasoning && reasoningEffortValue === -1) &&
+      !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort) &&
       ((data.isCreating && !createClassicAssistant) || assistantVersion === 3)
     ) {
       tools.push({ type: 'web_search' });
@@ -772,13 +827,13 @@
       tools,
       code_interpreter_file_ids:
         supportsCodeInterpreter &&
-        !(supportsReasoning && reasoningEffortValue === -1) &&
+        !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort) &&
         codeInterpreterToolSelect
           ? $selectedCodeInterpreterFiles
           : [],
       file_search_file_ids:
         supportsFileSearch &&
-        !(supportsReasoning && reasoningEffortValue === -1) &&
+        !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort) &&
         fileSearchToolSelect
           ? $selectedFileSearchFiles
           : [],
@@ -1117,9 +1172,26 @@
           class="underline">OpenAI's Documentation</a
         > for detailed descriptions of model capabilities.</Helper
       >
+      {#if selectedModelDeprecated}
+        <div
+          class="flex flex-row items-center gap-4 p-4 py-2 mb-2 text-amber-800 border rounded-lg bg-gradient-to-b border-amber-400 from-amber-50 to-amber-100"
+        >
+          <ArchiveOutline class="text-amber-800 w-8 h-8" strokeWidth="1.5" />
+          <div class="flex flex-col">
+            <span class="text-sm font-semibold">Legacy Model</span>
+            <span class="text-xs"
+              >This model is no longer available for new assistants on PingPong. You can continue
+              using it with this assistant, but you won't be able to switch back after selecting a
+              new model. <span class="font-semibold"
+                >We recommend upgrading to one of the latest models for the best experience.</span
+              ></span
+            >
+          </div>
+        </div>
+      {/if}
       {#if supportsVision && visionSupportOverride === false}
         <div
-          class="flex flex-row items-center gap-4 p-4 py-2 mb-2 text-amber-800 border rounded-lg bg-gradient-to-b border-amber-400 from-amber-50 to-amber-100 text-amber-800"
+          class="flex flex-row items-center gap-4 p-4 py-2 mb-2 border rounded-lg bg-gradient-to-b border-amber-400 from-amber-50 to-amber-100 text-amber-800"
         >
           <div class="flex items-center justify-center relative h-8 w-12">
             <BanOutline class="text-amber-600 w-12 h-12 z-10 absolute" strokeWidth="1.5" />
@@ -1278,6 +1350,42 @@
       <Label for="tools">Tools</Label>
       <Helper>Select tools available to the assistant when generating a response.</Helper>
     </div>
+    {#if supportsReasoning && reasoningEffortValue === -1 && supportsNoneReasoningEffort}
+      <div class="col-span-2 mb-3">
+        <div
+          class="flex flex-row items-center justify-between gap-x-4 p-3 border rounded-lg bg-gradient-to-b border-amber-400 from-amber-50 to-amber-100 text-amber-800"
+        >
+          <div class="flex flex-row items-center gap-x-3">
+            <LightbulbSolid size="md" class="shrink-0" />
+            <div class="flex flex-col text-xs">
+              <span class="font-bold">Tool reliability may be reduced</span>
+              <span
+                >The current <span class="font-mono">none</span> reasoning effort prioritizes speed,
+                which can impact the reliability of tool calls. You can adjust this setting in Advanced
+                Options.</span
+              >
+            </div>
+          </div>
+          <Button
+            size="xs"
+            color="light"
+            class="shrink-0 py-0.5 px-3 bg-white/60 border-amber-400 text-amber-900 hover:bg-white"
+            disabled={preventEdits}
+            on:click={async () => {
+              if (!advancedOptionsOpen) {
+                advancedOptionsOpen = true;
+                await tick();
+                await new Promise((resolve) => setTimeout(resolve, 150));
+              }
+              const el = document.getElementById('reasoning-effort');
+              if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
+            }}>Adjust in Advanced Options</Button
+          >
+        </div>
+      </div>
+    {/if}
     {#if !supportsFileSearch}
       <div class="col-span-2 mb-3">
         <div class="flex flex-col gap-y-1">
@@ -1292,7 +1400,7 @@
           >
         </div>
       </div>
-    {:else if supportsFileSearch && supportsReasoning && reasoningEffortValue === -1}
+    {:else if supportsFileSearch && supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort}
       <div class="col-span-2 mb-3">
         <div class="flex flex-col gap-y-1">
           <Badge
@@ -1333,7 +1441,7 @@
             select a different model.</Helper
           >
         </div>
-      {:else if supportsCodeInterpreter && supportsReasoning && reasoningEffortValue === -1}
+      {:else if supportsCodeInterpreter && supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort}
         <div class="col-span-2 mb-3">
           <div class="flex flex-col gap-y-1">
             <Badge
@@ -1388,7 +1496,7 @@
               different model.</Helper
             >
           </div>
-        {:else if supportsWebSearch && supportsReasoning && reasoningEffortValue === -1}
+        {:else if supportsWebSearch && supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort}
           <div class="col-span-2 mb-3">
             <div class="flex flex-col gap-y-1">
               <Badge
@@ -1424,7 +1532,7 @@
       </div>
     {/if}
 
-    {#if fileSearchToolSelect && supportsFileSearch && !(supportsReasoning && reasoningEffortValue === -1)}
+    {#if fileSearchToolSelect && supportsFileSearch && !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort)}
       <div class="col-span-2 mb-4">
         <Label for="selectedFileSearchFiles">{fileSearchMetadata.name} Files</Label>
         <Helper class="pb-1"
@@ -1460,7 +1568,7 @@
       </div>
     {/if}
 
-    {#if codeInterpreterToolSelect && supportsCodeInterpreter && !(supportsReasoning && reasoningEffortValue === -1)}
+    {#if codeInterpreterToolSelect && supportsCodeInterpreter && !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort)}
       <div class="col-span-2 mb-4">
         <Label for="selectedCodeInterpreterFiles">{codeInterpreterMetadata.name} Files</Label>
         <Helper class="pb-1"
@@ -1548,6 +1656,7 @@
     <div class="w-8/9 my-5">
       <Accordion>
         <AccordionItem
+          bind:open={advancedOptionsOpen}
           paddingDefault="px-5 py-3"
           defaultClass="px-6 py-4 flex items-center justify-between w-full font-medium text-left rounded border-gray-200 dark:border-gray-700"
           activeClass="rounded-b-none"
@@ -1659,7 +1768,7 @@
                     answers, choose a temperature closer to 0.2. For more varied or creative
                     responses, try a setting closer to 1. Avoid setting the temperature much above 1
                     unless you need very experimental responses, as it may lead to less predictable
-                    and more random answers. You can change this setting anytime.</Helper
+                    and more random answers.</Helper
                   >
                 {:else if interactionMode === 'voice'}
                   <Helper class="pb-1"
@@ -1780,38 +1889,67 @@
                 <Label for="reasoning-effort">Reasoning effort</Label>
                 <Helper class="pb-1"
                   >Select your desired reasoning effort, which gives the model guidance on how much
-                  time it should spend "reasoning" before creating a response to the prompt. You can
-                  specify one of {#if supportsExpandedReasoningEffort}<span class="font-mono"
-                      >minimal</span
-                    >,
-                  {/if}<span class="font-mono">low</span>,
-                  <span class="font-mono">medium</span>, or
-                  <span class="font-mono">high</span>
-                  for this setting, where <span class="font-mono">low</span> will favor speed, and
-                  <span class="font-mono">high</span>
-                  will favor more complete reasoning at the cost of slower responses. The default value
-                  is
-                  <span class="font-mono">low</span>, which is a balance between speed and reasoning
-                  accuracy. You can change this setting anytime.</Helper
+                  time it should spend "reasoning" before creating a response to the prompt. {#if reasoningEffortLabels.length !== 1}You
+                    can specify one of
+                    {#each reasoningEffortLabels as label, idx}
+                      <span class="font-mono">{label}</span>{idx < reasoningEffortLabels.length - 1
+                        ? ','
+                        : ''}
+                    {/each}for this setting, where <span class="font-mono">low</span> will favor
+                    speed, and
+                    <span class="font-mono">high</span>
+                    will favor more complete reasoning at the cost of slower responses. The default value
+                    is <span class="font-mono">{defaultReasoningLabel}</span>.{/if}</Helper
                 >
-              </div>
-              <Range
-                id="reasoning-effort"
-                name="reasoning-effort"
-                min={supportsExpandedReasoningEffort ? -1 : 0}
-                max="2"
-                bind:value={reasoningEffortValue}
-                step="1"
-                disabled={preventEdits}
-              />
-              <div class="mt-2 flex flex-row justify-between">
-                {#if supportsExpandedReasoningEffort}
-                  <p class="text-sm">minimal</p>
+                {#if reasoningEffortLabels.length === 1}
+                  <div
+                    class="flex flex-row items-center justify-between gap-x-4 p-3 border rounded-lg bg-gradient-to-b border-amber-400 from-amber-50 to-amber-100 text-amber-800 mt-2"
+                  >
+                    <div class="flex flex-row items-center gap-x-3">
+                      <LightbulbSolid size="md" class="shrink-0" />
+                      <div class="flex flex-col text-xs">
+                        <span class="font-bold"
+                          >This model only supports <span class="font-mono"
+                            >{reasoningEffortLabels[0]}</span
+                          > reasoning effort</span
+                        >
+                        <span
+                          >For other models, you can control how long the model spends thinking
+                          using this setting.</span
+                        >
+                      </div>
+                    </div>
+                  </div>
                 {/if}
-                <p class={(supportsExpandedReasoningEffort ? '-ml-1' : '') + ' text-sm'}>low</p>
-                <p class={(supportsExpandedReasoningEffort ? 'ml-2' : '') + ' text-sm'}>medium</p>
-                <p class="text-sm">high</p>
               </div>
+              {#if reasoningEffortLabels.length !== 1}
+                <Range
+                  id="reasoning-effort"
+                  name="reasoning-effort"
+                  min={reasoningEffortMin}
+                  max={reasoningEffortMax}
+                  bind:value={reasoningEffortValue}
+                  step="1"
+                  disabled={preventEdits}
+                />
+                <div class="mt-2 flex flex-row justify-between">
+                  {#if reasoningEffortLabels.length < 4}
+                    {#each reasoningEffortLabels as label}
+                      <p class="text-sm">{label}</p>
+                    {/each}
+                  {:else if supportsNoneReasoningEffort}
+                    <p class="text-sm">{reasoningEffortLabels[0]}</p>
+                    <p class="text-sm ml-4">{reasoningEffortLabels[1]}</p>
+                    <p class="text-sm ml-2">{reasoningEffortLabels[2]}</p>
+                    <p class="text-sm">{reasoningEffortLabels[3]}</p>
+                  {:else}
+                    <p class="text-sm">{reasoningEffortLabels[0]}</p>
+                    <p class="text-sm -ml-2">{reasoningEffortLabels[1]}</p>
+                    <p class="text-sm ml-1">{reasoningEffortLabels[2]}</p>
+                    <p class="text-sm">{reasoningEffortLabels[3]}</p>
+                  {/if}
+                </div>
+              {/if}
             {/if}
             {#if supportsVerbosity}
               <div class="flex flex-col">
@@ -1841,7 +1979,7 @@
                   <span class="font-mono">low</span>
                   verbosity produces shorter, more concise code with minimal commentary. The default
                   value is
-                  <span class="font-mono">medium</span>. You can change this setting anytime.</Helper
+                  <span class="font-mono">medium</span>.</Helper
                 >
               </div>
               <Range

@@ -39,10 +39,10 @@ from openai.types.beta.threads.file_citation_annotation import (
 from pingpong.ai_models import (
     AZURE_UNAVAILABLE_MODELS,
     DEFAULT_PROMPTS,
-    upgrade_assistants_model,
     KNOWN_MODELS,
     ADMIN_ONLY_MODELS,
     HIDDEN_MODELS,
+    get_reasoning_effort_map,
 )
 from pingpong.artifacts import ArtifactStoreError
 from pingpong.audio_store import AudioStoreError
@@ -76,8 +76,6 @@ from .time import convert_seconds
 from .saml import get_saml2_client, get_saml2_settings, get_saml2_attrs
 
 from .ai import (
-    REASONING_EFFORT_EXPANDED_MAP,
-    REASONING_EFFORT_MAP,
     GetOpenAIClientException,
     export_class_threads_anonymized,
     export_threads_multiple_classes,
@@ -89,6 +87,7 @@ from .ai import (
     inject_timestamp_to_instructions,
     run_response,
     run_thread,
+    upgrade_assistants_model,
     validate_api_key,
     get_ci_messages_from_step,
     get_azure_model_deployment_name_equivalent,
@@ -2121,13 +2120,19 @@ async def list_class_models(
             "supports_next_gen_assistants": KNOWN_MODELS[m.id][
                 "supports_next_gen_assistants"
             ],
-            "supports_expanded_reasoning_effort": KNOWN_MODELS[m.id][
-                "supports_expanded_reasoning_effort"
+            "supports_minimal_reasoning_effort": KNOWN_MODELS[m.id][
+                "supports_minimal_reasoning_effort"
+            ],
+            "supports_none_reasoning_effort": KNOWN_MODELS[m.id][
+                "supports_none_reasoning_effort"
             ],
             "supports_verbosity": KNOWN_MODELS[m.id]["supports_verbosity"],
             "supports_web_search": KNOWN_MODELS[m.id]["supports_web_search"],
             "supports_temperature": KNOWN_MODELS[m.id]["supports_temperature"],
             "supports_reasoning": KNOWN_MODELS[m.id]["supports_reasoning"],
+            "reasoning_effort_levels": KNOWN_MODELS[m.id].get(
+                "reasoning_effort_levels"
+            ),
         }
         for m in all_models.data
         if m.id in KNOWN_MODELS.keys()
@@ -2153,7 +2158,8 @@ async def list_class_models(
                 "supports_reasoning": False,
                 "supports_classic_assistants": True,
                 "supports_next_gen_assistants": False,
-                "supports_expanded_reasoning_effort": False,
+                "supports_minimal_reasoning_effort": False,
+                "supports_none_reasoning_effort": False,
                 "supports_verbosity": False,
                 "supports_web_search": False,
                 "description": "The latest GPT-4 Turbo model.",
@@ -2180,7 +2186,8 @@ async def list_class_models(
                 "supports_reasoning": False,
                 "supports_classic_assistants": True,
                 "supports_next_gen_assistants": False,
-                "supports_expanded_reasoning_effort": False,
+                "supports_minimal_reasoning_effort": False,
+                "supports_none_reasoning_effort": False,
                 "supports_verbosity": False,
                 "supports_web_search": False,
                 "description": "The latest GPT-4 Turbo preview model.",
@@ -5444,7 +5451,22 @@ async def create_assistant(
             detail=f"Model {req.model} does not support next generation assistants.",
         )
 
-    if req.reasoning_effort == -1 and req.tools and len(req.tools) > 0:
+    reasoning_effort_map = get_reasoning_effort_map(model_record.id)
+    if (
+        req.reasoning_effort is not None
+        and req.reasoning_effort not in reasoning_effort_map
+    ):
+        raise HTTPException(
+            400,
+            f"Reasoning effort is not supported for model {model_record.name}.",
+        )
+
+    if (
+        req.reasoning_effort == -1
+        and req.tools
+        and len(req.tools) > 0
+        and "minimal" in reasoning_effort_map.values()
+    ):
         raise HTTPException(
             400,
             "You cannot use tools when the reasoning effort is set to 'Minimal'. Please select a higher reasoning effort level.",
@@ -5565,18 +5587,12 @@ async def create_assistant(
                     else req.model
                 )
 
-            if model_record.supports_expanded_reasoning_effort:
-                reasoning_effort = (
-                    REASONING_EFFORT_EXPANDED_MAP.get(req.reasoning_effort)
-                    if req.reasoning_effort is not None
-                    else None
-                )
-            else:
-                reasoning_effort = (
-                    REASONING_EFFORT_MAP.get(req.reasoning_effort)
-                    if req.reasoning_effort is not None
-                    else None
-                )
+            reasoning_effort_map = get_reasoning_effort_map(model_record.id)
+            reasoning_effort = (
+                reasoning_effort_map.get(req.reasoning_effort)
+                if req.reasoning_effort is not None
+                else None
+            )
             reasoning_extra_body = (
                 {"reasoning_effort": reasoning_effort}
                 if reasoning_effort is not None
@@ -6050,24 +6066,27 @@ async def update_assistant(
                 detail=f"Model {req.model} is not available for use in {interaction_mode.capitalize()} mode.",
             )
 
+    reasoning_effort_map = (
+        get_reasoning_effort_map(model_record.id) if model_record else {}
+    )
+
     new_reasoning_effort_body = None
     if "reasoning_effort" in req.model_fields_set:
-        if model_record and model_record.supports_expanded_reasoning_effort:
-            reasoning_effort = (
-                REASONING_EFFORT_EXPANDED_MAP.get(req.reasoning_effort)
-                if req.reasoning_effort is not None
-                else None
+        if (
+            req.reasoning_effort is not None
+            and req.reasoning_effort not in reasoning_effort_map
+        ):
+            raise HTTPException(
+                400,
+                "Reasoning effort is not supported for the selected model.",
             )
-        elif model_record:
-            reasoning_effort = (
-                REASONING_EFFORT_MAP.get(req.reasoning_effort)
-                if req.reasoning_effort is not None
-                else None
-            )
-        else:
-            reasoning_effort = None
+        reasoning_effort = (
+            reasoning_effort_map.get(req.reasoning_effort)
+            if req.reasoning_effort is not None
+            else None
+        )
 
-        if reasoning_effort == "minimal" and (
+        if (reasoning_effort == "minimal" or reasoning_effort == "none") and (
             (
                 "tools" in req.model_fields_set
                 and req.tools is not None
@@ -6097,6 +6116,7 @@ async def update_assistant(
         if (
             asst.reasoning_effort is not None
             and asst.reasoning_effort == -1
+            and "minimal" in reasoning_effort_map.values()
             and (
                 (
                     "tools" in req.model_fields_set
@@ -6113,11 +6133,17 @@ async def update_assistant(
                 400,
                 "You cannot use tools when the reasoning effort is set to 'Minimal'. Please select a higher reasoning effort level.",
             )
-        new_reasoning_effort_body = (
-            {"reasoning_effort": REASONING_EFFORT_MAP.get(asst.reasoning_effort)}
-            if asst.reasoning_effort
-            else {}
-        )
+        if model_record:
+            reasoning_effort_map = get_reasoning_effort_map(model_record.id)
+            new_reasoning_effort_body = (
+                {"reasoning_effort": reasoning_effort_map.get(asst.reasoning_effort)}
+                if asst.reasoning_effort
+                else {}
+            )
+        else:
+            new_reasoning_effort_body = (
+                {"reasoning_effort": None} if asst.reasoning_effort else {}
+            )
 
     uses_web_search = False
     if "tools" in req.model_fields_set:

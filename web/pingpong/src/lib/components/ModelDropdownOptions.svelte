@@ -17,8 +17,8 @@
   }
 </script>
 
-<div class="relative z-0">
-  {#each modelOptions as { value, name, description, supports_vision, is_new, highlight }}
+<div class="relative">
+  {#each modelOptions as { value, name, description, supports_vision, supports_reasoning, is_new, highlight }}
     <div bind:this={modelNodes[value]}>
       <DropdownOption
         {value}
@@ -27,6 +27,7 @@
         selectedValue={selectedModel}
         update={updateSelectedModel}
         {smallNameText}
+        addBrainIcon={supports_reasoning}
       >
         {#if highlight}
           <DropdownBadge extraClasses="border-amber-400 from-amber-50 to-amber-100 text-amber-700"
