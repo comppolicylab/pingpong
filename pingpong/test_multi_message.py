@@ -168,6 +168,113 @@ async def _create_server_thread_alt(db, *, class_id: int, thread_id: int, run_id
     )
 
 
+async def _create_server_thread_with_reasoning(
+    db,
+    *,
+    class_id: int,
+    thread_id: int,
+    run_id: int,
+    assistant_id: int,
+    reasoning_step_id: int,
+):
+    base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    async with db.async_session() as session:
+        class_ = models.Class(id=class_id, name=f"Class {class_id}", api_key="sk-test")
+        assistant = models.Assistant(
+            id=assistant_id,
+            name=f"Assistant {assistant_id}",
+            class_id=class_id,
+            assistant_id=f"asst-{assistant_id}",
+            model="gpt-4o-mini",
+        )
+        thread = models.Thread(
+            id=thread_id,
+            thread_id=f"thread-{thread_id}",
+            class_id=class_id,
+            assistant_id=assistant_id,
+            version=3,
+            tools_available="",
+            private=False,
+        )
+        run = models.Run(
+            id=run_id,
+            run_id=f"run-{run_id}",
+            status=schemas.RunStatus.COMPLETED,
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            created=base_time,
+            updated=base_time,
+        )
+        message = models.Message(
+            id=run_id + 1,
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run_id,
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            role=schemas.MessageRole.ASSISTANT,
+            output_index=1,
+            created=base_time,
+        )
+        reasoning_step = models.ReasoningStep(
+            id=reasoning_step_id,
+            run_id=run_id,
+            thread_id=thread_id,
+            output_index=2,
+            status=schemas.ReasoningStatus.COMPLETED,
+            reasoning_id=f"rst-{reasoning_step_id}",
+            created=base_time,
+        )
+        reasoning_step.updated = base_time + timedelta(seconds=125)
+
+        session.add_all([class_, assistant, thread, run, message, reasoning_step])
+        await session.flush()
+
+        summary_part_one = models.ReasoningSummaryPart(
+            id=reasoning_step_id * 10 + 1,
+            reasoning_step_id=reasoning_step.id,
+            part_index=0,
+            summary_text="First reasoning summary",
+            created=base_time,
+        )
+        summary_part_two = models.ReasoningSummaryPart(
+            id=reasoning_step_id * 10 + 2,
+            reasoning_step_id=reasoning_step.id,
+            part_index=1,
+            summary_text="Second reasoning summary",
+            created=base_time,
+        )
+        session.add_all([summary_part_one, summary_part_two])
+        await session.flush()
+
+        summary_parts = [
+            {
+                "id": summary_part_one.id,
+                "part_index": summary_part_one.part_index,
+                "summary_text": summary_part_one.summary_text,
+            },
+            {
+                "id": summary_part_two.id,
+                "part_index": summary_part_two.part_index,
+                "summary_text": summary_part_two.summary_text,
+            },
+        ]
+
+        await session.commit()
+
+    return {
+        "assistant_id": assistant_id,
+        "thread_id": thread_id,
+        "run_id": run_id,
+        "reasoning_step_id": reasoning_step_id,
+        "step_identifier": f"rst-{reasoning_step_id}",
+        "output_index": 2,
+        "created_at": base_time.timestamp(),
+        "summary_parts": summary_parts,
+        "status": schemas.ReasoningStatus.COMPLETED.value,
+        "thought_for": "2 minutes",
+    }
+
+
 async def test_buffered_handler_truncates_after_duplicate_messages(db):
     handler, run_id, first_message_id = await _setup_handler_with_initial_message(db)
     done_event = SimpleNamespace(
@@ -251,3 +358,107 @@ async def test_list_thread_messages_deduplicates_extra_assistant_messages(
     assert len(messages) == 1
     assert messages[0]["output_index"] == 3
     assert messages[0]["run_id"] == str(run_id)
+
+
+@with_user(555)
+@with_authz(grants=[("user:555", "can_view", "thread:6101")])
+async def test_get_thread_includes_reasoning_messages(api, db, valid_user_token):
+    class_id = 6001
+    thread_id = 6101
+    run_id = 6201
+    assistant_id = 6301
+    reasoning_step_id = 6401
+
+    expected = await _create_server_thread_with_reasoning(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        run_id=run_id,
+        assistant_id=assistant_id,
+        reasoning_step_id=reasoning_step_id,
+    )
+
+    response = api.get(
+        f"/api/v1/class/{class_id}/thread/{thread_id}",
+        cookies={"session": valid_user_token},
+    )
+
+    assert response.status_code == 200
+    reasoning_messages = response.json()["reasoning_messages"]
+    assert len(reasoning_messages) == 1
+    reasoning_message = reasoning_messages[0]
+
+    assert reasoning_message["id"] == str(expected["reasoning_step_id"])
+    assert reasoning_message["assistant_id"] == str(expected["assistant_id"])
+    assert reasoning_message["thread_id"] == str(expected["thread_id"])
+    assert reasoning_message["run_id"] == str(expected["run_id"])
+    assert reasoning_message["output_index"] == expected["output_index"]
+    assert reasoning_message["message_type"] == "reasoning"
+    assert reasoning_message["role"] == "assistant"
+    assert reasoning_message["metadata"] == {}
+    assert reasoning_message["object"] == "thread.message"
+    assert reasoning_message["created_at"] > 0
+
+    assert len(reasoning_message["content"]) == 1
+    call = reasoning_message["content"][0]
+    assert call["type"] == "reasoning"
+    assert call["step_id"] == expected["step_identifier"]
+    assert call["status"] == expected["status"]
+    actual_summary = sorted(call["summary"], key=lambda part: part["part_index"])
+    expected_summary = sorted(
+        expected["summary_parts"], key=lambda part: part["part_index"]
+    )
+    assert actual_summary == expected_summary
+
+
+@with_user(777)
+@with_authz(grants=[("user:777", "can_view", "thread:7101")])
+async def test_list_thread_messages_includes_reasoning_messages(
+    api, db, valid_user_token
+):
+    class_id = 7001
+    thread_id = 7101
+    run_id = 7201
+    assistant_id = 7301
+    reasoning_step_id = 7401
+
+    expected = await _create_server_thread_with_reasoning(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        run_id=run_id,
+        assistant_id=assistant_id,
+        reasoning_step_id=reasoning_step_id,
+    )
+
+    response = api.get(
+        f"/api/v1/class/{class_id}/thread/{thread_id}/messages",
+        cookies={"session": valid_user_token},
+    )
+
+    assert response.status_code == 200
+    reasoning_messages = response.json()["reasoning_messages"]
+    assert len(reasoning_messages) == 1
+    reasoning_message = reasoning_messages[0]
+
+    assert reasoning_message["id"] == str(expected["reasoning_step_id"])
+    assert reasoning_message["assistant_id"] == str(expected["assistant_id"])
+    assert reasoning_message["thread_id"] == str(expected["thread_id"])
+    assert reasoning_message["run_id"] == str(expected["run_id"])
+    assert reasoning_message["output_index"] == expected["output_index"]
+    assert reasoning_message["message_type"] == "reasoning"
+    assert reasoning_message["role"] == "assistant"
+    assert reasoning_message["metadata"] == {}
+    assert reasoning_message["object"] == "thread.message"
+    assert reasoning_message["created_at"] > 0
+
+    assert len(reasoning_message["content"]) == 1
+    call = reasoning_message["content"][0]
+    assert call["type"] == "reasoning"
+    assert call["step_id"] == expected["step_identifier"]
+    assert call["status"] == expected["status"]
+    actual_summary = sorted(call["summary"], key=lambda part: part["part_index"])
+    expected_summary = sorted(
+        expected["summary_parts"], key=lambda part: part["part_index"]
+    )
+    assert actual_summary == expected_summary

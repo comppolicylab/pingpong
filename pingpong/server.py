@@ -2542,6 +2542,7 @@ async def get_thread(
                                 for part in reasoning_step.summary_parts
                             ],
                             status=reasoning_step.status,
+                            thought_for=reasoning_step.thought_for,
                         )
                     ],
                     metadata={},
@@ -3338,8 +3339,16 @@ async def list_thread_messages(
                             step_id=reasoning_step.reasoning_id
                             or str(reasoning_step.id),
                             type="reasoning",
-                            summary=reasoning_step.summary_parts,
+                            summary=[
+                                schemas.ReasoningSummaryPart(
+                                    id=part.id,
+                                    summary_text=part.summary_text,
+                                    part_index=part.part_index,
+                                )
+                                for part in reasoning_step.summary_parts
+                            ],
                             status=reasoning_step.status,
+                            thought_for=reasoning_step.thought_for,
                         )
                     ],
                     metadata={},

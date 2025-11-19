@@ -3888,6 +3888,52 @@ class ReasoningStep(Base):
         )
         await session.execute(stmt)
 
+    @staticmethod
+    def format_thought_for(
+        created: datetime | None, updated: datetime | None
+    ) -> str | None:
+        """Return a human readable duration string."""
+        if not created or not updated:
+            return None
+        total_seconds = max((updated - created).total_seconds(), 0)
+        if total_seconds < 1:
+            return "<1 second"
+        units = [
+            ("day", 60 * 60 * 24),
+            ("hour", 60 * 60),
+            ("minute", 60),
+            ("second", 1),
+        ]
+        for unit_name, unit_seconds in units:
+            if total_seconds >= unit_seconds or unit_seconds == 1:
+                value = int(total_seconds // unit_seconds)
+                if unit_seconds == 1:
+                    value = int(total_seconds)
+                if value == 0:
+                    continue
+                suffix = unit_name if value == 1 else f"{unit_name}s"
+                return f"{value} {suffix}"
+        return None
+
+    @property
+    def thought_for(self) -> str | None:
+        return self.format_thought_for(self.created, self.updated)
+
+    @classmethod
+    async def get_timestamps_by_id(
+        cls, session: AsyncSession, id_: int
+    ) -> tuple[datetime | None, datetime | None]:
+        stmt = (
+            select(ReasoningStep.created, ReasoningStep.updated)
+            .where(ReasoningStep.id == id_)
+            .limit(1)
+        )
+        result = await session.execute(stmt)
+        row = result.one_or_none()
+        if not row:
+            return None, None
+        return row[0], row[1]
+
 
 class MessagePart(Base):
     __tablename__ = "message_parts"

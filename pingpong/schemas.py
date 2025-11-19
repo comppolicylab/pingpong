@@ -1823,6 +1823,8 @@ class ReasoningCall(BaseModel):
     type: Literal["reasoning"]
     summary: list[ReasoningSummaryPart]
     status: ReasoningStatus
+    created_at: float
+    updated_at: float
 
 
 class ReasoningMessage(BaseModel):

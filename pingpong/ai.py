@@ -2401,11 +2401,23 @@ class BufferedResponseStreamHandler:
             status=ReasoningStatus(data.status or "completed"),
             encrypted_content=data.encrypted_content,
         )
+
+        @db_session_handler
+        async def get_thought_for_on_reasoning_completed(session_: AsyncSession):
+            if not self.reasoning_id:
+                return None
+            created, updated = await models.ReasoningStep.get_timestamps_by_id(
+                session_, self.reasoning_id
+            )
+            return models.ReasoningStep.format_thought_for(created, updated)
+
+        thought_for = await get_thought_for_on_reasoning_completed()
         self.enqueue(
             {
                 "type": "reasoning_step_completed",
                 "reasoning_step_id": self.reasoning_id,
                 "status": ReasoningStatus(data.status or "completed").value,
+                "thought_for": thought_for,
             }
         )
         self.reasoning_id = None
