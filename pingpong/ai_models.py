@@ -1234,7 +1234,6 @@ VERBOSITY_MAP = {
 
 def get_reasoning_effort_map(model_name: str) -> dict[int, str]:
     model_info = KNOWN_MODELS.get(model_name)
-    print(model_name, model_info)
 
     if not model_info or not model_info.get("supports_reasoning"):
         return {}
@@ -1243,11 +1242,8 @@ def get_reasoning_effort_map(model_name: str) -> dict[int, str]:
         return REASONING_EFFORT_EXPANDED_NONE_MAP
     elif model_info.get("supports_minimal_reasoning_effort"):
         return REASONING_EFFORT_EXPANDED_MINIMAL_MAP
-    elif model_info.get("supports_reasoning"):
-        reasoning_effort_map = REASONING_EFFORT_MAP
-    else:
-        return {}
 
+    reasoning_effort_map = REASONING_EFFORT_MAP
     reasoning_effort_levels = model_info.get("reasoning_effort_levels")
     if reasoning_effort_levels:
         return {

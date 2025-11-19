@@ -5458,7 +5458,7 @@ async def create_assistant(
     ):
         raise HTTPException(
             400,
-            f"Reasoning effort is not supported for model {model_record}.",
+            f"Reasoning effort is not supported for model {model_record.name}.",
         )
 
     if req.reasoning_effort == -1 and req.tools and len(req.tools) > 0:
@@ -6064,7 +6064,6 @@ async def update_assistant(
     reasoning_effort_map = (
         get_reasoning_effort_map(model_record.id) if model_record else {}
     )
-    print(f"reasoning_effort_map: {reasoning_effort_map}")
 
     new_reasoning_effort_body = None
     if "reasoning_effort" in req.model_fields_set:

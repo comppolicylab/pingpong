@@ -23,7 +23,6 @@ from pingpong.prompt import replace_random_blocks
 from pingpong.schemas import (
     APIKeyValidationResponse,
     AnnotationType,
-    Assistant,
     CodeInterpreterOutputType,
     FileSearchToolAnnotationResult,
     MessageStatus,
@@ -184,7 +183,9 @@ async def upgrade_assistants_model(
     deprecated_model: str, replacement_model: str
 ) -> None:
     async with config.db.driver.async_session() as session:
-        assistants_to_upgrade = await Assistant.get_by_model(session, deprecated_model)
+        assistants_to_upgrade = await models.Assistant.get_by_model(
+            session, deprecated_model
+        )
         if not assistants_to_upgrade:
             logger.info(f"No assistants found with model name {deprecated_model}")
             return
@@ -214,7 +215,7 @@ async def upgrade_assistants_model(
 
 
 async def update_model_on_openai(
-    session: AsyncSession, assistant: Assistant, new_model: str
+    session: AsyncSession, assistant: models.Assistant, new_model: str
 ) -> None:
     oai_client = await get_openai_client_by_class_id(session, assistant.class_id)
     return await oai_client.beta.assistants.update(
