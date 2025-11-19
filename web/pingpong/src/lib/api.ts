@@ -1114,6 +1114,7 @@ export type AssistantModelOptions = {
   name: string;
   description: string;
   supports_vision: boolean;
+  supports_reasoning: boolean;
   is_new: boolean;
   highlight: boolean;
 };

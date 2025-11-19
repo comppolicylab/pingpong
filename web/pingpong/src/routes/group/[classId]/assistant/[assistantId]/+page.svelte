@@ -38,7 +38,8 @@
     MessageDotsSolid,
     MessageDotsOutline,
     MicrophoneOutline,
-    MicrophoneSolid
+    MicrophoneSolid,
+    ArchiveOutline
   } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
   import { writable, type Writable } from 'svelte/store';
@@ -233,6 +234,7 @@
     supports_vision:
       model.supports_vision &&
       (model.vision_support_override === undefined || model.vision_support_override),
+    supports_reasoning: model.supports_reasoning,
     is_new: model.is_new,
     highlight: model.highlight
   }));
@@ -287,9 +289,16 @@
     supports_vision:
       model.supports_vision &&
       (model.vision_support_override === undefined || model.vision_support_override),
+    supports_reasoning: model.supports_reasoning,
     is_new: model.is_new,
     highlight: model.highlight
   }));
+  let availableModelIds: string[] = [];
+  let selectedModelDeprecated = false;
+  $: availableModelIds = [...latestModelOptions, ...versionedModelOptions].map(
+    (model) => model.value
+  );
+  $: selectedModelDeprecated = !!selectedModel && !availableModelIds.includes(selectedModel);
   $: supportVisionModels = (data.models.filter((model) => model.supports_vision) || []).map(
     (model) => model.id
   );
@@ -1163,9 +1172,26 @@
           class="underline">OpenAI's Documentation</a
         > for detailed descriptions of model capabilities.</Helper
       >
+      {#if selectedModelDeprecated}
+        <div
+          class="flex flex-row items-center gap-4 p-4 py-2 mb-2 text-amber-800 border rounded-lg bg-gradient-to-b border-amber-400 from-amber-50 to-amber-100"
+        >
+          <ArchiveOutline class="text-amber-800 w-8 h-8" strokeWidth="1.5" />
+          <div class="flex flex-col">
+            <span class="text-sm font-semibold">Legacy Model</span>
+            <span class="text-xs"
+              >This model is no longer available for new assistants on PingPong. You can continue
+              using it with this assistant, but you won't be able to switch back after selecting a
+              new model. <span class="font-semibold"
+                >We recommend upgrading to one of the latest models for the best experience.</span
+              ></span
+            >
+          </div>
+        </div>
+      {/if}
       {#if supportsVision && visionSupportOverride === false}
         <div
-          class="flex flex-row items-center gap-4 p-4 py-2 mb-2 text-amber-800 border rounded-lg bg-gradient-to-b border-amber-400 from-amber-50 to-amber-100 text-amber-800"
+          class="flex flex-row items-center gap-4 p-4 py-2 mb-2 border rounded-lg bg-gradient-to-b border-amber-400 from-amber-50 to-amber-100 text-amber-800"
         >
           <div class="flex items-center justify-center relative h-8 w-12">
             <BanOutline class="text-amber-600 w-12 h-12 z-10 absolute" strokeWidth="1.5" />
