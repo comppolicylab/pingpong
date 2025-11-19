@@ -2181,6 +2181,20 @@ export type FileSearchCallItem = {
   status?: 'in_progress' | 'searching' | 'completed' | 'incomplete' | 'failed';
 };
 
+export type ReasoningSummaryPart = {
+  id?: number;
+  part_index: number;
+  summary_text: string;
+};
+
+export type ReasoningCallItem = {
+  step_id: string;
+  type: 'reasoning';
+  summary: ReasoningSummaryPart[];
+  status: 'in_progress' | 'completed' | 'incomplete';
+  thought_for?: string | null;
+};
+
 export type Content =
   | MessageContentImageFile
   | MessageContentText
@@ -2189,7 +2203,8 @@ export type Content =
   | MessageContentCodeOutputImageURL
   | MessageContentCodeOutputLogs
   | CodeInterpreterCallPlaceholder
-  | FileSearchCallItem;
+  | FileSearchCallItem
+  | ReasoningCallItem;
 
 export type OpenAIMessage = {
   id: string;
@@ -2202,7 +2217,7 @@ export type OpenAIMessage = {
   vision_file_ids?: string[];
   metadata: Record<string, unknown> | null;
   object: 'thread.message' | 'code_interpreter_call_placeholder';
-  message_type?: 'file_search_call' | 'code_interpreter_call' | null;
+  message_type?: 'file_search_call' | 'code_interpreter_call' | 'reasoning' | null;
   role: 'user' | 'assistant';
   run_id: string | null;
   attachments: OpenAIAttachment[] | null;
@@ -2228,6 +2243,7 @@ export type ThreadWithMeta = {
   messages: OpenAIMessage[];
   ci_messages: OpenAIMessage[];
   fs_messages: OpenAIMessage[];
+  reasoning_messages: OpenAIMessage[];
   attachments: Record<string, ServerFile>;
   instructions: string | null;
   recording: VoiceModeRecordingInfo | null;
@@ -2297,6 +2313,7 @@ export type ThreadMessages = {
   messages: OpenAIMessage[];
   ci_messages: OpenAIMessage[];
   fs_messages: OpenAIMessage[];
+  reasoning_messages: OpenAIMessage[];
   limit: number;
   has_more: boolean;
 };
@@ -2319,6 +2336,7 @@ export const getThreadMessages = async (
       messages: [],
       fs_messages: [],
       ci_messages: [],
+      reasoning_messages: [],
       has_more: false,
       error: expanded.error
     };
@@ -2330,6 +2348,7 @@ export const getThreadMessages = async (
     messages: expanded.data.messages,
     ci_messages: expanded.data.ci_messages,
     fs_messages: expanded.data.fs_messages,
+    reasoning_messages: expanded.data.reasoning_messages,
     limit: expanded.data.limit,
     has_more: hasMore,
     lastPage,
@@ -2409,6 +2428,23 @@ export type FileSearchCall = {
   status: 'in_progress' | 'searching' | 'completed' | 'incomplete' | 'failed';
 };
 
+export type ReasoningStepSummaryPartChunk = {
+  reasoning_step_id: number;
+  part_index: number;
+  summary_text: string;
+  summary_part_id: number;
+};
+
+export type ReasoningCall = {
+  id: string;
+  index: number;
+  output_index?: number;
+  type: 'reasoning';
+  summary: ReasoningStepSummaryPartChunk[] | null;
+  run_id: string | null;
+  status: 'in_progress' | 'completed' | 'incomplete';
+};
+
 // TODO(jnu): support function calling, updates for v2
 export type ToolCallDelta = CodeInterpreterCall | FileSearchCall;
 
@@ -2420,6 +2456,30 @@ export type ThreadStreamToolCallCreatedChunk = {
 export type ThreadStreamToolCallDeltaChunk = {
   type: 'tool_call_delta';
   delta: ToolCallDelta;
+};
+
+export type ThreadStreamReasoningStepCreatedChunk = {
+  type: 'reasoning_step_created';
+  reasoning_step: ReasoningCall;
+};
+
+export type ThreadStreamReasoningSummaryPartAddedChunk = {
+  type: 'reasoning_step_summary_part_added';
+  summary_part: ReasoningStepSummaryPartChunk;
+};
+
+export type ThreadStreamReasoningSummaryDeltaChunk = {
+  type: 'reasoning_summary_text_delta';
+  reasoning_step_id: number;
+  summary_part_id: number;
+  delta: string;
+};
+
+export type ThreadStreamReasoningStepCompletedChunk = {
+  type: 'reasoning_step_completed';
+  reasoning_step_id: number;
+  status: 'in_progress' | 'completed' | 'incomplete';
+  thought_for?: string | null;
 };
 
 export type ThreadStreamErrorChunk = {
@@ -2469,7 +2529,11 @@ export type ThreadStreamChunk =
   | ThreadStreamToolCallCreatedChunk
   | MessageContentCodeOutputImageURL
   | MessageContentCodeOutputLogs
-  | ThreadStreamToolCallDeltaChunk;
+  | ThreadStreamToolCallDeltaChunk
+  | ThreadStreamReasoningStepCreatedChunk
+  | ThreadStreamReasoningSummaryPartAddedChunk
+  | ThreadStreamReasoningSummaryDeltaChunk
+  | ThreadStreamReasoningStepCompletedChunk;
 
 /**
  * Stream chunks from a thread.

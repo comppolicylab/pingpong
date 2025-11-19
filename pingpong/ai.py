@@ -2189,8 +2189,9 @@ class BufferedResponseStreamHandler:
         async def add_reasoning_summary_part_on_reasoning_created(
             session_: AsyncSession, data: dict
         ):
-            await models.ReasoningSummaryPart.create(session_, data)
+            part = await models.ReasoningSummaryPart.create(session_, data)
             await session_.commit()
+            return part
 
         @db_session_handler
         async def add_reasoning_content_part_on_reasoning_created(
@@ -2208,14 +2209,17 @@ class BufferedResponseStreamHandler:
                 "summary_text": summary_part.text,
                 "created": utcnow(),
             }
+            part_obj = await add_reasoning_summary_part_on_reasoning_created(
+                summary_part_data
+            )
             summary_parts.append(
                 {
-                    "reasoning_step_id": str(self.reasoning_id),
-                    "part_index": str(self.prev_reasoning_summary_part_index),
+                    "reasoning_step_id": self.reasoning_id,
+                    "part_index": self.prev_reasoning_summary_part_index,
                     "summary_text": summary_part.text,
+                    "summary_part_id": part_obj.id,
                 }
             )
-            await add_reasoning_summary_part_on_reasoning_created(summary_part_data)
 
         for content_part in data.content or []:
             self.prev_reasoning_content_part_index += 1
@@ -2238,7 +2242,7 @@ class BufferedResponseStreamHandler:
                     "output_index": self.prev_output_index,
                     "status": data.status,
                     "run_id": str(self.run_id),
-                    "summary": json.dumps(summary_parts),
+                    "summary": summary_parts,
                 },
             }
         )
