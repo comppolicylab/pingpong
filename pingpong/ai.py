@@ -2183,17 +2183,6 @@ class BufferedResponseStreamHandler:
         self.reasoning_id = reasoning.id
         self.reasoning_external_id = reasoning.reasoning_id
 
-        reasoning_client_data = {
-            "type": "reasoning_step_created",
-            "reasoning_step": {
-                "id": self.reasoning_id,
-                "index": self.prev_output_index,
-                "output_index": self.prev_output_index,
-                "status": data.status,
-                "run_id": str(self.run_id),
-                "summary": [],
-            },
-        }
         summary_parts = []
 
         @db_session_handler
@@ -2240,7 +2229,19 @@ class BufferedResponseStreamHandler:
 
             await add_reasoning_content_part_on_reasoning_created(content_part_data)
 
-        self.enqueue(reasoning_client_data)
+        self.enqueue(
+            {
+                "type": "reasoning_step_created",
+                "reasoning_step": {
+                    "id": self.reasoning_id,
+                    "index": self.prev_output_index,
+                    "output_index": self.prev_output_index,
+                    "status": data.status,
+                    "run_id": str(self.run_id),
+                    "summary": json.dumps(summary_parts),
+                },
+            }
+        )
 
     async def on_reasoning_summary_part_added(
         self, data: ResponseReasoningSummaryPartAddedEvent

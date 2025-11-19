@@ -5132,9 +5132,9 @@ class Thread(Base):
         thread_id: int,
         run_ids: Collection[int],
         order: Literal["asc", "desc"] = "desc",
-    ) -> tuple[list["Message"], list["ToolCall"]]:
+    ) -> tuple[list["Message"], list["ToolCall"], list["ReasoningStep"]]:
         if not run_ids:
-            return [], []
+            return [], [], []
 
         ordering = (
             asc(Message.output_index) if order == "asc" else desc(Message.output_index)
@@ -5143,6 +5143,11 @@ class Thread(Base):
             asc(ToolCall.output_index)
             if order == "asc"
             else desc(ToolCall.output_index)
+        )
+        reasoning_ordering = (
+            asc(ReasoningStep.output_index)
+            if order == "asc"
+            else desc(ReasoningStep.output_index)
         )
 
         messages = await session.execute(
@@ -5173,8 +5178,23 @@ class Thread(Base):
                 ),
             )
         )
+        reasoning_steps = await session.execute(
+            select(ReasoningStep)
+            .where(
+                ReasoningStep.thread_id == thread_id,
+                ReasoningStep.run_id.in_(run_ids),
+            )
+            .order_by(reasoning_ordering)
+            .options(
+                selectinload(ReasoningStep.summary_parts),
+            )
+        )
 
-        return messages.scalars().all(), tool_calls.scalars().all()
+        return (
+            messages.scalars().all(),
+            tool_calls.scalars().all(),
+            reasoning_steps.scalars().all(),
+        )
 
     @classmethod
     async def get_all_threads_by_version(
