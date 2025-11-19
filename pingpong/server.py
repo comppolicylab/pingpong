@@ -5461,7 +5461,12 @@ async def create_assistant(
             f"Reasoning effort is not supported for model {model_record.name}.",
         )
 
-    if req.reasoning_effort == -1 and req.tools and len(req.tools) > 0:
+    if (
+        req.reasoning_effort == -1
+        and req.tools
+        and len(req.tools) > 0
+        and "minimal" not in reasoning_effort_map.values()
+    ):
         raise HTTPException(
             400,
             "You cannot use tools when the reasoning effort is set to 'Minimal'. Please select a higher reasoning effort level.",
@@ -6111,6 +6116,7 @@ async def update_assistant(
         if (
             asst.reasoning_effort is not None
             and asst.reasoning_effort == -1
+            and "minimal" in reasoning_effort_map.values()
             and (
                 (
                     "tools" in req.model_fields_set
