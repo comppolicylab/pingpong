@@ -1298,6 +1298,10 @@ export type Assistant = {
   should_record_user_information: boolean | null;
   allow_user_file_uploads: boolean | null;
   allow_user_image_uploads: boolean | null;
+  hide_reasoning_summaries: boolean | null;
+  hide_file_search_result_quotes: boolean | null;
+  hide_file_search_document_names: boolean | null;
+  hide_file_search_queries: boolean | null;
   endorsed: boolean | null;
   created: string;
   updated: string | null;
@@ -1379,6 +1383,10 @@ export type CreateAssistantRequest = {
   should_record_user_information?: boolean;
   allow_user_file_uploads?: boolean;
   allow_user_image_uploads?: boolean;
+  hide_reasoning_summaries?: boolean;
+  hide_file_search_result_quotes?: boolean;
+  hide_file_search_document_names?: boolean;
+  hide_file_search_queries?: boolean;
 };
 
 /**
@@ -1406,6 +1414,10 @@ export type UpdateAssistantRequest = {
   should_record_user_information?: boolean;
   allow_user_file_uploads?: boolean;
   allow_user_image_uploads?: boolean;
+  hide_reasoning_summaries?: boolean;
+  hide_file_search_result_quotes?: boolean;
+  hide_file_search_document_names?: boolean;
+  hide_file_search_queries?: boolean;
 };
 
 /**

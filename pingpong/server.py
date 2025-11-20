@@ -10,6 +10,7 @@ from aiohttp import ClientResponseError
 import jwt
 import openai
 import humanize
+from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import (
     BackgroundTasks,
     Body,
@@ -2435,6 +2436,18 @@ async def get_thread(
 
         is_supervisor = is_supervisor_check[0]
         is_current_user = False
+        show_reasoning_summaries = is_supervisor or (
+            assistant and not assistant.hide_reasoning_summaries
+        )
+        show_file_search_queries = is_supervisor or (
+            assistant and not assistant.hide_file_search_queries
+        )
+        show_file_search_result_quotes = is_supervisor or (
+            assistant and not assistant.hide_file_search_result_quotes
+        )
+        show_file_search_document_names = is_supervisor or (
+            assistant and not assistant.hide_file_search_document_names
+        )
 
         thread_messages: list[schemas.ThreadMessage] = []
         placeholder_ci_calls = []
@@ -2506,7 +2519,7 @@ async def get_thread(
                                 type="file_search_call",
                                 status=tool_call.status.value,
                                 queries=json.loads(tool_call.queries)
-                                if tool_call.queries
+                                if tool_call.queries and show_file_search_queries
                                 else [],
                             )
                         ],
@@ -2539,7 +2552,11 @@ async def get_thread(
                                     summary_text=part.summary_text,
                                     part_index=part.part_index,
                                 )
-                                for part in reasoning_step.summary_parts
+                                for part in (
+                                    reasoning_step.summary_parts
+                                    if show_reasoning_summaries
+                                    else []
+                                )
                             ],
                             status=reasoning_step.status,
                             thought_for=reasoning_step.thought_for,
@@ -2620,7 +2637,7 @@ async def get_thread(
                     case schemas.MessagePartType.OUTPUT_TEXT:
                         _annotations: list[Annotation] = []
                         _file_ids_file_citation_annotation: set[str] = set()
-                        if content.annotations:
+                        if content.annotations and show_file_search_document_names:
                             for annotation in content.annotations:
                                 if (
                                     annotation.type
@@ -2643,7 +2660,9 @@ async def get_thread(
                                                 file_citation=FileCitation(
                                                     file_id=_file_record.file_id,
                                                     file_name=_file_record.filename,
-                                                    quote=_file_record.text,
+                                                    quote=_file_record.text
+                                                    if show_file_search_result_quotes
+                                                    else "",
                                                 ),
                                                 text="responses_v3",
                                                 type="file_citation",
@@ -3207,8 +3226,17 @@ async def list_thread_messages(
                 "has_more": False,
             }
 
+        async def get_assistant(
+            session: AsyncSession, id_: int | None
+        ) -> list[models.Assistant]:
+            if id_ is None:
+                return []
+            assistant = await models.Assistant.get_by_id(session, id_)
+            return [assistant] if assistant else []
+
         (
             [messages_v3, tool_calls_v3, reasoning_steps_v3],
+            assistants,
             file_names,
             is_supervisor_check,
         ) = await asyncio.gather(
@@ -3218,6 +3246,7 @@ async def list_thread_messages(
                 run_ids=run_ids,
                 order="asc",
             ),
+            get_assistant(request.state.db, thread.assistant_id),
             models.Thread.get_file_search_files(request.state.db, thread.id),
             request.state.authz.check(
                 [
@@ -3239,6 +3268,24 @@ async def list_thread_messages(
 
         is_supervisor = is_supervisor_check[0]
         is_current_user = False
+
+        if assistants and len(assistants) == 1:
+            assistant = assistants[0]
+        else:
+            assistant = None
+
+        show_reasoning_summaries = is_supervisor or (
+            assistant and not assistant.hide_reasoning_summaries
+        )
+        show_file_search_queries = is_supervisor or (
+            assistant and not assistant.hide_file_search_queries
+        )
+        show_file_search_result_quotes = is_supervisor or (
+            assistant and not assistant.hide_file_search_result_quotes
+        )
+        show_file_search_document_names = is_supervisor or (
+            assistant and not assistant.hide_file_search_document_names
+        )
 
         thread_messages: list[schemas.ThreadMessage] = []
         placeholder_ci_calls = []
@@ -3312,7 +3359,7 @@ async def list_thread_messages(
                                 type="file_search_call",
                                 status=tool_call.status.value,
                                 queries=json.loads(tool_call.queries)
-                                if tool_call.queries
+                                if tool_call.queries and show_file_search_queries
                                 else [],
                             )
                         ],
@@ -3345,7 +3392,11 @@ async def list_thread_messages(
                                     summary_text=part.summary_text,
                                     part_index=part.part_index,
                                 )
-                                for part in reasoning_step.summary_parts
+                                for part in (
+                                    reasoning_step.summary_parts
+                                    if show_reasoning_summaries
+                                    else []
+                                )
                             ],
                             status=reasoning_step.status,
                             thought_for=reasoning_step.thought_for,
@@ -3425,7 +3476,7 @@ async def list_thread_messages(
                     case schemas.MessagePartType.OUTPUT_TEXT:
                         _annotations: list[Annotation] = []
                         _file_ids_file_citation_annotation: set[str] = set()
-                        if content.annotations:
+                        if content.annotations and show_file_search_document_names:
                             for annotation in content.annotations:
                                 if (
                                     annotation.type
@@ -3448,7 +3499,9 @@ async def list_thread_messages(
                                                 file_citation=FileCitation(
                                                     file_id=_file_record.file_id,
                                                     file_name=_file_record.filename,
-                                                    quote=_file_record.text,
+                                                    quote=_file_record.text
+                                                    if show_file_search_result_quotes
+                                                    else "",
                                                 ),
                                                 text="responses_v3",
                                                 type="file_citation",
@@ -4570,23 +4623,41 @@ async def create_run(
                     status_code=409,
                     detail="OpenAI is still processing your last request. We're fetching the latest status...",
                 )
-            file_names = await models.Thread.get_file_search_files(
-                request.state.db, thread.id
-            )
-            thread_vector_store_id = (
-                await models.VectorStore.get_vector_store_id_by_id(
+
+            async def get_vector_store_id_by_id_or_none(
+                db: AsyncSession, vector_store_id: int | None
+            ) -> str | None:
+                if vector_store_id:
+                    return await models.VectorStore.get_vector_store_id_by_id(
+                        db, vector_store_id
+                    )
+                return None
+
+            [
+                file_names,
+                thread_vector_store_id,
+                assistant_vector_store_id,
+                is_supervisor_check,
+            ] = await asyncio.gather(
+                models.Thread.get_file_search_files(request.state.db, thread.id),
+                get_vector_store_id_by_id_or_none(
                     request.state.db, thread.vector_store_id
-                )
-                if thread.vector_store_id
-                else None
-            )
-            assistant_vector_store_id = (
-                await models.VectorStore.get_vector_store_id_by_id(
+                ),
+                get_vector_store_id_by_id_or_none(
                     request.state.db, asst.vector_store_id
-                )
-                if asst.vector_store_id
-                else None
+                ),
+                request.state.authz.check(
+                    [
+                        (
+                            f"user:{request.state.session.user.id}",
+                            "supervisor",
+                            f"class:{class_id}",
+                        )
+                    ]
+                ),
             )
+
+            is_supervisor = is_supervisor_check[0]
 
             run_to_complete.status = schemas.RunStatus.QUEUED
             request.state.db.add(run_to_complete)
@@ -4619,6 +4690,14 @@ async def create_run(
                 anonymous_link_id=request.state.anonymous_link_id
                 if hasattr(request.state, "anonymous_link_id")
                 else None,
+                show_file_search_document_names=is_supervisor
+                or not asst.hide_file_search_document_names,
+                show_file_search_queries=is_supervisor
+                or not asst.hide_file_search_queries,
+                show_file_search_result_quotes=is_supervisor
+                or not asst.hide_file_search_result_quotes,
+                show_reasoning_summaries=is_supervisor
+                or not asst.hide_reasoning_summaries,
             )
         except Exception as e:
             logger.exception("Error running thread")
@@ -4989,12 +5068,39 @@ async def send_message(
                 file_search_files,
             ) = await asyncio.gather(*tasks_to_run)
 
-            ci_all_files = await models.Thread.get_code_interpreter_file_obj_ids_including_assistant(
-                request.state.db, thread.id, asst.id
+            [
+                is_supervisor_check,
+                ci_all_files,
+                prev_output_sequence,
+            ] = await asyncio.gather(
+                request.state.authz.check(
+                    [
+                        (
+                            f"user:{request.state.session.user.id}",
+                            "supervisor",
+                            f"class:{class_id}",
+                        ),
+                    ]
+                ),
+                models.Thread.get_code_interpreter_file_obj_ids_including_assistant(
+                    request.state.db, thread.id, asst.id
+                ),
+                models.Thread.get_max_output_sequence(request.state.db, thread.id),
             )
 
-            prev_output_sequence = await models.Thread.get_max_output_sequence(
-                request.state.db, thread.id
+            is_supervisor = is_supervisor_check[0]
+
+            show_reasoning_summaries = is_supervisor or (
+                asst and not asst.hide_reasoning_summaries
+            )
+            show_file_search_queries = is_supervisor or (
+                asst and not asst.hide_file_search_queries
+            )
+            show_file_search_result_quotes = is_supervisor or (
+                asst and not asst.hide_file_search_result_quotes
+            )
+            show_file_search_document_names = is_supervisor or (
+                asst and not asst.hide_file_search_document_names
             )
 
             messageContentParts: list[models.MessagePart] = []
@@ -5065,6 +5171,10 @@ async def send_message(
                 thread_vector_store_id=thread_vector_store_id,
                 attached_file_search_file_ids=data.file_search_file_ids or [],
                 code_interpreter_file_ids=ci_all_files,
+                show_reasoning_summaries=show_reasoning_summaries,
+                show_file_search_queries=show_file_search_queries,
+                show_file_search_result_quotes=show_file_search_result_quotes,
+                show_file_search_document_names=show_file_search_document_names,
                 user_auth=request.state.auth_user
                 if hasattr(request.state, "auth_user")
                 else None,
@@ -5610,6 +5720,11 @@ async def create_assistant(
         raise HTTPException(
             status_code=400,
             detail="This class is private and does not allow recording user information.",
+        )
+    if req.hide_file_search_document_names and not req.hide_file_search_result_quotes:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot hide document names while showing result quotes. Please enable 'Hide File Search Result Quotes from Members' or disable 'Completely Hide File Search Results from Members'.",
         )
 
     uses_web_search = {"type": "web_search"} in req.tools
@@ -6406,6 +6521,46 @@ async def update_assistant(
         and req.allow_user_image_uploads is not None
     ):
         asst.allow_user_image_uploads = req.allow_user_image_uploads
+
+    if (
+        "hide_reasoning_summaries" in req.model_fields_set
+        and req.hide_reasoning_summaries is not None
+    ):
+        asst.hide_reasoning_summaries = req.hide_reasoning_summaries
+
+    if (
+        "hide_file_search_result_quotes" in req.model_fields_set
+        and req.hide_file_search_result_quotes is not None
+    ):
+        asst.hide_file_search_result_quotes = req.hide_file_search_result_quotes
+
+    if (
+        "hide_file_search_document_names" in req.model_fields_set
+        and req.hide_file_search_document_names is not None
+    ):
+        # Validate before assignment
+        # Determine what the value of hide_file_search_result_quotes will be after this request
+        new_hide_file_search_result_quotes = (
+            req.hide_file_search_result_quotes
+            if "hide_file_search_result_quotes" in req.model_fields_set
+            and req.hide_file_search_result_quotes is not None
+            else asst.hide_file_search_result_quotes
+        )
+        if (
+            req.hide_file_search_document_names
+            and not new_hide_file_search_result_quotes
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot hide document names while showing result quotes. Please enable 'Hide File Search Result Quotes from Members' or disable 'Completely Hide File Search Results from Members'.",
+            )
+        asst.hide_file_search_document_names = req.hide_file_search_document_names
+
+    if (
+        "hide_file_search_queries" in req.model_fields_set
+        and req.hide_file_search_queries is not None
+    ):
+        asst.hide_file_search_queries = req.hide_file_search_queries
 
     if is_toggling_publish_status:
         ptuple = (f"class:{class_id}#member", "can_view", f"assistant:{asst.id}")

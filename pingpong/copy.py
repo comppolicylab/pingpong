@@ -310,6 +310,10 @@ async def copy_assistant(
         should_record_user_information=assistant.should_record_user_information,
         allow_user_file_uploads=assistant.allow_user_file_uploads,
         allow_user_image_uploads=assistant.allow_user_image_uploads,
+        hide_reasoning_summaries=assistant.hide_reasoning_summaries,
+        hide_file_search_result_quotes=assistant.hide_file_search_result_quotes,
+        hide_file_search_document_names=assistant.hide_file_search_document_names,
+        hide_file_search_queries=assistant.hide_file_search_queries,
     )
 
     session.add(new_assistant)
