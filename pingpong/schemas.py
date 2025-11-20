@@ -419,6 +419,10 @@ class Assistant(BaseModel):
     should_record_user_information: bool | None = None
     allow_user_file_uploads: bool | None = None
     allow_user_image_uploads: bool | None = None
+    hide_reasoning_summaries: bool | None = None
+    hide_file_search_result_quotes: bool | None = None
+    hide_file_search_document_names: bool | None = None
+    hide_file_search_queries: bool | None = None
     use_latex: bool | None
     use_image_descriptions: bool | None
     hide_prompt: bool | None
@@ -466,6 +470,10 @@ class CreateAssistant(BaseModel):
     should_record_user_information: bool = False
     allow_user_file_uploads: bool = True
     allow_user_image_uploads: bool = True
+    hide_reasoning_summaries: bool = True
+    hide_file_search_result_quotes: bool = True
+    hide_file_search_document_names: bool = False
+    hide_file_search_queries: bool = True
     deleted_private_files: list[int] = []
     create_classic_assistant: bool = False
 
@@ -506,6 +514,10 @@ class UpdateAssistant(BaseModel):
     should_record_user_information: bool | None = None
     allow_user_file_uploads: bool | None = None
     allow_user_image_uploads: bool | None = None
+    hide_reasoning_summaries: bool | None = None
+    hide_file_search_result_quotes: bool | None = None
+    hide_file_search_document_names: bool | None = None
+    hide_file_search_queries: bool | None = None
     use_image_descriptions: bool | None = None
     deleted_private_files: list[int] = []
 

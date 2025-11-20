@@ -847,6 +847,10 @@ class BufferedResponseStreamHandler:
         anonymous_user_auth: str | None = None,
         anonymous_session_id: int | None = None,
         anonymous_link_id: int | None = None,
+        show_file_search_result_quotes: bool | None = None,
+        show_file_search_document_names: bool | None = None,
+        show_file_search_queries: bool | None = None,
+        show_reasoning_summaries: bool | None = None,
         *args,
         **kwargs,
     ):
@@ -884,6 +888,10 @@ class BufferedResponseStreamHandler:
         self.force_stopped = False
         self.output_message_created_count = 0
         self.force_stop_incomplete_reason: str | None = None
+        self.show_file_search_result_quotes = show_file_search_result_quotes or False
+        self.show_file_search_document_names = show_file_search_document_names or True
+        self.show_file_search_queries = show_file_search_queries or False
+        self.show_reasoning_summaries = show_reasoning_summaries or False
 
     def enqueue(self, data: Dict) -> None:
         self.__buffer.write(orjson.dumps(data))
@@ -1263,6 +1271,8 @@ class BufferedResponseStreamHandler:
         if _file_record:
             if data["file_id"] not in self.file_ids_file_citation_annotation:
                 self.file_ids_file_citation_annotation.add(data["file_id"])
+                if not self.show_file_search_document_names:
+                    return
                 self.enqueue(
                     {
                         "type": "message_delta",
@@ -1281,7 +1291,9 @@ class BufferedResponseStreamHandler:
                                                 "file_citation": {
                                                     "file_id": data["file_id"],
                                                     "file_name": data["filename"],
-                                                    "quote": _file_record.text,
+                                                    "quote": _file_record.text
+                                                    if self.show_file_search_result_quotes
+                                                    else "",
                                                 },
                                                 "text": "responses_v3",
                                             }
@@ -1958,7 +1970,7 @@ class BufferedResponseStreamHandler:
                     "index": self.prev_output_index,
                     "output_index": self.prev_output_index,
                     "type": "file_search",
-                    "queries": data.queries,
+                    "queries": data.queries if self.show_file_search_queries else [],
                     "status": data.status,
                     "run_id": str(self.run_id),
                 },
@@ -2138,7 +2150,7 @@ class BufferedResponseStreamHandler:
                     "id": data.id,
                     "index": self.prev_output_index,
                     "run_id": str(self.run_id),
-                    "queries": data.queries,
+                    "queries": data.queries if self.show_file_search_queries else [],
                     "status": data.status,
                 },
             }
@@ -2183,7 +2195,7 @@ class BufferedResponseStreamHandler:
         self.reasoning_id = reasoning.id
         self.reasoning_external_id = reasoning.reasoning_id
 
-        summary_parts = []
+        summary_parts: list[dict] = []
 
         @db_session_handler
         async def add_reasoning_summary_part_on_reasoning_created(
@@ -2212,6 +2224,8 @@ class BufferedResponseStreamHandler:
             part_obj = await add_reasoning_summary_part_on_reasoning_created(
                 summary_part_data
             )
+            if not self.show_reasoning_summaries:
+                continue
             summary_parts.append(
                 {
                     "reasoning_step_id": self.reasoning_id,
@@ -2283,6 +2297,8 @@ class BufferedResponseStreamHandler:
         )
         self.current_reasoning_summary_index = data.summary_index
         self.current_summary_part_id = summary_part.id
+        if not self.show_reasoning_summaries:
+            return
         self.enqueue(
             {
                 "type": "reasoning_step_summary_part_added",
@@ -2332,6 +2348,8 @@ class BufferedResponseStreamHandler:
             self.current_summary_part_id, data.delta
         )
 
+        if not self.show_reasoning_summaries:
+            return
         self.enqueue(
             {
                 "type": "reasoning_summary_text_delta",
@@ -2631,6 +2649,10 @@ async def run_response(
     thread_vector_store_id: str | None = None,
     attached_file_search_file_ids: list[str] | None = None,
     code_interpreter_file_ids: list[str] | None = None,
+    show_file_search_result_quotes: bool | None = None,
+    show_file_search_document_names: bool | None = None,
+    show_file_search_queries: bool | None = None,
+    show_reasoning_summaries: bool | None = None,
     user_auth: str | None = None,
     anonymous_link_auth: str | None = None,
     anonymous_user_auth: str | None = None,
@@ -2750,6 +2772,10 @@ async def run_response(
                     class_id=int(class_id),
                     thread_id=run.thread_id,
                     assistant_id=run.assistant_id,
+                    show_file_search_queries=show_file_search_queries,
+                    show_file_search_result_quotes=show_file_search_result_quotes,
+                    show_file_search_document_names=show_file_search_document_names,
+                    show_reasoning_summaries=show_reasoning_summaries,
                     user_id=run.creator_id,
                     user_auth=user_auth,
                     anonymous_user_auth=anonymous_user_auth,

@@ -444,6 +444,53 @@
     hasSetAllowUserImageUploads = true;
   }
 
+  let hideReasoningSummaries = true;
+  let hasSetHideReasoningSummaries = false;
+  $: if (
+    assistant?.hide_reasoning_summaries !== undefined &&
+    assistant?.hide_reasoning_summaries !== null &&
+    !hasSetHideReasoningSummaries
+  ) {
+    hideReasoningSummaries = assistant?.hide_reasoning_summaries;
+    hasSetHideReasoningSummaries = true;
+  }
+
+  let hideFileSearchResultQuotes = true;
+  let hasSethideFileSearchResultQuotes = false;
+  $: if (
+    assistant?.hide_file_search_result_quotes !== undefined &&
+    assistant?.hide_file_search_result_quotes !== null &&
+    !hasSethideFileSearchResultQuotes
+  ) {
+    hideFileSearchResultQuotes = assistant?.hide_file_search_result_quotes;
+    hasSethideFileSearchResultQuotes = true;
+  }
+
+  let hideFileSearchDocumentNames = false;
+  let hasSetHideFileSearchDocumentNames = false;
+  $: if (
+    assistant?.hide_file_search_document_names !== undefined &&
+    assistant?.hide_file_search_document_names !== null &&
+    !hasSetHideFileSearchDocumentNames
+  ) {
+    hideFileSearchDocumentNames = assistant?.hide_file_search_document_names;
+    hasSetHideFileSearchDocumentNames = true;
+  }
+
+  let hideFileSearchQueries = true;
+  let hasSetHideFileSearchQueries = false;
+  $: if (
+    assistant?.hide_file_search_queries !== undefined &&
+    assistant?.hide_file_search_queries !== null &&
+    !hasSetHideFileSearchQueries
+  ) {
+    hideFileSearchQueries = assistant?.hide_file_search_queries;
+    hasSetHideFileSearchQueries = true;
+  }
+  $: if (hideFileSearchDocumentNames) {
+    hideFileSearchResultQuotes = true;
+  }
+
   // Handle updates from the file upload component.
   const handleFSPrivateFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
     privateUploadFSFileInfo = e.detail;
@@ -849,7 +896,13 @@
       deleted_private_files: [...$trashPrivateFileIds, ...fileSearchCodeInterpreterUnusedFiles],
       should_record_user_information: shouldRecordNameOrVoice,
       allow_user_file_uploads: allowUserFileUploads,
-      allow_user_image_uploads: allowUserImageUploads
+      allow_user_image_uploads: allowUserImageUploads,
+      hide_reasoning_summaries: hideReasoningSummaries,
+      hide_file_search_result_quotes: hideFileSearchDocumentNames
+        ? true
+        : hideFileSearchResultQuotes,
+      hide_file_search_document_names: hideFileSearchDocumentNames,
+      hide_file_search_queries: hideFileSearchQueries
     };
     return params;
   };
@@ -1682,6 +1735,8 @@
               >
             </div>
 
+            <hr />
+
             <div class="col-span-2 mb-1">
               <Checkbox
                 id="should_record_user_information"
@@ -1714,6 +1769,7 @@
                 {/if}</Helper
               >
             </div>
+            <hr />
 
             <div class="col-span-2 mb-1">
               <Checkbox
@@ -1757,6 +1813,93 @@
                 ></Helper
               >
             </div>
+            <hr />
+            <div class="col-span-2 mb-1">
+              <Checkbox
+                id="hide_file_search_queries"
+                name="hide_file_search_queries"
+                disabled={preventEdits}
+                bind:checked={hideFileSearchQueries}
+                ><div class="flex flex-row gap-1">
+                  <div>Hide File Search Queries from Members</div>
+                </div></Checkbox
+              >
+              <Helper
+                >Control whether members can see the queries the assistant uses for file searches.
+                Depending on your prompt, these queries may contain sensitive information or provide
+                information about how you have designed the assistant. When checked, members will
+                not see the queries. Moderators can always review file search queries. <b
+                  >This setting will only apply to Chat Mode models with File Search enabled.</b
+                ></Helper
+              >
+            </div>
+
+            <div class="col-span-2 mb-1">
+              <Checkbox
+                id="hide_file_search_result_quotes"
+                name="hide_file_search_result_quotes"
+                class={hideFileSearchDocumentNames ? 'text-gray-400 grayscale contrast-50' : 'text-gray-800 grayscale-0 contrast-100'}
+                disabled={preventEdits || hideFileSearchDocumentNames}
+                bind:checked={hideFileSearchResultQuotes}
+                ><div class="flex flex-row gap-1">
+                  <div>Hide File Search Result Quotes from Members</div>
+                  {#if hideFileSearchDocumentNames}<div>&middot;</div>
+                    <div>"Completely Hide File Search Results" selected</div>{/if}
+                </div></Checkbox
+              >
+              <Helper
+                >Control whether members can see the text the assistant retrieves from each file
+                during File Search. Depending on the materials you make available to the assistant,
+                quotes may contain sensitive information like answer keys. When checked, members
+                will not see the document quotes returned during file searches. Moderators can
+                always review file search results. <b
+                  >This setting will only apply to Chat Mode models with File Search enabled.</b
+                ></Helper
+              >
+            </div>
+            <div class="col-span-2 mb-1">
+              <Checkbox
+                id="hide_file_search_document_names"
+                name="hide_file_search_document_names"
+                disabled={preventEdits}
+                class=""
+                bind:checked={hideFileSearchDocumentNames}
+                ><div class="flex flex-row gap-1">
+                  <div>Completely Hide File Search Results from Members</div>
+                </div></Checkbox
+              >
+              <Helper
+                >Control whether members can see the names of the documents the assistant retrieves
+                in file searches, on top of quotes. In some cases, document names may contain
+                sensitive information. When checked, PingPong will completely hide file search
+                results. Moderators can always review file search results. <b
+                  >This setting will only apply to Chat Mode models with File Search enabled.</b
+                ></Helper
+              >
+            </div>
+
+            <hr />
+
+            <div class="col-span-2 mb-1">
+              <Checkbox
+                id="hide_reasoning_summaries"
+                name="hide_reasoning_summaries"
+                disabled={preventEdits}
+                bind:checked={hideReasoningSummaries}
+                ><div class="flex flex-row gap-1">
+                  <div>Hide Reasoning Summaries from Members</div>
+                </div></Checkbox
+              >
+              <Helper
+                >Control whether members can see summaries of the assistant's reasoning process. In
+                some cases, this material may contain sensitive information or insights about the
+                assistant's internal logic or prompt. When checked, members will not see the
+                reasoning summaries. Moderators can always review reasoning summaries. <b
+                  >This setting will only apply to Chat Mode reasoning models.</b
+                ></Helper
+              >
+            </div>
+            <hr />
 
             {#if supportsTemperature}
               <div class="flex flex-col">
@@ -1997,6 +2140,7 @@
                 <p class="text-sm">high</p>
               </div>
             {/if}
+            <hr />
 
             {#if !data.isCreating}
               <div class="col-span-2 mb-1">
