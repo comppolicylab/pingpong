@@ -1871,10 +1871,10 @@
                 </div></Checkbox
               >
               <Helper
-                >Control whether members can see the names of the documents the assistant retrieves
-                in file searches, on top of quotes. In some cases, document names may contain
-                sensitive information. When checked, PingPong will completely hide file search
-                results. Moderators can always review file search results. <b
+                >Hide the names of the documents the assistant retrieves in file searches from
+                members, on top of quotes. In some cases, document names may contain sensitive
+                information. When checked, PingPong will completely hide file search results.
+                Moderators can always review file search results. <b
                   >This setting will only apply to Chat Mode models with File Search enabled.</b
                 ></Helper
               >
