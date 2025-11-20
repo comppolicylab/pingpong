@@ -1838,7 +1838,9 @@
               <Checkbox
                 id="hide_file_search_result_quotes"
                 name="hide_file_search_result_quotes"
-                class={hideFileSearchDocumentNames ? 'text-gray-400 grayscale contrast-50' : 'text-gray-800 grayscale-0 contrast-100'}
+                class={hideFileSearchDocumentNames
+                  ? 'text-gray-400 grayscale contrast-50'
+                  : 'text-gray-800 grayscale-0 contrast-100'}
                 disabled={preventEdits || hideFileSearchDocumentNames}
                 bind:checked={hideFileSearchResultQuotes}
                 ><div class="flex flex-row gap-1">
