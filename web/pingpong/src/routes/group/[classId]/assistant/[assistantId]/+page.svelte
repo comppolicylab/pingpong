@@ -463,6 +463,9 @@
     !hasSethideFileSearchResultQuotes
   ) {
     hideFileSearchResultQuotes = assistant?.hide_file_search_result_quotes;
+    if (hideFileSearchResultQuotes) {
+      hideFileSearchDocumentNames = true;
+    }
     hasSethideFileSearchResultQuotes = true;
   }
 

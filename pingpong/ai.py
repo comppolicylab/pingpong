@@ -888,10 +888,22 @@ class BufferedResponseStreamHandler:
         self.force_stopped = False
         self.output_message_created_count = 0
         self.force_stop_incomplete_reason: str | None = None
-        self.show_file_search_result_quotes = show_file_search_result_quotes or False
-        self.show_file_search_document_names = show_file_search_document_names or True
-        self.show_file_search_queries = show_file_search_queries or False
-        self.show_reasoning_summaries = show_reasoning_summaries or False
+        self.show_file_search_result_quotes = (
+            show_file_search_result_quotes
+            if show_file_search_result_quotes is not None
+            else False
+        )
+        self.show_file_search_document_names = (
+            show_file_search_document_names
+            if show_file_search_document_names is not None
+            else True
+        )
+        self.show_file_search_queries = (
+            show_file_search_queries if show_file_search_queries is not None else False
+        )
+        self.show_reasoning_summaries = (
+            show_reasoning_summaries if show_reasoning_summaries is not None else False
+        )
 
     def enqueue(self, data: Dict) -> None:
         self.__buffer.write(orjson.dumps(data))
