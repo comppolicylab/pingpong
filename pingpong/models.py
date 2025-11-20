@@ -3888,6 +3888,52 @@ class ReasoningStep(Base):
         )
         await session.execute(stmt)
 
+    @staticmethod
+    def format_thought_for(
+        created: datetime | None, updated: datetime | None
+    ) -> str | None:
+        """Return a human readable duration string."""
+        if not created or not updated:
+            return None
+        total_seconds = max((updated - created).total_seconds(), 0)
+        if total_seconds < 1:
+            return "<1 second"
+        units = [
+            ("day", 60 * 60 * 24),
+            ("hour", 60 * 60),
+            ("minute", 60),
+            ("second", 1),
+        ]
+        for unit_name, unit_seconds in units:
+            if total_seconds >= unit_seconds or unit_seconds == 1:
+                value = int(total_seconds // unit_seconds)
+                if unit_seconds == 1:
+                    value = int(total_seconds)
+                if value == 0:
+                    continue
+                suffix = unit_name if value == 1 else f"{unit_name}s"
+                return f"{value} {suffix}"
+        return None
+
+    @property
+    def thought_for(self) -> str | None:
+        return self.format_thought_for(self.created, self.updated)
+
+    @classmethod
+    async def get_timestamps_by_id(
+        cls, session: AsyncSession, id_: int
+    ) -> tuple[datetime | None, datetime | None]:
+        stmt = (
+            select(ReasoningStep.created, ReasoningStep.updated)
+            .where(ReasoningStep.id == id_)
+            .limit(1)
+        )
+        result = await session.execute(stmt)
+        row = result.one_or_none()
+        if not row:
+            return None, None
+        return row[0], row[1]
+
 
 class MessagePart(Base):
     __tablename__ = "message_parts"
@@ -5132,9 +5178,9 @@ class Thread(Base):
         thread_id: int,
         run_ids: Collection[int],
         order: Literal["asc", "desc"] = "desc",
-    ) -> tuple[list["Message"], list["ToolCall"]]:
+    ) -> tuple[list["Message"], list["ToolCall"], list["ReasoningStep"]]:
         if not run_ids:
-            return [], []
+            return [], [], []
 
         ordering = (
             asc(Message.output_index) if order == "asc" else desc(Message.output_index)
@@ -5143,6 +5189,11 @@ class Thread(Base):
             asc(ToolCall.output_index)
             if order == "asc"
             else desc(ToolCall.output_index)
+        )
+        reasoning_ordering = (
+            asc(ReasoningStep.output_index)
+            if order == "asc"
+            else desc(ReasoningStep.output_index)
         )
 
         messages = await session.execute(
@@ -5173,8 +5224,23 @@ class Thread(Base):
                 ),
             )
         )
+        reasoning_steps = await session.execute(
+            select(ReasoningStep)
+            .where(
+                ReasoningStep.thread_id == thread_id,
+                ReasoningStep.run_id.in_(run_ids),
+            )
+            .order_by(reasoning_ordering)
+            .options(
+                selectinload(ReasoningStep.summary_parts),
+            )
+        )
 
-        return messages.scalars().all(), tool_calls.scalars().all()
+        return (
+            messages.scalars().all(),
+            tool_calls.scalars().all(),
+            reasoning_steps.scalars().all(),
+        )
 
     @classmethod
     async def get_all_threads_by_version(

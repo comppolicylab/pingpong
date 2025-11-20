@@ -1467,6 +1467,7 @@ class ThreadMessages(BaseModel):
     messages: list[ThreadMessage]
     fs_messages: list[FileSearchMessage] | None = None
     ci_messages: list[CodeInterpreterMessage] | None
+    reasoning_messages: list["ReasoningMessage"] | None = None
     has_more: bool
 
 
@@ -1487,6 +1488,7 @@ class ThreadWithMeta(BaseModel):
     limit: int
     ci_messages: list[CodeInterpreterMessage] | None
     fs_messages: list[FileSearchMessage] | None = None
+    reasoning_messages: list["ReasoningMessage"] | None = None
     attachments: dict[str, File] | None
     instructions: str | None
     recording: VoiceModeRecording | None = None
@@ -1808,6 +1810,34 @@ class ReasoningStatus(StrEnum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     INCOMPLETE = "incomplete"
+
+
+class ReasoningSummaryPart(BaseModel):
+    id: int
+    part_index: int
+    summary_text: str
+
+
+class ReasoningCall(BaseModel):
+    step_id: str
+    type: Literal["reasoning"]
+    summary: list[ReasoningSummaryPart]
+    status: ReasoningStatus
+    thought_for: str | None = None
+
+
+class ReasoningMessage(BaseModel):
+    id: str
+    assistant_id: str
+    created_at: float
+    content: list[ReasoningCall]
+    metadata: dict[str, str]
+    object: Literal["thread.message"]
+    message_type: Literal["reasoning"]
+    role: Literal["assistant"]
+    run_id: str
+    thread_id: str
+    output_index: int | None = None
 
 
 class MessageRole(StrEnum):

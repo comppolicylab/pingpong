@@ -230,15 +230,44 @@ async def test_list_messages_tool_calls_filters_and_orders(db):
         )
 
         session.add_all([tool_call_one, tool_call_two, tool_call_three])
+
+        reasoning_step_one = models.ReasoningStep(
+            run_id=run_one.id,
+            thread_id=thread.id,
+            reasoning_id="rst_1",
+            output_index=6,
+            status=schemas.ReasoningStatus.COMPLETED,
+        )
+        reasoning_step_two = models.ReasoningStep(
+            run_id=run_two.id,
+            thread_id=thread.id,
+            reasoning_id="rst_2",
+            output_index=7,
+            status=schemas.ReasoningStatus.IN_PROGRESS,
+        )
+        reasoning_step_three = models.ReasoningStep(
+            run_id=run_three.id,
+            thread_id=thread.id,
+            reasoning_id="rst_3",
+            output_index=8,
+            status=schemas.ReasoningStatus.COMPLETED,
+        )
+
+        session.add_all([reasoning_step_one, reasoning_step_two, reasoning_step_three])
         await session.commit()
 
         run_ids = [run_one.id, run_two.id]
         message_ids = [message_one.id, message_two.id]
         tool_call_ids = [tool_call_one.id, tool_call_two.id]
+        reasoning_ids = [reasoning_step_one.id, reasoning_step_two.id]
         thread_id = thread.id
 
     async with db.async_session() as session:
-        messages_asc, tool_calls_asc = await models.Thread.list_messages_tool_calls(
+        (
+            messages_asc,
+            tool_calls_asc,
+            reasoning_steps_asc,
+        ) = await models.Thread.list_messages_tool_calls(
             session,
             thread_id,
             run_ids=run_ids,
@@ -247,9 +276,14 @@ async def test_list_messages_tool_calls_filters_and_orders(db):
 
     assert [message.id for message in messages_asc] == message_ids
     assert [tool_call.id for tool_call in tool_calls_asc] == tool_call_ids
+    assert [reasoning.id for reasoning in reasoning_steps_asc] == reasoning_ids
 
     async with db.async_session() as session:
-        messages_desc, tool_calls_desc = await models.Thread.list_messages_tool_calls(
+        (
+            messages_desc,
+            tool_calls_desc,
+            reasoning_steps_desc,
+        ) = await models.Thread.list_messages_tool_calls(
             session,
             thread_id,
             run_ids=run_ids,
@@ -258,3 +292,4 @@ async def test_list_messages_tool_calls_filters_and_orders(db):
 
     assert [message.id for message in messages_desc] == message_ids[::-1]
     assert [tool_call.id for tool_call in tool_calls_desc] == tool_call_ids[::-1]
+    assert [reasoning.id for reasoning in reasoning_steps_desc] == reasoning_ids[::-1]

@@ -2384,6 +2384,7 @@ async def get_thread(
             "messages": list(messages.data),
             "limit": 20,
             "ci_messages": placeholder_ci_calls,
+            "reasoning_messages": [],
             "attachments": all_files,
             "instructions": thread.instructions if can_view_prompt else None,
             "recording": thread.voice_mode_recording
@@ -2402,7 +2403,7 @@ async def get_thread(
         )
 
         (
-            [messages_v3, tool_calls_v3],
+            [messages_v3, tool_calls_v3, reasoning_steps_v3],
             latest_run,
             [assistant, file_names, all_files],
             is_supervisor_check,
@@ -2439,6 +2440,7 @@ async def get_thread(
         placeholder_ci_calls = []
         file_search_calls: list[schemas.FileSearchMessage] = []
         file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
+        reasoning_messages: list[schemas.ReasoningMessage] = []
         for tool_call in tool_calls_v3:
             if tool_call.type == schemas.ToolCallType.CODE_INTERPRETER:
                 tool_content: list[schemas.CodeInterpreterMessageContent] = []
@@ -2517,6 +2519,41 @@ async def get_thread(
                         output_index=tool_call.output_index,
                     )
                 )
+
+        for reasoning_step in reasoning_steps_v3:
+            reasoning_messages.append(
+                schemas.ReasoningMessage(
+                    id=str(reasoning_step.id),
+                    assistant_id=str(assistant.id)
+                    if assistant and assistant.id
+                    else "",
+                    created_at=reasoning_step.created.timestamp(),
+                    content=[
+                        schemas.ReasoningCall(
+                            step_id=reasoning_step.reasoning_id
+                            or str(reasoning_step.id),
+                            type="reasoning",
+                            summary=[
+                                schemas.ReasoningSummaryPart(
+                                    id=part.id,
+                                    summary_text=part.summary_text,
+                                    part_index=part.part_index,
+                                )
+                                for part in reasoning_step.summary_parts
+                            ],
+                            status=reasoning_step.status,
+                            thought_for=reasoning_step.thought_for,
+                        )
+                    ],
+                    metadata={},
+                    object="thread.message",
+                    message_type="reasoning",
+                    role="assistant",
+                    run_id=str(reasoning_step.run_id),
+                    thread_id=str(thread.id),
+                    output_index=reasoning_step.output_index,
+                )
+            )
 
         messages_v3.reverse()
         run_ids_set = set()
@@ -2736,6 +2773,7 @@ async def get_thread(
             "limit": 20,
             "ci_messages": placeholder_ci_calls,
             "fs_messages": file_search_calls,
+            "reasoning_messages": reasoning_messages,
             "attachments": all_files,
             "instructions": thread.instructions if can_view_prompt else None,
             "recording": thread.voice_mode_recording
@@ -3135,6 +3173,7 @@ async def list_thread_messages(
             "messages": list(messages.data),
             "ci_messages": placeholder_ci_calls,
             "fs_messages": [],
+            "reasoning_messages": [],
             "limit": limit,
             "has_more": messages.has_more,
         }
@@ -3163,12 +3202,13 @@ async def list_thread_messages(
                 "messages": [],
                 "ci_messages": [],
                 "fs_messages": [],
+                "reasoning_messages": [],
                 "limit": limit,
                 "has_more": False,
             }
 
         (
-            [messages_v3, tool_calls_v3],
+            [messages_v3, tool_calls_v3, reasoning_steps_v3],
             file_names,
             is_supervisor_check,
         ) = await asyncio.gather(
@@ -3204,6 +3244,7 @@ async def list_thread_messages(
         placeholder_ci_calls = []
         file_search_calls: list[schemas.FileSearchMessage] = []
         file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
+        reasoning_messages: list[schemas.ReasoningMessage] = []
         for tool_call in tool_calls_v3:
             if tool_call.type == schemas.ToolCallType.CODE_INTERPRETER:
                 tool_content: list[schemas.CodeInterpreterMessageContent] = []
@@ -3284,6 +3325,41 @@ async def list_thread_messages(
                         output_index=tool_call.output_index,
                     )
                 )
+
+        for reasoning_step in reasoning_steps_v3:
+            reasoning_messages.append(
+                schemas.ReasoningMessage(
+                    id=str(reasoning_step.id),
+                    assistant_id=str(thread.assistant_id)
+                    if thread.assistant_id
+                    else "",
+                    created_at=reasoning_step.created.timestamp(),
+                    content=[
+                        schemas.ReasoningCall(
+                            step_id=reasoning_step.reasoning_id
+                            or str(reasoning_step.id),
+                            type="reasoning",
+                            summary=[
+                                schemas.ReasoningSummaryPart(
+                                    id=part.id,
+                                    summary_text=part.summary_text,
+                                    part_index=part.part_index,
+                                )
+                                for part in reasoning_step.summary_parts
+                            ],
+                            status=reasoning_step.status,
+                            thought_for=reasoning_step.thought_for,
+                        )
+                    ],
+                    metadata={},
+                    object="thread.message",
+                    message_type="reasoning",
+                    role="assistant",
+                    run_id=str(reasoning_step.run_id),
+                    thread_id=str(thread.id),
+                    output_index=reasoning_step.output_index,
+                )
+            )
 
         run_ids_set = set()
         for message in messages_v3:
@@ -3454,6 +3530,7 @@ async def list_thread_messages(
             "messages": thread_messages,
             "ci_messages": [],
             "fs_messages": file_search_calls,
+            "reasoning_messages": reasoning_messages,
             "limit": limit,
             "has_more": has_more_runs,
         }

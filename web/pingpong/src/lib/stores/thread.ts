@@ -210,6 +210,11 @@ export class ThreadManager {
         error: null,
         persisted: true
       }));
+      const reasoning_messages = ($data.data?.reasoning_messages || []).map((message) => ({
+        data: message,
+        error: null,
+        persisted: true
+      }));
       const optimisticMessages = $data.optimistic.map((message) => ({
         data: message,
         error: null,
@@ -219,6 +224,7 @@ export class ThreadManager {
       const allMessages = realMessages
         .concat(ci_messages)
         .concat(fs_messages)
+        .concat(reasoning_messages)
         .concat(optimisticMessages)
         .sort(compareMessageDataAsc);
 
@@ -518,6 +524,10 @@ export class ThreadManager {
           ...d.data,
           ci_messages: [...response.ci_messages, ...d.data.ci_messages],
           fs_messages: [...response.fs_messages, ...d.data.fs_messages],
+          reasoning_messages: [
+            ...response.reasoning_messages,
+            ...(d.data.reasoning_messages || [])
+          ],
           messages: [...response.messages, ...d.data.messages].sort(compareApiMessagesAsc)
         },
         limit: response.limit || d.limit,
@@ -765,6 +775,7 @@ export class ThreadManager {
       ...(state.data?.messages ?? []),
       ...(state.data?.ci_messages ?? []),
       ...(state.data?.fs_messages ?? []),
+      ...(state.data?.reasoning_messages ?? []),
       ...state.optimistic
     ];
     const indices = messages
@@ -860,10 +871,221 @@ export class ThreadManager {
       case 'tool_call_delta':
         this.#appendToolCallDelta(chunk.delta);
         break;
+      case 'reasoning_step_created':
+        this.#createReasoningStep(chunk.reasoning_step);
+        break;
+      case 'reasoning_step_summary_part_added':
+        this.#createReasoningSummaryPart(chunk.summary_part);
+        break;
+      case 'reasoning_summary_text_delta':
+        this.#appendToReasoningSummaryPart(chunk);
+        break;
+      case 'reasoning_step_completed':
+        this.#completeReasoningStep(chunk);
+        break;
       default:
         console.warn('Unhandled chunk', chunk);
         break;
     }
+  }
+
+  #createReasoningStep(call: api.ThreadStreamReasoningStepCreatedChunk['reasoning_step']) {
+    this.#data.update((d) => {
+      const messages = get(this.messages);
+      if (!messages?.length) {
+        console.warn('createReasoningStep: Received a tool call without any messages.');
+        return d;
+      }
+      const sortedMessages = [...messages].sort(compareMessageDataDesc);
+      const lastMessage = sortedMessages[0];
+      if (!lastMessage) {
+        console.warn('createReasoningStep: Received a tool call without a previous message.');
+        return d;
+      }
+
+      if (
+        lastMessage.data.role !== 'assistant' ||
+        (lastMessage.data.run_id && call.run_id && lastMessage.data.run_id !== call.run_id)
+      ) {
+        const version = get(this.version);
+        const callOutputIndex =
+          call.output_index ??
+          (typeof call.index === 'number' ? call.index : undefined) ??
+          (version === 3 ? this.#getNextOutputIndex(d) : undefined);
+        d.data?.messages.push({
+          role: 'assistant',
+          content: [
+            {
+              step_id: String(call.id),
+              type: 'reasoning',
+              summary: (call.summary || []).map((part) => {
+                return {
+                  id: part.summary_part_id,
+                  part_index: part.part_index,
+                  summary_text: part.summary_text
+                };
+              }),
+              status: call.status ?? 'in_progress'
+            }
+          ],
+          created_at: Date.now() / 1000,
+          id: `optimistic-${(Math.random() + 1).toString(36).substring(2)}`,
+          assistant_id: '',
+          metadata: {},
+          file_search_file_ids: [],
+          code_interpreter_file_ids: [],
+          message_type: 'reasoning',
+          object: 'thread.message',
+          run_id: call.run_id || null,
+          attachments: [],
+          output_index: callOutputIndex
+        });
+      } else {
+        lastMessage.data.content.push({
+          step_id: String(call.id),
+          type: 'reasoning',
+          summary: (call.summary || []).map((part) => {
+            return {
+              id: part.summary_part_id,
+              part_index: part.part_index,
+              summary_text: part.summary_text
+            };
+          }),
+          status: call.status ?? 'in_progress'
+        });
+      }
+
+      return { ...d };
+    });
+  }
+
+  #createReasoningSummaryPart(part: api.ReasoningStepSummaryPartChunk) {
+    this.#data.update((d) => {
+      const messages = d.data?.messages;
+      if (!messages?.length) {
+        console.warn('createReasoningSummaryPart: Received a tool call without any messages.');
+        return d;
+      }
+      const sortedMessages = [...messages].sort(compareApiMessagesDesc);
+      const lastMessage = sortedMessages[0];
+      if (!lastMessage) {
+        console.warn(
+          'createReasoningSummaryPart: Received a tool call without a previous message.'
+        );
+        return d;
+      }
+
+      if (lastMessage.message_type !== 'reasoning') {
+        console.warn(
+          'createReasoningSummaryPart: Received a reasoning summary part for a non-reasoning message.'
+        );
+        return d;
+      }
+
+      const reasoningStep = lastMessage.content.find((content) => {
+        return content.type === 'reasoning' && content.step_id === String(part.reasoning_step_id);
+      }) as api.ReasoningCallItem | undefined;
+
+      if (!reasoningStep) {
+        console.warn(
+          'createReasoningSummaryPart: Received a reasoning summary part for a reasoning step that does not exist in the last message.'
+        );
+        return d;
+      }
+
+      reasoningStep.summary.push({
+        id: part.summary_part_id,
+        part_index: part.part_index,
+        summary_text: part.summary_text
+      });
+
+      return { ...d };
+    });
+  }
+
+  #appendToReasoningSummaryPart(call: api.ThreadStreamReasoningSummaryDeltaChunk) {
+    this.#data.update((d) => {
+      const messages = d.data?.messages;
+      if (!messages?.length) {
+        console.warn('appendToReasoningSummaryPart: Received a tool call without any messages.');
+        return d;
+      }
+      const sortedMessages = [...messages].sort(compareApiMessagesDesc);
+      const lastMessage = sortedMessages[0];
+      if (!lastMessage) {
+        console.warn(
+          'appendToReasoningSummaryPart: Received a tool call without a previous message.'
+        );
+        return d;
+      }
+
+      if (lastMessage.message_type !== 'reasoning') {
+        console.warn(
+          'appendToReasoningSummaryPart: Received a reasoning summary part for a non-reasoning message.'
+        );
+        return d;
+      }
+
+      const reasoningStep = lastMessage.content.find((content) => {
+        return content.type === 'reasoning' && content.step_id === String(call.reasoning_step_id);
+      }) as api.ReasoningCallItem | undefined;
+
+      if (!reasoningStep) {
+        console.warn(
+          'appendToReasoningSummaryPart: Received a reasoning summary part for a reasoning step that does not exist in the last message.'
+        );
+        return d;
+      }
+
+      const summaryPart = reasoningStep.summary.find((part) => part.id === call.summary_part_id);
+      if (!summaryPart) {
+        console.warn(
+          'appendToReasoningSummaryPart: Received a reasoning summary delta for a summary part that does not exist.'
+        );
+        return d;
+      }
+
+      summaryPart.summary_text += call.delta;
+      return { ...d };
+    });
+  }
+
+  #completeReasoningStep(call: api.ThreadStreamReasoningStepCompletedChunk) {
+    this.#data.update((d) => {
+      const messages = d.data?.messages;
+      if (!messages?.length) {
+        console.warn('Received a tool call without any messages.');
+        return d;
+      }
+      const sortedMessages = [...messages].sort(compareApiMessagesDesc);
+      const lastMessage = sortedMessages[0];
+      if (!lastMessage) {
+        console.warn('completeReasoningStep: Received a tool call without a previous message.');
+        return d;
+      }
+
+      if (lastMessage.message_type !== 'reasoning') {
+        console.warn(
+          'completeReasoningStep: Received a reasoning summary part for a non-reasoning message.'
+        );
+        return d;
+      }
+
+      const reasoningStep = lastMessage.content.find((content) => {
+        return content.type === 'reasoning' && content.step_id === String(call.reasoning_step_id);
+      }) as api.ReasoningCallItem | undefined;
+
+      if (!reasoningStep) {
+        console.warn(
+          'completeReasoningStep: Received a reasoning summary part for a reasoning step that does not exist in the last message.'
+        );
+        return d;
+      }
+
+      reasoningStep.status = call.status;
+      reasoningStep.thought_for = call.thought_for;
+      return { ...d };
+    });
   }
 
   /**

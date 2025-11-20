@@ -2183,12 +2183,15 @@ class BufferedResponseStreamHandler:
         self.reasoning_id = reasoning.id
         self.reasoning_external_id = reasoning.reasoning_id
 
+        summary_parts = []
+
         @db_session_handler
         async def add_reasoning_summary_part_on_reasoning_created(
             session_: AsyncSession, data: dict
         ):
-            await models.ReasoningSummaryPart.create(session_, data)
+            part = await models.ReasoningSummaryPart.create(session_, data)
             await session_.commit()
+            return part
 
         @db_session_handler
         async def add_reasoning_content_part_on_reasoning_created(
@@ -2206,7 +2209,17 @@ class BufferedResponseStreamHandler:
                 "summary_text": summary_part.text,
                 "created": utcnow(),
             }
-            await add_reasoning_summary_part_on_reasoning_created(summary_part_data)
+            part_obj = await add_reasoning_summary_part_on_reasoning_created(
+                summary_part_data
+            )
+            summary_parts.append(
+                {
+                    "reasoning_step_id": self.reasoning_id,
+                    "part_index": self.prev_reasoning_summary_part_index,
+                    "summary_text": summary_part.text,
+                    "summary_part_id": part_obj.id,
+                }
+            )
 
         for content_part in data.content or []:
             self.prev_reasoning_content_part_index += 1
@@ -2219,6 +2232,20 @@ class BufferedResponseStreamHandler:
             }
 
             await add_reasoning_content_part_on_reasoning_created(content_part_data)
+
+        self.enqueue(
+            {
+                "type": "reasoning_step_created",
+                "reasoning_step": {
+                    "id": self.reasoning_id,
+                    "index": self.prev_output_index,
+                    "output_index": self.prev_output_index,
+                    "status": data.status,
+                    "run_id": str(self.run_id),
+                    "summary": summary_parts,
+                },
+            }
+        )
 
     async def on_reasoning_summary_part_added(
         self, data: ResponseReasoningSummaryPartAddedEvent
@@ -2256,6 +2283,17 @@ class BufferedResponseStreamHandler:
         )
         self.current_reasoning_summary_index = data.summary_index
         self.current_summary_part_id = summary_part.id
+        self.enqueue(
+            {
+                "type": "reasoning_step_summary_part_added",
+                "summary_part": {
+                    "reasoning_step_id": self.reasoning_id,
+                    "part_index": self.prev_reasoning_summary_part_index,
+                    "summary_text": data.part.text,
+                    "summary_part_id": summary_part.id,
+                },
+            }
+        )
 
     async def on_reasoning_summary_text_delta(
         self, data: ResponseReasoningSummaryTextDeltaEvent
@@ -2292,6 +2330,15 @@ class BufferedResponseStreamHandler:
 
         await update_reasoning_summary_part_on_reasoning_summary_text_delta(
             self.current_summary_part_id, data.delta
+        )
+
+        self.enqueue(
+            {
+                "type": "reasoning_summary_text_delta",
+                "reasoning_step_id": self.reasoning_id,
+                "summary_part_id": self.current_summary_part_id,
+                "delta": data.delta,
+            }
         )
 
     async def on_reasoning_summary_part_done(
@@ -2358,6 +2405,25 @@ class BufferedResponseStreamHandler:
             status=ReasoningStatus(data.status or "completed"),
             encrypted_content=data.encrypted_content,
         )
+
+        @db_session_handler
+        async def get_thought_for_on_reasoning_completed(session_: AsyncSession):
+            if not self.reasoning_id:
+                return None
+            created, updated = await models.ReasoningStep.get_timestamps_by_id(
+                session_, self.reasoning_id
+            )
+            return models.ReasoningStep.format_thought_for(created, updated)
+
+        thought_for = await get_thought_for_on_reasoning_completed()
+        self.enqueue(
+            {
+                "type": "reasoning_step_completed",
+                "reasoning_step_id": self.reasoning_id,
+                "status": ReasoningStatus(data.status or "completed").value,
+                "thought_for": thought_for,
+            }
+        )
         self.reasoning_id = None
         self.reasoning_external_id = None
         self.prev_reasoning_summary_part_index = -1
@@ -2422,6 +2488,16 @@ class BufferedResponseStreamHandler:
                     )
                     await session_.commit()
 
+            @db_session_handler
+            async def mark_cached_reasoning_as_incomplete_on_cleanup(
+                session_: AsyncSession,
+            ):
+                if self.reasoning_id:
+                    await models.ReasoningStep.mark_as_incomplete(
+                        session_, self.reasoning_id
+                    )
+                    await session_.commit()
+
             if self.run_status == RunStatus.QUEUED and restore_to_pending_if_queued:
                 await mark_cached_run_as_pending_on_cleanup()
                 self.run_id = None
@@ -2436,6 +2512,9 @@ class BufferedResponseStreamHandler:
             if self.tool_call_id:
                 await mark_cached_tool_call_as_incomplete_on_cleanup()
                 self.tool_call_id = None
+            if self.reasoning_id:
+                await mark_cached_reasoning_as_incomplete_on_cleanup()
+                self.reasoning_id = None
 
             logger.info(f"About to save run data while cleaning up run: {self.run_id}")
             await mark_cached_run_status_on_cleanup(
