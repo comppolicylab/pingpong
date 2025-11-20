@@ -102,6 +102,7 @@ async def _create_thread_with_duplicate_assistant_messages(
             class_id=class_id,
             assistant_id=f"asst-{assistant_id}",
             model="gpt-4o-mini",
+            hide_reasoning_summaries=False,
         )
         thread = models.Thread(
             id=thread_id,
@@ -186,6 +187,7 @@ async def _create_server_thread_with_reasoning(
             class_id=class_id,
             assistant_id=f"asst-{assistant_id}",
             model="gpt-4o-mini",
+            hide_reasoning_summaries=False,
         )
         thread = models.Thread(
             id=thread_id,
