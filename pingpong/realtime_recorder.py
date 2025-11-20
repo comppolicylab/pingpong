@@ -16,6 +16,7 @@ from .config import config
 from pydantic import BaseModel, ConfigDict, Field
 from pydub import AudioSegment
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import ClientDisconnect
 
 realtime_recorder_logger = logging.getLogger("audio_recorder")
 
@@ -634,7 +635,7 @@ class RealtimeRecorder:
                     await self.save_buffer()
                 except Exception as e:
                     realtime_recorder_logger.exception("Error in save_buffer: %s", e)
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ClientDisconnect):
             try:
                 realtime_recorder_logger.debug(
                     "Received task cancellation signal. Saving buffer before closing."
