@@ -4623,23 +4623,41 @@ async def create_run(
                     status_code=409,
                     detail="OpenAI is still processing your last request. We're fetching the latest status...",
                 )
-            file_names = await models.Thread.get_file_search_files(
-                request.state.db, thread.id
-            )
-            thread_vector_store_id = (
-                await models.VectorStore.get_vector_store_id_by_id(
+
+            async def get_vector_store_id_by_id_or_none(
+                db: AsyncSession, vector_store_id: int | None
+            ) -> str | None:
+                if vector_store_id:
+                    return await models.VectorStore.get_vector_store_id_by_id(
+                        db, vector_store_id
+                    )
+                return None
+
+            [
+                file_names,
+                thread_vector_store_id,
+                assistant_vector_store_id,
+                is_supervisor_check,
+            ] = await asyncio.gather(
+                models.Thread.get_file_search_files(request.state.db, thread.id),
+                get_vector_store_id_by_id_or_none(
                     request.state.db, thread.vector_store_id
-                )
-                if thread.vector_store_id
-                else None
-            )
-            assistant_vector_store_id = (
-                await models.VectorStore.get_vector_store_id_by_id(
+                ),
+                get_vector_store_id_by_id_or_none(
                     request.state.db, asst.vector_store_id
-                )
-                if asst.vector_store_id
-                else None
+                ),
+                request.state.authz.check(
+                    [
+                        (
+                            f"user:{request.state.session.user.id}",
+                            "supervisor",
+                            f"class:{class_id}",
+                        )
+                    ]
+                ),
             )
+
+            is_supervisor = is_supervisor_check[0]
 
             run_to_complete.status = schemas.RunStatus.QUEUED
             request.state.db.add(run_to_complete)
@@ -4672,6 +4690,14 @@ async def create_run(
                 anonymous_link_id=request.state.anonymous_link_id
                 if hasattr(request.state, "anonymous_link_id")
                 else None,
+                show_file_search_document_names=is_supervisor
+                or not asst.hide_file_search_document_names,
+                show_file_search_queries=is_supervisor
+                or not asst.hide_file_search_queries,
+                show_file_search_result_quotes=is_supervisor
+                or not asst.hide_file_search_result_quotes,
+                show_reasoning_summaries=is_supervisor
+                or not asst.hide_reasoning_summaries,
             )
         except Exception as e:
             logger.exception("Error running thread")
