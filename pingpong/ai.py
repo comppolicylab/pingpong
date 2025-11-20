@@ -35,7 +35,7 @@ from pingpong.schemas import (
     ToolCallType,
     WebSearchActionType,
 )
-
+from starlette.requests import ClientDisconnect
 from datetime import datetime, timezone
 from openai.types.beta.assistant_stream_event import (
     ThreadRunStepCompleted,
@@ -2924,8 +2924,10 @@ async def run_response(
                 ConnectionResetError,
                 ConnectionAbortedError,
                 asyncio.CancelledError,
+                ClientDisconnect,
             ):
                 is_canceled = True
+                print("Response stream was canceled by the client.")
                 if handler:
                     await asyncio.shield(handler.on_response_canceled())
                 return
@@ -3044,7 +3046,7 @@ async def run_response(
                     if handler:
                         yield handler.flush()
                     yield b'{"type":"done"}\n'
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ClientDisconnect):
             logger.info("Response stream was cancelled")
             return
         except Exception as e:

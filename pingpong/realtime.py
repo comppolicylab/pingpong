@@ -7,6 +7,7 @@ from typing import Awaitable, Callable, cast
 from fastapi import WebSocket, WebSocketDisconnect
 from openai import OpenAIError
 from sqlalchemy import func
+from starlette.requests import ClientDisconnect
 
 from openai.resources.realtime.realtime import AsyncRealtimeConnection
 from openai.types.realtime import (
@@ -276,7 +277,7 @@ async def handle_browser_messages(
 
     except WebSocketDisconnect:
         browser_connection_logger.debug("Browser closed the websocket connection.")
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, ClientDisconnect):
         browser_connection_logger.debug(
             "Received task cancellation signal. Closing the browser websocket."
         )
@@ -421,7 +422,7 @@ async def handle_openai_events(
                         f"Ignoring unknown event type... {event.type}"
                     )
 
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, ClientDisconnect):
         openai_connection_logger.debug(
             "Received task cancellation signal. Closing the OpenAI connection."
         )
@@ -448,7 +449,7 @@ async def process_queue_tasks(
             except Exception as e:
                 task_logger.exception(f"Error processing {task_queue.name} task: {e}")
             task_queue.task_done()
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, ClientDisconnect):
         task_logger.debug("Task queue processor was cancelled.")
 
 
@@ -521,7 +522,8 @@ async def browser_realtime_websocket(
         task.cancel()
         try:
             await task
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ClientDisconnect):
+            # Suppress cancellation/client disconnect exceptions: expected during shutdown/cleanup.
             pass
 
     # Make sure to wait for the task queue to finish processing
@@ -530,5 +532,6 @@ async def browser_realtime_websocket(
     openai_queue_processor.cancel()
     try:
         await openai_queue_processor
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, ClientDisconnect):
+        # Suppress cancellation/client disconnect exceptions: expected during shutdown/cleanup.
         pass
