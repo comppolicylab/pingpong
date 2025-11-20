@@ -6542,10 +6542,14 @@ async def update_assistant(
         # Determine what the value of hide_file_search_result_quotes will be after this request
         new_hide_file_search_result_quotes = (
             req.hide_file_search_result_quotes
-            if "hide_file_search_result_quotes" in req.model_fields_set and req.hide_file_search_result_quotes is not None
+            if "hide_file_search_result_quotes" in req.model_fields_set
+            and req.hide_file_search_result_quotes is not None
             else asst.hide_file_search_result_quotes
         )
-        if req.hide_file_search_document_names and not new_hide_file_search_result_quotes:
+        if (
+            req.hide_file_search_document_names
+            and not new_hide_file_search_result_quotes
+        ):
             raise HTTPException(
                 status_code=400,
                 detail="Cannot hide document names while showing result quotes. Please enable 'Hide File Search Result Quotes from Members' or disable 'Completely Hide File Search Results from Members'.",
