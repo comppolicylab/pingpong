@@ -523,6 +523,7 @@ async def browser_realtime_websocket(
         try:
             await task
         except (asyncio.CancelledError, ClientDisconnect):
+            # Suppress cancellation/client disconnect exceptions: expected during shutdown/cleanup.
             pass
 
     # Make sure to wait for the task queue to finish processing
@@ -532,4 +533,5 @@ async def browser_realtime_websocket(
     try:
         await openai_queue_processor
     except (asyncio.CancelledError, ClientDisconnect):
+        # Suppress cancellation/client disconnect exceptions: expected during shutdown/cleanup.
         pass
