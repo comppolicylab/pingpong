@@ -456,17 +456,17 @@
   }
 
   let hideFileSearchResultQuotes = true;
-  let hasSethideFileSearchResultQuotes = false;
+  let hasSetHideFileSearchResultQuotes = false;
   $: if (
     assistant?.hide_file_search_result_quotes !== undefined &&
     assistant?.hide_file_search_result_quotes !== null &&
-    !hasSethideFileSearchResultQuotes
+    !hasSetHideFileSearchResultQuotes
   ) {
     hideFileSearchResultQuotes = assistant?.hide_file_search_result_quotes;
     if (hideFileSearchResultQuotes) {
       hideFileSearchDocumentNames = true;
     }
-    hasSethideFileSearchResultQuotes = true;
+    hasSetHideFileSearchResultQuotes = true;
   }
 
   let hideFileSearchDocumentNames = false;
