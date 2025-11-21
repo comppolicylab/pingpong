@@ -875,16 +875,12 @@ async def add_institution_admin(
     except EmailSyntaxError as e:
         raise HTTPException(status_code=400, detail=f"Invalid email: {str(e)}")
 
-    created_user = False
-    user = await models.User.get_by_email_sso(
-        request.state.db, normalized_email, "email", normalized_email
+    user = await models.User.get_or_create_by_email(
+        request.state.db,
+        normalized_email,
+        initial_state=schemas.UserState.UNVERIFIED,
     )
-    if not user:
-        created_user = True
-        user = models.User(email=normalized_email, state=schemas.UserState.UNVERIFIED)
-        request.state.db.add(user)
-        await request.state.db.flush()
-        await request.state.db.refresh(user)
+    created_user = False  # If you need to track creation, update this logic as needed
 
     already_admin = await request.state.authz.test(
         f"user:{user.id}", "admin", f"institution:{inst_id}"
