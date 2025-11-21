@@ -210,6 +210,11 @@ export class ThreadManager {
         error: null,
         persisted: true
       }));
+      const ws_messages = ($data.data?.ws_messages || []).map((message) => ({
+        data: message,
+        error: null,
+        persisted: true
+      }));
       const reasoning_messages = ($data.data?.reasoning_messages || []).map((message) => ({
         data: message,
         error: null,
@@ -224,6 +229,7 @@ export class ThreadManager {
       const allMessages = realMessages
         .concat(ci_messages)
         .concat(fs_messages)
+        .concat(ws_messages)
         .concat(reasoning_messages)
         .concat(optimisticMessages)
         .sort(compareMessageDataAsc);
@@ -524,6 +530,7 @@ export class ThreadManager {
           ...d.data,
           ci_messages: [...response.ci_messages, ...d.data.ci_messages],
           fs_messages: [...response.fs_messages, ...d.data.fs_messages],
+          ws_messages: [...response.ws_messages, ...(d.data.ws_messages || [])],
           reasoning_messages: [
             ...response.reasoning_messages,
             ...(d.data.reasoning_messages || [])
@@ -775,6 +782,7 @@ export class ThreadManager {
       ...(state.data?.messages ?? []),
       ...(state.data?.ci_messages ?? []),
       ...(state.data?.fs_messages ?? []),
+      ...(state.data?.ws_messages ?? []),
       ...(state.data?.reasoning_messages ?? []),
       ...state.optimistic
     ];
@@ -1107,7 +1115,7 @@ export class ThreadManager {
 
       if (
         lastMessage.data.role !== 'assistant' &&
-        (call.type === 'code_interpreter' || call.type === 'file_search')
+        (call.type === 'code_interpreter' || call.type === 'file_search' || call.type === 'web_search')
       ) {
         const version = get(this.version);
         const callOutputIndex =
@@ -1202,6 +1210,30 @@ export class ThreadManager {
             step_id: chunk.id,
             status: chunk.status,
             queries: chunk.queries || []
+          });
+        }
+      } else if (chunk.type === 'web_search') {
+        const placeholder = lastMessage.content.find(
+          (c) => c.type === 'web_search_call' && c.step_id === chunk.id
+        ) as api.WebSearchCallItem | undefined;
+
+        if (placeholder) {
+          placeholder.status = chunk.status;
+          placeholder.action_type = chunk.action?.action_type ?? placeholder.action_type;
+          placeholder.query = chunk.action?.query ?? placeholder.query;
+          placeholder.url = chunk.action?.url ?? placeholder.url;
+          placeholder.pattern = chunk.action?.pattern ?? placeholder.pattern;
+          placeholder.sources = chunk.action?.sources ?? placeholder.sources;
+        } else {
+          lastMessage.content.push({
+            type: 'web_search_call',
+            step_id: chunk.id,
+            status: chunk.status,
+            action_type: chunk.action?.action_type ?? null,
+            query: chunk.action?.query,
+            url: chunk.action?.url,
+            pattern: chunk.action?.pattern,
+            sources: chunk.action?.sources
           });
         }
       }

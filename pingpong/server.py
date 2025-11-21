@@ -36,6 +36,7 @@ from openai.types.beta.threads.file_citation_annotation import (
     FileCitationAnnotation,
     FileCitation,
 )
+from openai.types.responses.response_output_text_param import AnnotationURLCitation
 
 from pingpong.ai_models import (
     AZURE_UNAVAILABLE_MODELS,
@@ -2385,6 +2386,8 @@ async def get_thread(
             "messages": list(messages.data),
             "limit": 20,
             "ci_messages": placeholder_ci_calls,
+            "fs_messages": [],
+            "ws_messages": [],
             "reasoning_messages": [],
             "attachments": all_files,
             "instructions": thread.instructions if can_view_prompt else None,
@@ -2452,6 +2455,7 @@ async def get_thread(
         thread_messages: list[schemas.ThreadMessage] = []
         placeholder_ci_calls = []
         file_search_calls: list[schemas.FileSearchMessage] = []
+        web_search_calls: list[schemas.WebSearchMessage] = []
         file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
         reasoning_messages: list[schemas.ReasoningMessage] = []
         for tool_call in tool_calls_v3:
@@ -2530,6 +2534,50 @@ async def get_thread(
                         thread_id=str(thread.id),
                         message_type="file_search_call",
                         output_index=tool_call.output_index,
+                    )
+                )
+            elif tool_call.type == schemas.ToolCallType.WEB_SEARCH:
+                action = (
+                    tool_call.web_search_actions[0]
+                    if tool_call.web_search_actions
+                    else None
+                )
+
+                sources = (
+                    [
+                        schemas.WebSearchSource(url=source.url, name=source.name)
+                        for source in action.sources
+                    ]
+                    if action and action.sources
+                    else []
+                )
+
+                web_search_calls.append(
+                    schemas.WebSearchMessage(
+                        id=str(tool_call.id),
+                        assistant_id=str(thread.assistant_id)
+                        if thread.assistant_id
+                        else "",
+                        created_at=tool_call.created.timestamp(),
+                        content=[
+                            schemas.WebSearchCall(
+                                step_id=str(tool_call.id),
+                                type="web_search_call",
+                                status=tool_call.status.value,
+                                action_type=action.type if action else None,
+                                query=action.query if action else None,
+                                url=action.url if action else None,
+                                pattern=action.pattern if action else None,
+                                sources=sources,
+                            )
+                        ],
+                        metadata={},
+                        object="thread.message",
+                        role="assistant",
+                        run_id=str(tool_call.run_id),
+                        thread_id=str(thread.id),
+                        output_index=tool_call.output_index,
+                        message_type="web_search_call",
                     )
                 )
 
@@ -2637,11 +2685,12 @@ async def get_thread(
                     case schemas.MessagePartType.OUTPUT_TEXT:
                         _annotations: list[Annotation] = []
                         _file_ids_file_citation_annotation: set[str] = set()
-                        if content.annotations and show_file_search_document_names:
+                        if content.annotations:
                             for annotation in content.annotations:
                                 if (
                                     annotation.type
                                     == schemas.AnnotationType.FILE_CITATION
+                                    and show_file_search_document_names
                                 ):
                                     _file_record = file_search_results.get(
                                         annotation.file_id
@@ -2669,11 +2718,15 @@ async def get_thread(
                                             )
                                             _annotations.append(_file_citation)
                                 elif (
-                                    annotation.type == schemas.AnnotationType.FILE_PATH
-                                    or (
+                                    show_file_search_document_names
+                                    and (
                                         annotation.type
-                                        == schemas.AnnotationType.CONTAINER_FILE_CITATION
-                                        and not annotation.vision_file_id
+                                        == schemas.AnnotationType.FILE_PATH
+                                        or (
+                                            annotation.type
+                                            == schemas.AnnotationType.CONTAINER_FILE_CITATION
+                                            and not annotation.vision_file_id
+                                        )
                                     )
                                 ):
                                     _annotations.append(
@@ -2687,6 +2740,20 @@ async def get_thread(
                                                     or annotation.file_id
                                                 ),
                                             ),
+                                            text=annotation.text or "",
+                                        )
+                                    )
+                                elif (
+                                    annotation.type
+                                    == schemas.AnnotationType.URL_CITATION
+                                ):
+                                    _annotations.append(
+                                        AnnotationURLCitation(
+                                            type="url_citation",
+                                            end_index=annotation.end_index or 0,
+                                            start_index=annotation.start_index or 0,
+                                            url=annotation.url or "",
+                                            title=annotation.title,
                                             text=annotation.text or "",
                                         )
                                     )
@@ -2792,6 +2859,7 @@ async def get_thread(
             "limit": 20,
             "ci_messages": placeholder_ci_calls,
             "fs_messages": file_search_calls,
+            "ws_messages": web_search_calls,
             "reasoning_messages": reasoning_messages,
             "attachments": all_files,
             "instructions": thread.instructions if can_view_prompt else None,
@@ -3192,6 +3260,7 @@ async def list_thread_messages(
             "messages": list(messages.data),
             "ci_messages": placeholder_ci_calls,
             "fs_messages": [],
+            "ws_messages": [],
             "reasoning_messages": [],
             "limit": limit,
             "has_more": messages.has_more,
@@ -3583,6 +3652,7 @@ async def list_thread_messages(
             "messages": thread_messages,
             "ci_messages": [],
             "fs_messages": file_search_calls,
+            "ws_messages": web_search_calls,
             "reasoning_messages": reasoning_messages,
             "limit": limit,
             "has_more": has_more_runs,

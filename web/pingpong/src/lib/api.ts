@@ -2139,7 +2139,19 @@ export type TextAnnotationFileCitation = {
   type: 'file_citation';
 };
 
-export type TextAnnotation = TextAnnotationFilePath | TextAnnotationFileCitation;
+export type TextAnnotationURLCitation = {
+  end_index: number;
+  start_index: number;
+  text: string;
+  title?: string | null;
+  type: 'url_citation';
+  url: string;
+};
+
+export type TextAnnotation =
+  | TextAnnotationFilePath
+  | TextAnnotationFileCitation
+  | TextAnnotationURLCitation;
 
 export type Text = {
   annotations: TextAnnotation[];
@@ -2193,6 +2205,22 @@ export type FileSearchCallItem = {
   status?: 'in_progress' | 'searching' | 'completed' | 'incomplete' | 'failed';
 };
 
+export type WebSearchSource = {
+  url?: string | null;
+  name?: string | null;
+};
+
+export type WebSearchCallItem = {
+  step_id: string;
+  type: 'web_search_call';
+  status?: 'in_progress' | 'searching' | 'completed' | 'incomplete' | 'failed';
+  action_type?: 'search' | 'find' | 'open_page' | null;
+  query?: string | null;
+  url?: string | null;
+  pattern?: string | null;
+  sources?: WebSearchSource[];
+};
+
 export type ReasoningSummaryPart = {
   id?: number;
   part_index: number;
@@ -2216,6 +2244,7 @@ export type Content =
   | MessageContentCodeOutputLogs
   | CodeInterpreterCallPlaceholder
   | FileSearchCallItem
+  | WebSearchCallItem
   | ReasoningCallItem;
 
 export type OpenAIMessage = {
@@ -2229,7 +2258,12 @@ export type OpenAIMessage = {
   vision_file_ids?: string[];
   metadata: Record<string, unknown> | null;
   object: 'thread.message' | 'code_interpreter_call_placeholder';
-  message_type?: 'file_search_call' | 'code_interpreter_call' | 'reasoning' | null;
+  message_type?:
+    | 'file_search_call'
+    | 'web_search_call'
+    | 'code_interpreter_call'
+    | 'reasoning'
+    | null;
   role: 'user' | 'assistant';
   run_id: string | null;
   attachments: OpenAIAttachment[] | null;
@@ -2255,6 +2289,7 @@ export type ThreadWithMeta = {
   messages: OpenAIMessage[];
   ci_messages: OpenAIMessage[];
   fs_messages: OpenAIMessage[];
+  ws_messages: OpenAIMessage[];
   reasoning_messages: OpenAIMessage[];
   attachments: Record<string, ServerFile>;
   instructions: string | null;
@@ -2325,6 +2360,7 @@ export type ThreadMessages = {
   messages: OpenAIMessage[];
   ci_messages: OpenAIMessage[];
   fs_messages: OpenAIMessage[];
+  ws_messages: OpenAIMessage[];
   reasoning_messages: OpenAIMessage[];
   limit: number;
   has_more: boolean;
@@ -2347,6 +2383,7 @@ export const getThreadMessages = async (
       limit: null,
       messages: [],
       fs_messages: [],
+      ws_messages: [],
       ci_messages: [],
       reasoning_messages: [],
       has_more: false,
@@ -2360,6 +2397,7 @@ export const getThreadMessages = async (
     messages: expanded.data.messages,
     ci_messages: expanded.data.ci_messages,
     fs_messages: expanded.data.fs_messages,
+    ws_messages: expanded.data.ws_messages,
     reasoning_messages: expanded.data.reasoning_messages,
     limit: expanded.data.limit,
     has_more: hasMore,
@@ -2440,6 +2478,16 @@ export type FileSearchCall = {
   status: 'in_progress' | 'searching' | 'completed' | 'incomplete' | 'failed';
 };
 
+export type WebSearchCall = {
+  id: string;
+  index: number;
+  output_index?: number;
+  type: 'web_search';
+  run_id: string | null;
+  status: 'in_progress' | 'searching' | 'completed' | 'incomplete' | 'failed';
+  action?: WebSearchCallItem;
+};
+
 export type ReasoningStepSummaryPartChunk = {
   reasoning_step_id: number;
   part_index: number;
@@ -2458,7 +2506,7 @@ export type ReasoningCall = {
 };
 
 // TODO(jnu): support function calling, updates for v2
-export type ToolCallDelta = CodeInterpreterCall | FileSearchCall;
+export type ToolCallDelta = CodeInterpreterCall | FileSearchCall | WebSearchCall;
 
 export type ThreadStreamToolCallCreatedChunk = {
   type: 'tool_call_created';

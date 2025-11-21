@@ -58,7 +58,9 @@
   import FileCitation from './FileCitation.svelte';
   import StatusErrors from './StatusErrors.svelte';
   import FileSearchCallItem from './FileSearchCallItem.svelte';
+  import WebSearchCallItem from './WebSearchCallItem.svelte';
   import ReasoningCallItem from './ReasoningCallItem.svelte';
+  import WebSourceChip from './WebSourceChip.svelte';
   export let data;
 
   let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -207,6 +209,9 @@
 
   function isFileCitation(a: api.TextAnnotation): a is api.TextAnnotationFileCitation {
     return a.type === 'file_citation' && a.text === 'responses_v3';
+  }
+  function isURLCitation(a: api.TextAnnotation): a is api.TextAnnotationURLCitation {
+    return a.type === 'url_citation';
   }
   const getShortMessageTimestamp = (timestamp: number) => {
     return new Intl.DateTimeFormat('en-US', {
@@ -942,6 +947,7 @@
               {@const { clean_string, images } = processString(content.text.value)}
               {@const imageInfo = convertImageProxyToInfo(images)}
               {@const quoteCitations = (content.text.annotations ?? []).filter(isFileCitation)}
+              {@const urlCitations = (content.text.annotations ?? []).filter(isURLCitation)}
 
               <div class="leading-6">
                 <Markdown
@@ -960,6 +966,18 @@
                     <FileCitation
                       name={citation.file_citation.file_name}
                       quote={citation.file_citation.quote}
+                    />
+                  {/each}
+                </div>
+              {/if}
+              {#if urlCitations.length > 0}
+                <div class="flex flex-wrap gap-2 mt-1">
+                  {#each urlCitations as citation}
+                    <WebSourceChip
+                      source={{
+                        url: citation.url,
+                        name: citation.title ?? undefined
+                      }}
                     />
                   {/each}
                 </div>
@@ -1016,6 +1034,8 @@
               >
             {:else if content.type === 'file_search_call'}
               <FileSearchCallItem {content} />
+            {:else if content.type === 'web_search_call'}
+              <WebSearchCallItem {content} />
             {:else if content.type === 'reasoning'}
               <ReasoningCallItem {content} />
             {:else if content.type === 'code_output_image_file'}

@@ -26,6 +26,9 @@ export const parseTextContent = (text: Text, threadVersion: number = 2, baseUrl:
         const { start_index, end_index, file_citation } = annotation;
         const fileName = ` (${file_citation.file_name})`;
         replacements.push({ start: start_index, end: end_index, newValue: fileName });
+      } else if (annotation.type === 'url_citation') {
+        const { start_index, end_index } = annotation;
+        replacements.push({ start: start_index, end: end_index, newValue: '' });
       }
     }
   }
