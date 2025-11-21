@@ -1,10 +1,23 @@
 from datetime import date, datetime
 from enum import Enum, StrEnum, auto
 from typing import Generic, Literal, NotRequired, TypeVar, Union
-from typing_extensions import TypedDict
+from typing_extensions import TypedDict, Annotated, TypeAlias
 
+from openai._utils import PropertyInfo
+from openai.types.beta.threads import (
+    ImageFileContentBlock,
+    TextContentBlock,
+    RefusalContentBlock,
+    ImageURLContentBlock,
+)
+from openai.types.beta.threads.text import Text as OpenAIText
+from openai.types.beta.threads.annotation import (
+    FileCitationAnnotation,
+    FilePathAnnotation,
+)
 from openai.types.beta.assistant_tool import AssistantTool as Tool
 from openai.types.beta.threads import Message as OpenAIMessage
+from openai.types.responses.response_output_text import AnnotationURLCitation
 from pydantic import (
     BaseModel,
     Field,
@@ -1479,6 +1492,31 @@ class ThreadParticipants(BaseModel):
     assistant: dict[int, str]
 
 
+ThreadAnnotation: TypeAlias = Annotated[
+    Union[FileCitationAnnotation, FilePathAnnotation, AnnotationURLCitation],
+    PropertyInfo(discriminator="type"),
+]
+
+
+class ThreadText(OpenAIText):
+    annotations: list[ThreadAnnotation]
+
+
+class ThreadTextContentBlock(TextContentBlock):
+    text: ThreadText
+
+
+ThreadMessageContent: TypeAlias = Annotated[
+    Union[
+        ImageFileContentBlock,
+        ImageURLContentBlock,
+        ThreadTextContentBlock,
+        RefusalContentBlock,
+    ],
+    PropertyInfo(discriminator="type"),
+]
+
+
 class ThreadMessage(OpenAIMessage):
     status: Literal["in_progress", "incomplete", "completed"] | None
     """
@@ -1495,6 +1533,9 @@ class ThreadMessage(OpenAIMessage):
 
     output_index: int | None = None
     """The output index of the message, if applicable for Next-Gen Assistants."""
+
+    content: list[ThreadMessageContent]
+    """The content of the message in array of text and/or images."""
 
     metadata: dict[str, str | bool] | None = None
     """Set of 16 key-value pairs that can be attached to an object.
