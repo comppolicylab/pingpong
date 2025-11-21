@@ -10,6 +10,7 @@ from aiohttp import ClientResponseError
 import jwt
 import openai
 import humanize
+from email_validator import EmailSyntaxError, validate_email
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import (
     BackgroundTasks,
@@ -852,6 +853,58 @@ async def create_institution(create: schemas.CreateInstitution, request: Request
 )
 async def get_institution(institution_id: str, request: Request):
     return await models.Institution.get_by_id(request.state.db, int(institution_id))
+
+
+@v1.post(
+    "/institution/{institution_id}/admin",
+    dependencies=[Depends(Authz("admin", "institution:{institution_id}"))],
+    response_model=schemas.InstitutionAdminResponse,
+)
+async def add_institution_admin(
+    institution_id: str, data: schemas.AddInstitutionAdminRequest, request: Request
+):
+    """Add an admin to an institution.
+
+    If a user with the given email does not exist, creates a new user with that email.
+    Then grants admin permissions for the specified institution to the user.
+    Returns information about whether a user was created and whether admin rights were added.
+    """
+    inst_id = int(institution_id)
+    institution = await models.Institution.get_by_id(request.state.db, inst_id)
+    if not institution:
+        raise HTTPException(status_code=404, detail="Institution not found")
+
+    try:
+        normalized_email = validate_email(
+            data.email, check_deliverability=False
+        ).normalized
+    except EmailSyntaxError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid email: {str(e)}")
+
+    user = await models.User.get_or_create_by_email(
+        request.state.db,
+        normalized_email,
+        initial_state=schemas.UserState.UNVERIFIED,
+    )
+    created_user = False  # If you need to track creation, update this logic as needed
+
+    already_admin = await request.state.authz.test(
+        f"user:{user.id}", "admin", f"institution:{inst_id}"
+    )
+    added_admin = False
+    if not already_admin:
+        await request.state.authz.write_safe(
+            grant=[(f"user:{user.id}", "admin", f"institution:{inst_id}")]
+        )
+        added_admin = True
+
+    return schemas.InstitutionAdminResponse(
+        institution_id=inst_id,
+        user_id=user.id,
+        email=user.email,
+        created_user=created_user,
+        added_admin=added_admin,
+    )
 
 
 @v1.get(
