@@ -10,6 +10,7 @@ from aiohttp import ClientResponseError
 import jwt
 import openai
 import humanize
+from email_validator import EmailSyntaxError, validate_email
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import (
     BackgroundTasks,
@@ -852,6 +853,56 @@ async def create_institution(create: schemas.CreateInstitution, request: Request
 )
 async def get_institution(institution_id: str, request: Request):
     return await models.Institution.get_by_id(request.state.db, int(institution_id))
+
+
+@v1.post(
+    "/institution/{institution_id}/admin",
+    dependencies=[Depends(Authz("admin", "institution:{institution_id}"))],
+    response_model=schemas.InstitutionAdminResponse,
+)
+async def add_institution_admin(
+    institution_id: str, data: schemas.AddInstitutionAdminRequest, request: Request
+):
+    inst_id = int(institution_id)
+    institution = await models.Institution.get_by_id(request.state.db, inst_id)
+    if not institution:
+        raise HTTPException(status_code=404, detail="Institution not found")
+
+    try:
+        normalized_email = validate_email(
+            data.email, check_deliverability=False
+        ).normalized
+    except EmailSyntaxError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid email: {str(e)}")
+
+    created_user = False
+    user = await models.User.get_by_email_sso(
+        request.state.db, normalized_email, "email", normalized_email
+    )
+    if not user:
+        created_user = True
+        user = models.User(email=normalized_email, state=schemas.UserState.UNVERIFIED)
+        request.state.db.add(user)
+        await request.state.db.flush()
+        await request.state.db.refresh(user)
+
+    already_admin = await request.state.authz.test(
+        f"user:{user.id}", "admin", f"institution:{inst_id}"
+    )
+    added_admin = False
+    if not already_admin:
+        await request.state.authz.write_safe(
+            grant=[(f"user:{user.id}", "admin", f"institution:{inst_id}")]
+        )
+        added_admin = True
+
+    return schemas.InstitutionAdminResponse(
+        institution_id=inst_id,
+        user_id=user.id,
+        email=user.email,
+        created_user=created_user,
+        added_admin=added_admin,
+    )
 
 
 @v1.get(
