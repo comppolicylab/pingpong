@@ -1515,6 +1515,7 @@ class ThreadMessages(BaseModel):
     messages: list[ThreadMessage]
     fs_messages: list[FileSearchMessage] | None = None
     ci_messages: list[CodeInterpreterMessage] | None
+    ws_messages: list[WebSearchMessage] | None = None
     reasoning_messages: list["ReasoningMessage"] | None = None
     has_more: bool
 
@@ -1536,6 +1537,7 @@ class ThreadWithMeta(BaseModel):
     limit: int
     ci_messages: list[CodeInterpreterMessage] | None
     fs_messages: list[FileSearchMessage] | None = None
+    ws_messages: list[WebSearchMessage] | None = None
     reasoning_messages: list["ReasoningMessage"] | None = None
     attachments: dict[str, File] | None
     instructions: str | None
