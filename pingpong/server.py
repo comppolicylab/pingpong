@@ -863,6 +863,12 @@ async def get_institution(institution_id: str, request: Request):
 async def add_institution_admin(
     institution_id: str, data: schemas.AddInstitutionAdminRequest, request: Request
 ):
+    """Add an admin to an institution.
+
+    If a user with the given email does not exist, creates a new user with that email.
+    Then grants admin permissions for the specified institution to the user.
+    Returns information about whether a user was created and whether admin rights were added.
+    """
     inst_id = int(institution_id)
     institution = await models.Institution.get_by_id(request.state.db, inst_id)
     if not institution:
