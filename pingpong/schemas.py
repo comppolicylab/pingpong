@@ -1410,6 +1410,42 @@ class FileSearchMessage(BaseModel):
     output_index: int | None = None
 
 
+class WebSearchActionType(StrEnum):
+    SEARCH = "search"
+    FIND = "find"
+    OPEN_PAGE = "open_page"
+
+
+class WebSearchSource(BaseModel):
+    url: str | None = None
+    name: str | None = None
+
+
+class WebSearchCall(BaseModel):
+    step_id: str
+    type: Literal["web_search_call"]
+    action_type: WebSearchActionType | None = None
+    query: str | None = None
+    url: str | None = None
+    pattern: str | None = None
+    sources: list[WebSearchSource] | None = None
+    status: Literal["in_progress", "searching", "completed", "incomplete", "failed"]
+
+
+class WebSearchMessage(BaseModel):
+    id: str
+    assistant_id: str
+    created_at: float
+    content: list[WebSearchCall]
+    metadata: dict[str, str]
+    object: Literal["thread.message"]
+    message_type: Literal["web_search_call"]
+    role: Literal["assistant"]
+    run_id: str
+    thread_id: str
+    output_index: int | None = None
+
+
 class CodeInterpreterMessage(BaseModel):
     id: str
     assistant_id: str
@@ -1796,12 +1832,6 @@ class ToolCallStatus(StrEnum):
     COMPLETED = "completed"
     INCOMPLETE = "incomplete"
     FAILED = "failed"
-
-
-class WebSearchActionType(StrEnum):
-    SEARCH = "search"
-    FIND = "find"
-    OPEN_PAGE = "open_page"
 
 
 class MessagePartType(StrEnum):
