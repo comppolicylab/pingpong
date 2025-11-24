@@ -1831,6 +1831,7 @@ class BufferedResponseStreamHandler:
                         if self.show_web_search_actions
                         else None,
                     },
+                    "run_id": str(self.run_id),
                 },
             }
         )
