@@ -2443,6 +2443,8 @@ async def get_thread(
             "messages": list(messages.data),
             "limit": 20,
             "ci_messages": placeholder_ci_calls,
+            "fs_messages": [],
+            "ws_messages": [],
             "reasoning_messages": [],
             "attachments": all_files,
             "instructions": thread.instructions if can_view_prompt else None,
@@ -2931,8 +2933,8 @@ async def get_thread(
             "limit": 20,
             "ci_messages": placeholder_ci_calls,
             "fs_messages": file_search_calls,
-            "reasoning_messages": reasoning_messages,
             "ws_messages": web_search_calls,
+            "reasoning_messages": reasoning_messages,
             "attachments": all_files,
             "instructions": thread.instructions if can_view_prompt else None,
             "recording": thread.voice_mode_recording
@@ -3331,6 +3333,8 @@ async def list_thread_messages(
         return {
             "messages": list(messages.data),
             "ci_messages": placeholder_ci_calls,
+            "fs_messages": [],
+            "ws_messages": [],
             "limit": limit,
             "has_more": messages.has_more,
         }
@@ -3358,6 +3362,8 @@ async def list_thread_messages(
             return {
                 "messages": [],
                 "ci_messages": [],
+                "fs_messages": [],
+                "ws_messages": [],
                 "limit": limit,
                 "has_more": False,
             }

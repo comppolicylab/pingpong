@@ -528,11 +528,11 @@ export class ThreadManager {
         ...d,
         data: {
           ...d.data,
-          ci_messages: [...response.ci_messages, ...d.data.ci_messages],
-          fs_messages: [...response.fs_messages, ...d.data.fs_messages],
-          ws_messages: [...response.ws_messages, ...d.data.ws_messages],
+          ci_messages: [...(response.ci_messages || []), ...d.data.ci_messages],
+          fs_messages: [...(response.fs_messages || []), ...d.data.fs_messages],
+          ws_messages: [...(response.ws_messages || []), ...d.data.ws_messages],
           reasoning_messages: [
-            ...response.reasoning_messages,
+            ...(response.reasoning_messages || []),
             ...(d.data.reasoning_messages || [])
           ],
           messages: [...response.messages, ...d.data.messages].sort(compareApiMessagesAsc)

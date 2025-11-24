@@ -1482,7 +1482,7 @@ class CodeInterpreterMessage(BaseModel):
 
 
 class CodeInterpreterMessages(BaseModel):
-    ci_messages: list[CodeInterpreterMessage]
+    ci_messages: list[CodeInterpreterMessage] = []
 
 
 class ThreadRun(BaseModel):
@@ -1560,10 +1560,10 @@ class ThreadMessage(OpenAIMessage):
 class ThreadMessages(BaseModel):
     limit: int
     messages: list[ThreadMessage]
-    fs_messages: list[FileSearchMessage] | None = None
-    ci_messages: list[CodeInterpreterMessage] | None
-    ws_messages: list[WebSearchMessage] | None = None
-    reasoning_messages: list["ReasoningMessage"] | None = None
+    fs_messages: list[FileSearchMessage] = []
+    ci_messages: list[CodeInterpreterMessage] = []
+    ws_messages: list[WebSearchMessage] = []
+    reasoning_messages: list["ReasoningMessage"] = []
     has_more: bool
 
 

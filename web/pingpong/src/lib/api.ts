@@ -2213,7 +2213,7 @@ export type WebSearchSource = {
 export type WebSearchCallItem = {
   step_id: string;
   type: 'web_search_call';
-  action: WebSearchAction;
+  action?: WebSearchAction | null;
   status: 'in_progress' | 'completed' | 'incomplete' | 'searching' | 'failed';
 };
 
