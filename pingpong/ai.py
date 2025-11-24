@@ -851,6 +851,9 @@ class BufferedResponseStreamHandler:
         show_file_search_result_quotes: bool | None = None,
         show_file_search_document_names: bool | None = None,
         show_file_search_queries: bool | None = None,
+        show_web_search_sources: bool | None = None,
+        show_web_search_actions: bool | None = None,
+        show_web_search_citations: bool | None = None,
         show_reasoning_summaries: bool | None = None,
         *args,
         **kwargs,
@@ -904,6 +907,15 @@ class BufferedResponseStreamHandler:
         )
         self.show_reasoning_summaries = (
             show_reasoning_summaries if show_reasoning_summaries is not None else False
+        )
+        self.show_web_search_sources = (
+            show_web_search_sources if show_web_search_sources is not None else True
+        )
+        self.show_web_search_actions = (
+            show_web_search_actions if show_web_search_actions is not None else True
+        )
+        self.show_web_search_citations = (
+            show_web_search_citations if show_web_search_citations is not None else True
         )
 
     def enqueue(self, data: Dict) -> None:
@@ -1347,6 +1359,8 @@ class BufferedResponseStreamHandler:
 
         await add_cached_message_part_on_output_text_url_citation_added()
 
+        if not self.show_web_search_citations:
+            return
         self.enqueue(
             {
                 "type": "message_delta",
@@ -1755,7 +1769,9 @@ class BufferedResponseStreamHandler:
                 return {
                     "type": WebSearchActionType.SEARCH.value,
                     "query": action.query,
-                    "sources": [{"url": source.url} for source in action.sources or []],
+                    "sources": [{"url": source.url} for source in action.sources or []]
+                    if self.show_web_search_sources
+                    else [],
                 }
             case "find":
                 return {
@@ -1817,7 +1833,9 @@ class BufferedResponseStreamHandler:
                     "output_index": self.prev_output_index,
                     "type": "web_search",
                     "web_search": {
-                        "action": self.get_action_payload(data.action),
+                        "action": self.get_action_payload(data.action)
+                        if self.show_web_search_actions
+                        else None,
                     },
                 },
             }
@@ -2014,7 +2032,9 @@ class BufferedResponseStreamHandler:
                     "index": self.prev_output_index,
                     "run_id": str(self.run_id),
                     "status": data.status,
-                    "action": self.get_action_payload(data.action),
+                    "action": self.get_action_payload(data.action)
+                    if self.show_web_search_actions
+                    else None,
                 },
             }
         )
@@ -2750,6 +2770,9 @@ async def run_response(
     show_file_search_result_quotes: bool | None = None,
     show_file_search_document_names: bool | None = None,
     show_file_search_queries: bool | None = None,
+    show_web_search_sources: bool | None = None,
+    show_web_search_actions: bool | None = None,
+    show_web_search_citations: bool | None = None,
     show_reasoning_summaries: bool | None = None,
     user_auth: str | None = None,
     anonymous_link_auth: str | None = None,
@@ -2873,6 +2896,9 @@ async def run_response(
                     show_file_search_queries=show_file_search_queries,
                     show_file_search_result_quotes=show_file_search_result_quotes,
                     show_file_search_document_names=show_file_search_document_names,
+                    show_web_search_sources=show_web_search_sources,
+                    show_web_search_actions=show_web_search_actions,
+                    show_web_search_citations=show_web_search_citations,
                     show_reasoning_summaries=show_reasoning_summaries,
                     user_id=run.creator_id,
                     user_auth=user_auth,

@@ -1302,6 +1302,9 @@ export type Assistant = {
   hide_file_search_result_quotes: boolean | null;
   hide_file_search_document_names: boolean | null;
   hide_file_search_queries: boolean | null;
+  hide_web_search_sources: boolean | null;
+  hide_web_search_actions: boolean | null;
+  hide_web_search_citations: boolean | null;
   endorsed: boolean | null;
   created: string;
   updated: string | null;
@@ -1387,6 +1390,9 @@ export type CreateAssistantRequest = {
   hide_file_search_result_quotes?: boolean;
   hide_file_search_document_names?: boolean;
   hide_file_search_queries?: boolean;
+  hide_web_search_sources?: boolean;
+  hide_web_search_actions?: boolean;
+  hide_web_search_citations?: boolean;
 };
 
 /**
@@ -1418,6 +1424,9 @@ export type UpdateAssistantRequest = {
   hide_file_search_result_quotes?: boolean;
   hide_file_search_document_names?: boolean;
   hide_file_search_queries?: boolean;
+  hide_web_search_sources?: boolean;
+  hide_web_search_actions?: boolean;
+  hide_web_search_citations?: boolean;
 };
 
 /**

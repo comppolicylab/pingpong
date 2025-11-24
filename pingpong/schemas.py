@@ -439,6 +439,9 @@ class Assistant(BaseModel):
     hide_file_search_result_quotes: bool | None = None
     hide_file_search_document_names: bool | None = None
     hide_file_search_queries: bool | None = None
+    hide_web_search_sources: bool | None = None
+    hide_web_search_actions: bool | None = None
+    hide_web_search_citations: bool | None = None
     use_latex: bool | None
     use_image_descriptions: bool | None
     hide_prompt: bool | None
@@ -490,6 +493,9 @@ class CreateAssistant(BaseModel):
     hide_file_search_result_quotes: bool = True
     hide_file_search_document_names: bool = False
     hide_file_search_queries: bool = True
+    hide_web_search_sources: bool = False
+    hide_web_search_actions: bool = False
+    hide_web_search_citations: bool = False
     deleted_private_files: list[int] = []
     create_classic_assistant: bool = False
 
@@ -534,6 +540,9 @@ class UpdateAssistant(BaseModel):
     hide_file_search_result_quotes: bool | None = None
     hide_file_search_document_names: bool | None = None
     hide_file_search_queries: bool | None = None
+    hide_web_search_sources: bool | None = None
+    hide_web_search_actions: bool | None = None
+    hide_web_search_citations: bool | None = None
     use_image_descriptions: bool | None = None
     deleted_private_files: list[int] = []
 
