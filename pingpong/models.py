@@ -2241,7 +2241,6 @@ class Assistant(Base):
     hide_file_search_queries = Column(Boolean, server_default="true")
     hide_web_search_sources = Column(Boolean, server_default="false")
     hide_web_search_actions = Column(Boolean, server_default="false")
-    hide_web_search_citations = Column(Boolean, server_default="false")
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="assistants", foreign_keys=[class_id])
     threads = relationship("Thread", back_populates="assistant")

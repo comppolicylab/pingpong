@@ -25,13 +25,15 @@
 </script>
 
 <div class="my-3">
-  {#if content.action && content.action.type === 'search' && (uniqueSources.length > 0 || content.action.query)}
+  {#if content.action && content.action.type === 'search' && uniqueSources.length > 0}
     <div class="flex items-center gap-2">
       <GlobeOutline class="h-4 w-4 text-gray-600" />
       <button class="flex flex-row items-bottom" on:click={handleClick}>
         {#if content.status === 'completed'}
           <span class="text-sm text-left font-medium text-gray-600"
-            >Searched web{content.action.query ? ` for ${content.action.query}` : ''}{#if open}<span
+            >Searched{content.action.query
+              ? ` web for ${content.action.query}`
+              : ' the web'}{#if open}<span
                 >{content.action.sources
                   ? ` across ${content.action.sources.length} ${content.action.sources.length === 1 ? 'source' : 'sources'}`
                   : ''}...</span
@@ -77,7 +79,11 @@
       <div class="flex flex-row items-bottom">
         {#if content.action.type === 'search'}
           {#if content.status === 'completed'}
-            <span class="text-sm font-medium text-gray-600">Searched web</span>
+            <span class="text-sm font-medium text-gray-600"
+              >Searched{content.action.query
+                ? ` web for ${content.action.query}`
+                : ' the web'}</span
+            >
           {:else if content.status === 'failed'}
             <span class="text-sm font-medium text-red-600">Web search failed</span>
           {:else if content.status === 'incomplete'}
@@ -126,7 +132,7 @@
       <GlobeOutline class="h-4 w-4 text-gray-600" />
       <div class="flex flex-row items-bottom">
         {#if content.status === 'completed'}
-          <span class="text-sm font-medium text-gray-600">Web search completed</span>
+          <span class="text-sm font-medium text-gray-600">Searched the web</span>
         {:else if content.status === 'failed'}
           <span class="text-sm font-medium text-red-600">Web search failed</span>
         {:else if content.status === 'incomplete'}

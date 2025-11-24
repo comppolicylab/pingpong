@@ -39,7 +39,8 @@
     MessageDotsOutline,
     MicrophoneOutline,
     MicrophoneSolid,
-    ArchiveOutline
+    ArchiveOutline,
+    LinkOutline
   } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
   import { writable, type Writable } from 'svelte/store';
@@ -55,6 +56,7 @@
   import { page } from '$app/stores';
   import { computeLatestIncidentTimestamps, filterLatestIncidentUpdates } from '$lib/statusUpdates';
   import { tick } from 'svelte';
+  import WebSourceChip from '$lib/components/WebSourceChip.svelte';
   export let data;
 
   // Flag indicating whether we should check for changes before navigating away.
@@ -519,16 +521,6 @@
     hasSetHideWebSearchActions = true;
   }
 
-  let hideWebSearchCitations = false;
-  let hasSetHideWebSearchCitations = false;
-  $: if (
-    assistant?.hide_web_search_citations !== undefined &&
-    assistant?.hide_web_search_citations !== null &&
-    !hasSetHideWebSearchCitations
-  ) {
-    hideWebSearchCitations = assistant?.hide_web_search_citations;
-    hasSetHideWebSearchCitations = true;
-  }
   $: if (hideWebSearchActions) {
     hideWebSearchSources = true;
   }
@@ -946,8 +938,7 @@
       hide_file_search_document_names: hideFileSearchDocumentNames,
       hide_file_search_queries: hideFileSearchQueries,
       hide_web_search_sources: hideWebSearchActions ? true : hideWebSearchSources,
-      hide_web_search_actions: hideWebSearchActions,
-      hide_web_search_citations: hideWebSearchCitations
+      hide_web_search_actions: hideWebSearchActions
     };
     return params;
   };
@@ -1968,25 +1959,34 @@
               >
             </div>
             <div class="col-span-2 mb-1">
-              <Checkbox
-                id="hide_web_search_citations"
-                name="hide_web_search_citations"
-                disabled={preventEdits}
-                bind:checked={hideWebSearchCitations}
-                ><div class="flex flex-row gap-1">
-                  <div>Hide Inline URL Citations from Members</div>
-                </div></Checkbox
+              <div
+                class="flex flex-row items-center justify-between gap-x-4 p-3 border rounded-lg bg-gradient-to-b border-blue-400 from-blue-50 to-blue-100 text-blue-800"
               >
-              <Helper
-                >When the assistant uses web search, URL citations may be included in its responses.
-                Citations show the domain (e.g., apnews.com) inline, and the web address and title
-                in a popover. When enabled, members can click the inline citation to visit the
-                source. This setting controls whether members can see these citations. When checked,
-                members will not see the inline URL citations. Moderators can always review inline
-                URL citations. <b
-                  >This setting will only apply to Chat Mode models with Web Search enabled.</b
-                ></Helper
-              >
+                <div class="flex flex-row items-center gap-x-3">
+                  <LightbulbSolid size="md" class="shrink-0" />
+                  <div class="flex flex-col text-xs">
+                    <span class="font-bold"
+                      >Assistant responses may include inline URL citations</span
+                    >
+                    <span
+                      >When the assistant uses web search, URL citations may be included in its
+                      responses. Citations show the domain inline, and the web address and title in
+                      a popover. Members can click the inline citation to visit the source. You can
+                      interact with the example citation on the right.</span
+                    >
+                  </div>
+                </div>
+                <div class="flex flex-row items-center gap-x-3">
+                  <WebSourceChip
+                    source={{
+                      url: 'https://openai.com/index/gpt-5-1/',
+                      type: 'url',
+                      title: 'GPT-5.1: A smarter, more conversational ChatGPT'
+                    }}
+                    type="chip"
+                  />
+                </div>
+              </div>
             </div>
 
             <hr />

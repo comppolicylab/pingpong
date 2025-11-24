@@ -2514,9 +2514,6 @@ async def get_thread(
         show_web_search_actions = is_supervisor or (
             assistant and not assistant.hide_web_search_actions
         )
-        show_web_search_citations = is_supervisor or (
-            assistant and not assistant.hide_web_search_citations
-        )
 
         thread_messages: list[schemas.ThreadMessage] = []
         placeholder_ci_calls = []
@@ -2843,7 +2840,6 @@ async def get_thread(
                                 elif (
                                     annotation.type
                                     == schemas.AnnotationType.URL_CITATION
-                                    and show_web_search_citations
                                 ):
                                     _annotations.append(
                                         AnnotationURLCitation(
@@ -3444,9 +3440,6 @@ async def list_thread_messages(
         show_web_search_actions = is_supervisor or (
             assistant and not assistant.hide_web_search_actions
         )
-        show_web_search_citations = is_supervisor or (
-            assistant and not assistant.hide_web_search_citations
-        )
 
         thread_messages: list[schemas.ThreadMessage] = []
         placeholder_ci_calls = []
@@ -3774,7 +3767,6 @@ async def list_thread_messages(
                                 elif (
                                     annotation.type
                                     == schemas.AnnotationType.URL_CITATION
-                                    and show_web_search_citations
                                 ):
                                     _annotations.append(
                                         AnnotationURLCitation(
@@ -4946,8 +4938,6 @@ async def create_run(
                 or not asst.hide_web_search_sources,
                 show_web_search_actions=is_supervisor
                 or not asst.hide_web_search_actions,
-                show_web_search_citations=is_supervisor
-                or not asst.hide_web_search_citations,
             )
         except Exception as e:
             logger.exception("Error running thread")
@@ -5358,9 +5348,6 @@ async def send_message(
             show_web_search_actions = is_supervisor or (
                 asst and not asst.hide_web_search_actions
             )
-            show_web_search_citations = is_supervisor or (
-                asst and not asst.hide_web_search_citations
-            )
 
             messageContentParts: list[models.MessagePart] = []
             part_index = 0
@@ -5436,7 +5423,6 @@ async def send_message(
                 show_file_search_document_names=show_file_search_document_names,
                 show_web_search_sources=show_web_search_sources,
                 show_web_search_actions=show_web_search_actions,
-                show_web_search_citations=show_web_search_citations,
                 user_auth=request.state.auth_user
                 if hasattr(request.state, "auth_user")
                 else None,
@@ -6829,12 +6815,6 @@ async def update_assistant(
         and req.hide_file_search_queries is not None
     ):
         asst.hide_file_search_queries = req.hide_file_search_queries
-
-    if (
-        "hide_web_search_citations" in req.model_fields_set
-        and req.hide_web_search_citations is not None
-    ):
-        asst.hide_web_search_citations = req.hide_web_search_citations
 
     if (
         "hide_web_search_sources" in req.model_fields_set

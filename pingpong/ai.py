@@ -853,7 +853,6 @@ class BufferedResponseStreamHandler:
         show_file_search_queries: bool | None = None,
         show_web_search_sources: bool | None = None,
         show_web_search_actions: bool | None = None,
-        show_web_search_citations: bool | None = None,
         show_reasoning_summaries: bool | None = None,
         *args,
         **kwargs,
@@ -913,9 +912,6 @@ class BufferedResponseStreamHandler:
         )
         self.show_web_search_actions = (
             show_web_search_actions if show_web_search_actions is not None else True
-        )
-        self.show_web_search_citations = (
-            show_web_search_citations if show_web_search_citations is not None else True
         )
 
     def enqueue(self, data: Dict) -> None:
@@ -1359,8 +1355,6 @@ class BufferedResponseStreamHandler:
 
         await add_cached_message_part_on_output_text_url_citation_added()
 
-        if not self.show_web_search_citations:
-            return
         self.enqueue(
             {
                 "type": "message_delta",
@@ -2772,7 +2766,6 @@ async def run_response(
     show_file_search_queries: bool | None = None,
     show_web_search_sources: bool | None = None,
     show_web_search_actions: bool | None = None,
-    show_web_search_citations: bool | None = None,
     show_reasoning_summaries: bool | None = None,
     user_auth: str | None = None,
     anonymous_link_auth: str | None = None,
@@ -2898,7 +2891,6 @@ async def run_response(
                     show_file_search_document_names=show_file_search_document_names,
                     show_web_search_sources=show_web_search_sources,
                     show_web_search_actions=show_web_search_actions,
-                    show_web_search_citations=show_web_search_citations,
                     show_reasoning_summaries=show_reasoning_summaries,
                     user_id=run.creator_id,
                     user_auth=user_auth,
