@@ -314,6 +314,8 @@ async def copy_assistant(
         hide_file_search_result_quotes=assistant.hide_file_search_result_quotes,
         hide_file_search_document_names=assistant.hide_file_search_document_names,
         hide_file_search_queries=assistant.hide_file_search_queries,
+        hide_web_search_sources=assistant.hide_web_search_sources,
+        hide_web_search_actions=assistant.hide_web_search_actions,
     )
 
     session.add(new_assistant)

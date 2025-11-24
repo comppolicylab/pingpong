@@ -2508,6 +2508,12 @@ async def get_thread(
         show_file_search_document_names = is_supervisor or (
             assistant and not assistant.hide_file_search_document_names
         )
+        show_web_search_sources = is_supervisor or (
+            assistant and not assistant.hide_web_search_sources
+        )
+        show_web_search_actions = is_supervisor or (
+            assistant and not assistant.hide_web_search_actions
+        )
 
         thread_messages: list[schemas.ThreadMessage] = []
         placeholder_ci_calls = []
@@ -2596,7 +2602,7 @@ async def get_thread(
             elif tool_call.type == schemas.ToolCallType.WEB_SEARCH:
                 action = (
                     tool_call.web_search_actions[0]
-                    if tool_call.web_search_actions
+                    if tool_call.web_search_actions and show_web_search_actions
                     else None
                 )
 
@@ -2610,7 +2616,7 @@ async def get_thread(
                                     ActionSearchSource(url=source.url or "", type="url")
                                     for source in action.sources
                                 ]
-                                if action and action.sources
+                                if action and action.sources and show_web_search_sources
                                 else []
                             )
                             action_obj = ActionSearch(
@@ -3428,6 +3434,12 @@ async def list_thread_messages(
         show_file_search_document_names = is_supervisor or (
             assistant and not assistant.hide_file_search_document_names
         )
+        show_web_search_sources = is_supervisor or (
+            assistant and not assistant.hide_web_search_sources
+        )
+        show_web_search_actions = is_supervisor or (
+            assistant and not assistant.hide_web_search_actions
+        )
 
         thread_messages: list[schemas.ThreadMessage] = []
         placeholder_ci_calls = []
@@ -3518,7 +3530,7 @@ async def list_thread_messages(
             elif tool_call.type == schemas.ToolCallType.WEB_SEARCH:
                 action = (
                     tool_call.web_search_actions[0]
-                    if tool_call.web_search_actions
+                    if tool_call.web_search_actions and show_web_search_actions
                     else None
                 )
 
@@ -3532,7 +3544,7 @@ async def list_thread_messages(
                                     ActionSearchSource(url=source.url or "", type="url")
                                     for source in action.sources
                                 ]
-                                if action and action.sources
+                                if action and action.sources and show_web_search_sources
                                 else []
                             )
                             action_obj = ActionSearch(
@@ -4922,6 +4934,10 @@ async def create_run(
                 or not asst.hide_file_search_result_quotes,
                 show_reasoning_summaries=is_supervisor
                 or not asst.hide_reasoning_summaries,
+                show_web_search_sources=is_supervisor
+                or not asst.hide_web_search_sources,
+                show_web_search_actions=is_supervisor
+                or not asst.hide_web_search_actions,
             )
         except Exception as e:
             logger.exception("Error running thread")
@@ -5326,6 +5342,12 @@ async def send_message(
             show_file_search_document_names = is_supervisor or (
                 asst and not asst.hide_file_search_document_names
             )
+            show_web_search_sources = is_supervisor or (
+                asst and not asst.hide_web_search_sources
+            )
+            show_web_search_actions = is_supervisor or (
+                asst and not asst.hide_web_search_actions
+            )
 
             messageContentParts: list[models.MessagePart] = []
             part_index = 0
@@ -5399,6 +5421,8 @@ async def send_message(
                 show_file_search_queries=show_file_search_queries,
                 show_file_search_result_quotes=show_file_search_result_quotes,
                 show_file_search_document_names=show_file_search_document_names,
+                show_web_search_sources=show_web_search_sources,
+                show_web_search_actions=show_web_search_actions,
                 user_auth=request.state.auth_user
                 if hasattr(request.state, "auth_user")
                 else None,
@@ -5949,6 +5973,12 @@ async def create_assistant(
         raise HTTPException(
             status_code=400,
             detail="Cannot hide document names while showing result quotes. Please enable 'Hide File Search Result Quotes from Members' or disable 'Completely Hide File Search Results from Members'.",
+        )
+
+    if req.hide_web_search_actions and not req.hide_web_search_sources:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot hide web search actions while showing sources. Please enable 'Hide Web Search Sources from Members' or disable 'Completely Hide Web Search Actions from Members'.",
         )
 
     uses_web_search = {"type": "web_search"} in req.tools
@@ -6785,6 +6815,31 @@ async def update_assistant(
         and req.hide_file_search_queries is not None
     ):
         asst.hide_file_search_queries = req.hide_file_search_queries
+
+    if (
+        "hide_web_search_sources" in req.model_fields_set
+        and req.hide_web_search_sources is not None
+    ):
+        asst.hide_web_search_sources = req.hide_web_search_sources
+
+    if (
+        "hide_web_search_actions" in req.model_fields_set
+        and req.hide_web_search_actions is not None
+    ):
+        # Validate before assignment
+        # Determine what the value of hide_web_search_sources will be after this request
+        new_hide_web_search_sources = (
+            req.hide_web_search_sources
+            if "hide_web_search_sources" in req.model_fields_set
+            and req.hide_web_search_sources is not None
+            else asst.hide_web_search_sources
+        )
+        if req.hide_web_search_actions and not new_hide_web_search_sources:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot hide web search actions while showing sources. Please enable 'Hide Web Search Sources from Members' or disable 'Completely Hide Web Search Actions from Members'.",
+            )
+        asst.hide_web_search_actions = req.hide_web_search_actions
 
     if is_toggling_publish_status:
         ptuple = (f"class:{class_id}#member", "can_view", f"assistant:{asst.id}")

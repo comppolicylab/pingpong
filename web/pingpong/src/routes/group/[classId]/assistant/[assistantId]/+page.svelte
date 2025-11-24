@@ -55,6 +55,7 @@
   import { page } from '$app/stores';
   import { computeLatestIncidentTimestamps, filterLatestIncidentUpdates } from '$lib/statusUpdates';
   import { tick } from 'svelte';
+  import WebSourceChip from '$lib/components/WebSourceChip.svelte';
   export let data;
 
   // Flag indicating whether we should check for changes before navigating away.
@@ -172,7 +173,7 @@
     value: 'web_search',
     name: 'Web Search',
     description:
-      'Web search allows models to access up-to-date information from the internet and provide answers with sourced citations. Web search is currently in preview and may be unstable. Do not use for important tasks.'
+      'Web search allows models to access up-to-date information from the internet and provide answers with sourced citations.'
   };
   const defaultTools = [{ type: 'file_search' }];
 
@@ -492,6 +493,35 @@
   }
   $: if (hideFileSearchDocumentNames) {
     hideFileSearchResultQuotes = true;
+  }
+
+  let hideWebSearchSources = false;
+  let hasSetHideWebSearchSources = false;
+  $: if (
+    assistant?.hide_web_search_sources !== undefined &&
+    assistant?.hide_web_search_sources !== null &&
+    !hasSetHideWebSearchSources
+  ) {
+    hideWebSearchSources = assistant?.hide_web_search_sources;
+    hasSetHideWebSearchSources = true;
+  }
+
+  let hideWebSearchActions = false;
+  let hasSetHideWebSearchActions = false;
+  $: if (
+    assistant?.hide_web_search_actions !== undefined &&
+    assistant?.hide_web_search_actions !== null &&
+    !hasSetHideWebSearchActions
+  ) {
+    hideWebSearchActions = assistant?.hide_web_search_actions;
+    if (hideWebSearchActions) {
+      hideWebSearchSources = true;
+    }
+    hasSetHideWebSearchActions = true;
+  }
+
+  $: if (hideWebSearchActions) {
+    hideWebSearchSources = true;
   }
 
   // Handle updates from the file upload component.
@@ -905,7 +935,9 @@
         ? true
         : hideFileSearchResultQuotes,
       hide_file_search_document_names: hideFileSearchDocumentNames,
-      hide_file_search_queries: hideFileSearchQueries
+      hide_file_search_queries: hideFileSearchQueries,
+      hide_web_search_sources: hideWebSearchActions ? true : hideWebSearchSources,
+      hide_web_search_actions: hideWebSearchActions
     };
     return params;
   };
@@ -1577,10 +1609,6 @@
             }}
             ><div class="flex flex-wrap gap-1.5">
               <div>{webSearchMetadata.name}</div>
-              <DropdownBadge
-                extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
-                ><span slot="name">Preview</span></DropdownBadge
-              >
             </div></Checkbox
           >
           <Helper>{webSearchMetadata.description}</Helper>
@@ -1867,7 +1895,6 @@
                 id="hide_file_search_document_names"
                 name="hide_file_search_document_names"
                 disabled={preventEdits}
-                class=""
                 bind:checked={hideFileSearchDocumentNames}
                 ><div class="flex flex-row gap-1">
                   <div>Completely Hide File Search Results from Members</div>
@@ -1881,6 +1908,84 @@
                   >This setting will only apply to Chat Mode models with File Search enabled.</b
                 ></Helper
               >
+            </div>
+
+            <hr />
+            <div class="col-span-2 mb-1">
+              <Checkbox
+                id="hide_web_search_sources"
+                name="hide_web_search_sources"
+                disabled={preventEdits || hideWebSearchActions}
+                class={hideWebSearchActions
+                  ? 'text-gray-400 grayscale contrast-50'
+                  : 'text-gray-800 grayscale-0 contrast-100'}
+                bind:checked={hideWebSearchSources}
+                ><div class="flex flex-row gap-1">
+                  <div>Hide Web Search Sources from Members</div>
+                  {#if hideWebSearchActions}<div>&middot;</div>
+                    <div>"Completely Hide Web Search Actions" selected</div>{/if}
+                </div></Checkbox
+              >
+              <Helper
+                >When the assistant uses web search, it may consider a number of sources before
+                drafting its response. Many of the sources are often not used in the final response.
+                Control whether members can see all sources. When checked, members will not see the
+                sources the assistant used during web searches. Moderators can always review web
+                search sources. <b
+                  >This setting will only apply to Chat Mode models with Web Search enabled.</b
+                ></Helper
+              >
+            </div>
+
+            <div class="col-span-2 mb-1">
+              <Checkbox
+                id="hide_web_search_actions"
+                name="hide_web_search_actions"
+                disabled={preventEdits}
+                bind:checked={hideWebSearchActions}
+                ><div class="flex flex-row gap-1">
+                  <div>Completely Hide Web Search Actions from Members</div>
+                </div></Checkbox
+              >
+              <Helper
+                >When the assistant uses web search, it may perform various actions such as querying
+                search engines, clicking on links, and extracting information. This setting controls
+                whether members can see these web search actions. When checked, members will see
+                that the assistant is searching the web without revealing specific actions.
+                Moderators can always review web search actions. <b
+                  >This setting will only apply to Chat Mode models with Web Search enabled.</b
+                ></Helper
+              >
+            </div>
+            <div class="col-span-2 mb-1">
+              <div
+                class="flex flex-row items-center justify-between gap-x-4 p-3 border rounded-lg bg-gradient-to-b border-blue-400 from-blue-50 to-blue-100 text-blue-800"
+              >
+                <div class="flex flex-row items-center gap-x-3">
+                  <LightbulbSolid size="md" class="shrink-0" />
+                  <div class="flex flex-col text-xs">
+                    <span class="font-bold"
+                      >Assistant responses may include inline URL citations</span
+                    >
+                    <span
+                      >When the assistant uses web search, URL citations may be included in its
+                      responses. Citations show the domain inline, and the web address and title in
+                      a popover. Members can click the inline citation to visit the source. You can
+                      interact with the example citation on the right.</span
+                    >
+                  </div>
+                </div>
+                <div class="flex flex-row items-center gap-x-3">
+                  <WebSourceChip
+                    source={{
+                      url: 'https://openai.com/index/gpt-5-1/',
+                      type: 'url',
+                      title: 'GPT-5.1: A smarter, more conversational ChatGPT'
+                    }}
+                    type="chip"
+                  />
+                </div>
+              </div>
             </div>
 
             <hr />
