@@ -1769,6 +1769,7 @@ class BufferedResponseStreamHandler:
                 }
             case _:
                 return None
+        return None
 
     async def on_web_search_call_created(self, data: ResponseFunctionWebSearch):
         if not self.run_id:
