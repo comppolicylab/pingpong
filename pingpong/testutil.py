@@ -9,7 +9,7 @@ def with_user(id: int, email: str | None = None, created: datetime | None = None
         [
             {
                 "id": id,
-                "email": email or f"user_{id}@domain.test",
+                "email": email or f"user_{id}@domain.org",
                 "created": created or datetime(2024, 1, 1, 0, 0, 0),
             }
         ],

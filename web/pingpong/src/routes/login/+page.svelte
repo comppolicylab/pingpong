@@ -3,7 +3,6 @@
   import { Button, InputAddon, Input, Heading, ButtonGroup } from 'flowbite-svelte';
   import { EnvelopeSolid } from 'flowbite-svelte-icons';
   import { writable } from 'svelte/store';
-  import { fail } from '@sveltejs/kit';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
   import { page } from '$app/stores';
@@ -14,6 +13,9 @@
   const new_link = $page.url.searchParams.get('new_link') === 'true' || false;
   const loggingIn = writable(false);
   const success = writable(false);
+
+  $: email = form?.email ?? '';
+
   const loginWithMagicLink = async (evt: SubmitEvent) => {
     evt.preventDefault();
     loggingIn.set(true);
@@ -24,7 +26,9 @@
 
     const email = d.email?.toString();
     if (!email) {
-      return fail(400, { email, success: false, error: 'Missing email' });
+      loggingIn.set(false);
+      sadToast('Please provide a valid email address');
+      return;
     }
 
     const result = await api.loginWithMagicLink(fetch, email, forward);
@@ -83,7 +87,7 @@
               <EnvelopeSolid />
             </InputAddon>
             <Input
-              value={form?.email ?? ''}
+              bind:value={email}
               readonly={$loggingIn || null}
               type="email"
               placeholder="you@school.edu"
@@ -95,7 +99,7 @@
               pill
               class="p-3 px-6 mr-2 rounded-full bg-orange-dark hover:bg-orange text-white text-md py-2 px-4"
               type="submit"
-              disabled={$loggingIn}>Login</Button
+              disabled={$loggingIn || !email}>Login</Button
             >
           </ButtonGroup>
         </form>
