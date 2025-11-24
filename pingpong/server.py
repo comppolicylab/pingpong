@@ -597,6 +597,11 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
     """Provide a magic link to the auth endpoint."""
     # First figure out if this email domain is even allowed to use magic auth.
     # If not, we deny the request and point to another place they can log in.
+    # Validate the email address format
+    try:
+        validate_email(body.email, check_deliverability=False)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid email address.")
     login_config = authn_method_for_email(config.auth.authn_methods, body.email)
     if not login_config:
         raise HTTPException(
