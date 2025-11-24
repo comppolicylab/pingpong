@@ -3,7 +3,6 @@
   import { Button, InputAddon, Input, Heading, ButtonGroup } from 'flowbite-svelte';
   import { EnvelopeSolid } from 'flowbite-svelte-icons';
   import { writable } from 'svelte/store';
-  import { fail } from '@sveltejs/kit';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
   import { page } from '$app/stores';
@@ -15,7 +14,7 @@
   const loggingIn = writable(false);
   const success = writable(false);
 
-  $: email = form?.email ?? ''
+  $: email = form?.email ?? '';
 
   const loginWithMagicLink = async (evt: SubmitEvent) => {
     evt.preventDefault();
@@ -29,7 +28,7 @@
     if (!email) {
       loggingIn.set(false);
       sadToast('Please provide a valid email address');
-      return
+      return;
     }
 
     const result = await api.loginWithMagicLink(fetch, email, forward);
