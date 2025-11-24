@@ -1517,6 +1517,8 @@ class BufferedResponseStreamHandler:
                     "output_index": self.prev_output_index,
                     "type": "code_interpreter",
                     "code_interpreter": {"input": data.code or "", "outputs": None},
+                    "status": data.status,
+                    "run_id": str(self.run_id),
                 },
             }
         )
