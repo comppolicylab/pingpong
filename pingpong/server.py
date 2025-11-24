@@ -3684,11 +3684,12 @@ async def list_thread_messages(
                     case schemas.MessagePartType.OUTPUT_TEXT:
                         _annotations: list[Annotation] = []
                         _file_ids_file_citation_annotation: set[str] = set()
-                        if content.annotations and show_file_search_document_names:
+                        if content.annotations:
                             for annotation in content.annotations:
                                 if (
                                     annotation.type
                                     == schemas.AnnotationType.FILE_CITATION
+                                    and show_file_search_document_names
                                 ):
                                     _file_record = file_search_results.get(
                                         annotation.file_id
