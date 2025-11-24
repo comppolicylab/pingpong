@@ -104,11 +104,11 @@ async def test_me_with_valid_user(api, user, now, valid_user_token):
     expected_response = {
         "error": None,
         "profile": {
-            "email": "user_123@domain.test",
-            "gravatar_id": "45d4d5ec84ab81529df672c3abf0def25df67c0c64859aea0559bc867ea64b19",
+            "email": "user_123@domain.org",
+            "gravatar_id": "7306213ae4999865ca2856711998407f1530de2f6a7bf497401f1933899d5600",
             "image_url": (
                 "https://www.gravatar.com/avatar/"
-                "45d4d5ec84ab81529df672c3abf0def25df67c0c64859aea0559bc867ea64b19"
+                "7306213ae4999865ca2856711998407f1530de2f6a7bf497401f1933899d5600"
             ),
             "name": None,
         },
@@ -116,9 +116,9 @@ async def test_me_with_valid_user(api, user, now, valid_user_token):
         "token": {"exp": 1704153540, "iat": 1704067140, "sub": "123"},
         "user": {
             "created": "2024-01-01T00:00:00",
-            "email": "user_123@domain.test",
+            "email": "user_123@domain.org",
             "id": 123,
-            "name": "user_123@domain.test",
+            "name": "user_123@domain.org",
             "first_name": None,
             "last_name": None,
             "display_name": None,
@@ -229,7 +229,7 @@ async def test_magic_link_login_no_user(api, config, monkeypatch):
     monkeypatch.setattr(config.email.sender, "send", send_mock)
     response = api.post(
         "/api/v1/login/magic",
-        json={"email": "me@org.test"},
+        json={"email": "me@test.org"},
     )
     assert response.status_code == 401
     assert response.json() == {"detail": "User does not exist"}
@@ -244,12 +244,12 @@ async def test_magic_link_login(api, config, monkeypatch):
     monkeypatch.setattr(config.email.sender, "send", send_mock)
     response = api.post(
         "/api/v1/login/magic",
-        json={"email": "user_123@domain.test"},
+        json={"email": "user_123@domain.org"},
     )
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
     send_mock.assert_called_once_with(
-        "user_123@domain.test",
+        "user_123@domain.org",
         "Log back in to PingPong",
         """
 <!doctype html>
@@ -513,7 +513,7 @@ async def test_magic_link_login(api, config, monkeypatch):
             <div><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/" class="mobile-button-bg" style="display: flex; align-items: center; width: fit-content; row-gap: 8px; column-gap: 8px; font-size: 17px; line-height: 20px;font-weight: 500; border-radius: 9999px; padding: 8px 16px; color: white !important; flex-shrink: 0;">Login to PingPong<source srcset="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png"><img src="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png" width="17" height="17" class="hero-image" style="display: block;" border="0" alt="right pointing arrow"></a></div></span></p>
             <p></p>
             </p>
-            <p><b>Note:</b> This login link was intended for <span style="white-space: nowrap;"><a href="mailto:user_123@domain.test" style="color:#0070c9;">user_123@domain.test</a></span>. If you weren&#8217;t expecting this login link, there&#8217;s nothing to worry about — you can safely ignore it.</p>
+            <p><b>Note:</b> This login link was intended for <span style="white-space: nowrap;"><a href="mailto:user_123@domain.org" style="color:#0070c9;">user_123@domain.org</a></span>. If you weren&#8217;t expecting this login link, there&#8217;s nothing to worry about — you can safely ignore it.</p>
             <br>
          </div>
       </div>
@@ -602,7 +602,7 @@ async def test_magic_link_login(api, config, monkeypatch):
                               </a></div></span></p>
                               <p></p>
                               </p>
-                              <p><b>Note:</b> This login link was intended for <span style="white-space: nowrap;"><a href="mailto:user_123@domain.test" style="color:#0070c9;">user_123@domain.test</a></span>. If you weren&#8217;t expecting this login link, there&#8217;s nothing to worry about — you can safely ignore it.</p>
+                              <p><b>Note:</b> This login link was intended for <span style="white-space: nowrap;"><a href="mailto:user_123@domain.org" style="color:#0070c9;">user_123@domain.org</a></span>. If you weren&#8217;t expecting this login link, there&#8217;s nothing to worry about — you can safely ignore it.</p>
                            </td>
                         </tr>
                      </tbody>
