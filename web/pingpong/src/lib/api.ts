@@ -2139,7 +2139,18 @@ export type TextAnnotationFileCitation = {
   type: 'file_citation';
 };
 
-export type TextAnnotation = TextAnnotationFilePath | TextAnnotationFileCitation;
+export type TextAnnotationURLCitation = {
+  end_index: number;
+  start_index: number;
+  title: string;
+  type: 'url_citation';
+  url: string;
+};
+
+export type TextAnnotation =
+  | TextAnnotationFilePath
+  | TextAnnotationFileCitation
+  | TextAnnotationURLCitation;
 
 export type Text = {
   annotations: TextAnnotation[];
