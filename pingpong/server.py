@@ -26,13 +26,18 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import PositiveInt
+from openai.types.responses.response_output_text import AnnotationURLCitation
+from openai.types.responses.response_function_web_search import (
+    ActionFind,
+    ActionOpenPage,
+    ActionSearch,
+    ActionSearchSource,
+)
 from openai.types.beta.threads.message import Attachment
-from openai.types.beta.threads.text_content_block import TextContentBlock
 from openai.types.beta.threads.image_file_content_block import ImageFileContentBlock
 from openai.types.beta.threads.image_file import ImageFile
 from openai.types.beta.threads.annotation import Annotation
 from openai.types.beta.threads.file_path_annotation import FilePathAnnotation, FilePath
-from openai.types.beta.threads.text import Text
 from openai.types.beta.threads.file_citation_annotation import (
     FileCitationAnnotation,
     FileCitation,
@@ -2438,6 +2443,8 @@ async def get_thread(
             "messages": list(messages.data),
             "limit": 20,
             "ci_messages": placeholder_ci_calls,
+            "fs_messages": [],
+            "ws_messages": [],
             "reasoning_messages": [],
             "attachments": all_files,
             "instructions": thread.instructions if can_view_prompt else None,
@@ -2506,6 +2513,7 @@ async def get_thread(
         placeholder_ci_calls = []
         file_search_calls: list[schemas.FileSearchMessage] = []
         file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
+        web_search_calls: list[schemas.WebSearchMessage] = []
         reasoning_messages: list[schemas.ReasoningMessage] = []
         for tool_call in tool_calls_v3:
             if tool_call.type == schemas.ToolCallType.CODE_INTERPRETER:
@@ -2583,6 +2591,69 @@ async def get_thread(
                         thread_id=str(thread.id),
                         message_type="file_search_call",
                         output_index=tool_call.output_index,
+                    )
+                )
+            elif tool_call.type == schemas.ToolCallType.WEB_SEARCH:
+                action = (
+                    tool_call.web_search_actions[0]
+                    if tool_call.web_search_actions
+                    else None
+                )
+
+                if not action or not action.type:
+                    action_obj = None
+                else:
+                    match action.type:
+                        case schemas.WebSearchActionType.SEARCH:
+                            sources = (
+                                [
+                                    ActionSearchSource(url=source.url or "", type="url")
+                                    for source in action.sources
+                                ]
+                                if action and action.sources
+                                else []
+                            )
+                            action_obj = ActionSearch(
+                                query=action.query or "",
+                                type="search",
+                                sources=sources,
+                            )
+                        case schemas.WebSearchActionType.FIND:
+                            action_obj = ActionFind(
+                                url=action.url or "",
+                                pattern=action.pattern or "",
+                                type="find",
+                            )
+                        case schemas.WebSearchActionType.OPEN_PAGE:
+                            action_obj = ActionOpenPage(
+                                url=action.url or "",
+                                type="open_page",
+                            )
+                        case _:
+                            action_obj = None
+
+                web_search_calls.append(
+                    schemas.WebSearchMessage(
+                        id=str(tool_call.id),
+                        assistant_id=str(thread.assistant_id)
+                        if thread.assistant_id
+                        else "",
+                        created_at=tool_call.created.timestamp(),
+                        content=[
+                            schemas.WebSearchCall(
+                                step_id=str(tool_call.id),
+                                type="web_search_call",
+                                status=tool_call.status.value,
+                                action=action_obj,
+                            )
+                        ],
+                        metadata={},
+                        object="thread.message",
+                        role="assistant",
+                        run_id=str(tool_call.run_id),
+                        thread_id=str(thread.id),
+                        output_index=tool_call.output_index,
+                        message_type="web_search_call",
                     )
                 )
 
@@ -2673,8 +2744,10 @@ async def get_thread(
                 match content.type:
                     case schemas.MessagePartType.INPUT_TEXT:
                         _message.content.append(
-                            TextContentBlock(
-                                text=Text(value=content.text, annotations=[]),
+                            schemas.ThreadTextContentBlock(
+                                text=schemas.ThreadText(
+                                    value=content.text, annotations=[]
+                                ),
                                 type="text",
                             )
                         )
@@ -2688,13 +2761,14 @@ async def get_thread(
                             )
                         )
                     case schemas.MessagePartType.OUTPUT_TEXT:
-                        _annotations: list[Annotation] = []
+                        _annotations: list[schemas.ThreadAnnotation] = []
                         _file_ids_file_citation_annotation: set[str] = set()
-                        if content.annotations and show_file_search_document_names:
+                        if content.annotations:
                             for annotation in content.annotations:
                                 if (
                                     annotation.type
                                     == schemas.AnnotationType.FILE_CITATION
+                                    and show_file_search_document_names
                                 ):
                                     _file_record = file_search_results.get(
                                         annotation.file_id
@@ -2757,11 +2831,25 @@ async def get_thread(
                                             type="image_file",
                                         ),
                                     )
+                                elif (
+                                    annotation.type
+                                    == schemas.AnnotationType.URL_CITATION
+                                ):
+                                    _annotations.append(
+                                        AnnotationURLCitation(
+                                            type="url_citation",
+                                            end_index=annotation.end_index or 0,
+                                            start_index=annotation.start_index or 0,
+                                            url=annotation.url or "",
+                                            title=annotation.title or "",
+                                            text=annotation.text or "",
+                                        )
+                                    )
 
                         _message.content.append(
-                            TextContentBlock(
+                            schemas.ThreadTextContentBlock(
                                 type="text",
-                                text=Text(
+                                text=schemas.ThreadText(
                                     value=content.text,
                                     annotations=_annotations,
                                 ),
@@ -2845,6 +2933,7 @@ async def get_thread(
             "limit": 20,
             "ci_messages": placeholder_ci_calls,
             "fs_messages": file_search_calls,
+            "ws_messages": web_search_calls,
             "reasoning_messages": reasoning_messages,
             "attachments": all_files,
             "instructions": thread.instructions if can_view_prompt else None,
@@ -3245,7 +3334,7 @@ async def list_thread_messages(
             "messages": list(messages.data),
             "ci_messages": placeholder_ci_calls,
             "fs_messages": [],
-            "reasoning_messages": [],
+            "ws_messages": [],
             "limit": limit,
             "has_more": messages.has_more,
         }
@@ -3274,7 +3363,7 @@ async def list_thread_messages(
                 "messages": [],
                 "ci_messages": [],
                 "fs_messages": [],
-                "reasoning_messages": [],
+                "ws_messages": [],
                 "limit": limit,
                 "has_more": False,
             }
@@ -3345,6 +3434,7 @@ async def list_thread_messages(
         file_search_calls: list[schemas.FileSearchMessage] = []
         file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
         reasoning_messages: list[schemas.ReasoningMessage] = []
+        web_search_calls: list[schemas.WebSearchMessage] = []
         for tool_call in tool_calls_v3:
             if tool_call.type == schemas.ToolCallType.CODE_INTERPRETER:
                 tool_content: list[schemas.CodeInterpreterMessageContent] = []
@@ -3423,6 +3513,69 @@ async def list_thread_messages(
                         thread_id=str(thread.id),
                         message_type="file_search_call",
                         output_index=tool_call.output_index,
+                    )
+                )
+            elif tool_call.type == schemas.ToolCallType.WEB_SEARCH:
+                action = (
+                    tool_call.web_search_actions[0]
+                    if tool_call.web_search_actions
+                    else None
+                )
+
+                if not action or not action.type:
+                    action_obj = None
+                else:
+                    match action.type:
+                        case schemas.WebSearchActionType.SEARCH:
+                            sources = (
+                                [
+                                    ActionSearchSource(url=source.url or "", type="url")
+                                    for source in action.sources
+                                ]
+                                if action and action.sources
+                                else []
+                            )
+                            action_obj = ActionSearch(
+                                query=action.query or "",
+                                type="search",
+                                sources=sources,
+                            )
+                        case schemas.WebSearchActionType.FIND:
+                            action_obj = ActionFind(
+                                url=action.url or "",
+                                pattern=action.pattern or "",
+                                type="find",
+                            )
+                        case schemas.WebSearchActionType.OPEN_PAGE:
+                            action_obj = ActionOpenPage(
+                                url=action.url or "",
+                                type="open_page",
+                            )
+                        case _:
+                            action_obj = None
+
+                web_search_calls.append(
+                    schemas.WebSearchMessage(
+                        id=str(tool_call.id),
+                        assistant_id=str(thread.assistant_id)
+                        if thread.assistant_id
+                        else "",
+                        created_at=tool_call.created.timestamp(),
+                        content=[
+                            schemas.WebSearchCall(
+                                step_id=str(tool_call.id),
+                                type="web_search_call",
+                                status=tool_call.status.value,
+                                action=action_obj,
+                            )
+                        ],
+                        metadata={},
+                        object="thread.message",
+                        role="assistant",
+                        run_id=str(tool_call.run_id),
+                        thread_id=str(thread.id),
+                        output_index=tool_call.output_index,
+                        message_type="web_search_call",
                     )
                 )
 
@@ -3512,8 +3665,10 @@ async def list_thread_messages(
                 match content.type:
                     case schemas.MessagePartType.INPUT_TEXT:
                         _message.content.append(
-                            TextContentBlock(
-                                text=Text(value=content.text, annotations=[]),
+                            schemas.ThreadTextContentBlock(
+                                text=schemas.ThreadText(
+                                    value=content.text, annotations=[]
+                                ),
                                 type="text",
                             )
                         )
@@ -3529,11 +3684,12 @@ async def list_thread_messages(
                     case schemas.MessagePartType.OUTPUT_TEXT:
                         _annotations: list[Annotation] = []
                         _file_ids_file_citation_annotation: set[str] = set()
-                        if content.annotations and show_file_search_document_names:
+                        if content.annotations:
                             for annotation in content.annotations:
                                 if (
                                     annotation.type
                                     == schemas.AnnotationType.FILE_CITATION
+                                    and show_file_search_document_names
                                 ):
                                     _file_record = file_search_results.get(
                                         annotation.file_id
@@ -3596,11 +3752,25 @@ async def list_thread_messages(
                                             type="image_file",
                                         ),
                                     )
+                                elif (
+                                    annotation.type
+                                    == schemas.AnnotationType.URL_CITATION
+                                ):
+                                    _annotations.append(
+                                        AnnotationURLCitation(
+                                            type="url_citation",
+                                            end_index=annotation.end_index or 0,
+                                            start_index=annotation.start_index or 0,
+                                            url=annotation.url or "",
+                                            title=annotation.title or "",
+                                            text=annotation.text or "",
+                                        )
+                                    )
 
                         _message.content.append(
-                            TextContentBlock(
+                            schemas.ThreadTextContentBlock(
                                 type="text",
-                                text=Text(
+                                text=schemas.ThreadText(
                                     value=content.text,
                                     annotations=_annotations,
                                 ),
@@ -3636,6 +3806,7 @@ async def list_thread_messages(
             "messages": thread_messages,
             "ci_messages": [],
             "fs_messages": file_search_calls,
+            "ws_messages": web_search_calls,
             "reasoning_messages": reasoning_messages,
             "limit": limit,
             "has_more": has_more_runs,

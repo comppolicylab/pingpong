@@ -1,10 +1,26 @@
 from datetime import date, datetime
 from enum import Enum, StrEnum, auto
 from typing import Generic, Literal, NotRequired, TypeVar, Union
-from typing_extensions import TypedDict
+from typing_extensions import TypedDict, Annotated, TypeAlias
 
+from openai._utils import PropertyInfo
+from openai.types.beta.threads import (
+    ImageFileContentBlock,
+    TextContentBlock,
+    RefusalContentBlock,
+    ImageURLContentBlock,
+)
+from openai.types.beta.threads.text import Text as OpenAIText
+from openai.types.beta.threads.annotation import (
+    FileCitationAnnotation,
+    FilePathAnnotation,
+)
 from openai.types.beta.assistant_tool import AssistantTool as Tool
 from openai.types.beta.threads import Message as OpenAIMessage
+from openai.types.responses.response_output_text import AnnotationURLCitation
+from openai.types.responses.response_function_web_search import (
+    Action as WebSearchAction,
+)
 from pydantic import (
     BaseModel,
     Field,
@@ -1422,6 +1438,33 @@ class FileSearchMessage(BaseModel):
     output_index: int | None = None
 
 
+class WebSearchActionType(StrEnum):
+    SEARCH = "search"
+    FIND = "find"
+    OPEN_PAGE = "open_page"
+
+
+class WebSearchCall(BaseModel):
+    step_id: str
+    type: Literal["web_search_call"]
+    action: WebSearchAction | None = None
+    status: Literal["in_progress", "searching", "completed", "incomplete", "failed"]
+
+
+class WebSearchMessage(BaseModel):
+    id: str
+    assistant_id: str
+    created_at: float
+    content: list[WebSearchCall]
+    metadata: dict[str, str]
+    object: Literal["thread.message"]
+    message_type: Literal["web_search_call"]
+    role: Literal["assistant"]
+    run_id: str
+    thread_id: str
+    output_index: int | None = None
+
+
 class CodeInterpreterMessage(BaseModel):
     id: str
     assistant_id: str
@@ -1439,7 +1482,7 @@ class CodeInterpreterMessage(BaseModel):
 
 
 class CodeInterpreterMessages(BaseModel):
-    ci_messages: list[CodeInterpreterMessage]
+    ci_messages: list[CodeInterpreterMessage] = []
 
 
 class ThreadRun(BaseModel):
@@ -1453,6 +1496,31 @@ class ThreadRun(BaseModel):
 class ThreadParticipants(BaseModel):
     user: list[str]
     assistant: dict[int, str]
+
+
+ThreadAnnotation: TypeAlias = Annotated[
+    Union[FileCitationAnnotation, FilePathAnnotation, AnnotationURLCitation],
+    PropertyInfo(discriminator="type"),
+]
+
+
+class ThreadText(OpenAIText):
+    annotations: list[ThreadAnnotation]
+
+
+class ThreadTextContentBlock(TextContentBlock):
+    text: ThreadText
+
+
+ThreadMessageContent: TypeAlias = Annotated[
+    Union[
+        ImageFileContentBlock,
+        ImageURLContentBlock,
+        ThreadTextContentBlock,
+        RefusalContentBlock,
+    ],
+    PropertyInfo(discriminator="type"),
+]
 
 
 class ThreadMessage(OpenAIMessage):
@@ -1472,6 +1540,9 @@ class ThreadMessage(OpenAIMessage):
     output_index: int | None = None
     """The output index of the message, if applicable for Next-Gen Assistants."""
 
+    content: list[ThreadMessageContent]
+    """The content of the message in array of text and/or images."""
+
     metadata: dict[str, str | bool] | None = None
     """Set of 16 key-value pairs that can be attached to an object.
 
@@ -1489,9 +1560,10 @@ class ThreadMessage(OpenAIMessage):
 class ThreadMessages(BaseModel):
     limit: int
     messages: list[ThreadMessage]
-    fs_messages: list[FileSearchMessage] | None = None
-    ci_messages: list[CodeInterpreterMessage] | None
-    reasoning_messages: list["ReasoningMessage"] | None = None
+    fs_messages: list[FileSearchMessage] = []
+    ci_messages: list[CodeInterpreterMessage] = []
+    ws_messages: list[WebSearchMessage] = []
+    reasoning_messages: list["ReasoningMessage"] = []
     has_more: bool
 
 
@@ -1512,6 +1584,7 @@ class ThreadWithMeta(BaseModel):
     limit: int
     ci_messages: list[CodeInterpreterMessage] | None
     fs_messages: list[FileSearchMessage] | None = None
+    ws_messages: list[WebSearchMessage] | None = None
     reasoning_messages: list["ReasoningMessage"] | None = None
     attachments: dict[str, File] | None
     instructions: str | None
@@ -1808,12 +1881,6 @@ class ToolCallStatus(StrEnum):
     COMPLETED = "completed"
     INCOMPLETE = "incomplete"
     FAILED = "failed"
-
-
-class WebSearchActionType(StrEnum):
-    SEARCH = "search"
-    FIND = "find"
-    OPEN_PAGE = "open_page"
 
 
 class MessagePartType(StrEnum):

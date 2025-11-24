@@ -59,6 +59,7 @@
   import StatusErrors from './StatusErrors.svelte';
   import FileSearchCallItem from './FileSearchCallItem.svelte';
   import ReasoningCallItem from './ReasoningCallItem.svelte';
+  import WebSearchCallItem from './WebSearchCallItem.svelte';
   export let data;
 
   let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -942,14 +943,16 @@
               {@const { clean_string, images } = processString(content.text.value)}
               {@const imageInfo = convertImageProxyToInfo(images)}
               {@const quoteCitations = (content.text.annotations ?? []).filter(isFileCitation)}
+              {@const parsedTextContent = parseTextContent(
+                { value: clean_string, annotations: content.text.annotations },
+                $version,
+                api.fullPath(`/class/${classId}/thread/${threadId}`)
+              )}
 
               <div class="leading-6">
                 <Markdown
-                  content={parseTextContent(
-                    { value: clean_string, annotations: content.text.annotations },
-                    $version,
-                    api.fullPath(`/class/${classId}/thread/${threadId}`)
-                  )}
+                  content={parsedTextContent.content}
+                  inlineWebSources={parsedTextContent.inlineWebSources}
                   syntax={true}
                   latex={useLatex}
                 />
@@ -1016,6 +1019,8 @@
               >
             {:else if content.type === 'file_search_call'}
               <FileSearchCallItem {content} />
+            {:else if content.type === 'web_search_call'}
+              <WebSearchCallItem {content} />
             {:else if content.type === 'reasoning'}
               <ReasoningCallItem {content} />
             {:else if content.type === 'code_output_image_file'}

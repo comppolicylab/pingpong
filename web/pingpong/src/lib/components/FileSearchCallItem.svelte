@@ -50,6 +50,10 @@
       <div class="flex flex-row items-bottom">
         {#if content.status === 'completed'}
           <span class="text-sm font-medium text-gray-600">Searched files</span>
+        {:else if content.status === 'failed'}
+          <span class="text-sm font-medium text-red-600">File search failed</span>
+        {:else if content.status === 'incomplete'}
+          <span class="text-sm font-medium text-yellow-600">File search was canceled</span>
         {:else}
           <span class="text-sm font-medium shimmer">Searching files...</span>
         {/if}

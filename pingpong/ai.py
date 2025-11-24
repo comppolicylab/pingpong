@@ -743,7 +743,8 @@ async def build_response_input_item_list(
                         case WebSearchActionType.FIND:
                             action = ActionFind(
                                 type="find",
-                                query=action_rec.query or "",
+                                pattern=action_rec.pattern or "",
+                                url=action_rec.url or "",
                             )
                         case _:
                             action = None
@@ -1346,6 +1347,33 @@ class BufferedResponseStreamHandler:
 
         await add_cached_message_part_on_output_text_url_citation_added()
 
+        self.enqueue(
+            {
+                "type": "message_delta",
+                "delta": {
+                    "content": [
+                        {
+                            "index": 0,
+                            "type": "text",
+                            "text": {
+                                "value": "",
+                                "annotations": [
+                                    {
+                                        "type": "url_citation",
+                                        "end_index": data["end_index"],
+                                        "start_index": data["start_index"],
+                                        "url": data["url"],
+                                        "title": data["title"],
+                                    }
+                                ],
+                            },
+                        },
+                    ],
+                    "role": None,
+                },
+            }
+        )
+
     async def on_output_text_part_done(self, data: ResponseOutputText):
         if not self.message_part_id:
             logger.exception(
@@ -1715,6 +1743,35 @@ class BufferedResponseStreamHandler:
         self.tool_call_id = None
         self.tool_call_external_id = None
 
+    def get_action_payload(
+        self,
+        action: ActionSearch | ActionFind | ActionOpenPage | None,
+    ):
+        if not action:
+            return None
+
+        match action.type:
+            case "search":
+                return {
+                    "type": WebSearchActionType.SEARCH.value,
+                    "query": action.query,
+                    "sources": [{"url": source.url} for source in action.sources or []],
+                }
+            case "find":
+                return {
+                    "type": WebSearchActionType.FIND.value,
+                    "pattern": action.pattern,
+                    "url": action.url,
+                }
+            case "open_page":
+                return {
+                    "type": WebSearchActionType.OPEN_PAGE.value,
+                    "url": action.url,
+                }
+            case _:
+                return None
+        return None
+
     async def on_web_search_call_created(self, data: ResponseFunctionWebSearch):
         if not self.run_id:
             logger.exception(
@@ -1750,6 +1807,21 @@ class BufferedResponseStreamHandler:
         tool_call = await add_cached_tool_call_on_web_search_call_created()
         self.tool_call_id = tool_call.id
         self.tool_call_external_id = tool_call.tool_call_id
+
+        self.enqueue(
+            {
+                "type": "tool_call_created",
+                "tool_call": {
+                    "id": str(data.id),
+                    "index": self.prev_output_index,
+                    "output_index": self.prev_output_index,
+                    "type": "web_search",
+                    "web_search": {
+                        "action": self.get_action_payload(data.action),
+                    },
+                },
+            }
+        )
 
     async def on_web_search_call_in_progress(
         self, data: ResponseWebSearchCallInProgressEvent
@@ -1932,6 +2004,20 @@ class BufferedResponseStreamHandler:
                 ToolCallStatus(data.status),
             )
             await session_.commit()
+
+        self.enqueue(
+            {
+                "type": "tool_call_delta",
+                "delta": {
+                    "type": "web_search",
+                    "id": data.id,
+                    "index": self.prev_output_index,
+                    "run_id": str(self.run_id),
+                    "status": data.status,
+                    "action": self.get_action_payload(data.action),
+                },
+            }
+        )
 
         await add_cached_tool_call_on_web_search_call_done()
         self.tool_call_id = None
