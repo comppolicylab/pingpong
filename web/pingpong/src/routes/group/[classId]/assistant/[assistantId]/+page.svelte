@@ -39,8 +39,7 @@
     MessageDotsOutline,
     MicrophoneOutline,
     MicrophoneSolid,
-    ArchiveOutline,
-    LinkOutline
+    ArchiveOutline
   } from 'flowbite-svelte-icons';
   import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
   import { writable, type Writable } from 'svelte/store';
