@@ -18,6 +18,9 @@ from openai.types.beta.threads.annotation import (
 from openai.types.beta.assistant_tool import AssistantTool as Tool
 from openai.types.beta.threads import Message as OpenAIMessage
 from openai.types.responses.response_output_text import AnnotationURLCitation
+from openai.types.responses.response_function_web_search import (
+    Action as WebSearchAction,
+)
 from pydantic import (
     BaseModel,
     Field,
@@ -1441,19 +1444,10 @@ class WebSearchActionType(StrEnum):
     OPEN_PAGE = "open_page"
 
 
-class WebSearchSource(BaseModel):
-    url: str | None = None
-    name: str | None = None
-
-
 class WebSearchCall(BaseModel):
     step_id: str
     type: Literal["web_search_call"]
-    action_type: WebSearchActionType | None = None
-    query: str | None = None
-    url: str | None = None
-    pattern: str | None = None
-    sources: list[WebSearchSource] | None = None
+    action: WebSearchAction
     status: Literal["in_progress", "searching", "completed", "incomplete", "failed"]
 
 

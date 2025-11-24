@@ -2204,6 +2204,19 @@ export type FileSearchCallItem = {
   status?: 'in_progress' | 'searching' | 'completed' | 'incomplete' | 'failed';
 };
 
+export type WebSearchSource = {
+  url?: string | null;
+  title?: string | null;
+  type: 'url';
+};
+
+export type WebSearchCallItem = {
+  step_id: string;
+  type: 'web_search_call';
+  action: WebSearchAction;
+  status: 'in_progress' | 'completed' | 'incomplete' | 'searching' | 'failed';
+};
+
 export type ReasoningSummaryPart = {
   id?: number;
   part_index: number;
@@ -2227,6 +2240,7 @@ export type Content =
   | MessageContentCodeOutputLogs
   | CodeInterpreterCallPlaceholder
   | FileSearchCallItem
+  | WebSearchCallItem
   | ReasoningCallItem;
 
 export type OpenAIMessage = {
@@ -2266,6 +2280,7 @@ export type ThreadWithMeta = {
   messages: OpenAIMessage[];
   ci_messages: OpenAIMessage[];
   fs_messages: OpenAIMessage[];
+  ws_messages: OpenAIMessage[];
   reasoning_messages: OpenAIMessage[];
   attachments: Record<string, ServerFile>;
   instructions: string | null;
@@ -2336,6 +2351,7 @@ export type ThreadMessages = {
   messages: OpenAIMessage[];
   ci_messages: OpenAIMessage[];
   fs_messages: OpenAIMessage[];
+  ws_messages: OpenAIMessage[];
   reasoning_messages: OpenAIMessage[];
   limit: number;
   has_more: boolean;
@@ -2358,6 +2374,7 @@ export const getThreadMessages = async (
       limit: null,
       messages: [],
       fs_messages: [],
+      ws_messages: [],
       ci_messages: [],
       reasoning_messages: [],
       has_more: false,
@@ -2371,6 +2388,7 @@ export const getThreadMessages = async (
     messages: expanded.data.messages,
     ci_messages: expanded.data.ci_messages,
     fs_messages: expanded.data.fs_messages,
+    ws_messages: expanded.data.ws_messages,
     reasoning_messages: expanded.data.reasoning_messages,
     limit: expanded.data.limit,
     has_more: hasMore,
@@ -2451,6 +2469,40 @@ export type FileSearchCall = {
   status: 'in_progress' | 'searching' | 'completed' | 'incomplete' | 'failed';
 };
 
+export type WebSearchActionSearchSource = {
+  url: string;
+  type: 'url';
+};
+
+export type WebSearchActionSearch = {
+  type: 'search';
+  query: string;
+  sources: WebSearchActionSearchSource[];
+};
+
+export type WebSearchActionOpenPage = {
+  type: 'open_page';
+  url: string;
+};
+
+export type WebSearchActionFind = {
+  type: 'find';
+  pattern: string;
+  url: string;
+};
+
+export type WebSearchAction = WebSearchActionSearch | WebSearchActionOpenPage | WebSearchActionFind;
+
+export type WebSearchCall = {
+  type: 'web_search';
+  id: string;
+  index: number;
+  output_index?: number;
+  run_id: string | null;
+  action: WebSearchAction;
+  status: 'in_progress' | 'completed' | 'incomplete' | 'failed' | 'searching';
+};
+
 export type ReasoningStepSummaryPartChunk = {
   reasoning_step_id: number;
   part_index: number;
@@ -2469,7 +2521,7 @@ export type ReasoningCall = {
 };
 
 // TODO(jnu): support function calling, updates for v2
-export type ToolCallDelta = CodeInterpreterCall | FileSearchCall;
+export type ToolCallDelta = CodeInterpreterCall | FileSearchCall | WebSearchCall;
 
 export type ThreadStreamToolCallCreatedChunk = {
   type: 'tool_call_created';

@@ -1346,6 +1346,33 @@ class BufferedResponseStreamHandler:
 
         await add_cached_message_part_on_output_text_url_citation_added()
 
+        self.enqueue(
+            {
+                "type": "message_delta",
+                "delta": {
+                    "content": [
+                        {
+                            "index": 0,
+                            "type": "text",
+                            "text": {
+                                "value": "",
+                                "annotations": [
+                                    {
+                                        "type": "url_citation",
+                                        "end_index": data["end_index"],
+                                        "start_index": data["start_index"],
+                                        "url": data["url"],
+                                        "title": data["title"],
+                                    }
+                                ],
+                            },
+                        },
+                    ],
+                    "role": None,
+                },
+            }
+        )
+
     async def on_output_text_part_done(self, data: ResponseOutputText):
         if not self.message_part_id:
             logger.exception(
@@ -1725,22 +1752,19 @@ class BufferedResponseStreamHandler:
         match action.type:
             case "search":
                 return {
-                    "action_type": WebSearchActionType.SEARCH.value,
+                    "type": WebSearchActionType.SEARCH.value,
                     "query": action.query,
-                    "sources": [
-                        {"url": source.url, "name": source.name}
-                        for source in action.sources or []
-                    ],
+                    "sources": [{"url": source.url} for source in action.sources or []],
                 }
             case "find":
                 return {
-                    "action_type": WebSearchActionType.FIND.value,
+                    "type": WebSearchActionType.FIND.value,
                     "pattern": action.pattern,
                     "url": action.url,
                 }
             case "open_page":
                 return {
-                    "action_type": WebSearchActionType.OPEN_PAGE.value,
+                    "type": WebSearchActionType.OPEN_PAGE.value,
                     "url": action.url,
                 }
             case _:

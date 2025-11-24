@@ -27,6 +27,12 @@ from fastapi import (
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import PositiveInt
 from openai.types.responses.response_output_text import AnnotationURLCitation
+from openai.types.responses.response_function_web_search import (
+    ActionFind,
+    ActionOpenPage,
+    ActionSearch,
+    ActionSearchSource,
+)
 from openai.types.beta.threads.message import Attachment
 from openai.types.beta.threads.image_file_content_block import ImageFileContentBlock
 from openai.types.beta.threads.image_file import ImageFile
@@ -2592,14 +2598,37 @@ async def get_thread(
                     else None
                 )
 
-                sources = (
-                    [
-                        schemas.WebSearchSource(url=source.url, name=source.name)
-                        for source in action.sources
-                    ]
-                    if action and action.sources
-                    else []
-                )
+                if not action or not action.type:
+                    action_obj = None
+                else:
+                    match action.type:
+                        case schemas.WebSearchActionType.SEARCH:
+                            sources = (
+                                [
+                                    ActionSearchSource(url=source.url or "", type="url")
+                                    for source in action.sources
+                                ]
+                                if action and action.sources
+                                else []
+                            )
+                            action_obj = ActionSearch(
+                                query=action.query or "",
+                                type="search",
+                                sources=sources,
+                            )
+                        case schemas.WebSearchActionType.FIND:
+                            action_obj = ActionFind(
+                                url=action.url or "",
+                                pattern=action.pattern or "",
+                                type="find",
+                            )
+                        case schemas.WebSearchActionType.OPEN_PAGE:
+                            action_obj = ActionOpenPage(
+                                url=action.url or "",
+                                type="open_page",
+                            )
+                        case _:
+                            action_obj = None
 
                 web_search_calls.append(
                     schemas.WebSearchMessage(
@@ -2613,11 +2642,7 @@ async def get_thread(
                                 step_id=str(tool_call.id),
                                 type="web_search_call",
                                 status=tool_call.status.value,
-                                action_type=action.type if action else None,
-                                query=action.query if action else None,
-                                url=action.url if action else None,
-                                pattern=action.pattern if action else None,
-                                sources=sources,
+                                action=action_obj,
                             )
                         ],
                         metadata={},
@@ -3491,14 +3516,37 @@ async def list_thread_messages(
                     else None
                 )
 
-                sources = (
-                    [
-                        schemas.WebSearchSource(url=source.url, name=source.name)
-                        for source in action.sources
-                    ]
-                    if action and action.sources
-                    else []
-                )
+                if not action or not action.type:
+                    action_obj = None
+                else:
+                    match action.type:
+                        case schemas.WebSearchActionType.SEARCH:
+                            sources = (
+                                [
+                                    ActionSearchSource(url=source.url or "", type="url")
+                                    for source in action.sources
+                                ]
+                                if action and action.sources
+                                else []
+                            )
+                            action_obj = ActionSearch(
+                                query=action.query or "",
+                                type="search",
+                                sources=sources,
+                            )
+                        case schemas.WebSearchActionType.FIND:
+                            action_obj = ActionFind(
+                                url=action.url or "",
+                                pattern=action.pattern or "",
+                                type="find",
+                            )
+                        case schemas.WebSearchActionType.OPEN_PAGE:
+                            action_obj = ActionOpenPage(
+                                url=action.url or "",
+                                type="open_page",
+                            )
+                        case _:
+                            action_obj = None
 
                 web_search_calls.append(
                     schemas.WebSearchMessage(
@@ -3512,11 +3560,7 @@ async def list_thread_messages(
                                 step_id=str(tool_call.id),
                                 type="web_search_call",
                                 status=tool_call.status.value,
-                                action_type=action.type if action else None,
-                                query=action.query if action else None,
-                                url=action.url if action else None,
-                                pattern=action.pattern if action else None,
-                                sources=sources,
+                                action=action_obj,
                             )
                         ],
                         metadata={},
