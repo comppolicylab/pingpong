@@ -1447,7 +1447,7 @@ class WebSearchActionType(StrEnum):
 class WebSearchCall(BaseModel):
     step_id: str
     type: Literal["web_search_call"]
-    action: WebSearchAction
+    action: WebSearchAction | None = None
     status: Literal["in_progress", "searching", "completed", "incomplete", "failed"]
 
 
