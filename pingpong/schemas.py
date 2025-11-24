@@ -938,6 +938,18 @@ class Institutions(BaseModel):
         from_attributes = True
 
 
+class AddInstitutionAdminRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=100)
+
+
+class InstitutionAdminResponse(BaseModel):
+    institution_id: int
+    user_id: int
+    email: str
+    created_user: bool
+    added_admin: bool
+
+
 # Status documenting the state of the LMS sync.
 # NONE: The user has not authorized the app to sync with LMS.
 # AUTHORIZED: The user has authorized the app to sync with LMS.
