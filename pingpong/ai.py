@@ -743,7 +743,8 @@ async def build_response_input_item_list(
                         case WebSearchActionType.FIND:
                             action = ActionFind(
                                 type="find",
-                                query=action_rec.query or "",
+                                pattern=action_rec.pattern or "",
+                                url=action_rec.url or "",
                             )
                         case _:
                             action = None
