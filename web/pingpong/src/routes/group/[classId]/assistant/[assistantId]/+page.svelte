@@ -494,7 +494,7 @@
     hideFileSearchResultQuotes = true;
   }
 
-  let hideWebSearchSources = true;
+  let hideWebSearchSources = false;
   let hasSetHideWebSearchSources = false;
   $: if (
     assistant?.hide_web_search_sources !== undefined &&
@@ -505,7 +505,7 @@
     hasSetHideWebSearchSources = true;
   }
 
-  let hideWebSearchActions = true;
+  let hideWebSearchActions = false;
   let hasSetHideWebSearchActions = false;
   $: if (
     assistant?.hide_web_search_actions !== undefined &&
@@ -519,7 +519,7 @@
     hasSetHideWebSearchActions = true;
   }
 
-  let hideWebSearchCitations = true;
+  let hideWebSearchCitations = false;
   let hasSetHideWebSearchCitations = false;
   $: if (
     assistant?.hide_web_search_citations !== undefined &&
@@ -1905,7 +1905,6 @@
                 id="hide_file_search_document_names"
                 name="hide_file_search_document_names"
                 disabled={preventEdits}
-                class=""
                 bind:checked={hideFileSearchDocumentNames}
                 ><div class="flex flex-row gap-1">
                   <div>Completely Hide File Search Results from Members</div>
@@ -1973,7 +1972,6 @@
                 id="hide_web_search_citations"
                 name="hide_web_search_citations"
                 disabled={preventEdits}
-                class=""
                 bind:checked={hideWebSearchCitations}
                 ><div class="flex flex-row gap-1">
                   <div>Hide Inline URL Citations from Members</div>

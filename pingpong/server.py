@@ -6837,6 +6837,12 @@ async def update_assistant(
         asst.hide_web_search_citations = req.hide_web_search_citations
 
     if (
+        "hide_web_search_sources" in req.model_fields_set
+        and req.hide_web_search_sources is not None
+    ):
+        asst.hide_web_search_sources = req.hide_web_search_sources
+
+    if (
         "hide_web_search_actions" in req.model_fields_set
         and req.hide_web_search_actions is not None
     ):
