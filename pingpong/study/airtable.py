@@ -6,6 +6,8 @@ from pingpong.study.schemas import (
     Course,
     Instructor,
     PreAssessmentStudentSubmission,
+    PostAssessmentStudentSubmission,
+    UserClassAssociation,
 )
 
 
@@ -75,6 +77,43 @@ async def get_preassessment_students_by_class_id(
         PreAssessmentStudentSubmission.all, formula=formula
     )
     return submissions
+
+
+async def get_preassessment_submission_by_response_id(
+    submission_id: str,
+) -> PreAssessmentStudentSubmission | None:
+    def _get():
+        return PreAssessmentStudentSubmission.first(
+            formula=PreAssessmentStudentSubmission.submission_id.eq(submission_id)
+        )
+
+    return await asyncio.to_thread(_get)
+
+
+async def get_postassessment_students_by_class_id(
+    class_id: str,
+) -> list[PostAssessmentStudentSubmission]:
+    formula = PostAssessmentStudentSubmission.course_id.eq(class_id)
+    submissions = await asyncio.to_thread(
+        PostAssessmentStudentSubmission.all, formula=formula
+    )
+    return submissions
+
+
+async def request_student_group_removal(student_id: str, class_id: str) -> int:
+    """Mark user/group associations for a student in a class as removal requested."""
+
+    def _update():
+        formula = UserClassAssociation.student_id.eq(
+            student_id
+        ) & UserClassAssociation.class_id.eq(class_id)
+        rows = UserClassAssociation.all(formula=formula)
+        for row in rows:
+            row.removal_status = "Requested to Remove"
+            row.save()
+        return len(rows)
+
+    return await asyncio.to_thread(_update)
 
 
 async def get_admin_by_id(admin_id: str) -> Admin | None:

@@ -207,6 +207,8 @@ class StudySettings(BaseSettings):
     airtable_instructor_table_id: str
     airtable_admin_table_id: str
     airtable_preassessment_submission_table_id: str
+    airtable_postassessment_submission_table_id: str
+    airtable_user_class_association_table_id: str
 
 
 class LMSSettings(BaseSettings):
