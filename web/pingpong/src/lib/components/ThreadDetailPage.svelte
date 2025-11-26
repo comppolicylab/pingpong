@@ -54,7 +54,7 @@
   import { isFirefox } from '$lib/stores/general';
   import Sanitize from '$lib/components/Sanitize.svelte';
   import AudioPlayer from '$lib/components/AudioPlayer.svelte';
-  import { tick } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
   import FileCitation from './FileCitation.svelte';
   import StatusErrors from './StatusErrors.svelte';
   import FileSearchCallItem from './FileSearchCallItem.svelte';
@@ -205,6 +205,15 @@
   let showModerators = false;
   let showAssistantPrompt = false;
   let settingsOpen = false;
+  let exportModalOpen = false;
+  let exportJob: api.ThreadExportJob | null = null;
+  let exportError: string | null = null;
+  let exportPolling: ReturnType<typeof setInterval> | null = null;
+  let exportingPdf = false;
+  let downloadingPdf = false;
+  $: exportProcessing =
+    !!exportJob && (exportJob.status === 'pending' || exportJob.status === 'processing');
+  $: exportReady = exportJob?.status === 'ready';
 
   function isFileCitation(a: api.TextAnnotation): a is api.TextAnnotationFileCitation {
     return a.type === 'file_citation' && a.text === 'responses_v3';
@@ -231,6 +240,100 @@
       timeZone: userTimezone
     }).format(new Date(timestamp * 1000));
   };
+
+  const stopExportPolling = () => {
+    if (exportPolling) {
+      clearInterval(exportPolling);
+      exportPolling = null;
+    }
+  };
+
+  $: if (!exportModalOpen) {
+    stopExportPolling();
+  }
+
+  const resetExportState = () => {
+    exportJob = null;
+    exportError = null;
+    exportingPdf = false;
+    downloadingPdf = false;
+    stopExportPolling();
+  };
+
+  const pollExportStatus = async () => {
+    if (!exportJob) return;
+    const expanded = api.expandResponse(
+      await api.getThreadExportStatus(fetch, classId, threadId, exportJob.id)
+    );
+    if (expanded.error) {
+      exportError = errorMessage(expanded.error, 'Unable to check export status');
+      stopExportPolling();
+      return;
+    }
+
+    const stillProcessing =
+      expanded.data.status === 'pending' || expanded.data.status === 'processing';
+    exportJob = expanded.data;
+    if (!stillProcessing) {
+      stopExportPolling();
+    }
+  };
+
+  const requestPdfExport = async () => {
+    exportingPdf = true;
+    exportError = null;
+    const expanded = api.expandResponse(
+      await api.requestThreadPdfExport(fetch, classId, threadId)
+    );
+
+    if (expanded.error) {
+      exportError = errorMessage(expanded.error, 'Unable to request PDF export');
+      exportingPdf = false;
+      return;
+    }
+
+    exportJob = expanded.data;
+    exportingPdf = false;
+    stopExportPolling();
+    exportPolling = setInterval(pollExportStatus, 4000);
+  };
+
+  const downloadPdfExport = async () => {
+    if (!exportJob) return;
+    downloadingPdf = true;
+    exportError = null;
+    try {
+      const res = await api.downloadThreadPdfExport(fetch, classId, threadId, exportJob.id);
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null);
+        throw new Error(payload?.detail || 'Unable to download export');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `thread-${threadId}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      exportError = errorMessage(err, 'Unable to download export');
+      sadToast(exportError);
+    } finally {
+      downloadingPdf = false;
+    }
+  };
+
+  const openExportModal = () => {
+    resetExportState();
+    exportModalOpen = true;
+  };
+
+  const closeExportModal = () => {
+    stopExportPolling();
+    exportModalOpen = false;
+  };
+
+  onDestroy(stopExportPolling);
 
   let currentMessageAttachments: api.ServerFile[] = [];
   // Get the name of the participant in the chat thread.
@@ -1116,6 +1219,52 @@
       ><Sanitize html={$threadInstructions ?? ''} /></span
     ></Modal
   >
+  <Modal title="Export to PDF" size="lg" bind:open={exportModalOpen} autoclose outsideclose>
+    <div class="flex flex-col gap-3 p-1">
+      <span class="text-sm text-gray-700">
+        Export this conversation as a PDF with the visible messages and tool details. Files are
+        available for about one day and can be downloaded multiple times until they expire.
+      </span>
+      {#if exportError}
+        <span class="text-sm text-red-600">{exportError}</span>
+      {/if}
+      {#if exportJob}
+        <div class="flex items-center gap-2 text-sm">
+          {#if exportReady}
+            <CheckOutline class="text-green-600" size="sm" />
+            <span>
+              Export ready. {exportJob.expires_at
+                ? `Expires ${new Date(exportJob.expires_at).toLocaleString()}.`
+                : 'Expires in about a day.'}
+            </span>
+          {:else if exportJob.status === 'expired'}
+            <span class="text-orange-600">This export has expired. Start a new export to download.</span>
+          {:else if exportJob.status === 'failed'}
+            <span class="text-red-600">We could not finish this export. Please try again.</span>
+          {:else}
+            <Spinner size="sm" />
+            <span>Generating your PDF export...</span>
+          {/if}
+        </div>
+      {/if}
+      <div class="flex justify-end gap-3 pt-2">
+        <Button color="light" on:click={closeExportModal}>Close</Button>
+        {#if exportReady}
+          <Button on:click={downloadPdfExport} disabled={downloadingPdf}>
+            {downloadingPdf ? 'Downloading...' : 'Download PDF'}
+          </Button>
+        {:else}
+          <Button
+            on:click={requestPdfExport}
+            disabled={exportingPdf || exportProcessing}
+            color="alternative"
+          >
+            {exportingPdf ? 'Requesting export...' : exportJob ? 'Retry export' : 'Export to PDF'}
+          </Button>
+        {/if}
+      </div>
+    </div>
+  </Modal>
   <Modal title="Copy Link" bind:open={copyLinkModalOpen} autoclose outsideclose>
     <div class="flex flex-col gap-3 p-1">
       <span class="text-sm text-gray-700">Press Cmd+C / Ctrl+C to copy the thread link.</span>
@@ -1517,6 +1666,15 @@
                   </DropdownItem>
                   <DropdownDivider />
                 {/if}
+                <DropdownItem
+                  on:click={() => {
+                    settingsOpen = false;
+                    openExportModal();
+                  }}
+                >
+                  <span>Export to PDF</span>
+                </DropdownItem>
+                <DropdownDivider />
                 <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
                   <span class:text-gray-300={!canPublishThread}>
                     {#if $published}

@@ -1601,6 +1601,23 @@ class ThreadWithMeta(BaseModel):
         from_attributes = True
 
 
+class ThreadExportStatus(StrEnum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
+class ThreadExport(BaseModel):
+    id: int
+    status: ThreadExportStatus
+    expires_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
 class FileSearchToolAnnotationResult(BaseModel):
     file_id: str
     filename: str

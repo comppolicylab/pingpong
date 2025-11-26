@@ -69,6 +69,7 @@ from pingpong.stats import (
     get_thread_counts_by_class,
 )
 from pingpong.summary import send_class_summary_to_user_task
+from pingpong.thread_export import expire_export_if_needed, generate_thread_pdf_export
 from .animal_hash import name, process_threads, pseudonym, user_names
 from openai.types.beta.assistant_create_params import ToolResources
 from openai.types.beta.threads import MessageContentPartParam
@@ -2955,6 +2956,94 @@ async def get_thread(
         }
     else:
         raise HTTPException(status_code=400, detail="Invalid thread version")
+
+
+@v1.post(
+    "/class/{class_id}/thread/{thread_id}/export/pdf",
+    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
+    response_model=schemas.ThreadExport,
+)
+async def request_thread_export_pdf(
+    class_id: str,
+    thread_id: str,
+    request: Request,
+    tasks: BackgroundTasks,
+    openai_client: OpenAIClient,
+):
+    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    if not thread or thread.class_id != int(class_id):
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    export = await models.ThreadExport.create(
+        request.state.db, thread.id, request.state.session.user.id
+    )
+    await request.state.db.commit()
+
+    tasks.add_task(safe_task, generate_thread_pdf_export, export.id, openai_client)
+    return export
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/export/pdf/{export_id}",
+    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
+    response_model=schemas.ThreadExport,
+)
+async def get_thread_export_status(
+    class_id: str,
+    thread_id: str,
+    export_id: int,
+    request: Request,
+):
+    export = await models.ThreadExport.get_for_thread(
+        request.state.db, export_id, int(thread_id)
+    )
+    if not export:
+        raise HTTPException(status_code=404, detail="Export not found")
+
+    now = get_now_fn(request)()
+    export = await expire_export_if_needed(export, request.state.db, now)
+    await request.state.db.commit()
+    return export
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/export/pdf/{export_id}/download",
+    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
+)
+async def download_thread_export(
+    class_id: str,
+    thread_id: str,
+    export_id: int,
+    request: Request,
+):
+    export = await models.ThreadExport.get_for_thread(
+        request.state.db, export_id, int(thread_id)
+    )
+    if not export:
+        raise HTTPException(status_code=404, detail="Export not found")
+
+    now = get_now_fn(request)()
+    export = await expire_export_if_needed(export, request.state.db, now)
+    await request.state.db.commit()
+
+    if export.status == schemas.ThreadExportStatus.EXPIRED:
+        raise HTTPException(status_code=410, detail="Export expired")
+
+    if export.status != schemas.ThreadExportStatus.READY or not export.s3_file:
+        raise HTTPException(status_code=400, detail="Export not ready")
+
+    try:
+        return StreamingResponse(
+            config.artifact_store.store.get(export.s3_file.key),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename=thread_{thread_id}.pdf"
+            },
+        )
+    except ArtifactStoreError:
+        await models.ThreadExport.mark_expired(request.state.db, export.id)
+        await request.state.db.commit()
+        raise HTTPException(status_code=410, detail="Export expired")
 
 
 @v1.get(

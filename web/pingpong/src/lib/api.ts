@@ -2027,6 +2027,19 @@ export type ThreadWithOptionalToken = {
   session_token?: string | null;
 };
 
+export type ThreadExportStatus =
+  | 'pending'
+  | 'processing'
+  | 'ready'
+  | 'failed'
+  | 'expired';
+
+export type ThreadExportJob = {
+  id: number;
+  status: ThreadExportStatus;
+  expires_at: string | null;
+};
+
 /**
  * Create a new conversation thread.
  */
@@ -2300,6 +2313,38 @@ export type ThreadWithMeta = {
 export const getThread = async (f: Fetcher, classId: number, threadId: number) => {
   const url = `class/${classId}/thread/${threadId}`;
   return await GET<never, ThreadWithMeta>(f, url);
+};
+
+export const requestThreadPdfExport = async (
+  f: Fetcher,
+  classId: number,
+  threadId: number
+) => {
+  const url = `class/${classId}/thread/${threadId}/export/pdf`;
+  return await POST<never, ThreadExportJob>(f, url);
+};
+
+export const getThreadExportStatus = async (
+  f: Fetcher,
+  classId: number,
+  threadId: number,
+  exportId: number
+) => {
+  const url = `class/${classId}/thread/${threadId}/export/pdf/${exportId}`;
+  return await GET<never, ThreadExportJob>(f, url);
+};
+
+export const downloadThreadPdfExport = async (
+  f: Fetcher,
+  classId: number,
+  threadId: number,
+  exportId: number
+) => {
+  let url = `class/${classId}/thread/${threadId}/export/pdf/${exportId}/download`;
+  if (anonymousShareToken) {
+    url += `?share_token=${anonymousShareToken}`;
+  }
+  return await _fetch(f, 'GET', url);
 };
 
 export type CodeInterpreterMessages = {

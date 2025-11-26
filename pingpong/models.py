@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import (
     AsyncGenerator,
     Collection,
@@ -1508,6 +1508,109 @@ class S3File(Base):
         result = await session.execute(stmt)
         for row in result:
             yield row.S3File
+
+
+class ThreadExport(Base):
+    __tablename__ = "thread_exports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    thread_id = Column(Integer, ForeignKey("threads.id", ondelete="CASCADE"), nullable=False)
+    requested_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    status = Column(
+        SQLEnum(schemas.ThreadExportStatus, name="threadexportstatus"),
+        nullable=False,
+        server_default=schemas.ThreadExportStatus.PENDING.value,
+    )
+    s3_file_id = Column(Integer, ForeignKey("s3_files.id", ondelete="SET NULL"), nullable=True)
+    s3_file = relationship("S3File", uselist=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    @classmethod
+    async def create(
+        cls, session: AsyncSession, thread_id: int, requested_by: int
+    ) -> "ThreadExport":
+        export = ThreadExport(thread_id=thread_id, requested_by=requested_by)
+        session.add(export)
+        await session.flush()
+        await session.refresh(export)
+        return export
+
+    @classmethod
+    async def get_by_id(cls, session: AsyncSession, export_id: int) -> "ThreadExport | None":
+        stmt = (
+            select(ThreadExport)
+            .options(selectinload(ThreadExport.s3_file))
+            .where(ThreadExport.id == int(export_id))
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_for_thread(
+        cls, session: AsyncSession, export_id: int, thread_id: int
+    ) -> "ThreadExport | None":
+        stmt = (
+            select(ThreadExport)
+            .options(selectinload(ThreadExport.s3_file))
+            .where(ThreadExport.id == int(export_id), ThreadExport.thread_id == int(thread_id))
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def mark_processing(cls, session: AsyncSession, export_id: int) -> None:
+        await session.execute(
+            update(ThreadExport)
+            .where(ThreadExport.id == int(export_id))
+            .values(status=schemas.ThreadExportStatus.PROCESSING)
+        )
+
+    @classmethod
+    async def mark_ready(
+        cls,
+        session: AsyncSession,
+        export_id: int,
+        s3_file_id: int,
+        completed_at: datetime,
+        expires_at: datetime,
+    ) -> None:
+        await session.execute(
+            update(ThreadExport)
+            .where(ThreadExport.id == int(export_id))
+            .values(
+                status=schemas.ThreadExportStatus.READY,
+                s3_file_id=s3_file_id,
+                completed_at=completed_at,
+                expires_at=expires_at,
+            )
+        )
+
+    @classmethod
+    async def mark_failed(cls, session: AsyncSession, export_id: int) -> None:
+        await session.execute(
+            update(ThreadExport)
+            .where(ThreadExport.id == int(export_id))
+            .values(
+                status=schemas.ThreadExportStatus.FAILED,
+                completed_at=datetime.now(timezone.utc),
+            )
+        )
+
+    @classmethod
+    async def mark_expired(cls, session: AsyncSession, export_id: int) -> None:
+        export = await cls.get_by_id(session, export_id)
+        if not export:
+            return
+
+        if export.s3_file:
+            await session.delete(export.s3_file)
+            export.s3_file = None
+            export.s3_file_id = None
+
+        export.status = schemas.ThreadExportStatus.EXPIRED
+        export.updated = datetime.now(timezone.utc)
+        await session.flush()
 
 
 class File(Base):
