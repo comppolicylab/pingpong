@@ -495,7 +495,6 @@ async def get_preassessment_students(class_id: str, request: Request):
                         return "PEND", removed
         # Explicit return for static analyzers and future maintainers
         return "PEND", removed
-                return "PEND", removed
 
     pre_responses = [
         PreAssessmentStudentSubmissionResponse(
