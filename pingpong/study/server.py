@@ -475,7 +475,9 @@ async def get_preassessment_students(class_id: str, request: Request):
         submission,
     ) -> tuple[Literal["OK", "PEND", "NRC", "PRE"], bool]:
         raw_status = (submission.status or "").strip()
-        error_type = (submission.error_type or "").strip() if submission.error_type else ""
+        error_type = (
+            (submission.error_type or "").strip() if submission.error_type else ""
+        )
         removed = raw_status == "Removed from Class"
 
         match raw_status:
@@ -612,7 +614,12 @@ async def delete_preassessment_student_submission(
     submission_class_id = submission.class_id if submission else None
     submission_student_id = submission.student_id if submission else None
 
-    if not submission or not submission_class_id or not submission_student_id or submission_class_id != class_id:
+    if (
+        not submission
+        or not submission_class_id
+        or not submission_student_id
+        or submission_class_id != class_id
+    ):
         raise HTTPException(status_code=404, detail="Student not found.")
 
     try:

@@ -74,6 +74,7 @@ class PreAssessmentStudentSubmission(Model):
         base_id = study_config.airtable_base_id
         table_name = study_config.airtable_preassessment_submission_table_id
 
+
 class PostAssessmentStudentSubmission(Model):
     """Airtable post-assessment student submission model."""
 
@@ -104,6 +105,7 @@ class PreAssessmentStudentSubmissionResponse(BaseModel):
     class_id: str | None = None
     removed: bool = False
 
+
 class PostAssessmentStudentSubmissionResponse(BaseModel):
     """Response model for post-assessment student submission."""
 
@@ -115,6 +117,7 @@ class PostAssessmentStudentSubmissionResponse(BaseModel):
     class_id: str | None = None
     status: Literal["OK", "PEND", "NRC", "PRE"] | None = "PEND"
     removed: bool = False
+
 
 class PreAssessmentStudentSubmissionsResponse(BaseModel):
     """Response model for pre-assessment student submissions."""

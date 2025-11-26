@@ -211,7 +211,6 @@ class StudySettings(BaseSettings):
     airtable_user_class_association_table_id: str
 
 
-
 class LMSSettings(BaseSettings):
     """LMS connection settings."""
 
