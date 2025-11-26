@@ -1052,7 +1052,7 @@
 											<span class="w-full text-sm"
 												>We were unable to automatically match the student to a pre-assessment
 												submission. This might indicate that the student used a new email address,
-												or that there was a technical issue. Our team will will manually review and
+												or that there was a technical issue. Our team will manually review and
 												follow up as needed.</span
 											>
 										</Tooltip.Content>
