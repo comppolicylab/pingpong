@@ -7,8 +7,13 @@
 	import AlertTriangle from '@lucide/svelte/icons/alert-triangle';
 	import Calendar from '@lucide/svelte/icons/calendar';
 	import { SvelteDate } from 'svelte/reactivity';
+	import { Button } from '$lib/components/ui/button/index.js';
+	import { slide } from 'svelte/transition';
+	import { flip } from 'svelte/animate';
+	import { quintOut } from 'svelte/easing';
 
 	let { course }: { course: Course | undefined } = $props();
+	let showCompletedSteps = $state(false);
 
 	function toDate(v?: string) {
 		if (!v) return null;
@@ -54,9 +59,12 @@
 	}
 
 	const start = $derived(toDate(course?.start_date));
+	const end = $derived(toDate(course?.end_date));
 	const now = $derived(new SvelteDate());
 	const due = $derived(start ? addDays(start, 15) : null);
 	const grace = $derived(start ? addDays(start, 22) : null);
+	const postDue = $derived(end ? addDays(end, 1) : null);
+	const postGrace = $derived(end ? addDays(end, 8) : null);
 
 	const target = $derived(
 		typeof course?.completion_rate_target === 'number' ? course.completion_rate_target : undefined
@@ -67,8 +75,16 @@
 	const completed = $derived(
 		typeof course?.preassessment_student_count === 'number' ? course.preassessment_student_count : 0
 	);
+	const postCompleted = $derived(
+		typeof course?.postassessment_student_count === 'number'
+			? course.postassessment_student_count
+			: 0
+	);
 	const pct = $derived(
 		enrollment && enrollment > 0 ? Math.round((completed / enrollment) * 100) : undefined
+	);
+	const postPct = $derived(
+		enrollment && enrollment > 0 ? Math.round((postCompleted / enrollment) * 100) : undefined
 	);
 
 	function statusRegistration() {
@@ -121,6 +137,8 @@
 	}
 	function statusThroughout() {
 		if (!start) return 'upcoming';
+		const postAdminStart = end ? addDays(end, -14) : null;
+		if (postAdminStart && now >= postAdminStart) return 'completed';
 		// Do not move to Throughout until checkpoint is completed (target met) and the checkpoint date has passed
 		const checkpointDone =
 			typeof target === 'number' &&
@@ -131,6 +149,28 @@
 			now >= (due as Date);
 		if (checkpointDone && now >= start) return 'active';
 		return 'upcoming';
+	}
+	function statusReceivePostLink() {
+		return course?.postassessment_url ? 'completed' : 'upcoming';
+	}
+	function statusAdministerPost() {
+		if (!end) return 'upcoming';
+		const windowStart = addDays(end, -14);
+		const windowEnd = addDays(end, 1);
+		if (now < windowStart) return 'upcoming';
+		if (now <= windowEnd) return 'active';
+		const checkpoint = statusCheckpointPost();
+		if (checkpoint === 'grace' || checkpoint === 'incomplete') return 'incomplete';
+		return 'completed';
+	}
+	function statusCheckpointPost() {
+		if (!end || !target || !enrollment || enrollment <= 0) return 'upcoming';
+		if (now < (postDue as Date)) return 'upcoming';
+		if (postPct !== undefined && postPct >= target) return 'completed';
+		// Only becomes relevant at or after the checkpoint (due date)
+		if (now < (postDue as Date)) return 'upcoming';
+		if (postGrace && now <= postGrace) return 'grace';
+		return 'incomplete';
 	}
 
 	function Step({
@@ -243,36 +283,36 @@
 			Step({
 				idx: 8,
 				title: 'Receive Post-Study Assessment Link',
-				date: '2 weeks before course end',
+				date: end ? `By ${fmtDate(addDays(end, -14))}` : '2 weeks before course end',
 				description: 'We will provide a unique link for your class for the post-study assessment.',
-				status: 'upcoming'
+				status: statusReceivePostLink()
 			})
 		);
 		list.push(
 			Step({
 				idx: 9,
 				title: 'Administer Post-Study Assessment',
-				date: 'Last 2 weeks of class',
+				date: end ? `${fmtDate(addDays(end, -14))} – ${fmtDate(end)}` : 'Last 2 weeks of class',
 				description:
 					'Assign the Post-Study Assessment as a required assignment due in the last two weeks.',
-				status: 'upcoming'
+				status: statusAdministerPost()
 			})
 		);
 		list.push(
 			Step({
 				idx: 10,
 				title: 'Checkpoint: Post-Study Assessment Completion',
-				date: 'Last day of class',
+				date: end ? fmtDate(addDays(end, 1)) : 'One day after class end',
 				description:
 					'Last day to meet your post-assessment completion target to complete the study.',
-				status: 'upcoming'
+				status: statusCheckpointPost()
 			})
 		);
 		list.push(
 			Step({
 				idx: 11,
 				title: 'Checkpoint: Instructor Survey Completion',
-				date: '1 week after course end',
+				date: end ? fmtDate(addDays(end, 8)) : '1 week after course end',
 				description:
 					'Last day to submit the Instructor Experience Survey and complete the study. Second honorarium installment and any bonuses follow after all your courses meet their targets.',
 				status: 'upcoming'
@@ -311,10 +351,40 @@
 				i === currentActiveIndex ? s.status : s.status === 'active' ? 'upcoming' : s.status
 		}));
 	});
+
+	const completedSteps = $derived(timelineSteps.filter((s) => s.displayStatus === 'completed'));
+	const alwaysVisibleCompleted = 'Receive Post-Study Assessment Link';
+	const alwaysVisibleIndex = $derived(
+		timelineSteps.findIndex((s) => s.title === alwaysVisibleCompleted)
+	);
+	const shouldShowAlwaysVisible = $derived(
+		alwaysVisibleIndex > -1 && timelineSteps[alwaysVisibleIndex - 1]?.displayStatus !== 'completed'
+	);
+	const remainingSteps = $derived(
+		timelineSteps.filter(
+			(s) =>
+				s.displayStatus !== 'completed' ||
+				(shouldShowAlwaysVisible && alwaysVisibleCompleted.includes(s.title))
+		)
+	);
+	const displaySteps = $derived.by(() => (showCompletedSteps ? timelineSteps : remainingSteps));
 </script>
 
 <div class="rounded-md border p-4">
-	<h2 class="mb-3 text-lg font-semibold">Timeline</h2>
+	<div class="mb-3 flex items-center justify-between gap-3">
+		<h2 class="text-lg font-semibold">Timeline</h2>
+		{#if completedSteps.length}
+			<Button
+				variant="outline"
+				size="sm"
+				class="gap-2 text-sm"
+				onclick={() => (showCompletedSteps = !showCompletedSteps)}
+				aria-expanded={showCompletedSteps}
+			>
+				{showCompletedSteps ? 'Hide Completed Steps' : 'Show Completed Steps'}
+			</Button>
+		{/if}
+	</div>
 	{#if !course}
 		<div class="space-y-2">
 			<div class="h-4 w-full rounded bg-muted"></div>
@@ -326,8 +396,13 @@
 		<div class="relative ml-1">
 			<div class="absolute top-0 bottom-0 left-[11px] w-px bg-muted-foreground/20"></div>
 			<ol class="space-y-5">
-				{#each timelineSteps as s (s.idx)}
-					<li class="relative pl-8">
+				{#each displaySteps as s (s.idx)}
+					<li
+						class="relative pl-8"
+						animate:flip={{ duration: 140, easing: quintOut }}
+						in:slide={{ duration: 220, easing: quintOut }}
+						out:slide={{ duration: 120, easing: quintOut }}
+					>
 						<span
 							class="absolute top-1.5 left-[5px] inline-block size-3 rounded-full {statusDotClass(
 								s.displayStatus
@@ -353,6 +428,14 @@
 											<Clock />
 											{daysLabel(daysLeft(addDays(start as Date, 15)))} left
 										</Badge>
+									{:else if s.title === 'Administer Post-Study Assessment'}
+										<Badge
+											variant="outline"
+											class="border-sky-600 bg-transparent text-sky-600 [a&]:hover:bg-transparent"
+										>
+											<Clock />
+											{daysLabel(daysLeft(addDays(end as Date, 1)))} left
+										</Badge>
 									{:else}
 										<Badge
 											variant="outline"
@@ -363,13 +446,23 @@
 										</Badge>
 									{/if}
 								{:else if s.displayStatus === 'grace'}
-									<Badge
-										variant="outline"
-										class="border-amber-600 bg-transparent text-amber-700 dark:border-amber-400 dark:text-amber-300 [a&]:hover:bg-transparent"
-									>
-										<Hourglass />
-										Grace period / {daysLabel(daysLeft(addDays(start as Date, 22)))} left
-									</Badge>
+									{#if s.title === 'Checkpoint: Pre-Study Assessment Completion'}
+										<Badge
+											variant="outline"
+											class="border-amber-600 bg-transparent text-amber-700 dark:border-amber-400 dark:text-amber-300 [a&]:hover:bg-transparent"
+										>
+											<Hourglass />
+											Grace period / {daysLabel(daysLeft(addDays(start as Date, 22)))} left
+										</Badge>
+									{:else}
+										<Badge
+											variant="outline"
+											class="border-amber-600 bg-transparent text-amber-700 dark:border-amber-400 dark:text-amber-300 [a&]:hover:bg-transparent"
+										>
+											<Hourglass />
+											Grace period / {daysLabel(daysLeft(addDays(end as Date, 8)))} left
+										</Badge>
+									{/if}
 								{:else if s.displayStatus === 'incomplete'}
 									<Badge
 										variant="outline"
@@ -399,10 +492,5 @@
 				{/each}
 			</ol>
 		</div>
-		{#if !start}
-			<p class="mt-3 text-xs text-muted-foreground">
-				Set a start date to activate date-based milestones.
-			</p>
-		{/if}
 	{/if}
 </div>

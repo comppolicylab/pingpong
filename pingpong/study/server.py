@@ -1,4 +1,5 @@
 from fastapi import Depends, FastAPI, HTTPException, Request
+from typing import Literal
 from fastapi.responses import RedirectResponse
 from jwt import PyJWTError
 import jwt
@@ -17,6 +18,7 @@ from pingpong.study.schemas import (
     Course,
     PreAssessmentStudentSubmissionsResponse,
     PreAssessmentStudentSubmissionResponse,
+    PostAssessmentStudentSubmissionResponse,
     UpdateEnrollmentRequest,
 )
 from pingpong.users import UserNotFoundException
@@ -27,7 +29,10 @@ from pingpong.study.airtable import (
     get_courses_by_instructor_id,
     get_instructor,
     get_instructor_by_email,
+    get_postassessment_students_by_class_id,
     get_preassessment_students_by_class_id,
+    get_preassessment_submission_by_response_id,
+    request_student_group_removal,
     update_course_enrollment_by_record_id,
     set_instructor_profile_notice_seen,
 )
@@ -404,6 +409,7 @@ def process_course(course: Course) -> schemas.StudyCourse:
         status=course_status,
         randomization=randomization,
         start_date=course.start_date,
+        end_date=course.end_date,
         enrollment_count=course.enrollment_count,
         completion_rate_target=course.completion_rate_target * 100
         if course_status == "accepted"
@@ -411,10 +417,16 @@ def process_course(course: Course) -> schemas.StudyCourse:
         preassessment_url=course.preassessment_url
         if course_status == "accepted"
         else None,
+        postassessment_url=course.postassessment_url
+        if course_status == "accepted"
+        else None,
         pingpong_group_url=course.pingpong_group_url
         if course_status == "accepted"
         else None,
         preassessment_student_count=course.preassessment_student_count
+        if course_status == "accepted"
+        else None,
+        postassessment_student_count=course.postassessment_student_count
         if course_status == "accepted"
         else None,
     )
@@ -456,24 +468,74 @@ async def get_preassessment_students(class_id: str, request: Request):
             detail="You do not have permission to view this class's pre-assessment students.",
         )
 
-    students = await get_preassessment_students_by_class_id(class_id)
+    pre_students = await get_preassessment_students_by_class_id(class_id)
+    post_students = await get_postassessment_students_by_class_id(class_id)
+
+    def normalize_post_status(
+        submission,
+    ) -> tuple[Literal["OK", "PEND", "NRC", "PRE"], bool]:
+        raw_status = (submission.status or "").strip()
+        error_type = (submission.error_type or "").strip() if submission.error_type else ""
+        removed = raw_status == "Removed from Class"
+
+        match raw_status:
+            case "Complete":
+                return "OK", removed
+            case "Error":
+                match error_type:
+                    case "OK":
+                        return "OK", removed
+                    case "NRC":
+                        return "NRC", removed
+                    case "PRE":
+                        return "PRE", removed
+                    case _:
+                        return "PEND", removed
+            case _:
+                return "PEND", removed
+
+    pre_responses = [
+        PreAssessmentStudentSubmissionResponse(
+            id=student.submission_id,
+            first_name=student.first_name,
+            last_name=student.last_name,
+            email=student.email,
+            submission_date=student.submitted_at or "",
+            student_id=student.student_id,
+            class_id=student.class_id,
+            removed=bool(student.removal_status and student.removal_status[0] != ""),
+        )
+        for student in sorted(
+            pre_students,
+            key=lambda s: (
+                (s.last_name or "").lower(),
+                (s.first_name or "").lower(),
+            ),
+        )
+    ]
+
+    post_responses: list[PostAssessmentStudentSubmissionResponse] = []
+    for submission in sorted(
+        post_students,
+        key=lambda s: (s.name or s.email or "").lower(),
+    ):
+        normalized_status, removed = normalize_post_status(submission)
+        post_responses.append(
+            PostAssessmentStudentSubmissionResponse(
+                id=submission.submission_id,
+                name=submission.name or "",
+                email=submission.email or "",
+                submission_date=submission.submitted_at or "",
+                student_id=submission.student_id,
+                class_id=class_id,
+                status=normalized_status,
+                removed=removed,
+            )
+        )
+
     return {
-        "students": [
-            PreAssessmentStudentSubmissionResponse(
-                id=student.submission_id,
-                first_name=student.first_name,
-                last_name=student.last_name,
-                email=student.email,
-                submission_date=student.submitted_at or "",
-            )
-            for student in sorted(
-                students,
-                key=lambda s: (
-                    (s.last_name or "").lower(),
-                    (s.first_name or "").lower(),
-                ),
-            )
-        ]
+        "pre_assessment_submissions": pre_responses,
+        "post_assessment_submissions": post_responses,
     }
 
 
@@ -514,6 +576,50 @@ async def update_course_enrollment(
     # Perform update
     try:
         await update_course_enrollment_by_record_id(class_id, body.enrollment_count)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"status": "ok"}
+
+
+@study.delete(
+    "/preassessment/{class_id}/students/{submission_id}",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.GenericStatus,
+)
+async def delete_preassessment_student_submission(
+    class_id: str, submission_id: str, request: Request
+):
+    """Request removal for a student and their PingPong group associations."""
+
+    instructor = await get_instructor(request.state.session.token.sub)
+    if not instructor:
+        raise HTTPException(
+            status_code=404,
+            detail="We couldn't find you in the study database. Please contact the study administrator.",
+        )
+
+    teaches = await check_if_instructor_teaches_course_by_ids(
+        instructor.record_id, class_id
+    )
+    if not teaches:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to update this course.",
+        )
+
+    submission = await get_preassessment_submission_by_response_id(submission_id)
+    submission_class_id = submission.class_id if submission else None
+    submission_student_id = submission.student_id if submission else None
+
+    if not submission or not submission_class_id or not submission_student_id or submission_class_id != class_id:
+        raise HTTPException(status_code=404, detail="Student not found.")
+
+    try:
+        await request_student_group_removal(
+            submission_student_id,
+            submission_class_id,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
