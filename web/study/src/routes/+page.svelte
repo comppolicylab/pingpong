@@ -17,6 +17,7 @@
 		ensureCourses
 	} from '$lib/stores/courses';
 	import DeadlinesProgress from '$lib/components/dashboard/deadlines-progress.svelte';
+	import PostProgress from '$lib/components/dashboard/post-progress.svelte';
 	import Announcements from '$lib/components/dashboard/announcements.svelte';
 	import FAQ from '$lib/components/dashboard/faq.svelte';
 	import Hourglass from '@lucide/svelte/icons/hourglass';
@@ -170,6 +171,11 @@
 				<Skeleton class="h-40 w-full" />
 			{:else}
 				<DeadlinesProgress />
+			{/if}
+			{#if $coursesLoading}
+				<Skeleton class="h-40 w-full" />
+			{:else}
+				<PostProgress />
 			{/if}
 
 			<div>

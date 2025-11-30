@@ -191,3 +191,7 @@ airtable_instructor_table_id = "your instructor table id here"
 airtable_admin_table_id = "your admin table id here"
 # Airtable pre-assessment submission table ID for the study dashboard.
 airtable_preassessment_submission_table_id = "your preassessment submission table id here"
+# Airtable post-assessment submission table ID for the study dashboard.
+airtable_postassessment_submission_table_id = "your postassessment submission table id here"
+# Airtable user-class association table ID for the study dashboard.
+airtable_user_class_association_table_id = "your user-class association table id here"

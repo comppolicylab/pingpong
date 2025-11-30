@@ -1106,11 +1106,14 @@ class StudyCourse(BaseModel):
     status: Literal["in_review", "accepted", "rejected", "withdrawn"] | None = None
     randomization: Literal["control", "treatment"] | None = None
     start_date: datetime | None = None
+    end_date: datetime | None = None
     enrollment_count: int | None = None
     completion_rate_target: float | None = None
     preassessment_url: str | None
+    postassessment_url: str | None = None
     pingpong_group_url: str | None
     preassessment_student_count: int | None = None
+    postassessment_student_count: int | None = None
 
 
 class Class(BaseModel):
