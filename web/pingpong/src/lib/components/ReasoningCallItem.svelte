@@ -5,10 +5,15 @@
   import Markdown from './Markdown.svelte';
 
   export let content: ReasoningCallItem;
+  export let forceOpen: boolean = false;
 
   let open = false;
 
   $: hasSummary = (content.summary && content.summary.length > 0) || false;
+
+  $: if (forceOpen && hasSummary) {
+    open = true;
+  }
 
   const toggle = () => {
     if (hasSummary) {

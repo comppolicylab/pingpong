@@ -41,13 +41,14 @@
     MicrophoneSlashOutline,
     UsersSolid,
     LinkOutline,
+    PrinterOutline,
     TerminalOutline
   } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
   import { ThreadManager } from '$lib/stores/thread';
   import AttachmentDeletedPlaceholder from '$lib/components/AttachmentDeletedPlaceholder.svelte';
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
-  import { writable } from 'svelte/store';
+  import { get, writable } from 'svelte/store';
   import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
   import { base64ToArrayBuffer, WavRecorder, WavStreamPlayer } from '$lib/wavtools/index';
   import type { ExtendedMediaDeviceInfo } from '$lib/wavtools/lib/wav_recorder';
@@ -202,9 +203,47 @@
     statusComponents[statusComponentId],
     latestIncidentUpdateTimestamps
   );
+  $: isNextGenAssistant = resolvedAssistantVersion >= 3;
+  let preparingPrint = false;
+  let expandContentForPrint = false;
   let showModerators = false;
   let showAssistantPrompt = false;
   let settingsOpen = false;
+
+  const ensureAllMessagesLoaded = async () => {
+    while (get(canFetchMore)) {
+      await threadMgr.fetchMore();
+      await tick();
+    }
+  };
+
+  const expandContentForPrinting = async () => {
+    expandContentForPrint = true;
+    await tick();
+  };
+
+  const handlePrintRequest = async () => {
+    if (!isNextGenAssistant || preparingPrint) {
+      return;
+    }
+
+    preparingPrint = true;
+    try {
+      await ensureAllMessagesLoaded();
+      await expandContentForPrinting();
+      await tick();
+      window.print();
+    } catch (e) {
+      sadToast(
+        `Failed to prepare PDF export. Error: ${errorMessage(
+          e,
+          "We're facing an unknown error. Check PingPong's status page for updates if this persists."
+        )}`
+      );
+    } finally {
+      preparingPrint = false;
+    }
+  };
 
   function isFileCitation(a: api.TextAnnotation): a is api.TextAnnotationFileCitation {
     return a.type === 'file_citation' && a.text === 'responses_v3';
@@ -895,7 +934,7 @@
   });
 </script>
 
-<div class="w-full flex flex-col justify-between grow min-h-0 relative">
+<div class="thread-print-area w-full flex flex-col justify-between grow min-h-0 relative">
   <div
     class={`overflow-y-auto pb-4 px-2 lg:px-4 ${
       data.isSharedAssistantPage || data.isSharedThreadPage ? 'pt-10' : ''
@@ -913,7 +952,7 @@
       {@const attachment_file_ids = message.data.attachments
         ? new Set(message.data.attachments.map((attachment) => attachment.file_id))
         : new Set([])}
-      <div class="py-4 px-6 flex gap-x-3">
+      <div class="py-4 px-6 flex gap-x-3 message-block">
         <div class="shrink-0">
           {#if message.data.role === 'user'}
             <Avatar size="sm" src={getImage(message.data)} />
@@ -921,7 +960,7 @@
             <Logo size={8} />
           {/if}
         </div>
-        <div class="max-w-full w-full">
+        <div class="max-w-full w-full message-content">
           <div class="font-semibold text-blue-dark-40 mb-2 mt-1 flex flex-wrap items-center gap-2">
             <span class="flex items-center gap-2">
               {getName(message.data)}
@@ -985,7 +1024,7 @@
             {:else if content.type === 'code'}
               <div class="leading-6 w-full">
                 <Accordion flush>
-                  <AccordionItem>
+                  <AccordionItem open={expandContentForPrint}>
                     <span slot="header"
                       ><div class="flex-row flex items-center space-x-2">
                         <div><CodeOutline size="lg" /></div>
@@ -1022,10 +1061,10 @@
             {:else if content.type === 'web_search_call'}
               <WebSearchCallItem {content} />
             {:else if content.type === 'reasoning'}
-              <ReasoningCallItem {content} />
+              <ReasoningCallItem {content} forceOpen={expandContentForPrint} />
             {:else if content.type === 'code_output_image_file'}
               <Accordion flush>
-                <AccordionItem>
+                <AccordionItem open={expandContentForPrint}>
                   <span slot="header"
                     ><div class="flex-row flex items-center space-x-2">
                       <div><ImageSolid size="lg" /></div>
@@ -1045,7 +1084,7 @@
               </Accordion>
             {:else if content.type === 'code_output_image_url'}
               <Accordion flush>
-                <AccordionItem>
+                <AccordionItem open={expandContentForPrint}>
                   <span slot="header"
                     ><div class="flex-row flex items-center space-x-2">
                       <div><ImageSolid size="lg" /></div>
@@ -1063,7 +1102,7 @@
               </Accordion>
             {:else if content.type === 'code_output_logs'}
               <Accordion flush>
-                <AccordionItem>
+                <AccordionItem open={expandContentForPrint}>
                   <span slot="header"
                     ><div class="flex-row flex items-center space-x-2">
                       <div><TerminalOutline size="lg" /></div>
@@ -1496,6 +1535,26 @@
               >
             {/if}
           </div>
+          {#if isNextGenAssistant}
+            <button
+              on:click|preventDefault={handlePrintRequest}
+              title="Export as PDF"
+              aria-label="Export as PDF"
+              class={`inline-flex items-center justify-center w-7 h-7 ${
+                preparingPrint ? 'opacity-70 cursor-wait' : 'cursor-pointer'
+              }`}
+              disabled={preparingPrint}
+            >
+              {#if preparingPrint}
+                <Spinner class="w-5 h-5" />
+              {:else}
+                <PrinterOutline
+                  class="dark:text-white inline-block w-5 h-6 text-blue-dark-30 hover:text-blue-dark-50"
+                  size="lg"
+                />
+              {/if}
+            </button>
+          {/if}
           <button
             on:click|preventDefault={handleCopyLinkClick}
             title="Copy link"
@@ -1539,7 +1598,35 @@
 </div>
 
 <style lang="css">
+  .message-block,
+  .message-content,
+  .img-attachment,
+  pre {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
   .img-attachment {
     max-width: min(95%, 700px);
+  }
+
+  @media print {
+    :global(body) {
+      background: white;
+      padding: 0;
+      margin: 0;
+    }
+
+    .thread-print-area {
+      display: block !important;
+    }
+
+    :global(nav),
+    :global(aside),
+    :global(header),
+    :global(footer),
+    :global(.modal) {
+      display: none !important;
+    }
   }
 </style>
