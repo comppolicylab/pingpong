@@ -2668,8 +2668,14 @@ class BufferedResponseStreamHandler:
                     "detail": str(response_error_message),
                 }
             )
-        if response_incomplete_reason and (
-            not send_error_message_only_if_active or has_active_run
+        if (
+            response_incomplete_reason
+            and (not send_error_message_only_if_active or has_active_run)
+            # We shouldn't alert users when we force stop a response
+            # after detecting multiple output messages due to the
+            # RESPONSES_MULTI_MESSAGE_FIX
+            # See stop_after_additional_output_message() for more details.
+            and self.force_stop_incomplete_reason != response_incomplete_reason
         ):
             self.enqueue(
                 {
