@@ -169,6 +169,85 @@ async def _create_server_thread_alt(db, *, class_id: int, thread_id: int, run_id
     )
 
 
+async def _create_thread_with_tool_call_between_messages(
+    db,
+    *,
+    class_id: int,
+    thread_id: int,
+    run_id: int,
+    assistant_id: int,
+):
+    base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    async with db.async_session() as session:
+        class_ = models.Class(id=class_id, name=f"Class {class_id}", api_key="sk-test")
+        assistant = models.Assistant(
+            id=assistant_id,
+            name=f"Assistant {assistant_id}",
+            class_id=class_id,
+            assistant_id=f"asst-{assistant_id}",
+            model="gpt-4o-mini",
+            hide_reasoning_summaries=False,
+        )
+        thread = models.Thread(
+            id=thread_id,
+            thread_id=f"thread-{thread_id}",
+            class_id=class_id,
+            assistant_id=assistant_id,
+            version=3,
+            tools_available="code_interpreter",
+            private=False,
+        )
+        run = models.Run(
+            id=run_id,
+            run_id=f"run-{run_id}",
+            status=schemas.RunStatus.COMPLETED,
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            created=base_time,
+            updated=base_time,
+        )
+        first_message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run_id,
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            role=schemas.MessageRole.ASSISTANT,
+            output_index=1,
+            created=base_time,
+        )
+        tool_call = models.ToolCall(
+            tool_call_id="tc-1",
+            type=schemas.ToolCallType.CODE_INTERPRETER,
+            status=schemas.ToolCallStatus.COMPLETED,
+            run_id=run_id,
+            thread_id=thread_id,
+            output_index=2,
+            created=base_time,
+        )
+        second_message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run_id,
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            role=schemas.MessageRole.ASSISTANT,
+            output_index=3,
+            created=base_time + timedelta(seconds=1),
+        )
+
+        session.add_all(
+            [
+                class_,
+                assistant,
+                thread,
+                run,
+                first_message,
+                tool_call,
+                second_message,
+            ]
+        )
+        await session.commit()
+
+
 async def _create_server_thread_with_reasoning(
     db,
     *,
@@ -402,6 +481,66 @@ async def test_list_thread_messages_deduplicates_extra_assistant_messages(
     assert len(messages) == 1
     assert messages[0]["output_index"] == 3
     assert messages[0]["run_id"] == str(run_id)
+
+
+@with_user(444)
+@with_authz(grants=[("user:444", "can_view", "thread:4101")])
+async def test_get_thread_keeps_assistant_message_after_tool_call(
+    api, db, valid_user_token
+):
+    class_id = 4001
+    thread_id = 4101
+    run_id = 4201
+    assistant_id = 4301
+
+    await _create_thread_with_tool_call_between_messages(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        run_id=run_id,
+        assistant_id=assistant_id,
+    )
+
+    response = api.get(
+        f"/api/v1/class/{class_id}/thread/{thread_id}",
+        cookies={"session": valid_user_token},
+    )
+
+    assert response.status_code == 200
+    messages = response.json()["messages"]
+    assert len(messages) == 2
+    assert [message["output_index"] for message in messages] == [1, 3]
+    assert all(message["run_id"] == str(run_id) for message in messages)
+
+
+@with_user(545)
+@with_authz(grants=[("user:545", "can_view", "thread:5101")])
+async def test_list_thread_messages_keeps_assistant_message_after_tool_call(
+    api, db, valid_user_token
+):
+    class_id = 5001
+    thread_id = 5101
+    run_id = 5201
+    assistant_id = 5301
+
+    await _create_thread_with_tool_call_between_messages(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        run_id=run_id,
+        assistant_id=assistant_id,
+    )
+
+    response = api.get(
+        f"/api/v1/class/{class_id}/thread/{thread_id}/messages",
+        cookies={"session": valid_user_token},
+    )
+
+    assert response.status_code == 200
+    messages = response.json()["messages"]
+    assert len(messages) == 2
+    assert [message["output_index"] for message in messages] == [1, 3]
+    assert all(message["run_id"] == str(run_id) for message in messages)
 
 
 @with_user(555)

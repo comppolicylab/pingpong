@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import time
+from collections import defaultdict
 from datetime import datetime, timedelta
 from math import ceil
 from typing import Annotated, Any, Literal, Optional, Union
@@ -149,6 +150,65 @@ from .merge import list_all_permissions, merge
 
 logger = logging.getLogger(__name__)
 responses_api_transition_logger = logging.getLogger("responses_api_transition")
+
+
+def allowed_assistant_message_ids(
+    messages: list[models.Message],
+    tool_calls: list[models.ToolCall],
+    reasoning_steps: list[models.ReasoningStep],
+) -> set[int]:
+    """Return assistant message IDs that are not consecutive with another assistant message in the same run."""
+    allowed_ids: set[int] = {
+        message.id
+        for message in messages
+        if message.run_id is None or message.role != schemas.MessageRole.ASSISTANT
+    }
+    items_by_run: dict[
+        int,
+        list[
+            tuple[
+                int,
+                str,
+                models.Message | models.ToolCall | models.ReasoningStep,
+            ]
+        ],
+    ] = defaultdict(list)
+
+    for message in messages:
+        if message.run_id is None:
+            continue
+        items_by_run[message.run_id].append((message.output_index, "message", message))
+    for tool_call in tool_calls:
+        if tool_call.run_id is None:
+            continue
+        items_by_run[tool_call.run_id].append(
+            (tool_call.output_index, "tool_call", tool_call)
+        )
+    for reasoning_step in reasoning_steps:
+        if reasoning_step.run_id is None:
+            continue
+        items_by_run[reasoning_step.run_id].append(
+            (reasoning_step.output_index, "reasoning", reasoning_step)
+        )
+
+    for items in items_by_run.values():
+        items.sort(key=lambda item: item[0])
+        previous_type: str | None = None
+        for _, item_type, obj in items:
+            if item_type == "message":
+                message_obj = obj  # type: ignore[assignment]
+                if message_obj.role == schemas.MessageRole.ASSISTANT:
+                    if previous_type == "assistant_message":
+                        continue
+                    allowed_ids.add(message_obj.id)
+                    previous_type = "assistant_message"
+                else:
+                    previous_type = "other_message"
+            else:
+                previous_type = item_type
+
+    return allowed_ids
+
 
 if config.development:
     v1 = FastAPI()
@@ -2707,21 +2767,18 @@ async def get_thread(
                 )
             )
 
+        allowed_message_ids = allowed_assistant_message_ids(
+            messages_v3, tool_calls_v3, reasoning_steps_v3
+        )
+
         messages_v3.reverse()
-        run_ids_set = set()
         for message in messages_v3:
-            if (
-                message.run_id is not None
-                and message.run_id in run_ids_set
-                and message.role == "assistant"
-            ):
+            if message.role == "assistant" and message.id not in allowed_message_ids:
                 logger.info(
-                    "RESPONSES_MULTI_MESSAGE_THREAD_SKIP: Skipping duplicate message with run_id %s",
+                    "RESPONSES_MULTI_MESSAGE_THREAD_SKIP: Skipping consecutive assistant message with run_id %s",
                     message.run_id,
                 )
                 continue
-            if message.run_id is not None and message.role == "assistant":
-                run_ids_set.add(message.run_id)
             _message = schemas.ThreadMessage(
                 id=str(message.id),
                 thread_id=str(thread.id),
@@ -3635,20 +3692,17 @@ async def list_thread_messages(
                 )
             )
 
-        run_ids_set = set()
+        allowed_message_ids = allowed_assistant_message_ids(
+            messages_v3, tool_calls_v3, reasoning_steps_v3
+        )
+
         for message in messages_v3:
-            if (
-                message.run_id is not None
-                and message.run_id in run_ids_set
-                and message.role == "assistant"
-            ):
+            if message.role == "assistant" and message.id not in allowed_message_ids:
                 logger.info(
-                    "RESPONSES_MULTI_MESSAGE_LIST_MESSAGES_SKIP: Skipping duplicate message with run_id %s",
+                    "RESPONSES_MULTI_MESSAGE_LIST_MESSAGES_SKIP: Skipping consecutive assistant message with run_id %s",
                     message.run_id,
                 )
                 continue
-            if message.run_id is not None and message.role == "assistant":
-                run_ids_set.add(message.run_id)
             _message = schemas.ThreadMessage(
                 id=str(message.id),
                 thread_id=str(thread.id),
