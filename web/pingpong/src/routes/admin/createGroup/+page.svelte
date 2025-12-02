@@ -80,7 +80,7 @@
   };
 </script>
 
-<div class="h-full w-full flex flex-col p-8 gap-8 items-center">
+<div class="h-full w-full flex flex-col p-8 gap-8 items-center overflow-auto">
   <Heading tag="h2" class="serif">Create a new group</Heading>
   <form on:submit={submitCreateClass} class="flex flex-col gap-4 max-w-lg sm:min-w-[32rem]">
     <div>
