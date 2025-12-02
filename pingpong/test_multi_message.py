@@ -295,7 +295,6 @@ async def test_buffered_handler_truncates_after_duplicate_messages(db):
     assert handler.force_stopped is True
     assert handler.run_id is None
     assert handler.run_status is None
-    assert handler.output_message_created_count == 1
     assert handler.force_stop_incomplete_reason is None
 
     async with db.async_session() as session:
@@ -308,6 +307,49 @@ async def test_buffered_handler_truncates_after_duplicate_messages(db):
     assert run is not None
     assert run.status == schemas.RunStatus.COMPLETED
     assert run.incomplete_reason == "multi_message_truncate"
+
+
+async def test_buffered_handler_accepts_message_after_tool_call(db):
+    handler, run_id, first_message_id = await _setup_handler_with_initial_message(db)
+    done_event = SimpleNamespace(
+        id="msg-1",
+        status=schemas.MessageStatus.COMPLETED.value,
+    )
+    await handler.on_output_message_done(done_event)
+
+    tool_call_event = SimpleNamespace(
+        id="tc-1",
+        status=schemas.ToolCallStatus.IN_PROGRESS.value,
+        container_id="container-1",
+        code="print('hello')",
+    )
+    await handler.on_code_interpreter_tool_call_created(tool_call_event)
+
+    second_event = SimpleNamespace(
+        id="msg-2",
+        status=schemas.MessageStatus.IN_PROGRESS.value,
+        role="assistant",
+    )
+
+    await handler.on_output_message_created(second_event)
+
+    assert handler.force_stopped is False
+    assert handler.run_id == run_id
+    assert handler.message_id is not None
+    assert handler.last_output_item_type == "message"
+
+    async with db.async_session() as session:
+        first_message = await session.get(models.Message, first_message_id)
+        second_message = await session.get(models.Message, handler.message_id)
+        run = await session.get(models.Run, run_id)
+
+    assert first_message is not None
+    assert first_message.message_status == schemas.MessageStatus.COMPLETED
+    assert second_message is not None
+    assert second_message.message_status == schemas.MessageStatus.IN_PROGRESS
+    assert run is not None
+    assert run.status == schemas.RunStatus.IN_PROGRESS
+    assert run.incomplete_reason is None
 
 
 @with_user(111)

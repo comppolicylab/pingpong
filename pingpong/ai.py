@@ -889,8 +889,8 @@ class BufferedResponseStreamHandler:
         self.file_search_results: dict[str, FileSearchToolAnnotationResult] = {}
         self.file_ids_file_citation_annotation: set[str] = set()
         self.force_stopped = False
-        self.output_message_created_count = 0
         self.force_stop_incomplete_reason: str | None = None
+        self.last_output_item_type: str | None = None
         self.show_file_search_result_quotes = (
             show_file_search_result_quotes
             if show_file_search_result_quotes is not None
@@ -979,16 +979,16 @@ class BufferedResponseStreamHandler:
             )
             return
 
-        if self.output_message_created_count >= 1:
+        if self.last_output_item_type == "message":
             logger.warning(
-                "RESPONSES_MULTI_MESSAGE_CATCH: Received more than one assistant message in a single response. "
-                "Ignoring additional messages."
+                "RESPONSES_MULTI_MESSAGE_CATCH: Received consecutive assistant messages in a single response. "
+                "Stopping after detecting back-to-back messages."
             )
             await self.stop_after_additional_output_message()
             return
 
-        self.output_message_created_count += 1
         self.prev_output_index += 1
+        self.last_output_item_type = "message"
 
         message_data = {
             "output_index": self.prev_output_index,
@@ -1483,6 +1483,7 @@ class BufferedResponseStreamHandler:
             return
 
         self.prev_output_index += 1
+        self.last_output_item_type = "code_interpreter_call"
 
         tool_call_data = {
             "run_id": self.run_id,
@@ -1797,6 +1798,7 @@ class BufferedResponseStreamHandler:
             return
 
         self.prev_output_index += 1
+        self.last_output_item_type = "web_search_call"
 
         tool_call_data = {
             "run_id": self.run_id,
@@ -2053,6 +2055,7 @@ class BufferedResponseStreamHandler:
             return
 
         self.prev_output_index += 1
+        self.last_output_item_type = "file_search_call"
 
         tool_call_data = {
             "run_id": self.run_id,
@@ -2287,6 +2290,7 @@ class BufferedResponseStreamHandler:
             return
 
         self.prev_output_index += 1
+        self.last_output_item_type = "reasoning"
 
         reasoning_data = {
             "run_id": self.run_id,
@@ -2918,9 +2922,9 @@ async def run_response(
                         case "response.output_item.added":
                             match event.item.type:
                                 case "message":
-                                    if handler.output_message_created_count >= 1:
+                                    if handler.last_output_item_type == "message":
                                         logger.info(
-                                            "RESPONSES_MULTI_MESSAGE_FIX: Stopping response due to multiple output messages in event streamer."
+                                            "RESPONSES_MULTI_MESSAGE_FIX: Stopping response due to consecutive output messages in event streamer."
                                         )
                                         await handler.stop_after_additional_output_message()
                                         break
