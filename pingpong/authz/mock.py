@@ -53,6 +53,9 @@ class _MockFgaAuthzServer:
             f"/stores/{self._test_store_id}/authorization-models/{self._test_model_id}"
         )(self._api_test_store_get_model)
         self.app.post(f"/stores/{self._test_store_id}/check")(self._api_check)
+        self.app.post(f"/stores/{self._test_store_id}/list-objects")(
+            self._api_list_objects
+        )
         self.app.post(f"/stores/{self._test_store_id}/write")(self._api_write)
         self.app.get("/inspect/calls")(self._api_inspect_calls)
 
@@ -96,6 +99,27 @@ class _MockFgaAuthzServer:
 
         return {
             "allowed": self._has_grant((user, relation, obj)),
+        }
+
+    async def _api_list_objects(self, request: Request):
+        body = await request.json()
+        user = body.get("user")
+        relation = body.get("relation")
+        obj_type = body.get("type")
+
+        if not user or not relation or not obj_type:
+            raise ValueError("Missing user, relation or type")
+
+        prefix = f"{obj_type}:"
+        objects = [
+            obj
+            for (u, rel, obj) in self._all_grants
+            if u == user and rel == relation and obj.startswith(prefix)
+        ]
+
+        return {
+            "objects": objects,
+            "continuation_token": "",
         }
 
     async def _api_write(self, request: Request):

@@ -128,7 +128,7 @@ from .files import (
     handle_delete_files,
 )
 from .now import NowFn, utcnow
-from .permission import Authz, LoggedIn
+from .permission import Authz, InstitutionAdmin, LoggedIn
 from .runs import get_placeholder_ci_calls
 from .vector_stores import (
     add_vector_store_files_to_db,
@@ -869,7 +869,7 @@ async def auth(request: Request):
 
 @v1.get(
     "/api_keys/default",
-    dependencies=[Depends(Authz("admin"))],
+    dependencies=[Depends(Authz("admin") | InstitutionAdmin())],
     response_model=schemas.DefaultAPIKeys,
 )
 async def list_default_api_keys(request: Request):

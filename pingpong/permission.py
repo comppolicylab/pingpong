@@ -171,3 +171,21 @@ class Authz(Expression):
 
     def __str__(self):
         return f"Authz({self.relation}, {self.target})"
+
+
+class InstitutionAdmin(Expression):
+    async def test(self, request: Request) -> bool:
+        if not hasattr(request.state, "auth_user") or not request.state.auth_user:
+            return False
+
+        try:
+            institutions = await request.state.authz.list(
+                request.state.auth_user, "admin", "institution"
+            )
+            return len(institutions) > 0
+        except Exception as e:
+            logger.exception("Error evaluating expression %s: %s", self, e)
+            raise HTTPException(status_code=500, detail=str(e))
+
+    def __str__(self):
+        return "InstitutionAdmin()"
