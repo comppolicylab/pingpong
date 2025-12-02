@@ -34,4 +34,6 @@ def with_authz_series(series):
 
 
 def with_authz(grants=None):
-    return with_authz_series([{"grants": grants}] if grants else None)
+    if grants is None:
+        return with_authz_series(None)
+    return with_authz_series([{"grants": grants}])

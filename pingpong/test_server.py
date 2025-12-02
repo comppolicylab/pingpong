@@ -171,6 +171,45 @@ async def test_config_correct_permissions(api, valid_user_token):
     assert response.status_code == 200
 
 
+@with_user(123)
+@with_authz(grants=[])
+async def test_default_api_keys_requires_permissions(api, valid_user_token):
+    response = api.get(
+        "/api/v1/api_keys/default",
+        cookies={
+            "session": valid_user_token,
+        },
+    )
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Missing required role"}
+
+
+@with_user(123)
+@with_authz(grants=[("user:123", "admin", "institution:1")])
+async def test_default_api_keys_allows_institution_admin(api, valid_user_token):
+    response = api.get(
+        "/api/v1/api_keys/default",
+        cookies={
+            "session": valid_user_token,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json() == {"default_keys": []}
+
+
+@with_user(123)
+@with_authz(grants=[("user:123", "admin", "root:0")])
+async def test_default_api_keys_allows_root_admin(api, valid_user_token):
+    response = api.get(
+        "/api/v1/api_keys/default",
+        cookies={
+            "session": valid_user_token,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json() == {"default_keys": []}
+
+
 async def test_auth_with_invalid_token(api):
     invalid_token = (
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
