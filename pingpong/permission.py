@@ -4,6 +4,7 @@ from abc import abstractmethod
 from fastapi import HTTPException, Request
 
 from pingpong.schemas import SessionStatus
+import pingpong.models as models
 
 
 logger = logging.getLogger(__name__)
@@ -189,3 +190,30 @@ class InstitutionAdmin(Expression):
 
     def __str__(self):
         return "InstitutionAdmin()"
+
+
+class ClassInstitutionAdmin(Expression):
+    async def test(self, request: Request) -> bool:
+        if not hasattr(request.state, "auth_user") or not request.state.auth_user:
+            return False
+
+        try:
+            class_id = request.path_params.get("class_id")
+            if not class_id:
+                return False
+
+            class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+            if not class_ or not class_.institution_id:
+                return False
+
+            return await request.state.authz.test(
+                request.state.auth_user,
+                "admin",
+                f"institution:{class_.institution_id}",
+            )
+        except Exception as e:
+            logger.exception("Error evaluating expression %s: %s", self, e)
+            raise HTTPException(status_code=500, detail=str(e))
+
+    def __str__(self):
+        return "ClassInstitutionAdmin()"
