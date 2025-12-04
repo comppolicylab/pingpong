@@ -30,12 +30,13 @@
       math, economics, statistics and/or computer science, to participate in a randomized
       large-scale study. Initial access to PingPong will be provided to half of the participating
       instructors, with access provided to all instructors in the following semester. An
-      <b>honorarium of $1,000</b> will be available to all eligible participating instructors.</P
+      <b>honorarium of $1,000</b> will be available to all eligible participating instructors, along
+      with the opportunity to earn bonuses for referring other eligible instructors.</P
     >
     <P class="mt-4"
-      >We are now considering applications for Fall 2025 courses. <b
+      >We are now considering applications for Spring 2026 courses. <b
         >To participate, complete the application linked below to confirm your eligibility.
-      </b>Our team will be in touch on a rolling basis to confirm participation for the Fall 2025
+      </b>Our team will be in touch on a rolling basis to confirm participation for the Spring 2026
       semester.
     </P>
   </div>
@@ -171,7 +172,7 @@
           target="_blank">this short (15-minute) survey</a
         >
         to confirm your eligibility. Our team will be in touch on a rolling basis to confirm participation
-        for the Fall 2025 semester.
+        for the Spring 2026 semester.
         <br /><br />For further questions, please contact
         <a
           href="mailto:support@pingpong-hks.atlassian.net"
