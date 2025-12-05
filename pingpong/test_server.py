@@ -255,6 +255,115 @@ async def test_copy_class_rejects_unauthorized_target_institution(
     }
 
 
+@with_user(123)
+@with_institution(11, "Current Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_edit_info", "class:1"),
+        ("user:123", "teacher", "class:1"),
+        ("user:123", "can_create_class", "institution:11"),
+        ("user:123", "can_create_class", "institution:22"),
+    ]
+)
+async def test_transfer_class(api, db, institution, valid_user_token):
+    async with db.async_session() as session:
+        target_inst = models.Institution(id=22, name="New Institution")
+        session.add(target_inst)
+        class_ = models.Class(
+            id=1,
+            name="Source Class",
+            term="Fall 2024",
+            institution_id=institution.id,
+            private=False,
+        )
+        session.add(class_)
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/1/transfer",
+        json={"institution_id": 22},
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 200
+    assert response.json()["institution_id"] == 22
+
+    async with db.async_session() as session:
+        updated = await session.get(models.Class, 1)
+        assert updated.institution_id == 22
+
+
+@with_user(123)
+@with_institution(11, "Current Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_edit_info", "class:1"),
+        ("user:123", "teacher", "class:1"),
+        ("user:123", "can_create_class", "institution:22"),
+    ]
+)
+async def test_transfer_class_requires_permission_on_current_institution(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        target_inst = models.Institution(id=22, name="New Institution")
+        session.add(target_inst)
+        class_ = models.Class(
+            id=1,
+            name="Source Class",
+            term="Fall 2024",
+            institution_id=institution.id,
+            private=False,
+        )
+        session.add(class_)
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/1/transfer",
+        json={"institution_id": 22},
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "You do not have permission to create a class in the current institution."
+    }
+
+
+@with_user(123)
+@with_institution(11, "Current Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_edit_info", "class:1"),
+        ("user:123", "teacher", "class:1"),
+        ("user:123", "can_create_class", "institution:11"),
+    ]
+)
+async def test_transfer_class_requires_permission_on_target_institution(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        target_inst = models.Institution(id=22, name="New Institution")
+        session.add(target_inst)
+        class_ = models.Class(
+            id=1,
+            name="Source Class",
+            term="Fall 2024",
+            institution_id=institution.id,
+            private=False,
+        )
+        session.add(class_)
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/1/transfer",
+        json={"institution_id": 22},
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "You do not have permission to create a class in the target institution."
+    }
+
+
 async def test_me_without_token(api):
     response = api.get("/api/v1/me")
     assert response.status_code == 200

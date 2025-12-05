@@ -780,6 +780,10 @@ export type UpdateClassRequest = {
   any_can_upload_class_file?: boolean;
 };
 
+export type TransferClassRequest = {
+  institution_id: number;
+};
+
 export type CopyClassRequestInfo = {
   groupName: string;
   groupSession: string;
@@ -820,6 +824,14 @@ export const createClass = async (f: Fetcher, instId: number, data: CreateClassR
 export const updateClass = async (f: Fetcher, classId: number, data: UpdateClassRequest) => {
   const url = `class/${classId}`;
   return await PUT<UpdateClassRequest, Class>(f, url, data);
+};
+
+/**
+ * Transfer a class to another institution.
+ */
+export const transferClass = async (f: Fetcher, classId: number, data: TransferClassRequest) => {
+  const url = `class/${classId}/transfer`;
+  return await POST<TransferClassRequest, Class>(f, url, data);
 };
 
 /**

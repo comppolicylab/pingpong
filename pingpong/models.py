@@ -2863,6 +2863,33 @@ class Class(Base):
         return await cls.get_by_id(session, id_)
 
     @classmethod
+    async def transfer_institution(
+        cls, session: AsyncSession, id_: int, new_institution_id: int
+    ) -> tuple["Class", int | None]:
+        class_obj = await cls.get_by_id(session, id_)
+        if not class_obj:
+            raise ValueError("Transfer failed: Group not found.")
+
+        current_institution_id = class_obj.institution_id
+        if current_institution_id == new_institution_id:
+            return class_obj, current_institution_id
+
+        new_institution = await Institution.get_by_id(session, new_institution_id)
+        if not new_institution:
+            raise ValueError("Transfer failed: Target institution not found.")
+
+        stmt = (
+            update(Class)
+            .where(Class.id == int(id_))
+            .values(institution_id=new_institution_id)
+        )
+        await session.execute(stmt)
+        await session.flush()
+
+        updated_class = await cls.get_by_id(session, id_)
+        return updated_class, current_institution_id
+
+    @classmethod
     async def get_by_institution(
         cls, session: AsyncSession, institution_id: int
     ) -> List["Class"]:
