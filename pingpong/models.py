@@ -2471,7 +2471,7 @@ class Assistant(Base):
     async def copy_code_interpreter_files(
         cls, session: AsyncSession, old_assistant_id: int, new_assistant_id: int
     ) -> None:
-        """Copy code interpreter files from one API key to another."""
+        """Copy code interpreter files from one assistant to another."""
         source_rows = select(
             code_interpreter_file_assistant_association.c.file_id,
             literal(new_assistant_id).label("assistant_id"),
