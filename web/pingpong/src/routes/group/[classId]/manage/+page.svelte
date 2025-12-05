@@ -1042,10 +1042,7 @@
               pill
               color="blue"
               class="flex items-center gap-2"
-              disabled={transferring ||
-                !transferInstitutionId ||
-                transferInstitutionOptions.length === 0 ||
-                !hasCreatePermissionForCurrent}
+              disabled={transferring || !transferInstitutionId || !hasCreatePermissionForCurrent}
               on:click={transferClassInstitution}
             >
               {#if transferring}
@@ -1106,7 +1103,6 @@
               color="light"
               class="flex items-center gap-2 py-1.5 px-3 text-xs"
               on:click={() => (transferModal = true)}
-              disabled={availableTransferInstitutions.length === 0}
             >
               Transfer to another institution
               <ArrowRightOutline class="h-4 w-4" />
