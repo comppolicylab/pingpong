@@ -253,6 +253,11 @@ async def copy_vector_store(
         type=VectorStoreType.ASSISTANT,
     )
 
+    # Ensure the copied class is associated with the files the vector store reuses.
+    await models.File.add_files_to_class(
+        session, target_class_id, [f.id for f in files]
+    )
+
     new_grants: list[Relation] = []
 
     for f in files:
@@ -323,6 +328,13 @@ async def copy_assistant(
     await session.refresh(new_assistant)
 
     if assistant.code_interpreter_files:
+        ci_file_ids = [f.id for f in assistant.code_interpreter_files]
+        await models.File.add_files_to_class(session, target_class_id, ci_file_ids)
+        ci_grants: list[Relation] = []
+        for f in assistant.code_interpreter_files:
+            ci_grants.extend(_file_grants(f, target_class_id))
+        await client.write_safe(grant=ci_grants)
+
         await models.Assistant.copy_code_interpreter_files(
             session,
             assistant.id,
