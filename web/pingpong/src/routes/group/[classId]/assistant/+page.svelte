@@ -95,7 +95,7 @@
     if (copyPermissionLoading[assistantId]) {
       return sadToast('Please wait while we check permissions.');
     }
-    if (copyPermissionAllowed[assistantId] === false) {
+    if (copyPermissionAllowed[assistantId] !== true) {
       return sadToast(
         copyPermissionError[assistantId] || "You don't have permission to copy to that group."
       );
@@ -335,7 +335,7 @@
                     <Heading tag="h3" class="text-2xl font-serif font-medium text-blue-dark-40"
                       >Copy Assistant</Heading
                     >
-                    <p class="mb-4 text-blue-dark-40 mt-3">
+                    <p class="mb-4 text-blue-dark-40 mt-3 break-words whitespace-normal">
                       This will create a private copy of <b>{assistant.name}</b> in the group you select.
                       You can rename it below.
                     </p>
@@ -397,7 +397,7 @@
                       <Button
                         color="blue"
                         disabled={copyPermissionLoading[assistant.id] ||
-                          copyPermissionAllowed[assistant.id] === false}
+                          copyPermissionAllowed[assistant.id] !== true}
                         on:click={() => handleCopyAssistant(assistant.id)}>Copy</Button
                       >
                     </div>

@@ -6227,6 +6227,19 @@ async def preview_assistant_instructions(
     }
 
 
+def _classes_share_api_key(src: models.Class | None, tgt: models.Class | None) -> bool:
+    """
+    Return True if both classes have the same configured API key or key id.
+    """
+    if not src or not tgt:
+        return False
+    if src.api_key_id and tgt.api_key_id:
+        return src.api_key_id == tgt.api_key_id
+    if src.api_key and tgt.api_key:
+        return src.api_key == tgt.api_key
+    return False
+
+
 @v1.post(
     "/class/{class_id}/assistant/{assistant_id}/copy",
     dependencies=[
@@ -6274,13 +6287,6 @@ async def copy_assistant(
             detail="Target class not found",
         )
 
-    def _api_keys_match(src: models.Class, tgt: models.Class) -> bool:
-        if src.api_key_id and tgt.api_key_id:
-            return src.api_key_id == tgt.api_key_id
-        if src.api_key and tgt.api_key:
-            return src.api_key == tgt.api_key
-        return False
-
     if not (source_class.api_key_id or source_class.api_key):
         raise HTTPException(
             status_code=400,
@@ -6293,7 +6299,7 @@ async def copy_assistant(
             detail="Target class has no API key configured.",
         )
 
-    if not _api_keys_match(source_class, target_class):
+    if not _classes_share_api_key(source_class, target_class):
         raise HTTPException(
             status_code=400,
             detail="Source and target classes must share the same API key to copy assistants.",
@@ -6307,7 +6313,7 @@ async def copy_assistant(
     if not can_create_in_target:
         raise HTTPException(
             status_code=403,
-            detail="You do not have permission to create assistants in the target class.",
+            detail="You do not have permission to create assistants in the target group.",
         )
 
     if target_class_id == class_id_int:
@@ -6383,14 +6389,7 @@ async def copy_assistant_check(
             detail="Source class has no API key configured.",
         )
 
-    if source_class.api_key_id and target_class.api_key_id:
-        same_key = source_class.api_key_id == target_class.api_key_id
-    elif source_class.api_key and target_class.api_key:
-        same_key = source_class.api_key == target_class.api_key
-    else:
-        same_key = False
-
-    if not same_key:
+    if not _classes_share_api_key(source_class, target_class):
         raise HTTPException(
             status_code=400,
             detail="Source and target classes must share the same API key to copy assistants.",

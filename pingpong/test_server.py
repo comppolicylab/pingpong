@@ -1373,6 +1373,51 @@ async def test_copy_assistant_mismatched_api_key(
 @with_institution(1, "Test Institution")
 @with_authz(
     grants=[
+        ("user:123", "can_edit", "assistant:1"),
+    ]
+)
+async def test_copy_assistant_missing_target_permissions(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        source_class = models.Class(
+            id=1, name="Source", institution_id=institution.id, api_key="test-key"
+        )
+        target_class = models.Class(
+            id=2, name="Target", institution_id=institution.id, api_key="test-key"
+        )
+        assistant = models.Assistant(
+            id=1,
+            name="Assistant One",
+            instructions="Be helpful",
+            description="original",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            model="gpt-4o-mini",
+            temperature=0.2,
+            class_id=source_class.id,
+            tools="[]",
+            creator_id=123,
+            published=None,
+            version=3,
+        )
+        session.add_all([source_class, target_class, assistant])
+        await session.commit()
+
+    response = api.post(
+        f"/api/v1/class/{source_class.id}/assistant/{assistant.id}/copy",
+        json={"target_class_id": target_class.id, "name": "Assistant Copy"},
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "You do not have permission to create assistants in the target group.",
+    }
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(
+    grants=[
         ("user:123", "can_create_assistants", "class:1"),
         ("user:123", "can_create_assistants", "class:2"),
         ("user:123", "can_edit", "assistant:1"),

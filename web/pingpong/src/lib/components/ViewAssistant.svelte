@@ -311,7 +311,7 @@
           on:click|preventDefault={() => {
             copyName = defaultCopyName(assistant.name);
             copyTargetClassId = `${currentClassId}`;
-            copyPermissionAllowed = undefined;
+            copyPermissionAllowed = false;
             copyPermissionLoading = false;
             copyPermissionError = '';
             checkCopyPermission(copyTargetClassId);
@@ -398,7 +398,7 @@
 
       {#if copyPermissionLoading}
         <span class="italic text-gray-500">Checking permissions...</span>
-      {:else if copyPermissionAllowed ?? true}
+      {:else if copyPermissionAllowed === true}
         <span class="flex items-center gap-1 text-green-700">
           <CheckCircleOutline class="w-4 h-4" /> Can create assistant in this Group
         </span>
