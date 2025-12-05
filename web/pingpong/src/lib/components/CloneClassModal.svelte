@@ -16,7 +16,7 @@
   import type { CopyClassRequestInfo, Institution } from '$lib/api';
 
   export let groupName: string;
-  groupName = groupName + ' (Copy)';
+  let displayGroupName = groupName + ' (Copy)';
   export let groupSession: string;
   export let institutions: Institution[] = [];
   export let currentInstitutionId: number | null = null;
@@ -37,20 +37,17 @@
   let assistantCopy: 'moderators' | 'all' = 'moderators';
   let userCopy: 'moderators' | 'all' = 'moderators';
   let selectedInstitutionId = currentInstitutionId !== null ? currentInstitutionId.toString() : '';
-  let sortedInstitutions: Institution[] = [];
-  $: sortedInstitutions = [...institutions].sort((a, b) => a.name.localeCompare(b.name));
-  $: institutionOptions = sortedInstitutions.map((inst) => ({
+  $: institutionOptions = institutions.map((inst) => ({
     value: inst.id.toString(),
     name: inst.name
   }));
   $: {
-    const hasValidSelection = sortedInstitutions.some(
+    const hasValidSelection = institutions.some(
       (inst) => inst.id.toString() === selectedInstitutionId
     );
-    if ((!selectedInstitutionId || !hasValidSelection) && sortedInstitutions.length > 0) {
+    if ((!selectedInstitutionId || !hasValidSelection) && institutions.length > 0) {
       const preferred =
-        sortedInstitutions.find((inst) => inst.id === currentInstitutionId) ||
-        sortedInstitutions[0];
+        institutions.find((inst) => inst.id === currentInstitutionId) || institutions[0];
       if (preferred) {
         selectedInstitutionId = preferred.id.toString();
       }
@@ -59,7 +56,7 @@
 
   let copyClassInfo: CopyClassRequestInfo;
   $: copyClassInfo = {
-    groupName,
+    groupName: displayGroupName,
     groupSession,
     institutionId: selectedInstitutionId
       ? parseInt(selectedInstitutionId, 10)
@@ -106,7 +103,7 @@
           </div>
           <div class="md:col-span-2">
             <Label for="institution" class="mb-1">Institution</Label>
-            {#if sortedInstitutions.length > 0}
+            {#if institutions.length > 0}
               <Select
                 id="institution"
                 name="institution"

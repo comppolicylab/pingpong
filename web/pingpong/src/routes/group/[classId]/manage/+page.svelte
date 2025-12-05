@@ -387,10 +387,10 @@
     const copyOptions: api.CopyClassRequest = {
       name: requestInfo.groupName.toString(),
       term: requestInfo.groupSession.toString(),
-      institution_id: requestInfo.institutionId ?? currentInstitutionId ?? undefined,
+      institution_id: requestInfo.institutionId ?? currentInstitutionId,
       any_can_publish_thread: requestInfo.anyCanPublishThread,
       any_can_share_assistant: requestInfo.anyCanShareAssistant,
-      private: makePrivate,
+      private: requestInfo.makePrivate,
       copy_assistants: requestInfo.assistantCopy,
       copy_users: requestInfo.userCopy,
       ...parseAssistantPermissions(requestInfo.assistantPermissions)
