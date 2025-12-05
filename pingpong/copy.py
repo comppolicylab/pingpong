@@ -278,6 +278,12 @@ async def copy_assistant(
     require_published: bool = True,
     force_private: bool = False,
 ) -> models.Assistant | None:
+    """
+    Copy an assistant to the target class.
+
+    Returns the new assistant on success, or None if require_published is True
+    and the source assistant is not published.
+    """
     if require_published and not assistant.published:
         return None
 

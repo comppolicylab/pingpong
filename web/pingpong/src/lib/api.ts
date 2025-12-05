@@ -1459,7 +1459,7 @@ export const updateAssistant = async (
 };
 
 /**
- * Copy an existing assistant within the same class.
+ * Copy an existing assistant to the same class or a different class.
  */
 export const copyAssistant = async (
   f: Fetcher,

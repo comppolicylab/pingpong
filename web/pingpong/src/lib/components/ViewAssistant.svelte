@@ -56,7 +56,7 @@
   let deleteAssistantModalOpen = false;
   let copyName = '';
   let copyTargetClassId = `${currentClassId}`;
-  let copyPermissionAllowed = true;
+  let copyPermissionAllowed: boolean | undefined = undefined;
   let copyPermissionLoading = false;
   let copyPermissionError = '';
 
@@ -311,7 +311,7 @@
           on:click|preventDefault={() => {
             copyName = defaultCopyName(assistant.name);
             copyTargetClassId = `${currentClassId}`;
-            copyPermissionAllowed = true;
+            copyPermissionAllowed = undefined;
             copyPermissionLoading = false;
             copyPermissionError = '';
             checkCopyPermission(copyTargetClassId);
@@ -398,7 +398,7 @@
 
       {#if copyPermissionLoading}
         <span class="italic text-gray-500">Checking permissions...</span>
-      {:else if copyPermissionAllowed}
+      {:else if copyPermissionAllowed ?? true}
         <span class="flex items-center gap-1 text-green-700">
           <CheckCircleOutline class="w-4 h-4" /> Can create assistant in this Group
         </span>
@@ -410,8 +410,8 @@
       {/if}
     </div>
     <Select
-      id="copy-target"
-      name="copy-target"
+      id={`copy-target-${assistant.id}`}
+      name={`copy-target-${assistant.id}`}
       bind:value={copyTargetClassId}
       size="md"
       class="w-full"
@@ -428,7 +428,7 @@
     <Button color="light" on:click={() => (copyAssistantModalOpen = false)}>Cancel</Button>
     <Button
       color="blue"
-      disabled={copyPermissionLoading || !copyPermissionAllowed}
+      disabled={copyPermissionLoading || copyPermissionAllowed !== true}
       on:click={copyAssistant}>Copy</Button
     >
   </div>

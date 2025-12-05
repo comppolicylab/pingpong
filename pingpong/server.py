@@ -6234,7 +6234,7 @@ async def preview_assistant_instructions(
     ],
     response_model=schemas.Assistant,
 )
-async def copy_assistant_within_class(
+async def copy_assistant(
     class_id: str,
     assistant_id: str,
     request: Request,
