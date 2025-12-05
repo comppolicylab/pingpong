@@ -34,6 +34,13 @@
   import dayjs from 'dayjs';
   import { happyToast, sadToast } from '$lib/toast';
   import * as api from '$lib/api';
+  import {
+    checkCopyPermission as sharedCheckCopyPermission,
+    defaultCopyName,
+    parseTargetClassId,
+    performCopyAssistant,
+    performDeleteAssistant
+  } from '$lib/assistantHelpers';
   import { invalidateAll } from '$app/navigation';
   import { loading, loadingMessage } from '$lib/stores/general';
 
@@ -53,15 +60,6 @@
   let copyPermissionLoading = false;
   let copyPermissionError = '';
 
-  const defaultCopyName = (name: string) => {
-    const suffix = ' (Copy)';
-    const maxLen = 100;
-    if (name.length + suffix.length > maxLen) {
-      return `${name.slice(0, maxLen - suffix.length)}${suffix}`;
-    }
-    return `${name}${suffix}`;
-  };
-
   // Get the full URL to use the assistant
   $: assistantLink = `${$page.url.protocol}//${$page.url.host}/group/${assistant.class_id}?assistant=${assistant.id}`;
   $: sharedAssistantLinkWithParam = `${$page.url.protocol}//${$page.url.host}/group/${assistant.class_id}/shared/assistant/${assistant.id}?share_token=`;
@@ -77,34 +75,23 @@
   };
 
   const checkCopyPermission = async (targetClassId: string) => {
-    const trimmed = targetClassId?.toString().trim();
-    const targetId = trimmed ? parseInt(trimmed, 10) : currentClassId;
-    if (Number.isNaN(targetId)) {
+    const targetId = parseTargetClassId(targetClassId, currentClassId);
+    if (targetId === null) {
       copyPermissionAllowed = false;
       copyPermissionError = 'Invalid class selected.';
       return;
     }
     copyPermissionLoading = true;
     copyPermissionError = '';
-    try {
-      const result = await api.copyAssistantCheck(fetch, assistant.class_id, assistant.id, {
-        target_class_id: targetId
-      });
-      const expanded = api.expandResponse(result);
-      if (expanded.error) {
-        copyPermissionAllowed = false;
-        copyPermissionError = expanded.error.detail || 'Permission check failed.';
-      } else {
-        copyPermissionAllowed = !!expanded.data?.allowed;
-        copyPermissionError = '';
-      }
-    } catch (err) {
-      console.error('Failed to check copy permission', err);
-      copyPermissionAllowed = false;
-      copyPermissionError = 'Unable to verify permissions right now.';
-    } finally {
-      copyPermissionLoading = false;
-    }
+    const result = await sharedCheckCopyPermission(
+      fetch,
+      assistant.class_id,
+      assistant.id,
+      targetId
+    );
+    copyPermissionAllowed = result.allowed;
+    copyPermissionError = result.error;
+    copyPermissionLoading = false;
   };
 
   const createLink = async () => {
@@ -162,25 +149,19 @@
     }
     $loadingMessage = 'Copying assistant...';
     $loading = true;
-    const requestedName = copyName.trim() || defaultCopyName(assistant.name);
-    const safeName = requestedName.slice(0, 100);
-    const payload: api.CopyAssistantRequest = { name: safeName };
-    const trimmedTarget = copyTargetClassId?.toString().trim();
-    if (trimmedTarget) {
-      const parsed = parseInt(trimmedTarget, 10);
-      if (Number.isNaN(parsed)) {
-        $loadingMessage = '';
-        $loading = false;
-        return sadToast('Invalid target class ID');
-      }
-      payload.target_class_id = parsed;
-    }
-    const result = await api.copyAssistant(fetch, assistant.class_id, assistant.id, payload);
-    const expanded = api.expandResponse(result);
-    if (expanded.error) {
+    const result = await performCopyAssistant(fetch, assistant.class_id, assistant.id, {
+      name: copyName,
+      fallbackName: assistant.name,
+      targetClassId: copyTargetClassId
+    });
+    if (result.error) {
       $loadingMessage = '';
       $loading = false;
-      return sadToast(`Failed to copy assistant: ${expanded.error.detail}`);
+      const detail =
+        (result.error as Error & { detail?: string }).detail ||
+        (result.error as Error).message ||
+        'Unknown error';
+      return sadToast(`Failed to copy assistant: ${detail}`);
     }
     happyToast('Assistant copied', 2000);
     await invalidateAll();
@@ -193,11 +174,15 @@
     deleteAssistantModalOpen = false;
     $loadingMessage = 'Deleting assistant...';
     $loading = true;
-    const result = await api.deleteAssistant(fetch, assistant.class_id, assistant.id);
-    if (result.$status >= 300) {
+    const result = await performDeleteAssistant(fetch, assistant.class_id, assistant.id);
+    if (result.error) {
       $loadingMessage = '';
       $loading = false;
-      return sadToast(`Error deleting assistant: ${JSON.stringify(result.detail, null, '  ')}`);
+      const detail =
+        (result.error as Error & { detail?: string }).detail ||
+        (result.error as Error).message ||
+        'Unknown error';
+      return sadToast(`Error deleting assistant: ${detail}`);
     }
     happyToast('Assistant deleted');
     await invalidateAll();

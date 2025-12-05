@@ -27,10 +27,16 @@
   } from 'flowbite-svelte-icons';
   import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
   import { happyToast, sadToast } from '$lib/toast';
-  import * as api from '$lib/api';
   import { copy } from 'svelte-copy';
   import { loading, loadingMessage } from '$lib/stores/general';
   import { invalidateAll } from '$app/navigation';
+  import {
+    checkCopyPermission as sharedCheckCopyPermission,
+    defaultCopyName,
+    parseTargetClassId,
+    performCopyAssistant,
+    performDeleteAssistant
+  } from '$lib/assistantHelpers';
 
   export let data;
 
@@ -60,16 +66,6 @@
     name: c.name,
     term: c.term
   }));
-
-  const defaultCopyName = (name: string) => {
-    const suffix = ' (Copy)';
-    const maxLen = 100;
-    if (name.length + suffix.length > maxLen) {
-      return `${name.slice(0, maxLen - suffix.length)}${suffix}`;
-    }
-    return `${name}${suffix}`;
-  };
-
   const assistantLink = (assistantId: number) =>
     `${baseUrl}/group/${data.class.id}?assistant=${assistantId}`;
 
@@ -112,23 +108,19 @@
     const name = (copyNames[assistantId] || '').trim() || defaultCopyName(fallbackName);
     $loadingMessage = 'Copying assistant...';
     $loading = true;
-    const payload: api.CopyAssistantRequest = { name: name.slice(0, 100) };
-    const target = (copyTargets[assistantId] || '').trim();
-    if (target) {
-      const parsed = parseInt(target, 10);
-      if (Number.isNaN(parsed)) {
-        $loadingMessage = '';
-        $loading = false;
-        return sadToast('Invalid target class ID');
-      }
-      payload.target_class_id = parsed;
-    }
-    const result = await api.copyAssistant(fetch, data.class.id, assistantId, payload);
-    const expanded = api.expandResponse(result);
-    if (expanded.error) {
+    const result = await performCopyAssistant(fetch, data.class.id, assistantId, {
+      name,
+      fallbackName: fallbackName,
+      targetClassId: copyTargets[assistantId]
+    });
+    if (result.error) {
       $loadingMessage = '';
       $loading = false;
-      return sadToast(`Failed to copy assistant: ${expanded.error.detail}`);
+      const detail =
+        (result.error as Error & { detail?: string }).detail ||
+        (result.error as Error).message ||
+        'Unknown error';
+      return sadToast(`Failed to copy assistant: ${detail}`);
     }
     happyToast('Assistant copied', 2000);
     await invalidateAll();
@@ -141,11 +133,15 @@
     closeDeleteModal(assistantId);
     $loadingMessage = 'Deleting assistant...';
     $loading = true;
-    const result = await api.deleteAssistant(fetch, data.class.id, assistantId);
-    if (result.$status >= 300) {
+    const result = await performDeleteAssistant(fetch, data.class.id, assistantId);
+    if (result.error) {
       $loadingMessage = '';
       $loading = false;
-      return sadToast(`Error deleting assistant: ${JSON.stringify(result.detail, null, '  ')}`);
+      const detail =
+        (result.error as Error & { detail?: string }).detail ||
+        (result.error as Error).message ||
+        'Unknown error';
+      return sadToast(`Error deleting assistant: ${detail}`);
     }
     happyToast('Assistant deleted');
     await invalidateAll();
@@ -173,43 +169,18 @@
   };
 
   const checkCopyPermission = async (assistantId: number, targetClassId: string) => {
-    const trimmed = targetClassId?.toString().trim();
-    const targetId = trimmed ? parseInt(trimmed, 10) : data.class.id;
-    if (Number.isNaN(targetId)) {
+    const targetId = parseTargetClassId(targetClassId, data.class.id);
+    if (targetId === null) {
       copyPermissionAllowed = { ...copyPermissionAllowed, [assistantId]: false };
       copyPermissionError = { ...copyPermissionError, [assistantId]: 'Invalid class selected.' };
       return;
     }
     copyPermissionLoading = { ...copyPermissionLoading, [assistantId]: true };
     copyPermissionError = { ...copyPermissionError, [assistantId]: '' };
-    try {
-      const result = await api.copyAssistantCheck(fetch, data.class.id, assistantId, {
-        target_class_id: targetId
-      });
-      const expanded = api.expandResponse(result);
-      if (expanded.error) {
-        copyPermissionAllowed = { ...copyPermissionAllowed, [assistantId]: false };
-        copyPermissionError = {
-          ...copyPermissionError,
-          [assistantId]: expanded.error.detail || 'Permission check failed.'
-        };
-      } else {
-        copyPermissionAllowed = {
-          ...copyPermissionAllowed,
-          [assistantId]: !expanded.error && expanded.data?.allowed
-        };
-        copyPermissionError = { ...copyPermissionError, [assistantId]: '' };
-      }
-    } catch (err) {
-      console.error('Failed to check copy permission', err);
-      copyPermissionAllowed = { ...copyPermissionAllowed, [assistantId]: false };
-      copyPermissionError = {
-        ...copyPermissionError,
-        [assistantId]: 'Unable to verify permissions right now.'
-      };
-    } finally {
-      copyPermissionLoading = { ...copyPermissionLoading, [assistantId]: false };
-    }
+    const result = await sharedCheckCopyPermission(fetch, data.class.id, assistantId, targetId);
+    copyPermissionAllowed = { ...copyPermissionAllowed, [assistantId]: result.allowed };
+    copyPermissionError = { ...copyPermissionError, [assistantId]: result.error };
+    copyPermissionLoading = { ...copyPermissionLoading, [assistantId]: false };
   };
 
   const handleCopyTargetSelect = (assistantId: number, event: Event) => {

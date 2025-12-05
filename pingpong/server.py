@@ -6252,7 +6252,7 @@ async def copy_assistant_within_class(
         )
     source_class = await models.Class.get_by_id(request.state.db, class_id_int)
     if not source_class:
-        raise HTTPException(status_code=404, detail="Group not found")
+        raise HTTPException(status_code=404, detail="Class not found")
 
     def _default_copy_name(name: str) -> str:
         suffix = " (Copy)"
@@ -6284,19 +6284,19 @@ async def copy_assistant_within_class(
     if not (source_class.api_key_id or source_class.api_key):
         raise HTTPException(
             status_code=400,
-            detail="Source group has no API key configured.",
+            detail="Source class has no API key configured.",
         )
 
     if not (target_class.api_key_id or target_class.api_key):
         raise HTTPException(
             status_code=400,
-            detail="Target group has no API key configured.",
+            detail="Target class has no API key configured.",
         )
 
     if not _api_keys_match(source_class, target_class):
         raise HTTPException(
             status_code=400,
-            detail="Source and target groups must share the same API key to copy assistants.",
+            detail="Source and target classes must share the same API key to copy assistants.",
         )
 
     can_create_in_target = await request.state.authz.test(
@@ -6368,19 +6368,19 @@ async def copy_assistant_check(
     if not target_class:
         raise HTTPException(
             status_code=404,
-            detail="Target group not found",
+            detail="Target class not found",
         )
 
     if not (target_class.api_key_id or target_class.api_key):
         raise HTTPException(
             status_code=400,
-            detail="Target group has no API key configured.",
+            detail="Target class has no API key configured.",
         )
 
     if not (source_class.api_key_id or source_class.api_key):
         raise HTTPException(
             status_code=400,
-            detail="Source group has no API key configured.",
+            detail="Source class has no API key configured.",
         )
 
     if source_class.api_key_id and target_class.api_key_id:
@@ -6393,7 +6393,7 @@ async def copy_assistant_check(
     if not same_key:
         raise HTTPException(
             status_code=400,
-            detail="Source and target groups must share the same API key to copy assistants.",
+            detail="Source and target classes must share the same API key to copy assistants.",
         )
 
     can_create_in_target = await request.state.authz.test(
