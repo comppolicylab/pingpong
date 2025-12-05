@@ -95,7 +95,7 @@
         <div class="grid md:grid-cols-2 gap-x-6 gap-y-6 my-3">
           <div>
             <Label for="name" class="mb-1">Name</Label>
-            <Input id="name" name="name" bind:value={groupName} />
+            <Input id="name" name="name" bind:value={displayGroupName} />
           </div>
           <div>
             <Label for="term" class="mb-1">Session</Label>
