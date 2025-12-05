@@ -516,6 +516,10 @@ class CopyAssistantRequest(BaseModel):
     target_class_id: int | None = None
 
 
+class CopyAssistantCheckResponse(BaseModel):
+    allowed: bool
+
+
 class UpdateAssistantShareNameRequest(BaseModel):
     name: str
 

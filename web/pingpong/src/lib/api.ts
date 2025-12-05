@@ -1471,6 +1471,23 @@ export const copyAssistant = async (
   return await POST<CopyAssistantRequest, Assistant>(f, url, data);
 };
 
+export type CopyAssistantCheckResponse = {
+  allowed: boolean;
+};
+
+/**
+ * Check whether an assistant can be copied to a target class.
+ */
+export const copyAssistantCheck = async (
+  f: Fetcher,
+  classId: number,
+  assistantId: number,
+  data: CopyAssistantRequest
+) => {
+  const url = `class/${classId}/assistant/${assistantId}/copy/check`;
+  return await POST<CopyAssistantRequest, CopyAssistantCheckResponse>(f, url, data);
+};
+
 export type AssistantInstructionsPreviewResponse = {
   instructions_preview: string;
 };

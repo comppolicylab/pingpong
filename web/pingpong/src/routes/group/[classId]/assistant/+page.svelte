@@ -53,6 +53,7 @@
   let copyTargets: Record<number, string> = {};
   let copyPermissionAllowed: Record<number, boolean> = {};
   let copyPermissionLoading: Record<number, boolean> = {};
+  let copyPermissionError: Record<number, string> = {};
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
   const classOptions = (data.classes || []).map((c) => ({
     id: c.id,
@@ -78,6 +79,7 @@
     copyTargets = { ...copyTargets, [assistantId]: `${data.class.id}` };
     copyPermissionAllowed = { ...copyPermissionAllowed, [assistantId]: true };
     copyPermissionLoading = { ...copyPermissionLoading, [assistantId]: false };
+    copyPermissionError = { ...copyPermissionError, [assistantId]: '' };
     void checkCopyPermission(assistantId, `${data.class.id}`);
   };
 
@@ -98,7 +100,9 @@
       return sadToast('Please wait while we check permissions.');
     }
     if (copyPermissionAllowed[assistantId] === false) {
-      return sadToast("You don't have permission to copy to that group.");
+      return sadToast(
+        copyPermissionError[assistantId] || "You don't have permission to copy to that group."
+      );
     }
     const fallbackName =
       otherAssistants.find((a) => a.id === assistantId)?.name ||
@@ -173,24 +177,36 @@
     const targetId = trimmed ? parseInt(trimmed, 10) : data.class.id;
     if (Number.isNaN(targetId)) {
       copyPermissionAllowed = { ...copyPermissionAllowed, [assistantId]: false };
+      copyPermissionError = { ...copyPermissionError, [assistantId]: 'Invalid class selected.' };
       return;
     }
     copyPermissionLoading = { ...copyPermissionLoading, [assistantId]: true };
+    copyPermissionError = { ...copyPermissionError, [assistantId]: '' };
     try {
-      const grants = await api.grants(fetch, {
-        canCreateAssistants: {
-          target_type: 'class',
-          target_id: targetId,
-          relation: 'can_create_assistants'
-        }
+      const result = await api.copyAssistantCheck(fetch, data.class.id, assistantId, {
+        target_class_id: targetId
       });
-      copyPermissionAllowed = {
-        ...copyPermissionAllowed,
-        [assistantId]: !!grants.canCreateAssistants
-      };
+      const expanded = api.expandResponse(result);
+      if (expanded.error) {
+        copyPermissionAllowed = { ...copyPermissionAllowed, [assistantId]: false };
+        copyPermissionError = {
+          ...copyPermissionError,
+          [assistantId]: expanded.error.detail || 'Permission check failed.'
+        };
+      } else {
+        copyPermissionAllowed = {
+          ...copyPermissionAllowed,
+          [assistantId]: !expanded.error && expanded.data?.allowed
+        };
+        copyPermissionError = { ...copyPermissionError, [assistantId]: '' };
+      }
     } catch (err) {
       console.error('Failed to check copy permission', err);
       copyPermissionAllowed = { ...copyPermissionAllowed, [assistantId]: false };
+      copyPermissionError = {
+        ...copyPermissionError,
+        [assistantId]: 'Unable to verify permissions right now.'
+      };
     } finally {
       copyPermissionLoading = { ...copyPermissionLoading, [assistantId]: false };
     }
@@ -383,8 +399,9 @@
                           </span>
                         {:else}
                           <span class="flex items-center gap-1 text-red-700">
-                            <ExclamationCircleOutline class="w-4 h-4" /> Can't create assistant in this
-                            Group
+                            <ExclamationCircleOutline class="w-4 h-4" />
+                            {copyPermissionError[assistant.id] ||
+                              "Can't create assistant in this Group"}
                           </span>
                         {/if}
                       </div>

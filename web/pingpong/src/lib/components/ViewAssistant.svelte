@@ -51,6 +51,7 @@
   let copyTargetClassId = `${currentClassId}`;
   let copyPermissionAllowed = true;
   let copyPermissionLoading = false;
+  let copyPermissionError = '';
 
   const defaultCopyName = (name: string) => {
     const suffix = ' (Copy)';
@@ -80,21 +81,27 @@
     const targetId = trimmed ? parseInt(trimmed, 10) : currentClassId;
     if (Number.isNaN(targetId)) {
       copyPermissionAllowed = false;
+      copyPermissionError = 'Invalid class selected.';
       return;
     }
     copyPermissionLoading = true;
+    copyPermissionError = '';
     try {
-      const grants = await api.grants(fetch, {
-        canCreateAssistants: {
-          target_type: 'class',
-          target_id: targetId,
-          relation: 'can_create_assistants'
-        }
+      const result = await api.copyAssistantCheck(fetch, assistant.class_id, assistant.id, {
+        target_class_id: targetId
       });
-      copyPermissionAllowed = !!grants.canCreateAssistants;
+      const expanded = api.expandResponse(result);
+      if (expanded.error) {
+        copyPermissionAllowed = false;
+        copyPermissionError = expanded.error.detail || 'Permission check failed.';
+      } else {
+        copyPermissionAllowed = !!expanded.data?.allowed;
+        copyPermissionError = '';
+      }
     } catch (err) {
       console.error('Failed to check copy permission', err);
       copyPermissionAllowed = false;
+      copyPermissionError = 'Unable to verify permissions right now.';
     } finally {
       copyPermissionLoading = false;
     }
@@ -151,7 +158,7 @@
       return sadToast('Please wait while we check permissions.');
     }
     if (!copyPermissionAllowed) {
-      return sadToast("You don't have permission to copy to that group.");
+      return sadToast(copyPermissionError || "You don't have permission to copy to that group.");
     }
     $loadingMessage = 'Copying assistant...';
     $loading = true;
@@ -321,6 +328,7 @@
             copyTargetClassId = `${currentClassId}`;
             copyPermissionAllowed = true;
             copyPermissionLoading = false;
+            copyPermissionError = '';
             checkCopyPermission(copyTargetClassId);
             copyAssistantModalOpen = true;
           }}><FileCopyOutline size="md" /></button
@@ -411,7 +419,8 @@
         </span>
       {:else}
         <span class="flex items-center gap-1 text-red-700">
-          <ExclamationCircleOutline class="w-4 h-4" /> Can't create assistant in this Group
+          <ExclamationCircleOutline class="w-4 h-4" />
+          {copyPermissionError || "Can't create assistant in this Group"}
         </span>
       {/if}
     </div>
