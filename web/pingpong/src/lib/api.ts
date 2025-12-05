@@ -1395,6 +1395,11 @@ export type CreateAssistantRequest = {
   hide_web_search_actions?: boolean;
 };
 
+export type CopyAssistantRequest = {
+  name?: string | null;
+  target_class_id?: number | null;
+};
+
 /**
  * Parameters for updating an assistant.
  */
@@ -1451,6 +1456,19 @@ export const updateAssistant = async (
 ) => {
   const url = `class/${classId}/assistant/${assistantId}`;
   return await PUT<UpdateAssistantRequest, Assistant>(f, url, data);
+};
+
+/**
+ * Copy an existing assistant within the same class.
+ */
+export const copyAssistant = async (
+  f: Fetcher,
+  classId: number,
+  assistantId: number,
+  data: CopyAssistantRequest = {}
+) => {
+  const url = `class/${classId}/assistant/${assistantId}/copy`;
+  return await POST<CopyAssistantRequest, Assistant>(f, url, data);
 };
 
 export type AssistantInstructionsPreviewResponse = {

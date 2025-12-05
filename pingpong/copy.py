@@ -273,9 +273,13 @@ async def copy_assistant(
     cli: openai.AsyncClient,
     target_class_id: int,
     assistant: models.Assistant,
-):
-    if not assistant.published:
-        return
+    *,
+    new_name: str | None = None,
+    require_published: bool = True,
+    force_private: bool = False,
+) -> models.Assistant | None:
+    if require_published and not assistant.published:
+        return None
 
     new_vector_store_id, new_vector_store_obj_id = None, None
     if assistant.vector_store_id:
@@ -291,7 +295,7 @@ async def copy_assistant(
             }
 
     new_assistant = models.Assistant(
-        name=assistant.name,
+        name=new_name or assistant.name,
         version=assistant.version,
         instructions=assistant.instructions,
         interaction_mode=assistant.interaction_mode,
@@ -310,7 +314,7 @@ async def copy_assistant(
         class_id=target_class_id,
         vector_store_id=new_vector_store_id,
         creator_id=assistant.creator_id,
-        published=assistant.published,
+        published=None if force_private else assistant.published,
         should_record_user_information=assistant.should_record_user_information,
         allow_user_file_uploads=assistant.allow_user_file_uploads,
         allow_user_image_uploads=assistant.allow_user_image_uploads,
@@ -399,7 +403,7 @@ async def copy_assistant(
         (f"user:{assistant.creator_id}", "owner", f"assistant:{new_assistant.id}"),
     ]
 
-    if assistant.published:
+    if assistant.published and not force_private:
         grants.append(
             (
                 f"class:{target_class_id}#member",
@@ -409,6 +413,7 @@ async def copy_assistant(
         )
 
     await client.write_safe(grant=grants)
+    return new_assistant
 
 
 async def copy_moderator_published_assistants(

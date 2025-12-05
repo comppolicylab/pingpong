@@ -17,10 +17,10 @@
 
 <div class="text-center px-2">
   <ExclamationCircleOutline class="mx-auto mb-4 text-red-600 w-12 h-12" />
-  <h3 class="mb-5 text-xl text-gray-900 dark:text-white font-bold">
+  <h3 class="mb-5 text-xl text-gray-900 dark:text-white font-bold break-words">
     {warningTitle}
   </h3>
-  <p class="mb-5 text-sm text-gray-700 dark:text-gray-300">
+  <p class="mb-5 text-sm text-gray-700 dark:text-gray-300 break-words whitespace-normal">
     {warningDescription}
     <span class="font-bold">{warningMessage}</span>
   </p>

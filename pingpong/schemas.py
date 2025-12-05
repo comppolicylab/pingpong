@@ -511,6 +511,11 @@ class AssistantInstructionsPreviewResponse(BaseModel):
         from_attributes = True
 
 
+class CopyAssistantRequest(BaseModel):
+    name: str | None = Field(None, min_length=3, max_length=100)
+    target_class_id: int | None = None
+
+
 class UpdateAssistantShareNameRequest(BaseModel):
     name: str
 

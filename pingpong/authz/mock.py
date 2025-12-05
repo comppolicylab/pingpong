@@ -56,6 +56,7 @@ class _MockFgaAuthzServer:
         self.app.post(f"/stores/{self._test_store_id}/list-objects")(
             self._api_list_objects
         )
+        self.app.post(f"/stores/{self._test_store_id}/read")(self._api_read)
         self.app.post(f"/stores/{self._test_store_id}/write")(self._api_write)
         self.app.get("/inspect/calls")(self._api_inspect_calls)
 
@@ -121,6 +122,33 @@ class _MockFgaAuthzServer:
             "objects": objects,
             "continuation_token": "",
         }
+
+    async def _api_read(self, request: Request):
+        body = await request.json()
+        tuple_key = body.get("tuple_key")
+        if not tuple_key:
+            raise ValueError("Missing tuple_key")
+
+        user = tuple_key.get("user")
+        relation = tuple_key.get("relation")
+        obj = tuple_key.get("object")
+
+        if not user or not relation or not obj:
+            raise ValueError("Missing user, relation or object")
+
+        tuples = []
+        if self._has_grant((user, relation, obj)):
+            tuples.append(
+                {
+                    "key": {
+                        "user": user,
+                        "relation": relation,
+                        "object": obj,
+                    }
+                }
+            )
+
+        return {"tuples": tuples, "continuation_token": ""}
 
     async def _api_write(self, request: Request):
         body = await request.json()
