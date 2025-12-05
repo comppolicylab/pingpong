@@ -10,6 +10,154 @@ from .now import offset
 from .testutil import with_authz, with_authz_series, with_user, with_institution
 
 
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[])
+async def test_copy_class_requires_permission(api, db, institution, valid_user_token):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            name="Source Class",
+            term="Fall 2024",
+            institution_id=institution.id,
+            private=False,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.commit()
+        await session.refresh(class_)
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/copy",
+        json={
+            "name": "Copied Class",
+            "term": "Fall 2024",
+            "private": False,
+            "any_can_create_assistant": False,
+            "any_can_publish_assistant": False,
+            "any_can_share_assistant": False,
+            "any_can_publish_thread": False,
+            "any_can_upload_class_file": False,
+            "copy_assistants": "moderators",
+            "copy_users": "moderators",
+        },
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Missing required role"}
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "admin", "root:0")])
+async def test_copy_class_allows_root_admin(api, db, institution, valid_user_token):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            name="Source Class",
+            term="Fall 2024",
+            institution_id=institution.id,
+            private=False,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.commit()
+        await session.refresh(class_)
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/copy",
+        json={
+            "name": "Copied Class",
+            "term": "Fall 2024",
+            "private": False,
+            "any_can_create_assistant": False,
+            "any_can_publish_assistant": False,
+            "any_can_share_assistant": False,
+            "any_can_publish_thread": False,
+            "any_can_upload_class_file": False,
+            "copy_assistants": "moderators",
+            "copy_users": "moderators",
+        },
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "admin", "institution:11")])
+async def test_copy_class_allows_institution_admin(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            name="Source Class",
+            term="Fall 2024",
+            institution_id=institution.id,
+            private=False,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.commit()
+        await session.refresh(class_)
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/copy",
+        json={
+            "name": "Copied Class",
+            "term": "Fall 2024",
+            "private": False,
+            "any_can_create_assistant": False,
+            "any_can_publish_assistant": False,
+            "any_can_share_assistant": False,
+            "any_can_publish_thread": False,
+            "any_can_upload_class_file": False,
+            "copy_assistants": "moderators",
+            "copy_users": "moderators",
+        },
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "admin", "institution:99")])
+async def test_copy_class_rejects_other_institution_admin(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            name="Source Class",
+            term="Fall 2024",
+            institution_id=institution.id,
+            private=False,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.commit()
+        await session.refresh(class_)
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/copy",
+        json={
+            "name": "Copied Class",
+            "term": "Fall 2024",
+            "private": False,
+            "any_can_create_assistant": False,
+            "any_can_publish_assistant": False,
+            "any_can_share_assistant": False,
+            "any_can_publish_thread": False,
+            "any_can_upload_class_file": False,
+            "copy_assistants": "moderators",
+            "copy_users": "moderators",
+        },
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Missing required role"}
+
+
 async def test_me_without_token(api):
     response = api.get("/api/v1/me")
     assert response.status_code == 200

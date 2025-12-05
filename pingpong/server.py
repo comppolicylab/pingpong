@@ -128,7 +128,7 @@ from .files import (
     handle_delete_files,
 )
 from .now import NowFn, utcnow
-from .permission import Authz, InstitutionAdmin, LoggedIn
+from .permission import Authz, InstitutionAdmin, LoggedIn, ClassInstitutionAdmin
 from .runs import get_placeholder_ci_calls
 from .vector_stores import (
     add_vector_store_files_to_db,
@@ -3167,7 +3167,7 @@ async def export_class_threads(
 
 @v1.post(
     "/class/{class_id}/copy",
-    dependencies=[Depends(Authz("admin"))],
+    dependencies=[Depends(Authz("admin") | ClassInstitutionAdmin())],
     response_model=schemas.GenericStatus,
 )
 async def copy_class(
