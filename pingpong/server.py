@@ -55,7 +55,7 @@ from pingpong.ai_models import (
 from pingpong.artifacts import ArtifactStoreError
 from pingpong.audio_store import AudioStoreError
 from pingpong.bg_tasks import safe_task
-from pingpong.copy import copy_group
+from pingpong.copy import copy_group, copy_assistant as copy_assistant_to_class
 from pingpong.emails import (
     parse_addresses,
     revalidate_email_addresses,
@@ -6225,6 +6225,188 @@ async def preview_assistant_instructions(
             thread_id=f"preview_{uuid.uuid4()}",
         )
     }
+
+
+def _classes_share_api_key(src: models.Class | None, tgt: models.Class | None) -> bool:
+    """
+    Return True if both classes have the same configured API key or key id.
+    """
+    if not src or not tgt:
+        return False
+    if src.api_key_id and tgt.api_key_id:
+        return src.api_key_id == tgt.api_key_id
+    if src.api_key and tgt.api_key:
+        return src.api_key == tgt.api_key
+    return False
+
+
+@v1.post(
+    "/class/{class_id}/assistant/{assistant_id}/copy",
+    dependencies=[
+        Depends(Authz("can_edit", "assistant:{assistant_id}")),
+    ],
+    response_model=schemas.Assistant,
+)
+async def copy_assistant(
+    class_id: str,
+    assistant_id: str,
+    request: Request,
+    openai_client: OpenAIClient,
+    copy_options: schemas.CopyAssistantRequest | None = Body(default=None),
+):
+    assistant = await models.Assistant.get_by_id_with_ci_files(
+        request.state.db, int(assistant_id)
+    )
+    class_id_int = int(class_id)
+    if not assistant or assistant.class_id != class_id_int:
+        raise HTTPException(
+            status_code=404,
+            detail="Assistant not found",
+        )
+    source_class = await models.Class.get_by_id(request.state.db, class_id_int)
+    if not source_class:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    def _default_copy_name(name: str) -> str:
+        suffix = " (Copy)"
+        max_len = 100
+        if len(name) + len(suffix) > max_len:
+            name = name[: max_len - len(suffix)]
+        return f"{name}{suffix}"
+
+    target_class_id = (
+        copy_options.target_class_id
+        if copy_options and copy_options.target_class_id
+        else class_id_int
+    )
+
+    target_class = await models.Class.get_by_id(request.state.db, target_class_id)
+    if not target_class:
+        raise HTTPException(
+            status_code=404,
+            detail="Target class not found",
+        )
+
+    if not (source_class.api_key_id or source_class.api_key):
+        raise HTTPException(
+            status_code=400,
+            detail="Source class has no API key configured.",
+        )
+
+    if not (target_class.api_key_id or target_class.api_key):
+        raise HTTPException(
+            status_code=400,
+            detail="Target class has no API key configured.",
+        )
+
+    if not _classes_share_api_key(source_class, target_class):
+        raise HTTPException(
+            status_code=400,
+            detail="Source and target classes must share the same API key to copy assistants.",
+        )
+
+    can_create_in_target = await request.state.authz.test(
+        request.state.auth_user,
+        "can_create_assistants",
+        f"class:{target_class_id}",
+    )
+    if not can_create_in_target:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to create assistants in the target group.",
+        )
+
+    if target_class_id == class_id_int:
+        target_openai_client = openai_client
+    else:
+        try:
+            target_openai_client = await get_openai_client_by_class_id(
+                request.state.db, target_class_id
+            )
+        except GetOpenAIClientException as e:
+            raise HTTPException(status_code=e.code or 400, detail=e.detail)
+
+    requested_name = (
+        copy_options.name.strip() if copy_options and copy_options.name else None
+    )
+
+    new_assistant = await copy_assistant_to_class(
+        request.state.db,
+        request.state.authz,
+        target_openai_client,
+        target_class_id,
+        assistant,
+        new_name=requested_name or _default_copy_name(assistant.name),
+        require_published=False,
+        force_private=True,
+    )
+    if not new_assistant:
+        raise HTTPException(status_code=400, detail="Assistant could not be copied.")
+    return new_assistant
+
+
+@v1.post(
+    "/class/{class_id}/assistant/{assistant_id}/copy/check",
+    dependencies=[
+        Depends(Authz("can_edit", "assistant:{assistant_id}")),
+    ],
+    response_model=schemas.CopyAssistantCheckResponse,
+)
+async def copy_assistant_check(
+    class_id: str,
+    assistant_id: str,
+    request: Request,
+    copy_options: schemas.CopyAssistantRequest,
+):
+    assistant = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    class_id_int = int(class_id)
+    if not assistant or assistant.class_id != class_id_int:
+        raise HTTPException(
+            status_code=404,
+            detail="Assistant not found",
+        )
+    source_class = await models.Class.get_by_id(request.state.db, class_id_int)
+    if not source_class:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    target_class_id = copy_options.target_class_id or class_id_int
+    target_class = await models.Class.get_by_id(request.state.db, target_class_id)
+    if not target_class:
+        raise HTTPException(
+            status_code=404,
+            detail="Target class not found",
+        )
+
+    if not (target_class.api_key_id or target_class.api_key):
+        raise HTTPException(
+            status_code=400,
+            detail="Target class has no API key configured.",
+        )
+
+    if not (source_class.api_key_id or source_class.api_key):
+        raise HTTPException(
+            status_code=400,
+            detail="Source class has no API key configured.",
+        )
+
+    if not _classes_share_api_key(source_class, target_class):
+        raise HTTPException(
+            status_code=400,
+            detail="Source and target classes must share the same API key to copy assistants.",
+        )
+
+    can_create_in_target = await request.state.authz.test(
+        request.state.auth_user,
+        "can_create_assistants",
+        f"class:{target_class_id}",
+    )
+    if not can_create_in_target:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to create assistants in the target group.",
+        )
+
+    return schemas.CopyAssistantCheckResponse(allowed=True)
 
 
 @v1.post(

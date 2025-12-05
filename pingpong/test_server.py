@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from pingpong import models
+import pingpong.schemas as schemas
 
 from .auth import encode_session_token
 from .now import offset
@@ -1157,3 +1158,300 @@ async def test_get_institution_thread_counts(api, db, valid_user_token, institut
             {"class_id": class_c_id, "class_name": "Class C", "thread_count": 0},
         ],
     }
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+    ]
+)
+async def test_copy_assistant_within_class(
+    api, db, institution, valid_user_token, authz
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1, name="Test Class", institution_id=institution.id, api_key="test-key"
+        )
+        assistant = models.Assistant(
+            id=1,
+            name="A" * 100,
+            instructions="Be helpful",
+            description="original",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            model="gpt-4o-mini",
+            temperature=0.2,
+            class_id=class_.id,
+            tools="[]",
+            creator_id=123,
+            published=None,
+            version=3,
+        )
+        session.add_all([class_, assistant])
+        await session.commit()
+        class_id, assistant_id = class_.id, assistant.id
+        original_instructions = assistant.instructions
+        creator_id = assistant.creator_id
+
+    response = api.post(
+        f"/api/v1/class/{class_id}/assistant/{assistant_id}/copy",
+        json={},
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] != assistant_id
+    assert data["class_id"] == class_id
+    assert data["name"].endswith(" (Copy)")
+    assert len(data["name"]) == 100
+    assert data["published"] is None
+
+    async with db.async_session() as session:
+        saved = await models.Assistant.get_by_id(session, data["id"])
+        assert saved.instructions == original_instructions
+        assert saved.creator_id == creator_id
+
+    assert await authz.get_all_calls() == [
+        ("grant", f"class:{class_id}", "parent", f"assistant:{data['id']}"),
+        ("grant", f"user:{creator_id}", "owner", f"assistant:{data['id']}"),
+    ]
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_create_assistants", "class:2"),
+        ("user:123", "can_edit", "assistant:1"),
+    ]
+)
+async def test_copy_assistant_to_other_class(
+    api, db, institution, valid_user_token, authz
+):
+    async with db.async_session() as session:
+        source_class = models.Class(
+            id=1, name="Source", institution_id=institution.id, api_key="test-key"
+        )
+        target_class = models.Class(
+            id=2, name="Target", institution_id=institution.id, api_key="test-key"
+        )
+        assistant = models.Assistant(
+            id=1,
+            name="Assistant One",
+            instructions="Be helpful",
+            description="original",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            model="gpt-4o-mini",
+            temperature=0.2,
+            class_id=source_class.id,
+            tools="[]",
+            creator_id=123,
+            published=None,
+            version=3,
+        )
+        session.add_all([source_class, target_class, assistant])
+        await session.commit()
+
+    response = api.post(
+        f"/api/v1/class/{source_class.id}/assistant/{assistant.id}/copy",
+        json={"target_class_id": target_class.id, "name": "Assistant Copy"},
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] != assistant.id
+    assert data["class_id"] == target_class.id
+    assert data["name"] == "Assistant Copy"
+    assert data["published"] is None
+
+    assert (
+        "grant",
+        f"class:{target_class.id}",
+        "parent",
+        f"assistant:{data['id']}",
+    ) in (await authz.get_all_calls())
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_create_assistants", "class:2"),
+        ("user:123", "can_edit", "assistant:1"),
+    ]
+)
+async def test_copy_assistant_missing_target_api_key(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        source_class = models.Class(
+            id=1, name="Source", institution_id=institution.id, api_key="test-key"
+        )
+        target_class = models.Class(
+            id=2, name="Target", institution_id=institution.id, api_key=None
+        )
+        assistant = models.Assistant(
+            id=1,
+            name="Assistant One",
+            instructions="Be helpful",
+            description="original",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            model="gpt-4o-mini",
+            temperature=0.2,
+            class_id=source_class.id,
+            tools="[]",
+            creator_id=123,
+            published=None,
+            version=3,
+        )
+        session.add_all([source_class, target_class, assistant])
+        await session.commit()
+
+    response = api.post(
+        f"/api/v1/class/{source_class.id}/assistant/{assistant.id}/copy",
+        json={"target_class_id": target_class.id, "name": "Assistant Copy"},
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Target class has no API key configured.",
+    }
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_create_assistants", "class:2"),
+        ("user:123", "can_edit", "assistant:1"),
+    ]
+)
+async def test_copy_assistant_mismatched_api_key(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        source_class = models.Class(
+            id=1, name="Source", institution_id=institution.id, api_key="test-key"
+        )
+        target_class = models.Class(
+            id=2, name="Target", institution_id=institution.id, api_key="other-key"
+        )
+        assistant = models.Assistant(
+            id=1,
+            name="Assistant One",
+            instructions="Be helpful",
+            description="original",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            model="gpt-4o-mini",
+            temperature=0.2,
+            class_id=source_class.id,
+            tools="[]",
+            creator_id=123,
+            published=None,
+            version=3,
+        )
+        session.add_all([source_class, target_class, assistant])
+        await session.commit()
+
+    response = api.post(
+        f"/api/v1/class/{source_class.id}/assistant/{assistant.id}/copy",
+        json={"target_class_id": target_class.id, "name": "Assistant Copy"},
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Source and target classes must share the same API key to copy assistants.",
+    }
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_edit", "assistant:1"),
+    ]
+)
+async def test_copy_assistant_missing_target_permissions(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        source_class = models.Class(
+            id=1, name="Source", institution_id=institution.id, api_key="test-key"
+        )
+        target_class = models.Class(
+            id=2, name="Target", institution_id=institution.id, api_key="test-key"
+        )
+        assistant = models.Assistant(
+            id=1,
+            name="Assistant One",
+            instructions="Be helpful",
+            description="original",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            model="gpt-4o-mini",
+            temperature=0.2,
+            class_id=source_class.id,
+            tools="[]",
+            creator_id=123,
+            published=None,
+            version=3,
+        )
+        session.add_all([source_class, target_class, assistant])
+        await session.commit()
+
+    response = api.post(
+        f"/api/v1/class/{source_class.id}/assistant/{assistant.id}/copy",
+        json={"target_class_id": target_class.id, "name": "Assistant Copy"},
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "You do not have permission to create assistants in the target group.",
+    }
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_create_assistants", "class:2"),
+        ("user:123", "can_edit", "assistant:1"),
+    ]
+)
+async def test_copy_assistant_check_endpoint(api, db, institution, valid_user_token):
+    async with db.async_session() as session:
+        source_class = models.Class(
+            id=1, name="Source", institution_id=institution.id, api_key="test-key"
+        )
+        target_class = models.Class(
+            id=2, name="Target", institution_id=institution.id, api_key="test-key"
+        )
+        assistant = models.Assistant(
+            id=1,
+            name="Assistant One",
+            instructions="Be helpful",
+            description="original",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            model="gpt-4o-mini",
+            temperature=0.2,
+            class_id=source_class.id,
+            tools="[]",
+            creator_id=123,
+            published=None,
+            version=3,
+        )
+        session.add_all([source_class, target_class, assistant])
+        await session.commit()
+
+    response = api.post(
+        f"/api/v1/class/{source_class.id}/assistant/{assistant.id}/copy/check",
+        json={"target_class_id": target_class.id},
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"allowed": True}
