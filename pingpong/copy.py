@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def create_new_class_object(
-    session: AsyncSession, institution_id: int, create: CopyClassRequest
+    session: AsyncSession, institution_id: int, create: CreateClass
 ) -> models.Class:
     return await models.Class.create(session, institution_id, create)
 
@@ -34,7 +34,7 @@ async def create_new_class(
     session: AsyncSession,
     client: OpenFgaAuthzClient,
     institution_id: int,
-    create: CopyClassRequest,
+    create: CreateClass,
     user_id: int,
     user_dna_as_create: bool,
 ) -> models.Class:
@@ -469,6 +469,10 @@ async def copy_group(
                 if not user:
                     raise ValueError(f"User with ID {user_id} not found")
 
+                target_institution_id = (
+                    copy_options.institution_id or class_.institution_id
+                )
+
                 new_class_options = CreateClass(
                     name=copy_options.name,
                     term=copy_options.term,
@@ -484,7 +488,7 @@ async def copy_group(
                 new_class = await create_new_class(
                     session,
                     c,
-                    class_.institution_id,
+                    target_institution_id,
                     new_class_options,
                     user_id,
                     user.dna_as_create,

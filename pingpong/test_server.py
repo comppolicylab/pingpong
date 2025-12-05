@@ -11,16 +11,13 @@ from .testutil import with_authz, with_authz_series, with_user, with_institution
 
 
 @with_user(123)
-@with_institution(11, "Test Institution")
+@with_institution(11, "Harvard Kennedy School")
 @with_authz(grants=[])
 async def test_copy_class_requires_permission(api, db, institution, valid_user_token):
     async with db.async_session() as session:
         class_ = models.Class(
             name="Source Class",
-            term="Fall 2024",
             institution_id=institution.id,
-            private=False,
-            api_key="test-key",
         )
         session.add(class_)
         await session.commit()
@@ -48,7 +45,12 @@ async def test_copy_class_requires_permission(api, db, institution, valid_user_t
 
 @with_user(123)
 @with_institution(11, "Test Institution")
-@with_authz(grants=[("user:123", "admin", "root:0")])
+@with_authz(
+    grants=[
+        ("user:123", "admin", "root:0"),
+        ("user:123", "can_create_class", "institution:11"),
+    ]
+)
 async def test_copy_class_allows_root_admin(api, db, institution, valid_user_token):
     async with db.async_session() as session:
         class_ = models.Class(
@@ -84,7 +86,12 @@ async def test_copy_class_allows_root_admin(api, db, institution, valid_user_tok
 
 @with_user(123)
 @with_institution(11, "Test Institution")
-@with_authz(grants=[("user:123", "admin", "institution:11")])
+@with_authz(
+    grants=[
+        ("user:123", "admin", "institution:11"),
+        ("user:123", "can_create_class", "institution:11"),
+    ]
+)
 async def test_copy_class_allows_institution_admin(
     api, db, institution, valid_user_token
 ):
@@ -122,7 +129,7 @@ async def test_copy_class_allows_institution_admin(
 
 @with_user(123)
 @with_institution(11, "Test Institution")
-@with_authz(grants=[("user:123", "admin", "institution:99")])
+@with_authz(grants=[("user:123", "can_create_class", "institution:99")])
 async def test_copy_class_rejects_other_institution_admin(
     api, db, institution, valid_user_token
 ):
@@ -156,6 +163,95 @@ async def test_copy_class_rejects_other_institution_admin(
     )
     assert response.status_code == 403
     assert response.json() == {"detail": "Missing required role"}
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "admin", "institution:11"),
+        ("user:123", "can_create_class", "institution:22"),
+    ]
+)
+async def test_copy_class_allows_copy_to_other_institution(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        other_institution = models.Institution(id=22, name="Other Institution")
+        session.add(other_institution)
+        class_ = models.Class(
+            name="Source Class",
+            term="Fall 2024",
+            institution_id=institution.id,
+            private=False,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.commit()
+        await session.refresh(class_)
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/copy",
+        json={
+            "name": "Copied Class",
+            "term": "Fall 2024",
+            "private": False,
+            "any_can_create_assistant": False,
+            "any_can_publish_assistant": False,
+            "any_can_share_assistant": False,
+            "any_can_publish_thread": False,
+            "any_can_upload_class_file": False,
+            "copy_assistants": "moderators",
+            "copy_users": "moderators",
+            "institution_id": other_institution.id,
+        },
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "admin", "institution:11")])
+async def test_copy_class_rejects_unauthorized_target_institution(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        other_institution = models.Institution(id=22, name="Other Institution")
+        session.add(other_institution)
+        class_ = models.Class(
+            name="Source Class",
+            term="Fall 2024",
+            institution_id=institution.id,
+            private=False,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.commit()
+        await session.refresh(class_)
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/copy",
+        json={
+            "name": "Copied Class",
+            "term": "Fall 2024",
+            "private": False,
+            "any_can_create_assistant": False,
+            "any_can_publish_assistant": False,
+            "any_can_share_assistant": False,
+            "any_can_publish_thread": False,
+            "any_can_upload_class_file": False,
+            "copy_assistants": "moderators",
+            "copy_users": "moderators",
+            "institution_id": other_institution.id,
+        },
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "You do not have permission to create a class in the target institution."
+    }
 
 
 async def test_me_without_token(api):

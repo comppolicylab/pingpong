@@ -13,10 +13,13 @@
   import { FileCopyOutline } from 'flowbite-svelte-icons';
   import AzureLogo from './AzureLogo.svelte';
   import OpenAiLogo from './OpenAILogo.svelte';
-  import type { CopyClassRequestInfo } from '$lib/api';
+  import type { CopyClassRequestInfo, Institution } from '$lib/api';
 
   export let groupName: string;
+  let displayGroupName = groupName + ' (Copy)';
   export let groupSession: string;
+  export let institutions: Institution[] = [];
+  export let currentInstitutionId: number | null = null;
   export let makePrivate = false;
   export let anyCanPublishThread = false;
   export let anyCanShareAssistant = false;
@@ -33,11 +36,31 @@
 
   let assistantCopy: 'moderators' | 'all' = 'moderators';
   let userCopy: 'moderators' | 'all' = 'moderators';
+  let selectedInstitutionId = currentInstitutionId !== null ? currentInstitutionId.toString() : '';
+  $: institutionOptions = institutions.map((inst) => ({
+    value: inst.id.toString(),
+    name: inst.name
+  }));
+  $: {
+    const hasValidSelection = institutions.some(
+      (inst) => inst.id.toString() === selectedInstitutionId
+    );
+    if ((!selectedInstitutionId || !hasValidSelection) && institutions.length > 0) {
+      const preferred =
+        institutions.find((inst) => inst.id === currentInstitutionId) || institutions[0];
+      if (preferred) {
+        selectedInstitutionId = preferred.id.toString();
+      }
+    }
+  }
 
   let copyClassInfo: CopyClassRequestInfo;
   $: copyClassInfo = {
-    groupName,
+    groupName: displayGroupName,
     groupSession,
+    institutionId: selectedInstitutionId
+      ? parseInt(selectedInstitutionId, 10)
+      : (currentInstitutionId ?? null),
     makePrivate,
     anyCanPublishThread,
     anyCanShareAssistant,
@@ -72,11 +95,27 @@
         <div class="grid md:grid-cols-2 gap-x-6 gap-y-6 my-3">
           <div>
             <Label for="name" class="mb-1">Name</Label>
-            <Input id="name" name="name" bind:value={groupName} />
+            <Input id="name" name="name" bind:value={displayGroupName} />
           </div>
           <div>
             <Label for="term" class="mb-1">Session</Label>
             <Input id="term" name="term" bind:value={groupSession} />
+          </div>
+          <div class="md:col-span-2">
+            <Label for="institution" class="mb-1">Institution</Label>
+            {#if institutions.length > 0}
+              <Select
+                id="institution"
+                name="institution"
+                bind:value={selectedInstitutionId}
+                class="truncate"
+                items={institutionOptions}
+              />
+            {:else}
+              <p class="text-sm text-gray-500">
+                No eligible institutions available for this account.
+              </p>
+            {/if}
           </div>
           <Checkbox id="make_private" name="make_private" bind:checked={makePrivate}>
             Make threads and assistants private
