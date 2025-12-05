@@ -6230,7 +6230,6 @@ async def preview_assistant_instructions(
 @v1.post(
     "/class/{class_id}/assistant/{assistant_id}/copy",
     dependencies=[
-        Depends(Authz("can_create_assistants", "class:{class_id}")),
         Depends(Authz("can_edit", "assistant:{assistant_id}")),
     ],
     response_model=schemas.Assistant,
