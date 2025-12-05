@@ -1208,6 +1208,10 @@ class UpdateClass(BaseModel):
     any_can_upload_class_file: bool | None = None
 
 
+class TransferClassRequest(BaseModel):
+    institution_id: int = Field(..., gt=0)
+
+
 class APIKeyCheck(BaseModel):
     has_api_key: bool
 

@@ -1311,6 +1311,77 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
     return cls
 
 
+@v1.post(
+    "/class/{class_id}/transfer",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.Class,
+)
+async def transfer_class(
+    class_id: str, transfer: schemas.TransferClassRequest, request: Request
+):
+    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    if not class_:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    if transfer.institution_id == class_.institution_id:
+        return class_
+
+    target_institution = await models.Institution.get_by_id(
+        request.state.db, transfer.institution_id
+    )
+    if not target_institution:
+        raise HTTPException(status_code=404, detail="Institution not found")
+
+    if class_.institution_id is None:
+        raise HTTPException(
+            status_code=400, detail="This group is not linked to an institution."
+        )
+
+    checks: list[tuple[int, str]] = [
+        (
+            class_.institution_id,
+            "You do not have permission to create a class in the current institution.",
+        ),
+        (
+            transfer.institution_id,
+            "You do not have permission to create a class in the target institution.",
+        ),
+    ]
+    for inst_id, error_detail in checks:
+        can_create = await request.state.authz.test(
+            request.state.auth_user,
+            "can_create_class",
+            f"institution:{inst_id}",
+        )
+        if not can_create:
+            raise HTTPException(status_code=403, detail=error_detail)
+
+    updated_class, previous_institution_id = await models.Class.transfer_institution(
+        request.state.db, int(class_id), transfer.institution_id
+    )
+
+    grants = [
+        (
+            f"institution:{transfer.institution_id}",
+            "parent",
+            f"class:{class_id}",
+        )
+    ]
+    revokes = []
+    if previous_institution_id is not None:
+        revokes.append(
+            (
+                f"institution:{previous_institution_id}",
+                "parent",
+                f"class:{class_id}",
+            )
+        )
+
+    await request.state.authz.write_safe(grant=grants, revoke=revokes)
+
+    return updated_class
+
+
 @v1.delete(
     "/class/{class_id}",
     dependencies=[Depends(Authz("can_delete", "class:{class_id}"))],

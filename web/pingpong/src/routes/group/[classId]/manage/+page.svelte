@@ -211,11 +211,35 @@
     { value: 'create:1,publish:1,upload:1', name: 'Members can create and publish' }
   ];
   let availableInstitutions: api.Institution[] = [];
+  let availableTransferInstitutions: api.Institution[] = [];
   let currentInstitutionId: number | null = null;
   $: availableInstitutions = (data?.admin?.canCreateClass || [])
     .slice()
     .sort((a, b) => a.name.localeCompare(b.name));
   $: currentInstitutionId = data?.class?.institution_id ?? null;
+  $: availableTransferInstitutions = availableInstitutions.filter(
+    (inst) => inst.id !== currentInstitutionId
+  );
+  let transferModal = false;
+  let transferInstitutionId: number | null = null;
+  $: {
+    if (availableTransferInstitutions.length === 0) {
+      transferInstitutionId = null;
+    } else if (
+      transferInstitutionId === null ||
+      !availableTransferInstitutions.some((inst) => inst.id === transferInstitutionId)
+    ) {
+      transferInstitutionId = availableTransferInstitutions[0].id;
+    }
+  }
+  $: hasCreatePermissionForCurrent =
+    currentInstitutionId !== null &&
+    availableInstitutions.some((inst) => inst.id === currentInstitutionId);
+  $: transferInstitutionOptions = availableTransferInstitutions.map((inst) => ({
+    value: inst.id.toString(),
+    name: inst.name
+  }));
+  let transferring = false;
   let anyCanPublishAssistant =
     parseAssistantPermissions(assistantPermissions).any_can_publish_assistant;
 
@@ -407,6 +431,45 @@
       );
     }
     $loading = false;
+  };
+
+  const transferClassInstitution = async () => {
+    if (!hasCreatePermissionForCurrent) {
+      sadToast(
+        'You need permission to create classes in the current institution to transfer this group.'
+      );
+      return;
+    }
+
+    if (!transferInstitutionId) {
+      sadToast('Select an institution to transfer this group to.');
+      return;
+    }
+
+    transferring = true;
+    const result = await api.transferClass(fetch, data.class.id, {
+      institution_id: transferInstitutionId
+    });
+    const response = api.expandResponse(result);
+    if (response.error) {
+      sadToast(response.error.detail || 'An unknown error occurred');
+    } else {
+      const targetInstitutionName =
+        availableInstitutions.find((inst) => inst.id === transferInstitutionId)?.name ||
+        response.data.institution?.name ||
+        'the new institution';
+      currentInstitutionId = response.data.institution_id;
+      happyToast(`Group transferred to ${targetInstitutionName}.`);
+      transferModal = false;
+      await invalidateAll();
+    }
+    transferring = false;
+  };
+
+  const handleTransferInstitutionChange = (evt: Event) => {
+    const target = evt.target as HTMLSelectElement;
+    const selectedValue = parseInt(target.value, 10);
+    transferInstitutionId = Number.isNaN(selectedValue) ? null : selectedValue;
   };
 
   const updatingApiKey = writable(false);
@@ -933,6 +996,67 @@
           on:cancel={() => (cloneModal = false)}
         />
       </Modal>
+      <Modal bind:open={transferModal} size="md">
+        <div class="flex flex-col gap-4 p-1">
+          <Heading customSize="text-xl" tag="h3"
+            ><Secondary class="text-3xl font-serif font-medium text-blue-dark-40"
+              >Transfer group</Secondary
+            ></Heading
+          >
+          <p class="text-sm text-slate-700">
+            Move this group to another institution without losing your roster or settings. You can
+            only transfer this group to an institution where you have create-group permissions.
+          </p>
+          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div class="text-xs uppercase tracking-wide text-slate-500">Current institution</div>
+            <div class="text-base font-semibold text-slate-900">
+              {data.class.institution?.name || 'Not linked to an institution'}
+            </div>
+          </div>
+          <div class="space-y-2">
+            <Label for="transferInstitution">Transfer to</Label>
+            {#if transferInstitutionOptions.length > 0}
+              <Select
+                id="transferInstitution"
+                name="transferInstitution"
+                items={transferInstitutionOptions}
+                value={transferInstitutionId ? transferInstitutionId.toString() : ''}
+                on:change={handleTransferInstitutionChange}
+                disabled={transferring}
+              />
+            {:else}
+              <div class="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-700">
+                No other eligible institutions available for transfer.
+              </div>
+            {/if}
+          </div>
+          <div class="flex flex-row justify-end gap-2">
+            <Button
+              pill
+              color="light"
+              on:click={() => (transferModal = false)}
+              disabled={transferring}>Cancel</Button
+            >
+            <Button
+              type="button"
+              pill
+              color="blue"
+              class="flex items-center gap-2"
+              disabled={transferring || !transferInstitutionId || !hasCreatePermissionForCurrent}
+              on:click={transferClassInstitution}
+            >
+              {#if transferring}
+                <Spinner size="5" />
+                <span>Transferring...</span>
+              {:else}
+                <span class="flex items-center gap-2">
+                  Transfer<ArrowRightOutline class="h-4 w-4" />
+                </span>
+              {/if}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   </div>
   {#if canEditClassInfo}
@@ -964,6 +1088,26 @@
             on:change={submitParentForm}
             disabled={$updatingClass}
           />
+        </div>
+        <div></div>
+        <div>
+          <Label class="mb-1">Institution</Label>
+          <p class="text-sm">{data.class.institution?.name || 'Not linked to an institution'}</p>
+        </div>
+
+        <div class="flex items-end">
+          {#if availableTransferInstitutions.length > 0}
+            <Button
+              type="button"
+              pill
+              color="light"
+              class="flex items-center gap-2 py-1.5 px-3 text-xs"
+              on:click={() => (transferModal = true)}
+            >
+              Transfer to another institution
+              <ArrowRightOutline class="h-4 w-4" />
+            </Button>
+          {/if}
         </div>
 
         {#if !makePrivate}
