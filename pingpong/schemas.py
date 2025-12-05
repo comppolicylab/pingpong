@@ -955,7 +955,6 @@ class InstitutionAdminResponse(BaseModel):
     institution_id: int
     user_id: int
     email: str
-    created_user: bool
     added_admin: bool
 
 
@@ -1166,6 +1165,7 @@ class ClassLMSInfo(BaseModel):
 class CopyClassRequest(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
     term: str = Field(..., min_length=1, max_length=100)
+    institution_id: int | None = None
     private: bool = False
     any_can_create_assistant: bool = False
     any_can_publish_assistant: bool = False

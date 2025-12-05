@@ -210,6 +210,12 @@
     { value: 'create:1,publish:0,upload:1', name: 'Members can create but not publish' },
     { value: 'create:1,publish:1,upload:1', name: 'Members can create and publish' }
   ];
+  let availableInstitutions: api.Institution[] = [];
+  let currentInstitutionId: number | null = null;
+  $: availableInstitutions = (data?.admin?.canCreateClass || [])
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name));
+  $: currentInstitutionId = data?.class?.institution_id ?? null;
   let anyCanPublishAssistant =
     parseAssistantPermissions(assistantPermissions).any_can_publish_assistant;
 
@@ -381,6 +387,7 @@
     const copyOptions: api.CopyClassRequest = {
       name: requestInfo.groupName.toString(),
       term: requestInfo.groupSession.toString(),
+      institution_id: requestInfo.institutionId ?? currentInstitutionId ?? undefined,
       any_can_publish_thread: requestInfo.anyCanPublishThread,
       any_can_share_assistant: requestInfo.anyCanShareAssistant,
       private: makePrivate,
@@ -915,6 +922,8 @@
         <CloneClassModal
           groupName={data?.class.name || ''}
           groupSession={data?.class.term || ''}
+          institutions={availableInstitutions}
+          {currentInstitutionId}
           {makePrivate}
           aiProvider={apiProvider}
           {anyCanPublishThread}

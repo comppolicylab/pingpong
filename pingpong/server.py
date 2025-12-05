@@ -956,7 +956,6 @@ async def add_institution_admin(
         normalized_email,
         initial_state=schemas.UserState.UNVERIFIED,
     )
-    created_user = False  # If you need to track creation, update this logic as needed
 
     already_admin = await request.state.authz.test(
         f"user:{user.id}", "admin", f"institution:{inst_id}"
@@ -972,7 +971,6 @@ async def add_institution_admin(
         institution_id=inst_id,
         user_id=user.id,
         email=user.email,
-        created_user=created_user,
         added_admin=added_admin,
     )
 
@@ -3180,6 +3178,20 @@ async def copy_class(
     class_ = await models.Class.get_by_id(request.state.db, int(class_id))
     if not class_:
         raise HTTPException(status_code=404, detail="Class not found")
+
+    target_institution_id = copy_options.institution_id or class_.institution_id
+    can_create_class = await request.state.authz.test(
+        request.state.auth_user,
+        "can_create_class",
+        f"institution:{target_institution_id}",
+    )
+    if not can_create_class:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to create a class in the target institution.",
+        )
+
+    copy_options.institution_id = target_institution_id
     if (
         copy_options.copy_assistants == "all"
         and copy_options.copy_users == "moderators"

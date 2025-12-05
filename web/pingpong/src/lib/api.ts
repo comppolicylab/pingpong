@@ -783,6 +783,7 @@ export type UpdateClassRequest = {
 export type CopyClassRequestInfo = {
   groupName: string;
   groupSession: string;
+  institutionId: number | null;
   makePrivate: boolean;
   anyCanPublishThread: boolean;
   anyCanShareAssistant: boolean;
@@ -802,6 +803,7 @@ export type CopyClassRequest = {
   any_can_upload_class_file: boolean;
   copy_assistants: 'moderators' | 'all';
   copy_users: 'moderators' | 'all';
+  institution_id?: number | null;
 };
 
 /**
