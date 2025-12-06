@@ -27,10 +27,10 @@
 <SvelteToast />
 {#if showSidebar}
   <div class=" w-full flex h-full lg:gap-4 md:h-[calc(100vh-3rem)]">
-    <div class="basis-[320px] shrink-0 grow-0 min-w-0">
+    <div class="sidebar basis-[320px] shrink-0 grow-0 min-w-0">
       <Sidebar {data} />
     </div>
-    <div class="shrink grow min-w-0">
+    <div class="main-content shrink grow min-w-0">
       <Main>
         <slot />
       </Main>
@@ -55,12 +55,10 @@
   }
 
   @media print {
-    /* Hide sidebar during print */
-    :global(.basis-\[320px\]) {
+    .sidebar {
       display: none !important;
     }
-    /* Make main content full width */
-    :global(.shrink.grow) {
+    .main-content {
       flex-basis: 100% !important;
       max-width: 100% !important;
     }
