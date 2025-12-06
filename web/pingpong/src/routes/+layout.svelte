@@ -53,4 +53,16 @@
     --toastBorderRadius: 0.5rem;
     --toastBarBackground: #1d9e48;
   }
+
+  @media print {
+    /* Hide sidebar during print */
+    :global(.basis-\[320px\]) {
+      display: none !important;
+    }
+    /* Make main content full width */
+    :global(.shrink.grow) {
+      flex-basis: 100% !important;
+      max-width: 100% !important;
+    }
+  }
 </style>

@@ -5,6 +5,7 @@
 
   export let source: WebSearchSource;
   export let type: 'chip' | 'list' = 'chip';
+  export let forceEagerLoad = false;
 
   const domainFromUrl = (url?: string | null) => {
     if (!url) return '';
@@ -73,7 +74,7 @@
       alt="Favicon"
       src={faviconUrl}
       class="w-4 rounded-full"
-      loading="lazy"
+      loading={forceEagerLoad ? 'eager' : 'lazy'}
       on:load={handleFaviconLoad}
       on:error={() => (showFavicon = false)}
     />
@@ -93,7 +94,7 @@
           alt="Favicon"
           src={faviconUrl}
           class="h-4 w-4 rounded-sm bg-white"
-          loading="lazy"
+          loading={forceEagerLoad ? 'eager' : 'lazy'}
           on:load={handleFaviconLoad}
           on:error={() => (showFavicon = false)}
         />
