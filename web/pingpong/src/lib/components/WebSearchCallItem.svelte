@@ -5,8 +5,22 @@
   import WebSourceChip from './WebSourceChip.svelte';
 
   export let content: WebSearchCallItem;
+  export let forceOpen = false;
+  export let forceEagerImages = false;
 
   let open = false;
+  let previousOpen: boolean | null = null;
+  $: {
+    if (forceOpen) {
+      if (previousOpen === null) {
+        previousOpen = open;
+      }
+      open = true;
+    } else if (previousOpen !== null) {
+      open = previousOpen;
+      previousOpen = null;
+    }
+  }
   const handleClick = () => (open = !open);
 
   const deduplicateSources = (sources?: WebSearchActionSearchSource[]) => {
@@ -67,7 +81,7 @@
         {:else}
           {#each uniqueSources as source, i (source.url)}
             <div class="py-0.5" transition:slide={{ delay: i * 80, duration: 250, axis: 'y' }}>
-              <WebSourceChip {source} type="list" />
+              <WebSourceChip {source} type="list" forceEagerLoad={forceEagerImages} />
             </div>
           {/each}
         {/if}
@@ -98,6 +112,7 @@
               ><span>Looked closer through</span>{#if content.action.url}<WebSourceChip
                   source={{ url: content.action.url, type: 'url' }}
                   type="list"
+                  forceEagerLoad={forceEagerImages}
                 />{:else}web sources{/if}{#if content.action.pattern}
                 for {content.action.pattern}{/if}</span
             >
@@ -115,6 +130,7 @@
               >{#if content.action.url}<span>Opened</span><WebSourceChip
                   source={{ url: content.action.url, type: 'url' }}
                   type="list"
+                  forceEagerLoad={forceEagerImages}
                 />{:else}Looked through web sources{/if}</span
             >
           {:else if content.status === 'failed'}

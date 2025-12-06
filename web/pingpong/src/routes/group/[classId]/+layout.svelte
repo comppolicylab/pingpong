@@ -23,7 +23,7 @@
 
 <div class="relative h-full w-full flex flex-col">
   {#if !(data.isSharedAssistantPage || data.isSharedThreadPage)}
-    <div bind:this={headerEl}>
+    <div bind:this={headerEl} class="print-hidden">
       <ThreadHeader
         current={data.class}
         classes={data.classes}
@@ -35,3 +35,11 @@
   {/if}
   <slot />
 </div>
+
+<style>
+  @media print {
+    .print-hidden {
+      display: none !important;
+    }
+  }
+</style>

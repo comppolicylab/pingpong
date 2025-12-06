@@ -47,7 +47,7 @@
   import { ThreadManager } from '$lib/stores/thread';
   import AttachmentDeletedPlaceholder from '$lib/components/AttachmentDeletedPlaceholder.svelte';
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
-  import { writable } from 'svelte/store';
+  import { get, writable } from 'svelte/store';
   import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
   import { base64ToArrayBuffer, WavRecorder, WavStreamPlayer } from '$lib/wavtools/index';
   import type { ExtendedMediaDeviceInfo } from '$lib/wavtools/lib/wav_recorder';
@@ -83,6 +83,9 @@
   $: participants = threadMgr.participants;
   $: published = threadMgr.published;
   $: version = threadMgr.version;
+  $: threadName = threadMgr.thread?.name || 'Thread';
+  $: groupName = data.class?.name || `Group ${classId}`;
+  $: threadLink = `${$page.url.origin}/group/${classId}/thread/${threadId}`;
   $: error = threadMgr.error;
   $: threadManagerError = $error?.detail || null;
   $: assistantId = threadMgr.assistantId;
@@ -205,6 +208,8 @@
   let showModerators = false;
   let showAssistantPrompt = false;
   let settingsOpen = false;
+  let printingThread = false;
+  let messagesContainer: HTMLDivElement | null = null;
 
   function isFileCitation(a: api.TextAnnotation): a is api.TextAnnotationFileCitation {
     return a.type === 'file_citation' && a.text === 'responses_v3';
@@ -331,6 +336,14 @@
   // Fetch an earlier page of messages
   const fetchMoreMessages = async () => {
     await threadMgr.fetchMore();
+  };
+
+  // Fetch the entire thread so the print view includes every message/tool call.
+  const loadEntireThreadForPrint = async () => {
+    while (get(canFetchMore)) {
+      await fetchMoreMessages();
+      await tick();
+    }
   };
 
   // Fetch a singular code interpreter step result
@@ -502,6 +515,57 @@
       sadToast(
         `Failed to ${verb} thread. Error: ${errorMessage(e, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
       );
+    }
+  };
+
+  const handlePrintThread = async () => {
+    if (printingThread) {
+      return;
+    }
+    printingThread = true;
+    try {
+      await loadEntireThreadForPrint();
+      await tick();
+
+      if (typeof window === 'undefined') {
+        return;
+      }
+
+      if (!messagesContainer) {
+        sadToast('Unable to find the thread content to print.');
+        return;
+      }
+
+      // Wait for images to load before printing
+      const images = Array.from(messagesContainer.querySelectorAll('img'));
+      await Promise.all(
+        images.map(
+          (img) =>
+            new Promise<void>((resolve) => {
+              if (img.complete) {
+                resolve();
+                return;
+              }
+              const done = () => {
+                img.removeEventListener('load', done);
+                img.removeEventListener('error', done);
+                resolve();
+              };
+              img.addEventListener('load', done);
+              img.addEventListener('error', done);
+            })
+        )
+      );
+
+      window.print();
+    } catch (e) {
+      console.error('Failed to print thread', e);
+      sadToast(
+        `Unable to print this thread. Error: ${errorMessage(e, 'Please try again in a moment.')}`
+      );
+    } finally {
+      settingsOpen = false;
+      printingThread = false;
     }
   };
 
@@ -897,11 +961,23 @@
 
 <div class="w-full flex flex-col justify-between grow min-h-0 relative">
   <div
-    class={`overflow-y-auto pb-4 px-2 lg:px-4 ${
+    class={`messages-container overflow-y-auto pb-4 px-2 lg:px-4 ${
       data.isSharedAssistantPage || data.isSharedThreadPage ? 'pt-10' : ''
     }`}
+    bind:this={messagesContainer}
     use:scroll={$messages}
   >
+    <div class="print-only print-header">
+      <div class="print-header__brand">
+        <Logo size={9} />
+        <div class="print-header__brand-text">PingPong</div>
+      </div>
+      <div class="print-header__meta">
+        <div><span class="label">Group</span><span>{groupName}</span></div>
+        <div><span class="label">Thread</span><span>{threadName}</span></div>
+      </div>
+      <div class="print-header__link">{threadLink}</div>
+    </div>
     {#if $canFetchMore}
       <div class="flex justify-center grow">
         <Button size="sm" class="text-sky-600 hover:text-sky-800" on:click={fetchMoreMessages}>
@@ -983,19 +1059,29 @@
                 </div>
               {/if}
             {:else if content.type === 'code'}
-              <div class="leading-6 w-full">
-                <Accordion flush>
-                  <AccordionItem>
-                    <span slot="header"
-                      ><div class="flex-row flex items-center space-x-2">
-                        <div><CodeOutline size="lg" /></div>
-                        <div>Code Interpreter Code</div>
-                      </div></span
-                    >
-                    <pre style="white-space: pre-wrap;" class="text-black">{content.code}</pre>
-                  </AccordionItem>
-                </Accordion>
-              </div>
+              {#if printingThread}
+                <div class="leading-6 w-full">
+                  <div class="flex-row flex items-center space-x-2 mb-2">
+                    <div><CodeOutline size="lg" /></div>
+                    <div>Code Interpreter Code</div>
+                  </div>
+                  <pre style="white-space: pre-wrap;" class="text-black">{content.code}</pre>
+                </div>
+              {:else}
+                <div class="leading-6 w-full">
+                  <Accordion flush>
+                    <AccordionItem>
+                      <span slot="header"
+                        ><div class="flex-row flex items-center space-x-2">
+                          <div><CodeOutline size="lg" /></div>
+                          <div>Code Interpreter Code</div>
+                        </div></span
+                      >
+                      <pre style="white-space: pre-wrap;" class="text-black">{content.code}</pre>
+                    </AccordionItem>
+                  </Accordion>
+                </div>
+              {/if}
             {:else if content.type === 'code_interpreter_call_placeholder'}
               <Card padding="md" class="max-w-full flex-row flex items-center justify-between">
                 <div class="flex-row flex items-center space-x-2">
@@ -1018,20 +1104,22 @@
                 </div></Card
               >
             {:else if content.type === 'file_search_call'}
-              <FileSearchCallItem {content} />
+              <FileSearchCallItem {content} forceOpen={printingThread} />
             {:else if content.type === 'web_search_call'}
-              <WebSearchCallItem {content} />
+              <WebSearchCallItem
+                {content}
+                forceOpen={printingThread}
+                forceEagerImages={printingThread}
+              />
             {:else if content.type === 'reasoning'}
-              <ReasoningCallItem {content} />
+              <ReasoningCallItem {content} forceOpen={printingThread} />
             {:else if content.type === 'code_output_image_file'}
-              <Accordion flush>
-                <AccordionItem>
-                  <span slot="header"
-                    ><div class="flex-row flex items-center space-x-2">
-                      <div><ImageSolid size="lg" /></div>
-                      <div>Output Image</div>
-                    </div></span
-                  >
+              {#if printingThread}
+                <div class="leading-6 w-full">
+                  <div class="flex-row flex items-center space-x-2 mb-2">
+                    <div><ImageSolid size="lg" /></div>
+                    <div>Output Image</div>
+                  </div>
                   <div class="leading-6 w-full">
                     <img
                       class="img-attachment m-auto"
@@ -1041,17 +1129,35 @@
                       alt="Attachment generated by the assistant"
                     />
                   </div>
-                </AccordionItem>
-              </Accordion>
+                </div>
+              {:else}
+                <Accordion flush>
+                  <AccordionItem>
+                    <span slot="header"
+                      ><div class="flex-row flex items-center space-x-2">
+                        <div><ImageSolid size="lg" /></div>
+                        <div>Output Image</div>
+                      </div></span
+                    >
+                    <div class="leading-6 w-full">
+                      <img
+                        class="img-attachment m-auto"
+                        src={api.fullPath(
+                          `/class/${classId}/thread/${threadId}/image/${content.image_file.file_id}`
+                        )}
+                        alt="Attachment generated by the assistant"
+                      />
+                    </div>
+                  </AccordionItem>
+                </Accordion>
+              {/if}
             {:else if content.type === 'code_output_image_url'}
-              <Accordion flush>
-                <AccordionItem>
-                  <span slot="header"
-                    ><div class="flex-row flex items-center space-x-2">
-                      <div><ImageSolid size="lg" /></div>
-                      <div>Output Image</div>
-                    </div></span
-                  >
+              {#if printingThread}
+                <div class="leading-6 w-full">
+                  <div class="flex-row flex items-center space-x-2 mb-2">
+                    <div><ImageSolid size="lg" /></div>
+                    <div>Output Image</div>
+                  </div>
                   <div class="leading-6 w-full">
                     <img
                       class="img-attachment m-auto"
@@ -1059,22 +1165,52 @@
                       alt="Attachment generated by the assistant"
                     />
                   </div>
-                </AccordionItem>
-              </Accordion>
+                </div>
+              {:else}
+                <Accordion flush>
+                  <AccordionItem>
+                    <span slot="header"
+                      ><div class="flex-row flex items-center space-x-2">
+                        <div><ImageSolid size="lg" /></div>
+                        <div>Output Image</div>
+                      </div></span
+                    >
+                    <div class="leading-6 w-full">
+                      <img
+                        class="img-attachment m-auto"
+                        src={content.url}
+                        alt="Attachment generated by the assistant"
+                      />
+                    </div>
+                  </AccordionItem>
+                </Accordion>
+              {/if}
             {:else if content.type === 'code_output_logs'}
-              <Accordion flush>
-                <AccordionItem>
-                  <span slot="header"
-                    ><div class="flex-row flex items-center space-x-2">
-                      <div><TerminalOutline size="lg" /></div>
-                      <div>Output Logs</div>
-                    </div></span
-                  >
+              {#if printingThread}
+                <div class="leading-6 w-full">
+                  <div class="flex-row flex items-center space-x-2 mb-2">
+                    <div><TerminalOutline size="lg" /></div>
+                    <div>Output Logs</div>
+                  </div>
                   <div class="leading-6 w-full">
                     <pre style="white-space: pre-wrap;" class="text-black">{content.logs}</pre>
                   </div>
-                </AccordionItem>
-              </Accordion>
+                </div>
+              {:else}
+                <Accordion flush>
+                  <AccordionItem>
+                    <span slot="header"
+                      ><div class="flex-row flex items-center space-x-2">
+                        <div><TerminalOutline size="lg" /></div>
+                        <div>Output Logs</div>
+                      </div></span
+                    >
+                    <div class="leading-6 w-full">
+                      <pre style="white-space: pre-wrap;" class="text-black">{content.logs}</pre>
+                    </div>
+                  </AccordionItem>
+                </Accordion>
+              {/if}
             {:else if content.type === 'image_file'}
               <div class="leading-6 w-full">
                 <img
@@ -1133,405 +1269,412 @@
     </div>
   </Modal>
   {#if !$loading}
-    {#if data.threadInteractionMode === 'voice' && !microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'voice'}
-      {#if $isFirefox}
-        <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
-          <div class="bg-blue-light-50 p-3 rounded-lg">
-            <MicrophoneSlashOutline size="xl" class="text-blue-dark-40" />
-          </div>
-          <div class="flex flex-col items-center w-2/5">
-            <p class="text-xl font-semibold text-blue-dark-40 text-center">
-              Voice mode not available on Firefox
-            </p>
-            <p class="text-md font-base text-gray-600 text-center">
-              We're working on bringing Voice mode to Firefox in a future update. For the best
-              experience, please use Safari, Chrome, or Edge in the meantime.
-            </p>
-          </div>
-        </div>
-      {:else}
-        <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
-          <div class="bg-blue-light-50 p-3 rounded-lg">
-            <MicrophoneOutline size="xl" class="text-blue-dark-40" />
-          </div>
-          <div class="flex flex-col items-center w-2/5">
-            <p class="text-xl font-semibold text-blue-dark-40 text-center">Voice mode</p>
-            <p class="text-md font-base text-gray-600 text-center">
-              To get started, enable microphone access.
-            </p>
-          </div>
-          <Button
-            class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all text-sm font-normal text-center"
-            type="button"
-            on:click={handleSessionSetup}
-            on:touchstart={handleSessionSetup}
-          >
-            Enable access
-          </Button>
-        </div>
-      {/if}
-    {:else if data.threadInteractionMode === 'voice' && microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'voice'}
-      {#if $isFirefox}
-        <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
-          <div class="bg-blue-light-50 p-3 rounded-lg">
-            <MicrophoneSlashOutline size="xl" class="text-blue-dark-40" />
-          </div>
-          <div class="flex flex-col items-center w-2/5">
-            <p class="text-xl font-semibold text-blue-dark-40 text-center">
-              Voice mode not available on Firefox
-            </p>
-            <p class="text-md font-base text-gray-600 text-center">
-              We're working on bringing Voice mode to Firefox in a future update. For the best
-              experience, please use Safari, Chrome, or Edge in the meantime.
-            </p>
-          </div>
-        </div>
-      {:else}
-        <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
-          <div class="bg-blue-light-50 p-3 rounded-lg">
-            <MicrophoneOutline size="xl" class="text-blue-dark-40" />
-          </div>
-          <div class="flex flex-col items-center w-2/5">
-            <p class="text-xl font-semibold text-blue-dark-40 text-center">Voice mode</p>
-            {#if endingAudioSession}
-              <p class="text-md font-base text-gray-600 text-center">
-                Finishing up your session...
+    <div class="print-hide">
+      {#if data.threadInteractionMode === 'voice' && !microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'voice'}
+        {#if $isFirefox}
+          <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+            <div class="bg-blue-light-50 p-3 rounded-lg">
+              <MicrophoneSlashOutline size="xl" class="text-blue-dark-40" />
+            </div>
+            <div class="flex flex-col items-center w-2/5">
+              <p class="text-xl font-semibold text-blue-dark-40 text-center">
+                Voice mode not available on Firefox
               </p>
-            {:else}
               <p class="text-md font-base text-gray-600 text-center">
-                When you're ready, start the session to begin recording.
+                We're working on bringing Voice mode to Firefox in a future update. For the best
+                experience, please use Safari, Chrome, or Edge in the meantime.
               </p>
+            </div>
+          </div>
+        {:else}
+          <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+            <div class="bg-blue-light-50 p-3 rounded-lg">
+              <MicrophoneOutline size="xl" class="text-blue-dark-40" />
+            </div>
+            <div class="flex flex-col items-center w-2/5">
+              <p class="text-xl font-semibold text-blue-dark-40 text-center">Voice mode</p>
+              <p class="text-md font-base text-gray-600 text-center">
+                To get started, enable microphone access.
+              </p>
+            </div>
+            <Button
+              class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all text-sm font-normal text-center"
+              type="button"
+              on:click={handleSessionSetup}
+              on:touchstart={handleSessionSetup}
+            >
+              Enable access
+            </Button>
+          </div>
+        {/if}
+      {:else if data.threadInteractionMode === 'voice' && microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'voice'}
+        {#if $isFirefox}
+          <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+            <div class="bg-blue-light-50 p-3 rounded-lg">
+              <MicrophoneSlashOutline size="xl" class="text-blue-dark-40" />
+            </div>
+            <div class="flex flex-col items-center w-2/5">
+              <p class="text-xl font-semibold text-blue-dark-40 text-center">
+                Voice mode not available on Firefox
+              </p>
+              <p class="text-md font-base text-gray-600 text-center">
+                We're working on bringing Voice mode to Firefox in a future update. For the best
+                experience, please use Safari, Chrome, or Edge in the meantime.
+              </p>
+            </div>
+          </div>
+        {:else}
+          <div class="w-full h-full flex flex-col gap-4 items-center justify-center">
+            <div class="bg-blue-light-50 p-3 rounded-lg">
+              <MicrophoneOutline size="xl" class="text-blue-dark-40" />
+            </div>
+            <div class="flex flex-col items-center w-2/5">
+              <p class="text-xl font-semibold text-blue-dark-40 text-center">Voice mode</p>
+              {#if endingAudioSession}
+                <p class="text-md font-base text-gray-600 text-center">
+                  Finishing up your session...
+                </p>
+              {:else}
+                <p class="text-md font-base text-gray-600 text-center">
+                  When you're ready, start the session to begin recording.
+                </p>
+              {/if}
+            </div>
+            {#if !isPrivate && displayUserInfo}
+              <div
+                class="flex flex-col gap-1 border border-red-600 px-3 py-2 rounded-2xl max-w-sm items-center justify-center text-center my-5"
+              >
+                <UsersSolid class="h-10 w-10 text-red-600" />
+                <span class="text-gray-700 text-sm font-normal"
+                  ><Button
+                    class="p-0 text-gray-700 text-sm underline font-normal"
+                    on:click={showModeratorsModal}
+                    on:touchstart={showModeratorsModal}>Moderators</Button
+                  > have enabled a setting for this thread only that allows them to see the thread,
+                  <span class="font-semibold"
+                    >your full name, and listen to a recording of your conversation</span
+                  >.</span
+                >
+              </div>
             {/if}
-          </div>
-          {#if !isPrivate && displayUserInfo}
-            <div
-              class="flex flex-col gap-1 border border-red-600 px-3 py-2 rounded-2xl max-w-sm items-center justify-center text-center my-5"
-            >
-              <UsersSolid class="h-10 w-10 text-red-600" />
-              <span class="text-gray-700 text-sm font-normal"
-                ><Button
-                  class="p-0 text-gray-700 text-sm underline font-normal"
-                  on:click={showModeratorsModal}
-                  on:touchstart={showModeratorsModal}>Moderators</Button
-                > have enabled a setting for this thread only that allows them to see the thread,
-                <span class="font-semibold"
-                  >your full name, and listen to a recording of your conversation</span
-                >.</span
+            <div class="w-full flex justify-center">
+              <div
+                class="bg-gray-100 flex flex-row gap-2 items-center justify-center shadow-xl rounded-xl px-2 py-1.5 w-fit h-fit"
               >
-            </div>
-          {/if}
-          <div class="w-full flex justify-center">
-            <div
-              class="bg-gray-100 flex flex-row gap-2 items-center justify-center shadow-xl rounded-xl px-2 py-1.5 w-fit h-fit"
-            >
-              {#if !audioSessionStarted}
-                <Button
-                  class="flex flex-row gap-1 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 transition-all text-sm font-normal text-center px-3 py-2"
-                  type="button"
-                  on:click={handleSessionStart}
-                  on:touchstart={handleSessionStart}
-                  disabled={!microphoneAccess}
-                >
-                  {#if startingAudioSession}
-                    <Spinner color="custom" customColor="fill-white" class="w-4 h-4 mr-1" />
-                  {:else}
-                    <PlaySolid class="pl-0 ml-0" size="md" />
-                  {/if}
-                  <span class="mr-1">Start session</span>
-                </Button>
-              {:else}
-                <Button
-                  class="flex flex-row gap-1 bg-amber-700 text-white rounded rounded-lg text-xs hover:bg-amber-800 transition-all text-sm font-normal text-center px-3 py-2"
-                  type="button"
-                  on:click={handleSessionEnd}
-                  on:touchstart={handleSessionEnd}
-                  disabled={!microphoneAccess}
-                >
-                  {#if endingAudioSession}
-                    <Spinner color="custom" customColor="fill-white" class="w-4 h-4 mr-1" />
-                  {:else}
-                    <StopSolid class="pl-0 ml-0" size="md" />
-                  {/if}
-                  <span class="mr-1">End session</span>
-                </Button>
-              {/if}
-              <Button
-                id="top-dd"
-                class="flex flex-row gap-2 min-w-56 max-w-56 hover:bg-gray-300 px-3 py-2 grow-0 shrink-0 transition-all text-sm font-normal justify-between text-gray-800 rounded-lg"
-                disabled={!microphoneAccess ||
-                  audioSessionStarted ||
-                  startingAudioSession ||
-                  endingAudioSession}
-              >
-                <div class="flex flex-row gap-2 justify-start w-5/6">
-                  <MicrophoneOutline class="w-5 h-5" />
-                  <span class="truncate"
-                    >{selectedAudioDevice?.label || 'Select microphone...'}</span
+                {#if !audioSessionStarted}
+                  <Button
+                    class="flex flex-row gap-1 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 transition-all text-sm font-normal text-center px-3 py-2"
+                    type="button"
+                    on:click={handleSessionStart}
+                    on:touchstart={handleSessionStart}
+                    disabled={!microphoneAccess}
                   >
-                </div>
-                <ChevronSortOutline class="ml-2 w-4 h-4" strokeWidth="2" /></Button
-              >
-              {#if audioDevices.length === 0}
-                <Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
-                  <DropdownItem class="flex flex-row gap-2 items-center">
-                    <span>No microphones available</span>
-                  </DropdownItem>
-                </Dropdown>
-              {:else}
-                <Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
-                  {#each audioDevices as audioDevice}
-                    <DropdownItem
-                      class="flex flex-row gap-2 items-center"
-                      on:click={() => {
-                        selectAudioDevice(audioDevice.deviceId);
-                        openMicrophoneModal = false;
-                      }}
-                    >
-                      {#if audioDevice.deviceId === selectedAudioDevice?.deviceId}
-                        <CheckOutline class="w-5 h-5" />
-                      {:else}
-                        <span class="w-5 h-5"></span>
-                      {/if}
-                      <span>{audioDevice.label}</span>
-                    </DropdownItem>
-                  {/each}
-                </Dropdown>
-              {/if}
-            </div>
-          </div>
-        </div>
-      {/if}
-    {/if}
-
-    <div class="w-full bg-gradient-to-t from-white to-transparent">
-      <div class="w-11/12 mx-auto relative flex flex-col">
-        <StatusErrors {assistantStatusUpdates} />
-        {#if data.threadInteractionMode == 'chat' && assistantInteractionMode === 'chat'}
-          {#if $waiting || $submitting}
-            <div
-              class="w-full flex justify-center absolute -top-10"
-              transition:blur={{ amount: 10 }}
-            >
-              <DoubleBounce color="#0ea5e9" size="30" />
-            </div>
-          {/if}
-          <ChatInput
-            mimeType={data.uploadInfo.mimeType}
-            maxSize={data.uploadInfo.private_file_max_size}
-            bind:attachments={currentMessageAttachments}
-            {threadManagerError}
-            visionAcceptedFiles={allowUserImageUploads ? visionAcceptedFiles : null}
-            fileSearchAcceptedFiles={allowUserFileUploads ? fileSearchAcceptedFiles : null}
-            codeInterpreterAcceptedFiles={allowUserFileUploads
-              ? codeInterpreterAcceptedFiles
-              : null}
-            {visionSupportOverride}
-            {useImageDescriptions}
-            {assistantDeleted}
-            {canViewAssistant}
-            canSubmit={canSubmit && !assistantDeleted && canViewAssistant}
-            disabled={!canSubmit || assistantDeleted || !!$navigating || !canViewAssistant}
-            loading={$submitting || $waiting}
-            {fileSearchAttachmentCount}
-            {codeInterpreterAttachmentCount}
-            upload={handleUpload}
-            remove={handleRemove}
-            threadVersion={$version}
-            assistantVersion={resolvedAssistantVersion}
-            on:submit={handleSubmit}
-            on:dismissError={handleDismissError}
-            on:startNewChat={startNewChat}
-          />
-        {:else if data.threadInteractionMode === 'voice' && ($messages.length > 0 || assistantInteractionMode === 'chat')}
-          {#if threadRecording && $messages.length > 0 && assistantInteractionMode === 'voice'}
-            <div
-              class="border relative flex gap-2 flex-wrap z-10 px-3.5 text-blue-dark-40 border-gray-500 bg-gray-100 -mb-3 rounded-t-2xl border-b-0 pb-5 pt-2.5"
-            >
-              <div class="w-full">
-                {#if showPlayer && audioUrl}
-                  <AudioPlayer bind:src={audioUrl} duration={threadRecording.duration} />
+                    {#if startingAudioSession}
+                      <Spinner color="custom" customColor="fill-white" class="w-4 h-4 mr-1" />
+                    {:else}
+                      <PlaySolid class="pl-0 ml-0" size="md" />
+                    {/if}
+                    <span class="mr-1">Start session</span>
+                  </Button>
                 {:else}
-                  <div class="flex w-full flex-col items-center md:flex-row gap-2">
-                    <div class="text-danger-000 flex flex-row items-center gap-2 md:w-full">
-                      <div class="flex flex-col w-fit">
-                        <div class="text-xs uppercase font-semibold">Recording available</div>
-                        <div class="text-sm">
-                          You can listen to a recording of this conversation.
-                        </div>
-                      </div>
-                    </div>
-                    <Button
-                      class="text-white bg-gradient-to-b from-blue-dark-30 to-blue-dark-40 py-1 px-2 rounded-lg w-fit shrink-0 hover:from-blue-dark-40 hover:to-blue-dark-50 transition-all text-xs font-normal"
-                      on:click={fetchRecording}
-                    >
-                      Load Recording
-                    </Button>
-                  </div>
+                  <Button
+                    class="flex flex-row gap-1 bg-amber-700 text-white rounded rounded-lg text-xs hover:bg-amber-800 transition-all text-sm font-normal text-center px-3 py-2"
+                    type="button"
+                    on:click={handleSessionEnd}
+                    on:touchstart={handleSessionEnd}
+                    disabled={!microphoneAccess}
+                  >
+                    {#if endingAudioSession}
+                      <Spinner color="custom" customColor="fill-white" class="w-4 h-4 mr-1" />
+                    {:else}
+                      <StopSolid class="pl-0 ml-0" size="md" />
+                    {/if}
+                    <span class="mr-1">End session</span>
+                  </Button>
                 {/if}
-              </div>
-            </div>
-          {/if}
-
-          <div
-            class="flex flex-col bg-seasalt gap-2 border border-melon pl-4 py-2.5 pr-3 items-stretch transition-all duration-200 relative shadow-[0_0.25rem_1.25rem_rgba(254,184,175,0.15)] focus-within:shadow-[0_0.25rem_1.25rem_rgba(253,148,134,0.25)] hover:border-coral-pink focus-within:border-coral-pink z-20 rounded-2xl"
-          >
-            <div class="flex flex-row gap-2">
-              <MicrophoneOutline class="w-6 h-6 text-gray-700" />
-              <div class="flex flex-col">
-                <span class="font-semibold text-md text-gray-700">Voice Mode Session</span><span
-                  class="font-normal text-md text-gray-700"
-                  >This conversation was completed in Voice mode and is read-only. To continue
-                  chatting, start a new conversation.</span
+                <Button
+                  id="top-dd"
+                  class="flex flex-row gap-2 min-w-56 max-w-56 hover:bg-gray-300 px-3 py-2 grow-0 shrink-0 transition-all text-sm font-normal justify-between text-gray-800 rounded-lg"
+                  disabled={!microphoneAccess ||
+                    audioSessionStarted ||
+                    startingAudioSession ||
+                    endingAudioSession}
                 >
-              </div>
-            </div>
-          </div>
-        {:else if data.threadInteractionMode === 'chat' && assistantInteractionMode === 'voice'}
-          <div
-            class="flex flex-col bg-seasalt gap-2 border border-melon pl-4 py-2.5 pr-3 items-stretch transition-all duration-200 relative shadow-[0_0.25rem_1.25rem_rgba(254,184,175,0.15)] focus-within:shadow-[0_0.25rem_1.25rem_rgba(253,148,134,0.25)] hover:border-coral-pink focus-within:border-coral-pink z-20 rounded-2xl"
-          >
-            <div class="flex flex-row gap-2">
-              <MicrophoneOutline class="w-6 h-6 text-gray-700" />
-              <div class="flex flex-col">
-                <span class="font-semibold text-md text-gray-700">Assistant in Voice mode</span
-                ><span class="font-normal text-md text-gray-700"
-                  >This assistant uses audio. Start a new session to keep the conversation going.</span
+                  <div class="flex flex-row gap-2 justify-start w-5/6">
+                    <MicrophoneOutline class="w-5 h-5" />
+                    <span class="truncate"
+                      >{selectedAudioDevice?.label || 'Select microphone...'}</span
+                    >
+                  </div>
+                  <ChevronSortOutline class="ml-2 w-4 h-4" strokeWidth="2" /></Button
                 >
+                {#if audioDevices.length === 0}
+                  <Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
+                    <DropdownItem class="flex flex-row gap-2 items-center">
+                      <span>No microphones available</span>
+                    </DropdownItem>
+                  </Dropdown>
+                {:else}
+                  <Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
+                    {#each audioDevices as audioDevice}
+                      <DropdownItem
+                        class="flex flex-row gap-2 items-center"
+                        on:click={() => {
+                          selectAudioDevice(audioDevice.deviceId);
+                          openMicrophoneModal = false;
+                        }}
+                      >
+                        {#if audioDevice.deviceId === selectedAudioDevice?.deviceId}
+                          <CheckOutline class="w-5 h-5" />
+                        {:else}
+                          <span class="w-5 h-5"></span>
+                        {/if}
+                        <span>{audioDevice.label}</span>
+                      </DropdownItem>
+                    {/each}
+                  </Dropdown>
+                {/if}
               </div>
             </div>
           </div>
         {/if}
-        <div class="flex gap-2 items-center w-full text-sm justify-between grow my-3">
-          <div class="flex gap-2 grow shrink min-w-0">
-            {#if !$published && isPrivate && !displayUserInfo}
-              <LockSolid size="sm" class="text-orange" />
-              <Span class="text-gray-600 text-xs font-normal"
-                ><Button
-                  class="p-0 text-gray-600 text-xs underline font-normal"
-                  on:click={showModeratorsModal}
-                  on:touchstart={showModeratorsModal}>Moderators</Button
-                > <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
-                  more information, please review <a
-                    href="/privacy-policy"
-                    rel="noopener noreferrer"
-                    class="underline">PingPong's privacy statement</a
-                  >.
-                {/if}Assistants can make mistakes. Check important info.</Span
+      {/if}
+
+      <div class="w-full bg-gradient-to-t from-white to-transparent">
+        <div class="w-11/12 mx-auto relative flex flex-col">
+          <StatusErrors {assistantStatusUpdates} />
+          {#if data.threadInteractionMode == 'chat' && assistantInteractionMode === 'chat'}
+            {#if $waiting || $submitting}
+              <div
+                class="w-full flex justify-center absolute -top-10"
+                transition:blur={{ amount: 10 }}
               >
-            {:else if !$published}
-              {#if displayUserInfo}
-                {#if data.threadInteractionMode === 'voice'}
-                  <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
-                    <UsersSolid size="sm" class="text-orange pt-0" />
-                    <Span class="text-gray-600 text-xs font-normal"
-                      ><Button
-                        class="p-0 text-gray-600 text-xs underline font-normal"
-                        on:click={showModeratorsModal}
-                        on:touchstart={showModeratorsModal}>Moderators</Button
-                      > can see this thread,
-                      <span class="font-semibold"
-                        >{isCurrentUser ? 'your' : "the user's"} full name, and listen to a recording
-                        of {isCurrentUser ? 'your' : 'the'} conversation</span
-                      >. For more information, please review
-                      <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
-                        >PingPong's privacy statement</a
-                      >. Assistants can make mistakes. Check important info.</Span
-                    >
-                  </div>
-                {:else}
-                  <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
-                    <UsersSolid size="sm" class="text-orange pt-0" />
-                    <Span class="text-gray-600 text-xs font-normal"
-                      ><Button
-                        class="p-0 text-gray-600 text-xs underline font-normal"
-                        on:click={showModeratorsModal}
-                        on:touchstart={showModeratorsModal}>Moderators</Button
-                      > can see this thread and
-                      <span class="font-semibold"
-                        >{isCurrentUser ? 'your' : "the user's"} full name</span
-                      >. For more information, please review
-                      <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
-                        >PingPong's privacy statement</a
-                      >. Assistants can make mistakes. Check important info.</Span
-                    >
-                  </div>
-                {/if}
-              {:else}
-                <EyeSlashOutline size="sm" class="text-orange" />
+                <DoubleBounce color="#0ea5e9" size="30" />
+              </div>
+            {/if}
+            <ChatInput
+              mimeType={data.uploadInfo.mimeType}
+              maxSize={data.uploadInfo.private_file_max_size}
+              bind:attachments={currentMessageAttachments}
+              {threadManagerError}
+              visionAcceptedFiles={allowUserImageUploads ? visionAcceptedFiles : null}
+              fileSearchAcceptedFiles={allowUserFileUploads ? fileSearchAcceptedFiles : null}
+              codeInterpreterAcceptedFiles={allowUserFileUploads
+                ? codeInterpreterAcceptedFiles
+                : null}
+              {visionSupportOverride}
+              {useImageDescriptions}
+              {assistantDeleted}
+              {canViewAssistant}
+              canSubmit={canSubmit && !assistantDeleted && canViewAssistant}
+              disabled={!canSubmit || assistantDeleted || !!$navigating || !canViewAssistant}
+              loading={$submitting || $waiting}
+              {fileSearchAttachmentCount}
+              {codeInterpreterAttachmentCount}
+              upload={handleUpload}
+              remove={handleRemove}
+              threadVersion={$version}
+              assistantVersion={resolvedAssistantVersion}
+              on:submit={handleSubmit}
+              on:dismissError={handleDismissError}
+              on:startNewChat={startNewChat}
+            />
+          {:else if data.threadInteractionMode === 'voice' && ($messages.length > 0 || assistantInteractionMode === 'chat')}
+            {#if threadRecording && $messages.length > 0 && assistantInteractionMode === 'voice'}
+              <div
+                class="border relative flex gap-2 flex-wrap z-10 px-3.5 text-blue-dark-40 border-gray-500 bg-gray-100 -mb-3 rounded-t-2xl border-b-0 pb-5 pt-2.5"
+              >
+                <div class="w-full">
+                  {#if showPlayer && audioUrl}
+                    <AudioPlayer bind:src={audioUrl} duration={threadRecording.duration} />
+                  {:else}
+                    <div class="flex w-full flex-col items-center md:flex-row gap-2">
+                      <div class="text-danger-000 flex flex-row items-center gap-2 md:w-full">
+                        <div class="flex flex-col w-fit">
+                          <div class="text-xs uppercase font-semibold">Recording available</div>
+                          <div class="text-sm">
+                            You can listen to a recording of this conversation.
+                          </div>
+                        </div>
+                      </div>
+                      <Button
+                        class="text-white bg-gradient-to-b from-blue-dark-30 to-blue-dark-40 py-1 px-2 rounded-lg w-fit shrink-0 hover:from-blue-dark-40 hover:to-blue-dark-50 transition-all text-xs font-normal"
+                        on:click={fetchRecording}
+                      >
+                        Load Recording
+                      </Button>
+                    </div>
+                  {/if}
+                </div>
+              </div>
+            {/if}
+
+            <div
+              class="flex flex-col bg-seasalt gap-2 border border-melon pl-4 py-2.5 pr-3 items-stretch transition-all duration-200 relative shadow-[0_0.25rem_1.25rem_rgba(254,184,175,0.15)] focus-within:shadow-[0_0.25rem_1.25rem_rgba(253,148,134,0.25)] hover:border-coral-pink focus-within:border-coral-pink z-20 rounded-2xl"
+            >
+              <div class="flex flex-row gap-2">
+                <MicrophoneOutline class="w-6 h-6 text-gray-700" />
+                <div class="flex flex-col">
+                  <span class="font-semibold text-md text-gray-700">Voice Mode Session</span><span
+                    class="font-normal text-md text-gray-700"
+                    >This conversation was completed in Voice mode and is read-only. To continue
+                    chatting, start a new conversation.</span
+                  >
+                </div>
+              </div>
+            </div>
+          {:else if data.threadInteractionMode === 'chat' && assistantInteractionMode === 'voice'}
+            <div
+              class="flex flex-col bg-seasalt gap-2 border border-melon pl-4 py-2.5 pr-3 items-stretch transition-all duration-200 relative shadow-[0_0.25rem_1.25rem_rgba(254,184,175,0.15)] focus-within:shadow-[0_0.25rem_1.25rem_rgba(253,148,134,0.25)] hover:border-coral-pink focus-within:border-coral-pink z-20 rounded-2xl"
+            >
+              <div class="flex flex-row gap-2">
+                <MicrophoneOutline class="w-6 h-6 text-gray-700" />
+                <div class="flex flex-col">
+                  <span class="font-semibold text-md text-gray-700">Assistant in Voice mode</span
+                  ><span class="font-normal text-md text-gray-700"
+                    >This assistant uses audio. Start a new session to keep the conversation going.</span
+                  >
+                </div>
+              </div>
+            </div>
+          {/if}
+          <div class="flex gap-2 items-center w-full text-sm justify-between grow my-3">
+            <div class="flex gap-2 grow shrink min-w-0">
+              {#if !$published && isPrivate && !displayUserInfo}
+                <LockSolid size="sm" class="text-orange" />
                 <Span class="text-gray-600 text-xs font-normal"
                   ><Button
                     class="p-0 text-gray-600 text-xs underline font-normal"
                     on:click={showModeratorsModal}
                     on:touchstart={showModeratorsModal}>Moderators</Button
-                  > can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
-                  {#if isCurrentUser}For more information, please review <a
+                  > <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
+                    more information, please review <a
                       href="/privacy-policy"
                       rel="noopener noreferrer"
                       class="underline">PingPong's privacy statement</a
                     >.
                   {/if}Assistants can make mistakes. Check important info.</Span
                 >
-              {/if}
-            {:else}
-              <EyeOutline size="sm" class="text-orange" />
-              <Span class="text-gray-600 text-xs font-normal"
-                >Everyone in this group can see this thread but not {isCurrentUser
-                  ? 'your'
-                  : "the user's"} name. {#if displayUserInfo}{#if data.threadInteractionMode === 'voice'}<Button
+              {:else if !$published}
+                {#if displayUserInfo}
+                  {#if data.threadInteractionMode === 'voice'}
+                    <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
+                      <UsersSolid size="sm" class="text-orange pt-0" />
+                      <Span class="text-gray-600 text-xs font-normal"
+                        ><Button
+                          class="p-0 text-gray-600 text-xs underline font-normal"
+                          on:click={showModeratorsModal}
+                          on:touchstart={showModeratorsModal}>Moderators</Button
+                        > can see this thread,
+                        <span class="font-semibold"
+                          >{isCurrentUser ? 'your' : "the user's"} full name, and listen to a recording
+                          of {isCurrentUser ? 'your' : 'the'} conversation</span
+                        >. For more information, please review
+                        <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
+                          >PingPong's privacy statement</a
+                        >. Assistants can make mistakes. Check important info.</Span
+                      >
+                    </div>
+                  {:else}
+                    <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
+                      <UsersSolid size="sm" class="text-orange pt-0" />
+                      <Span class="text-gray-600 text-xs font-normal"
+                        ><Button
+                          class="p-0 text-gray-600 text-xs underline font-normal"
+                          on:click={showModeratorsModal}
+                          on:touchstart={showModeratorsModal}>Moderators</Button
+                        > can see this thread and
+                        <span class="font-semibold"
+                          >{isCurrentUser ? 'your' : "the user's"} full name</span
+                        >. For more information, please review
+                        <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
+                          >PingPong's privacy statement</a
+                        >. Assistants can make mistakes. Check important info.</Span
+                      >
+                    </div>
+                  {/if}
+                {:else}
+                  <EyeSlashOutline size="sm" class="text-orange" />
+                  <Span class="text-gray-600 text-xs font-normal"
+                    ><Button
                       class="p-0 text-gray-600 text-xs underline font-normal"
                       on:click={showModeratorsModal}
                       on:touchstart={showModeratorsModal}>Moderators</Button
-                    > can see this thread,
-                    <span class="font-semibold"
-                      >{isCurrentUser ? 'your' : "the user's"} full name, and listen to a recording of
-                      {isCurrentUser ? 'your' : 'the'} conversation</span
-                    >.{:else}<Button
-                      class="p-0 text-gray-600 text-xs underline font-normal"
-                      on:click={showModeratorsModal}
-                      on:touchstart={showModeratorsModal}>Moderators</Button
-                    > can see this thread and
-                    <span class="font-semibold"
-                      >{isCurrentUser ? 'your' : "the user's"} full name</span
-                    >.{/if}{/if} Assistants can make mistakes. Check important info.</Span
-              >
-            {/if}
-          </div>
-          <button
-            on:click|preventDefault={handleCopyLinkClick}
-            title="Copy link"
-            aria-label="Copy link"
-            ><LinkOutline
-              class="dark:text-white inline-block w-5 h-6 text-blue-dark-30 hover:text-blue-dark-50 active:animate-ping font-medium"
-              size="lg"
-            /></button
-          >
-          {#if !(data.threadInteractionMode === 'voice' && $messages.length === 0 && assistantInteractionMode === 'voice')}
-            <div class="shrink-0 grow-0 h-auto">
-              <CogOutline class="dark:text-white cursor-pointer w-6 h-4 font-light" size="lg" />
-              <Dropdown bind:open={settingsOpen}>
-                {#if $threadInstructions}
-                  <DropdownItem
-                    on:click={() => ((showAssistantPrompt = true), (settingsOpen = false))}
+                    > can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
+                    {#if isCurrentUser}For more information, please review <a
+                        href="/privacy-policy"
+                        rel="noopener noreferrer"
+                        class="underline">PingPong's privacy statement</a
+                      >.
+                    {/if}Assistants can make mistakes. Check important info.</Span
                   >
-                    <span>Prompt</span>
+                {/if}
+              {:else}
+                <EyeOutline size="sm" class="text-orange" />
+                <Span class="text-gray-600 text-xs font-normal"
+                  >Everyone in this group can see this thread but not {isCurrentUser
+                    ? 'your'
+                    : "the user's"} name. {#if displayUserInfo}{#if data.threadInteractionMode === 'voice'}<Button
+                        class="p-0 text-gray-600 text-xs underline font-normal"
+                        on:click={showModeratorsModal}
+                        on:touchstart={showModeratorsModal}>Moderators</Button
+                      > can see this thread,
+                      <span class="font-semibold"
+                        >{isCurrentUser ? 'your' : "the user's"} full name, and listen to a recording
+                        of
+                        {isCurrentUser ? 'your' : 'the'} conversation</span
+                      >.{:else}<Button
+                        class="p-0 text-gray-600 text-xs underline font-normal"
+                        on:click={showModeratorsModal}
+                        on:touchstart={showModeratorsModal}>Moderators</Button
+                      > can see this thread and
+                      <span class="font-semibold"
+                        >{isCurrentUser ? 'your' : "the user's"} full name</span
+                      >.{/if}{/if} Assistants can make mistakes. Check important info.</Span
+                >
+              {/if}
+            </div>
+            <button
+              on:click|preventDefault={handleCopyLinkClick}
+              title="Copy link"
+              aria-label="Copy link"
+              ><LinkOutline
+                class="dark:text-white inline-block w-5 h-6 text-blue-dark-30 hover:text-blue-dark-50 active:animate-ping font-medium"
+                size="lg"
+              /></button
+            >
+            {#if !(data.threadInteractionMode === 'voice' && $messages.length === 0 && assistantInteractionMode === 'voice')}
+              <div class="shrink-0 grow-0 h-auto">
+                <CogOutline class="dark:text-white cursor-pointer w-6 h-4 font-light" size="lg" />
+                <Dropdown bind:open={settingsOpen}>
+                  {#if $threadInstructions}
+                    <DropdownItem
+                      on:click={() => ((showAssistantPrompt = true), (settingsOpen = false))}
+                    >
+                      <span>Prompt</span>
+                    </DropdownItem>
+                    <DropdownDivider />
+                  {/if}
+                  <DropdownItem on:click={handlePrintThread} disabled={printingThread}>
+                    <span class:text-gray-300={printingThread}>Print</span>
                   </DropdownItem>
                   <DropdownDivider />
-                {/if}
-                <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
-                  <span class:text-gray-300={!canPublishThread}>
-                    {#if $published}
-                      Unpublish
-                    {:else}
-                      Publish
-                    {/if}
-                  </span>
-                </DropdownItem>
-                <DropdownItem on:click={deleteThread} disabled={!canDeleteThread}>
-                  <span class:text-gray-300={!canDeleteThread}>Delete</span>
-                </DropdownItem>
-              </Dropdown>
-            </div>
-          {/if}
+                  <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
+                    <span class:text-gray-300={!canPublishThread}>
+                      {#if $published}
+                        Unpublish
+                      {:else}
+                        Publish
+                      {/if}
+                    </span>
+                  </DropdownItem>
+                  <DropdownItem on:click={deleteThread} disabled={!canDeleteThread}>
+                    <span class:text-gray-300={!canDeleteThread}>Delete</span>
+                  </DropdownItem>
+                </Dropdown>
+              </div>
+            {/if}
+          </div>
         </div>
       </div>
     </div>
@@ -1541,5 +1684,76 @@
 <style lang="css">
   .img-attachment {
     max-width: min(95%, 700px);
+  }
+
+  .print-only {
+    display: none;
+  }
+
+  @media print {
+    .print-only {
+      display: block;
+    }
+
+    .print-header {
+      border: 1px solid #e5e7eb;
+      background: #ffffff;
+      padding: 16px;
+      border-radius: 12px;
+      font-family: inherit;
+      color: #0f172a;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+      margin-bottom: 18px;
+    }
+
+    .print-header__brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .print-header__brand-text {
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .print-header__meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 8px 14px;
+      margin-bottom: 10px;
+      font-size: 0.95rem;
+    }
+
+    .print-header__meta .label {
+      display: inline-block;
+      min-width: 60px;
+      font-weight: 600;
+      color: #0f172a;
+      margin-right: 6px;
+    }
+
+    .print-header__link {
+      font-size: 0.84rem;
+      color: #111827;
+      word-break: break-all;
+      padding-top: 6px;
+      border-top: 1px dashed #d1d5db;
+      margin-top: 6px;
+    }
+
+    /* Hide chat input and footer during print */
+    .print-hide {
+      display: none !important;
+    }
+
+    /* Make messages container full height and overflow visible */
+    .messages-container {
+      overflow: visible !important;
+      height: auto !important;
+      max-height: none !important;
+    }
   }
 </style>

@@ -5,8 +5,21 @@
   import Markdown from './Markdown.svelte';
 
   export let content: ReasoningCallItem;
+  export let forceOpen = false;
 
   let open = false;
+  let previousOpen: boolean | null = null;
+  $: {
+    if (forceOpen) {
+      if (previousOpen === null) {
+        previousOpen = open;
+      }
+      open = true;
+    } else if (previousOpen !== null) {
+      open = previousOpen;
+      previousOpen = null;
+    }
+  }
 
   $: hasSummary = (content.summary && content.summary.length > 0) || false;
 
