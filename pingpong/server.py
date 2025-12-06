@@ -210,6 +210,19 @@ def allowed_assistant_message_ids(
     return allowed_ids
 
 
+async def _direct_institution_admin_ids(authz: Any, inst_id: int) -> list[int]:
+    tuples = await authz.read_tuples("admin", f"institution:{inst_id}", user=None)
+    admin_ids: list[int] = []
+    for user, _, _ in tuples:
+        if not user or not user.startswith("user:"):
+            continue
+        try:
+            admin_ids.append(int(user.split(":")[1]))
+        except (IndexError, ValueError):
+            continue
+    return admin_ids
+
+
 if config.development:
     v1 = FastAPI()
 else:
@@ -941,21 +954,9 @@ async def get_institution_with_admins(institution_id: int, request: Request):
         request.state.authz.root, "admin", "user"
     )
 
-    async def _direct_institution_admin_ids(inst_id: int) -> list[int]:
-        tuples = await request.state.authz.read_tuples(
-            "admin", f"institution:{inst_id}", user=None
-        )
-        admin_ids = []
-        for user, _, _ in tuples:
-            if not user or not user.startswith("user:"):
-                continue
-            try:
-                admin_ids.append(int(user.split(":")[1]))
-            except (IndexError, ValueError):
-                continue
-        return admin_ids
-
-    inst_admin_ids = await _direct_institution_admin_ids(institution_id)
+    inst_admin_ids = await _direct_institution_admin_ids(
+        request.state.authz, institution_id
+    )
     all_ids = set(root_admin_ids) | set(inst_admin_ids)
     users_by_id: dict[int, models.User] = {}
     if all_ids:
@@ -998,21 +999,7 @@ async def copy_institution(
         raise HTTPException(status_code=404, detail="Institution not found")
 
     # Gather direct admins (exclude inherited root) from source.
-    async def _direct_institution_admin_ids(inst_id: int) -> list[int]:
-        tuples = await request.state.authz.read_tuples(
-            "admin", f"institution:{inst_id}", user=None
-        )
-        admin_ids = []
-        for user, _, _ in tuples:
-            if not user or not user.startswith("user:"):
-                continue
-            try:
-                admin_ids.append(int(user.split(":")[1]))
-            except (IndexError, ValueError):
-                continue
-        return admin_ids
-
-    admin_ids = await _direct_institution_admin_ids(institution_id)
+    admin_ids = await _direct_institution_admin_ids(request.state.authz, institution_id)
 
     # Create the new institution.
     new_inst = await models.Institution.create(
