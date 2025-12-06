@@ -1395,6 +1395,24 @@ class Institution(Base):
         stmt = select(Institution).where(Institution.id == int(id_))
         return await session.scalar(stmt)
 
+    @classmethod
+    async def get_all(cls, session: AsyncSession) -> List["Institution"]:
+        stmt = select(Institution).order_by(Institution.name.asc())
+        result = await session.execute(stmt)
+        return [row.Institution for row in result]
+
+    @classmethod
+    async def update(
+        cls, session: AsyncSession, id_: int, data: schemas.UpdateInstitution
+    ) -> "Institution":
+        payload = data.model_dump(exclude_none=True)
+        if payload:
+            stmt = (
+                update(Institution).where(Institution.id == int(id_)).values(**payload)
+            )
+            await session.execute(stmt)
+        return await cls.get_by_id(session, id_)
+
 
 code_interpreter_file_assistant_association = Table(
     "code_interpreter_files_assistants",

@@ -123,6 +123,17 @@ class OpenFgaAuthzClient(AuthzClient):
 
         return client_tuples
 
+    async def read_tuples(
+        self, relation: str, obj: str, user: str | None = None
+    ) -> List[Relation]:
+        key = ReadRequestTupleKey(
+            user=user,
+            relation=relation,
+            object=obj,
+        )
+        tuples = await self.read(key)
+        return [(t.user, t.relation, t.object) for t in tuples]
+
     async def expand(
         self, entity: str, relation: str, max_depth: int = 1
     ) -> List[RelatedObject]:

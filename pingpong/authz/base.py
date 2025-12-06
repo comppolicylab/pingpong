@@ -14,28 +14,38 @@ class RelatedObject:
 
 class AuthzClient(Protocol):
     @abstractproperty
-    def root(self) -> str: ...
+    def root(self) -> str:
+        pass
 
     @abstractmethod
-    async def check(self, checks: List[Relation]) -> List[bool]: ...
+    async def check(self, checks: List[Relation]) -> List[bool]:
+        pass
 
     @abstractmethod
-    async def list(self, entity: str, relation: str, type_: str) -> List[int]: ...
+    async def list(self, entity: str, relation: str, type_: str) -> List[int]:
+        pass
 
     @abstractmethod
-    async def list_entities(
-        self, target: str, relation: str, type_: str
-    ) -> List[int]: ...
+    async def list_entities(self, target: str, relation: str, type_: str) -> List[int]:
+        pass
 
     @abstractmethod
     async def list_entities_permissive(
         self, target: str, relation: str, type_: str
-    ) -> List[int | str]: ...
+    ) -> List[int | str]:
+        pass
 
     @abstractmethod
     async def expand(
         self, entity: str, relation: str, max_depth: int = 1
-    ) -> List[RelatedObject]: ...
+    ) -> List[RelatedObject]:
+        pass
+
+    @abstractmethod
+    async def read_tuples(
+        self, relation: str, obj: str, user: str | None = None
+    ) -> List[Relation]:
+        pass
 
     async def test(self, entity: str, relation: str, target: str) -> bool:
         results = await self.check([(entity, relation, target)])
@@ -50,21 +60,26 @@ class AuthzClient(Protocol):
     @abstractmethod
     async def write(
         self, grant: List[Relation] | None = None, revoke: List[Relation] | None = None
-    ): ...
+    ):
+        pass
 
     @abstractmethod
     async def write_safe(
         self, grant: List[Relation] | None = None, revoke: List[Relation] | None = None
-    ): ...
+    ):
+        pass
 
     @abstractmethod
-    async def create_root_user(self, user_id: int): ...
+    async def create_root_user(self, user_id: int):
+        pass
 
     @abstractmethod
-    async def connect(self): ...
+    async def connect(self):
+        pass
 
     @abstractmethod
-    async def close(self): ...
+    async def close(self):
+        pass
 
     async def __aenter__(self):
         await self.connect()
@@ -76,7 +91,9 @@ class AuthzClient(Protocol):
 
 class AuthzDriver(Protocol):
     @abstractmethod
-    async def init(self): ...
+    async def init(self):
+        pass
 
     @abstractmethod
-    def get_client(self) -> AuthzClient: ...
+    def get_client(self) -> AuthzClient:
+        pass

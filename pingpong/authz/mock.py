@@ -133,17 +133,21 @@ class _MockFgaAuthzServer:
         relation = tuple_key.get("relation")
         obj = tuple_key.get("object")
 
-        if not user or not relation or not obj:
-            raise ValueError("Missing user, relation or object")
+        if not relation or not obj:
+            raise ValueError("Missing relation or object")
 
         tuples = []
-        if self._has_grant((user, relation, obj)):
+        for u, rel, o in self._all_grants:
+            if rel != relation or o != obj:
+                continue
+            if user and u != user:
+                continue
             tuples.append(
                 {
                     "key": {
-                        "user": user,
-                        "relation": relation,
-                        "object": obj,
+                        "user": u,
+                        "relation": rel,
+                        "object": o,
                     }
                 }
             )
