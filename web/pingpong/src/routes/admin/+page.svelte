@@ -122,6 +122,12 @@
           class="bg-orange text-white rounded-full hover:bg-orange-dark"
           href="/admin/providers">Manage External Login Providers</Button
         >
+        {#if data.admin?.isRootAdmin}
+          <Button
+            class="bg-orange text-white rounded-full hover:bg-orange-dark"
+            href="/admin/institutions">Manage Institutions</Button
+          >
+        {/if}
         <Button class="bg-orange text-white rounded-full hover:bg-orange-dark" href="/admin/terms"
           >Manage User Agreements</Button
         >

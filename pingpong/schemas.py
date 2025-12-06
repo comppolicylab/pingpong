@@ -937,6 +937,14 @@ class CreateInstitution(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
 
 
+class UpdateInstitution(BaseModel):
+    name: str | None = Field(None, min_length=3, max_length=100)
+
+
+class CopyInstitution(BaseModel):
+    name: str = Field(..., min_length=3, max_length=100)
+
+
 class Institution(BaseModel):
     id: int
     name: str
@@ -958,6 +966,21 @@ class Institutions(BaseModel):
 
 class AddInstitutionAdminRequest(BaseModel):
     email: str = Field(..., min_length=3, max_length=100)
+
+
+class InstitutionAdmin(BaseModel, UserNameMixin):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+class InstitutionWithAdmins(Institution):
+    admins: list[InstitutionAdmin] = Field(default_factory=list)
+    root_admins: list[InstitutionAdmin] = Field(default_factory=list)
+
+    class Config:
+        from_attributes = True
 
 
 class InstitutionAdminResponse(BaseModel):

@@ -351,6 +351,21 @@ export type Institution = {
   updated: string | null;
 };
 
+export type InstitutionAdmin = {
+  id: number;
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  display_name: string | null;
+  name?: string | null;
+  has_real_name?: boolean;
+};
+
+export type InstitutionWithAdmins = Institution & {
+  admins: InstitutionAdmin[];
+  root_admins: InstitutionAdmin[];
+};
+
 /**
  * Overall status of the session.
  */
@@ -636,10 +651,20 @@ export type Institutions = {
   institutions: Institution[];
 };
 
+export type InstitutionWithAdminsResponse = InstitutionWithAdmins;
+
 /**
  * Parameters for a new institution.
  */
 export type CreateInstitutionRequest = {
+  name: string;
+};
+
+export type UpdateInstitutionRequest = {
+  name?: string;
+};
+
+export type CopyInstitutionRequest = {
   name: string;
 };
 
@@ -673,6 +698,49 @@ export const getInstitutions = async (f: Fetcher, role?: string) => {
  */
 export const getInstitution = async (f: Fetcher, id: string) => {
   return await GET<never, Institution>(f, `institution/${id}`);
+};
+
+export const getInstitutionsWithAdmins = async (f: Fetcher) => {
+  return await GET<never, Institutions>(f, 'admin/institutions');
+};
+
+export const getInstitutionWithAdmins = async (f: Fetcher, id: number | string) => {
+  return await GET<never, InstitutionWithAdminsResponse>(f, `admin/institutions/${id}`);
+};
+
+export const copyInstitution = async (f: Fetcher, id: number, data: CopyInstitutionRequest) => {
+  return await POST<CopyInstitutionRequest, Institution>(f, `admin/institutions/${id}/copy`, data);
+};
+
+export const updateInstitution = async (f: Fetcher, id: number, data: UpdateInstitutionRequest) => {
+  return await PATCH<UpdateInstitutionRequest, Institution>(f, `institution/${id}`, data);
+};
+
+export type AddInstitutionAdminRequest = {
+  email: string;
+};
+
+export type InstitutionAdminResponse = {
+  institution_id: number;
+  user_id: number;
+  email: string;
+  added_admin: boolean;
+};
+
+export const addInstitutionAdmin = async (
+  f: Fetcher,
+  id: number,
+  data: AddInstitutionAdminRequest
+) => {
+  return await POST<AddInstitutionAdminRequest, InstitutionAdminResponse>(
+    f,
+    `institution/${id}/admin`,
+    data
+  );
+};
+
+export const removeInstitutionAdmin = async (f: Fetcher, instId: number, userId: number) => {
+  return await DELETE<never, GenericStatus>(f, `institution/${instId}/admin/${userId}`);
 };
 
 export type LMSStatus = 'authorized' | 'none' | 'error' | 'linked' | 'dismissed';

@@ -104,9 +104,14 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   let threads: api.Thread[] = [];
   let institutions: api.Institution[] = [];
   let canCreateInstitution = false;
+  let isRootAdmin = false;
   let modelInfo: api.AssistantModelLite[] = [];
   if (authed) {
-    [classes, threads, canCreateInstitution, institutions, modelInfo] = await Promise.all([
+    let grantResults: { canCreateInstitution: boolean; isRootAdmin: boolean } = {
+      canCreateInstitution: false,
+      isRootAdmin: false
+    };
+    [classes, threads, grantResults, institutions, modelInfo] = await Promise.all([
       api
         .getMyClasses(fetch)
         .then(api.explodeResponse)
@@ -118,9 +123,14 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
             target_type: 'root',
             target_id: 0,
             relation: 'can_create_institution'
+          },
+          isRootAdmin: {
+            target_type: 'root',
+            target_id: 0,
+            relation: 'admin'
           }
         })
-        .then((g) => g.canCreateInstitution),
+        .then((g) => g),
       api
         .getInstitutions(fetch, 'can_create_class')
         .then(api.explodeResponse)
@@ -130,11 +140,14 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
         .then(api.explodeResponse)
         .then((m) => m.models)
     ]);
+    canCreateInstitution = grantResults.canCreateInstitution;
+    isRootAdmin = grantResults.isRootAdmin;
   }
 
   const admin = {
     canCreateInstitution,
     canCreateClass: institutions,
+    isRootAdmin,
     showAdminPage: authed && (canCreateInstitution || institutions.length > 0)
   };
 

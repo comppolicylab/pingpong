@@ -37,6 +37,11 @@ class AuthzClient(Protocol):
         self, entity: str, relation: str, max_depth: int = 1
     ) -> List[RelatedObject]: ...
 
+    @abstractmethod
+    async def read_tuples(
+        self, relation: str, obj: str, user: str | None = None
+    ) -> List[Relation]: ...
+
     async def test(self, entity: str, relation: str, target: str) -> bool:
         results = await self.check([(entity, relation, target)])
         return results[0]

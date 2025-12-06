@@ -917,6 +917,126 @@ async def create_institution(create: schemas.CreateInstitution, request: Request
 
 
 @v1.get(
+    "/admin/institutions",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.Institutions,
+)
+async def list_institutions_with_admins(request: Request):
+    institutions = await models.Institution.get_all(request.state.db)
+
+    return {"institutions": institutions}
+
+
+@v1.get(
+    "/admin/institutions/{institution_id}",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.InstitutionWithAdmins,
+)
+async def get_institution_with_admins(institution_id: int, request: Request):
+    institution = await models.Institution.get_by_id(request.state.db, institution_id)
+    if not institution:
+        raise HTTPException(status_code=404, detail="Institution not found")
+
+    root_admin_ids = await request.state.authz.list_entities(
+        request.state.authz.root, "admin", "user"
+    )
+
+    async def _direct_institution_admin_ids(inst_id: int) -> list[int]:
+        tuples = await request.state.authz.read_tuples(
+            "admin", f"institution:{inst_id}", user=None
+        )
+        admin_ids = []
+        for user, _, _ in tuples:
+            if not user or not user.startswith("user:"):
+                continue
+            try:
+                admin_ids.append(int(user.split(":")[1]))
+            except (IndexError, ValueError):
+                continue
+        return admin_ids
+
+    inst_admin_ids = await _direct_institution_admin_ids(institution_id)
+    all_ids = set(root_admin_ids) | set(inst_admin_ids)
+    users_by_id: dict[int, models.User] = {}
+    if all_ids:
+        users = await models.User.get_all_by_id(request.state.db, list(all_ids))
+        users_by_id = {user.id: user for user in users}
+
+    admins = [
+        schemas.InstitutionAdmin.model_validate(
+            users_by_id[user_id], from_attributes=True
+        )
+        for user_id in inst_admin_ids
+        if user_id in users_by_id
+    ]
+    root_admins = [
+        schemas.InstitutionAdmin.model_validate(
+            users_by_id[user_id], from_attributes=True
+        )
+        for user_id in root_admin_ids
+        if user_id in users_by_id
+    ]
+
+    inst_data = schemas.Institution.model_validate(
+        institution, from_attributes=True
+    ).model_dump()
+    return schemas.InstitutionWithAdmins(
+        **inst_data, admins=admins, root_admins=root_admins
+    )
+
+
+@v1.post(
+    "/admin/institutions/{institution_id}/copy",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.Institution,
+)
+async def copy_institution(
+    institution_id: int, body: schemas.CopyInstitution, request: Request
+):
+    source = await models.Institution.get_by_id(request.state.db, institution_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Institution not found")
+
+    # Gather direct admins (exclude inherited root) from source.
+    async def _direct_institution_admin_ids(inst_id: int) -> list[int]:
+        tuples = await request.state.authz.read_tuples(
+            "admin", f"institution:{inst_id}", user=None
+        )
+        admin_ids = []
+        for user, _, _ in tuples:
+            if not user or not user.startswith("user:"):
+                continue
+            try:
+                admin_ids.append(int(user.split(":")[1]))
+            except (IndexError, ValueError):
+                continue
+        return admin_ids
+
+    admin_ids = await _direct_institution_admin_ids(institution_id)
+
+    # Create the new institution.
+    new_inst = await models.Institution.create(
+        request.state.db, schemas.CreateInstitution(name=body.name)
+    )
+    await request.state.authz.grant(
+        request.state.authz.root,
+        "parent",
+        f"institution:{new_inst.id}",
+    )
+
+    # Copy admin grants.
+    if admin_ids:
+        await request.state.authz.write_safe(
+            grant=[
+                (f"user:{uid}", "admin", f"institution:{new_inst.id}")
+                for uid in admin_ids
+            ]
+        )
+
+    return new_inst
+
+
+@v1.get(
     "/institution/{institution_id}",
     dependencies=[Depends(Authz("can_view", "institution:{institution_id}"))],
     response_model=schemas.Institution,
@@ -925,9 +1045,25 @@ async def get_institution(institution_id: str, request: Request):
     return await models.Institution.get_by_id(request.state.db, int(institution_id))
 
 
+@v1.patch(
+    "/institution/{institution_id}",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.Institution,
+)
+async def update_institution(
+    institution_id: int, data: schemas.UpdateInstitution, request: Request
+):
+    institution = await models.Institution.update(
+        request.state.db, institution_id, data
+    )
+    if not institution:
+        raise HTTPException(status_code=404, detail="Institution not found")
+    return institution
+
+
 @v1.post(
     "/institution/{institution_id}/admin",
-    dependencies=[Depends(Authz("admin", "institution:{institution_id}"))],
+    dependencies=[Depends(Authz("admin"))],
     response_model=schemas.InstitutionAdminResponse,
 )
 async def add_institution_admin(
@@ -957,9 +1093,12 @@ async def add_institution_admin(
         initial_state=schemas.UserState.UNVERIFIED,
     )
 
-    already_admin = await request.state.authz.test(
-        f"user:{user.id}", "admin", f"institution:{inst_id}"
+    tuples = await request.state.authz.read_tuples(
+        "admin",
+        f"institution:{inst_id}",
+        user=f"user:{user.id}",
     )
+    already_admin = bool(tuples)
     added_admin = False
     if not already_admin:
         await request.state.authz.write_safe(
@@ -973,6 +1112,22 @@ async def add_institution_admin(
         email=user.email,
         added_admin=added_admin,
     )
+
+
+@v1.delete(
+    "/institution/{institution_id}/admin/{user_id}",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.GenericStatus,
+)
+async def remove_institution_admin(institution_id: int, user_id: int, request: Request):
+    institution = await models.Institution.get_by_id(request.state.db, institution_id)
+    if not institution:
+        raise HTTPException(status_code=404, detail="Institution not found")
+
+    await request.state.authz.write_safe(
+        revoke=[(f"user:{user_id}", "admin", f"institution:{institution_id}")]
+    )
+    return {"status": "ok"}
 
 
 @v1.get(
