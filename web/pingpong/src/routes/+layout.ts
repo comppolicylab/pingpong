@@ -106,7 +106,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   let canCreateInstitution = false;
   let isRootAdmin = false;
   let modelInfo: api.AssistantModelLite[] = [];
-  let grantResults = { canCreateInstitution: false, isRootAdmin: false };
+  let grantResults;
   if (authed) {
     [classes, threads, grantResults, institutions, modelInfo] = await Promise.all([
       api
