@@ -8,7 +8,7 @@
 </script>
 
 <div
-  class="cursor-default hover:shadow relative rounded-lg items-center border-[1px] border-solid border-gray-300 flex px-2 -delete-button-container"
+  class="cursor-default hover:shadow-sm relative rounded-lg items-center border-[1px] border-solid border-gray-300 flex px-2 -delete-button-container"
 >
   <div>
     <FileSolid class="w-6 h-6 text-red-500" />

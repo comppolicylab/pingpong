@@ -57,7 +57,7 @@
   const url = stripUtmParams(source?.url);
   const buttonClass =
     'inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50 text-xs font-normal text-gray-700 hover:bg-gray-100' +
-    (type === 'list' ? ' py-1 pl-2 pr-3 shadow-sm' : ' py-0.5 px-2');
+    (type === 'list' ? ' py-1 pl-2 pr-3 shadow-xs' : ' py-0.5 px-2');
 </script>
 
 <button
@@ -93,7 +93,7 @@
         <img
           alt="Favicon"
           src={faviconUrl}
-          class="h-4 w-4 rounded-sm bg-white"
+          class="h-4 w-4 rounded-xs bg-white"
           loading={forceEagerLoad ? 'eager' : 'lazy'}
           on:load={handleFaviconLoad}
           on:error={() => (showFavicon = false)}

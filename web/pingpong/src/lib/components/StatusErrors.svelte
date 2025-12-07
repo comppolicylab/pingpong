@@ -84,7 +84,7 @@
       {#if hasMultipleIssues}
         <button
           type="button"
-          class="flex w-full items-center gap-3 text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-600 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60 focus-visible:ring-offset-2 hover:text-gray-800"
+          class="flex w-full items-center gap-3 text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-600 transition focus:outline-hidden focus-visible:ring-2 focus-visible:ring-sky-400/60 focus-visible:ring-offset-2 hover:text-gray-800"
           on:click={() => (showAllIssues = !showAllIssues)}
           aria-expanded={showAllIssues}
         >
@@ -120,7 +120,7 @@
       {/if}
 
       {#if showDetails}
-        <div class={'flex flex-col gap-1.5'} transition:slide={{ duration: 220 }}>
+        <div class="flex flex-col gap-1.5" transition:slide={{ duration: 220 }}>
           {#each assistantStatusUpdates as statusUpdate (statusUpdate.incidentId)}
             {@const impactStyle = getImpactStyle(statusUpdate.impact)}
             <div
@@ -139,6 +139,7 @@
                   {statusUpdate.incidentName}
                 </span>
               </div>
+              <!-- eslint-disable svelte/no-navigation-without-resolve -->
               <a
                 class="shrink-0 text-xs font-semibold underline"
                 href={statusUpdate.shortlink || 'https://pingpong-hks.statuspage.io'}
@@ -147,6 +148,7 @@
               >
                 View more...
               </a>
+              <!-- eslint-enable svelte/no-navigation-without-resolve -->
             </div>
           {/each}
         </div>

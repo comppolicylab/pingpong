@@ -17,10 +17,10 @@
 
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
+  import type { Action } from 'svelte/action';
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
   import { Button, Heading, Li, List, Modal, P, Popover } from 'flowbite-svelte';
-  import { page } from '$app/stores';
   import { browser } from '$app/environment';
   import type {
     MimeTypeLookupFn,
@@ -291,7 +291,7 @@
   // Focus textarea when component is mounted. Since we can only use `use` on
   // native DOM elements, we need to wrap the textarea in a div and then
   // access its child to imperatively focus it.
-  const init = (node: HTMLDivElement, newThreadId: string) => {
+  const init: Action<HTMLElement> = () => {
     focusMessage();
     return {
       update: () => {
@@ -370,7 +370,7 @@
   };
 
   // Fix the height of the container when the file list changes.
-  const fixFileListHeight = (node: HTMLDivElement, newFiles: FileUploadInfo[]) => {
+  const fixFileListHeight: Action<HTMLElement> = () => {
     const update = () => {
       const el = document.getElementById('message');
       if (!el) {
@@ -440,16 +440,16 @@
   };
 </script>
 
-<div use:init={$page.params.threadId} class="w-full relative">
-  <input type="hidden" name="vision_file_ids" bind:value={visionFileIds} />
-  <input type="hidden" name="file_search_file_ids" bind:value={fileSearchFileIds} />
-  <input type="hidden" name="code_interpreter_file_ids" bind:value={codeInterpreterFileIds} />
+<div use:init class="w-full relative">
+  <input type="hidden" name="vision_file_ids" value={visionFileIds} />
+  <input type="hidden" name="file_search_file_ids" value={fileSearchFileIds} />
+  <input type="hidden" name="code_interpreter_file_ids" value={codeInterpreterFileIds} />
   <div class="flex px-1 md:px-2 flex-col">
     <div style="opacity: 1; height: auto;">
       {#if canSubmit && assistantVersion !== null && threadVersion !== null && assistantVersion > threadVersion}
         <div
           class="border border-gray-300 -mb-4 relative flex gap-2 flex-wrap rounded-t-2xl border-b-0 pt-2.5 pb-6 px-3.5 bg-gray-50"
-          use:fixFileListHeight={$allFiles}
+          use:fixFileListHeight
           bind:this={allFileListRef}
         >
           <div class="w-full">
@@ -479,11 +479,11 @@
       {#if $allFiles.length > 0}
         <div
           class="border border-blue-light-40 relative flex -mb-3 gap-2 flex-wrap rounded-t-2xl z-10 pb-5 pt-2.5 bg-blue-light-50"
-          use:fixFileListHeight={$allFiles}
+          use:fixFileListHeight
           bind:this={allFileListRef}
         >
           <div class="flex gap-2 flex-wrap px-2 py-0">
-            {#each $allFiles as file}
+            {#each $allFiles as file (file.file.name)}
               <FilePlaceholder
                 {mimeType}
                 info={file}
@@ -530,7 +530,7 @@
         id="message"
         rows="1"
         name="message"
-        class="w-full !outline-none focus:ring-0 resize-none border-none bg-transparent p-0 mt-1"
+        class="w-full !outline-hidden focus:ring-0 resize-none border-none bg-transparent p-0 mt-1"
         placeholder={canSubmit
           ? 'Ask me anything'
           : assistantDeleted
@@ -622,8 +622,7 @@
             <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
               ><div class="flex flex-col h-fit align-center">
                 <span class="pb-2 text-sm"
-                  >You can't upload any more files {tooManyVisionFiles ? 'or photos' : ''} with this
-                  message{!tooManyVisionFiles
+                  >You can't upload any more files {tooManyVisionFiles ? 'or photos' : ''} with this message{!tooManyVisionFiles
                     ? '. You can still add more photos to this message.'
                     : '.'}</span
                 >{#if !tooManyVisionFiles}<span class="text-sm"

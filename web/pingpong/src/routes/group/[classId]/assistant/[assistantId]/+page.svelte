@@ -18,6 +18,7 @@
   } from 'flowbite-svelte';
   import type { Tool, ServerFile, FileUploadInfo } from '$lib/api';
   import { beforeNavigate, goto, invalidate } from '$app/navigation';
+  import { resolve } from '$app/paths';
   import * as api from '$lib/api';
   import { setsEqual } from '$lib/set';
   import { happyToast, sadToast } from '$lib/toast';
@@ -340,7 +341,7 @@
     (model) => model.id === selectedModel
   )?.vision_support_override;
   $: finalVisionSupport = visionSupportOverride ?? supportsVision;
-  $: allowVisionUpload = true;
+  let allowVisionUpload = true;
   $: asstFSFiles = [...data.files, ...allFSPrivateFiles];
   $: asstCIFiles = [...data.files, ...allCIPrivateFiles];
 
@@ -1020,7 +1021,7 @@
     checkForChanges = false;
     happyToast('Assistant deleted');
     await invalidate(`/group/${$page.params.classId}`);
-    await goto(`/group/${data.class.id}/assistant`);
+    await goto(resolve(`/group/${data.class.id}/assistant`));
     return;
   };
 
@@ -1052,7 +1053,7 @@
         $loadingMessage = '';
         happyToast('Assistant saved.');
         checkForChanges = false;
-        await goto(`/group/${data.class.id}/assistant`, { invalidateAll: true });
+        await goto(resolve(`/group/${data.class.id}/assistant`), { invalidateAll: true });
         return;
       }
     }
@@ -1088,7 +1089,7 @@
       happyToast('Assistant saved');
       checkForChanges = false;
       await invalidate(`/group/${$page.params.classId}`);
-      await goto(`/group/${data.class.id}/assistant`);
+      await goto(resolve(`/group/${data.class.id}/assistant`));
     }
   };
 
@@ -1448,9 +1449,8 @@
             <div class="flex flex-col text-xs">
               <span class="font-bold">Tool reliability may be reduced</span>
               <span
-                >The current <span class="font-mono">none</span> reasoning effort prioritizes speed,
-                which can impact the reliability of tool calls. You can adjust this setting in Advanced
-                Options.</span
+                >The current <span class="font-mono">none</span> reasoning effort prioritizes speed, which
+                can impact the reliability of tool calls. You can adjust this setting in Advanced Options.</span
               >
             </div>
           </div>
@@ -1742,7 +1742,7 @@
         <AccordionItem
           bind:open={advancedOptionsOpen}
           paddingDefault="px-5 py-3"
-          defaultClass="px-6 py-4 flex items-center justify-between w-full font-medium text-left rounded border-gray-200 dark:border-gray-700"
+          defaultClass="px-6 py-4 flex items-center justify-between w-full font-medium text-left rounded-sm border-gray-200 dark:border-gray-700"
           activeClass="rounded-b-none"
           borderOpenClass="rounded-b-lg border-s border-e"
         >
@@ -2144,7 +2144,7 @@
                   >Select your desired reasoning effort, which gives the model guidance on how much
                   time it should spend "reasoning" before creating a response to the prompt. {#if reasoningEffortLabels.length !== 1}You
                     can specify one of
-                    {#each reasoningEffortLabels as label, idx}
+                    {#each reasoningEffortLabels as label, idx (label)}
                       <span class="font-mono">{label}</span>{idx < reasoningEffortLabels.length - 1
                         ? ','
                         : ''}
@@ -2187,7 +2187,7 @@
                 />
                 <div class="mt-2 flex flex-row justify-between">
                   {#if reasoningEffortLabels.length < 4}
-                    {#each reasoningEffortLabels as label}
+                    {#each reasoningEffortLabels as label (label)}
                       <p class="text-sm">{label}</p>
                     {/each}
                   {:else if supportsNoneReasoningEffort}
@@ -2223,15 +2223,15 @@
                       concise answers or simple code generation, such as SQL queries.
                     </li>
                   </ol>
-                  Models before GPT-5 have used medium verbosity by default. With GPT-5, this option
-                  is configurable as one of<span class="font-mono">high</span>,
+                  Models before GPT-5 have used medium verbosity by default. With GPT-5, this option is
+                  configurable as one of<span class="font-mono">high</span>,
                   <span class="font-mono">medium</span>, or <span class="font-mono">low</span>. When
                   generating code, <span class="font-mono">medium</span> and
                   <span class="font-mono">high</span>
                   verbosity levels yield longer, more structured code with inline explanations, while
                   <span class="font-mono">low</span>
-                  verbosity produces shorter, more concise code with minimal commentary. The default
-                  value is
+                  verbosity produces shorter, more concise code with minimal commentary. The default value
+                  is
                   <span class="font-mono">medium</span>.</Helper
                 >
               </div>

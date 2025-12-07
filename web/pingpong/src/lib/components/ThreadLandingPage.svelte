@@ -1,5 +1,6 @@
 <script lang="ts">
   import { afterNavigate, goto } from '$app/navigation';
+  import { resolve } from '$app/paths';
   import { navigating, page } from '$app/stores';
   import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
   import {
@@ -63,7 +64,7 @@
     if (!$page.url.searchParams.has('assistant') && !data.isSharedAssistantPage) {
       if (data.assistants.length > 0) {
         // replace current URL with one that has the assistant ID
-        await goto(`/group/${data.class.id}/?assistant=${data.assistants[0].id}`, {
+        await goto(resolve(`/group/${data.class.id}/?assistant=${data.assistants[0].id}`), {
           replaceState: true
         });
       }
@@ -98,7 +99,7 @@
     (asst: Assistant) => asst.creator_id !== data.me.user?.id
   );
   $: otherAssistants = otherAssistantsAll.filter((asst: Assistant) => !asst.endorsed);
-  $: assistant = data?.assistants[0] || {};
+  let assistant = data?.assistants[0] || {};
   $: assistantMeta = getAssistantMetadata(assistant);
   // Whether billing is set up for the class (which controls everything).
   $: isConfigured = data?.hasAssistants && data?.hasAPIKey;
@@ -139,7 +140,7 @@
             ?.azure_supports_vision
         : undefined;
   }
-  $: allowVisionUpload = true;
+  let allowVisionUpload = true;
   let showModerators = false;
 
   $: statusComponents = (data.statusComponents || {}) as Partial<
@@ -183,7 +184,7 @@
     }
   };
 
-  const handleAudioThreadCreate = async (e: Event) => {
+  const handleAudioThreadCreate = async () => {
     $loading = true;
     const partyIds = parties ? parties.split(',').map((id) => parseInt(id, 10)) : [];
     try {
@@ -200,9 +201,11 @@
       api.setAnonymousSessionToken(newThreadOpts.session_token || null);
       $loading = false;
       if (api.hasAnonymousSessionToken()) {
-        await goto(`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}`);
+        await goto(
+          resolve(`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}`)
+        );
       } else {
-        await goto(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`);
+        await goto(resolve(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`));
       }
     } catch (e) {
       $loading = false;
@@ -212,7 +215,7 @@
     }
   };
 
-  const handleChatThreadCreate = async (e: Event) => {
+  const handleChatThreadCreate = async () => {
     $loading = true;
     const partyIds = parties ? parties.split(',').map((id) => parseInt(id, 10)) : [];
     const tools: api.Tool[] = [];
@@ -245,9 +248,11 @@
       api.setAnonymousSessionToken(newThreadOpts.session_token || null);
       $loading = false;
       if (api.hasAnonymousSessionToken()) {
-        await goto(`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}`);
+        await goto(
+          resolve(`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}`)
+        );
       } else {
-        await goto(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`);
+        await goto(resolve(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`));
       }
     } catch (e) {
       $loading = false;
@@ -303,9 +308,11 @@
       $loading = false;
       form.callback({ success: true, errorMessage: null, message_sent: true });
       if (api.hasAnonymousSessionToken()) {
-        await goto(`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}`);
+        await goto(
+          resolve(`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}`)
+        );
       } else {
-        await goto(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`);
+        await goto(resolve(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`));
       }
     } catch (e) {
       $loading = false;
@@ -321,7 +328,7 @@
   // Set the new assistant selection.
   const selectAi = async (asst: Assistant) => {
     assistantDropdownOpen = false;
-    await goto(`/group/${data.class.id}/?assistant=${asst.id}`);
+    await goto(resolve(`/group/${data.class.id}/?assistant=${asst.id}`));
   };
   const showModeratorsModal = () => {
     showModerators = true;
@@ -391,11 +398,11 @@
                 </DropdownItem>
               {/if}
 
-              {#each courseAssistants as asst}
+              {#each courseAssistants as asst (asst.id)}
                 <DropdownItem
                   on:click={() => selectAi(asst)}
                   on:touchstart={() => selectAi(asst)}
-                  class="normal-case tracking-tight font-normal rounded rounded-lg hover:bg-gray-100 select-none max-w-full group"
+                  class="normal-case tracking-tight font-normal rounded-sm rounded-lg hover:bg-gray-100 select-none max-w-full group"
                 >
                   <div class="flex flex-row justify-between gap-5 max-w-full items-center">
                     <div class="flex flex-col gap-1 w-10/12">
@@ -436,11 +443,11 @@
                   Your assistants
                 </DropdownItem>
 
-                {#each myAssistants as asst}
+                {#each myAssistants as asst (asst.id)}
                   <DropdownItem
                     on:click={() => selectAi(asst)}
                     on:touchstart={() => selectAi(asst)}
-                    class="normal-case tracking-tight font-normal rounded rounded-lg hover:bg-gray-100 select-none max-w-full group"
+                    class="normal-case tracking-tight font-normal rounded-smrounded-lg hover:bg-gray-100 select-none max-w-full group"
                   >
                     <div class="flex flex-row justify-between gap-5 max-w-full items-center">
                       <div class="flex flex-col gap-1 w-10/12">
@@ -481,11 +488,11 @@
                   Other assistants
                 </DropdownItem>
 
-                {#each otherAssistants as asst}
+                {#each otherAssistants as asst (asst.id)}
                   <DropdownItem
                     on:click={() => selectAi(asst)}
                     on:touchstart={() => selectAi(asst)}
-                    class="normal-case tracking-tight font-normal rounded rounded-lg hover:bg-gray-100 select-none max-w-full group"
+                    class="normal-case tracking-tight font-normal rounded-smrounded-lg hover:bg-gray-100 select-none max-w-full group"
                   >
                     <div class="flex flex-row justify-between gap-5 max-w-full items-center">
                       <div class="flex flex-col gap-1 w-10/12">
@@ -543,7 +550,7 @@
             </div>
             <div class="flex flex-row p-1.5">
               <Button
-                class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all"
+                class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded-smrounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all"
                 on:click={handleAudioThreadCreate}
                 on:touchstart={handleAudioThreadCreate}
                 type="button"
@@ -614,7 +621,7 @@
           </div>
           <div class="flex flex-row p-1.5">
             <Button
-              class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all"
+              class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded-smrounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all"
               on:click={handleChatThreadCreate}
               on:touchstart={handleChatThreadCreate}
               type="button"
@@ -626,8 +633,8 @@
         {/if}
       </div>
       <div class="shrink-0 grow-0">
-        <input type="hidden" name="assistant_id" bind:value={assistant.id} />
-        <input type="hidden" name="parties" bind:value={parties} />
+        <input type="hidden" name="assistant_id" value={assistant.id} />
+        <input type="hidden" name="parties" value={parties} />
         <div class="my-3">
           {#if isPrivate}
             <div class="flex gap-2 items-start w-full text-sm flex-wrap lg:flex-nowrap">
@@ -639,7 +646,7 @@
                   on:touchstart={showModeratorsModal}>Moderators</Button
                 > <span class="font-semibold">cannot</span> see this thread or your name. For more
                 information, please review
-                <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
+                <a href={resolve('/privacy-policy')} rel="noopener noreferrer" class="underline"
                   >PingPong's privacy statement</a
                 >. Assistants can make mistakes. Check important info.</Span
               >
@@ -657,7 +664,7 @@
                   <span class="font-semibold"
                     >your full name, and listen to a recording of your conversation</span
                   >. For more information, please review
-                  <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
+                  <a href={resolve('/privacy-policy')} rel="noopener noreferrer" class="underline"
                     >PingPong's privacy statement</a
                   >. Assistants can make mistakes. Check important info.</Span
                 >
@@ -672,7 +679,7 @@
                     on:touchstart={showModeratorsModal}>Moderators</Button
                   > can see this thread and <span class="font-semibold">your full name</span>. For
                   more information, please review
-                  <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
+                  <a href={resolve('/privacy-policy')} rel="noopener noreferrer" class="underline"
                     >PingPong's privacy statement</a
                   >. Assistants can make mistakes. Check important info.</Span
                 >
@@ -687,7 +694,7 @@
                   on:click={showModeratorsModal}
                   on:touchstart={showModeratorsModal}>Moderators</Button
                 > can see this thread but not your name. For more information, please review
-                <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
+                <a href={resolve('/privacy-policy')} rel="noopener noreferrer" class="underline"
                   >PingPong's privacy statement</a
                 >. Assistants can make mistakes. Check important info.</Span
               >

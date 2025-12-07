@@ -3,6 +3,7 @@
   import { ChevronDownOutline, GlobeOutline } from 'flowbite-svelte-icons';
   import type { WebSearchActionSearchSource, WebSearchCallItem } from '$lib/api';
   import WebSourceChip from './WebSourceChip.svelte';
+  import { SvelteSet } from 'svelte/reactivity';
 
   export let content: WebSearchCallItem;
   export let forceOpen = false;
@@ -26,7 +27,7 @@
   const deduplicateSources = (sources?: WebSearchActionSearchSource[]) => {
     if (!sources) return [];
 
-    const seen = new Set<string>();
+    const seen = new SvelteSet<string>();
     return sources.filter(({ url }) => {
       if (seen.has(url)) return false;
       seen.add(url);
@@ -169,7 +170,16 @@
     animation-duration: 2s;
     animation-iteration-count: infinite;
     animation-name: shimmer;
-    background: #4b5563 -webkit-gradient(linear, 100% 0, 0 0, from(#5d5d5d), color-stop(0.4, #ffffffbf), to(#4b5563), color-stop(0.6, #ffffffbf), to(#4b5563));
+    background: #4b5563 -webkit-gradient(
+        linear,
+        100% 0,
+        0 0,
+        from(#5d5d5d),
+        color-stop(0.4, #ffffffbf),
+        to(#4b5563),
+        color-stop(0.6, #ffffffbf),
+        to(#4b5563)
+      );
     -webkit-background-clip: text;
     background-clip: text;
     background-position: -100% 0;

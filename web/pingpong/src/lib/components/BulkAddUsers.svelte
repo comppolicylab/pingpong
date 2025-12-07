@@ -265,14 +265,14 @@
         <TableHeadCell padding="px-3 py-1" class="font-medium text-gray-900"></TableHeadCell>
       </TableHead>
       <TableBody>
-        {#each unverifiedEmails as tuple, index}
+        {#each unverifiedEmails as tuple, index (tuple.email)}
           <TableBodyRow class="px-2 py-1">
             <!-- Name Input -->
             <TableBodyCell class="px-3 py-1">
               <Input
                 type="text"
                 placeholder="Name"
-                class="w-full px-2 py-1 border rounded font-light"
+                class="w-full px-2 py-1 border rounded-sm font-light"
                 bind:value={tuple.name}
               />
             </TableBodyCell>
@@ -282,7 +282,7 @@
               <Input
                 type="email"
                 placeholder="Email"
-                class="w-full px-2 py-1 border rounded font-light"
+                class="w-full px-2 py-1 border rounded-sm font-light"
                 bind:value={tuple.email}
               />
             </TableBodyCell>
@@ -329,7 +329,7 @@
       <TableHeadCell padding="px-3 py-1" class="font-medium text-gray-900"></TableHeadCell>
     </TableHead>
     <TableBody>
-      {#each verifiedEmails as tuple, index}
+      {#each verifiedEmails as tuple, index (tuple.email)}
         <TableBodyRow class="px-2 py-1">
           <!-- Name Input -->
           <TableBodyCell class="px-3 py-1">
@@ -342,7 +342,7 @@
               <Input
                 type="text"
                 placeholder="Name"
-                class="w-full px-2 py-1 border rounded font-light"
+                class="w-full px-2 py-1 border rounded-sm font-light"
                 bind:value={tuple.name}
                 disabled={tuple.isUser}
               />
@@ -363,7 +363,7 @@
               <Input
                 type="email"
                 placeholder="Email"
-                class="w-full px-2 py-1 border rounded font-light"
+                class="w-full px-2 py-1 border rounded-sm font-light"
                 bind:value={tuple.email}
                 disabled={tuple.valid}
               />
@@ -444,7 +444,7 @@
         <TableHeadCell padding="px-3 py-1" class="font-medium text-gray-900"></TableHeadCell>
       </TableHead>
       <TableBody>
-        {#each results as tuple}
+        {#each results as tuple (tuple.email)}
           <TableBodyRow class="px-2 py-1">
             <!-- Name Input -->
             <TableBodyCell class="px-3 py-1">

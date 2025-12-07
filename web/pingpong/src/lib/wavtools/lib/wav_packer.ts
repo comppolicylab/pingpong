@@ -133,9 +133,9 @@ export class WavPacker {
       // chunk 2
       'data', // Sub-chunk identifier
       this._packData(1, (channels[0].length * channels.length * bitsPerSample) / 8), // Chunk length
-      data
+      new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
     ];
-    const blob = new Blob(output, { type: 'audio/mpeg' });
+    const blob = new Blob(output as BlobPart[], { type: 'audio/mpeg' });
     const url = URL.createObjectURL(blob);
     return {
       blob,

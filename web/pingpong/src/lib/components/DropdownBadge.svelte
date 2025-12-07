@@ -5,6 +5,6 @@
 
 <Badge
   class="flex flex-row items-center gap-x-1 py-0.5 px-2 border text-xs normal-case
-           shadow-sm bg-gradient-to-b {extraClasses}"
+           shadow-xs bg-gradient-to-b {extraClasses}"
   ><slot name="icon" /><slot name="name" /></Badge
 >

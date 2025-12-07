@@ -236,14 +236,14 @@
       <!-- Hover time tooltip -->
       {#if isHoveringProgress && !isDragging}
         <div
-          class="absolute -top-8 bg-gray-800 text-white text-xs px-2 py-1 rounded transform -translate-x-1/2 z-10"
+          class="absolute -top-8 bg-gray-800 text-white text-xs px-2 py-1 rounded-sm transform -translate-x-1/2 z-10"
           style="left: {hoverProgress}%"
         >
           {formatTime(hoverTime)}
         </div>
       {:else if isHoveringProgress && isDragging}
         <div
-          class="absolute -top-8 bg-gray-800 text-white text-xs px-2 py-1 rounded transform -translate-x-1/2 z-10"
+          class="absolute -top-8 bg-gray-800 text-white text-xs px-2 py-1 rounded-sm transform -translate-x-1/2 z-10"
           style="left: {seekProgress}%"
         >
           {formatTime(seekTime)}
@@ -332,7 +332,7 @@
             <!-- Large wave -->
             <path
               d="M14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"
-              class={`origin-center transition-opacity translate-scale duration-300 ease-in-out`}
+              class="origin-center transition-opacity translate-scale duration-300 ease-in-out"
               class:opacity-100={volume === 0 || volume >= 0.5}
               class:scale-100={volume === 0 || volume >= 0.5}
               class:opacity-0={volume > 0 && volume < 0.5}
@@ -376,7 +376,7 @@
     <!-- Speed Selector -->
     <div class="relative">
       <Button
-        class="flex items-center justify-center w-12 h-8 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors"
+        class="flex items-center justify-center w-12 h-8 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-sm transition-colors"
       >
         {playbackRate}x
       </Button>
@@ -386,7 +386,7 @@
         placement="top-end"
         bind:open={showSpeedDropdown}
       >
-        {#each playbackSpeeds as speed}
+        {#each playbackSpeeds as speed (speed)}
           <DropdownItem
             on:click={() => selectPlaybackRate(speed)}
             class="block w-full px-3 py-1 text-sm font-light text-left hover:bg-gray-100 {speed ===

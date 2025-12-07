@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invalidateAll } from '$app/navigation';
+  import { resolve } from '$app/paths';
   import * as api from '$lib/api';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import { happyToast, sadToast } from '$lib/toast';
@@ -66,7 +67,7 @@
     </div>
     <div slot="right">
       <a
-        href={`/admin`}
+        href={resolve(`/admin`)}
         class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-white hover:bg-blue-dark-40 transition-all flex items-center gap-2"
         >Admin page <ArrowRightOutline size="md" class="text-orange" /></a
       >
@@ -94,7 +95,7 @@
           <TableHeadCell></TableHeadCell>
         </TableHead>
         <TableBody>
-          {#each agreements as agreement}
+          {#each agreements as agreement (agreement.id)}
             <TableBodyRow>
               <TableBodyCell class="py-2 font-medium whitespace-normal"
                 >{agreement.name}</TableBodyCell
@@ -142,7 +143,7 @@
           <TableHeadCell></TableHeadCell>
         </TableHead>
         <TableBody>
-          {#each policies as policy}
+          {#each policies as policy (policy.id)}
             <TableBodyRow>
               <TableBodyCell class="py-2 font-medium whitespace-normal">{policy.name}</TableBodyCell
               >

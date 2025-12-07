@@ -6,7 +6,9 @@
   export let link: string = '';
 </script>
 
-{#if link}<a href={link} rel="noopener noreferrer" target="_blank"
+{#if link}
+  <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+  <a href={link} data-sveltekit-reload rel="noopener noreferrer" target="_blank"
     ><DropdownItem
       class="bg-gradient-to-r {colorClasses} text-white {hoverable
         ? hoverColorClasses
