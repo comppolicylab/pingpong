@@ -2,6 +2,7 @@
   import { Select, Label, Input, Textarea, Heading, P, Button, Modal, A } from 'flowbite-svelte';
   import Sanitize from '$lib/components/Sanitize.svelte';
   import { writable } from 'svelte/store';
+  import { resolve } from '$app/paths';
   import { happyToast, sadToast } from '$lib/toast.js';
   import * as api from '$lib/api';
   import PingPongDemoCarousel from '$lib/components/PingPongDemoCarousel.svelte';
@@ -153,8 +154,10 @@
   <div class="px-12">
     <Heading tag="h3" class="my-4">What kinds of data do you collect?</Heading>
     <P class="ml-0.5 mt-4">
-      Please read our <a href="/privacy-policy" class="underline" rel="noopener noreferrer"
-        >privacy policy</a
+      Please read our <a
+        href={resolve('/privacy-policy')}
+        class="underline"
+        rel="noopener noreferrer">privacy policy</a
       > to learn about what information we collect and how we keep it safe.
     </P>
   </div>

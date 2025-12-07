@@ -22,13 +22,12 @@
     </Heading>
     <ol class="list-disc ml-5">
       <li class="my-2">
-        <span class="font-semibold">Moderators can see this thread but not your name:</span> If your
-        group has been configured so that moderators (typically members of the teaching team) can view
-        de-identified transcripts in your group, you will see the notice: &ldquo;Moderators can see this
-        thread but not your name.&rdquo; This means moderators can see conversations happening with the
-        bot, but not your name or other identifiable information about you. Moderators may select this
-        option so they can adjust the bot as needed, but chats will not be used to identify any individual
-        user.
+        <span class="font-semibold">Moderators can see this thread but not your name:</span> If your group
+        has been configured so that moderators (typically members of the teaching team) can view de-identified
+        transcripts in your group, you will see the notice: &ldquo;Moderators can see this thread but
+        not your name.&rdquo; This means moderators can see conversations happening with the bot, but
+        not your name or other identifiable information about you. Moderators may select this option so
+        they can adjust the bot as needed, but chats will not be used to identify any individual user.
       </li>
       <li class="my-2">
         <span class="font-semibold">Moderators cannot see this thread or your name:</span> If your group

@@ -24,10 +24,10 @@
       <TableHeadCell class="bg-gray-100 text-center py-2">Moderators</TableHeadCell>
     </TableHead>
     <TableBody>
-      {#each permissions as { name, member, moderator }}
+      {#each permissions as { name, member, moderator } (name)}
         <TableBodyRow>
           <TableBodyCell class="py-1 font-normal whitespace-normal">{name}</TableBodyCell>
-          {#each [member, moderator] as status}
+          {#each [member, moderator] as status, idx (idx)}
             <TableBodyCell class="text-center py-1">
               <span
                 class={`inline-flex items-center justify-center w-5 h-5 ${getStatusClass(status)}`}

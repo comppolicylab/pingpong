@@ -1,0 +1,157 @@
+@import 'tailwindcss';
+@config '../tailwind.config.js';
+
+@media print {
+  body {
+    background: white !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  body > div {
+    margin: 0 !important;
+    max-width: none !important;
+    height: auto !important;
+  }
+}
+
+.katex-display {
+  display: block;
+  width: 100%;
+  margin: 1.5rem 0;
+}
+
+.eyebrow {
+  color: theme('colors.blue-light-40');
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.eyebrow-dark {
+  color: theme('colors.blue-dark-40');
+}
+
+.hidden-radio input[type='radio'] {
+  display: none !important;
+}
+
+.markdown {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: bold;
+    margin-top: 1em;
+    margin-bottom: 0.75em;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+  }
+
+  h2 {
+    font-size: 1.4rem;
+  }
+
+  h3 {
+    font-size: 1.3rem;
+  }
+
+  h4 {
+    font-size: 1.2rem;
+  }
+
+  h5 {
+    font-size: 1.1rem;
+  }
+
+  h6 {
+    font-size: 1rem;
+  }
+
+  strong {
+    font-weight: bold;
+  }
+
+  em {
+    font-style: italic;
+  }
+
+  a {
+    text-decoration: underline;
+    color: #0ea5e9;
+    &:hover {
+      color: #3b82f6;
+    }
+  }
+
+  blockquote {
+    background-color: #f9f9f9;
+    border-left: 10px solid #ccc;
+    padding: 1em 10px 0.1em;
+  }
+
+  code {
+    border-radius: 0.25rem;
+  }
+
+  hr {
+    border: 1px solid #aaa;
+  }
+
+  hr,
+  pre,
+  p,
+  ul,
+  ol,
+  blockquote,
+  table {
+    margin-bottom: 1rem;
+  }
+
+  ul {
+    list-style: initial;
+    margin-left: 1rem;
+  }
+
+  ol {
+    list-style: decimal;
+    margin-left: 1rem;
+  }
+
+  ul,
+  ol {
+    li {
+      margin-bottom: 0.25rem;
+      margin-left: 1rem;
+      line-height: 2;
+      p:last-child {
+        margin-bottom: 0;
+      }
+    }
+  }
+
+  table {
+    border-collapse: collapse;
+    &,
+    th,
+    td {
+      border: 1px solid #ccc;
+    }
+    th,
+    td {
+      padding: 0.5rem 1rem;
+    }
+  }
+
+  p,
+  li {
+    font-size: 15px;
+    font-weight: 400;
+    letter-spacing: 0.25px;
+    line-height: 1.65;
+    max-width: 52rem;
+  }
+}

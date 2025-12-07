@@ -7,7 +7,7 @@
    */
   export let html: string | Promise<string>;
 
-  let sanitized: string;
+  let sanitized = '';
 
   const flowbiteSvelteTags = ['Heading', 'List', 'Li'];
 
@@ -18,29 +18,35 @@
   });
 
   // Sanitize the document.
-  $: {
-    if (typeof html === 'string') {
-      sanitized = DOMPurify.sanitize(html, {
-        ADD_TAGS: flowbiteSvelteTags,
-        ADD_ATTR: ['customsize', 'tag']
-      });
-    } else {
-      sanitized = '';
-      html.then((content) => {
-        sanitized = DOMPurify.sanitize(content, {
-          ADD_TAGS: flowbiteSvelteTags,
-          ADD_ATTR: ['customsize', 'tag']
-        });
-      });
-    }
-    // Fix Flowbite Svelte tags
-    sanitized = sanitized
+  $: sanitizeInput(html);
+
+  function sanitizeContent(content: string) {
+    return DOMPurify.sanitize(content, {
+      ADD_TAGS: flowbiteSvelteTags,
+      ADD_ATTR: ['customsize', 'tag']
+    })
       .replace(/<heading\b/gi, '<Heading')
       .replace(/<\/heading>/gi, '</Heading>')
       .replace(/<list\b/gi, '<List')
       .replace(/<\/list>/gi, '</List>')
       .replace(/<li\b/gi, '<Li')
       .replace(/<\/li>/gi, '</Li>');
+  }
+
+  function sanitizeInput(value: string | Promise<string>) {
+    if (typeof value === 'string') {
+      sanitized = sanitizeContent(value);
+      return;
+    }
+
+    sanitized = '';
+    const pending = value;
+    pending.then((content) => {
+      // Guard against stale promise resolutions.
+      if (pending === html) {
+        sanitized = sanitizeContent(content);
+      }
+    });
   }
 </script>
 

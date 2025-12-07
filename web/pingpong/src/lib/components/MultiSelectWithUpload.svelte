@@ -107,12 +107,12 @@
   $: availableFiles = items.filter(
     (item) => !$value.includes(item.value) && !privateFileIds.includes(item.value)
   );
-  $: availableFileNames = availableFiles
+  $: availableFileNames = [...availableFiles]
     .sort((a, b) => (a.name as string).localeCompare(b.name as string))
     .map((item) => item.name as string);
   $: availableFileIds = availableFiles.map((item) => item.value);
   $: selectedFiles = items.filter((item) => $value.includes(item.value));
-  $: selectedFileNames = selectedFiles
+  $: selectedFileNames = [...selectedFiles]
     .sort((a, b) => (a.name as string).localeCompare(b.name as string))
     .map((item) => [item.name as string, privateFileIds.includes(item.value)]);
   $: selectedFileIds = selectedFiles.map((item) => item.value);
@@ -314,13 +314,13 @@
     <div
       bind:this={availableListElement}
       id="available-files"
-      class="rounded border border-inherit border-solid h-[200px] overflow-y-auto"
+      class="rounded-sm border border-inherit border-solid h-[200px] overflow-y-auto"
       role="listbox"
       aria-label="Available files"
       tabindex="0"
       on:keydown={(e) => handleKeydown(e, true)}
     >
-      {#each availableFileNames as name, index}
+      {#each availableFileNames as name, index (name)}
         {@const isSelected = selectedAvailable.includes(index)}
         <button
           type="button"
@@ -369,7 +369,7 @@
     <button
       type="button"
       id="move-to-selected"
-      class="my-1 mx-0 py-1 px-2.5 bg-none rounded border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+      class="my-1 mx-0 py-1 px-2.5 bg-none rounded-sm border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
       on:click={moveToSelected}
       disabled={selectedAvailable.length === 0 ||
         disabled ||
@@ -396,7 +396,7 @@
     {/if}
     <button
       type="button"
-      class="my-1 mx-0 py-1 px-2.5 bg-none rounded border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+      class="my-1 mx-0 py-1 px-2.5 bg-none rounded-sm border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
       on:click={moveToAvailable}
       disabled={selectedSelected.length === 0 || disabled || $loading}
       aria-label="Move selected files to Available list">◀</button
@@ -405,7 +405,7 @@
       <button
         type="button"
         id="upload"
-        class="my-1 mx-0 py-1 px-2.5 bg-none rounded border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+        class="my-1 mx-0 py-1 px-2.5 bg-none rounded-sm border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
         on:click={() => {
           uploadRef.click();
         }}
@@ -438,13 +438,13 @@
     <div
       bind:this={selectedListElement}
       id="selected-files"
-      class="rounded border border-inherit border-solid h-[200px] overflow-y-auto"
+      class="rounded-sm border border-inherit border-solid h-[200px] overflow-y-auto"
       role="listbox"
       aria-label="Selected files"
       tabindex="0"
       on:keydown={(e) => handleKeydown(e, false)}
     >
-      {#each selectedFileNames as [name, isPrivate], index}
+      {#each selectedFileNames as [name, isPrivate], index (name)}
         {@const isSelected = selectedSelected.includes(index)}
         <button
           type="button"

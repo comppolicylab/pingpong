@@ -17,6 +17,7 @@
   import type { Institution } from '$lib/api';
   import * as api from '$lib/api';
   import { happyToast, sadToast } from '$lib/toast';
+  import { resolve } from '$app/paths';
 
   export let data;
 
@@ -88,7 +89,7 @@
     </div>
     <div slot="right">
       <a
-        href={`/admin`}
+        href={resolve(`/admin`)}
         class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-white hover:bg-blue-dark-40 transition-all flex items-center gap-2"
         >Admin page <ArrowRightOutline size="md" class="text-orange" /></a
       >
@@ -125,7 +126,7 @@
             </TableBodyRow>
           {/if}
 
-          {#each institutions as institution}
+          {#each institutions as institution (institution.id)}
             <TableBodyRow>
               <TableBodyCell class="py-2 font-medium whitespace-normal">
                 {institution.name}

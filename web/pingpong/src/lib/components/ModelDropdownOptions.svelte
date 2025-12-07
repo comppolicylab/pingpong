@@ -18,7 +18,7 @@
 </script>
 
 <div class="relative">
-  {#each modelOptions as { value, name, description, supports_vision, supports_reasoning, is_new, highlight }}
+  {#each modelOptions as { value, name, description, supports_vision, supports_reasoning, is_new, highlight } (value)}
     <div bind:this={modelNodes[value]}>
       <DropdownOption
         {value}

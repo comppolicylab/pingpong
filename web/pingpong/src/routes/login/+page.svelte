@@ -14,7 +14,7 @@
   const loggingIn = writable(false);
   const success = writable(false);
 
-  $: email = form?.email ?? '';
+  let email = form?.email ?? '';
 
   const loginWithMagicLink = async (evt: SubmitEvent) => {
     evt.preventDefault();

@@ -49,7 +49,7 @@
 </script>
 
 <div
-  class="cursor-default hover:shadow relative rounded-lg items-center border-[1px] border-solid border-gray-300 bg-white flex px-2 -delete-button-container"
+  class="cursor-default hover:shadow-sm relative rounded-lg items-center border-[1px] border-solid border-gray-300 bg-white flex px-2 -delete-button-container"
 >
   <div>
     {#if state === 'pending'}

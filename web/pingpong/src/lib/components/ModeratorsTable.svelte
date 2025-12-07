@@ -18,7 +18,7 @@
       <TableHeadCell class="bg-gray-100 py-2">Email</TableHeadCell>
     </TableHead>
     <TableBody>
-      {#each moderators as { name, email }}
+      {#each moderators as { name, email } (email)}
         <TableBodyRow>
           {#if name}
             <TableBodyCell class="py-1 font-medium whitespace-normal">{name}</TableBodyCell>
