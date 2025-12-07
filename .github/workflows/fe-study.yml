@@ -2,10 +2,10 @@ name: UI — Study
 
 on:
   push:
-    branches: [main, releases/**]
+    branches: [main, releases/**/*]
     paths: [web/study/**]
   pull_request:
-    branches: [main, releases/**]
+    branches: [main, releases/**/*]
     paths: [web/study/**]
 
 jobs:
