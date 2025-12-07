@@ -2,10 +2,10 @@ name: UI - PingPong
 
 on:
   push:
-    branches: [main]
+    branches: [main, releases/**/*]
     paths: [web/pingpong/**]
   pull_request:
-    branches: [main]
+    branches: [main, releases/**/*]
     paths: [web/pingpong/**]
 
 jobs:
