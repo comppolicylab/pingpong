@@ -45,7 +45,7 @@
     TerminalOutline
   } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
-  import { ThreadManager } from '$lib/stores/thread';
+  import { ThreadManager, type Message } from '$lib/stores/thread';
   import AttachmentDeletedPlaceholder from '$lib/components/AttachmentDeletedPlaceholder.svelte';
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import { get, writable } from 'svelte/store';
@@ -310,7 +310,9 @@
   };
 
   // Scroll to the bottom of the chat thread.
-  const scroll = (el: HTMLDivElement) => {
+  const scroll = (el: HTMLDivElement, _messages: Message[]) => {
+    // Keep _messages so the action's update runs when the message list changes.
+    void _messages;
     // Scroll to the bottom of the element.
     el.scrollTo({
       top: el.scrollHeight,
@@ -980,7 +982,7 @@
       data.isSharedAssistantPage || data.isSharedThreadPage ? 'pt-10' : ''
     }`}
     bind:this={messagesContainer}
-    use:scroll
+    use:scroll={$messages}
   >
     <div class="print-only print-header">
       <div class="print-header__brand">
