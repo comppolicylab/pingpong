@@ -2,10 +2,10 @@ name: Python
 
 on:
   push:
-    branches: [main, releases/**/*]
+    branches: [main, releases/**]
     paths: [pingpong/**, conftest.py, poetry.lock, pyproject.toml]
   pull_request:
-    branches: [main, releases/**/*]
+    branches: [main, releases/**]
     paths: [pingpong/**, conftest.py, poetry.lock, pyproject.toml]
 
 jobs:
