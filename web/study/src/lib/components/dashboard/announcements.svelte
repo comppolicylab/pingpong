@@ -1,7 +1,5 @@
 <script lang="ts">
 	import * as Alert from '$lib/components/ui/alert/index.js';
-	import Percent from '@lucide/svelte/icons/percent';
-	import Users from '@lucide/svelte/icons/users';
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
 	import { courses as coursesStore } from '$lib/stores/courses';
 	import Info from '@lucide/svelte/icons/info';
@@ -21,6 +19,22 @@
 
 	{#if hasAnyAcceptedCourses}
 		<div class="flex flex-col gap-3">
+			<Alert.Root
+				class="self-start border-sky-600 bg-transparent text-sky-700 dark:border-sky-400 dark:text-sky-200"
+			>
+				<Info />
+				<Alert.Title class="line-clamp-none tracking-normal"
+					>Instructor Survey Coming Soon</Alert.Title
+				>
+				<Alert.Description>
+					<p>
+						We're resolving a technical issue before opening the Instructor Experience Survey and
+						will email survey links directly to instructors.
+					</p>
+					<p>We've extended the survey deadline to three weeks after your course end date.</p>
+				</Alert.Description>
+			</Alert.Root>
+
 			<Alert.Root class="self-start">
 				<Info />
 				<Alert.Title class="line-clamp-none tracking-normal"
@@ -31,47 +45,6 @@
 						We use your enrollment count to calculate completion rates. Click <i>View course</i> to
 						navigate to the course details page and use the <i>Change Enrollment</i> button to update
 						your enrollment count.
-					</p>
-				</Alert.Description>
-			</Alert.Root>
-
-			<Alert.Root class="self-start">
-				<Percent />
-				<Alert.Title class="line-clamp-none tracking-normal">
-					Available Now: Pre-assessment completion rate targets
-				</Alert.Title>
-				<Alert.Description>
-					<p>
-						You can now view completion rate targets for your accepted courses.
-						<span class="font-medium">
-							As a reminder, all courses in both treatment and control groups need to meet the
-							completion rate targets for the pre-assessment and post-assessment to remain in the
-							study and receive the honorarium.
-						</span>
-						Email
-						<a
-							href="mailto:support@pingpong-hks.atlassian.net"
-							class="text-nowrap text-primary underline underline-offset-4 hover:text-primary/80"
-							>support@pingpong-hks.atlassian.net</a
-						> if you have any questions.
-					</p>
-				</Alert.Description>
-			</Alert.Root>
-
-			<Alert.Root class="self-start">
-				<Users />
-				<Alert.Title class="line-clamp-none tracking-normal">
-					Available Now: List of students that have completed the pre-assessment
-				</Alert.Title>
-				<Alert.Description>
-					<p>
-						You can now view real-time lists of students that have completed the pre-assessment for
-						your accepted courses.
-						<span class="font-medium">
-							All students in your course should complete the pre-assessment, whether they are in a
-							treatment or control group class, regardless of whether they agree for the research
-							team to analyze their de-identified data.
-						</span>
 					</p>
 				</Alert.Description>
 			</Alert.Root>
