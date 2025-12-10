@@ -737,6 +737,21 @@
 				</Alert.Description>
 			</Alert.Root>
 		{/if}
+		<Alert.Root
+			class="self-start border-sky-600 bg-transparent text-sky-700 dark:border-sky-400 dark:text-sky-200"
+		>
+			<Info />
+			<Alert.Title class="line-clamp-none font-semibold tracking-normal">
+				Instructor Survey Coming Soon
+			</Alert.Title>
+			<Alert.Description>
+				<span>
+					We're resolving a technical issue before opening the Instructor Experience Survey and will
+					email survey links directly to instructors.
+				</span>
+				<span>We've extended the survey deadline to three weeks after your course end date.</span>
+			</Alert.Description>
+		</Alert.Root>
 		<!-- Overview & Completion -->
 		<div class="rounded-md border p-4">
 			<div class="mb-3 flex items-center justify-between gap-3">

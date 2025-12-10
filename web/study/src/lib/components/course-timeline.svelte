@@ -65,6 +65,7 @@
 	const grace = $derived(start ? addDays(start, 22) : null);
 	const postDue = $derived(end ? addDays(end, 1) : null);
 	const postGrace = $derived(end ? addDays(end, 8) : null);
+	const instructorSurveyDue = $derived(end ? addDays(end, 21) : null);
 
 	const target = $derived(
 		typeof course?.completion_rate_target === 'number' ? course.completion_rate_target : undefined
@@ -312,9 +313,9 @@
 			Step({
 				idx: 11,
 				title: 'Checkpoint: Instructor Survey Completion',
-				date: end ? fmtDate(addDays(end, 8)) : '1 week after course end',
+				date: end ? fmtDate(instructorSurveyDue) : '3 weeks after course end',
 				description:
-					'Last day to submit the Instructor Experience Survey and complete the study. Second honorarium installment and any bonuses follow after all your courses meet their targets.',
+					'Last day to submit the Instructor Experience Survey and complete the study. We have extended the deadline to accommodate technical issues; expect the survey link via email. Second honorarium installment and any bonuses follow after all your courses meet their targets.',
 				status: 'upcoming'
 			})
 		);
