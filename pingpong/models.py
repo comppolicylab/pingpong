@@ -971,16 +971,20 @@ class ExternalLogin(Base):
     async def delete_secondary_email(
         cls, session: AsyncSession, user_id: int, email: str
     ) -> None:
-        result = await session.execute(
-            delete(ExternalLogin)
-            .join(ExternalLoginProvider)
+        provider_is_email = (
+            select(ExternalLoginProvider.id)
             .where(
+                ExternalLoginProvider.id == ExternalLogin.provider_id,
+                ExternalLoginProvider.name == "email",
+            )
+            .exists()
+        )
+
+        result = await session.execute(
+            delete(ExternalLogin).where(
                 and_(
                     ExternalLogin.user_id == user_id,
-                    or_(
-                        ExternalLogin.provider == "email",
-                        ExternalLoginProvider.name == "email",
-                    ),
+                    or_(ExternalLogin.provider == "email", provider_is_email),
                     ExternalLogin.identifier == email,
                 )
             )
