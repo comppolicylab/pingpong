@@ -374,7 +374,6 @@ async def transcribe_thread_recording_and_email_link(
 
             recording_key = thread.voice_mode_recording.recording_id
             thread_users = user_names(thread, user_id, is_supervisor=is_supervisor)
-            raise NotImplementedError("Transcription service is disabled")
             visible_users = [
                 u for u in thread.users if not u.anonymous_link_id or u.id == user_id
             ]
