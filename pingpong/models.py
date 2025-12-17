@@ -4610,6 +4610,7 @@ class Thread(Base):
                     User.email,
                 ),
                 selectinload(Thread.voice_mode_recording),
+                selectinload(Thread.assistant).load_only(Assistant.name),
             )
         )
         return await session.scalar(stmt)
