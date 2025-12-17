@@ -101,6 +101,7 @@ async def transcribe_thread_recording_and_email_link(
     class_name: str | None = None
     user_email: str | None = None
     group_link = config.url(f"/group/{class_id}/thread/{thread_id}")
+    tmp_path: str | None = None
 
     try:
         async with config.db.driver.async_session() as session:
@@ -125,7 +126,6 @@ async def transcribe_thread_recording_and_email_link(
             recording_key = thread.voice_mode_recording.recording_id
 
         suffix = os.path.splitext(recording_key)[1] or ".webm"
-        tmp_path = None
         with tempfile.NamedTemporaryFile(mode="wb", suffix=suffix, delete=False) as tmp:
             tmp_path = tmp.name
             async for chunk in config.audio_store.store.get_file(recording_key):

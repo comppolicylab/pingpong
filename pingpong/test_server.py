@@ -892,7 +892,7 @@ async def test_magic_link_login(api, config, monkeypatch):
       </div>
       <!-- BEGIN MOBILE BODY -->
       <div>
-      <div class="mobile mobile-bg" style="width: 0; max-height: 0; overflow: hidden; display: none;"">
+      <div class="mobile mobile-bg" style="width: 0; max-height: 0; overflow: hidden; display: none;">
          <div class="m-gutter">
             <h1 class="m-title" style="margin-top: 50px; margin-bottom: 30px; font-weight: 600; font-size: 40px; line-height:42px;letter-spacing:-1px;border-bottom:0; font-family: STIX Two Text, serif; font-weight:700;">Welcome back!</h1>
          </div>
@@ -943,7 +943,7 @@ async def test_magic_link_login(api, config, monkeypatch):
                <td align="center">
                   <!-- Hero -->
                   <table width="736" role="presentation" cellspacing="0" cellpadding="0" outline="0" border="0" align="center" style="
-                     margin-top: 20px;"">
+                     margin-top: 20px;">
                      <tbody>
                         <tr>
                            <td class="d1 header-pingpong" align="center" style="width:736px; height:166px; background-color: #2d2a62; border-radius: 15px 15px 0px 0px; padding: 0 0 0 0;">
