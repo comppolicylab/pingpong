@@ -3412,14 +3412,14 @@ async def redirect_to_transcription_download(
             config.url(f"/group/{class_id}/manage?error_code=7"),
             status_code=303,
         )
-    except (jwt.exceptions.PyJWTError, Exception):
-        return RedirectResponse(
-            config.url(f"/group/{class_id}/manage?error_code=6"),
-            status_code=303,
-        )
     except ArtifactStoreError:
         return RedirectResponse(
             config.url(f"/group/{class_id}/manage?error_code=9"),
+            status_code=303,
+        )
+    except (jwt.exceptions.PyJWTError, Exception):
+        return RedirectResponse(
+            config.url(f"/group/{class_id}/manage?error_code=6"),
             status_code=303,
         )
 
@@ -3603,14 +3603,14 @@ async def redirect_to_export(class_id: str, request: Request):
             config.url(f"/group/{class_id}/manage?error_code=7"),
             status_code=303,
         )
-    except (jwt.exceptions.PyJWTError, Exception):
-        return RedirectResponse(
-            config.url(f"/group/{class_id}/manage?error_code=6"),
-            status_code=303,
-        )
     except ArtifactStoreError:
         return RedirectResponse(
             config.url(f"/group/{class_id}/manage?error_code=9"),
+            status_code=303,
+        )
+    except (jwt.exceptions.PyJWTError, Exception):
+        return RedirectResponse(
+            config.url(f"/group/{class_id}/manage?error_code=6"),
             status_code=303,
         )
 
