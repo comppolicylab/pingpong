@@ -9,11 +9,12 @@ import openai
 from openai.types.audio.transcription_diarized import TranscriptionDiarized
 
 import pingpong.models as models
+from pingpong.animal_hash import user_names
 from pingpong.auth import encode_auth_token
 from pingpong.config import config
 from pingpong.invite import send_transcription_download, send_transcription_failed
 from pingpong.now import NowFn, utcnow
-from pingpong.schemas import DownloadExport
+from pingpong.schemas import DownloadExport, DownloadTranscriptExport
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,20 @@ async def transcribe_thread_recording_and_email_link(
     tmp_path: str | None = None
 
     try:
+        async with config.authz.driver.get_client() as authz:
+            is_supervisor_check = await authz.check(
+                [
+                    (
+                        f"user:{user_id}",
+                        "supervisor",
+                        f"class:{class_id}",
+                    ),
+                ]
+            )
+            is_supervisor = (
+                bool(is_supervisor_check[0]) if is_supervisor_check else False
+            )
+
         async with config.db.driver.async_session() as session:
             class_ = await models.Class.get_by_id(session, int(class_id))
             if not class_:
@@ -124,6 +139,7 @@ async def transcribe_thread_recording_and_email_link(
                 raise ValueError(f"Thread with ID {thread_id} has no recording")
 
             recording_key = thread.voice_mode_recording.recording_id
+            thread_users = user_names(thread, user_id, is_supervisor=is_supervisor)
 
         suffix = os.path.splitext(recording_key)[1] or ".webm"
         with tempfile.NamedTemporaryFile(mode="wb", suffix=suffix, delete=False) as tmp:
@@ -146,6 +162,11 @@ async def transcribe_thread_recording_and_email_link(
             )
 
         transcription_txt = format_diarized_transcription_txt(transcription)
+        transcription_txt = (
+            f"Thread link: {group_link}\n"
+            f"Thread participants: {', '.join(thread_users)}\n\n"
+            f"{transcription_txt}"
+        )
 
         txt_buffer = io.StringIO(transcription_txt)
         file_name = f"thread_recording_transcription_{class_id}_{thread_id}_{user_id}_{datetime.now(timezone.utc).isoformat()}.txt"
@@ -169,10 +190,12 @@ async def transcribe_thread_recording_and_email_link(
             f"/api/v1/class/{class_id}/thread/{thread_id}/recording/transcribe/download?token={tok}"
         )
 
-        invite = DownloadExport(
+        invite = DownloadTranscriptExport(
             class_name=class_.name,
             email=user.email,
             link=download_link,
+            thread_link=group_link,
+            thread_users=thread_users,
         )
         await send_transcription_download(
             config.email.sender,

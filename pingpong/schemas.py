@@ -872,6 +872,12 @@ class DownloadExport(BaseModel):
     email: str
     class_name: str
 
+class DownloadTranscriptExport(BaseModel):
+    link: str
+    email: str
+    class_name: str
+    thread_link: str
+    thread_users: list[str]
 
 class ClonedGroupNotification(BaseModel):
     link: str

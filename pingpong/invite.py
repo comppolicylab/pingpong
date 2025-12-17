@@ -4,6 +4,7 @@ from .schemas import (
     ClonedGroupNotification,
     CreateInvite,
     DownloadExport,
+    DownloadTranscriptExport,
 )
 from .template import email_template as message_template
 from .template import notification_template
@@ -75,7 +76,7 @@ async def send_export_download(
 
 async def send_transcription_download(
     sender: EmailSender,
-    invite: DownloadExport,
+    invite: DownloadTranscriptExport,
     expires: int = 43200,
 ):
     subject = f"Your transcription is ready for {invite.class_name}"
@@ -85,7 +86,7 @@ async def send_transcription_download(
             "title": "Your transcription is ready.",
             "subtitle": "We have successfully transcribed the recording you requested from "
             + invite.class_name
-            + ". You can download the transcription below as a text file.",
+            + f". You can download the transcription below as a text file. </p><p><b>Thread link:</b> <a href=\"{invite.thread_link}\" style=\"color:#0070c9;\">{invite.thread_link}</a></p><p><b>Thread participants:</b> {', '.join(invite.thread_users)}",
             "type": "download link",
             "cta": "Download transcription",
             "underline": "If your download link has expired, you can request a new transcription from PingPong. All transcriptions are deleted after they expire.",
