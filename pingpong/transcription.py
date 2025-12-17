@@ -6,7 +6,6 @@ import re
 import tempfile
 from datetime import datetime, timezone
 from collections import Counter
-from dataclasses import dataclass
 
 import openai
 from openai.types.audio.transcription_diarized import TranscriptionDiarized
@@ -18,7 +17,7 @@ from pingpong.auth import encode_auth_token
 from pingpong.config import config
 from pingpong.invite import send_transcription_download, send_transcription_failed
 from pingpong.now import NowFn, utcnow
-from pingpong.schemas import DownloadTranscriptExport
+from pingpong.schemas import DownloadTranscriptExport, MessageForSpeakerMatch
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +53,11 @@ def _normalize_text(text: str) -> str:
 
 
 def _token_set(text: str) -> set[str]:
-    return {t for t in _normalize_text(text).split(" ") if t}
+    return _token_set_from_normalized(_normalize_text(text))
+
+
+def _token_set_from_normalized(normalized_text: str) -> set[str]:
+    return {t for t in normalized_text.split(" ") if t}
 
 
 def _similarity(a: str, b: str) -> float:
@@ -69,8 +72,8 @@ def _similarity(a: str, b: str) -> float:
     if len(b_norm) >= _MIN_SUBSTRING_MATCH_LENGTH and b_norm in a_norm:
         return 1.0
 
-    a_tokens = _token_set(a_norm)
-    b_tokens = _token_set(b_norm)
+    a_tokens = _token_set_from_normalized(a_norm)
+    b_tokens = _token_set_from_normalized(b_norm)
     if not a_tokens or not b_tokens:
         return 0.0
 
@@ -96,15 +99,6 @@ def _similarity_precomputed(
         return 0.0
 
     return len(a_tokens & b_tokens) / float(min(len(a_tokens), len(b_tokens)))
-
-
-@dataclass(frozen=True)
-class _MessageForSpeakerMatch:
-    role: str
-    user_id: int | None
-    text: str
-    norm_text: str
-    tokens: set[str]
 
 
 def _extract_openai_thread_message_text(message: OpenAIThreadMessage) -> str:
@@ -248,7 +242,7 @@ def infer_speaker_display_names_from_thread_messages(
     of that diarization speaker id are labeled consistently.
     """
 
-    filtered_messages: list[_MessageForSpeakerMatch] = []
+    filtered_messages: list[MessageForSpeakerMatch] = []
     for msg in thread_messages:
         role = getattr(msg, "role", None)
         if role not in {"assistant", "user"}:
@@ -268,12 +262,12 @@ def infer_speaker_display_names_from_thread_messages(
                 user_id = None
 
         filtered_messages.append(
-            _MessageForSpeakerMatch(
+            MessageForSpeakerMatch(
                 role=role,
                 user_id=user_id,
                 text=text,
                 norm_text=norm_text,
-                tokens=_token_set(norm_text),
+                tokens=_token_set_from_normalized(norm_text),
             )
         )
 

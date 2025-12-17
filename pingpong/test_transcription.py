@@ -8,6 +8,7 @@ from pingpong.transcription import (
     _normalize_text,
     _similarity,
     _token_set,
+    _token_set_from_normalized,
 )
 
 
@@ -412,6 +413,7 @@ def test_token_set_splits_and_dedupes() -> None:
     assert _token_set("") == set()
     assert _token_set("Hello world world") == {"hello", "world"}
     assert _token_set("  hello   ") == {"hello"}
+    assert _token_set_from_normalized("hello world world") == {"hello", "world"}
 
 
 def test_similarity_returns_zero_for_empty_inputs() -> None:
