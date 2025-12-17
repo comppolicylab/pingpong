@@ -6,6 +6,7 @@ from .schemas import (
     DownloadExport,
 )
 from .template import email_template as message_template
+from .template import notification_template
 from .template import summary_template
 from .time import convert_seconds
 
@@ -66,6 +67,51 @@ async def send_export_download(
             "link": invite.link,
             "email": invite.email,
             "legal_text": "because you requested a data export from PingPong",
+        }
+    )
+
+    await sender.send(invite.email, subject, message)
+
+
+async def send_transcription_download(
+    sender: EmailSender,
+    invite: DownloadExport,
+    expires: int = 43200,
+):
+    subject = f"Your transcription is ready for {invite.class_name}"
+
+    message = message_template.substitute(
+        {
+            "title": "Your transcription is ready.",
+            "subtitle": "We have successfully transcribed the recording you requested from "
+            + invite.class_name
+            + ". You can download the transcription below as a text file.",
+            "type": "download link",
+            "cta": "Download transcription",
+            "underline": "If your download link has expired, you can request a new transcription from PingPong. All transcriptions are deleted after they expire.",
+            "expires": convert_seconds(expires),
+            "link": invite.link,
+            "email": invite.email,
+            "legal_text": "because you requested a transcription from PingPong",
+        }
+    )
+
+    await sender.send(invite.email, subject, message)
+
+
+async def send_transcription_failed(
+    sender: EmailSender,
+    invite: DownloadExport,
+):
+    subject = f"Transcription failed for {invite.class_name}"
+
+    message = notification_template.substitute(
+        {
+            "title": "We couldn’t create your transcription.",
+            "subtitle": "We ran into an issue while creating the transcription you requested from "
+            + invite.class_name
+            + ". </p><p>Our team has been notified and we are looking into it. Please try again later.",
+            "legal_text": "because you requested a transcription from PingPong",
         }
     )
 
