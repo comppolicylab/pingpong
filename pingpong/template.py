@@ -438,6 +438,397 @@ email_template = Template("""
 </html>
 """)
 
+notification_template = Template("""
+<!doctype html>
+<html>
+   <head>
+      <meta name="comm-name" content="invite-notification">
+   </head>
+   <body style="margin:0; padding:0;" class="body">
+      <!-- head include -->
+      <!-- BEGIN HEAD -->
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <meta http-equiv="content-type" content="text/html;charset=utf-8">
+      <meta name="format-detection" content="date=no">
+      <meta name="format-detection" content="address=no">
+      <meta name="format-detection" content="email=no">
+      <meta name="color-scheme" content="light dark">
+      <meta name="supported-color-schemes" content="light dark">
+      <style type="text/css">
+         body {
+         width: 100% !important;
+         padding: 0;
+         margin: 0;
+         background-color: #201e45;
+         font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+         font-weight: normal;
+         text-rendering: optimizelegibility;
+         -webkit-font-smoothing: antialiased;
+         }
+         a, a:link {
+         color: #0070c9;
+         text-decoration: none;
+         }
+         a:hover {
+         color: #0070c9;
+         text-decoration: underline !important;
+         }
+         sup {
+         line-height: normal;
+         font-size: .65em !important;
+         vertical-align: super;
+         }
+         b {
+         font-weight: 600 !important;
+         }
+         td {
+         color: #333333;
+         font-size: 17px;
+         font-weight: normal;
+         line-height: 25px;
+         }
+         .type-body-d, .type-body-m {
+         font-size: 14px;
+         line-height: 20px;
+         }
+         p {
+         margin: 0 0 16px 0;
+         padding: 0;
+         }
+         .f-complete {
+         color: #6F6363;
+         font-size: 12px;
+         line-height: 15px;
+         }
+         .f-complete p {
+         margin-bottom: 9px;
+         }
+         .f-legal {
+         padding: 0 0% 0 0%;
+         }
+         .preheader-hide {
+         display: none !important;
+         }
+         /* DARK MODE DESKTOP */
+         @media (prefers-color-scheme: dark) {
+         .header-pingpong {
+         background-color: #1A1834 !important;
+         }
+         .desktop-bg {
+         background-color: #111517 !important;
+         }
+         .desktop-button-bg {
+         background-color: #b6320a !important;
+         }
+         .d-divider {
+         border-top: solid 1px #808080 !important;
+         }
+         body {
+         background-color: transparent !important;
+         color: #ffffff !important;
+         }
+         a, a:link {
+         color: #62adf6 !important;
+         }
+         td {
+         border-color: #808080 !important;
+         color: #ffffff !important;
+         }
+         p {
+         color: #ffffff !important;
+         }
+         .footer-bg {
+         background-color: #333333 !important;
+         }
+         }
+         @media only screen and (max-device-width: 568px) {
+         .desktop {
+         display: none;
+         }
+         .mobile {
+         display: block !important;
+         color: #333333;
+         font-size: 17px;
+         font-weight: normal;
+         line-height: 25px;
+         margin: 0 auto;
+         max-height: inherit !important;
+         max-width: 414px;
+         overflow: visible;
+         width: 100% !important;
+         }
+         .mobile-bg {
+         background-color: white;
+         }
+         .mobile-button-bg {
+         background-color: rgb(252, 98, 77);
+         }
+         sup {
+         font-size: .55em;
+         }
+         .m-gutter {
+         margin: 0 6.25%;
+         }
+         .m-divider {
+         padding: 0px 0 30px 0;
+         border-top: solid 1px #d6d6d6;
+         }
+         .f-legal {
+         padding: 0 5% 0 6.25%;
+         background: #f1f4ff !important;
+         }
+         .bold {
+         font-weight: 600;
+         }
+         .hero-head-container {
+         width: 100%;
+         overflow: hidden;
+         position: relative;
+         margin: 0;
+         height: 126px;
+         padding-bottom: 0;
+         }
+         .m-gutter .row {
+         position: relative;
+         width: 100%;
+         display: block;
+         min-width: 320px;
+         overflow: auto;
+         margin-bottom: 10px;
+         }
+         .m-gutter .row .column {
+         display: inline-block;
+         vertical-align: middle;
+         }
+         .m-gutter .row .column img {
+         margin-right: 12px;
+         }
+         u+.body a.gmail-unlink {
+         color: #333333 !important;
+         }
+         /* M-FOOT */
+         .m-footer {
+         background: #f1f4ff;
+         padding: 19px 0 28px;
+         color: #6F6363;
+         }
+         .m-footer p, .m-footer li {
+         font-size: 12px;
+         line-height: 16px;
+         }
+         ul.m-bnav {
+         border-top: 1px solid #d6d6d6;
+         color: #555555;
+         margin: 0;
+         padding-top: 12px;
+         padding-bottom: 1px;
+         text-align: center;
+         }
+         ul.m-bnav li {
+         border-bottom: 1px solid #d6d6d6;
+         font-size: 12px;
+         font-weight: normal;
+         line-height: 16px;
+         margin: 0 0 11px 0;
+         padding: 0 0 12px 0;
+         }
+         ul.m-bnav li a, ul.m-bnav li a:visited {
+         color: #555555;
+         }
+         }
+         /* DARK MODE MOBILE */
+         @media (prefers-color-scheme: dark) {
+         .mobile {
+         color: #ffffff;
+         }
+         .mobile-bg {
+         background-color: #111517;
+         }
+         .m-title {
+         color:#ffffff;
+         }
+         .mobile-button-bg {
+         background-color: #b6320a;
+         }
+         .f-legal {
+         background: #333333 !important;
+         }
+         .m-divider {
+         border-top: solid 1px #808080;
+         }
+         .m-footer {
+         background: #333333;
+         }
+         }
+      </style>
+      <!--[if gte mso 9]>
+      <style type="text/css">
+         sup
+         { font-size:100% !important }
+      </style>
+      <![endif]-->
+      <!-- END HEAD -->
+      <!-- end head include -->
+      <div class="mobile" style="width: 0; max-height: 0; overflow: hidden; display: none;">
+         <div style="display:none !important;position: absolute; font-size:0; line-height:1; max-height:0; max-width:0; opacity:0; overflow:hidden; color: #333333" class="preheader-hide">
+            &nbsp;
+         </div>
+         <div class="m-hero-section">
+            <div class="m-content-hero">
+               <div class="m1 hero-head-container" style="padding:0; margin-top: 20px;">
+                  <div class="header-pingpong" style="height:126px; display: flex; align-items:center; background-color: #2d2a62; border-radius: 15px 15px 0px 0px; justify-content: center;">
+                     <source srcset="https://pingpong.hks.harvard.edu/pingpong_logo_2x.png">
+                     <img src="https://pingpong.hks.harvard.edu/pingpong_logo_2x.png" width="165" height="47.45" class="hero-image" style="display: block;" border="0" alt="PingPong">
+                  </div>
+               </div>
+            </div>
+         </div>
+      </div>
+      <!-- BEGIN MOBILE BODY -->
+      <div>
+      <div class="mobile mobile-bg" style="width: 0; max-height: 0; overflow: hidden; display: none;"">
+         <div class="m-gutter">
+            <h1 class="m-title" style="margin-top: 50px; margin-bottom: 30px; font-weight: 600; font-size: 40px; line-height:42px;letter-spacing:-1px;border-bottom:0; font-family: STIX Two Text, serif; font-weight:700;">$title</h1>
+         </div>
+      </div>
+      <div class="mobile mobile-bg" style="width: 0; max-height: 0; overflow: hidden; display: none;">
+         <div class="m-gutter">
+            <p>$subtitle</p>
+            <br>
+         </div>
+      </div>
+      <div class="mobile mobile-bg" style="width: 0; max-height: 0; overflow: hidden; display: none;">
+         <div class="m-gutter">
+            <div class="m-divider"></div>
+         </div>
+      </div>
+      <!-- END MOBILE BODY -->
+      <!-- BEGIN MOBILE FOOTER -->
+      <div class="mobile m-footer" style="width:0; max-height:0; overflow:hidden; display:none; margin-bottom: 20px; padding-bottom: 0px; border-radius: 0px 0px 15px 15px;">
+         <div class="f-legal" style="padding-left: 0px; padding-right: 0px;">
+            <div class="m-gutter">
+               <p>You&#8217;re receiving this email because $legal_text.
+               </p>
+               <p>Pingpong is developed by the Computational Policy Lab at the Harvard Kennedy School.</p>
+            </div>
+         </div>
+      </div>
+      <!-- END MOBILE FOOTER -->
+      <!-- desktop header include -->
+      <table role="presentation" width="736" class="desktop" cellspacing="0" cellpadding="0" border="0" align="center">
+         <tbody>
+            <tr>
+               <td align="center">
+                  <!-- Hero -->
+                  <table width="736" role="presentation" cellspacing="0" cellpadding="0" outline="0" border="0" align="center" style="
+                     margin-top: 20px;"">
+                     <tbody>
+                        <tr>
+                           <td class="d1 header-pingpong" align="center" style="width:736px; height:166px; background-color: #2d2a62; border-radius: 15px 15px 0px 0px; padding: 0 0 0 0;">
+                              <source media="(min-device-width: 568px)" srcset="https://pingpong.hks.harvard.edu/pingpong_logo_2x.png">
+                              <img src="https://pingpong.hks.harvard.edu/pingpong_logo_2x.png" width="233" height="67" class="hero-image" style="display: block;" border="0" alt="PingPong">
+                           </td>
+                        </tr>
+                     </tbody>
+                  </table>
+               </td>
+            </tr>
+         </tbody>
+      </table>
+      <!-- end desktop header include -->
+      <!-- BEGIN DESKTOP BODY -->
+      <table role="presentation" class="desktop desktop-bg" width="736" class="desktop" cellspacing="0" cellpadding="0" border="0" align="center" style="background-color: white;">
+         <tbody>
+            <tr>
+               <td>
+                  <table cellspacing="0" width="550" border="0" cellpadding="0" align="center" class="pingpong_headline" style="margin:0 auto">
+                     <tbody>
+                        <tr>
+                           <td align="" style="padding-top:50px;padding-bottom:25px">
+                              <p style="font-family: STIX Two Text, serif;color:#111111; font-weight:700;font-size:40px;line-height:44px;letter-spacing:-1px;border-bottom:0;">$title</p>
+                           </td>
+                        </tr>
+                     </tbody>
+                  </table>
+               </td>
+            </tr>
+         </tbody>
+      </table>
+      <table role="presentation" class="desktop desktop-bg" width="736" class="desktop" cellspacing="0" cellpadding="0" border="0" align="center" style="background-color: white;">
+         <tbody>
+            <tr>
+               <td align="center">
+                  <table role="presentation" width="550" cellspacing="0" cellpadding="0" border="0" align="center">
+                     <tbody>
+                        <tr>
+                           <td class="d1" align="left" valign="top" style="padding: 0;">
+                              <p>$subtitle</p>
+                           </td>
+                        </tr>
+                     </tbody>
+                  </table>
+               </td>
+            </tr>
+         </tbody>
+      </table>
+      <table role="presentation" class="desktop desktop-bg" width="736" class="desktop" cellspacing="0" cellpadding="0" border="0" align="center" style="background-color: white;">
+         <tbody>
+            <tr>
+               <td align="center">
+                  <table role="presentation" width="550" cellspacing="0" cellpadding="0" border="0" align="center">
+                     <tbody>
+                        <tr>
+                           <td width="550" style="padding: 10px 0 0 0;">&nbsp;</td>
+                        </tr>
+                        <tr>
+                           <td width="550" valign="top" align="center" class="d-divider" style="border-color: #d6d6d6; border-top-style: solid; border-top-width: 1px; font-size: 1px; line-height: 1px;"> &nbsp;</td>
+                        </tr>
+                        <tr>
+                           <td width="550" style="padding: 4px 0 0 0;">&nbsp;</td>
+                        </tr>
+                     </tbody>
+                  </table>
+               </td>
+            </tr>
+         </tbody>
+      </table>
+      <!-- END DESKTOP BODY -->
+      <!-- BEGIN DESKTOP FOOTER -->
+      <table role="presentation" width="736" class="desktop" cellspacing="0" cellpadding="0" border="0" align="center" style="margin-bottom: 20px;">
+         <tbody>
+            <tr class="desktop-bg" style="background-color: white;">
+               <td align="center" class="desktop-bg" style="margin: 0 auto; padding:0 20px 0 20px;" style="background-color: white;">
+                  <table role="presentation" cellspacing="0" cellpadding="0" border="0" class="footer">
+                     <tbody>
+                        <tr>
+                           <td style="padding: 19px 0 20px 0;"> </td>
+                        </tr>
+                     </tbody>
+                  </table>
+               </td>
+            </tr>
+            <tr>
+               <td align="center" class="footer-bg" style="margin: 0 auto;background-color: #f1f4ff;padding:0 37px 0 37px; border-radius: 0px 0px 15px 15px;">
+                  <table role="presentation" width="662" cellspacing="0" cellpadding="0" border="0" class="footer">
+                     <tbody>
+                        <td align="left" class="f-complete" style="padding: 19px 0 20px 0;">
+                           <div class="f-legal">
+                              <p>You&#8217;re receiving this email because $legal_text.
+                              </p>
+                              <p>Pingpong is developed by the Computational Policy Lab at the Harvard Kennedy School.</p>
+                           </div>
+                        </td>
+                     </tbody>
+                  </table>
+               </td>
+            </tr>
+         </tbody>
+      </table>
+      <!-- END DESKTOP FOOTER -->
+   </body>
+</html>
+""")
+
 summary_template = Template("""
 <!doctype html>
 <html>

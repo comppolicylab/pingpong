@@ -937,6 +937,32 @@
     showPlayer = true;
   };
 
+  let transcribingRecording = false;
+  const transcribeRecording = async () => {
+    if (transcribingRecording) {
+      return;
+    }
+    transcribingRecording = true;
+    settingsOpen = false;
+    try {
+      const res = await api.transcribeThreadRecording(fetch, classId, threadId);
+      if (res.$status >= 300) {
+        sadToast(`Failed to request transcription: ${res.detail || 'unknown error'}`);
+        return;
+      }
+      happyToast(
+        "We've started transcribing your recording. You'll receive an email when it's done.",
+        4000
+      );
+    } catch (e) {
+      sadToast(
+        `Failed to request transcription. Error: ${errorMessage(e, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
+      );
+    } finally {
+      transcribingRecording = false;
+    }
+  };
+
   onNavigate(async () => {
     await resetAudioSession();
   });
@@ -1658,6 +1684,11 @@
                   <DropdownItem on:click={handlePrintThread} disabled={printingThread}>
                     <span class:text-gray-300={printingThread}>Print</span>
                   </DropdownItem>
+                  {#if threadRecording}
+                    <DropdownItem on:click={transcribeRecording} disabled={transcribingRecording}>
+                      <span class:text-gray-300={transcribingRecording}>Transcribe</span>
+                    </DropdownItem>
+                  {/if}
                   <DropdownDivider />
                   <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
                     <span class:text-gray-300={!canPublishThread}>

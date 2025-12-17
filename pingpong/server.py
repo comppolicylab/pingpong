@@ -147,6 +147,7 @@ from .users import (
     delete_canvas_permissions,
 )
 from .merge import list_all_permissions, merge
+from .transcription import transcribe_thread_recording_and_email_link
 
 logger = logging.getLogger(__name__)
 responses_api_transition_logger = logging.getLogger("responses_api_transition")
@@ -3318,6 +3319,108 @@ async def get_thread_recording(
         raise HTTPException(
             status_code=500,
             detail="An internal error occurred while retrieving the recording.",
+        )
+
+
+@v1.post(
+    "/class/{class_id}/thread/{thread_id}/recording/transcribe",
+    dependencies=[
+        Depends(
+            Authz("can_view", "thread:{thread_id}"),
+        )
+    ],
+    response_model=schemas.GenericStatus,
+)
+async def transcribe_thread_recording(
+    class_id: str,
+    thread_id: str,
+    request: Request,
+    tasks: BackgroundTasks,
+    openai_client: OpenAIClient,
+):
+    user_id = request.state.session.user.id
+    thread, is_supervisor_check = await asyncio.gather(
+        models.Thread.get_by_id_with_users_voice_mode(request.state.db, int(thread_id)),
+        request.state.authz.check(
+            [
+                (
+                    f"user:{user_id}",
+                    "supervisor",
+                    f"class:{class_id}",
+                ),
+            ]
+        ),
+    )
+
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if not thread.voice_mode_recording:
+        raise HTTPException(
+            status_code=404,
+            detail="This thread does not have a recording.",
+        )
+    is_participant = user_id in [u.id for u in thread.users]
+    if not (is_supervisor_check[0] or is_participant):
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to transcribe this recording.",
+        )
+
+    tasks.add_task(
+        safe_task,
+        transcribe_thread_recording_and_email_link,
+        openai_client,
+        class_id,
+        thread_id,
+        user_id,
+    )
+    return {"status": "ok"}
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/recording/transcribe/download",
+    dependencies=[
+        Depends(
+            Authz("can_view", "thread:{thread_id}"),
+        )
+    ],
+)
+async def redirect_to_transcription_download(
+    class_id: str,
+    thread_id: str,
+    request: Request,
+):
+    token = request.query_params.get("token")
+    nowfn = get_now_fn(request)
+    try:
+        auth_token = decode_auth_token(token, nowfn=nowfn)
+        sub_data = json.loads(auth_token.sub)
+        requestor_user_id = sub_data["user_id"]
+        download_name = sub_data["download_name"]
+        if requestor_user_id != request.state.session.user.id:
+            return RedirectResponse(
+                config.url(f"/group/{class_id}/manage?error_code=8"),
+                status_code=303,
+            )
+        return StreamingResponse(
+            config.artifact_store.store.get(download_name),
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename={download_name}"},
+        )
+    except TimeException:
+        return RedirectResponse(
+            config.url(f"/group/{class_id}/manage?error_code=7"),
+            status_code=303,
+        )
+    except (jwt.exceptions.PyJWTError, Exception):
+        return RedirectResponse(
+            config.url(f"/group/{class_id}/manage?error_code=6"),
+            status_code=303,
+        )
+    except ArtifactStoreError:
+        return RedirectResponse(
+            config.url(f"/group/{class_id}/manage?error_code=9"),
+            status_code=303,
         )
 
 

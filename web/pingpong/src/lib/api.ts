@@ -2119,6 +2119,16 @@ export const getThreadRecording = async (f: Fetcher, classId: number, threadId: 
 };
 
 /**
+ * Request a diarized transcription of a thread Voice Mode recording.
+ *
+ * This starts an async job and sends a download link via email when ready.
+ */
+export const transcribeThreadRecording = async (f: Fetcher, classId: number, threadId: number) => {
+  const url = `class/${classId}/thread/${threadId}/recording/transcribe`;
+  return await POST<Record<string, never>, GenericStatus>(f, url, {});
+};
+
+/**
  * Thread information.
  */
 export type Thread = {
