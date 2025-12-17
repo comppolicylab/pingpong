@@ -873,10 +873,7 @@ class DownloadExport(BaseModel):
     class_name: str
 
 
-class DownloadTranscriptExport(BaseModel):
-    link: str
-    email: str
-    class_name: str
+class DownloadTranscriptExport(DownloadExport):
     thread_link: str
     thread_users: list[str]
 
