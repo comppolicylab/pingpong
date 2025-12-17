@@ -873,6 +873,11 @@ class DownloadExport(BaseModel):
     class_name: str
 
 
+class DownloadTranscriptExport(DownloadExport):
+    thread_link: str
+    thread_users: list[str]
+
+
 class ClonedGroupNotification(BaseModel):
     link: str
     email: str = Field(..., min_length=3, max_length=100)
