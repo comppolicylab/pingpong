@@ -102,7 +102,7 @@ async def send_transcription_download(
 
 async def send_transcription_failed(
     sender: EmailSender,
-    invite: DownloadExport,
+    invite: DownloadTranscriptExport,
 ):
     subject = f"Transcription failed for {invite.class_name}"
 

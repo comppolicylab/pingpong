@@ -6,6 +6,7 @@ import re
 import tempfile
 from datetime import datetime, timezone
 from collections import Counter
+from dataclasses import dataclass
 
 import openai
 from openai.types.audio.transcription_diarized import TranscriptionDiarized
@@ -23,6 +24,26 @@ logger = logging.getLogger(__name__)
 
 _WHITESPACE_RE = re.compile(r"\s+")
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9 ]+")
+# Minimum normalized length for a thread message to be considered for matching.
+# Rationale: very short messages (e.g., "ok", "thanks") are too ambiguous and create
+# false matches against diarized chunks.
+_MIN_MESSAGE_LENGTH = 20
+# Minimum normalized length for a diarized chunk to be considered for matching.
+# Rationale: very short chunk text tends to be filler and matches many messages.
+_MIN_CHUNK_LENGTH = 25
+# Minimum number of words for a diarized chunk to be considered for matching.
+# Rationale: additional guardrail against short acknowledgements.
+_MIN_CHUNK_WORDS = 4
+# Minimum normalized length before we attempt substring matching.
+# Rationale: diarized chunks can be short; using substring matching on very short strings
+# causes frequent false positives ("yeah", "okay", etc.). 30 chars is a practical cutoff
+# that tends to include meaningful phrases while filtering fillers.
+_MIN_SUBSTRING_MATCH_LENGTH = 30
+# Minimum similarity score required to treat a diarized chunk as matching a thread message.
+# Rationale: the similarity metric is token-overlap over the smaller token set, which can
+# be overly optimistic for short/partial overlaps. 0.6 provides a balance that typically
+# requires substantive overlap while still tolerating diarization/ASR differences.
+_MIN_SIMILARITY_SCORE = 0.6
 
 
 def _normalize_text(text: str) -> str:
@@ -43,9 +64,9 @@ def _similarity(a: str, b: str) -> float:
         return 0.0
 
     # Strong signal for partial matches: diarized chunks are often substrings of thread messages.
-    if len(a_norm) >= 30 and a_norm in b_norm:
+    if len(a_norm) >= _MIN_SUBSTRING_MATCH_LENGTH and a_norm in b_norm:
         return 1.0
-    if len(b_norm) >= 30 and b_norm in a_norm:
+    if len(b_norm) >= _MIN_SUBSTRING_MATCH_LENGTH and b_norm in a_norm:
         return 1.0
 
     a_tokens = _token_set(a_norm)
@@ -56,7 +77,51 @@ def _similarity(a: str, b: str) -> float:
     return len(a_tokens & b_tokens) / float(min(len(a_tokens), len(b_tokens)))
 
 
+def _similarity_precomputed(
+    *,
+    a_norm: str,
+    a_tokens: set[str],
+    b_norm: str,
+    b_tokens: set[str],
+) -> float:
+    if not a_norm or not b_norm:
+        return 0.0
+
+    if len(a_norm) >= _MIN_SUBSTRING_MATCH_LENGTH and a_norm in b_norm:
+        return 1.0
+    if len(b_norm) >= _MIN_SUBSTRING_MATCH_LENGTH and b_norm in a_norm:
+        return 1.0
+
+    if not a_tokens or not b_tokens:
+        return 0.0
+
+    return len(a_tokens & b_tokens) / float(min(len(a_tokens), len(b_tokens)))
+
+
+@dataclass(frozen=True)
+class _MessageForSpeakerMatch:
+    role: str
+    user_id: int | None
+    text: str
+    norm_text: str
+    tokens: set[str]
+
+
 def _extract_openai_thread_message_text(message: OpenAIThreadMessage) -> str:
+    """
+    Extract the concatenated plain-text content from an OpenAI thread message.
+
+    Only `text` content blocks are included; non-text blocks (images, etc.) are ignored.
+    Uses `getattr` defensively because OpenAI SDK content block types can vary by version
+    and not all blocks guarantee the same attribute shape at runtime.
+
+    Args:
+        message: An OpenAI thread message object.
+
+    Returns:
+        A single string containing the concatenated text values (newline-separated),
+        or an empty string if no text content is present.
+    """
     parts: list[str] = []
     for content in message.content:
         if getattr(content, "type", None) == "text" and getattr(content, "text", None):
@@ -72,6 +137,19 @@ async def _list_openai_thread_messages(
     *,
     limit: int = 200,
 ) -> list[OpenAIThreadMessage]:
+    """
+    List messages for a classic (v2) OpenAI thread, handling pagination.
+
+    Pagination strategy:
+    - Fetches pages in ascending order using the `after` cursor.
+    - Uses `page.last_id` as the next cursor and stops when `page.has_more` is false.
+    - Caps results at `limit` (default 200) to bound latency and token usage.
+
+    Early termination can happen when:
+    - The API indicates there are no more pages (`has_more` is false).
+    - The API response does not include a `last_id` cursor (defensive stop).
+    - `limit` is reached.
+    """
     messages: list[OpenAIThreadMessage] = []
     after: str | None = None
     per_page = min(100, limit)
@@ -96,6 +174,22 @@ async def _list_openai_thread_messages(
 def _iter_diarized_chunks(
     transcription: TranscriptionDiarized,
 ) -> list[tuple[str, float, float, str]]:
+    """
+    Consolidate diarized segments into contiguous chunks per speaker.
+
+    Strategy:
+    - Walks the diarized `segments` in order.
+    - Merges consecutive segments with the same `segment.speaker` into one chunk,
+      concatenating their non-empty `segment.text` values with spaces.
+    - Starts a new chunk when the speaker changes.
+
+    Returns:
+        A list of tuples `(speaker_id, start_seconds, end_seconds, text)` where:
+        - `speaker_id` is `segment.speaker` (or "unknown" if missing/falsy),
+        - `start_seconds` is the first segment's start time in the chunk,
+        - `end_seconds` is the last segment's end time in the chunk,
+        - `text` is the concatenated transcript text for that chunk.
+    """
     chunks: list[tuple[str, float, float, str]] = []
 
     current_speaker: str | None = None
@@ -154,13 +248,14 @@ def infer_speaker_display_names_from_thread_messages(
     of that diarization speaker id are labeled consistently.
     """
 
-    message_index: list[dict[str, object]] = []
+    filtered_messages: list[_MessageForSpeakerMatch] = []
     for msg in thread_messages:
         role = getattr(msg, "role", None)
         if role not in {"assistant", "user"}:
             continue
         text = _extract_openai_thread_message_text(msg)
-        if len(_normalize_text(text)) < 20:
+        norm_text = _normalize_text(text)
+        if len(norm_text) < _MIN_MESSAGE_LENGTH:
             continue
 
         user_id: int | None = None
@@ -172,13 +267,20 @@ def infer_speaker_display_names_from_thread_messages(
             except (TypeError, ValueError):
                 user_id = None
 
-        message_index.append(
-            {
-                "role": role,
-                "user_id": user_id,
-                "text": text,
-            }
+        filtered_messages.append(
+            _MessageForSpeakerMatch(
+                role=role,
+                user_id=user_id,
+                text=text,
+                norm_text=norm_text,
+                tokens=_token_set(norm_text),
+            )
         )
+
+    token_to_message_idxs: dict[str, list[int]] = {}
+    for idx, message in enumerate(filtered_messages):
+        for token in message.tokens:
+            token_to_message_idxs.setdefault(token, []).append(idx)
 
     speaker_assistant_votes: Counter[str] = Counter()
     speaker_user_votes: dict[str, Counter[int]] = {}
@@ -186,24 +288,33 @@ def infer_speaker_display_names_from_thread_messages(
 
     for speaker, _start, _end, text in _iter_diarized_chunks(transcription):
         norm = _normalize_text(text)
-        if len(norm) < 25 or len(norm.split(" ")) < 4:
+        words = [w for w in norm.split(" ") if w]
+        if len(norm) < _MIN_CHUNK_LENGTH or len(words) < _MIN_CHUNK_WORDS:
             continue
+        chunk_tokens = set(words)
 
         best_score = 0.0
         best_role: str | None = None
         best_user_id: int | None = None
 
-        for m in message_index:
-            score = _similarity(text, str(m["text"]))
+        candidate_idxs: set[int] = set()
+        for token in chunk_tokens:
+            candidate_idxs.update(token_to_message_idxs.get(token, []))
+
+        for idx in sorted(candidate_idxs):
+            m = filtered_messages[idx]
+            score = _similarity_precomputed(
+                a_norm=norm,
+                a_tokens=chunk_tokens,
+                b_norm=m.norm_text,
+                b_tokens=m.tokens,
+            )
             if score > best_score:
                 best_score = score
-                best_role = str(m["role"])
-                candidate_user_id = m.get("user_id")
-                best_user_id = (
-                    candidate_user_id if isinstance(candidate_user_id, int) else None
-                )
+                best_role = m.role
+                best_user_id = m.user_id
 
-        if best_score < 0.6 or best_role is None:
+        if best_score < _MIN_SIMILARITY_SCORE or best_role is None:
             continue
 
         if best_role == "assistant":
