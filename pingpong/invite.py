@@ -102,7 +102,7 @@ async def send_transcription_download(
 
 async def send_transcription_failed(
     sender: EmailSender,
-    invite: DownloadExport,
+    invite: DownloadTranscriptExport,
 ):
     subject = f"Transcription failed for {invite.class_name}"
 
@@ -111,7 +111,7 @@ async def send_transcription_failed(
             "title": "We couldn’t create your transcription.",
             "subtitle": "We ran into an issue while creating the transcription you requested from "
             + invite.class_name
-            + ". </p><p>Our team has been notified and we are looking into it. Please try again later.",
+            + f'. </p><p><b>Thread link:</b> <a href="{invite.thread_link}" style="color:#0070c9;">{invite.thread_link}</a></p><p>Our team has been notified and we are looking into it. Please try again later.',
             "legal_text": "because you requested a transcription from PingPong",
         }
     )

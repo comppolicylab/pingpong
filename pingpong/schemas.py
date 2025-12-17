@@ -878,6 +878,14 @@ class DownloadTranscriptExport(DownloadExport):
     thread_users: list[str]
 
 
+class MessageForSpeakerMatch(BaseModel):
+    role: str
+    user_id: int | None
+    text: str
+    norm_text: str
+    tokens: set[str]
+
+
 class ClonedGroupNotification(BaseModel):
     link: str
     email: str = Field(..., min_length=3, max_length=100)
