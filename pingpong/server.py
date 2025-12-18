@@ -8429,6 +8429,17 @@ except Exception:
     logger.exception("Failed to mount study app.")
     pass
 
+try:
+    if config.lti:
+        from pingpong.lti.server import lti_router
+
+        v1.include_router(lti_router, prefix="/lti")
+        logger.info("Mounted LTI Advantage Service routes")
+except Exception:
+    # If LTI is not configured or import fails, skip mounting
+    logger.exception("Failed to mount LTI Advantage Service routes.")
+    pass
+
 
 @app.get("/health")
 async def health():

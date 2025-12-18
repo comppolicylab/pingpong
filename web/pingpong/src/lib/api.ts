@@ -426,6 +426,26 @@ export type ExternalLoginProviders = {
   providers: ExternalLoginProvider[];
 };
 
+/**
+ * Get all external login providers.
+ */
+export const getExternalLoginProvidersForLTI = async (f: Fetcher) => {
+  return await GET<never, ExternalLoginProviders>(f, 'lti/sso/providers');
+};
+
+export type LTIRegisterRequest = {
+  name: string;
+  admin_name: string;
+  admin_email: string;
+  provider_id: number;
+  openid_configuration: string;
+  registration_token: string;
+};
+
+export const registerLTIInstance = async (f: Fetcher, data: LTIRegisterRequest) => {
+  return await POST<LTIRegisterRequest, never>(f, 'lti/register', data);
+};
+
 export type ExternalLogin = {
   id: number;
   provider: string;

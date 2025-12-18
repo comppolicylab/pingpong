@@ -57,6 +57,7 @@
   };
 
   $: sharedPage = data.isSharedAssistantPage || data.isSharedThreadPage;
+  $: sharedLTIInstancePage = data.isSharedLTIInstancePage;
   $: isSharedAssistantPage = data.isSharedAssistantPage;
   $: isSharedThreadPage = data.isSharedThreadPage;
   $: shareToken = data.shareToken;
@@ -159,7 +160,7 @@
   <SidebarWrapper class="bg-transparent h-full flex flex-col">
     <SidebarGroup class="mb-6">
       <div class="flex items-center" data-sveltekit-preload-data="off">
-        {#if !(inIframe && sharedPage)}
+        {#if !(inIframe && sharedPage) && !sharedLTIInstancePage}
           <button
             class="menu-button bg-transparent border-none mr-3 mt-1 lg:hidden"
             on:click={() => togglePanel()}
@@ -171,12 +172,15 @@
             {/if}
           </button>
         {/if}
-        <NavBrand href={inIframe && sharedPage ? undefined : '/'} class="">
+        <NavBrand
+          href={(inIframe && sharedPage) || sharedLTIInstancePage ? undefined : '/'}
+          class=""
+        >
           <PingPongLogo size={10} extraClass="fill-amber-600" />
         </NavBrand>
       </div>
     </SidebarGroup>
-
+    {#if !sharedLTIInstancePage}
     <SidebarGroup class="mt-6">
       <SidebarItem
         href={nonAuthed
@@ -369,6 +373,8 @@
         </Li>
       </SidebarGroup>
     {/if}
+          {/if}
+
   </SidebarWrapper>
 </Sidebar>
 

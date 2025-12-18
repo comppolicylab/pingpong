@@ -5321,3 +5321,41 @@ class Thread(Base):
         )
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
+
+
+class LTIRegistration(Base):
+    __tablename__ = "lti_registrations"
+
+    id = Column(Integer, primary_key=True)
+    issuer = Column(String, nullable=False)
+    client_id = Column(String)
+    auth_login_url = Column(String, nullable=False)
+    auth_token_url = Column(String, nullable=False)
+    key_set_url = Column(String, nullable=False)
+    token_algorithm = Column(SQLEnum(schemas.LTITokenAlgorithm), nullable=False)
+    lms_platform = Column(SQLEnum(schemas.LMSPlatform), nullable=True)
+    canvas_account_name = Column(String, nullable=True)
+
+    configuration = Column(String, nullable=True)
+
+    admin_name = Column(String, nullable=True)
+    admin_email = Column(String, nullable=True)
+    friendly_name = Column(String, nullable=True)
+
+    review_status = Column(
+        SQLEnum(schemas.LTIRegistrationReviewStatus),
+        server_default=schemas.LTIRegistrationReviewStatus.PENDING.name,
+    )
+    review_notes = Column(String, nullable=True)
+    public_notes = Column(String, nullable=True)
+    review_by_id = Column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    review_by = relationship("User", uselist=False, lazy="selectin")
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

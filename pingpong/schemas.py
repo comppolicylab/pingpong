@@ -1003,6 +1003,20 @@ class InstitutionAdminResponse(BaseModel):
     added_admin: bool
 
 
+class LMSPlatform(StrEnum):
+    CANVAS = "canvas"
+
+
+class LTIRegistrationReviewStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class LTITokenAlgorithm(StrEnum):
+    RS256 = "RS256"
+
+
 # Status documenting the state of the LMS sync.
 # NONE: The user has not authorized the app to sync with LMS.
 # AUTHORIZED: The user has authorized the app to sync with LMS.

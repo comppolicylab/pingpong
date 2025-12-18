@@ -1047,6 +1047,143 @@ async def _send_activity_summaries(
             await session.commit()
 
 
+@cli.group("lti")
+def lti() -> None:
+    """LTI Advantage Service commands."""
+    pass
+
+
+@lti.command("rotate-keys")
+@click.option("--key-size", default=2048, help="RSA key size in bits")
+@click.option("--retention-count", default=3, help="Number of keys to retain")
+def lti_rotate_keys(key_size: int, retention_count: int) -> None:
+    """
+    Rotate LTI RSA key pairs.
+
+    Generates a new RSA key pair and stores it in the configured storage backend.
+    Removes old keys based on retention policy.
+    """
+
+    async def _rotate_keys() -> None:
+        lti_settings = config.lti
+        if lti_settings is None:
+            logger.error("LTI service is not enabled in configuration")
+            return
+
+        key_manager = lti_settings.key_store.key_manager
+
+        try:
+            new_key = await key_manager.rotate_keys(
+                key_size=key_size, retention_count=retention_count
+            )
+            logger.info(f"Successfully rotated keys. New key ID: {new_key.kid}")
+
+            # Display current keys
+            keys = await key_manager.key_store.load_keys()
+            logger.info(f"Current keys ({len(keys)} total):")
+            for i, key in enumerate(keys):
+                status = "CURRENT" if i == 0 else "VALID"
+                logger.info(f"  [{status}] {key.kid} (created: {key.created_at})")
+
+        except Exception as e:
+            logger.error(f"Error rotating keys: {e}")
+            raise
+
+    asyncio.run(_rotate_keys())
+
+
+@lti.command("list-keys")
+def lti_list_keys() -> None:
+    """List all LTI keys."""
+
+    async def _list_keys() -> None:
+        lti_settings = config.lti
+        if lti_settings is None:
+            logger.error("LTI service is not enabled in configuration")
+            return
+
+        key_manager = lti_settings.key_store.key_manager
+
+        try:
+            keys = await key_manager.key_store.load_keys()
+
+            if not keys:
+                logger.info("No keys found")
+                return
+
+            logger.info(f"Found {len(keys)} keys:")
+            for i, key in enumerate(keys):
+                status = "CURRENT" if i == 0 else "VALID"
+                logger.info(f"  [{status}] {key.kid}")
+                logger.info(f"    Created: {key.created_at}")
+                logger.info(f"    Algorithm: {key.algorithm}")
+                logger.info(f"    Use: {key.use}")
+                logger.info("")
+
+        except Exception as e:
+            logger.error(f"Error listing keys: {e}")
+            raise
+
+    asyncio.run(_list_keys())
+
+
+@lti.command("generate-initial-key")
+@click.option("--key-size", default=2048, help="RSA key size in bits")
+def lti_generate_initial_key(key_size: int) -> None:
+    """Generate the initial LTI key pair."""
+
+    async def _generate_initial_key() -> None:
+        lti_settings = config.lti
+        if lti_settings is None:
+            logger.error("LTI service is not enabled in configuration")
+            return
+
+        key_manager = lti_settings.key_store.key_manager
+
+        try:
+            existing_keys = await key_manager.key_store.load_keys()
+            if existing_keys:
+                logger.warning(f"Keys already exist ({len(existing_keys)} keys found)")
+                logger.info("Use 'rotate-keys' command to add a new key")
+                return
+
+            logger.info("Generating initial LTI key pair...")
+            new_key = await key_manager.rotate_keys(
+                key_size=key_size, retention_count=1
+            )
+            logger.info(f"Successfully generated initial key: {new_key.kid}")
+
+        except Exception as e:
+            logger.error(f"Error generating initial key: {e}")
+            raise
+
+    asyncio.run(_generate_initial_key())
+
+
+@lti.command("test-jwks")
+def lti_test_jwks() -> None:
+    """Test JWKS generation."""
+
+    async def _test_jwks() -> None:
+        lti_settings = config.lti
+        if lti_settings is None:
+            logger.error("LTI service is not enabled in configuration")
+            return
+
+        key_manager = lti_settings.key_store.key_manager
+
+        try:
+            jwks = await key_manager.get_public_keys_jwks()
+            logger.info("JWKS generated successfully:")
+            logger.info(json.dumps(jwks, indent=2))
+
+        except Exception as e:
+            logger.error(f"Error generating JWKS: {e}")
+            raise
+
+    asyncio.run(_test_jwks())
+
+
 FUNCTIONS_MAP: Dict[str, Callable] = {
     "batch_send_activity_summaries": _send_activity_summaries,
     "sync_pingpong_with_lms": lambda _, **kwargs: _lms_sync_all(**kwargs),
