@@ -963,6 +963,7 @@ class Institution(BaseModel):
     name: str
     description: str | None
     logo: str | None
+    default_api_key_id: int | None = None
     created: datetime
     updated: datetime | None
 
@@ -1001,6 +1002,10 @@ class InstitutionAdminResponse(BaseModel):
     user_id: int
     email: str
     added_admin: bool
+
+
+class SetInstitutionDefaultAPIKeyRequest(BaseModel):
+    default_api_key_id: int | None = None
 
 
 # Status documenting the state of the LMS sync.
