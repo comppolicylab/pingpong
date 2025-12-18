@@ -474,21 +474,21 @@ def test_rescale_diarized_transcription_timestamps_scales_duration_and_segments(
 def test_rescale_diarized_transcription_timestamps_handles_missing_or_none_values() -> (
     None
 ):
-    class SegmentWithOptionalTimestamps:
+    class FakeSegmentWithOptionalTimestamps:
         def __init__(self, start, end):
             self.start = start
             self.end = end
 
-    class SegmentWithoutTimestamps:
+    class FakeSegmentWithoutTimestamps:
         pass
 
-    class TranscriptionLike:
+    class FakeTranscription:
         def __init__(self, segments):
             self.segments = segments
 
-    seg_none_start = SegmentWithOptionalTimestamps(start=None, end=2.0)
-    seg_missing_fields = SegmentWithoutTimestamps()
-    transcription = TranscriptionLike(segments=[seg_none_start, seg_missing_fields])
+    seg_none_start = FakeSegmentWithOptionalTimestamps(start=None, end=2.0)
+    seg_missing_fields = FakeSegmentWithoutTimestamps()
+    transcription = FakeTranscription(segments=[seg_none_start, seg_missing_fields])
 
     transcription_module._rescale_diarized_transcription_timestamps(
         transcription, factor=1.5
@@ -628,7 +628,7 @@ def test_prepare_audio_file_for_transcription_export_failure_removes_tempfile(
         ) -> None:
             raise RuntimeError("export failed")
 
-    class _Tmp:
+    class FakeTempFile:
         def __init__(self, name: str):
             self.name = name
 
@@ -642,7 +642,7 @@ def test_prepare_audio_file_for_transcription_export_failure_removes_tempfile(
 
     def fake_named_tempfile(*_args, **_kwargs):
         out_path.write_bytes(b"")
-        return _Tmp(str(out_path))
+        return FakeTempFile(str(out_path))
 
     monkeypatch.setattr(transcription_module, "_TRANSCRIPTION_TARGET_SECONDS", 100.0)
     monkeypatch.setattr(
@@ -689,7 +689,7 @@ def test_prepare_audio_file_for_transcription_sped_duration_zero_uses_requested_
             with open(path, "ab"):
                 pass
 
-    class _Tmp:
+    class FakeTempFile:
         def __init__(self, name: str):
             self.name = name
 
@@ -703,7 +703,7 @@ def test_prepare_audio_file_for_transcription_sped_duration_zero_uses_requested_
 
     def fake_named_tempfile(*_args, **_kwargs):
         out_path.write_bytes(b"")
-        return _Tmp(str(out_path))
+        return FakeTempFile(str(out_path))
 
     monkeypatch.setattr(transcription_module, "_TRANSCRIPTION_TARGET_SECONDS", 100.0)
     monkeypatch.setattr(

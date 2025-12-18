@@ -461,11 +461,10 @@ def _prepare_audio_file_for_transcription(
         .set_sample_width(_AUDIO_SAMPLE_WIDTH)
     )
     duration_seconds = float(len(audio)) / 1000.0
-    requested_factor = max(1.0, duration_seconds / _TRANSCRIPTION_TARGET_SECONDS)
-
-    if requested_factor <= 1.0:
+    if duration_seconds <= _TRANSCRIPTION_TARGET_SECONDS:
         return input_path, 1.0, None
 
+    requested_factor = duration_seconds / _TRANSCRIPTION_TARGET_SECONDS
     sped = speedup(audio, playback_speed=requested_factor)
     sped_duration_seconds = float(len(sped)) / 1000.0
     # Use the actual speed-up achieved (pydub may round frames) for timestamp rescaling.
@@ -523,6 +522,13 @@ def _rescale_diarized_transcription_timestamps(
     The diarized timestamps come from the audio we send to the API. If we speed up
     audio by `factor`, the returned timestamps are on the sped-up timeline and must
     be scaled back to the original (1x) timeline.
+
+    Args:
+        transcription: A diarized transcription object whose `duration` and segment
+            `start`/`end` timestamps will be updated in-place.
+        factor: The speed-up factor applied to the audio prior to transcription. All
+            diarized timestamps are multiplied by this value to map back to the
+            original (1x) timeline.
     """
     if getattr(transcription, "duration", None) is not None:
         transcription.duration = float(transcription.duration) * factor
@@ -600,7 +606,7 @@ async def transcribe_thread_recording_and_email_link(
             (
                 path_to_send,
                 speed_factor,
-                _cleanup_path,
+                _,  # cleanup handled by TemporaryDirectory context manager
             ) = await _prepare_audio_file_for_transcription_async(
                 input_path=recording_path,
                 temp_dir=tmpdir,
