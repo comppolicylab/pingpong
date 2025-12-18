@@ -1,3 +1,6 @@
+import os
+
+import pytest
 from openai.types.audio.transcription_diarized import TranscriptionDiarized
 from openai.types.beta.threads.message import Message as OpenAIThreadMessage
 
@@ -6,6 +9,7 @@ from pingpong.transcription import (
     infer_speaker_display_names_from_thread_messages,
     _iter_diarized_chunks,
     _normalize_text,
+    _prepare_audio_file_for_transcription,
     _rescale_diarized_transcription_timestamps,
     _similarity,
     _token_set,
@@ -496,3 +500,227 @@ def test_rescale_diarized_transcription_timestamps_handles_missing_or_none_value
 
     assert seg_none_start.start is None
     assert seg_none_start.end == 3.0
+
+
+def test_prepare_audio_file_for_transcription_returns_original_path_when_under_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pingpong.transcription as transcription
+
+    class FakeAudio:
+        def __len__(self) -> int:
+            return 99_000  # 99 seconds
+
+        def set_frame_rate(self, _rate: int):
+            return self
+
+        def set_channels(self, _channels: int):
+            return self
+
+        def set_sample_width(self, _width: int):
+            return self
+
+    monkeypatch.setattr(transcription, "_TRANSCRIPTION_TARGET_SECONDS", 100.0)
+    monkeypatch.setattr(transcription.AudioSegment, "from_file", lambda _p: FakeAudio())
+    monkeypatch.setattr(
+        transcription,
+        "speedup",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("speedup() should not be called")
+        ),
+    )
+    monkeypatch.setattr(
+        transcription.tempfile,
+        "NamedTemporaryFile",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("NamedTemporaryFile() should not be called")
+        ),
+    )
+
+    input_path = "/tmp/in.webm"
+    path_to_send, factor, cleanup_path = _prepare_audio_file_for_transcription(
+        input_path=input_path
+    )
+    assert path_to_send == input_path
+    assert factor == 1.0
+    assert cleanup_path is None
+
+
+def test_prepare_audio_file_for_transcription_speeds_up_and_returns_actual_factor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pingpong.transcription as transcription
+
+    class FakeAudio:
+        def __init__(self, duration_ms: int):
+            self.duration_ms = duration_ms
+
+        def __len__(self) -> int:
+            return self.duration_ms
+
+        def set_frame_rate(self, _rate: int):
+            return self
+
+        def set_channels(self, _channels: int):
+            return self
+
+        def set_sample_width(self, _width: int):
+            return self
+
+    class FakeSped(FakeAudio):
+        def export(
+            self, path: str, format: str, codec: str, parameters: list[str]
+        ) -> None:
+            assert format == "webm"
+            assert codec == "libopus"
+            assert "-application" in parameters and "voip" in parameters
+            assert "-ac" in parameters and "1" in parameters
+            assert "-ar" in parameters and "24000" in parameters
+            # Touch the file to emulate export output.
+            with open(path, "ab"):
+                pass
+
+    monkeypatch.setattr(transcription, "_TRANSCRIPTION_TARGET_SECONDS", 100.0)
+    monkeypatch.setattr(
+        transcription.AudioSegment, "from_file", lambda _p: FakeAudio(200_000)
+    )
+
+    def fake_speedup(audio: FakeAudio, *, playback_speed: float) -> FakeSped:
+        assert playback_speed == 2.0  # 200s / 100s target
+        return FakeSped(120_000)  # 120 seconds after speedup
+
+    monkeypatch.setattr(transcription, "speedup", fake_speedup)
+
+    path_to_send, factor, cleanup_path = _prepare_audio_file_for_transcription(
+        input_path="/tmp/in.webm"
+    )
+    try:
+        assert cleanup_path == path_to_send
+        assert isinstance(path_to_send, str) and path_to_send.endswith(".webm")
+        assert os.path.exists(path_to_send)
+        assert abs(factor - (200.0 / 120.0)) < 1e-9
+    finally:
+        if cleanup_path and os.path.exists(cleanup_path):
+            os.remove(cleanup_path)
+
+
+def test_prepare_audio_file_for_transcription_export_failure_removes_tempfile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    import pingpong.transcription as transcription
+
+    class FakeAudio:
+        def __len__(self) -> int:
+            return 200_000  # 200 seconds
+
+        def set_frame_rate(self, _rate: int):
+            return self
+
+        def set_channels(self, _channels: int):
+            return self
+
+        def set_sample_width(self, _width: int):
+            return self
+
+    class FakeSped:
+        def __len__(self) -> int:
+            return 100_000  # 100 seconds
+
+        def export(
+            self, _path: str, format: str, codec: str, parameters: list[str]
+        ) -> None:
+            raise RuntimeError("export failed")
+
+    class _Tmp:
+        def __init__(self, name: str):
+            self.name = name
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    out_path = tmp_path / "out.webm"
+
+    def fake_named_tempfile(*_args, **_kwargs):
+        out_path.write_bytes(b"")
+        return _Tmp(str(out_path))
+
+    monkeypatch.setattr(transcription, "_TRANSCRIPTION_TARGET_SECONDS", 100.0)
+    monkeypatch.setattr(transcription.AudioSegment, "from_file", lambda _p: FakeAudio())
+    monkeypatch.setattr(transcription, "speedup", lambda *_a, **_k: FakeSped())
+    monkeypatch.setattr(
+        transcription.tempfile, "NamedTemporaryFile", fake_named_tempfile
+    )
+
+    with pytest.raises(RuntimeError, match="export failed"):
+        _prepare_audio_file_for_transcription(input_path="/tmp/in.webm")
+
+    assert not out_path.exists()
+
+
+def test_prepare_audio_file_for_transcription_sped_duration_zero_uses_requested_factor(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    import pingpong.transcription as transcription
+
+    class FakeAudio:
+        def __len__(self) -> int:
+            return 200_000  # 200 seconds
+
+        def set_frame_rate(self, _rate: int):
+            return self
+
+        def set_channels(self, _channels: int):
+            return self
+
+        def set_sample_width(self, _width: int):
+            return self
+
+    class FakeSped:
+        def __len__(self) -> int:
+            return 0
+
+        def export(
+            self, path: str, format: str, codec: str, parameters: list[str]
+        ) -> None:
+            (tmp_path / "exported").write_text("ok")
+            with open(path, "ab"):
+                pass
+
+    class _Tmp:
+        def __init__(self, name: str):
+            self.name = name
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    out_path = tmp_path / "out.webm"
+
+    def fake_named_tempfile(*_args, **_kwargs):
+        out_path.write_bytes(b"")
+        return _Tmp(str(out_path))
+
+    monkeypatch.setattr(transcription, "_TRANSCRIPTION_TARGET_SECONDS", 100.0)
+    monkeypatch.setattr(transcription.AudioSegment, "from_file", lambda _p: FakeAudio())
+    monkeypatch.setattr(transcription, "speedup", lambda *_a, **_k: FakeSped())
+    monkeypatch.setattr(
+        transcription.tempfile, "NamedTemporaryFile", fake_named_tempfile
+    )
+
+    path_to_send, factor, cleanup_path = _prepare_audio_file_for_transcription(
+        input_path="/tmp/in.webm"
+    )
+    try:
+        assert path_to_send == str(out_path)
+        assert cleanup_path == str(out_path)
+        assert factor == 2.0  # requested_factor, because sped_duration_seconds == 0
+    finally:
+        if cleanup_path and os.path.exists(cleanup_path):
+            os.remove(cleanup_path)

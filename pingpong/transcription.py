@@ -48,6 +48,10 @@ _MIN_SUBSTRING_MATCH_LENGTH = 30
 _MIN_SIMILARITY_SCORE = 0.6
 
 _TRANSCRIPTION_TARGET_SECONDS = 1_380.0  # 23 minutes, safely under 1,400s context limit
+_AUDIO_SAMPLE_WIDTH = 2
+_AUDIO_FRAME_RATE = 24000
+_AUDIO_CHANNELS = 1
+_AUDIO_APPLICATION = "voip"
 
 
 def _normalize_text(text: str) -> str:
@@ -437,7 +441,7 @@ def format_diarized_transcription_txt(
 
 
 def _prepare_audio_file_for_transcription(
-    *, input_path: str
+    *, input_path: str, temp_dir: str | None = None
 ) -> tuple[str, float, str | None]:
     """
     Prepare an audio file for transcription by optionally speeding it up.
@@ -448,7 +452,14 @@ def _prepare_audio_file_for_transcription(
         - `speed_factor`: how much faster than 1x we made the audio (>= 1.0)
         - `cleanup_path`: optional temp file path to remove afterwards
     """
-    audio = AudioSegment.from_file(input_path)
+    # Match realtime recorder settings for consistency with the stored artifact:
+    # - mono, 24kHz, 16-bit PCM prior to encoding
+    audio = (
+        AudioSegment.from_file(input_path)
+        .set_frame_rate(_AUDIO_FRAME_RATE)
+        .set_channels(_AUDIO_CHANNELS)
+        .set_sample_width(_AUDIO_SAMPLE_WIDTH)
+    )
     duration_seconds = float(len(audio)) / 1000.0
     requested_factor = max(1.0, duration_seconds / _TRANSCRIPTION_TARGET_SECONDS)
 
@@ -464,12 +475,26 @@ def _prepare_audio_file_for_transcription(
         else requested_factor
     )
 
-    with tempfile.NamedTemporaryFile(mode="wb", suffix=".mp3", delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(
+        mode="wb", suffix=".webm", delete=False, dir=temp_dir
+    ) as tmp:
         sped_path = tmp.name
 
     # Export after closing to avoid platform-specific file-lock issues.
     try:
-        sped.export(sped_path, format="mp3", bitrate="96k")
+        sped.export(
+            sped_path,
+            format="webm",
+            codec="libopus",
+            parameters=[
+                "-application",
+                _AUDIO_APPLICATION,
+                "-ac",
+                str(_AUDIO_CHANNELS),
+                "-ar",
+                str(_AUDIO_FRAME_RATE),
+            ],
+        )
     except Exception:
         try:
             os.remove(sped_path)
@@ -484,10 +509,10 @@ def _prepare_audio_file_for_transcription(
 
 
 async def _prepare_audio_file_for_transcription_async(
-    *, input_path: str
+    *, input_path: str, temp_dir: str | None = None
 ) -> tuple[str, float, str | None]:
     return await asyncio.to_thread(
-        _prepare_audio_file_for_transcription, input_path=input_path
+        _prepare_audio_file_for_transcription, input_path=input_path, temp_dir=temp_dir
     )
 
 
@@ -518,8 +543,6 @@ async def transcribe_thread_recording_and_email_link(
     class_name: str | None = None
     user_email: str | None = None
     group_link = config.url(f"/group/{class_id}/thread/{thread_id}")
-    tmp_path: str | None = None
-    tmp_sped_path: str | None = None
     speed_factor: float = 1.0
 
     try:
@@ -568,26 +591,30 @@ async def transcribe_thread_recording_and_email_link(
             }
 
         suffix = os.path.splitext(recording_key)[1] or ".webm"
-        with tempfile.NamedTemporaryFile(mode="wb", suffix=suffix, delete=False) as tmp:
-            tmp_path = tmp.name
-            async for chunk in config.audio_store.store.get_file(recording_key):
-                tmp.write(chunk)
+        with tempfile.TemporaryDirectory(prefix="pingpong_transcription_") as tmpdir:
+            recording_path = os.path.join(tmpdir, f"recording{suffix}")
+            with open(recording_path, "wb") as tmp:
+                async for chunk in config.audio_store.store.get_file(recording_key):
+                    tmp.write(chunk)
 
-        (
-            path_to_send,
-            speed_factor,
-            tmp_sped_path,
-        ) = await _prepare_audio_file_for_transcription_async(input_path=tmp_path)
-
-        with open(path_to_send, "rb") as audio_file:
-            transcription = await cli.audio.transcriptions.create(
-                file=audio_file,
-                model="gpt-4o-transcribe-diarize",
-                response_format="diarized_json",
-                chunking_strategy="auto",
-                language="en",
-                timeout=60 * 20,  # 20 minutes
+            (
+                path_to_send,
+                speed_factor,
+                _cleanup_path,
+            ) = await _prepare_audio_file_for_transcription_async(
+                input_path=recording_path,
+                temp_dir=tmpdir,
             )
+
+            with open(path_to_send, "rb") as audio_file:
+                transcription = await cli.audio.transcriptions.create(
+                    file=audio_file,
+                    model="gpt-4o-transcribe-diarize",
+                    response_format="diarized_json",
+                    chunking_strategy="auto",
+                    language="en",
+                    timeout=60 * 20,  # 20 minutes
+                )
 
         if not isinstance(transcription, TranscriptionDiarized):
             raise TypeError(
@@ -680,17 +707,4 @@ async def transcribe_thread_recording_and_email_link(
                     class_id,
                     thread_id,
                     user_id,
-                )
-    finally:
-        if tmp_path:
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                logger.warning("Failed to remove temp recording file %s", tmp_path)
-        if tmp_sped_path:
-            try:
-                os.remove(tmp_sped_path)
-            except OSError:
-                logger.warning(
-                    "Failed to remove temp sped-up recording file %s", tmp_sped_path
                 )
