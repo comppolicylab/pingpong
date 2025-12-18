@@ -12,6 +12,7 @@ from openai.types.audio.transcription_diarized import TranscriptionDiarized
 from openai.types.beta.threads.message import Message as OpenAIThreadMessage
 
 import pingpong.models as models
+from pingpong.ai import get_openai_client_by_class_id
 from pingpong.animal_hash import user_names
 from pingpong.auth import encode_auth_token
 from pingpong.config import config
@@ -432,7 +433,6 @@ def format_diarized_transcription_txt(
 
 
 async def transcribe_thread_recording_and_email_link(
-    cli: openai.AsyncClient | openai.AsyncAzureOpenAI,
     class_id: str,
     thread_id: str,
     user_id: int,
@@ -476,6 +476,10 @@ async def transcribe_thread_recording_and_email_link(
                 raise ValueError(f"Thread with ID {thread_id} not found")
             if not thread.voice_mode_recording:
                 raise ValueError(f"Thread with ID {thread_id} has no recording")
+
+            cli = await get_openai_client_by_class_id(
+                session, int(class_id), timeout=20 * 60
+            )
 
             recording_key = thread.voice_mode_recording.recording_id
             thread_users = user_names(thread, user_id, is_supervisor=is_supervisor)

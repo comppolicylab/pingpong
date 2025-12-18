@@ -243,14 +243,26 @@ def get_now_fn(req: Request) -> NowFn:
 OpenAIClientType = Union[openai.AsyncClient, openai.AsyncAzureOpenAI]
 
 
-async def get_openai_client_for_class(request: Request) -> OpenAIClientType:
+def _no_openai_timeout() -> float | None | openai.NotGiven:
+    return openai.NOT_GIVEN
+
+
+async def get_openai_client_for_class(
+    request: Request,
+    timeout: Annotated[
+        float | None | openai.NotGiven,
+        Depends(_no_openai_timeout),
+    ] = openai.NOT_GIVEN,
+) -> OpenAIClientType:
     """Get an OpenAI client for the class.
 
     Requires the class_id to be in the path parameters.
     """
     class_id = request.path_params["class_id"]
     try:
-        return await get_openai_client_by_class_id(request.state.db, int(class_id))
+        return await get_openai_client_by_class_id(
+            request.state.db, int(class_id), timeout=timeout
+        )
     except GetOpenAIClientException as e:
         raise HTTPException(status_code=e.code, detail=e.detail)
 
@@ -3336,7 +3348,6 @@ async def transcribe_thread_recording(
     thread_id: str,
     request: Request,
     tasks: BackgroundTasks,
-    openai_client: OpenAIClient,
 ):
     user_id = request.state.session.user.id
     thread, is_supervisor_check = await asyncio.gather(
@@ -3369,7 +3380,6 @@ async def transcribe_thread_recording(
     tasks.add_task(
         safe_task,
         transcribe_thread_recording_and_email_link,
-        openai_client,
         class_id,
         thread_id,
         user_id,

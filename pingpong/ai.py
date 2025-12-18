@@ -153,7 +153,10 @@ class GetOpenAIClientException(Exception):
 
 
 async def get_openai_client_by_class_id(
-    session: AsyncSession, class_id: int
+    session: AsyncSession,
+    class_id: int,
+    *,
+    timeout: float | None | openai.NotGiven = openai.NOT_GIVEN,
 ) -> OpenAIClientType:
     result = await models.Class.get_api_key(session, class_id)
     if result.api_key_obj:
@@ -161,6 +164,7 @@ async def get_openai_client_by_class_id(
             return get_openai_client(
                 result.api_key_obj.api_key,
                 provider=result.api_key_obj.provider,  # type: ignore
+                timeout=timeout,
             )
         elif result.api_key_obj.provider == "azure":
             return get_openai_client(
@@ -168,13 +172,14 @@ async def get_openai_client_by_class_id(
                 provider=result.api_key_obj.provider,  # type: ignore
                 endpoint=result.api_key_obj.endpoint,
                 api_version=result.api_key_obj.api_version,
+                timeout=timeout,
             )
         else:
             raise GetOpenAIClientException(
                 code=400, detail="Unknown API key provider for class"
             )
     elif result.api_key:
-        return get_openai_client(result.api_key)
+        return get_openai_client(result.api_key, timeout=timeout)
     else:
         raise GetOpenAIClientException(code=401, detail="No API key for class")
 
@@ -4022,13 +4027,20 @@ def replace_annotations_in_text_v3(
 
 @overload
 def get_openai_client(
-    api_key: str, provider: Literal["openai"] = "openai"
+    api_key: str,
+    provider: Literal["openai"] = "openai",
+    *,
+    timeout: float | None | openai.NotGiven = openai.NOT_GIVEN,
 ) -> openai.AsyncClient: ...
 
 
 @overload
 def get_openai_client(
-    api_key: str, *, provider: Literal["azure"], endpoint: str | None
+    api_key: str,
+    *,
+    provider: Literal["azure"],
+    endpoint: str | None,
+    timeout: float | None | openai.NotGiven = openai.NOT_GIVEN,
 ) -> openai.AsyncAzureOpenAI: ...
 
 
@@ -4039,11 +4051,18 @@ def get_openai_client(
     provider: Literal["azure"],
     endpoint: str | None,
     api_version: str | None,
+    timeout: float | None | openai.NotGiven = openai.NOT_GIVEN,
 ) -> openai.AsyncAzureOpenAI: ...
 
 
 @functools.cache
-def get_openai_client(api_key, provider="openai", endpoint=None, api_version=None):
+def get_openai_client(
+    api_key,
+    provider="openai",
+    endpoint=None,
+    api_version=None,
+    timeout: float | None | openai.NotGiven = openai.NOT_GIVEN,
+):
     """Create an OpenAI client instance with the provided configuration.
 
     This function creates either a standard OpenAI client or an Azure OpenAI client
@@ -4069,9 +4088,12 @@ def get_openai_client(api_key, provider="openai", endpoint=None, api_version=Non
             if not endpoint:
                 raise ValueError("Azure client requires endpoint.")
             return openai.AsyncAzureOpenAI(
-                api_key=api_key, azure_endpoint=endpoint, api_version=_api_version
+                api_key=api_key,
+                azure_endpoint=endpoint,
+                api_version=_api_version,
+                timeout=timeout,
             )
         case "openai":
-            return openai.AsyncClient(api_key=api_key)
+            return openai.AsyncClient(api_key=api_key, timeout=timeout)
         case _:
             raise ValueError(f"Unknown provider {provider}")
