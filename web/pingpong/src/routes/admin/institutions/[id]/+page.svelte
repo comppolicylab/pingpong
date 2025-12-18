@@ -6,6 +6,7 @@
     Helper,
     Input,
     Label,
+    Select,
     Table,
     TableBody,
     TableBodyCell,
@@ -22,10 +23,24 @@
   export let data;
 
   let institution: api.InstitutionWithAdmins = data.institution;
+  let defaultKeys: api.DefaultAPIKey[] = data.defaultKeys || [];
   let draftName = institution.name;
   let newAdminEmail = '';
   let savingName = false;
   let managingAdmins: Record<number, boolean> = {};
+  let savingDefaultKey = false;
+  let selectedDefaultKeyId = institution.default_api_key_id ? `${institution.default_api_key_id}` : '';
+
+  $: defaultKeyOptions = [
+    { value: '', name: 'None' },
+    ...defaultKeys
+      .slice()
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }))
+      .map((key) => ({
+        value: `${key.id}`,
+        name: `${key.name || key.provider} (${key.redacted_key})`
+      }))
+  ];
 
   const sortAdmins = (admins: api.InstitutionAdmin[]) =>
     [...admins].sort((a, b) =>
@@ -43,15 +58,24 @@
   institution = sortInstitutionAdmins(institution);
 
   const refresh = async () => {
-    const response = await api
-      .getInstitutionWithAdmins(fetch, institution.id)
-      .then(api.expandResponse);
-    if (response.error || !response.data) {
-      sadToast(response.error?.detail || 'Unable to refresh institution');
+    const [institutionResponse, defaultKeysResponse] = await Promise.all([
+      api.getInstitutionWithAdmins(fetch, institution.id).then(api.expandResponse),
+      api.getDefaultAPIKeys(fetch).then(api.expandResponse)
+    ]);
+    if (institutionResponse.error || !institutionResponse.data) {
+      sadToast(institutionResponse.error?.detail || 'Unable to refresh institution');
       return;
     }
-    institution = sortInstitutionAdmins(response.data);
+    if (defaultKeysResponse.error || !defaultKeysResponse.data) {
+      sadToast(defaultKeysResponse.error?.detail || 'Unable to refresh default API keys');
+      return;
+    }
+    institution = sortInstitutionAdmins(institutionResponse.data);
+    defaultKeys = defaultKeysResponse.data.default_keys;
     draftName = institution.name;
+    selectedDefaultKeyId = institution.default_api_key_id
+      ? `${institution.default_api_key_id}`
+      : '';
     newAdminEmail = '';
     managingAdmins = {};
   };
@@ -123,6 +147,29 @@
       managingAdmins = { ...managingAdmins, [userId]: false };
     }
   };
+
+  const saveDefaultApiKey = async () => {
+    if ($loading || savingDefaultKey) return;
+    savingDefaultKey = true;
+    try {
+      const keyId = selectedDefaultKeyId ? Number(selectedDefaultKeyId) : null;
+      const response = api.expandResponse(
+        await api.setInstitutionDefaultApiKey(fetch, institution.id, { default_api_key_id: keyId })
+      );
+      if (response.error) {
+        sadToast(response.error.detail || 'Could not update default API key');
+        return;
+      }
+      happyToast('Default API key updated');
+      await refresh();
+      await invalidateAll();
+    } catch (err) {
+      console.error(err);
+      sadToast('Could not update default API key');
+    } finally {
+      savingDefaultKey = false;
+    }
+  };
 </script>
 
 <div class="relative h-full w-full flex flex-col">
@@ -159,6 +206,18 @@
         bind:value={draftName}
         disabled={$loading || savingName}
         on:change={saveName}
+      />
+    </div>
+    <div>
+      <Label for="default-api-key" class="mb-1">Default API Key</Label>
+      <Helper class="mb-2">Optional: used for future defaults. Not currently used.</Helper>
+      <Select
+        id="default-api-key"
+        name="default-api-key"
+        items={defaultKeyOptions}
+        bind:value={selectedDefaultKeyId}
+        disabled={$loading || savingDefaultKey}
+        on:change={saveDefaultApiKey}
       />
     </div>
     <div class="space-y-4">
