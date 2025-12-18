@@ -1,6 +1,7 @@
 import os
-
 import pytest
+import sys
+
 from openai.types.audio.transcription_diarized import TranscriptionDiarized
 from openai.types.beta.threads.message import Message as OpenAIThreadMessage
 
@@ -505,7 +506,7 @@ def test_rescale_diarized_transcription_timestamps_handles_missing_or_none_value
 def test_prepare_audio_file_for_transcription_returns_original_path_when_under_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import pingpong.transcription as transcription
+    transcription = sys.modules["pingpong.transcription"]
 
     class FakeAudio:
         def __len__(self) -> int:
@@ -549,7 +550,7 @@ def test_prepare_audio_file_for_transcription_returns_original_path_when_under_t
 def test_prepare_audio_file_for_transcription_speeds_up_and_returns_actual_factor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import pingpong.transcription as transcription
+    transcription = sys.modules["pingpong.transcription"]
 
     class FakeAudio:
         def __init__(self, duration_ms: int):
@@ -608,7 +609,7 @@ def test_prepare_audio_file_for_transcription_export_failure_removes_tempfile(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    import pingpong.transcription as transcription
+    transcription = sys.modules["pingpong.transcription"]
 
     class FakeAudio:
         def __len__(self) -> int:
@@ -665,7 +666,7 @@ def test_prepare_audio_file_for_transcription_sped_duration_zero_uses_requested_
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    import pingpong.transcription as transcription
+    transcription = sys.modules["pingpong.transcription"]
 
     class FakeAudio:
         def __len__(self) -> int:
