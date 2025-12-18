@@ -1,6 +1,6 @@
 import os
 import pytest
-import sys
+import pingpong.transcription as transcription_module
 
 from openai.types.audio.transcription_diarized import TranscriptionDiarized
 from openai.types.beta.threads.message import Message as OpenAIThreadMessage
@@ -506,8 +506,6 @@ def test_rescale_diarized_transcription_timestamps_handles_missing_or_none_value
 def test_prepare_audio_file_for_transcription_returns_original_path_when_under_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    transcription = sys.modules["pingpong.transcription"]
-
     class FakeAudio:
         def __len__(self) -> int:
             return 99_000  # 99 seconds
@@ -521,17 +519,19 @@ def test_prepare_audio_file_for_transcription_returns_original_path_when_under_t
         def set_sample_width(self, _width: int):
             return self
 
-    monkeypatch.setattr(transcription, "_TRANSCRIPTION_TARGET_SECONDS", 100.0)
-    monkeypatch.setattr(transcription.AudioSegment, "from_file", lambda _p: FakeAudio())
+    monkeypatch.setattr(transcription_module, "_TRANSCRIPTION_TARGET_SECONDS", 100.0)
     monkeypatch.setattr(
-        transcription,
+        transcription_module.AudioSegment, "from_file", lambda _p: FakeAudio()
+    )
+    monkeypatch.setattr(
+        transcription_module,
         "speedup",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("speedup() should not be called")
         ),
     )
     monkeypatch.setattr(
-        transcription.tempfile,
+        transcription_module.tempfile,
         "NamedTemporaryFile",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("NamedTemporaryFile() should not be called")
@@ -550,8 +550,6 @@ def test_prepare_audio_file_for_transcription_returns_original_path_when_under_t
 def test_prepare_audio_file_for_transcription_speeds_up_and_returns_actual_factor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    transcription = sys.modules["pingpong.transcription"]
-
     class FakeAudio:
         def __init__(self, duration_ms: int):
             self.duration_ms = duration_ms
@@ -581,16 +579,16 @@ def test_prepare_audio_file_for_transcription_speeds_up_and_returns_actual_facto
             with open(path, "ab"):
                 pass
 
-    monkeypatch.setattr(transcription, "_TRANSCRIPTION_TARGET_SECONDS", 100.0)
+    monkeypatch.setattr(transcription_module, "_TRANSCRIPTION_TARGET_SECONDS", 100.0)
     monkeypatch.setattr(
-        transcription.AudioSegment, "from_file", lambda _p: FakeAudio(200_000)
+        transcription_module.AudioSegment, "from_file", lambda _p: FakeAudio(200_000)
     )
 
     def fake_speedup(audio: FakeAudio, *, playback_speed: float) -> FakeSped:
         assert playback_speed == 2.0  # 200s / 100s target
         return FakeSped(120_000)  # 120 seconds after speedup
 
-    monkeypatch.setattr(transcription, "speedup", fake_speedup)
+    monkeypatch.setattr(transcription_module, "speedup", fake_speedup)
 
     path_to_send, factor, cleanup_path = _prepare_audio_file_for_transcription(
         input_path="/tmp/in.webm"
@@ -609,8 +607,6 @@ def test_prepare_audio_file_for_transcription_export_failure_removes_tempfile(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    transcription = sys.modules["pingpong.transcription"]
-
     class FakeAudio:
         def __len__(self) -> int:
             return 200_000  # 200 seconds
@@ -649,11 +645,13 @@ def test_prepare_audio_file_for_transcription_export_failure_removes_tempfile(
         out_path.write_bytes(b"")
         return _Tmp(str(out_path))
 
-    monkeypatch.setattr(transcription, "_TRANSCRIPTION_TARGET_SECONDS", 100.0)
-    monkeypatch.setattr(transcription.AudioSegment, "from_file", lambda _p: FakeAudio())
-    monkeypatch.setattr(transcription, "speedup", lambda *_a, **_k: FakeSped())
+    monkeypatch.setattr(transcription_module, "_TRANSCRIPTION_TARGET_SECONDS", 100.0)
     monkeypatch.setattr(
-        transcription.tempfile, "NamedTemporaryFile", fake_named_tempfile
+        transcription_module.AudioSegment, "from_file", lambda _p: FakeAudio()
+    )
+    monkeypatch.setattr(transcription_module, "speedup", lambda *_a, **_k: FakeSped())
+    monkeypatch.setattr(
+        transcription_module.tempfile, "NamedTemporaryFile", fake_named_tempfile
     )
 
     with pytest.raises(RuntimeError, match="export failed"):
@@ -666,8 +664,6 @@ def test_prepare_audio_file_for_transcription_sped_duration_zero_uses_requested_
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    transcription = sys.modules["pingpong.transcription"]
-
     class FakeAudio:
         def __len__(self) -> int:
             return 200_000  # 200 seconds
@@ -708,11 +704,13 @@ def test_prepare_audio_file_for_transcription_sped_duration_zero_uses_requested_
         out_path.write_bytes(b"")
         return _Tmp(str(out_path))
 
-    monkeypatch.setattr(transcription, "_TRANSCRIPTION_TARGET_SECONDS", 100.0)
-    monkeypatch.setattr(transcription.AudioSegment, "from_file", lambda _p: FakeAudio())
-    monkeypatch.setattr(transcription, "speedup", lambda *_a, **_k: FakeSped())
+    monkeypatch.setattr(transcription_module, "_TRANSCRIPTION_TARGET_SECONDS", 100.0)
     monkeypatch.setattr(
-        transcription.tempfile, "NamedTemporaryFile", fake_named_tempfile
+        transcription_module.AudioSegment, "from_file", lambda _p: FakeAudio()
+    )
+    monkeypatch.setattr(transcription_module, "speedup", lambda *_a, **_k: FakeSped())
+    monkeypatch.setattr(
+        transcription_module.tempfile, "NamedTemporaryFile", fake_named_tempfile
     )
 
     path_to_send, factor, cleanup_path = _prepare_audio_file_for_transcription(
