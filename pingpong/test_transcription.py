@@ -6,6 +6,7 @@ from pingpong.transcription import (
     infer_speaker_display_names_from_thread_messages,
     _iter_diarized_chunks,
     _normalize_text,
+    _rescale_diarized_transcription_timestamps,
     _similarity,
     _token_set,
     _token_set_from_normalized,
@@ -432,3 +433,66 @@ def test_similarity_substring_match_is_strong_signal() -> None:
     a = "this is a sufficiently long phrase to trigger substring matching"
     b = f"prefix {a} suffix"
     assert _similarity(a, b) == 1.0
+
+
+def test_rescale_diarized_transcription_timestamps_scales_duration_and_segments() -> (
+    None
+):
+    transcription = TranscriptionDiarized.model_validate(
+        {
+            "duration": 10.0,
+            "task": "transcribe",
+            "text": "",
+            "segments": [
+                {
+                    "id": "seg_1",
+                    "type": "transcript.text.segment",
+                    "speaker": "spk_1",
+                    "start": 1.0,
+                    "end": 2.0,
+                    "text": "Hello",
+                },
+                {
+                    "id": "seg_2",
+                    "type": "transcript.text.segment",
+                    "speaker": "spk_1",
+                    "start": 2.0,
+                    "end": 4.0,
+                    "text": "world",
+                },
+            ],
+        }
+    )
+
+    _rescale_diarized_transcription_timestamps(transcription, factor=1.25)
+
+    assert transcription.duration == 12.5
+    assert transcription.segments[0].start == 1.25
+    assert transcription.segments[0].end == 2.5
+    assert transcription.segments[1].start == 2.5
+    assert transcription.segments[1].end == 5.0
+
+
+def test_rescale_diarized_transcription_timestamps_handles_missing_or_none_values() -> (
+    None
+):
+    class SegmentWithOptionalTimestamps:
+        def __init__(self, start, end):
+            self.start = start
+            self.end = end
+
+    class SegmentWithoutTimestamps:
+        pass
+
+    class TranscriptionLike:
+        def __init__(self, segments):
+            self.segments = segments
+
+    seg_none_start = SegmentWithOptionalTimestamps(start=None, end=2.0)
+    seg_missing_fields = SegmentWithoutTimestamps()
+    transcription = TranscriptionLike(segments=[seg_none_start, seg_missing_fields])
+
+    _rescale_diarized_transcription_timestamps(transcription, factor=1.5)  # type: ignore[arg-type]
+
+    assert seg_none_start.start is None
+    assert seg_none_start.end == 3.0

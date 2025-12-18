@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import logging
@@ -467,8 +468,23 @@ def _prepare_audio_file_for_transcription(
         sped_path = tmp.name
 
     # Export after closing to avoid platform-specific file-lock issues.
-    sped.export(sped_path, format="mp3", bitrate="96k")
+    try:
+        sped.export(sped_path, format="mp3", bitrate="96k")
+    except Exception:
+        try:
+            os.remove(sped_path)
+        except OSError:
+            pass
+        raise
     return sped_path, actual_factor, sped_path
+
+
+async def _prepare_audio_file_for_transcription_async(
+    *, input_path: str
+) -> tuple[str, float, str | None]:
+    return await asyncio.to_thread(
+        _prepare_audio_file_for_transcription, input_path=input_path
+    )
 
 
 def _rescale_diarized_transcription_timestamps(
@@ -553,9 +569,11 @@ async def transcribe_thread_recording_and_email_link(
             async for chunk in config.audio_store.store.get_file(recording_key):
                 tmp.write(chunk)
 
-        path_to_send, speed_factor, tmp_sped_path = (
-            _prepare_audio_file_for_transcription(input_path=tmp_path)
-        )
+        (
+            path_to_send,
+            speed_factor,
+            tmp_sped_path,
+        ) = await _prepare_audio_file_for_transcription_async(input_path=tmp_path)
 
         with open(path_to_send, "rb") as audio_file:
             transcription = await cli.audio.transcriptions.create(
