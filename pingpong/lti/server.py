@@ -29,7 +29,7 @@ def get_lti_key_manager() -> LTIKeyManager:
 async def get_jwks(key_manager: LTIKeyManager = Depends(get_lti_key_manager)):
     """
     Get the JSON Web Key Set (JWKS) containing all valid public keys.
-    
+
     This endpoint provides the public keys that LTI platforms can use to verify
     JWTs signed by this tool. The endpoint returns the last 3 valid keys as
     specified in the LTI Advantage specification.
@@ -42,14 +42,18 @@ async def get_jwks(key_manager: LTIKeyManager = Depends(get_lti_key_manager)):
         logger.error(f"Error serving JWKS: {e}")
         raise HTTPException(status_code=500, detail="Error retrieving public keys")
 
+
 @lti_router.get("/sso/providers", response_model=ExternalLoginProviders)
 async def get_sso_ids(request: Request):
     """
     Get the SSO identifiers for the LTI instance.
     """
     external_login_providers = await ExternalLoginProvider.get_all(request.state.db)
-    no_email_providers = [provider for provider in external_login_providers if provider.name != "email"]
+    no_email_providers = [
+        provider for provider in external_login_providers if provider.name != "email"
+    ]
     return {"providers": no_email_providers}
+
 
 @lti_router.post("/register")
 async def register_lti_instance(request: Request, data: LTIRegisterRequest):
@@ -57,15 +61,17 @@ async def register_lti_instance(request: Request, data: LTIRegisterRequest):
     Register a new LTI instance.
     """
     if not data.openid_configuration or not data.registration_token:
-        raise HTTPException(status_code=400, detail="Missing openid_configuration or registration_token")
+        raise HTTPException(
+            status_code=400, detail="Missing openid_configuration or registration_token"
+        )
 
-    headers = {
-        "Authorization": f"Bearer {data.registration_token}"
-    }
+    headers = {"Authorization": f"Bearer {data.registration_token}"}
 
     response_data: dict[str, Any] | None = None
     async with aiohttp.ClientSession() as session:
-        async with session.get(data.openid_configuration, raise_for_status=True, headers=headers) as response:
+        async with session.get(
+            data.openid_configuration, raise_for_status=True, headers=headers
+        ) as response:
             payload = await response.json()
             if not isinstance(payload, dict):
                 raise HTTPException(
@@ -73,10 +79,12 @@ async def register_lti_instance(request: Request, data: LTIRegisterRequest):
                     detail="Invalid OpenID configuration response payload",
                 )
             response_data = cast(dict[str, Any], payload)
-    
+
     if not response_data:
-        raise HTTPException(status_code=500, detail="Failed to fetch OpenID configuration")
-    
+        raise HTTPException(
+            status_code=500, detail="Failed to fetch OpenID configuration"
+        )
+
     ISSUER_KEY = "issuer"
     AUTHORIZATION_ENDPOINT_KEY = "authorization_endpoint"
     REGISTRATION_ENDPOINT_KEY = "registration_endpoint"
@@ -85,8 +93,10 @@ async def register_lti_instance(request: Request, data: LTIRegisterRequest):
     SCOPES_SUPPORTED_KEY = "scopes_supported"
     TOKEN_ALG_KEY = "id_token_signing_alg_values_supported"
     SUBJECT_TYPES_KEY = "subject_types_supported"
-    
-    PLATFORM_CONFIGURATION_KEY = "https://purl.imsglobal.org/spec/lti-platform-configuration"
+
+    PLATFORM_CONFIGURATION_KEY = (
+        "https://purl.imsglobal.org/spec/lti-platform-configuration"
+    )
     MESSAGE_TYPES_KEY = "messages_supported"
     MESSAGE_TYPE = "LtiResourceLinkRequest"
     CANVAS_MESSAGE_PLACEMENT = "https://canvas.instructure.com/lti/course_navigation"
@@ -108,35 +118,58 @@ async def register_lti_instance(request: Request, data: LTIRegisterRequest):
 
     platform_config = response_data.get(PLATFORM_CONFIGURATION_KEY)
     if not isinstance(platform_config, dict):
-        raise HTTPException(status_code=400, detail="Missing platform configuration in OpenID response")
+        raise HTTPException(
+            status_code=400, detail="Missing platform configuration in OpenID response"
+        )
 
     product_family_code = platform_config.get("product_family_code")
 
     # Check that the product family code exists in schema.LMSPlatform
     if product_family_code not in {platform.value for platform in LMSPlatform}:
         raise HTTPException(status_code=400, detail="Invalid product family")
-    
+
     platform = LMSPlatform(product_family_code)
 
-    if not issuer or not authorization_endpoint or not registration_endpoint or not keys_endpoint or not token_endpoint:
-        raise HTTPException(status_code=400, detail="Missing required OpenID configuration fields")
-    
+    if (
+        not issuer
+        or not authorization_endpoint
+        or not registration_endpoint
+        or not keys_endpoint
+        or not token_endpoint
+    ):
+        raise HTTPException(
+            status_code=400, detail="Missing required OpenID configuration fields"
+        )
+
     if not all(scope in scopes_supported for scope in REQUIRED_SCOPES):
-        raise HTTPException(status_code=400, detail="Missing required scopes in OpenID configuration")
+        raise HTTPException(
+            status_code=400, detail="Missing required scopes in OpenID configuration"
+        )
 
     message_types_supported = platform_config.get(MESSAGE_TYPES_KEY, [])
     if not any(msg.get("type") == MESSAGE_TYPE for msg in message_types_supported):
-        raise HTTPException(status_code=400, detail="LtiResourceLinkRequest not supported by platform")
+        raise HTTPException(
+            status_code=400, detail="LtiResourceLinkRequest not supported by platform"
+        )
 
-    if not any(CANVAS_MESSAGE_PLACEMENT in msg.get("placements", []) for msg in message_types_supported if msg.get("type") == MESSAGE_TYPE):
-        raise HTTPException(status_code=400, detail="Canvas course navigation placement not supported by platform")
-    
+    if not any(
+        CANVAS_MESSAGE_PLACEMENT in msg.get("placements", [])
+        for msg in message_types_supported
+        if msg.get("type") == MESSAGE_TYPE
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Canvas course navigation placement not supported by platform",
+        )
+
     if "RS256" not in token_algorithms:
-        raise HTTPException(status_code=400, detail="RS256 not supported for ID token signing")
-    
+        raise HTTPException(
+            status_code=400, detail="RS256 not supported for ID token signing"
+        )
+
     if "public" not in subject_types:
         raise HTTPException(status_code=400, detail="public subject type not supported")
-    
+
     canvas_account_name = platform_config.get(CANVAS_ACCOUNT_NAME_KEY)
 
     tool_registration_data = {
@@ -153,9 +186,7 @@ async def register_lti_instance(request: Request, data: LTIRegisterRequest):
             "domain": config.host,
             "target_link_uri": config.url("/api/v1/lti/launch"),
             "description": "LTI Tool for easy launching of the PingPong application.",
-            "custom_parameters": {
-                "platform": platform.value
-            },
+            "custom_parameters": {"platform": platform.value},
             "claims": [
                 "sub",
                 "iss",
@@ -168,19 +199,19 @@ async def register_lti_instance(request: Request, data: LTIRegisterRequest):
                 "https://purl.imsglobal.org/spec/lti/claim/roles",
                 "https://purl.imsglobal.org/spec/lti/claim/resource_link",
                 "https://purl.imsglobal.org/spec/lti/claim/tool_platform",
-                "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice"
+                "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice",
             ],
             "extensions": {
                 "https://canvas.instructure.com/lti/extensions/course_navigation": {
                     "default": True,
                     "text": "PingPong LTI Tool",
                     "enabled": True,
-                    "visibility": "members"
+                    "visibility": "members",
                 }
-            }
-        }
+            },
+        },
     }
-    
+
     new_registration = LTIRegistration(
         issuer=issuer,
         configuration=json.dumps(response_data),
@@ -192,8 +223,7 @@ async def register_lti_instance(request: Request, data: LTIRegisterRequest):
         canvas_account_name=canvas_account_name,
         admin_name=data.admin_name,
         admin_email=data.admin_email,
-        friendly_name=data.friendly_name
+        friendly_name=data.friendly_name,
     )
-
 
     return {"status": "ok"}
