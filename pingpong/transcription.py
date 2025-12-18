@@ -46,7 +46,7 @@ _MIN_SUBSTRING_MATCH_LENGTH = 30
 # requires substantive overlap while still tolerating diarization/ASR differences.
 _MIN_SIMILARITY_SCORE = 0.6
 
-_TRANSCRIPTION_SPEEDUP = 1.2
+_TRANSCRIPTION_TARGET_SECONDS = 1_380.0  # 23 minutes, safely under 1,400s context limit
 
 
 def _normalize_text(text: str) -> str:
@@ -435,24 +435,40 @@ def format_diarized_transcription_txt(
     return "\n".join(chunks).strip() + "\n"
 
 
-def _speed_up_audio_file_for_transcription(
-    *, input_path: str, playback_speed: float
-) -> str:
+def _prepare_audio_file_for_transcription(
+    *, input_path: str
+) -> tuple[str, float, str | None]:
     """
-    Create a temporary, speed-adjusted audio file for faster transcription.
+    Prepare an audio file for transcription by optionally speeding it up.
 
     Returns:
-        Path to the sped-up audio file (caller is responsible for cleanup).
+        A tuple of:
+        - `path_to_send`: file path to pass to the transcription API
+        - `speed_factor`: how much faster than 1x we made the audio (>= 1.0)
+        - `cleanup_path`: optional temp file path to remove afterwards
     """
     audio = AudioSegment.from_file(input_path)
-    sped = speedup(audio, playback_speed=playback_speed)
+    duration_seconds = float(len(audio)) / 1000.0
+    requested_factor = max(1.0, duration_seconds / _TRANSCRIPTION_TARGET_SECONDS)
+
+    if requested_factor <= 1.0:
+        return input_path, 1.0, None
+
+    sped = speedup(audio, playback_speed=requested_factor)
+    sped_duration_seconds = float(len(sped)) / 1000.0
+    # Use the actual speed-up achieved (pydub may round frames) for timestamp rescaling.
+    actual_factor = (
+        duration_seconds / sped_duration_seconds
+        if sped_duration_seconds > 0
+        else requested_factor
+    )
 
     with tempfile.NamedTemporaryFile(mode="wb", suffix=".mp3", delete=False) as tmp:
         sped_path = tmp.name
 
     # Export after closing to avoid platform-specific file-lock issues.
     sped.export(sped_path, format="mp3", bitrate="96k")
-    return sped_path
+    return sped_path, actual_factor, sped_path
 
 
 def _rescale_diarized_transcription_timestamps(
@@ -484,6 +500,7 @@ async def transcribe_thread_recording_and_email_link(
     group_link = config.url(f"/group/{class_id}/thread/{thread_id}")
     tmp_path: str | None = None
     tmp_sped_path: str | None = None
+    speed_factor: float = 1.0
 
     try:
         async with config.authz.driver.get_client() as authz:
@@ -536,11 +553,11 @@ async def transcribe_thread_recording_and_email_link(
             async for chunk in config.audio_store.store.get_file(recording_key):
                 tmp.write(chunk)
 
-        tmp_sped_path = _speed_up_audio_file_for_transcription(
-            input_path=tmp_path, playback_speed=_TRANSCRIPTION_SPEEDUP
+        path_to_send, speed_factor, tmp_sped_path = (
+            _prepare_audio_file_for_transcription(input_path=tmp_path)
         )
 
-        with open(tmp_sped_path, "rb") as audio_file:
+        with open(path_to_send, "rb") as audio_file:
             transcription = await cli.audio.transcriptions.create(
                 file=audio_file,
                 model="gpt-4o-transcribe-diarize",
@@ -555,9 +572,7 @@ async def transcribe_thread_recording_and_email_link(
                 f"Unexpected transcription response type: {type(transcription)}"
             )
 
-        _rescale_diarized_transcription_timestamps(
-            transcription, factor=_TRANSCRIPTION_SPEEDUP
-        )
+        _rescale_diarized_transcription_timestamps(transcription, factor=speed_factor)
 
         speaker_display_names: dict[str, str] | None = None
         try:
