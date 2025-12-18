@@ -10,6 +10,8 @@ from collections import Counter
 import openai
 from openai.types.audio.transcription_diarized import TranscriptionDiarized
 from openai.types.beta.threads.message import Message as OpenAIThreadMessage
+from pydub import AudioSegment
+from pydub.effects import speedup
 
 import pingpong.models as models
 from pingpong.animal_hash import user_names
@@ -43,6 +45,8 @@ _MIN_SUBSTRING_MATCH_LENGTH = 30
 # be overly optimistic for short/partial overlaps. 0.6 provides a balance that typically
 # requires substantive overlap while still tolerating diarization/ASR differences.
 _MIN_SIMILARITY_SCORE = 0.6
+
+_TRANSCRIPTION_SPEEDUP = 1.2
 
 
 def _normalize_text(text: str) -> str:
@@ -431,6 +435,43 @@ def format_diarized_transcription_txt(
     return "\n".join(chunks).strip() + "\n"
 
 
+def _speed_up_audio_file_for_transcription(
+    *, input_path: str, playback_speed: float
+) -> str:
+    """
+    Create a temporary, speed-adjusted audio file for faster transcription.
+
+    Returns:
+        Path to the sped-up audio file (caller is responsible for cleanup).
+    """
+    audio = AudioSegment.from_file(input_path)
+    sped = speedup(audio, playback_speed=playback_speed)
+
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".mp3", delete=False) as tmp:
+        sped_path = tmp.name
+
+    # Export after closing to avoid platform-specific file-lock issues.
+    sped.export(sped_path, format="mp3", bitrate="96k")
+    return sped_path
+
+
+def _rescale_diarized_transcription_timestamps(
+    transcription: TranscriptionDiarized, *, factor: float
+) -> None:
+    """
+    The diarized timestamps come from the audio we send to the API. If we speed up
+    audio by `factor`, the returned timestamps are on the sped-up timeline and must
+    be scaled back to the original (1x) timeline.
+    """
+    if getattr(transcription, "duration", None) is not None:
+        transcription.duration = float(transcription.duration) * factor
+    for seg in transcription.segments:
+        if getattr(seg, "start", None) is not None:
+            seg.start = float(seg.start) * factor
+        if getattr(seg, "end", None) is not None:
+            seg.end = float(seg.end) * factor
+
+
 async def transcribe_thread_recording_and_email_link(
     cli: openai.AsyncClient | openai.AsyncAzureOpenAI,
     class_id: str,
@@ -442,6 +483,7 @@ async def transcribe_thread_recording_and_email_link(
     user_email: str | None = None
     group_link = config.url(f"/group/{class_id}/thread/{thread_id}")
     tmp_path: str | None = None
+    tmp_sped_path: str | None = None
 
     try:
         async with config.authz.driver.get_client() as authz:
@@ -494,7 +536,11 @@ async def transcribe_thread_recording_and_email_link(
             async for chunk in config.audio_store.store.get_file(recording_key):
                 tmp.write(chunk)
 
-        with open(tmp_path, "rb") as audio_file:
+        tmp_sped_path = _speed_up_audio_file_for_transcription(
+            input_path=tmp_path, playback_speed=_TRANSCRIPTION_SPEEDUP
+        )
+
+        with open(tmp_sped_path, "rb") as audio_file:
             transcription = await cli.audio.transcriptions.create(
                 file=audio_file,
                 model="gpt-4o-transcribe-diarize",
@@ -508,6 +554,10 @@ async def transcribe_thread_recording_and_email_link(
             raise TypeError(
                 f"Unexpected transcription response type: {type(transcription)}"
             )
+
+        _rescale_diarized_transcription_timestamps(
+            transcription, factor=_TRANSCRIPTION_SPEEDUP
+        )
 
         speaker_display_names: dict[str, str] | None = None
         try:
@@ -600,3 +650,10 @@ async def transcribe_thread_recording_and_email_link(
                 os.remove(tmp_path)
             except OSError:
                 logger.warning("Failed to remove temp recording file %s", tmp_path)
+        if tmp_sped_path:
+            try:
+                os.remove(tmp_sped_path)
+            except OSError:
+                logger.warning(
+                    "Failed to remove temp sped-up recording file %s", tmp_sped_path
+                )
