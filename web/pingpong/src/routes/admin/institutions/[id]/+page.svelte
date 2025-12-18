@@ -29,13 +29,17 @@
   let savingName = false;
   let managingAdmins: Record<number, boolean> = {};
   let savingDefaultKey = false;
-  let selectedDefaultKeyId = institution.default_api_key_id ? `${institution.default_api_key_id}` : '';
+  let selectedDefaultKeyId = institution.default_api_key_id
+    ? `${institution.default_api_key_id}`
+    : '';
 
   $: defaultKeyOptions = [
     { value: '', name: 'None' },
     ...defaultKeys
       .slice()
-      .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }))
+      .sort((a, b) =>
+        (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })
+      )
       .map((key) => ({
         value: `${key.id}`,
         name: `${key.name || key.provider} (${key.redacted_key})`
