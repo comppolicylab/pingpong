@@ -474,7 +474,11 @@ def _prepare_audio_file_for_transcription(
         try:
             os.remove(sped_path)
         except OSError:
-            pass
+            logger.warning(
+                "Failed to remove temporary sped audio file %s during cleanup",
+                sped_path,
+                exc_info=True,
+            )
         raise
     return sped_path, actual_factor, sped_path
 
