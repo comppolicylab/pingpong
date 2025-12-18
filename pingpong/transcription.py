@@ -501,6 +501,7 @@ async def transcribe_thread_recording_and_email_link(
                 response_format="diarized_json",
                 chunking_strategy="auto",
                 language="en",
+                timeout=60*20,  # 20 minutes
             )
 
         if not isinstance(transcription, TranscriptionDiarized):
