@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import logging
@@ -10,6 +11,8 @@ from collections import Counter
 import openai
 from openai.types.audio.transcription_diarized import TranscriptionDiarized
 from openai.types.beta.threads.message import Message as OpenAIThreadMessage
+from pydub import AudioSegment
+from pydub.effects import speedup
 
 import pingpong.models as models
 from pingpong.animal_hash import user_names
@@ -43,6 +46,14 @@ _MIN_SUBSTRING_MATCH_LENGTH = 30
 # be overly optimistic for short/partial overlaps. 0.6 provides a balance that typically
 # requires substantive overlap while still tolerating diarization/ASR differences.
 _MIN_SIMILARITY_SCORE = 0.6
+
+_TRANSCRIPTION_TARGET_SECONDS = (
+    1_380.0  # 23 minutes (1,380s), safely under the 1,400s context limit
+)
+_AUDIO_SAMPLE_WIDTH = 2
+_AUDIO_FRAME_RATE = 24000
+_AUDIO_CHANNELS = 1
+_AUDIO_APPLICATION = "voip"
 
 
 def _normalize_text(text: str) -> str:
@@ -431,6 +442,111 @@ def format_diarized_transcription_txt(
     return "\n".join(chunks).strip() + "\n"
 
 
+def _prepare_audio_file_for_transcription(
+    *, input_path: str, temp_dir: str | None = None
+) -> tuple[str, float, str | None]:
+    """
+    Prepare an audio file for transcription by optionally speeding it up.
+
+    Returns:
+        A tuple of:
+        - `path_to_send`: file path to pass to the transcription API
+        - `speed_factor`: how much faster than 1x we made the audio (>= 1.0)
+        - `cleanup_path`: optional temp file path to remove afterwards
+    """
+    # Match realtime recorder settings for consistency with the stored artifact:
+    # - mono, 24kHz, 16-bit PCM prior to encoding
+    audio = (
+        AudioSegment.from_file(input_path)
+        .set_frame_rate(_AUDIO_FRAME_RATE)
+        .set_channels(_AUDIO_CHANNELS)
+        .set_sample_width(_AUDIO_SAMPLE_WIDTH)
+    )
+    duration_seconds = float(len(audio)) / 1000.0
+    if duration_seconds <= _TRANSCRIPTION_TARGET_SECONDS:
+        return input_path, 1.0, None
+
+    requested_factor = duration_seconds / _TRANSCRIPTION_TARGET_SECONDS
+    sped = speedup(audio, playback_speed=requested_factor)
+    sped_duration_seconds = float(len(sped)) / 1000.0
+    # Use the actual speed-up achieved (pydub may round frames) for timestamp rescaling.
+    actual_factor = (
+        duration_seconds / sped_duration_seconds
+        if sped_duration_seconds > 0
+        else requested_factor
+    )
+    logger.info(
+        "Speeding up audio from %.1fs to %.1fs (factor: %.2fx)",
+        duration_seconds,
+        sped_duration_seconds,
+        actual_factor,
+    )
+
+    with tempfile.NamedTemporaryFile(
+        mode="wb", suffix=".webm", delete=False, dir=temp_dir
+    ) as tmp:
+        sped_path = tmp.name
+
+    # Export after closing to avoid platform-specific file-lock issues.
+    try:
+        sped.export(
+            sped_path,
+            format="webm",
+            codec="libopus",
+            parameters=[
+                "-application",
+                _AUDIO_APPLICATION,
+                "-ac",
+                str(_AUDIO_CHANNELS),
+                "-ar",
+                str(_AUDIO_FRAME_RATE),
+            ],
+        )
+    except Exception:
+        try:
+            os.remove(sped_path)
+        except OSError:
+            logger.warning(
+                "Failed to remove temporary sped audio file %s during cleanup",
+                sped_path,
+                exc_info=True,
+            )
+        raise
+    return sped_path, actual_factor, sped_path
+
+
+async def _prepare_audio_file_for_transcription_async(
+    *, input_path: str, temp_dir: str | None = None
+) -> tuple[str, float, str | None]:
+    return await asyncio.to_thread(
+        _prepare_audio_file_for_transcription, input_path=input_path, temp_dir=temp_dir
+    )
+
+
+def _rescale_diarized_transcription_timestamps(
+    transcription: TranscriptionDiarized, *, factor: float
+) -> None:
+    """
+    The diarized timestamps come from the audio we send to the API. If we speed up
+    audio by `factor`, the returned timestamps are on the sped-up timeline and must
+    be scaled back to the original (1x) timeline.
+
+    Args:
+        transcription: A diarized transcription object whose `duration` and segment
+            `start`/`end` timestamps will be updated in-place.
+        factor: The speed-up factor applied to the audio prior to transcription. All
+            diarized timestamps are multiplied by this value to map back to the
+            original (1x) timeline.
+    """
+    if getattr(transcription, "duration", None) is not None:
+        transcription.duration = float(transcription.duration) * factor
+    for seg in transcription.segments:
+        if getattr(seg, "start", None) is not None:
+            seg.start = float(seg.start) * factor
+        if getattr(seg, "end", None) is not None:
+            seg.end = float(seg.end) * factor
+
+
 async def transcribe_thread_recording_and_email_link(
     cli: openai.AsyncClient | openai.AsyncAzureOpenAI,
     class_id: str,
@@ -441,7 +557,7 @@ async def transcribe_thread_recording_and_email_link(
     class_name: str | None = None
     user_email: str | None = None
     group_link = config.url(f"/group/{class_id}/thread/{thread_id}")
-    tmp_path: str | None = None
+    speed_factor: float = 1.0
 
     try:
         async with config.authz.driver.get_client() as authz:
@@ -489,24 +605,39 @@ async def transcribe_thread_recording_and_email_link(
             }
 
         suffix = os.path.splitext(recording_key)[1] or ".webm"
-        with tempfile.NamedTemporaryFile(mode="wb", suffix=suffix, delete=False) as tmp:
-            tmp_path = tmp.name
-            async for chunk in config.audio_store.store.get_file(recording_key):
-                tmp.write(chunk)
+        with tempfile.TemporaryDirectory(prefix="pingpong_transcription_") as tmpdir:
+            recording_path = os.path.join(tmpdir, f"recording{suffix}")
+            with open(recording_path, "wb") as tmp:
+                async for chunk in config.audio_store.store.get_file(recording_key):
+                    tmp.write(chunk)
 
-        with open(tmp_path, "rb") as audio_file:
-            transcription = await cli.audio.transcriptions.create(
-                file=audio_file,
-                model="gpt-4o-transcribe-diarize",
-                response_format="diarized_json",
-                chunking_strategy="auto",
-                language="en",
-                timeout=60 * 20,  # 20 minutes
+            (
+                path_to_send,
+                speed_factor,
+                _,  # cleanup handled by TemporaryDirectory context manager
+            ) = await _prepare_audio_file_for_transcription_async(
+                input_path=recording_path,
+                temp_dir=tmpdir,
             )
+
+            with open(path_to_send, "rb") as audio_file:
+                transcription = await cli.audio.transcriptions.create(
+                    file=audio_file,
+                    model="gpt-4o-transcribe-diarize",
+                    response_format="diarized_json",
+                    chunking_strategy="auto",
+                    language="en",
+                    timeout=60 * 20,  # 20 minutes
+                )
 
         if not isinstance(transcription, TranscriptionDiarized):
             raise TypeError(
                 f"Unexpected transcription response type: {type(transcription)}"
+            )
+
+        if speed_factor > 1.0:
+            _rescale_diarized_transcription_timestamps(
+                transcription, factor=speed_factor
             )
 
         speaker_display_names: dict[str, str] | None = None
@@ -594,9 +725,3 @@ async def transcribe_thread_recording_and_email_link(
                     thread_id,
                     user_id,
                 )
-    finally:
-        if tmp_path:
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                logger.warning("Failed to remove temp recording file %s", tmp_path)
