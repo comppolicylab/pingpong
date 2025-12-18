@@ -1001,27 +1001,22 @@ async def set_institution_default_api_key(
     if not institution:
         raise HTTPException(status_code=404, detail="Institution not found")
 
-    if body.default_api_key_id is None:
-        stmt = (
-            update(models.Institution)
-            .where(models.Institution.id == int(institution_id))
-            .values(default_api_key_id=None)
+    default_api_key_id = None
+    if body.default_api_key_id is not None:
+        api_key = await models.APIKey.get_by_id(
+            request.state.db, body.default_api_key_id
         )
-        await request.state.db.execute(stmt)
-        return await models.Institution.get_by_id(request.state.db, institution_id)
-
-    api_key = await models.APIKey.get_by_id(request.state.db, body.default_api_key_id)
-    if not api_key:
-        raise HTTPException(status_code=404, detail="API key not found")
-    if not api_key.available_as_default:
-        raise HTTPException(
-            status_code=400, detail="API key is not available as default"
-        )
-
+        if not api_key:
+            raise HTTPException(status_code=404, detail="API key not found")
+        if not api_key.available_as_default:
+            raise HTTPException(
+                status_code=400, detail="API key is not available as default"
+            )
+        default_api_key_id = api_key.id
     stmt = (
         update(models.Institution)
         .where(models.Institution.id == int(institution_id))
-        .values(default_api_key_id=api_key.id)
+        .values(default_api_key_id=default_api_key_id)
     )
     await request.state.db.execute(stmt)
     return await models.Institution.get_by_id(request.state.db, institution_id)
