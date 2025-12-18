@@ -47,7 +47,9 @@ _MIN_SUBSTRING_MATCH_LENGTH = 30
 # requires substantive overlap while still tolerating diarization/ASR differences.
 _MIN_SIMILARITY_SCORE = 0.6
 
-_TRANSCRIPTION_TARGET_SECONDS = 1_380.0  # 23 minutes, safely under 1,400s context limit
+_TRANSCRIPTION_TARGET_SECONDS = (
+    1_380.0  # 23 minutes (1,380s), safely under the 1,400s context limit
+)
 _AUDIO_SAMPLE_WIDTH = 2
 _AUDIO_FRAME_RATE = 24000
 _AUDIO_CHANNELS = 1
@@ -473,6 +475,12 @@ def _prepare_audio_file_for_transcription(
         if sped_duration_seconds > 0
         else requested_factor
     )
+    logger.info(
+        "Speeding up audio from %.1fs to %.1fs (factor: %.2fx)",
+        duration_seconds,
+        sped_duration_seconds,
+        actual_factor,
+    )
 
     with tempfile.NamedTemporaryFile(
         mode="wb", suffix=".webm", delete=False, dir=temp_dir
@@ -627,7 +635,10 @@ async def transcribe_thread_recording_and_email_link(
                 f"Unexpected transcription response type: {type(transcription)}"
             )
 
-        _rescale_diarized_transcription_timestamps(transcription, factor=speed_factor)
+        if speed_factor > 1.0:
+            _rescale_diarized_transcription_timestamps(
+                transcription, factor=speed_factor
+            )
 
         speaker_display_names: dict[str, str] | None = None
         try:
