@@ -347,6 +347,7 @@ export type Institution = {
   name: string;
   description: string | null;
   logo: string | null;
+  default_api_key_id: number | null;
   created: string;
   updated: string | null;
 };
@@ -734,6 +735,22 @@ export const copyInstitution = async (f: Fetcher, id: number, data: CopyInstitut
 
 export const updateInstitution = async (f: Fetcher, id: number, data: UpdateInstitutionRequest) => {
   return await PATCH<UpdateInstitutionRequest, Institution>(f, `institution/${id}`, data);
+};
+
+export type SetInstitutionDefaultApiKeyRequest = {
+  default_api_key_id: number | null;
+};
+
+export const setInstitutionDefaultApiKey = async (
+  f: Fetcher,
+  id: number,
+  data: SetInstitutionDefaultApiKeyRequest
+) => {
+  return await PATCH<SetInstitutionDefaultApiKeyRequest, Institution>(
+    f,
+    `admin/institutions/${id}/default_api_key`,
+    data
+  );
 };
 
 export type AddInstitutionAdminRequest = {

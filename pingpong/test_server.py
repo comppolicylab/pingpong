@@ -564,6 +564,120 @@ async def test_default_api_keys_allows_root_admin(api, valid_user_token):
     assert response.json() == {"default_keys": []}
 
 
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(grants=[("user:123", "admin", "root:0")])
+async def test_set_institution_default_api_key_success(
+    api, db, valid_user_token, institution
+):
+    async with db.async_session() as session:
+        api_key = models.APIKey(
+            api_key="test-default-key",
+            provider="openai",
+            available_as_default=True,
+        )
+        session.add(api_key)
+        await session.commit()
+        await session.refresh(api_key)
+
+    response = api.patch(
+        f"/api/v1/admin/institutions/{institution.id}/default_api_key",
+        json={"default_api_key_id": api_key.id},
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == institution.id
+    assert data["default_api_key_id"] == api_key.id
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(grants=[("user:123", "admin", "root:0")])
+async def test_clear_institution_default_api_key_success(
+    api, db, valid_user_token, institution
+):
+    async with db.async_session() as session:
+        api_key = models.APIKey(
+            api_key="test-default-key-to-clear",
+            provider="openai",
+            available_as_default=True,
+        )
+        session.add(api_key)
+        await session.commit()
+        await session.refresh(api_key)
+
+    response = api.patch(
+        f"/api/v1/admin/institutions/{institution.id}/default_api_key",
+        json={"default_api_key_id": api_key.id},
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 200
+    assert response.json()["default_api_key_id"] == api_key.id
+
+    response = api.patch(
+        f"/api/v1/admin/institutions/{institution.id}/default_api_key",
+        json={"default_api_key_id": None},
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 200
+    assert response.json()["default_api_key_id"] is None
+
+
+@with_user(123)
+@with_authz(grants=[("user:123", "admin", "root:0")])
+async def test_set_institution_default_api_key_institution_not_found(
+    api, valid_user_token
+):
+    response = api.patch(
+        "/api/v1/admin/institutions/999999/default_api_key",
+        json={"default_api_key_id": None},
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Institution not found"}
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(grants=[("user:123", "admin", "root:0")])
+async def test_set_institution_default_api_key_key_not_found(
+    api, valid_user_token, institution
+):
+    response = api.patch(
+        f"/api/v1/admin/institutions/{institution.id}/default_api_key",
+        json={"default_api_key_id": 999999},
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": "API key not found"}
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(grants=[("user:123", "admin", "root:0")])
+async def test_set_institution_default_api_key_key_not_available_as_default(
+    api, db, valid_user_token, institution
+):
+    async with db.async_session() as session:
+        api_key = models.APIKey(
+            api_key="test-not-available-default-key",
+            provider="openai",
+            available_as_default=False,
+        )
+        session.add(api_key)
+        await session.commit()
+        await session.refresh(api_key)
+
+    response = api.patch(
+        f"/api/v1/admin/institutions/{institution.id}/default_api_key",
+        json={"default_api_key_id": api_key.id},
+        cookies={"session": valid_user_token},
+    )
+    assert response.status_code == 400
+    assert response.json() == {"detail": "API key is not available as default"}
+
+
 async def test_auth_with_invalid_token(api):
     invalid_token = (
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
@@ -1140,6 +1254,7 @@ async def test_create_class(api, now, institution, valid_user_token, authz):
             "name": "Harvard Kennedy School",
             "description": None,
             "logo": None,
+            "default_api_key_id": None,
             "updated": None,
             "created": response_data["institution"]["created"],
         },
@@ -1200,6 +1315,7 @@ async def test_create_class_private(api, now, institution, valid_user_token, aut
             "name": "Harvard Kennedy School",
             "description": None,
             "logo": None,
+            "default_api_key_id": None,
             "updated": None,
             "created": response_data["institution"]["created"],
         },

@@ -1367,6 +1367,8 @@ class Institution(Base):
     name = Column(String)
     description = Column(String, nullable=True)
     logo = Column(String, nullable=True)
+    default_api_key_id = Column(Integer, ForeignKey("api_keys.id"), nullable=True)
+    default_api_key_obj = relationship("APIKey")
     classes = relationship("Class", back_populates="institution")
     users: Mapped[List["UserInstitutionRole"]] = relationship(
         "UserInstitutionRole", back_populates="institution"
@@ -2651,6 +2653,11 @@ class APIKey(Base):
     api_version = Column(String, nullable=True)
     region = Column(String, nullable=True)
     available_as_default = Column(Boolean, default=False)
+
+    @classmethod
+    async def get_by_id(cls, session: AsyncSession, id_: int) -> "APIKey | None":
+        stmt = select(APIKey).where(APIKey.id == int(id_))
+        return await session.scalar(stmt)
 
     @classmethod
     async def create_or_update(

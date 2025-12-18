@@ -1,7 +1,7 @@
 """Add LTI
 
 Revision ID: e920bdf08505
-Revises: 90e1564bb31d
+Revises: a54f5dd3ac9d
 Create Date: 2025-12-18 16:29:36.471794
 
 """
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "e920bdf08505"
-down_revision: Union[str, None] = "90e1564bb31d"
+down_revision: Union[str, None] = "a54f5dd3ac9d"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

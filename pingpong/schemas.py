@@ -963,6 +963,7 @@ class Institution(BaseModel):
     name: str
     description: str | None
     logo: str | None
+    default_api_key_id: int | None = None
     created: datetime
     updated: datetime | None
 
@@ -1015,6 +1016,10 @@ class LTIRegistrationReviewStatus(StrEnum):
 
 class LTITokenAlgorithm(StrEnum):
     RS256 = "RS256"
+
+
+class SetInstitutionDefaultAPIKeyRequest(BaseModel):
+    default_api_key_id: int | None = None
 
 
 # Status documenting the state of the LMS sync.
