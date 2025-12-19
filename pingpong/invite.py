@@ -12,6 +12,26 @@ from .template import summary_template
 from .time import convert_seconds
 
 
+async def send_lti_registration_submitted(
+    sender: EmailSender,
+    *,
+    admin_email: str,
+    admin_name: str,
+    integration_name: str,
+):
+    subject = f"PingPong LTI registration submitted: {integration_name}"
+
+    message = notification_template.substitute(
+        {
+            "title": "We received your LTI registration.",
+            "subtitle": f"Thanks, {admin_name}.</p><p>We received your LTI registration for <b>{integration_name}</b>. Our team will review it before activation. You’ll receive an email notification once your integration is approved.",
+            "legal_text": "because you submitted an LTI registration to PingPong",
+        }
+    )
+
+    await sender.send(admin_email, subject, message)
+
+
 async def send_invite(
     sender: EmailSender,
     invite: CreateInvite,

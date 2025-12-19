@@ -1,6 +1,8 @@
 import asyncio
+import hashlib
 import json
-from datetime import datetime
+import secrets
+from datetime import datetime, timedelta
 from typing import (
     AsyncGenerator,
     Collection,
@@ -5366,3 +5368,159 @@ class LTIRegistration(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> "LTIRegistration":
+        registration = LTIRegistration(**data)
+        session.add(registration)
+        await session.flush()
+        return registration
+
+    @classmethod
+    async def get_by_client_id(
+        cls, session: AsyncSession, client_id: str
+    ) -> "LTIRegistration":
+        stmt = select(LTIRegistration).where(LTIRegistration.client_id == client_id)
+        return await session.scalar(stmt)
+
+
+class LTIOIDCSession(Base):
+    __tablename__ = "lti_oidc_sessions"
+
+    id = Column(Integer, primary_key=True)
+
+    # OIDC request/response correlation + CSRF mitigation
+    state = Column(String, nullable=False, unique=True)
+
+    # Store a hash of the nonce (rather than the raw nonce) to reduce sensitive data at rest.
+    nonce_sha256 = Column(String, nullable=False)
+
+    issuer = Column(String, nullable=False)
+    client_id = Column(String, nullable=False)
+    deployment_id = Column(String, nullable=True)
+
+    redirect_uri = Column(String, nullable=True)
+    target_link_uri = Column(String, nullable=True)
+    login_hint = Column(String, nullable=True)
+    lti_message_hint = Column(String, nullable=True)
+    extra = Column(String, nullable=True)
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    consumed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("idx_lti_oidc_expires_at", "expires_at"),
+        Index("idx_lti_oidc_consumed_at", "consumed_at"),
+    )
+
+    @staticmethod
+    def generate_state(num_bytes: int = 32) -> str:
+        return secrets.token_urlsafe(num_bytes)
+
+    @staticmethod
+    def generate_nonce(num_bytes: int = 32) -> str:
+        return secrets.token_urlsafe(num_bytes)
+
+    @staticmethod
+    def hash_nonce(nonce: str) -> str:
+        return hashlib.sha256(nonce.encode("utf-8")).hexdigest()
+
+    def is_consumed(self) -> bool:
+        return self.consumed_at is not None
+
+    def is_expired(self, now: datetime) -> bool:
+        return self.expires_at <= now
+
+    @classmethod
+    async def create_pending(
+        cls,
+        session: AsyncSession,
+        *,
+        issuer: str,
+        client_id: str,
+        now: datetime,
+        ttl_seconds: int = 600,
+        deployment_id: str | None = None,
+        redirect_uri: str | None = None,
+        target_link_uri: str | None = None,
+        login_hint: str | None = None,
+        lti_message_hint: str | None = None,
+        extra: dict[str, Any] | None = None,
+        state: str | None = None,
+        nonce: str | None = None,
+    ) -> tuple["LTIOIDCSession", str, str]:
+        """
+        Create a pending OIDC session for LTI login.
+
+        Returns (session_row, state, nonce). Only the nonce hash is persisted.
+        """
+        if ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be positive")
+
+        state_value = state or cls.generate_state()
+        nonce_value = nonce or cls.generate_nonce()
+
+        session_row = LTIOIDCSession(
+            state=state_value,
+            nonce_sha256=cls.hash_nonce(nonce_value),
+            issuer=issuer,
+            client_id=client_id,
+            deployment_id=deployment_id,
+            redirect_uri=redirect_uri,
+            target_link_uri=target_link_uri,
+            login_hint=login_hint,
+            lti_message_hint=lti_message_hint,
+            extra=json.dumps(extra) if extra is not None else None,
+            expires_at=now + timedelta(seconds=ttl_seconds),
+        )
+
+        session.add(session_row)
+        await session.flush()
+        return session_row, state_value, nonce_value
+
+    @classmethod
+    async def get_by_state(
+        cls, session: AsyncSession, state: str
+    ) -> "LTIOIDCSession | None":
+        stmt = select(LTIOIDCSession).where(LTIOIDCSession.state == state)
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def validate_and_consume(
+        cls,
+        session: AsyncSession,
+        *,
+        state: str,
+        nonce: str,
+        now: datetime,
+        issuer: str | None = None,
+        client_id: str | None = None,
+        deployment_id: str | None = None,
+    ) -> "LTIOIDCSession | None":
+        """
+        Validate a launch callback against a pending session and mark it consumed.
+
+        Returns the session row if valid; otherwise returns None.
+        """
+        oidc_session = await cls.get_by_state(session, state)
+        if oidc_session is None:
+            return None
+
+        if oidc_session.is_consumed() or oidc_session.is_expired(now):
+            return None
+
+        if issuer is not None and oidc_session.issuer != issuer:
+            return None
+        if client_id is not None and oidc_session.client_id != client_id:
+            return None
+        if deployment_id is not None and oidc_session.deployment_id != deployment_id:
+            return None
+
+        if oidc_session.nonce_sha256 != cls.hash_nonce(nonce):
+            return None
+
+        oidc_session.consumed_at = now
+        session.add(oidc_session)
+        await session.flush()
+        return oidc_session

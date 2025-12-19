@@ -8,11 +8,20 @@
 
   export let data;
   $: externalLoginProviders = data.externalLoginProviders;
+  $: institutions = data.institutions || [];
 
   let openid_configuration: string | null = null;
   let registration_token: string | null = null;
   let missing_params = false;
   let showModal = false;
+
+  let ssoProviderId = '0';
+  let institutionIds: number[] = [];
+
+  const isValidSsoField = (value: string): value is api.LTISSOField =>
+    value === 'canvas.sisIntegrationId' ||
+    value === 'canvas.sisSourceId' ||
+    value === 'person.sourcedId';
 
   onMount(() => {
     const params = new URLSearchParams(window.location.search);
@@ -30,44 +39,65 @@
 
     const form = evt.target as HTMLFormElement;
     const formData = new FormData(form);
-    const d = Object.fromEntries(formData.entries());
-
-    const name = d.name?.toString();
+    const name = formData.get('name')?.toString();
     if (!name) {
       $loading = false;
       return sadToast('Name is required');
     }
 
-    const ssoId = d.sso_id?.toString();
+    const ssoId = formData.get('sso_id')?.toString();
     if (!ssoId) {
       $loading = false;
       return sadToast('SSO identifier is required');
     }
+    const providerId = parseInt(ssoId, 10);
 
-    const adminName = d.admin_name?.toString();
+    let ssoField: api.LTISSOField | null = null;
+    if (providerId !== 0) {
+      const rawSsoField = formData.get('sso_field')?.toString()?.trim() ?? '';
+      if (!rawSsoField) {
+        $loading = false;
+        return sadToast('SSO field is required');
+      }
+      if (!isValidSsoField(rawSsoField)) {
+        $loading = false;
+        return sadToast('Invalid SSO field');
+      }
+      ssoField = rawSsoField;
+    }
+
+    const adminName = formData.get('admin_name')?.toString();
     if (!adminName) {
       $loading = false;
       return sadToast('Administrator name is required');
     }
 
-    const adminEmail = d.admin_email?.toString();
+    const adminEmail = formData.get('admin_email')?.toString();
     if (!adminEmail) {
       $loading = false;
       return sadToast('Administrator email is required');
+    }
+
+    if (!institutionIds.length) {
+      $loading = false;
+      return sadToast('Select at least one institution');
     }
 
     const data: api.LTIRegisterRequest = {
       name: name,
       admin_name: adminName,
       admin_email: adminEmail,
-      provider_id: parseInt(ssoId, 10),
+      provider_id: providerId,
+      sso_field: ssoField,
       openid_configuration: openid_configuration || '',
-      registration_token: registration_token || ''
+      registration_token: registration_token || '',
+      institution_ids: institutionIds
     };
 
     const result = await api.registerLTIInstance(fetch, data);
     if (result.$status < 300) {
       happyToast('LTI instance registered successfully');
+      window.parent.postMessage({ subject: 'org.imsglobal.lti.close' }, '*');
     } else {
       sadToast('There was an error registering the LTI instance');
     }
@@ -94,19 +124,16 @@
     </div>
     <div>
       <Label for="admin_email" class="mb-1">Administrator Email</Label>
-      <Input id="admin_email" name="admin_email" placeholder="john.doe@example.com" />
+      <Input id="admin_email" name="admin_email" placeholder="john.doe@example.com" type="email" />
     </div>
     <div>
       <Label for="sso_id" class="mb-1">SSO Provider</Label>
       <Helper class="mb-2"
-        >Use this field to select which SSO identifier Canvas will provide to PingPong. If PingPong
-        does not support your SSO identifier, select "No SSO". PingPong will use SSO identifers and
-        fallback to email addresses to identify users.<br /><br />PingPong relies on the
-        <code class="font-mono">lis_person_sourcedid</code>
-        attribute in the <code class="font-mono">NamesAndRoleMembership</code> object to get the user's
-        SSO identifier.</Helper
+        >Choose the SSO identifier your LTI instance will provide to PingPong. If PingPong doesn’t
+        support your SSO identifier, select "No SSO." PingPong will use SSO identifiers and fall
+        back to email addresses to identify users.</Helper
       >
-      <Select name="sso_id" id="sso_id" disabled={$loading}>
+      <Select name="sso_id" id="sso_id" disabled={$loading} bind:value={ssoProviderId}>
         {#each externalLoginProviders as provider}
           <option value={provider.id}>{provider.display_name || provider.name}</option>
         {/each}
@@ -114,10 +141,57 @@
         <option value="0">No SSO</option>
       </Select>
     </div>
+    {#if parseInt(ssoProviderId, 10) !== 0}
+      <div>
+        <Label for="sso_field" class="mb-1">SSO Field</Label>
+        <Helper class="mb-2"
+          >Select the field where PingPong should expect SSO identifiers. If the field where your
+          SSO identifiers are stored isn’t listed, please contact us.</Helper
+        >
+        <Select name="sso_field" id="sso_field" disabled={$loading}>
+          <option value="canvas.sisIntegrationId">Canvas.user.sisIntegrationId</option>
+          <option value="canvas.sisSourceId">Canvas.user.sisSourceId</option>
+          <option value="person.sourcedId">Person.sourcedId</option>
+        </Select>
+      </div>
+    {/if}
+    <div>
+      <Label class="mb-1">Institutions</Label>
+      <Helper class="mb-2"
+        >Select the institutions where your instructors should be able to create groups. When
+        PingPong is first launched from Canvas, instructors can either associate an existing group
+        from any institution or create a new one in the institutions you’ve selected. If an
+        institution you anticipate is not listed, please contact us.</Helper
+      >
+      {#if institutions.length > 0}
+        <div class="max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-3">
+          <div class="flex flex-col gap-2">
+            {#each institutions as inst}
+              <label class="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  class="mt-1 h-4 w-4 rounded border-gray-300"
+                  bind:group={institutionIds}
+                  value={inst.id}
+                  disabled={$loading}
+                />
+                <div class="flex flex-col">
+                  <div class="text-sm font-medium text-gray-900">{inst.name}</div>
+                </div>
+              </label>
+            {/each}
+          </div>
+        </div>
+      {:else}
+        <div class="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
+          No institutions with default API keys are available to your account.
+        </div>
+      {/if}
+    </div>
     <div class="text-sm text-gray-600">
-      <b>Note:</b> After you completete the LTI registration process, your integration will need to be
-      reviewed by a PingPong administrator before it becomes active. You will receive an email when your
-      integration is approved.
+      <b>Note:</b> After completing the LTI registration process, your integration will require review
+      by a PingPong staff member before activation. You’ll receive an email notification once your integration
+      is approved.
     </div>
     <div class="flex items-center justify-between">
       <Button

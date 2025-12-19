@@ -2,19 +2,148 @@
 
 import json
 import logging
+from datetime import datetime
 from typing import Any, cast
+from urllib.parse import urlencode
 import aiohttp
+import jwt
 from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi.responses import RedirectResponse
 
 from pingpong.config import config
-from pingpong.lti.schemas import LTIRegisterRequest
-from pingpong.models import ExternalLoginProvider, LTIRegistration
+from pingpong.invite import send_lti_registration_submitted
+from pingpong.lti.schemas import (
+    LTIRegisterRequest,
+    LTIPublicInstitutions,
+    LTIPublicSSOProviders,
+)
+from pingpong.models import (
+    ExternalLoginProvider,
+    Institution,
+    LTIRegistration,
+    LTIOIDCSession,
+)
+from pingpong.server import get_now_fn
 from .key_manager import LTIKeyManager
-from pingpong.schemas import ExternalLoginProviders, LMSPlatform
+from pingpong.schemas import (
+    ExternalLoginProviders,
+    LMSPlatform,
+    LTIRegistrationReviewStatus,
+)
 
 logger = logging.getLogger(__name__)
 
-lti_router = APIRouter()
+lti_router: APIRouter = APIRouter()
+
+SSO_FIELD_FULL_NAME: dict[str, str] = {
+    "canvas.sisIntegrationId": "Canvas.user.sisIntegrationId",
+    "canvas.sisSourceId": "Canvas.user.sisSourceId",
+    "person.sourcedId": "Person.sourcedId",
+}
+
+ISSUER_KEY = "issuer"
+AUTHORIZATION_ENDPOINT_KEY = "authorization_endpoint"
+REGISTRATION_ENDPOINT_KEY = "registration_endpoint"
+KEYS_ENDPOINT_KEY = "jwks_uri"
+TOKEN_ENDPOINT_KEY = "token_endpoint"
+SCOPES_SUPPORTED_KEY = "scopes_supported"
+TOKEN_ALG_KEY = "id_token_signing_alg_values_supported"
+SUBJECT_TYPES_KEY = "subject_types_supported"
+
+PLATFORM_CONFIGURATION_KEY = (
+    "https://purl.imsglobal.org/spec/lti-platform-configuration"
+)
+MESSAGE_TYPES_KEY = "messages_supported"
+MESSAGE_TYPE = "LtiResourceLinkRequest"
+CANVAS_MESSAGE_PLACEMENT = "https://canvas.instructure.com/lti/course_navigation"
+
+CANVAS_ACCOUNT_NAME_KEY = "https://canvas.instructure.com/lti/account_name"
+
+REQUIRED_SCOPES = [
+    "https://purl.imsglobal.org/spec/lti-nrps/scope/contextmembership.readonly"
+]
+
+LTI_DEPLOYMENT_ID_CLAIM = "https://purl.imsglobal.org/spec/lti/claim/deployment_id"
+
+
+async def _fetch_jwks(jwks_url: str) -> dict[str, Any]:
+    timeout = aiohttp.ClientTimeout(total=10)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(jwks_url, raise_for_status=True) as response:
+            payload = await response.json()
+            if not isinstance(payload, dict):
+                raise HTTPException(status_code=500, detail="Invalid JWKS response")
+            return cast(dict[str, Any], payload)
+
+
+def _select_jwk(jwks: dict[str, Any], kid: str | None) -> dict[str, Any]:
+    keys = jwks.get("keys")
+    if not isinstance(keys, list) or not keys:
+        raise HTTPException(status_code=500, detail="Invalid JWKS (missing keys)")
+
+    if kid:
+        for key in keys:
+            if isinstance(key, dict) and key.get("kid") == kid:
+                return cast(dict[str, Any], key)
+        raise HTTPException(status_code=400, detail="Unknown JWT key id (kid)")
+
+    if len(keys) == 1 and isinstance(keys[0], dict):
+        return cast(dict[str, Any], keys[0])
+
+    raise HTTPException(status_code=400, detail="Missing JWT key id (kid)")
+
+
+async def _verify_lti_id_token(
+    *,
+    id_token: str,
+    jwks_url: str,
+    expected_issuer: str,
+    expected_audience: str,
+    expected_algorithm: str,
+) -> dict[str, Any]:
+    try:
+        header = jwt.get_unverified_header(id_token)
+    except jwt.PyJWTError as e:
+        raise HTTPException(status_code=400, detail="Invalid id_token header") from e
+
+    if header.get("typ") not in (None, "JWT", "at+jwt"):
+        raise HTTPException(status_code=400, detail="Invalid id_token type")
+
+    alg = header.get("alg")
+    if not isinstance(alg, str) or not alg:
+        raise HTTPException(status_code=400, detail="Invalid id_token algorithm")
+    if alg != expected_algorithm:
+        raise HTTPException(status_code=400, detail="Unexpected id_token algorithm")
+
+    kid = header.get("kid")
+    if kid is not None and not isinstance(kid, str):
+        raise HTTPException(status_code=400, detail="Invalid id_token kid")
+
+    jwks = await _fetch_jwks(jwks_url)
+    jwk = _select_jwk(jwks, kid)
+    try:
+        public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Invalid JWKS key material") from e
+
+    try:
+        claims = jwt.decode(
+            id_token,
+            key=public_key,
+            algorithms=[expected_algorithm],
+            audience=expected_audience,
+            issuer=expected_issuer,
+            options={
+                "require": ["exp", "iat", "iss", "aud", "nonce"],
+            },
+            leeway=60,
+        )
+    except jwt.PyJWTError as e:
+        raise HTTPException(status_code=400, detail="Invalid id_token") from e
+
+    if not isinstance(claims, dict):
+        raise HTTPException(status_code=400, detail="Invalid id_token claims")
+    return cast(dict[str, Any], claims)
 
 
 def get_lti_key_manager() -> LTIKeyManager:
@@ -36,7 +165,6 @@ async def get_jwks(key_manager: LTIKeyManager = Depends(get_lti_key_manager)):
     """
     try:
         jwks = await key_manager.get_public_keys_jwks()
-        logger.info(f"Served JWKS with {len(jwks['keys'])} keys")
         return jwks
     except Exception as e:
         logger.error(f"Error serving JWKS: {e}")
@@ -55,6 +183,30 @@ async def get_sso_ids(request: Request):
     return {"providers": no_email_providers}
 
 
+@lti_router.get("/public/sso/providers", response_model=LTIPublicSSOProviders)
+async def get_public_sso_providers(request: Request):
+    providers = await ExternalLoginProvider.get_all(request.state.db)
+    return {
+        "providers": [
+            {"id": p.id, "name": p.name, "display_name": p.display_name}
+            for p in providers
+            if p.name != "email"
+        ]
+    }
+
+
+@lti_router.get("/public/institutions", response_model=LTIPublicInstitutions)
+async def get_public_institutions(request: Request):
+    institutions = await Institution.get_all(request.state.db)
+    return {
+        "institutions": [
+            {"id": inst.id, "name": inst.name}
+            for inst in institutions
+            if inst.default_api_key_id is not None
+        ]
+    }
+
+
 @lti_router.post("/register")
 async def register_lti_instance(request: Request, data: LTIRegisterRequest):
     """
@@ -64,6 +216,25 @@ async def register_lti_instance(request: Request, data: LTIRegisterRequest):
         raise HTTPException(
             status_code=400, detail="Missing openid_configuration or registration_token"
         )
+
+    if not data.institution_ids:
+        raise HTTPException(
+            status_code=400, detail="At least one institution must be selected"
+        )
+
+    if data.provider_id == 0:
+        if data.sso_field is not None:
+            raise HTTPException(
+                status_code=400, detail="SSO field must be null when no SSO is selected"
+            )
+    elif data.sso_field is None:
+        raise HTTPException(
+            status_code=400, detail="SSO field is required when SSO is selected"
+        )
+
+    sso_field_full_name = (
+        None if data.sso_field is None else SSO_FIELD_FULL_NAME[data.sso_field]
+    )
 
     headers = {"Authorization": f"Bearer {data.registration_token}"}
 
@@ -84,28 +255,6 @@ async def register_lti_instance(request: Request, data: LTIRegisterRequest):
         raise HTTPException(
             status_code=500, detail="Failed to fetch OpenID configuration"
         )
-
-    ISSUER_KEY = "issuer"
-    AUTHORIZATION_ENDPOINT_KEY = "authorization_endpoint"
-    REGISTRATION_ENDPOINT_KEY = "registration_endpoint"
-    KEYS_ENDPOINT_KEY = "jwks_uri"
-    TOKEN_ENDPOINT_KEY = "token_endpoint"
-    SCOPES_SUPPORTED_KEY = "scopes_supported"
-    TOKEN_ALG_KEY = "id_token_signing_alg_values_supported"
-    SUBJECT_TYPES_KEY = "subject_types_supported"
-
-    PLATFORM_CONFIGURATION_KEY = (
-        "https://purl.imsglobal.org/spec/lti-platform-configuration"
-    )
-    MESSAGE_TYPES_KEY = "messages_supported"
-    MESSAGE_TYPE = "LtiResourceLinkRequest"
-    CANVAS_MESSAGE_PLACEMENT = "https://canvas.instructure.com/lti/course_navigation"
-
-    CANVAS_ACCOUNT_NAME_KEY = "https://canvas.instructure.com/lti/account_name"
-
-    REQUIRED_SCOPES = [
-        "https://purl.imsglobal.org/spec/lti-nrps/scope/contextmembership.readonly"
-    ]
 
     issuer = response_data.get(ISSUER_KEY)
     authorization_endpoint = response_data.get(AUTHORIZATION_ENDPOINT_KEY)
@@ -178,52 +327,282 @@ async def register_lti_instance(request: Request, data: LTIRegisterRequest):
         "initiate_login_uri": config.url("/api/v1/lti/login"),
         "redirect_uris": [config.url("/api/v1/lti/launch")],
         "response_types": ["id_token"],
-        "client_name": "PingPong LTI Tool",
+        "client_name": "PingPong",
         "jwks_uri": config.url("/api/v1/lti/.well-known/jwks.json"),
         "token_endpoint_auth_method": "private_key_jwt",
         "scope": " ".join(REQUIRED_SCOPES + ["openid"]),
         "https://purl.imsglobal.org/spec/lti-tool-configuration": {
-            "domain": config.host,
+            "domain": config.public_url.replace("https://", "")
+            .replace("http://", "")
+            .replace("/", ""),
             "target_link_uri": config.url("/api/v1/lti/launch"),
-            "description": "LTI Tool for easy launching of the PingPong application.",
-            "custom_parameters": {"platform": platform.value},
+            "description": "A platform carefully designed for AI-driven learning.",
+            "custom_parameters": {
+                "platform": platform.value,
+                "pingpong_lti_tool_version": "1.0",
+                "sso_provider_id": str(data.provider_id),
+                "sso_value": f"${sso_field_full_name}" if sso_field_full_name else "",
+            },
             "claims": [
                 "sub",
                 "iss",
-                "name",
                 "given_name",
                 "family_name",
                 "email",
-                "picture",
                 "https://purl.imsglobal.org/spec/lti/claim/context",
                 "https://purl.imsglobal.org/spec/lti/claim/roles",
                 "https://purl.imsglobal.org/spec/lti/claim/resource_link",
                 "https://purl.imsglobal.org/spec/lti/claim/tool_platform",
                 "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice",
             ],
-            "extensions": {
-                "https://canvas.instructure.com/lti/extensions/course_navigation": {
-                    "default": True,
-                    "text": "PingPong LTI Tool",
-                    "enabled": True,
-                    "visibility": "members",
+            "https://canvas.instructure.com/lti/vendor": "Computational Policy Lab",
+            "messages": [
+                {
+                    "type": MESSAGE_TYPE,
+                    "target_link_uri": config.url("/api/v1/lti/launch"),
+                    "label": "PingPong",
+                    "placements": ["course_navigation"],
+                    "custom_parameters": {
+                        "placement": "course_navigation",
+                        "canvas_course_id": "$Canvas.course.id",
+                        "canvas_term_name": "$Canvas.term.name",
+                    },
+                    "https://canvas.instructure.com/lti/display_type": "full_width_in_context",
+                    "https://canvas.instructure.com/lti/course_navigation/default_enabled": True,
+                    "https://canvas.instructure.com/lti/visibility": "members",
                 }
-            },
+            ],
         },
     }
 
-    new_registration = LTIRegistration(
-        issuer=issuer,
-        configuration=json.dumps(response_data),
-        auth_login_url=authorization_endpoint,
-        auth_token_url=token_endpoint,
-        key_set_url=keys_endpoint,
-        lms_platform=platform,
-        token_algorithm="RS256",
-        canvas_account_name=canvas_account_name,
-        admin_name=data.admin_name,
-        admin_email=data.admin_email,
-        friendly_name=data.friendly_name,
+    registration_response_data: dict[str, Any] | None = None
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(
+                registration_endpoint,
+                raise_for_status=True,
+                headers={
+                    "Authorization": f"Bearer {data.registration_token}",
+                    "Content-Type": "application/json",
+                },
+                json=tool_registration_data,
+            ) as response:
+                payload = await response.json()
+                if not isinstance(payload, dict):
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Invalid registration endpoint response payload",
+                    )
+                registration_response_data = cast(dict[str, Any], payload)
+        except aiohttp.ClientResponseError as e:
+            logger.error(f"Error during LTI tool registration: {e.status} {e.message}")
+            raise HTTPException(
+                status_code=e.status,
+                detail=f"Failed to create registration: {e.message}",
+            )
+
+    if not registration_response_data:
+        raise HTTPException(status_code=500, detail="Failed to create registration")
+
+    client_id = registration_response_data.get("client_id")
+    if not isinstance(client_id, str) or not client_id:
+        raise HTTPException(
+            status_code=500, detail="Missing client_id in registration response"
+        )
+
+    new_registration = {
+        "issuer": issuer,
+        "configuration": json.dumps(registration_response_data),
+        "client_id": client_id,
+        "auth_login_url": authorization_endpoint,
+        "auth_token_url": token_endpoint,
+        "key_set_url": keys_endpoint,
+        "lms_platform": platform,
+        "token_algorithm": "RS256",
+        "canvas_account_name": canvas_account_name,
+        "admin_name": data.admin_name,
+        "admin_email": data.admin_email,
+        "friendly_name": data.name,
+    }
+
+    await LTIRegistration.create(request.state.db, new_registration)
+
+    try:
+        await send_lti_registration_submitted(
+            config.email.sender,
+            admin_email=data.admin_email,
+            admin_name=data.admin_name,
+            integration_name=data.name,
+        )
+    except Exception:
+        logger.exception(
+            f"Failed to send LTI registration submitted email: {data.admin_email}",
+        )
+
+    return {"status": "ok"}
+
+
+@lti_router.post("/login")
+async def lti_login(request: Request):
+    """Handle LTI login requests.
+
+    Receives an OIDC initiation request from the platform and responds with a browser redirect
+    to the platform's OIDC authorization endpoint.
+    """
+    if request.method == "GET":
+        payload = request.query_params
+    else:
+        payload = await request.form()
+
+    client_id = payload.get("client_id")
+    if not isinstance(client_id, str) or not client_id:
+        raise HTTPException(status_code=400, detail="Missing or invalid client_id")
+
+    iss = payload.get("iss")
+    if not isinstance(iss, str) or not iss:
+        raise HTTPException(status_code=400, detail="Missing or invalid iss")
+
+    registration = await LTIRegistration.get_by_client_id(request.state.db, client_id)
+    if registration is None:
+        raise HTTPException(status_code=404, detail="Unknown LTI client_id")
+
+    if registration.issuer != iss:
+        raise HTTPException(status_code=400, detail="Issuer mismatch for client_id")
+
+    login_hint = payload.get("login_hint")
+    if not isinstance(login_hint, str) or not login_hint:
+        raise HTTPException(status_code=400, detail="Missing or invalid login_hint")
+
+    target_link_uri = payload.get("target_link_uri")
+    if not isinstance(target_link_uri, str) or not target_link_uri:
+        raise HTTPException(
+            status_code=400, detail="Missing or invalid target_link_uri"
+        )
+
+    lti_message_hint = payload.get("lti_message_hint")
+    if lti_message_hint is not None and not isinstance(lti_message_hint, str):
+        raise HTTPException(status_code=400, detail="Invalid lti_message_hint")
+
+    # Use the platform's authorization endpoint discovered during dynamic registration.
+    oidc_authorization_endpoint = registration.auth_login_url
+    if not oidc_authorization_endpoint:
+        raise HTTPException(
+            status_code=400, detail="No known OIDC authorization endpoint for issuer"
+        )
+
+    # Optional deployment binding if the platform supplies it at initiation time.
+    request_deployment_id = payload.get("deployment_id") or payload.get(
+        "lti_deployment_id"
     )
+    if request_deployment_id is not None and not isinstance(request_deployment_id, str):
+        raise HTTPException(status_code=400, detail="Invalid deployment_id")
+
+    # Create a short-lived server-side session that binds state <-> nonce.
+    now = get_now_fn(request)()
+    redirect_uri = config.url("/api/v1/lti/launch")
+    _, state, nonce = await LTIOIDCSession.create_pending(
+        request.state.db,
+        issuer=iss,
+        client_id=client_id,
+        deployment_id=request_deployment_id,
+        redirect_uri=redirect_uri,
+        target_link_uri=target_link_uri,
+        login_hint=login_hint,
+        lti_message_hint=lti_message_hint,
+        now=now,
+        ttl_seconds=600,
+    )
+
+    # Build the authorization redirect (must be a browser redirect, not server-to-server).
+    auth_params: dict[str, str] = {
+        "scope": "openid",
+        "response_type": "id_token",
+        "response_mode": "form_post",
+        "prompt": "none",
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "login_hint": login_hint,
+        "state": state,
+        "nonce": nonce,
+    }
+    if lti_message_hint:
+        auth_params["lti_message_hint"] = lti_message_hint
+
+    redirect_url = f"{oidc_authorization_endpoint}?{urlencode(auth_params)}"
+    return RedirectResponse(url=redirect_url, status_code=302)
+
+
+@lti_router.post("/launch")
+async def lti_launch(request: Request):
+    form = await request.form()
+
+    state = form.get("state")
+    if not isinstance(state, str) or not state:
+        raise HTTPException(status_code=400, detail="Missing or invalid state")
+
+    id_token = form.get("id_token")
+    if not isinstance(id_token, str) or not id_token:
+        raise HTTPException(status_code=400, detail="Missing or invalid id_token")
+
+    now: datetime = get_now_fn(request)()
+
+    oidc_session = await LTIOIDCSession.get_by_state(request.state.db, state)
+    if oidc_session is None:
+        raise HTTPException(status_code=400, detail="Unknown state")
+    if oidc_session.is_consumed():
+        raise HTTPException(status_code=400, detail="State already consumed")
+    if oidc_session.is_expired(now):
+        raise HTTPException(status_code=400, detail="State expired")
+
+    expected_redirect_uri = config.url("/api/v1/lti/launch")
+    if oidc_session.redirect_uri and oidc_session.redirect_uri != expected_redirect_uri:
+        raise HTTPException(status_code=400, detail="OIDC redirect_uri mismatch")
+
+    registration = await LTIRegistration.get_by_client_id(
+        request.state.db, oidc_session.client_id
+    )
+    if registration is None:
+        raise HTTPException(status_code=404, detail="Unknown LTI client_id")
+    if registration.issuer != oidc_session.issuer:
+        raise HTTPException(status_code=400, detail="Issuer mismatch for state")
+
+    claims = await _verify_lti_id_token(
+        id_token=id_token,
+        jwks_url=registration.key_set_url,
+        expected_issuer=oidc_session.issuer,
+        expected_audience=oidc_session.client_id,
+        expected_algorithm=registration.token_algorithm,
+    )
+
+    nonce = claims.get("nonce")
+    if not isinstance(nonce, str) or not nonce:
+        raise HTTPException(status_code=400, detail="Missing nonce in id_token")
+
+    deployment_id_claim = claims.get(LTI_DEPLOYMENT_ID_CLAIM)
+    if deployment_id_claim is not None and not isinstance(deployment_id_claim, str):
+        raise HTTPException(status_code=400, detail="Invalid deployment_id in id_token")
+
+    deployment_id_to_check: str | None = None
+    if oidc_session.deployment_id is not None:
+        if not deployment_id_claim:
+            raise HTTPException(
+                status_code=400, detail="Missing deployment_id in id_token"
+            )
+        deployment_id_to_check = deployment_id_claim
+
+    consumed = await LTIOIDCSession.validate_and_consume(
+        request.state.db,
+        state=state,
+        nonce=nonce,
+        now=now,
+        issuer=oidc_session.issuer,
+        client_id=oidc_session.client_id,
+        deployment_id=deployment_id_to_check,
+    )
+    if consumed is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired state/nonce")
+
+    if registration.review_status != LTIRegistrationReviewStatus.APPROVED:
+        return RedirectResponse(url=config.url("/lti/inactive"), status_code=302)
 
     return {"status": "ok"}

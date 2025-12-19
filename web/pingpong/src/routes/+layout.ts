@@ -11,6 +11,7 @@ const PRIVACY_POLICY = '/privacy-policy';
 const EDU = '/eduaccess';
 const LOGOUT = '/logout';
 const LTI_REGISTER = '/lti/register';
+const LTI_INACTIVE = '/lti/inactive';
 
 /**
  * Load the current user and redirect if they are not logged in.
@@ -54,6 +55,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   const isSharedAssistantPage = sharedAssistantPattern.test(url.pathname);
   const isSharedThreadPage = sharedThreadPattern.test(url.pathname);
   const isSharedLTIInstancePage = url.pathname === LTI_REGISTER;
+  const isLTIInactivePage = url.pathname === LTI_INACTIVE;
 
   if (url.pathname === LOGIN) {
     // If the user is logged in, go to the forward page.
@@ -62,7 +64,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
       redirect(302, destination);
     }
   } else {
-    if (isSharedLTIInstancePage) {
+    if (isSharedLTIInstancePage || isLTIInactivePage) {
       doNotShowSidebar = false;
       isPublicPage = true;
     } else if (new Set([ABOUT, PRIVACY_POLICY, EDU, HOME]).has(url.pathname) && !authed) {
@@ -275,6 +277,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
     isSharedAssistantPage,
     isSharedThreadPage,
     isSharedLTIInstancePage,
+    isLTIInactivePage,
     statusComponents,
     hasNonComponentIncidents
   };

@@ -352,6 +352,15 @@ export type Institution = {
   updated: string | null;
 };
 
+export type LTIPublicInstitution = {
+  id: number;
+  name: string;
+};
+
+export type LTIPublicInstitutions = {
+  institutions: LTIPublicInstitution[];
+};
+
 export type InstitutionAdmin = {
   id: number;
   email: string | null;
@@ -434,13 +443,36 @@ export const getExternalLoginProvidersForLTI = async (f: Fetcher) => {
   return await GET<never, ExternalLoginProviders>(f, 'lti/sso/providers');
 };
 
+export type LTIPublicSSOProvider = {
+  id: number;
+  name: string;
+  display_name: string | null;
+};
+
+export type LTIPublicSSOProviders = {
+  providers: LTIPublicSSOProvider[];
+};
+
+export const getPublicExternalLoginProvidersForLTI = async (f: Fetcher) => {
+  return await GET<never, LTIPublicSSOProviders>(f, 'lti/public/sso/providers');
+};
+
+export const LTI_SSO_FIELDS = [
+  'canvas.sisIntegrationId',
+  'canvas.sisSourceId',
+  'person.sourcedId'
+] as const;
+export type LTISSOField = (typeof LTI_SSO_FIELDS)[number];
+
 export type LTIRegisterRequest = {
   name: string;
   admin_name: string;
   admin_email: string;
   provider_id: number;
+  sso_field: LTISSOField | null;
   openid_configuration: string;
   registration_token: string;
+  institution_ids?: number[];
 };
 
 export const registerLTIInstance = async (f: Fetcher, data: LTIRegisterRequest) => {
@@ -712,6 +744,10 @@ export const getInstitutions = async (f: Fetcher, role?: string) => {
     q.role = role;
   }
   return await GET<GetInstitutionsRequest, Institutions>(f, 'institutions', q);
+};
+
+export const getPublicInstitutionsForLTI = async (f: Fetcher) => {
+  return await GET<never, LTIPublicInstitutions>(f, 'lti/public/institutions');
 };
 
 /**
