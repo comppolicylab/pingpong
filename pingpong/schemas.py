@@ -1036,6 +1036,11 @@ class LMSStatus(StrEnum):
     ERROR = auto()
 
 
+class LTIStatus(StrEnum):
+    LINKED = auto()
+    ERROR = auto()
+
+
 class LMSInstance(BaseModel):
     tenant: str
     tenant_friendly_name: str

@@ -1062,6 +1062,9 @@ class User(Base):
     )
     # Maps to classes in which the user has connected their LMS account
     lms_syncs: Mapped[List["Class"]] = relationship("Class", back_populates="lms_user")
+    lti_syncs: Mapped[List["LTIClass"]] = relationship(
+        "LTIClass", back_populates="setup_user"
+    )
     anonymous_link_id = Column(Integer, ForeignKey("anonymous_links.id"), nullable=True)
     anonymous_link = relationship("AnonymousLink", back_populates="user", uselist=False)
     anonymous_sessions = relationship("AnonymousSession", back_populates="user")
@@ -2635,6 +2638,42 @@ class LMSClass(Base):
             await session.execute(stmt_)
 
 
+class LTIClass(Base):
+    __tablename__ = "lti_classes"
+    __table_args__ = (
+        UniqueConstraint(
+            "registration_id",
+            "course_id",
+            name="_lti_registration_course_id_uc",
+        ),
+        Index("idx_lti_classes_registration_id", "registration_id"),
+        Index("idx_lti_classes_class_id", "class_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    registration_id = Column(
+        Integer, ForeignKey("lti_registrations.id", ondelete="CASCADE"), nullable=False
+    )
+
+    lti_status = Column(SQLEnum(schemas.LTIStatus), nullable=False)
+    last_synced = Column(DateTime(timezone=True), nullable=True)
+    last_sync_error = Column(String, nullable=True)
+
+    setup_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    lti_platform = Column(SQLEnum(schemas.LMSPlatform), nullable=False)
+    course_id = Column(String, nullable=False)
+    course_name = Column(String, nullable=True)
+    course_code = Column(String, nullable=True)
+    course_term = Column(String, nullable=True)
+    class_id = Column(
+        Integer, ForeignKey("classes.id", ondelete="SET NULL"), nullable=True
+    )
+
+    setup_user = relationship("User", foreign_keys=[setup_user_id])
+    registration = relationship("LTIRegistration", back_populates="lti_classes")
+    class_ = relationship("Class", back_populates="lti_classes")
+
+
 class APIKey(Base):
     __tablename__ = "api_keys"
     __table_args__ = (
@@ -2737,6 +2776,7 @@ class Class(Base):
     lms_type = Column(SQLEnum(schemas.LMSType), nullable=True)
     lms_class_id = Column(Integer, ForeignKey("lms_classes.id"), nullable=True)
     lms_class = relationship("LMSClass", back_populates="classes")
+    lti_classes = relationship("LTIClass", back_populates="class_")
     lms_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     lms_user = relationship("User", back_populates="lms_syncs")
     lms_course_id = Column(Integer, nullable=True)
@@ -5361,6 +5401,7 @@ class LTIRegistration(Base):
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     review_by = relationship("User", uselist=False, lazy="selectin")
+    lti_classes = relationship("LTIClass", back_populates="registration")
 
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(
