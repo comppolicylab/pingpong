@@ -758,9 +758,7 @@ async def lti_launch(
         else:
             print("Class found:", class_.id)
             new_lti_class = None
-            if is_instructor and (
-                class_.lms_user_id == user.id or str(class_.lms_course_id) == course_id
-            ):
+            if is_instructor:
                 course_details = claims.get(
                     "https://purl.imsglobal.org/spec/lti/claim/context", {}
                 )
