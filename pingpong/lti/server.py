@@ -718,7 +718,6 @@ async def lti_launch(
             return RedirectResponse(url=config.url("/lti/no-group"), status_code=302)
     else:
         if isinstance(class_, LTIClass):
-            print("LTIClass found:", class_.id)
             if user.id == class_.setup_user_id:
                 return RedirectResponse(
                     url=config.url(f"/group/{class_.class_id}"), status_code=302
@@ -756,7 +755,6 @@ async def lti_launch(
                     url=config.url(f"/group/{class_.class_id}"), status_code=302
                 )
         else:
-            print("Class found:", class_.id)
             new_lti_class = None
             if is_instructor:
                 course_details = claims.get(
