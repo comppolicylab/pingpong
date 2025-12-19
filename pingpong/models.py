@@ -2673,6 +2673,18 @@ class LTIClass(Base):
     registration = relationship("LTIRegistration", back_populates="lti_classes")
     class_ = relationship("Class", back_populates="lti_classes")
 
+    @classmethod
+    async def get_by_registration_and_course_id(
+        cls, session: AsyncSession, registration_id: int, course_id: str
+    ) -> "LTIClass | None":
+        stmt = select(LTIClass).where(
+            and_(
+                LTIClass.registration_id == registration_id,
+                LTIClass.course_id == course_id,
+            )
+        )
+        return await session.scalar(stmt)
+
 
 class APIKey(Base):
     __tablename__ = "api_keys"
@@ -3391,6 +3403,15 @@ class Class(Base):
         self.institution = None
         stmt = delete(Class).where(Class.id == self.id)
         await session.execute(stmt)
+
+    @classmethod
+    async def get_all_by_lms_course_id(
+        cls, session: AsyncSession, lms_course_id: int
+    ) -> list["Class"]:
+        """Get all classes by LMS course ID."""
+        stmt = select(Class).where(Class.lms_class_id == lms_course_id)
+        result = await session.execute(stmt)
+        return [row.Class for row in result]
 
 
 class CodeInterpreterCall(Base):

@@ -7,11 +7,12 @@ from typing import Any, cast
 from urllib.parse import urlencode
 import aiohttp
 import jwt
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Request
 from fastapi.responses import RedirectResponse
 
 from pingpong.config import config
 from pingpong.invite import send_lti_registration_submitted
+from pingpong.lti.lti_course import find_class_by_course_id
 from pingpong.lti.schemas import (
     LTIRegisterRequest,
     LTIPublicInstitutions,
@@ -20,15 +21,23 @@ from pingpong.lti.schemas import (
 from pingpong.models import (
     ExternalLoginProvider,
     Institution,
+    LTIClass,
     LTIRegistration,
     LTIOIDCSession,
+    User,
 )
 from pingpong.server import get_now_fn
+from pingpong.users import AddNewUsersManual, AddUserException
 from .key_manager import LTIKeyManager
 from pingpong.schemas import (
+    ClassUserRoles,
+    CreateUserClassRole,
+    CreateUserClassRoles,
     ExternalLoginProviders,
     LMSPlatform,
     LTIRegistrationReviewStatus,
+    LTIStatus,
+    UserState,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,6 +73,13 @@ REQUIRED_SCOPES = [
 ]
 
 LTI_DEPLOYMENT_ID_CLAIM = "https://purl.imsglobal.org/spec/lti/claim/deployment_id"
+
+LTI_CUSTOM_PARAM_DEFAULT_VALUES = {
+    "sso_provider_id": ["0"],
+    "sso_value": [""] + [f"${field}" for field in SSO_FIELD_FULL_NAME.values()],
+    "canvas_course_id": ["$Canvas.course.id"],
+    "canvas_term_name": ["$Canvas.term.name"],
+}
 
 
 async def _fetch_jwks(jwks_url: str) -> dict[str, Any]:
@@ -532,8 +548,27 @@ async def lti_login(request: Request):
     return RedirectResponse(url=redirect_url, status_code=302)
 
 
+def _is_instructor(roles: list[str]) -> bool:
+    """Check if the user has an instructor role."""
+    instructor_roles = {
+        "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor",
+    }
+    return any(role in instructor_roles for role in roles)
+
+
+def _is_student(roles: list[str]) -> bool:
+    """Check if the user has a student role."""
+    student_roles = {
+        "http://purl.imsglobal.org/vocab/lis/v2/membership#Learner",
+    }
+    return any(role in student_roles for role in roles)
+
+
 @lti_router.post("/launch")
-async def lti_launch(request: Request):
+async def lti_launch(
+    request: Request,
+    tasks: BackgroundTasks,
+):
     form = await request.form()
 
     state = form.get("state")
@@ -601,8 +636,219 @@ async def lti_launch(request: Request):
     )
     if consumed is None:
         raise HTTPException(status_code=400, detail="Invalid or expired state/nonce")
+    launch_custom_params = claims.get(
+        "https://purl.imsglobal.org/spec/lti/claim/custom", {}
+    )
 
     if registration.review_status != LTIRegistrationReviewStatus.APPROVED:
         return RedirectResponse(url=config.url("/lti/inactive"), status_code=302)
 
-    return {"status": "ok"}
+    course_id = launch_custom_params.get("canvas_course_id")
+    if (
+        not isinstance(course_id, str)
+        or not course_id
+        or course_id in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_course_id"]
+    ):
+        raise HTTPException(status_code=400, detail="Missing or invalid course_id")
+
+    class_ = await find_class_by_course_id(
+        request.state.db,
+        registration.id,
+        course_id,
+    )
+
+    user_roles = claims.get("https://purl.imsglobal.org/spec/lti/claim/roles", [])
+    is_instructor = _is_instructor(user_roles)
+    is_student = _is_student(user_roles)
+
+    if not is_instructor and not is_student:
+        logger.warning(f"LTI launch with no recognized roles: roles={user_roles}")
+        return RedirectResponse(url=config.url("/lti/no-role"), status_code=302)
+
+    user_email = claims.get("email")
+    if user_email is None or not isinstance(user_email, str):
+        raise HTTPException(status_code=400, detail="Invalid email in id_token")
+
+    sso_provider_id_str = launch_custom_params.get("sso_provider_id", "0")
+    user: User | None = None
+    sso_provider: ExternalLoginProvider | None = None
+    sso_value: str | None = None
+
+    if int(sso_provider_id_str) != 0:
+        sso_provider = await ExternalLoginProvider.get_by_id(
+            request.state.db, int(sso_provider_id_str)
+        )
+        if sso_provider is None:
+            raise HTTPException(status_code=400, detail="Unknown SSO provider id")
+        sso_value = launch_custom_params.get("sso_value", None)
+        if not sso_value or sso_value in LTI_CUSTOM_PARAM_DEFAULT_VALUES["sso_value"]:
+            sso_value = None
+        user = await User.get_by_email_sso(
+            request.state.db,
+            user_email,
+            provider=sso_provider.name,
+            identifier=sso_value,
+        )
+        user.email = user_email
+    else:
+        user = await User.get_by_email(request.state.db, user_email)
+
+    if not user:
+        user = User(
+            email=user_email,
+        )
+
+    user_first_name = claims.get("given_name") or ""
+    if user_first_name:
+        user.first_name = user_first_name
+    user_last_name = claims.get("family_name") or ""
+    if user_last_name:
+        user.last_name = user_last_name
+
+    user.state = UserState.VERIFIED
+
+    request.state.db.add(user)
+    await request.state.db.flush()
+    await request.state.db.refresh(user)
+
+    if class_ is None:
+        if is_instructor:
+            return RedirectResponse(url=config.url("/lti/setup"), status_code=302)
+        else:
+            return RedirectResponse(url=config.url("/lti/no-group"), status_code=302)
+    else:
+        if isinstance(class_, LTIClass):
+            print("LTIClass found:", class_.id)
+            if user.id == class_.setup_user_id:
+                return RedirectResponse(
+                    url=config.url(f"/group/{class_.class_id}"), status_code=302
+                )
+            else:
+                new_ucr = CreateUserClassRoles(
+                    roles=[
+                        CreateUserClassRole(
+                            email=user.email,
+                            sso_id=sso_value,
+                            roles=ClassUserRoles(
+                                instructor=is_instructor,
+                                student=is_student,
+                                admin=False,
+                            ),
+                        )
+                    ],
+                    silent=True,
+                    lms_tenant=None,
+                    lms_type=registration.lms_platform,
+                    lti_class_id=class_.id,
+                    sso_tenant=sso_provider.name if sso_provider else None,
+                )
+                try:
+                    await AddNewUsersManual(
+                        class_.class_id, new_ucr, request, tasks
+                    ).add_new_users()
+                except AddUserException as e:
+                    logger.exception("lti_launch: AddUserException occurred")
+                    raise HTTPException(
+                        status_code=e.code or 500,
+                        detail="Failed to add user to class",
+                    )
+                return RedirectResponse(
+                    url=config.url(f"/group/{class_.class_id}"), status_code=302
+                )
+        else:
+            print("Class found:", class_.id)
+            new_lti_class = None
+            if is_instructor and (
+                class_.lms_user_id == user.id or str(class_.lms_course_id) == course_id
+            ):
+                course_details = claims.get(
+                    "https://purl.imsglobal.org/spec/lti/claim/context", {}
+                )
+                course_code = course_details.get("label")
+                course_name = course_details.get("title")
+                course_term = launch_custom_params.get("canvas_term_name")
+                if (
+                    not course_term
+                    or course_term
+                    in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
+                ):
+                    course_term = None
+                new_lti_class = LTIClass(
+                    registration_id=registration.id,
+                    lti_status=LTIStatus.LINKED,
+                    lti_platform=registration.lms_platform,
+                    course_id=course_id,
+                    course_code=course_code,
+                    course_name=course_name,
+                    course_term=course_term,
+                    class_id=class_.id,
+                    setup_user_id=user.id,
+                )
+                request.state.db.add(new_lti_class)
+                await request.state.db.flush()
+                await request.state.db.refresh(new_lti_class)
+
+            if class_.lms_user_id == user.id:
+                return RedirectResponse(
+                    url=config.url(f"/group/{class_.id}"), status_code=302
+                )
+            elif str(class_.lms_course_id) == course_id:
+                new_ucr = CreateUserClassRoles(
+                    roles=[
+                        CreateUserClassRole(
+                            email=user.email,
+                            sso_id=sso_value,
+                            roles=ClassUserRoles(
+                                instructor=is_instructor,
+                                student=is_student,
+                                admin=False,
+                            ),
+                        )
+                    ],
+                    silent=True,
+                    lms_tenant=class_.lms_tenant if not new_lti_class else None,
+                    lms_type=class_.lms_type
+                    if not new_lti_class
+                    else new_lti_class.lti_platform,
+                    lti_class_id=new_lti_class.id if new_lti_class else None,
+                    sso_tenant=sso_provider.name if sso_provider else None,
+                )
+                try:
+                    await AddNewUsersManual(
+                        class_.id, new_ucr, request, tasks
+                    ).add_new_users()
+                except AddUserException as e:
+                    logger.exception("lti_launch: AddUserException occurred")
+                    raise HTTPException(
+                        status_code=e.code or 500,
+                        detail="Failed to add user to class",
+                    )
+            else:
+                new_ucr = CreateUserClassRoles(
+                    roles=[
+                        CreateUserClassRole(
+                            email=user.email,
+                            sso_id=sso_value,
+                            roles=ClassUserRoles(
+                                instructor=is_instructor,
+                                student=is_student,
+                                admin=False,
+                            ),
+                        )
+                    ],
+                    silent=True,
+                    sso_tenant=sso_provider.name if sso_provider else None,
+                )
+                try:
+                    await AddNewUsersManual(
+                        class_.id, new_ucr, request, tasks
+                    ).add_new_users()
+                except AddUserException as e:
+                    logger.exception("lti_launch: AddUserException occurred")
+                    raise HTTPException(
+                        status_code=e.code or 500,
+                        detail="Failed to add user to class",
+                    )
+            return RedirectResponse(
+                url=config.url(f"/group/{class_.id}"), status_code=302
+            )

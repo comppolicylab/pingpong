@@ -1063,6 +1063,7 @@ class CreateUserClassRoles(BaseModel):
     silent: bool = False
     lms_tenant: str | None = None
     lms_type: LMSType | None = None
+    lti_class_id: int | None = None
     sso_tenant: str | None = None
 
 
