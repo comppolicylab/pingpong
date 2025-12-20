@@ -13,6 +13,7 @@ const EDU = '/eduaccess';
 const LOGOUT = '/logout';
 const LTI_REGISTER = '/lti/register';
 const LTI_INACTIVE = '/lti/inactive';
+const LTI_LAUNCH = '/lti/launch';
 
 /**
  * Load the current user and redirect if they are not logged in.
@@ -81,11 +82,14 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
       // If the user is not logged in and the URL has a share token,
       // allow access to the shared assistant or thread page.
       // doNotShowSidebar = true;
-    } else if (!authed && url.pathname !== LOGOUT) {
+    } else if (!authed && url.pathname !== LOGOUT && url.pathname !== LTI_LAUNCH) {
       const destination = encodeURIComponent(`${url.pathname}${url.search}`);
       redirect(302, `${LOGIN}?forward=${destination}`);
     } else {
-      if (needsAgreements && (url.pathname === LOGOUT || url.pathname === TERMS)) {
+      if (
+        (needsAgreements && (url.pathname === LOGOUT || url.pathname === TERMS)) ||
+        url.pathname === LTI_LAUNCH
+      ) {
         // If the user is logged in and tries to access the logout or terms page, don't show the sidebar.
         doNotShowSidebar = true;
       } else if (needsAgreements && url.pathname !== TERMS && url.pathname !== PRIVACY_POLICY) {
