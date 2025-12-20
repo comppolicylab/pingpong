@@ -1,5 +1,6 @@
 import { browser } from '$app/environment';
 import { TextLineStream, JSONStream } from '$lib/streams';
+import { getAnonymousSessionToken, getAnonymousShareToken } from '$lib/stores/anonymous';
 
 /**
  * HTTP methods.
@@ -161,47 +162,6 @@ export const fullPath = (path: string) => {
 };
 
 /**
- * Session token for anonymous threads.
- */
-let anonymousSessionToken: string | null = null;
-
-export const setAnonymousSessionToken = (token: string | null) => {
-  anonymousSessionToken = token;
-};
-
-export const resetAnonymousSessionToken = () => {
-  anonymousSessionToken = null;
-};
-
-export const hasAnonymousSessionToken = () => {
-  return anonymousSessionToken !== null;
-};
-
-/**
- * Share token for anonymous assistant access.
- */
-let anonymousShareToken: string | null = null;
-
-export const setAnonymousShareToken = (token: string | null) => {
-  anonymousShareToken = token;
-};
-
-export const resetAnonymousShareToken = () => {
-  anonymousShareToken = null;
-};
-
-export const hasAnonymousShareToken = () => {
-  return anonymousShareToken !== null;
-};
-
-/**
- * Get the current anonymous share token.
- */
-export const getAnonymousShareToken = () => {
-  return anonymousShareToken;
-};
-
-/**
  * Common fetch method.
  */
 const _fetch = async (
@@ -212,6 +172,7 @@ const _fetch = async (
   body?: string | FormData
 ) => {
   const full = fullPath(path);
+  const anonymousSessionToken = getAnonymousSessionToken();
   if (anonymousSessionToken) {
     // If we have a session token for anonymous threads, add it to the headers.
     headers = {
@@ -238,6 +199,7 @@ const _fetchJSON = async <R extends BaseData>(
   headers?: Record<string, string>,
   body?: string | FormData
 ): Promise<(R | Error | ValidationError) & BaseResponse> => {
+  const anonymousSessionToken = getAnonymousSessionToken();
   if (anonymousSessionToken) {
     // If we have a session token for anonymous threads, add it to the headers.
     headers = {
@@ -271,11 +233,16 @@ const _qmethod = async <T extends BaseData, R extends BaseData>(
   // Specifically, we want to remove "undefined" values.
   const filtered = data && (JSON.parse(JSON.stringify(data)) as Record<string, string>);
   const params = new URLSearchParams(filtered);
+  const anonymousShareToken = getAnonymousShareToken();
+  let headers: Record<string, string> = {};
   if (anonymousShareToken) {
-    params.set('share_token', anonymousShareToken);
+    headers = {
+      ...headers,
+      'X-Anonymous-Link-Share': anonymousShareToken
+    };
   }
   path = `${path}?${params}`;
-  return await _fetchJSON<R>(f, method, path);
+  return await _fetchJSON<R>(f, method, path, headers);
 };
 
 /**
@@ -288,11 +255,14 @@ const _bmethod = async <T extends BaseData, R extends BaseData>(
   data?: T
 ) => {
   const body = JSON.stringify(data);
+  let headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const anonymousShareToken = getAnonymousShareToken();
   if (anonymousShareToken) {
-    // Add as query parameter if we have a share token.
-    path = `${path}?share_token=${encodeURIComponent(anonymousShareToken)}`;
+    headers = {
+      ...headers,
+      'X-Anonymous-Link-Share': anonymousShareToken
+    };
   }
-  const headers = { 'Content-Type': 'application/json' };
   return await _fetchJSON<R>(f, method, path, headers, body);
 };
 
@@ -1782,17 +1752,18 @@ const _doUpload = (
     }
   };
 
-  if (anonymousShareToken) {
-    url += `?share_token=${anonymousShareToken}`;
-  }
-
   // Don't use the normal fetch because this only works with xhr, and we want
   // to be able to track progress.
   const promise = new Promise<FileUploadResult>((resolve, reject) => {
     xhr.open('POST', url, true);
     xhr.setRequestHeader('Accept', 'application/json');
+    const anonymousSessionToken = getAnonymousSessionToken();
     if (anonymousSessionToken) {
       xhr.setRequestHeader('X-Anonymous-Thread-Session', anonymousSessionToken);
+    }
+    const anonymousShareToken = getAnonymousShareToken();
+    if (anonymousShareToken) {
+      xhr.setRequestHeader('X-Anonymous-Link-Share', anonymousShareToken);
     }
     xhr.upload.onprogress = onProgress;
     xhr.onreadystatechange = () => {
@@ -3436,9 +3407,11 @@ export const createAudioWebsocket = (classId: number, threadId: number): WebSock
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const host = window.location.host;
   const params = new URLSearchParams();
+  const anonymousSessionToken = getAnonymousSessionToken();
   if (anonymousSessionToken) {
     params.set('session_token', anonymousSessionToken);
   }
+  const anonymousShareToken = getAnonymousShareToken();
   if (anonymousShareToken) {
     params.set('share_token', anonymousShareToken);
   }
