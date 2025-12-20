@@ -38,6 +38,7 @@
   import PingPongLogo from '$lib/components/PingPongLogo.svelte';
   import dayjs from '$lib/time';
   import * as api from '$lib/api';
+  import { anonymousShareToken } from '$lib/stores/anonymous';
   import type { LayoutData } from '../../routes/$types';
   import { appMenuOpen } from '$lib/stores/general';
   import { afterNavigate, goto } from '$app/navigation';
@@ -183,7 +184,7 @@
           ? isSharedAssistantPage
             ? `/login?forward=${pathName}%3Fshare_token=${shareToken}`
             : isSharedThreadPage
-              ? `/group/${currentClassId}/shared/assistant/${currentAssistantId}?share_token=${api.getAnonymousShareToken()}`
+              ? `/group/${currentClassId}/shared/assistant/${currentAssistantId}?share_token=${$anonymousShareToken}`
               : '/login'
           : onNewChatPage
             ? undefined

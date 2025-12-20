@@ -2,6 +2,11 @@
   import { navigating, page } from '$app/stores';
   import { beforeNavigate, goto, invalidateAll, onNavigate } from '$app/navigation';
   import * as api from '$lib/api';
+  import {
+    getAnonymousShareToken,
+    hasAnonymousShareToken,
+    resetAnonymousSessionToken
+  } from '$lib/stores/anonymous';
   import { happyToast, sadToast } from '$lib/toast';
   import { errorMessage } from '$lib/errors';
   import { computeLatestIncidentTimestamps, filterLatestIncidentUpdates } from '$lib/statusUpdates';
@@ -427,10 +432,10 @@
 
   const startNewChat = async () => {
     if (isAnonymousSession) {
-      if (api.hasAnonymousShareToken()) {
-        api.resetAnonymousSessionToken();
+      if (hasAnonymousShareToken()) {
+        resetAnonymousSessionToken();
         await goto(
-          `/group/${classId}/shared/assistant/${$assistantId}?share_token=${api.getAnonymousShareToken()}`
+          `/group/${classId}/shared/assistant/${$assistantId}?share_token=${getAnonymousShareToken()}`
         );
       } else {
         sadToast('Cannot start a new chat in this anonymous session.');
@@ -585,10 +590,10 @@
       happyToast('Thread deleted.');
       confirmNavigation = false;
       if (isAnonymousSession) {
-        if (api.hasAnonymousShareToken()) {
-          api.resetAnonymousSessionToken();
+        if (hasAnonymousShareToken()) {
+          resetAnonymousSessionToken();
           await goto(
-            `/group/${classId}/shared/assistant/${$assistantId}?share_token=${api.getAnonymousShareToken()}`
+            `/group/${classId}/shared/assistant/${$assistantId}?share_token=${getAnonymousShareToken()}`
           );
         } else {
           await goto(`/`, { invalidateAll: true });
