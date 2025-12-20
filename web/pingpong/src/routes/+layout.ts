@@ -1,5 +1,6 @@
 import { redirect, error } from '@sveltejs/kit';
 import * as api from '$lib/api';
+import { hasAnonymousSessionToken, setAnonymousShareToken } from '$lib/stores/anonymous';
 import type { LayoutLoad } from './$types';
 
 const LOGIN = '/login';
@@ -21,7 +22,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   // If so, we will allow access to the page without authentication.
   const t = url.searchParams.get('share_token');
   if (t) {
-    api.setAnonymousShareToken(t);
+    setAnonymousShareToken(t);
   }
 
   // Fetch the current user
@@ -75,7 +76,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
       }
     } else if (
       !authed &&
-      ((t && isSharedAssistantPage) || (api.hasAnonymousSessionToken() && isSharedThreadPage))
+      ((t && isSharedAssistantPage) || (hasAnonymousSessionToken() && isSharedThreadPage))
     ) {
       // If the user is not logged in and the URL has a share token,
       // allow access to the shared assistant or thread page.

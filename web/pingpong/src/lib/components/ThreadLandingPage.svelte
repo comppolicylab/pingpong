@@ -27,6 +27,7 @@
   } from 'flowbite-svelte-icons';
   import { sadToast } from '$lib/toast';
   import * as api from '$lib/api';
+  import { hasAnonymousSessionToken, setAnonymousSessionToken } from '$lib/stores/anonymous';
   import { errorMessage } from '$lib/errors';
   import { computeLatestIncidentTimestamps, filterLatestIncidentUpdates } from '$lib/statusUpdates';
   import type { Assistant, FileUploadPurpose } from '$lib/api';
@@ -197,9 +198,9 @@
         })
       );
       data.threads = [newThreadOpts.thread as api.Thread, ...data.threads];
-      api.setAnonymousSessionToken(newThreadOpts.session_token || null);
+      setAnonymousSessionToken(newThreadOpts.session_token || null);
       $loading = false;
-      if (api.hasAnonymousSessionToken()) {
+      if (hasAnonymousSessionToken()) {
         await goto(`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}`);
       } else {
         await goto(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`);
@@ -242,9 +243,9 @@
         })
       );
       data.threads = [newThreadOpts.thread as api.Thread, ...data.threads];
-      api.setAnonymousSessionToken(newThreadOpts.session_token || null);
+      setAnonymousSessionToken(newThreadOpts.session_token || null);
       $loading = false;
-      if (api.hasAnonymousSessionToken()) {
+      if (hasAnonymousSessionToken()) {
         await goto(`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}`);
       } else {
         await goto(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`);
@@ -299,10 +300,10 @@
         })
       );
       data.threads = [newThreadOpts.thread as api.Thread, ...data.threads];
-      api.setAnonymousSessionToken(newThreadOpts.session_token || null);
+      setAnonymousSessionToken(newThreadOpts.session_token || null);
       $loading = false;
       form.callback({ success: true, errorMessage: null, message_sent: true });
-      if (api.hasAnonymousSessionToken()) {
+      if (hasAnonymousSessionToken()) {
         await goto(`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}`);
       } else {
         await goto(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`);
