@@ -716,14 +716,22 @@ async def lti_launch(
 
     if class_ is None:
         if is_instructor:
-            return RedirectResponse(url=config.url(f"/lti/setup?lti_session={user_token}"), status_code=302)
+            return RedirectResponse(
+                url=config.url(f"/lti/setup?lti_session={user_token}"), status_code=302
+            )
         else:
-            return RedirectResponse(url=config.url(f"/lti/no-group?lti_session={user_token}"), status_code=302)
+            return RedirectResponse(
+                url=config.url(f"/lti/no-group?lti_session={user_token}"),
+                status_code=302,
+            )
     else:
         if isinstance(class_, LTIClass):
             if user.id == class_.setup_user_id:
                 return RedirectResponse(
-                    url=config.url(f"/group/{class_.class_id}?lti_session={user_token}"), status_code=302
+                    url=config.url(
+                        f"/group/{class_.class_id}?lti_session={user_token}"
+                    ),
+                    status_code=302,
                 )
             else:
                 new_ucr = CreateUserClassRoles(
@@ -789,7 +797,8 @@ async def lti_launch(
 
             if class_.lms_user_id == user.id:
                 return RedirectResponse(
-                    url=config.url(f"/group/{class_.id}?lti_session={user_token}"), status_code=302
+                    url=config.url(f"/group/{class_.id}?lti_session={user_token}"),
+                    status_code=302,
                 )
             elif str(class_.lms_course_id) == course_id:
                 new_ucr = CreateUserClassRoles(
@@ -849,5 +858,6 @@ async def lti_launch(
                         detail="Failed to add user to class",
                     )
             return RedirectResponse(
-                url=config.url(f"/group/{class_.id}?lti_session={user_token}"), status_code=302
+                url=config.url(f"/group/{class_.id}?lti_session={user_token}"),
+                status_code=302,
             )
