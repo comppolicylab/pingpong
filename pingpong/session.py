@@ -28,7 +28,9 @@ async def populate_anonymous_tokens(request):
     )
 
     if isRequest:
-        request.state.anonymous_share_token = request.query_params.get("share_token")
+        request.state.anonymous_share_token = request.headers.get(
+            "X-Anonymous-Share-Token"
+        )
         request.state.anonymous_session_token = request.headers.get(
             "X-Anonymous-Thread-Session"
         )

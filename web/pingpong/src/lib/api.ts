@@ -234,11 +234,15 @@ const _qmethod = async <T extends BaseData, R extends BaseData>(
   const filtered = data && (JSON.parse(JSON.stringify(data)) as Record<string, string>);
   const params = new URLSearchParams(filtered);
   const shareToken = getAnonymousShareToken();
+  let headers: Record<string, string> = {};
   if (shareToken) {
-    params.set('share_token', shareToken);
+    headers = {
+      ...headers,
+      'X-Anonymous-Share-Token': shareToken
+    };
   }
   path = `${path}?${params}`;
-  return await _fetchJSON<R>(f, method, path);
+  return await _fetchJSON<R>(f, method, path, headers);
 };
 
 /**
@@ -251,12 +255,14 @@ const _bmethod = async <T extends BaseData, R extends BaseData>(
   data?: T
 ) => {
   const body = JSON.stringify(data);
+  let headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const shareToken = getAnonymousShareToken();
   if (shareToken) {
-    // Add as query parameter if we have a share token.
-    path = `${path}?share_token=${encodeURIComponent(shareToken)}`;
+    headers = {
+      ...headers,
+      'X-Anonymous-Share-Token': shareToken
+    };
   }
-  const headers = { 'Content-Type': 'application/json' };
   return await _fetchJSON<R>(f, method, path, headers, body);
 };
 
@@ -1746,11 +1752,6 @@ const _doUpload = (
     }
   };
 
-  const shareToken = getAnonymousShareToken();
-  if (shareToken) {
-    url += `?share_token=${shareToken}`;
-  }
-
   // Don't use the normal fetch because this only works with xhr, and we want
   // to be able to track progress.
   const promise = new Promise<FileUploadResult>((resolve, reject) => {
@@ -1759,6 +1760,10 @@ const _doUpload = (
     const sessionToken = getAnonymousSessionToken();
     if (sessionToken) {
       xhr.setRequestHeader('X-Anonymous-Thread-Session', sessionToken);
+    }
+    const shareToken = getAnonymousShareToken();
+    if (shareToken) {
+      xhr.setRequestHeader('X-Anonymous-Share-Token', shareToken);
     }
     xhr.upload.onprogress = onProgress;
     xhr.onreadystatechange = () => {
