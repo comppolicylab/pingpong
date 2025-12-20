@@ -10,6 +10,7 @@ import jwt
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Request
 from fastapi.responses import RedirectResponse
 
+from pingpong.auth import encode_session_token
 from pingpong.config import config
 from pingpong.invite import send_lti_registration_submitted
 from pingpong.lti.lti_course import find_class_by_course_id
@@ -711,16 +712,18 @@ async def lti_launch(
     await request.state.db.flush()
     await request.state.db.refresh(user)
 
+    user_token = encode_session_token(user.id, nowfn=get_now_fn(request))
+
     if class_ is None:
         if is_instructor:
-            return RedirectResponse(url=config.url("/lti/setup"), status_code=302)
+            return RedirectResponse(url=config.url(f"/lti/setup?lti_session={user_token}"), status_code=302)
         else:
-            return RedirectResponse(url=config.url("/lti/no-group"), status_code=302)
+            return RedirectResponse(url=config.url(f"/lti/no-group?lti_session={user_token}"), status_code=302)
     else:
         if isinstance(class_, LTIClass):
             if user.id == class_.setup_user_id:
                 return RedirectResponse(
-                    url=config.url(f"/group/{class_.class_id}"), status_code=302
+                    url=config.url(f"/group/{class_.class_id}?lti_session={user_token}"), status_code=302
                 )
             else:
                 new_ucr = CreateUserClassRoles(
@@ -786,7 +789,7 @@ async def lti_launch(
 
             if class_.lms_user_id == user.id:
                 return RedirectResponse(
-                    url=config.url(f"/group/{class_.id}"), status_code=302
+                    url=config.url(f"/group/{class_.id}?lti_session={user_token}"), status_code=302
                 )
             elif str(class_.lms_course_id) == course_id:
                 new_ucr = CreateUserClassRoles(
@@ -846,5 +849,5 @@ async def lti_launch(
                         detail="Failed to add user to class",
                     )
             return RedirectResponse(
-                url=config.url(f"/group/{class_.id}"), status_code=302
+                url=config.url(f"/group/{class_.id}?lti_session={user_token}"), status_code=302
             )

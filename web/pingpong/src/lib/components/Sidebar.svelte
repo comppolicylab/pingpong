@@ -58,8 +58,10 @@
   };
 
   $: sharedPage = data.isSharedAssistantPage || data.isSharedThreadPage;
-  $: sharedLTIInstancePage = data.isSharedLTIInstancePage;
-  $: isLTIInactivePage = data.isLTIInactivePage;
+  $: showCollapsedSidebarOnly = data.showCollapsedSidebarOnly;
+  $: openAllLinksInNewTab = data.openAllLinksInNewTab;
+  $: logoIsClickable = data.logoIsClickable;
+  $: showSidebarItems = data.showSidebarItems;
   $: isSharedAssistantPage = data.isSharedAssistantPage;
   $: isSharedThreadPage = data.isSharedThreadPage;
   $: shareToken = data.shareToken;
@@ -156,13 +158,13 @@
 </script>
 
 <Sidebar
-  asideClass={`absolute top-0 left-0 z-0 w-[90%] px-2 h-full ${!inIframe || isLTIInactivePage ? 'lg:static lg:h-full lg:w-full' : ''}`}
+  asideClass={`absolute top-0 left-0 z-0 w-[90%] px-2 h-full ${!inIframe || !showCollapsedSidebarOnly ? 'lg:static lg:h-full lg:w-full' : ''}`}
   activeUrl={$page.url.pathname}
 >
   <SidebarWrapper class="bg-transparent h-full flex flex-col">
     <SidebarGroup class="mb-6">
       <div class="flex items-center" data-sveltekit-preload-data="off">
-        {#if !(inIframe && sharedPage) && !sharedLTIInstancePage}
+        {#if !(inIframe && sharedPage) || !showCollapsedSidebarOnly}
           <button
             class="menu-button bg-transparent border-none mr-3 mt-1 lg:hidden"
             on:click={() => togglePanel()}
@@ -175,18 +177,18 @@
           </button>
         {/if}
         <NavBrand
-          href={(inIframe && sharedPage) || sharedLTIInstancePage ? undefined : '/'}
+          href={(inIframe && sharedPage) || !logoIsClickable ? undefined : '/'}
           class=""
-          target={isLTIInactivePage ? '_blank' : undefined}
+          target={openAllLinksInNewTab ? '_blank' : undefined}
         >
           <PingPongLogo size={10} extraClass="fill-amber-600" />
         </NavBrand>
       </div>
     </SidebarGroup>
-    {#if !sharedLTIInstancePage}
+    {#if showSidebarItems}
       <SidebarGroup class="mt-6">
         <SidebarItem
-          target={isLTIInactivePage ? '_blank' : undefined}
+          target={openAllLinksInNewTab ? '_blank' : undefined}
           href={nonAuthed
             ? isSharedAssistantPage
               ? `/login?forward=${pathName}%3Fshare_token=${shareToken}`
@@ -228,14 +230,14 @@
       {#if nonAuthed}
         <SidebarGroup border class="overflow-y-auto border-blue-dark-40 border-t-3 pt-1">
           <SidebarItem
-            target={isLTIInactivePage ? '_blank' : undefined}
+            target={openAllLinksInNewTab ? '_blank' : undefined}
             href="/about"
             label="Home"
             class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2"
             activeClass="bg-blue-dark-40"
           />
           <SidebarItem
-            target={isLTIInactivePage ? '_blank' : undefined}
+            target={openAllLinksInNewTab ? '_blank' : undefined}
             href="/privacy-policy"
             label="Privacy Policy"
             class="text-sm text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap gap-2"

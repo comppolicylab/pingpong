@@ -2,7 +2,6 @@ import { redirect, error } from '@sveltejs/kit';
 import * as api from '$lib/api';
 import { hasAnonymousSessionToken, setAnonymousShareToken } from '$lib/stores/anonymous';
 import type { LayoutLoad } from './$types';
-
 const LOGIN = '/login';
 const HOME = '/';
 const ONBOARDING = '/onboarding';
@@ -13,7 +12,6 @@ const EDU = '/eduaccess';
 const LOGOUT = '/logout';
 const LTI_REGISTER = '/lti/register';
 const LTI_INACTIVE = '/lti/inactive';
-const LTI_LAUNCH = '/lti/launch';
 
 /**
  * Load the current user and redirect if they are not logged in.
@@ -24,6 +22,16 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   const t = url.searchParams.get('share_token');
   if (t) {
     setAnonymousShareToken(t);
+  }
+
+  if (url.pathname === LTI_INACTIVE) {
+    api.clearLTISessionToken();
+  } else {
+    // Check if we have an LTI session token in the URL or already stored.
+    const ltiSession = url.searchParams.get('lti_session');
+    if (ltiSession) {
+      api.setLTISessionToken(ltiSession);
+    }
   }
 
   // Fetch the current user
@@ -47,6 +55,10 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   const needsOnboarding = !!me.data?.user && (!me.data.user.first_name || !me.data.user.last_name);
   const needsAgreements = me.data?.agreement_id !== null;
   let doNotShowSidebar = false;
+  let showCollapsedSidebarOnly = false;
+  let openAllLinksInNewTab = false;
+  let logoIsClickable = true;
+  let showSidebarItems = true;
 
   // If the page is public, don't redirect to the login page.
   let isPublicPage = false;
@@ -56,8 +68,6 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
   const sharedThreadPattern = /\/group\/(\d+)\/shared\/thread\/(\d+)/;
   const isSharedAssistantPage = sharedAssistantPattern.test(url.pathname);
   const isSharedThreadPage = sharedThreadPattern.test(url.pathname);
-  const isSharedLTIInstancePage = url.pathname === LTI_REGISTER;
-  const isLTIInactivePage = url.pathname === LTI_INACTIVE;
 
   if (url.pathname === LOGIN) {
     // If the user is logged in, go to the forward page.
@@ -66,9 +76,15 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
       redirect(302, destination);
     }
   } else {
-    if (isSharedLTIInstancePage || isLTIInactivePage) {
+    if (url.pathname === LTI_REGISTER || url.pathname === LTI_INACTIVE) {
       doNotShowSidebar = false;
       isPublicPage = true;
+      openAllLinksInNewTab = true;
+      logoIsClickable = false;
+      if (url.pathname === LTI_REGISTER) {
+        showCollapsedSidebarOnly = true;
+        showSidebarItems = false;
+      }
     } else if (new Set([ABOUT, PRIVACY_POLICY, EDU, HOME]).has(url.pathname) && !authed) {
       isPublicPage = true;
       if (url.pathname === HOME) {
@@ -82,14 +98,11 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
       // If the user is not logged in and the URL has a share token,
       // allow access to the shared assistant or thread page.
       // doNotShowSidebar = true;
-    } else if (!authed && url.pathname !== LOGOUT && url.pathname !== LTI_LAUNCH) {
+    } else if (!authed && url.pathname !== LOGOUT) {
       const destination = encodeURIComponent(`${url.pathname}${url.search}`);
       redirect(302, `${LOGIN}?forward=${destination}`);
     } else {
-      if (
-        (needsAgreements && (url.pathname === LOGOUT || url.pathname === TERMS)) ||
-        url.pathname === LTI_LAUNCH
-      ) {
+      if (needsAgreements && (url.pathname === LOGOUT || url.pathname === TERMS)) {
         // If the user is logged in and tries to access the logout or terms page, don't show the sidebar.
         doNotShowSidebar = true;
       } else if (needsAgreements && url.pathname !== TERMS && url.pathname !== PRIVACY_POLICY) {
@@ -272,6 +285,10 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
     needsOnboarding,
     needsAgreements,
     doNotShowSidebar,
+    showCollapsedSidebarOnly,
+    openAllLinksInNewTab,
+    logoIsClickable,
+    showSidebarItems,
     me: me.data,
     authed,
     classes,
@@ -281,8 +298,6 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
     shareToken: t,
     isSharedAssistantPage,
     isSharedThreadPage,
-    isSharedLTIInstancePage,
-    isLTIInactivePage,
     statusComponents,
     hasNonComponentIncidents
   };

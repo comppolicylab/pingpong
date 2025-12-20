@@ -9,7 +9,7 @@
   export let data;
 
   let inIframe = false;
-  $: isLTIInactivePage = data?.isLTIInactivePage ?? false;
+  $: showCollapsedSidebarOnly = data.showCollapsedSidebarOnly;
   onMount(() => {
     inIframe = window.self !== window.top;
   });
@@ -18,7 +18,7 @@
 <div
   class={`main-panel transition-all absolute left-0 top-24 z-10 w-[calc(100%-2rem)] ml-4 mr-4 h-[calc(100%-6rem)] overflow-hidden print:!static print:!w-full print:!h-auto print:!m-0 print:!p-0 print:!overflow-visible print:!top-0 print:!left-0 print:!z-auto  ${
     $appMenuOpen ? 'left-[90%]' : ''
-  } ${!inIframe || isLTIInactivePage ? 'lg:h-full lg:static' : ''}`}
+  } ${!inIframe || !showCollapsedSidebarOnly ? 'lg:h-full lg:static' : ''}`}
 >
   <div
     class="h-full flex-grow bg-white rounded-t-4xl overflow-hidden relative print:!overflow-visible print:!h-auto print:!rounded-none print:!bg-transparent"

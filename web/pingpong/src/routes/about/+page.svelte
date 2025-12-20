@@ -10,7 +10,7 @@
   export let data;
 
   $: nonAuthed = data.isPublicPage && !data?.me?.user;
-  $: isLTIInactivePage = data?.isLTIInactivePage ?? false;
+  $: openAllLinksInNewTab = data.openAllLinksInNewTab;
 
   const categories = [
     { value: 'bug', name: 'Bug Report' },
@@ -100,7 +100,7 @@
   let handleModalCancel: () => void;
 </script>
 
-<AboutPage {nonAuthed} linksOpenInNewTab={isLTIInactivePage}>
+<AboutPage {nonAuthed} linksOpenInNewTab={openAllLinksInNewTab}>
   <span slot="footer">
     {#if !nonAuthed}
       <div class="px-12 pb-8 bg-white">

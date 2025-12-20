@@ -161,6 +161,37 @@ export const fullPath = (path: string) => {
   return join('/api/v1/', path);
 };
 
+let _ltiSessionToken: string | null = null;
+
+export const setLTISessionToken = (token: string) => {
+  if (browser) {
+    sessionStorage.setItem('lti_session', token);
+  }
+  _ltiSessionToken = token;
+};
+
+export const hasLTISessionToken = () => {
+  if (!browser) {
+    return _ltiSessionToken !== null;
+  }
+  const token = sessionStorage.getItem('lti_session');
+  return token !== null;
+};
+
+export const getLTISessionToken = () => {
+  if (!browser) {
+    return _ltiSessionToken;
+  }
+  return sessionStorage.getItem('lti_session');
+};
+
+export const clearLTISessionToken = () => {
+  _ltiSessionToken = null;
+  if (browser) {
+    sessionStorage.removeItem('lti_session');
+  }
+};
+
 /**
  * Common fetch method.
  */
@@ -178,6 +209,15 @@ const _fetch = async (
     headers = {
       ...headers,
       'X-Anonymous-Thread-Session': sessionToken
+    };
+  }
+  // If we're in an LTI context, include the session token in the Authorization header.
+  // This is needed because third-party cookies may be blocked in iframes.
+  const ltiToken = getLTISessionToken();
+  if (ltiToken) {
+    headers = {
+      ...headers,
+      Authorization: `Bearer ${ltiToken}`
     };
   }
   return f(full, {
@@ -1820,6 +1860,11 @@ const _doUpload = (
     const shareToken = getAnonymousShareToken();
     if (shareToken) {
       xhr.setRequestHeader('X-Anonymous-Share-Token', shareToken);
+    }
+    // If we're in an LTI context, include the session token in the Authorization header.
+    const ltiToken = getLTISessionToken();
+    if (ltiToken) {
+      xhr.setRequestHeader('Authorization', `Bearer ${ltiToken}`);
     }
     xhr.upload.onprogress = onProgress;
     xhr.onreadystatechange = () => {
@@ -3470,6 +3515,12 @@ export const createAudioWebsocket = (classId: number, threadId: number): WebSock
   const shareToken = getAnonymousShareToken();
   if (shareToken) {
     params.set('share_token', shareToken);
+  }
+  // If we're in an LTI context, include the session token as a query param
+  // (WebSockets can't use Authorization headers)
+  const ltiToken = getLTISessionToken();
+  if (ltiToken) {
+    params.set('lti_session', ltiToken);
   }
   const url = `${protocol}://${host}/api/v1/class/${classId}/thread/${threadId}/audio?${params}`;
   return new WebSocket(url);
