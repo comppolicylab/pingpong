@@ -1157,11 +1157,6 @@ async def remove_institution_admin(institution_id: int, user_id: int, request: R
     return {"status": "ok"}
 
 
-# =====================
-# LTI Registration Admin
-# =====================
-
-
 @v1.get(
     "/admin/lti/registrations",
     dependencies=[Depends(Authz("admin"))],
@@ -1184,32 +1179,9 @@ async def get_lti_registration(registration_id: int, request: Request):
     if not registration:
         raise HTTPException(status_code=404, detail="LTI registration not found")
 
-    return schemas.LTIRegistrationDetail(
-        id=registration.id,
-        issuer=registration.issuer,
-        client_id=registration.client_id,
-        auth_login_url=registration.auth_login_url,
-        auth_token_url=registration.auth_token_url,
-        key_set_url=registration.key_set_url,
-        token_algorithm=registration.token_algorithm,
-        lms_platform=registration.lms_platform,
-        canvas_account_name=registration.canvas_account_name,
-        admin_name=registration.admin_name,
-        admin_email=registration.admin_email,
-        friendly_name=registration.friendly_name,
-        enabled=registration.enabled,
-        review_status=registration.review_status,
-        internal_notes=registration.internal_notes,
-        review_notes=registration.review_notes,
-        review_by=registration.review_by,
-        institutions=registration.institutions,
-        openid_configuration=registration.openid_configuration,
-        registration_data=registration.registration_data,
-        lti_classes_count=len(registration.lti_classes)
-        if registration.lti_classes
-        else 0,
-        created=registration.created,
-        updated=registration.updated,
+    detail = schemas.LTIRegistrationDetail.model_validate(registration)
+    return detail.model_copy(
+        update={"lti_classes_count": len(registration.lti_classes or [])}
     )
 
 

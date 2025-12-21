@@ -826,10 +826,6 @@ export const removeInstitutionAdmin = async (f: Fetcher, instId: number, userId:
   return await DELETE<never, GenericStatus>(f, `institution/${instId}/admin/${userId}`);
 };
 
-// =====================
-// LTI Registration Admin
-// =====================
-
 export type LTIRegistrationReviewStatus = 'pending' | 'approved' | 'rejected';
 
 export type LTIRegistrationInstitution = {
@@ -961,10 +957,6 @@ export type InstitutionsWithDefaultAPIKey = {
 export const getInstitutionsWithDefaultAPIKey = async (f: Fetcher) => {
   return await GET<never, InstitutionsWithDefaultAPIKey>(f, '/admin/lti/institutions');
 };
-
-// =====================
-// LTI Setup
-// =====================
 
 export type LTISetupInstitution = {
   id: number;
