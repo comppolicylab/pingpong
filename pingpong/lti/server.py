@@ -226,13 +226,9 @@ async def get_public_sso_providers(request: Request):
 
 @lti_router.get("/public/institutions", response_model=LTIPublicInstitutions)
 async def get_public_institutions(request: Request):
-    institutions = await Institution.get_all(request.state.db)
+    institutions = await Institution.get_all_with_default_api_key(request.state.db)
     return {
-        "institutions": [
-            {"id": inst.id, "name": inst.name}
-            for inst in institutions
-            if inst.default_api_key_id is not None
-        ]
+        "institutions": [{"id": inst.id, "name": inst.name} for inst in institutions]
     }
 
 
@@ -759,6 +755,9 @@ async def lti_launch(
             if isinstance(class_, LTIClass) and class_.lti_status == LTIStatus.PENDING:
                 # Resume existing setup
                 pending_lti_class = class_
+                pending_lti_class.setup_user_id = user.id
+                request.state.db.add(pending_lti_class)
+                await request.state.db.flush()
             else:
                 # Create new pending LTIClass to store context
                 course_details = claims.get(
@@ -955,9 +954,6 @@ async def lti_launch(
                 url=config.url(f"/group/{class_.id}?lti_session={user_token}"),
                 status_code=302,
             )
-
-
-# ==================== LTI Setup Endpoints ====================
 
 
 async def _get_lti_class_for_setup(request: Request, lti_class_id: int) -> LTIClass:
@@ -1179,7 +1175,5 @@ async def link_lti_group(
     lti_class.class_id = body.class_id
     lti_class.lti_status = LTIStatus.LINKED
     request.state.db.add(lti_class)
-
-    await request.state.db.flush()
 
     return LTISetupLinkResponse(class_id=body.class_id)
