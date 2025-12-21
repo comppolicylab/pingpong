@@ -203,12 +203,12 @@ const _fetch = async (
   body?: string | FormData
 ) => {
   const full = fullPath(path);
-  const sessionToken = getAnonymousSessionToken();
-  if (sessionToken) {
+  const anonymousSessionToken = getAnonymousSessionToken();
+  if (anonymousSessionToken) {
     // If we have a session token for anonymous threads, add it to the headers.
     headers = {
       ...headers,
-      'X-Anonymous-Thread-Session': sessionToken
+      'X-Anonymous-Thread-Session': anonymousSessionToken
     };
   }
   // If we're in an LTI context, include the session token in the Authorization header.
@@ -239,12 +239,12 @@ const _fetchJSON = async <R extends BaseData>(
   headers?: Record<string, string>,
   body?: string | FormData
 ): Promise<(R | Error | ValidationError) & BaseResponse> => {
-  const sessionToken = getAnonymousSessionToken();
-  if (sessionToken) {
+  const anonymousSessionToken = getAnonymousSessionToken();
+  if (anonymousSessionToken) {
     // If we have a session token for anonymous threads, add it to the headers.
     headers = {
       ...headers,
-      'X-Anonymous-Thread-Session': sessionToken
+      'X-Anonymous-Thread-Session': anonymousSessionToken
     };
   }
   const res = await _fetch(f, method, path, headers, body);
@@ -273,12 +273,12 @@ const _qmethod = async <T extends BaseData, R extends BaseData>(
   // Specifically, we want to remove "undefined" values.
   const filtered = data && (JSON.parse(JSON.stringify(data)) as Record<string, string>);
   const params = new URLSearchParams(filtered);
-  const shareToken = getAnonymousShareToken();
+  const anonymousShareToken = getAnonymousShareToken();
   let headers: Record<string, string> = {};
-  if (shareToken) {
+  if (anonymousShareToken) {
     headers = {
       ...headers,
-      'X-Anonymous-Share-Token': shareToken
+      'X-Anonymous-Link-Share': anonymousShareToken
     };
   }
   path = `${path}?${params}`;
@@ -296,11 +296,11 @@ const _bmethod = async <T extends BaseData, R extends BaseData>(
 ) => {
   const body = JSON.stringify(data);
   let headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const shareToken = getAnonymousShareToken();
-  if (shareToken) {
+  const anonymousShareToken = getAnonymousShareToken();
+  if (anonymousShareToken) {
     headers = {
       ...headers,
-      'X-Anonymous-Share-Token': shareToken
+      'X-Anonymous-Link-Share': anonymousShareToken
     };
   }
   return await _fetchJSON<R>(f, method, path, headers, body);
@@ -2063,13 +2063,13 @@ const _doUpload = (
   const promise = new Promise<FileUploadResult>((resolve, reject) => {
     xhr.open('POST', url, true);
     xhr.setRequestHeader('Accept', 'application/json');
-    const sessionToken = getAnonymousSessionToken();
-    if (sessionToken) {
-      xhr.setRequestHeader('X-Anonymous-Thread-Session', sessionToken);
+    const anonymousSessionToken = getAnonymousSessionToken();
+    if (anonymousSessionToken) {
+      xhr.setRequestHeader('X-Anonymous-Thread-Session', anonymousSessionToken);
     }
-    const shareToken = getAnonymousShareToken();
-    if (shareToken) {
-      xhr.setRequestHeader('X-Anonymous-Share-Token', shareToken);
+    const anonymousShareToken = getAnonymousShareToken();
+    if (anonymousShareToken) {
+      xhr.setRequestHeader('X-Anonymous-Link-Share', anonymousShareToken);
     }
     // If we're in an LTI context, include the session token in the Authorization header.
     const ltiToken = getLTISessionToken();
@@ -3718,13 +3718,13 @@ export const createAudioWebsocket = (classId: number, threadId: number): WebSock
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const host = window.location.host;
   const params = new URLSearchParams();
-  const sessionToken = getAnonymousSessionToken();
-  if (sessionToken) {
-    params.set('session_token', sessionToken);
+  const anonymousSessionToken = getAnonymousSessionToken();
+  if (anonymousSessionToken) {
+    params.set('session_token', anonymousSessionToken);
   }
-  const shareToken = getAnonymousShareToken();
-  if (shareToken) {
-    params.set('share_token', shareToken);
+  const anonymousShareToken = getAnonymousShareToken();
+  if (anonymousShareToken) {
+    params.set('share_token', anonymousShareToken);
   }
   // If we're in an LTI context, include the session token as a query param
   // (WebSockets can't use Authorization headers)
