@@ -1,0 +1,45 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths: [web/**, pingpong/**, .github/workflows/**, conftest.py, poetry.lock, pyproject.toml]
+
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Please review this pull request and provide feedback on:
+            - Code quality and best practices
+            - Potential bugs or issues
+            - Performance considerations
+            - Security concerns
+            - Test coverage
+
+            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+
+            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
+
+          # Tools based on CLAUDE.md development commands
+          # Includes: poetry (pytest, alembic, python), pnpm (check, lint, test), and gh CLI
+          claude_args: '--allowed-tools "Bash(poetry run pytest:*),Bash(poetry run alembic:*),Bash(poetry run python:*),Bash(poetry install:*),Bash(pnpm install:*),Bash(pnpm check:*),Bash(pnpm lint:*),Bash(pnpm format:*),Bash(pnpm test:*),Bash(pnpm build:*),Bash(gh issue:*),Bash(gh pr:*),Bash(gh search:*)"'
