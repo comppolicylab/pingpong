@@ -3530,7 +3530,7 @@ class Class(Base):
         cls, session: AsyncSession, lms_course_id: int
     ) -> list["Class"]:
         """Get all classes by LMS course ID."""
-        stmt = select(Class).where(Class.lms_class_id == lms_course_id)
+        stmt = select(Class).where(Class.lms_course_id == lms_course_id)
         result = await session.execute(stmt)
         return [row.Class for row in result]
 
