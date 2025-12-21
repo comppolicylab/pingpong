@@ -3,6 +3,7 @@ import json
 import logging
 import multiprocessing
 import time
+from datetime import datetime, timezone
 from typing import Tuple
 
 import aiohttp
@@ -137,6 +138,7 @@ class _MockFgaAuthzServer:
             raise ValueError("Missing relation or object")
 
         tuples = []
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         for u, rel, o in self._all_grants:
             if rel != relation or o != obj:
                 continue
@@ -148,7 +150,8 @@ class _MockFgaAuthzServer:
                         "user": u,
                         "relation": rel,
                         "object": o,
-                    }
+                    },
+                    "timestamp": now,
                 }
             )
 

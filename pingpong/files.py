@@ -72,7 +72,11 @@ def _file_grants_revoke(
         )
     if file.anonymous_link:
         grants.append(
-            (f"anonymous_link:{file.anonymous_link.id}", "can_delete", target)
+            (
+                f"anonymous_link:{file.anonymous_link.share_token}",
+                "can_delete",
+                target,
+            )
         )
 
     grants.append((f"user:{file.uploader_id}", "owner", target))

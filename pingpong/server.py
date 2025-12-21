@@ -5319,6 +5319,7 @@ async def create_thread(
         ] + [
             (f"user:{p.id}", "party", f"thread:{thread_db_record.id}") for p in parties
         ]
+        revokes = []
         if anonymous_session:
             grants.extend(
                 [
@@ -5342,9 +5343,15 @@ async def create_thread(
                         f"thread:{thread_db_record.id}",
                     )
                 )
-            if req.file_search_file_ids or req.code_interpreter_file_ids:
-                all_file_ids = (req.file_search_file_ids or []) + (
-                    req.code_interpreter_file_ids or []
+            if (
+                req.file_search_file_ids
+                or req.code_interpreter_file_ids
+                or req.vision_file_ids
+            ):
+                all_file_ids = (
+                    (req.file_search_file_ids or [])
+                    + (req.code_interpreter_file_ids or [])
+                    + (req.vision_file_ids or [])
                 )
                 files = await models.File.get_all_by_file_id(
                     request.state.db, all_file_ids
@@ -5357,12 +5364,26 @@ async def create_thread(
                             f"user_file:{file.id}",
                         )
                     )
+                    # Revoke can_delete permission from the anonymous link
+                    # now that the file is associated with an anonymous session
+                    if (
+                        request.state.anonymous_share_token
+                        and file.anonymous_link_id == request.state.anonymous_link_id
+                    ):
+                        revokes.append(
+                            (
+                                f"anonymous_link:{request.state.anonymous_share_token}",
+                                "can_delete",
+                                f"user_file:{file.id}",
+                            )
+                        )
+
                     file.anonymous_session_id = anonymous_session.id
                     request.state.db.add(file)
                 if files:
                     await request.state.db.flush()
 
-        await request.state.authz.write_safe(grant=grants)
+        await request.state.authz.write_safe(grant=grants, revoke=revokes)
 
         return {
             "thread": thread_db_record,
@@ -5377,9 +5398,6 @@ async def create_thread(
         if thread:
             await openai_client.beta.threads.delete(thread.id)
         if thread_db_record:
-            # Delete users-threads mapping
-            for user in thread_db_record.users:
-                thread_db_record.users.remove(user)
             await thread_db_record.delete(request.state.db)
         raise e
 
