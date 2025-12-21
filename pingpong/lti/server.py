@@ -847,7 +847,10 @@ async def lti_launch(
                         detail="Failed to add user to class",
                     )
                 return RedirectResponse(
-                    url=config.url(f"/group/{class_.class_id}"), status_code=302
+                    url=config.url(
+                        f"/group/{class_.class_id}?lti_session={user_token}"
+                    ),
+                    status_code=302,
                 )
         else:
             new_lti_class = None
@@ -913,7 +916,7 @@ async def lti_launch(
                 )
                 try:
                     await AddNewUsersManual(
-                        class_.id, new_ucr, request, tasks
+                        class_.id, new_ucr, request, tasks, user_id=class_.lms_user_id
                     ).add_new_users()
                 except AddUserException as e:
                     logger.exception("lti_launch: AddUserException occurred")
@@ -939,7 +942,7 @@ async def lti_launch(
                 )
                 try:
                     await AddNewUsersManual(
-                        class_.id, new_ucr, request, tasks
+                        class_.id, new_ucr, request, tasks, user_id=class_.lms_user_id
                     ).add_new_users()
                 except AddUserException as e:
                     logger.exception("lti_launch: AddUserException occurred")

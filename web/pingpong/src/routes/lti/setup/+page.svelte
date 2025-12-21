@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, Heading } from 'flowbite-svelte';
+  import { Heading } from 'flowbite-svelte';
   import { goto } from '$app/navigation';
   import PingPongLogo from '$lib/components/PingPongLogo.svelte';
   import { PlusOutline, LinkOutline } from 'flowbite-svelte-icons';
