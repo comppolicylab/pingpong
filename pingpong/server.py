@@ -8679,11 +8679,10 @@ try:
         from pingpong.lti.server import lti_router
 
         v1.include_router(lti_router, prefix="/lti")
-        logger.info("Mounted LTI Advantage Service routes")
+        logger.info("Mounted Canvas Connect routes")
 except Exception:
     # If LTI is not configured or import fails, skip mounting
-    logger.exception("Failed to mount LTI Advantage Service routes.")
-    pass
+    logger.exception("Failed to mount Canvas Connect routes.")
 
 
 @app.get("/health")
