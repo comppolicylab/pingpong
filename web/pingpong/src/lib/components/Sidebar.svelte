@@ -115,6 +115,7 @@
   );
   $: onNewChatPage = $page.url.pathname === `/group/${currentClassId}`;
   $: canViewSpecificClass = data.classes.some((cls) => cls.id === currentClassId);
+  $: hasNoClasses = !nonAuthed && data.classes?.length === 0;
 
   // Toggle whether menu is open.
   const togglePanel = (state?: boolean) => {
@@ -164,7 +165,7 @@
   <SidebarWrapper class="bg-transparent h-full flex flex-col">
     <SidebarGroup class="mb-6">
       <div class="flex items-center" data-sveltekit-preload-data="off">
-        {#if !(inIframe && sharedPage) || !showCollapsedSidebarOnly}
+        {#if !(inIframe && sharedPage) && !showCollapsedSidebarOnly}
           <button
             class="menu-button bg-transparent border-none mr-3 mt-1 lg:hidden"
             on:click={() => togglePanel()}
@@ -195,7 +196,7 @@
               : isSharedThreadPage
                 ? `/group/${currentClassId}/shared/assistant/${currentAssistantId}?share_token=${$anonymousShareToken}`
                 : '/login'
-            : onNewChatPage
+            : onNewChatPage || hasNoClasses
               ? undefined
               : sharedPage
                 ? `/`
@@ -212,10 +213,10 @@
                 : 'Login'
             : 'Start a new chat'}
           class={`flex flex-row-reverse justify-between pr-4 text-white rounded-full ${
-            onNewChatPage
+            onNewChatPage || hasNoClasses
               ? 'bg-blue-dark-40 hover:bg-blue-dark-40 cursor-default text-blue-dark-30 select-none'
               : 'bg-orange hover:bg-orange-dark'
-          } ${onNewChatPage ? 'disabled' : ''}`}
+          } ${onNewChatPage || hasNoClasses ? 'disabled' : ''}`}
         >
           <svelte:fragment slot="icon">
             {#if nonAuthed && !isSharedThreadPage}

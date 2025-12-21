@@ -61,6 +61,10 @@ from pingpong.emails import (
     revalidate_email_addresses,
     validate_email_addresses,
 )
+from pingpong.invite import (
+    send_lti_registration_approved,
+    send_lti_registration_rejected,
+)
 from pingpong.realtime import browser_realtime_websocket
 from pingpong.session import populate_request
 from pingpong.stats import (
@@ -1151,6 +1155,212 @@ async def remove_institution_admin(institution_id: int, user_id: int, request: R
         revoke=[(f"user:{user_id}", "admin", f"institution:{institution_id}")]
     )
     return {"status": "ok"}
+
+
+# =====================
+# LTI Registration Admin
+# =====================
+
+
+@v1.get(
+    "/admin/lti/registrations",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.LTIRegistrations,
+)
+async def list_lti_registrations(request: Request):
+    registrations = await models.LTIRegistration.get_all(request.state.db)
+    return {"registrations": registrations}
+
+
+@v1.get(
+    "/admin/lti/registrations/{registration_id}",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.LTIRegistrationDetail,
+)
+async def get_lti_registration(registration_id: int, request: Request):
+    registration = await models.LTIRegistration.get_by_id(
+        request.state.db, registration_id
+    )
+    if not registration:
+        raise HTTPException(status_code=404, detail="LTI registration not found")
+
+    return schemas.LTIRegistrationDetail(
+        id=registration.id,
+        issuer=registration.issuer,
+        client_id=registration.client_id,
+        auth_login_url=registration.auth_login_url,
+        auth_token_url=registration.auth_token_url,
+        key_set_url=registration.key_set_url,
+        token_algorithm=registration.token_algorithm,
+        lms_platform=registration.lms_platform,
+        canvas_account_name=registration.canvas_account_name,
+        admin_name=registration.admin_name,
+        admin_email=registration.admin_email,
+        friendly_name=registration.friendly_name,
+        enabled=registration.enabled,
+        review_status=registration.review_status,
+        internal_notes=registration.internal_notes,
+        review_notes=registration.review_notes,
+        review_by=registration.review_by,
+        institutions=registration.institutions,
+        openid_configuration=registration.openid_configuration,
+        registration_data=registration.registration_data,
+        lti_classes_count=len(registration.lti_classes)
+        if registration.lti_classes
+        else 0,
+        created=registration.created,
+        updated=registration.updated,
+    )
+
+
+@v1.patch(
+    "/admin/lti/registrations/{registration_id}",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.LTIRegistration,
+)
+async def update_lti_registration(
+    registration_id: int,
+    body: schemas.UpdateLTIRegistration,
+    request: Request,
+):
+    data = body.model_dump(exclude_unset=True)
+    registration = await models.LTIRegistration.update(
+        request.state.db,
+        registration_id,
+        data,
+        reviewer_id=request.state.session.user.id,
+    )
+    if not registration:
+        raise HTTPException(status_code=404, detail="LTI registration not found")
+    return registration
+
+
+@v1.patch(
+    "/admin/lti/registrations/{registration_id}/status",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.LTIRegistration,
+)
+async def set_lti_registration_status(
+    registration_id: int,
+    body: schemas.SetLTIRegistrationStatus,
+    request: Request,
+):
+    # Get current registration to check previous status and get admin email
+    current_registration = await models.LTIRegistration.get_by_id(
+        request.state.db, registration_id
+    )
+    if not current_registration:
+        raise HTTPException(status_code=404, detail="LTI registration not found")
+
+    previous_status = current_registration.review_status
+
+    data: dict[str, Any] = {"review_status": body.review_status}
+    if body.review_status == schemas.LTIRegistrationReviewStatus.APPROVED:
+        data["enabled"] = True
+    else:
+        data["enabled"] = False
+    registration = await models.LTIRegistration.update(
+        request.state.db,
+        registration_id,
+        data,
+        reviewer_id=request.state.session.user.id,
+    )
+
+    if not registration:
+        raise HTTPException(status_code=404, detail="LTI registration not found")
+
+    # Send email notification if status changed and admin email exists
+    if previous_status != body.review_status and registration.admin_email:
+        integration_name = (
+            registration.friendly_name
+            or registration.canvas_account_name
+            or "LTI Integration"
+        )
+        admin_name = registration.admin_name or "Admin"
+
+        try:
+            if body.review_status == schemas.LTIRegistrationReviewStatus.APPROVED:
+                await send_lti_registration_approved(
+                    config.email.sender,
+                    admin_email=registration.admin_email,
+                    admin_name=admin_name,
+                    integration_name=integration_name,
+                )
+            elif body.review_status == schemas.LTIRegistrationReviewStatus.REJECTED:
+                await send_lti_registration_rejected(
+                    config.email.sender,
+                    admin_email=registration.admin_email,
+                    admin_name=admin_name,
+                    integration_name=integration_name,
+                    review_notes=registration.review_notes,
+                )
+        except Exception:
+            logging.exception(
+                f"Failed to send LTI registration status email: {registration.admin_email}"
+            )
+
+    return registration
+
+
+@v1.patch(
+    "/admin/lti/registrations/{registration_id}/enabled",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.LTIRegistration,
+)
+async def set_lti_registration_enabled(
+    registration_id: int,
+    body: schemas.SetLTIRegistrationEnabled,
+    request: Request,
+):
+    # First get the registration to check its status
+    registration = await models.LTIRegistration.get_by_id(
+        request.state.db, registration_id
+    )
+    if not registration:
+        raise HTTPException(status_code=404, detail="LTI registration not found")
+    # Only allow enabling if registration is approved
+    if (
+        body.enabled
+        and registration.review_status != schemas.LTIRegistrationReviewStatus.APPROVED
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot enable registration that is not approved",
+        )
+    registration = await models.LTIRegistration.set_enabled(
+        request.state.db, registration_id, body.enabled
+    )
+    return registration
+
+
+@v1.patch(
+    "/admin/lti/registrations/{registration_id}/institutions",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.LTIRegistration,
+)
+async def set_lti_registration_institutions(
+    registration_id: int,
+    body: schemas.SetLTIRegistrationInstitutions,
+    request: Request,
+):
+    registration = await models.LTIRegistration.set_institutions(
+        request.state.db, registration_id, body.institution_ids
+    )
+    if not registration:
+        raise HTTPException(status_code=404, detail="LTI registration not found")
+    return registration
+
+
+@v1.get(
+    "/admin/lti/institutions",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.InstitutionsWithDefaultAPIKey,
+)
+async def get_institutions_with_default_api_key(request: Request):
+    institutions = await models.Institution.get_all_with_default_api_key(
+        request.state.db
+    )
+    return {"institutions": institutions}
 
 
 @v1.get(

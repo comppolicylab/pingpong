@@ -37,3 +37,46 @@ class LTIRegisterRequest(BaseModel):
     openid_configuration: str
     registration_token: str
     institution_ids: list[int] = Field(min_length=1)
+
+
+# LTI Setup schemas
+class LTISetupInstitution(BaseModel):
+    id: int
+    name: str
+
+
+class LTISetupContext(BaseModel):
+    lti_class_id: int
+    course_name: str | None
+    course_code: str | None
+    course_term: str | None
+    institutions: list[LTISetupInstitution]
+
+
+class LTILinkableGroup(BaseModel):
+    id: int
+    name: str
+    term: str
+    institution_name: str
+
+
+class LTILinkableGroupsResponse(BaseModel):
+    groups: list[LTILinkableGroup]
+
+
+class LTISetupCreateRequest(BaseModel):
+    institution_id: int
+    name: str
+    term: str
+
+
+class LTISetupCreateResponse(BaseModel):
+    class_id: int
+
+
+class LTISetupLinkRequest(BaseModel):
+    class_id: int
+
+
+class LTISetupLinkResponse(BaseModel):
+    class_id: int

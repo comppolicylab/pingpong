@@ -234,9 +234,10 @@ class AddNewUsers(ABC):
         # will be deleted if they are no longer on the LMS roster.
         # TODO: This might not be the desired behavior in all cases. Add a UI option to
         # control this behavior.
-        if self.new_ucr.lms_tenant:
+        if self.new_ucr.lms_tenant or self.new_ucr.lti_class_id:
             enrollment.lms_tenant = self.new_ucr.lms_tenant
             enrollment.lms_type = self.new_ucr.lms_type
+            enrollment.lti_class_id = self.new_ucr.lti_class_id
             self.session.add(enrollment)
 
         # Update the external login identifier if it's provided
@@ -266,6 +267,7 @@ class AddNewUsers(ABC):
             self.new_ucr.sso_tenant,
             sso_id,
             subscribed_to_summaries=not user.dna_as_join,
+            lti_class_id=self.new_ucr.lti_class_id,
         )
 
         self.new_roles.append(
@@ -290,13 +292,23 @@ class AddNewUsers(ABC):
     async def _remove_deleted_users(self):
         # Find users that were previously synced but are no longer on the roster
         # and delete their class enrollments
-        users_to_delete = await models.UserClassRole.delete_from_sync_list(
-            self.session,
-            self.class_id,
-            self.newly_synced,
-            self.new_ucr.lms_tenant,
-            self.new_ucr.lms_type,
-        )
+        if self.new_ucr.lms_tenant:
+            users_to_delete = await models.UserClassRole.delete_from_sync_list(
+                self.session,
+                self.class_id,
+                self.newly_synced,
+                self.new_ucr.lms_tenant,
+                self.new_ucr.lms_type,
+            )
+        else:
+            users_to_delete = await models.UserClassRole.delete_from_sync_list_lti(
+                self.session,
+                self.class_id,
+                self.newly_synced,
+                self.new_ucr.lti_class_id,
+                self.new_ucr.lms_type,
+            )
+
         # Finally, add permission revokes for the users that were deleted
         self.revokes.extend(self._permissions_to_revoke(users_to_delete))
 
@@ -324,7 +336,7 @@ class AddNewUsers(ABC):
 
         # If the request is from LMS, we need to store the newly synced users
         # so we can delete previously synced users that are no longer on the roster
-        if self.new_ucr.lms_tenant:
+        if self.new_ucr.lms_tenant or self.new_ucr.lti_class_id:
             self.newly_synced: list[int] = []
             self.newly_synced_identifiers: dict[int, str | None] = {}
 
@@ -369,12 +381,12 @@ class AddNewUsers(ABC):
                 else None
             )
 
-            if self.new_ucr.lms_tenant:
+            if self.new_ucr.lms_tenant or self.new_ucr.lti_class_id:
                 self.newly_synced.append(user.id)
                 self.newly_synced_identifiers[user.id] = ucr.sso_id
             if user.id == self.user_id:
                 # We don't want an LMS sync to change the roles of the user who initiated it
-                if self.new_ucr.lms_tenant:
+                if self.new_ucr.lms_tenant or self.new_ucr.lti_class_id:
                     continue
                 # An admin cannot add themselves as a student
                 if self.is_admin and ucr.roles.student:
@@ -404,7 +416,10 @@ class AddNewUsers(ABC):
                 self.session, user.id, self.class_id
             )
 
-            if enrollment and enrollment.lms_tenant and not self.new_ucr.lms_tenant:
+            if enrollment and (
+                (enrollment.lms_tenant and not self.new_ucr.lms_tenant)
+                or (enrollment.lti_class_id and not self.new_ucr.lti_class_id)
+            ):
                 logger.info("add_users_to_class: AddUserException occurred")
                 results.append(
                     schemas.CreateUserResult(
@@ -440,7 +455,7 @@ class AddNewUsers(ABC):
         if not self.new_ucr.silent:
             self.send_invites()
 
-        if self.new_ucr.lms_tenant:
+        if self.new_ucr.lms_tenant or self.new_ucr.lti_class_id:
             await self._remove_deleted_users()
             await self._merge_accounts()
 
@@ -460,11 +475,12 @@ class AddNewUsersManual(AddNewUsers):
         new_ucr: schemas.CreateUserClassRoles,
         request: Request,
         tasks: BackgroundTasks,
+        user_id: Optional[int] = None,
     ):
         super().__init__(
             class_id,
             new_ucr,
-            request.state.session.user.id,
+            user_id or request.state.session.user.id,
             request.state.db,
             request.state.authz,
         )

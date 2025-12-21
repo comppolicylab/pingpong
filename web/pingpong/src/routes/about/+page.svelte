@@ -4,13 +4,14 @@
   import { writable } from 'svelte/store';
   import { happyToast, sadToast } from '$lib/toast.js';
   import * as api from '$lib/api';
-  import { ExclamationCircleOutline, LockSolid } from 'flowbite-svelte-icons';
+  import { ExclamationCircleOutline, InfoCircleSolid, LockSolid } from 'flowbite-svelte-icons';
   import AboutPage from '$lib/components/AboutPage.svelte';
 
   export let data;
 
   $: nonAuthed = data.isPublicPage && !data?.me?.user;
   $: openAllLinksInNewTab = data.openAllLinksInNewTab;
+  $: hasNoGroups = !nonAuthed && data.classes?.length === 0;
 
   const categories = [
     { value: 'bug', name: 'Bug Report' },
@@ -101,6 +102,25 @@
 </script>
 
 <AboutPage {nonAuthed} linksOpenInNewTab={openAllLinksInNewTab}>
+  <div class="px-12 pt-8" slot="header">
+    {#if hasNoGroups}
+      <div class="w-full rounded-lg border border-gray-300 bg-gray-100 p-6">
+        <div class="flex items-start gap-4">
+          <InfoCircleSolid class="w-6 h-6 text-gray-500 flex-shrink-0 mt-0.5" />
+          <div class="flex-1">
+            <h5 class="text-lg font-semibold text-gray-900 mb-2">
+              It's a little empty around here...
+            </h5>
+            <p class="text-md text-gray-600">
+              You're not part of any PingPong groups yet. Ask your instructor or course
+              administrator to add you to a group to get started. If you believe this is an error,
+              please see the support information below for help.
+            </p>
+          </div>
+        </div>
+      </div>
+    {/if}
+  </div>
   <span slot="footer">
     {#if !nonAuthed}
       <div class="px-12 pb-8 bg-white">

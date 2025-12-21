@@ -12,6 +12,8 @@ const EDU = '/eduaccess';
 const LOGOUT = '/logout';
 const LTI_REGISTER = '/lti/register';
 const LTI_INACTIVE = '/lti/inactive';
+const NO_GROUP = '/lti/no-group';
+const SETUP = '/lti/setup';
 
 /**
  * Load the current user and redirect if they are not logged in.
@@ -24,15 +26,25 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
     setAnonymousShareToken(t);
   }
 
+  // Check if we have an LTI session token in the URL.
+  const ltiSession = url.searchParams.get('lti_session');
+
   if (url.pathname === LTI_INACTIVE) {
     api.clearLTISessionToken();
-  } else {
-    // Check if we have an LTI session token in the URL or already stored.
-    const ltiSession = url.searchParams.get('lti_session');
-    if (ltiSession) {
-      api.setLTISessionToken(ltiSession);
-    }
+  } else if (ltiSession) {
+    // Store the LTI session token if present.
+    api.setLTISessionToken(ltiSession);
   }
+
+  // Helper to append lti_session to redirect URLs during SSR.
+  // This ensures the token is preserved across redirects before client hydration.
+  const buildRedirect = (path: string) => {
+    if (ltiSession) {
+      const separator = path.includes('?') ? '&' : '?';
+      return `${path}${separator}lti_session=${encodeURIComponent(ltiSession)}`;
+    }
+    return path;
+  };
 
   // Fetch the current user
   const me = api.expandResponse(await api.me(fetch));
@@ -77,7 +89,6 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
     }
   } else {
     if (url.pathname === LTI_REGISTER || url.pathname === LTI_INACTIVE) {
-      doNotShowSidebar = false;
       isPublicPage = true;
       openAllLinksInNewTab = true;
       logoIsClickable = false;
@@ -85,6 +96,9 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
         showCollapsedSidebarOnly = true;
         showSidebarItems = false;
       }
+    } else if (url.pathname === NO_GROUP || url.pathname.startsWith(SETUP)) {
+      doNotShowSidebar = true;
+      logoIsClickable = false;
     } else if (new Set([ABOUT, PRIVACY_POLICY, EDU, HOME]).has(url.pathname) && !authed) {
       isPublicPage = true;
       if (url.pathname === HOME) {
@@ -100,23 +114,23 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
       // doNotShowSidebar = true;
     } else if (!authed && url.pathname !== LOGOUT) {
       const destination = encodeURIComponent(`${url.pathname}${url.search}`);
-      redirect(302, `${LOGIN}?forward=${destination}`);
+      redirect(302, buildRedirect(`${LOGIN}?forward=${destination}`));
     } else {
-      if (needsAgreements && (url.pathname === LOGOUT || url.pathname === TERMS)) {
+      if ((needsAgreements && url.pathname === TERMS) || url.pathname === LOGOUT) {
         // If the user is logged in and tries to access the logout or terms page, don't show the sidebar.
         doNotShowSidebar = true;
       } else if (needsAgreements && url.pathname !== TERMS && url.pathname !== PRIVACY_POLICY) {
         // If the user is logged in and hasn't agreed to the terms, redirect them to the terms page. Exclude the privacy policy page.
         doNotShowSidebar = true;
         const destination = encodeURIComponent(`${url.pathname}${url.search}`);
-        redirect(302, `${TERMS}?forward=${destination}&id=${me.data.agreement_id}`);
+        redirect(302, buildRedirect(`${TERMS}?forward=${destination}&id=${me.data.agreement_id}`));
       } else if (!needsAgreements && url.pathname === TERMS) {
         // Just in case someone tries to go to the terms page when they don't need to.
         const destination = url.searchParams.get('forward') || HOME;
         redirect(302, destination);
       } else if (needsOnboarding && url.pathname !== ONBOARDING) {
         const destination = encodeURIComponent(`${url.pathname}${url.search}`);
-        redirect(302, `${ONBOARDING}?forward=${destination}`);
+        redirect(302, buildRedirect(`${ONBOARDING}?forward=${destination}`));
       } else if (!needsOnboarding && url.pathname === ONBOARDING) {
         // Just in case someone tries to go to the onboarding page when they don't need to.
         const destination = url.searchParams.get('forward') || HOME;

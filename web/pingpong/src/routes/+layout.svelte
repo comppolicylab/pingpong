@@ -13,13 +13,14 @@
   });
 
   $: showSidebar =
-    (data.me &&
+    ((data.me &&
       data.me.user &&
       !data.needsOnboarding &&
       (!data.needsAgreements || !data.doNotShowSidebar)) ||
-    (data.isPublicPage && !data.doNotShowSidebar) ||
-    data.isSharedAssistantPage ||
-    data.isSharedThreadPage;
+      (data.isPublicPage && !data.doNotShowSidebar) ||
+      data.isSharedAssistantPage ||
+      data.isSharedThreadPage) &&
+    !data.doNotShowSidebar;
   $: showStatusPage = data.me?.user;
   $: showBackground = data.isSharedAssistantPage || data.isSharedThreadPage;
 </script>

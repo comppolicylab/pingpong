@@ -139,6 +139,9 @@ class UserClassRole(Base):
     title: Mapped[Optional[str]]
     lms_tenant: Mapped[Optional[str]]
     lms_type = Column(SQLEnum(schemas.LMSType), nullable=True)
+    lti_class_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("lti_classes.id", ondelete="SET NULL"), nullable=True
+    )
     user = relationship("User", back_populates="classes")
     class_ = relationship("Class", back_populates="users")
     subscribed_to_summaries = Column(Boolean, server_default="true")
@@ -344,6 +347,7 @@ class UserClassRole(Base):
         sso_tenant: str | None = None,
         sso_id: str | None = None,
         subscribed_to_summaries: bool = True,
+        lti_class_id: int | None = None,
     ) -> "UserClassRole":
         stmt = (
             _get_upsert_stmt(session)(UserClassRole)
@@ -353,6 +357,7 @@ class UserClassRole(Base):
                 lms_tenant=lms_tenant,
                 lms_type=lms_type,
                 subscribed_to_summaries=subscribed_to_summaries,
+                lti_class_id=lti_class_id,
             )
             .on_conflict_do_update(
                 index_elements=[UserClassRole.user_id, UserClassRole.class_id],
@@ -362,6 +367,7 @@ class UserClassRole(Base):
                     subscribed_to_summaries=(
                         subscribed_to_summaries or UserClassRole.subscribed_to_summaries
                     ),
+                    lti_class_id=lti_class_id,
                 ),
             )
             .returning(UserClassRole)
@@ -415,6 +421,46 @@ class UserClassRole(Base):
             and_(
                 UserClassRole.class_id == int(class_id),
                 UserClassRole.lms_tenant == lms_tenant,
+                UserClassRole.lms_type == lms_type,
+            )
+        )
+        result = await session.execute(stmt)
+        users = [row.UserClassRole.user_id for row in result]
+        users_to_delete = list(set(users) - set(newly_synced))
+        stmt_ = delete(UserClassRole).where(
+            and_(
+                UserClassRole.class_id == int(class_id),
+                UserClassRole.user_id.in_(users_to_delete),
+            )
+        )
+        await session.execute(stmt_)
+        return users_to_delete
+
+    @classmethod
+    async def delete_from_sync_list_lti(
+        cls,
+        session: AsyncSession,
+        class_id: int,
+        newly_synced: list[int],
+        lti_class_id: int,
+        lms_type: schemas.LMSType,
+    ) -> list[int]:
+        """
+        Removes `UserClassRole`s from LMS course members who were previously synced with a specific LTI tenant but were not returned in the current sync.
+
+        Args:
+            session (AsyncSession): The DB Session to use for executing DB statements.
+            class_id (int): The ID of the class being synced.
+            newly_synced (list[int]): The list of all user ids returned by the current sync.
+            lms (str): The LMS tenant the sync was performed on.
+
+        Returns:
+            list[int]: List of user ids that were removed as they were not included in the current LMS tenant sync. Can be used to remove the relevant permissions for users.
+        """
+        stmt = select(UserClassRole).where(
+            and_(
+                UserClassRole.class_id == int(class_id),
+                UserClassRole.lti_class_id == lti_class_id,
                 UserClassRole.lms_type == lms_type,
             )
         )
@@ -1402,6 +1448,24 @@ class Institution(Base):
         return [row.Institution for row in result]
 
     @classmethod
+    async def all_have_default_api_key(
+        cls, session: AsyncSession, ids: list[int]
+    ) -> bool:
+        """Check if all institutions with the given IDs have a default API key configured."""
+        if not ids:
+            return True
+        stmt = (
+            select(func.count())
+            .select_from(Institution)
+            .where(
+                Institution.id.in_(ids),
+                Institution.default_api_key_id.is_not(None),
+            )
+        )
+        count = await session.scalar(stmt)
+        return count == len(ids)
+
+    @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "Institution":
         stmt = select(Institution).where(Institution.id == int(id_))
         return await session.scalar(stmt)
@@ -1409,6 +1473,18 @@ class Institution(Base):
     @classmethod
     async def get_all(cls, session: AsyncSession) -> List["Institution"]:
         stmt = select(Institution).order_by(Institution.name.asc())
+        result = await session.execute(stmt)
+        return [row.Institution for row in result]
+
+    @classmethod
+    async def get_all_with_default_api_key(
+        cls, session: AsyncSession
+    ) -> List["Institution"]:
+        stmt = (
+            select(Institution)
+            .where(Institution.default_api_key_id.is_not(None))
+            .order_by(Institution.name.asc())
+        )
         result = await session.execute(stmt)
         return [row.Institution for row in result]
 
@@ -2686,6 +2762,36 @@ class LTIClass(Base):
         )
         return await session.scalar(stmt)
 
+    @classmethod
+    async def get_by_id_for_setup(
+        cls, session: AsyncSession, lti_class_id: int
+    ) -> "LTIClass | None":
+        """Get an LTIClass with registration and institutions loaded for setup."""
+        stmt = (
+            select(LTIClass)
+            .where(LTIClass.id == lti_class_id)
+            .options(
+                selectinload(LTIClass.registration).selectinload(
+                    LTIRegistration.institutions
+                )
+            )
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def has_link_for_registration_and_class(
+        cls, session: AsyncSession, registration_id: int, class_id: int
+    ) -> bool:
+        """Check if a class already has an LTI link for a specific registration."""
+        stmt = select(LTIClass).where(
+            and_(
+                LTIClass.registration_id == registration_id,
+                LTIClass.class_id == class_id,
+            )
+        )
+        result = await session.scalar(stmt)
+        return result is not None
+
 
 class APIKey(Base):
     __tablename__ = "api_keys"
@@ -3032,6 +3138,20 @@ class Class(Base):
             .options(joinedload(Class.institution))
             .options(joinedload(Class.lms_user))
             .options(joinedload(Class.lms_class))
+            .where(Class.id.in_(ids))
+        )
+        result = await session.execute(stmt)
+        return [row.Class for row in result]
+
+    @classmethod
+    async def get_all_by_id_simple(
+        cls, session: AsyncSession, ids: list[int]
+    ) -> list["Class"]:
+        if not ids:
+            return []
+        stmt = (
+            select(Class)
+            .options(joinedload(Class.institution))
             .where(Class.id.in_(ids))
         )
         result = await session.execute(stmt)
@@ -5426,7 +5546,6 @@ class LTIRegistration(Base):
     institutions = relationship(
         "Institution",
         secondary=lti_registration_institution_association,
-        back_populates="lti_registrations",
     )
 
     admin_name = Column(String, nullable=True)
@@ -5454,10 +5573,30 @@ class LTIRegistration(Base):
     )
 
     @classmethod
-    async def create(cls, session: AsyncSession, data: dict) -> "LTIRegistration":
+    async def create(
+        cls,
+        session: AsyncSession,
+        data: dict,
+        institution_ids: list[int] | None = None,
+    ) -> "LTIRegistration":
         registration = LTIRegistration(**data)
         session.add(registration)
         await session.flush()
+
+        if institution_ids:
+            institution_registration_pairs = [
+                {"lti_registration_id": registration.id, "institution_id": inst_id}
+                for inst_id in institution_ids
+            ]
+            stmt = (
+                _get_upsert_stmt(session)(lti_registration_institution_association)
+                .values(institution_registration_pairs)
+                .on_conflict_do_nothing(
+                    index_elements=["lti_registration_id", "institution_id"],
+                )
+            )
+            await session.execute(stmt)
+
         return registration
 
     @classmethod
@@ -5466,6 +5605,81 @@ class LTIRegistration(Base):
     ) -> "LTIRegistration":
         stmt = select(LTIRegistration).where(LTIRegistration.client_id == client_id)
         return await session.scalar(stmt)
+
+    @classmethod
+    async def get_all(cls, session: AsyncSession) -> list["LTIRegistration"]:
+        stmt = (
+            select(LTIRegistration)
+            .options(selectinload(LTIRegistration.institutions))
+            .options(selectinload(LTIRegistration.review_by))
+            .order_by(LTIRegistration.created.desc())
+        )
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+    @classmethod
+    async def get_by_id(
+        cls, session: AsyncSession, id_: int
+    ) -> "LTIRegistration | None":
+        stmt = (
+            select(LTIRegistration)
+            .where(LTIRegistration.id == id_)
+            .options(selectinload(LTIRegistration.institutions))
+            .options(selectinload(LTIRegistration.review_by))
+            .options(selectinload(LTIRegistration.lti_classes))
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def update(
+        cls,
+        session: AsyncSession,
+        id_: int,
+        data: dict,
+        reviewer_id: int | None = None,
+    ) -> "LTIRegistration | None":
+        registration = await cls.get_by_id(session, id_)
+        if not registration:
+            return None
+        for key, value in data.items():
+            if hasattr(registration, key):
+                setattr(registration, key, value)
+        if reviewer_id is not None:
+            registration.review_by_id = reviewer_id
+        session.add(registration)
+        await session.flush()
+        await session.refresh(registration)
+        return registration
+
+    @classmethod
+    async def set_enabled(
+        cls, session: AsyncSession, id_: int, enabled: bool
+    ) -> "LTIRegistration | None":
+        registration = await cls.get_by_id(session, id_)
+        if not registration:
+            return None
+        registration.enabled = enabled
+        session.add(registration)
+        await session.flush()
+        await session.refresh(registration)
+        return registration
+
+    @classmethod
+    async def set_institutions(
+        cls, session: AsyncSession, id_: int, institution_ids: list[int]
+    ) -> "LTIRegistration | None":
+        registration = await cls.get_by_id(session, id_)
+        if not registration:
+            return None
+        if institution_ids:
+            institutions = await Institution.get_all_by_id(session, institution_ids)
+            registration.institutions = institutions
+        else:
+            registration.institutions = []
+        session.add(registration)
+        await session.flush()
+        await session.refresh(registration)
+        return registration
 
 
 class LTIOIDCSession(Base):
