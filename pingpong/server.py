@@ -1774,7 +1774,10 @@ async def delete_class(class_id: str, request: Request):
 
     # All private and class files associated with the class_id
     # are deleted by the database cascade
-    if class_.lms_status and class_.lms_status != schemas.LMSStatus.NONE:
+    if class_.lms_status and class_.lms_status not in {
+        schemas.LMSStatus.DISMISSED,
+        schemas.LMSStatus.NONE,
+    }:
         await remove_canvas_connection(request.state.db, class_.id, request=request)
 
     stmt = delete(models.UserClassRole).where(
