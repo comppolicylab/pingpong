@@ -13,13 +13,14 @@
   });
 
   $: showSidebar =
-    (data.me &&
+    ((data.me &&
       data.me.user &&
       !data.needsOnboarding &&
       (!data.needsAgreements || !data.doNotShowSidebar)) ||
-    (data.isPublicPage && !data.doNotShowSidebar) ||
-    data.isSharedAssistantPage ||
-    data.isSharedThreadPage;
+      (data.isPublicPage && !data.doNotShowSidebar) ||
+      data.isSharedAssistantPage ||
+      data.isSharedThreadPage) &&
+    !data.doNotShowSidebar;
   $: showStatusPage = data.me?.user;
   $: showBackground = data.isSharedAssistantPage || data.isSharedThreadPage;
 </script>
@@ -31,7 +32,7 @@
       <Sidebar {data} />
     </div>
     <div class="main-content shrink grow min-w-0">
-      <Main>
+      <Main {data}>
         <slot />
       </Main>
     </div>
@@ -40,7 +41,7 @@
     <script src="https://pingpong-hks.statuspage.io/embed/script.js"></script>
   {/if}
 {:else if showBackground}
-  <Main>
+  <Main {data}>
     <slot />
   </Main>
 {:else}

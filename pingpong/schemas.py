@@ -1004,6 +1004,116 @@ class InstitutionAdminResponse(BaseModel):
     added_admin: bool
 
 
+class LMSPlatform(StrEnum):
+    CANVAS = "canvas"
+
+
+class LTIRegistrationReviewStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class LTITokenAlgorithm(StrEnum):
+    RS256 = "RS256"
+
+
+class LTIRegistrationInstitution(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+
+
+class LTIRegistrationReviewer(BaseModel):
+    id: int
+    email: str | None
+    first_name: str | None
+    last_name: str | None
+    display_name: str | None
+
+    class Config:
+        from_attributes = True
+
+
+class LTIRegistration(BaseModel):
+    id: int
+    issuer: str
+    client_id: str | None
+    auth_login_url: str
+    auth_token_url: str
+    key_set_url: str
+    token_algorithm: LTITokenAlgorithm
+    lms_platform: LMSPlatform | None
+    canvas_account_name: str | None
+    admin_name: str | None
+    admin_email: str | None
+    friendly_name: str | None
+    enabled: bool
+    review_status: LTIRegistrationReviewStatus
+    internal_notes: str | None
+    review_notes: str | None
+    review_by: LTIRegistrationReviewer | None
+    institutions: list[LTIRegistrationInstitution]
+    created: datetime
+    updated: datetime | None
+
+    class Config:
+        from_attributes = True
+
+
+class LTIRegistrations(BaseModel):
+    registrations: list[LTIRegistration]
+
+    class Config:
+        from_attributes = True
+
+
+class LTIRegistrationDetail(LTIRegistration):
+    openid_configuration: str | None
+    registration_data: str | None
+    lti_classes_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class UpdateLTIRegistration(BaseModel):
+    friendly_name: str | None = Field(None, max_length=200)
+    admin_name: str | None = Field(None, max_length=200)
+    admin_email: str | None = Field(None, max_length=200)
+    internal_notes: str | None = Field(None, max_length=5000)
+    review_notes: str | None = Field(None, max_length=5000)
+
+
+class SetLTIRegistrationStatus(BaseModel):
+    review_status: LTIRegistrationReviewStatus
+
+
+class SetLTIRegistrationEnabled(BaseModel):
+    enabled: bool
+
+
+class SetLTIRegistrationInstitutions(BaseModel):
+    institution_ids: list[int]
+
+
+class InstitutionWithDefaultAPIKey(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+
+
+class InstitutionsWithDefaultAPIKey(BaseModel):
+    institutions: list[InstitutionWithDefaultAPIKey]
+
+    class Config:
+        from_attributes = True
+
+
 class SetInstitutionDefaultAPIKeyRequest(BaseModel):
     default_api_key_id: int | None = None
 
@@ -1019,6 +1129,12 @@ class LMSStatus(StrEnum):
     AUTHORIZED = auto()
     LINKED = auto()
     DISMISSED = auto()
+    ERROR = auto()
+
+
+class LTIStatus(StrEnum):
+    PENDING = auto()
+    LINKED = auto()
     ERROR = auto()
 
 
@@ -1044,6 +1160,7 @@ class CreateUserClassRoles(BaseModel):
     silent: bool = False
     lms_tenant: str | None = None
     lms_type: LMSType | None = None
+    lti_class_id: int | None = None
     sso_tenant: str | None = None
 
 

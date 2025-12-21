@@ -15,6 +15,7 @@ from pingpong.audio_store import LocalAudioStore, S3AudioStore
 from pingpong.log_filters import IgnoreHealthEndpoint
 from .authz import OpenFgaAuthzDriver
 from .email import AzureEmailSender, GmailEmailSender, MockEmailSender, SmtpEmailSender
+from .lti import AWSLTIKeyStore, LocalLTIKeyStore, LTIKeyManager
 from .support import SupportSettings, NoSupportSettings
 
 logger = logging.getLogger(__name__)
@@ -282,6 +283,44 @@ class LocalAudioStoreSettings(BaseSettings):
 AudioStoreSettings = Union[S3AudioStoreSettings, LocalAudioStoreSettings]
 
 
+class AWSLTIKeyStoreSettings(BaseSettings):
+    """Settings for AWS LTI key store."""
+
+    type: Literal["aws"] = "aws"
+    secret_name: str
+
+    @cached_property
+    def key_manager(self):
+        key_store = AWSLTIKeyStore(self.secret_name)
+        return LTIKeyManager(key_store)
+
+
+class LocalLTIKeyStoreSettings(BaseSettings):
+    """Settings for local LTI key store."""
+
+    type: Literal["local"] = "local"
+    directory: str
+
+    @cached_property
+    def key_manager(self):
+        key_store = LocalLTIKeyStore(self.directory)
+        return LTIKeyManager(key_store)
+
+
+LTIKeyStoreSettings = Union[AWSLTIKeyStoreSettings, LocalLTIKeyStoreSettings]
+
+
+class LTISettings(BaseSettings):
+    """LTI Advantage Service settings."""
+
+    key_store: LTIKeyStoreSettings
+
+    # Key rotation settings
+    rotation_schedule: str = Field("0 0 1 * *")  # First day of every month at midnight
+    key_retention_count: int = Field(3)  # Keep last 3 keys
+    key_size: int = Field(2048)  # RSA key size in bits
+
+
 class FeatureFlags(BaseSettings):
     """Feature flags for the application."""
 
@@ -321,6 +360,7 @@ class Config(BaseSettings):
     email: EmailSettings
     lms: LMSSettings
     study: StudySettings | None = Field(None)
+    lti: LTISettings | None = Field(None)
     sentry: SentrySettings = Field(SentrySettings())
     metrics: MetricsSettings = Field(MetricsSettings())
     init: InitSettings = Field(InitSettings())

@@ -161,6 +161,37 @@ export const fullPath = (path: string) => {
   return join('/api/v1/', path);
 };
 
+let _ltiSessionToken: string | null = null;
+
+export const setLTISessionToken = (token: string) => {
+  if (browser) {
+    sessionStorage.setItem('lti_session', token);
+  }
+  _ltiSessionToken = token;
+};
+
+export const hasLTISessionToken = () => {
+  if (!browser) {
+    return _ltiSessionToken !== null;
+  }
+  const token = sessionStorage.getItem('lti_session');
+  return token !== null;
+};
+
+export const getLTISessionToken = () => {
+  if (!browser) {
+    return _ltiSessionToken;
+  }
+  return sessionStorage.getItem('lti_session');
+};
+
+export const clearLTISessionToken = () => {
+  _ltiSessionToken = null;
+  if (browser) {
+    sessionStorage.removeItem('lti_session');
+  }
+};
+
 /**
  * Common fetch method.
  */
@@ -178,6 +209,15 @@ const _fetch = async (
     headers = {
       ...headers,
       'X-Anonymous-Thread-Session': anonymousSessionToken
+    };
+  }
+  // If we're in an LTI context, include the session token in the Authorization header.
+  // This is needed because third-party cookies may be blocked in iframes.
+  const ltiToken = getLTISessionToken();
+  if (ltiToken) {
+    headers = {
+      ...headers,
+      Authorization: `Bearer ${ltiToken}`
     };
   }
   return f(full, {
@@ -322,6 +362,15 @@ export type Institution = {
   updated: string | null;
 };
 
+export type LTIPublicInstitution = {
+  id: number;
+  name: string;
+};
+
+export type LTIPublicInstitutions = {
+  institutions: LTIPublicInstitution[];
+};
+
 export type InstitutionAdmin = {
   id: number;
   email: string | null;
@@ -395,6 +444,49 @@ export type ExternalLoginProvider = {
 
 export type ExternalLoginProviders = {
   providers: ExternalLoginProvider[];
+};
+
+/**
+ * Get all external login providers.
+ */
+export const getExternalLoginProvidersForLTI = async (f: Fetcher) => {
+  return await GET<never, ExternalLoginProviders>(f, 'lti/sso/providers');
+};
+
+export type LTIPublicSSOProvider = {
+  id: number;
+  name: string;
+  display_name: string | null;
+};
+
+export type LTIPublicSSOProviders = {
+  providers: LTIPublicSSOProvider[];
+};
+
+export const getPublicExternalLoginProvidersForLTI = async (f: Fetcher) => {
+  return await GET<never, LTIPublicSSOProviders>(f, 'lti/public/sso/providers');
+};
+
+export const LTI_SSO_FIELDS = [
+  'canvas.sisIntegrationId',
+  'canvas.sisSourceId',
+  'person.sourcedId'
+] as const;
+export type LTISSOField = (typeof LTI_SSO_FIELDS)[number];
+
+export type LTIRegisterRequest = {
+  name: string;
+  admin_name: string;
+  admin_email: string;
+  provider_id: number;
+  sso_field: LTISSOField | null;
+  openid_configuration: string;
+  registration_token: string;
+  institution_ids?: number[];
+};
+
+export const registerLTIInstance = async (f: Fetcher, data: LTIRegisterRequest) => {
+  return await POST<LTIRegisterRequest, never>(f, 'lti/register', data);
 };
 
 export type ExternalLogin = {
@@ -664,6 +756,10 @@ export const getInstitutions = async (f: Fetcher, role?: string) => {
   return await GET<GetInstitutionsRequest, Institutions>(f, 'institutions', q);
 };
 
+export const getPublicInstitutionsForLTI = async (f: Fetcher) => {
+  return await GET<never, LTIPublicInstitutions>(f, 'lti/public/institutions');
+};
+
 /**
  * Get an institution by ID.
  */
@@ -728,6 +824,208 @@ export const addInstitutionAdmin = async (
 
 export const removeInstitutionAdmin = async (f: Fetcher, instId: number, userId: number) => {
   return await DELETE<never, GenericStatus>(f, `institution/${instId}/admin/${userId}`);
+};
+
+export type LTIRegistrationReviewStatus = 'pending' | 'approved' | 'rejected';
+
+export type LTIRegistrationInstitution = {
+  id: number;
+  name: string;
+};
+
+export type LTIRegistrationReviewer = {
+  id: number;
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  display_name: string | null;
+};
+
+export type LTIRegistration = {
+  id: number;
+  issuer: string;
+  client_id: string | null;
+  auth_login_url: string;
+  auth_token_url: string;
+  key_set_url: string;
+  token_algorithm: string;
+  lms_platform: string | null;
+  canvas_account_name: string | null;
+  admin_name: string | null;
+  admin_email: string | null;
+  friendly_name: string | null;
+  enabled: boolean;
+  review_status: LTIRegistrationReviewStatus;
+  internal_notes: string | null;
+  review_notes: string | null;
+  review_by: LTIRegistrationReviewer | null;
+  institutions: LTIRegistrationInstitution[];
+  created: string;
+  updated: string | null;
+};
+
+export type LTIRegistrations = {
+  registrations: LTIRegistration[];
+};
+
+export type LTIRegistrationDetail = LTIRegistration & {
+  openid_configuration: string | null;
+  registration_data: string | null;
+  lti_classes_count: number;
+};
+
+export type UpdateLTIRegistrationRequest = {
+  friendly_name?: string | null;
+  admin_name?: string | null;
+  admin_email?: string | null;
+  internal_notes?: string | null;
+  review_notes?: string | null;
+};
+
+export type SetLTIRegistrationStatusRequest = {
+  review_status: LTIRegistrationReviewStatus;
+};
+
+export type SetLTIRegistrationEnabledRequest = {
+  enabled: boolean;
+};
+
+export const getLTIRegistrations = async (f: Fetcher) => {
+  return await GET<never, LTIRegistrations>(f, 'admin/lti/registrations');
+};
+
+export const getLTIRegistration = async (f: Fetcher, id: number | string) => {
+  return await GET<never, LTIRegistrationDetail>(f, `admin/lti/registrations/${id}`);
+};
+
+export const updateLTIRegistration = async (
+  f: Fetcher,
+  id: number,
+  data: UpdateLTIRegistrationRequest
+) => {
+  return await PATCH<UpdateLTIRegistrationRequest, LTIRegistration>(
+    f,
+    `admin/lti/registrations/${id}`,
+    data
+  );
+};
+
+export const setLTIRegistrationStatus = async (
+  f: Fetcher,
+  id: number,
+  data: SetLTIRegistrationStatusRequest
+) => {
+  return await PATCH<SetLTIRegistrationStatusRequest, LTIRegistration>(
+    f,
+    `admin/lti/registrations/${id}/status`,
+    data
+  );
+};
+
+export const setLTIRegistrationEnabled = async (
+  f: Fetcher,
+  id: number,
+  data: SetLTIRegistrationEnabledRequest
+) => {
+  return await PATCH<SetLTIRegistrationEnabledRequest, LTIRegistration>(
+    f,
+    `admin/lti/registrations/${id}/enabled`,
+    data
+  );
+};
+
+export type SetLTIRegistrationInstitutionsRequest = {
+  institution_ids: number[];
+};
+
+export const setLTIRegistrationInstitutions = async (
+  f: Fetcher,
+  id: number,
+  data: SetLTIRegistrationInstitutionsRequest
+) => {
+  return await PATCH<SetLTIRegistrationInstitutionsRequest, LTIRegistration>(
+    f,
+    `admin/lti/registrations/${id}/institutions`,
+    data
+  );
+};
+
+export type InstitutionsWithDefaultAPIKey = {
+  institutions: Institution[];
+};
+
+export const getInstitutionsWithDefaultAPIKey = async (f: Fetcher) => {
+  return await GET<never, InstitutionsWithDefaultAPIKey>(f, '/admin/lti/institutions');
+};
+
+export type LTISetupInstitution = {
+  id: number;
+  name: string;
+};
+
+export type LTISetupContext = {
+  lti_class_id: number;
+  course_name: string | null;
+  course_code: string | null;
+  course_term: string | null;
+  institutions: LTISetupInstitution[];
+};
+
+export type LTILinkableGroup = {
+  id: number;
+  name: string;
+  term: string;
+  institution_name: string;
+};
+
+export type LTILinkableGroupsResponse = {
+  groups: LTILinkableGroup[];
+};
+
+export type LTISetupCreateRequest = {
+  institution_id: number;
+  name: string;
+  term: string;
+};
+
+export type LTISetupCreateResponse = {
+  class_id: number;
+};
+
+export type LTISetupLinkRequest = {
+  class_id: number;
+};
+
+export type LTISetupLinkResponse = {
+  class_id: number;
+};
+
+export const getLTISetupContext = async (f: Fetcher, ltiClassId: number) => {
+  return await GET<never, LTISetupContext>(f, `lti/setup/${ltiClassId}`);
+};
+
+export const getLTILinkableGroups = async (f: Fetcher, ltiClassId: number) => {
+  return await GET<never, LTILinkableGroupsResponse>(f, `lti/setup/${ltiClassId}/linkable-groups`);
+};
+
+export const createLTIGroup = async (
+  f: Fetcher,
+  ltiClassId: number,
+  data: LTISetupCreateRequest
+) => {
+  return await POST<LTISetupCreateRequest, LTISetupCreateResponse>(
+    f,
+    `lti/setup/${ltiClassId}/create`,
+    data
+  );
+};
+
+export const linkLTIGroup = async (f: Fetcher, ltiClassId: number, data: LTISetupLinkRequest) => {
+  return await POST<LTISetupLinkRequest, LTISetupLinkResponse>(
+    f,
+    `lti/setup/${ltiClassId}/link`,
+    data
+  );
 };
 
 export type LMSStatus = 'authorized' | 'none' | 'error' | 'linked' | 'dismissed';
@@ -1764,6 +2062,11 @@ const _doUpload = (
     const anonymousShareToken = getAnonymousShareToken();
     if (anonymousShareToken) {
       xhr.setRequestHeader('X-Anonymous-Link-Share', anonymousShareToken);
+    }
+    // If we're in an LTI context, include the session token in the Authorization header.
+    const ltiToken = getLTISessionToken();
+    if (ltiToken) {
+      xhr.setRequestHeader('Authorization', `Bearer ${ltiToken}`);
     }
     xhr.upload.onprogress = onProgress;
     xhr.onreadystatechange = () => {
@@ -3414,6 +3717,12 @@ export const createAudioWebsocket = (classId: number, threadId: number): WebSock
   const anonymousShareToken = getAnonymousShareToken();
   if (anonymousShareToken) {
     params.set('share_token', anonymousShareToken);
+  }
+  // If we're in an LTI context, include the session token as a query param
+  // (WebSockets can't use Authorization headers)
+  const ltiToken = getLTISessionToken();
+  if (ltiToken) {
+    params.set('lti_session', ltiToken);
   }
   const url = `${protocol}://${host}/api/v1/class/${classId}/thread/${threadId}/audio?${params}`;
   return new WebSocket(url);

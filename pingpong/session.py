@@ -93,6 +93,7 @@ def populate_authorization_token(request):
 
 
 async def populate_request(request):
+    user: models.User | None = None
     try:
         request = await populate_anonymous_tokens(request)
         request = populate_authorization_token(request)

@@ -1,6 +1,8 @@
 import asyncio
+import hashlib
 import json
-from datetime import datetime
+import secrets
+from datetime import datetime, timedelta
 from typing import (
     AsyncGenerator,
     Collection,
@@ -137,6 +139,9 @@ class UserClassRole(Base):
     title: Mapped[Optional[str]]
     lms_tenant: Mapped[Optional[str]]
     lms_type = Column(SQLEnum(schemas.LMSType), nullable=True)
+    lti_class_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("lti_classes.id", ondelete="SET NULL"), nullable=True
+    )
     user = relationship("User", back_populates="classes")
     class_ = relationship("Class", back_populates="users")
     subscribed_to_summaries = Column(Boolean, server_default="true")
@@ -342,6 +347,7 @@ class UserClassRole(Base):
         sso_tenant: str | None = None,
         sso_id: str | None = None,
         subscribed_to_summaries: bool = True,
+        lti_class_id: int | None = None,
     ) -> "UserClassRole":
         stmt = (
             _get_upsert_stmt(session)(UserClassRole)
@@ -351,6 +357,7 @@ class UserClassRole(Base):
                 lms_tenant=lms_tenant,
                 lms_type=lms_type,
                 subscribed_to_summaries=subscribed_to_summaries,
+                lti_class_id=lti_class_id,
             )
             .on_conflict_do_update(
                 index_elements=[UserClassRole.user_id, UserClassRole.class_id],
@@ -360,6 +367,7 @@ class UserClassRole(Base):
                     subscribed_to_summaries=(
                         subscribed_to_summaries or UserClassRole.subscribed_to_summaries
                     ),
+                    lti_class_id=lti_class_id,
                 ),
             )
             .returning(UserClassRole)
@@ -413,6 +421,46 @@ class UserClassRole(Base):
             and_(
                 UserClassRole.class_id == int(class_id),
                 UserClassRole.lms_tenant == lms_tenant,
+                UserClassRole.lms_type == lms_type,
+            )
+        )
+        result = await session.execute(stmt)
+        users = [row.UserClassRole.user_id for row in result]
+        users_to_delete = list(set(users) - set(newly_synced))
+        stmt_ = delete(UserClassRole).where(
+            and_(
+                UserClassRole.class_id == int(class_id),
+                UserClassRole.user_id.in_(users_to_delete),
+            )
+        )
+        await session.execute(stmt_)
+        return users_to_delete
+
+    @classmethod
+    async def delete_from_sync_list_lti(
+        cls,
+        session: AsyncSession,
+        class_id: int,
+        newly_synced: list[int],
+        lti_class_id: int,
+        lms_type: schemas.LMSType,
+    ) -> list[int]:
+        """
+        Removes `UserClassRole`s from LMS course members who were previously synced with a specific LTI tenant but were not returned in the current sync.
+
+        Args:
+            session (AsyncSession): The DB Session to use for executing DB statements.
+            class_id (int): The ID of the class being synced.
+            newly_synced (list[int]): The list of all user ids returned by the current sync.
+            lms (str): The LMS tenant the sync was performed on.
+
+        Returns:
+            list[int]: List of user ids that were removed as they were not included in the current LMS tenant sync. Can be used to remove the relevant permissions for users.
+        """
+        stmt = select(UserClassRole).where(
+            and_(
+                UserClassRole.class_id == int(class_id),
+                UserClassRole.lti_class_id == lti_class_id,
                 UserClassRole.lms_type == lms_type,
             )
         )
@@ -1060,6 +1108,9 @@ class User(Base):
     )
     # Maps to classes in which the user has connected their LMS account
     lms_syncs: Mapped[List["Class"]] = relationship("Class", back_populates="lms_user")
+    lti_syncs: Mapped[List["LTIClass"]] = relationship(
+        "LTIClass", back_populates="setup_user"
+    )
     anonymous_link_id = Column(Integer, ForeignKey("anonymous_links.id"), nullable=True)
     anonymous_link = relationship("AnonymousLink", back_populates="user", uselist=False)
     anonymous_sessions = relationship("AnonymousSession", back_populates="user")
@@ -1397,6 +1448,24 @@ class Institution(Base):
         return [row.Institution for row in result]
 
     @classmethod
+    async def all_have_default_api_key(
+        cls, session: AsyncSession, ids: list[int]
+    ) -> bool:
+        """Check if all institutions with the given IDs have a default API key configured."""
+        if not ids:
+            return True
+        stmt = (
+            select(func.count())
+            .select_from(Institution)
+            .where(
+                Institution.id.in_(ids),
+                Institution.default_api_key_id.is_not(None),
+            )
+        )
+        count = await session.scalar(stmt)
+        return count == len(ids)
+
+    @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "Institution":
         stmt = select(Institution).where(Institution.id == int(id_))
         return await session.scalar(stmt)
@@ -1404,6 +1473,18 @@ class Institution(Base):
     @classmethod
     async def get_all(cls, session: AsyncSession) -> List["Institution"]:
         stmt = select(Institution).order_by(Institution.name.asc())
+        result = await session.execute(stmt)
+        return [row.Institution for row in result]
+
+    @classmethod
+    async def get_all_with_default_api_key(
+        cls, session: AsyncSession
+    ) -> List["Institution"]:
+        stmt = (
+            select(Institution)
+            .where(Institution.default_api_key_id.is_not(None))
+            .order_by(Institution.name.asc())
+        )
         result = await session.execute(stmt)
         return [row.Institution for row in result]
 
@@ -2633,6 +2714,85 @@ class LMSClass(Base):
             await session.execute(stmt_)
 
 
+class LTIClass(Base):
+    __tablename__ = "lti_classes"
+    __table_args__ = (
+        UniqueConstraint(
+            "registration_id",
+            "course_id",
+            name="_lti_registration_course_id_uc",
+        ),
+        Index("idx_lti_classes_registration_id", "registration_id"),
+        Index("idx_lti_classes_class_id", "class_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    registration_id = Column(
+        Integer, ForeignKey("lti_registrations.id", ondelete="CASCADE"), nullable=False
+    )
+
+    lti_status = Column(SQLEnum(schemas.LTIStatus), nullable=False)
+    last_synced = Column(DateTime(timezone=True), nullable=True)
+    last_sync_error = Column(String, nullable=True)
+    context_memberships_url = Column(String, nullable=True)
+
+    setup_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    lti_platform = Column(SQLEnum(schemas.LMSPlatform), nullable=False)
+    course_id = Column(String, nullable=False)
+    course_name = Column(String, nullable=True)
+    course_code = Column(String, nullable=True)
+    course_term = Column(String, nullable=True)
+    class_id = Column(
+        Integer, ForeignKey("classes.id", ondelete="SET NULL"), nullable=True
+    )
+
+    setup_user = relationship("User", foreign_keys=[setup_user_id])
+    registration = relationship("LTIRegistration", back_populates="lti_classes")
+    class_ = relationship("Class", back_populates="lti_classes")
+
+    @classmethod
+    async def get_by_registration_and_course_id(
+        cls, session: AsyncSession, registration_id: int, course_id: str
+    ) -> "LTIClass | None":
+        stmt = select(LTIClass).where(
+            and_(
+                LTIClass.registration_id == registration_id,
+                LTIClass.course_id == course_id,
+            )
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_for_setup(
+        cls, session: AsyncSession, lti_class_id: int
+    ) -> "LTIClass | None":
+        """Get an LTIClass with registration and institutions loaded for setup."""
+        stmt = (
+            select(LTIClass)
+            .where(LTIClass.id == lti_class_id)
+            .options(
+                selectinload(LTIClass.registration).selectinload(
+                    LTIRegistration.institutions
+                )
+            )
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def has_link_for_registration_and_class(
+        cls, session: AsyncSession, registration_id: int, class_id: int
+    ) -> bool:
+        """Check if a class already has an LTI link for a specific registration."""
+        stmt = select(LTIClass).where(
+            and_(
+                LTIClass.registration_id == registration_id,
+                LTIClass.class_id == class_id,
+            )
+        )
+        result = await session.scalar(stmt)
+        return result is not None
+
+
 class APIKey(Base):
     __tablename__ = "api_keys"
     __table_args__ = (
@@ -2735,6 +2895,7 @@ class Class(Base):
     lms_type = Column(SQLEnum(schemas.LMSType), nullable=True)
     lms_class_id = Column(Integer, ForeignKey("lms_classes.id"), nullable=True)
     lms_class = relationship("LMSClass", back_populates="classes")
+    lti_classes = relationship("LTIClass", back_populates="class_")
     lms_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     lms_user = relationship("User", back_populates="lms_syncs")
     lms_course_id = Column(Integer, nullable=True)
@@ -2977,6 +3138,20 @@ class Class(Base):
             .options(joinedload(Class.institution))
             .options(joinedload(Class.lms_user))
             .options(joinedload(Class.lms_class))
+            .where(Class.id.in_(ids))
+        )
+        result = await session.execute(stmt)
+        return [row.Class for row in result]
+
+    @classmethod
+    async def get_all_by_id_simple(
+        cls, session: AsyncSession, ids: list[int]
+    ) -> list["Class"]:
+        if not ids:
+            return []
+        stmt = (
+            select(Class)
+            .options(joinedload(Class.institution))
             .where(Class.id.in_(ids))
         )
         result = await session.execute(stmt)
@@ -3349,6 +3524,15 @@ class Class(Base):
         self.institution = None
         stmt = delete(Class).where(Class.id == self.id)
         await session.execute(stmt)
+
+    @classmethod
+    async def get_all_by_lms_course_id(
+        cls, session: AsyncSession, lms_course_id: int
+    ) -> list["Class"]:
+        """Get all classes by LMS course ID."""
+        stmt = select(Class).where(Class.lms_course_id == lms_course_id)
+        result = await session.execute(stmt)
+        return [row.Class for row in result]
 
 
 class CodeInterpreterCall(Base):
@@ -5328,3 +5512,313 @@ class Thread(Base):
         )
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
+
+
+lti_registration_institution_association = Table(
+    "lti_registrations_institutions",
+    Base.metadata,
+    Column("lti_registration_id", Integer, ForeignKey("lti_registrations.id")),
+    Column("institution_id", Integer, ForeignKey("institutions.id")),
+    Index(
+        "lti_registration_institution_idx",
+        "lti_registration_id",
+        "institution_id",
+        unique=True,
+    ),
+)
+
+
+class LTIRegistration(Base):
+    __tablename__ = "lti_registrations"
+
+    id = Column(Integer, primary_key=True)
+    issuer = Column(String, nullable=False)
+    client_id = Column(String)
+    auth_login_url = Column(String, nullable=False)
+    auth_token_url = Column(String, nullable=False)
+    key_set_url = Column(String, nullable=False)
+    token_algorithm = Column(SQLEnum(schemas.LTITokenAlgorithm), nullable=False)
+    lms_platform = Column(SQLEnum(schemas.LMSPlatform), nullable=True)
+    canvas_account_name = Column(String, nullable=True)
+
+    openid_configuration = Column(String, nullable=True)
+    registration_data = Column(String, nullable=True)
+    institutions = relationship(
+        "Institution",
+        secondary=lti_registration_institution_association,
+    )
+
+    admin_name = Column(String, nullable=True)
+    admin_email = Column(String, nullable=True)
+    friendly_name = Column(String, nullable=True)
+
+    enabled = Column(Boolean, default=False)
+    review_status = Column(
+        SQLEnum(schemas.LTIRegistrationReviewStatus),
+        server_default=schemas.LTIRegistrationReviewStatus.PENDING.name,
+    )
+    internal_notes = Column(String, nullable=True)
+    review_notes = Column(String, nullable=True)
+    review_by_id = Column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    review_by = relationship("User", uselist=False)
+    lti_classes = relationship("LTIClass", back_populates="registration")
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        data: dict,
+        institution_ids: list[int] | None = None,
+    ) -> "LTIRegistration":
+        registration = LTIRegistration(**data)
+        session.add(registration)
+        await session.flush()
+
+        if institution_ids:
+            institution_registration_pairs = [
+                {"lti_registration_id": registration.id, "institution_id": inst_id}
+                for inst_id in institution_ids
+            ]
+            stmt = (
+                _get_upsert_stmt(session)(lti_registration_institution_association)
+                .values(institution_registration_pairs)
+                .on_conflict_do_nothing(
+                    index_elements=["lti_registration_id", "institution_id"],
+                )
+            )
+            await session.execute(stmt)
+
+        return registration
+
+    @classmethod
+    async def get_by_client_id(
+        cls, session: AsyncSession, client_id: str
+    ) -> "LTIRegistration":
+        stmt = select(LTIRegistration).where(LTIRegistration.client_id == client_id)
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_all(cls, session: AsyncSession) -> list["LTIRegistration"]:
+        stmt = (
+            select(LTIRegistration)
+            .options(selectinload(LTIRegistration.institutions))
+            .options(selectinload(LTIRegistration.review_by))
+            .order_by(LTIRegistration.created.desc())
+        )
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+    @classmethod
+    async def get_by_id(
+        cls, session: AsyncSession, id_: int
+    ) -> "LTIRegistration | None":
+        stmt = (
+            select(LTIRegistration)
+            .where(LTIRegistration.id == id_)
+            .options(selectinload(LTIRegistration.institutions))
+            .options(selectinload(LTIRegistration.review_by))
+            .options(selectinload(LTIRegistration.lti_classes))
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def update(
+        cls,
+        session: AsyncSession,
+        id_: int,
+        data: dict,
+        reviewer_id: int | None = None,
+    ) -> "LTIRegistration | None":
+        registration = await cls.get_by_id(session, id_)
+        if not registration:
+            return None
+        for key, value in data.items():
+            if hasattr(registration, key):
+                setattr(registration, key, value)
+        if reviewer_id is not None:
+            registration.review_by_id = reviewer_id
+        session.add(registration)
+        await session.flush()
+        await session.refresh(registration)
+        return registration
+
+    @classmethod
+    async def set_enabled(
+        cls, session: AsyncSession, id_: int, enabled: bool
+    ) -> "LTIRegistration | None":
+        registration = await cls.get_by_id(session, id_)
+        if not registration:
+            return None
+        registration.enabled = enabled
+        session.add(registration)
+        await session.flush()
+        await session.refresh(registration)
+        return registration
+
+    @classmethod
+    async def set_institutions(
+        cls, session: AsyncSession, id_: int, institution_ids: list[int]
+    ) -> "LTIRegistration | None":
+        registration = await cls.get_by_id(session, id_)
+        if not registration:
+            return None
+        if institution_ids:
+            institutions = await Institution.get_all_by_id(session, institution_ids)
+            registration.institutions = institutions
+        else:
+            registration.institutions = []
+        session.add(registration)
+        await session.flush()
+        await session.refresh(registration)
+        return registration
+
+
+class LTIOIDCSession(Base):
+    __tablename__ = "lti_oidc_sessions"
+
+    id = Column(Integer, primary_key=True)
+
+    # OIDC request/response correlation + CSRF mitigation
+    state = Column(String, nullable=False, unique=True)
+
+    # Store a hash of the nonce (rather than the raw nonce) to reduce sensitive data at rest.
+    nonce_sha256 = Column(String, nullable=False)
+
+    issuer = Column(String, nullable=False)
+    client_id = Column(String, nullable=False)
+    deployment_id = Column(String, nullable=True)
+
+    redirect_uri = Column(String, nullable=True)
+    target_link_uri = Column(String, nullable=True)
+    login_hint = Column(String, nullable=True)
+    lti_message_hint = Column(String, nullable=True)
+    extra = Column(String, nullable=True)
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    consumed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("idx_lti_oidc_expires_at", "expires_at"),
+        Index("idx_lti_oidc_consumed_at", "consumed_at"),
+    )
+
+    @staticmethod
+    def generate_state(num_bytes: int = 32) -> str:
+        return secrets.token_urlsafe(num_bytes)
+
+    @staticmethod
+    def generate_nonce(num_bytes: int = 32) -> str:
+        return secrets.token_urlsafe(num_bytes)
+
+    @staticmethod
+    def hash_nonce(nonce: str) -> str:
+        return hashlib.sha256(nonce.encode("utf-8")).hexdigest()
+
+    def is_consumed(self) -> bool:
+        return self.consumed_at is not None
+
+    def is_expired(self, now: datetime) -> bool:
+        return self.expires_at <= now
+
+    @classmethod
+    async def create_pending(
+        cls,
+        session: AsyncSession,
+        *,
+        issuer: str,
+        client_id: str,
+        now: datetime,
+        ttl_seconds: int = 600,
+        deployment_id: str | None = None,
+        redirect_uri: str | None = None,
+        target_link_uri: str | None = None,
+        login_hint: str | None = None,
+        lti_message_hint: str | None = None,
+        extra: dict[str, Any] | None = None,
+        state: str | None = None,
+        nonce: str | None = None,
+    ) -> tuple["LTIOIDCSession", str, str]:
+        """
+        Create a pending OIDC session for LTI login.
+
+        Returns (session_row, state, nonce). Only the nonce hash is persisted.
+        """
+        if ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be positive")
+
+        state_value = state or cls.generate_state()
+        nonce_value = nonce or cls.generate_nonce()
+
+        session_row = LTIOIDCSession(
+            state=state_value,
+            nonce_sha256=cls.hash_nonce(nonce_value),
+            issuer=issuer,
+            client_id=client_id,
+            deployment_id=deployment_id,
+            redirect_uri=redirect_uri,
+            target_link_uri=target_link_uri,
+            login_hint=login_hint,
+            lti_message_hint=lti_message_hint,
+            extra=json.dumps(extra) if extra is not None else None,
+            expires_at=now + timedelta(seconds=ttl_seconds),
+        )
+
+        session.add(session_row)
+        await session.flush()
+        return session_row, state_value, nonce_value
+
+    @classmethod
+    async def get_by_state(
+        cls, session: AsyncSession, state: str
+    ) -> "LTIOIDCSession | None":
+        stmt = select(LTIOIDCSession).where(LTIOIDCSession.state == state)
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def validate_and_consume(
+        cls,
+        session: AsyncSession,
+        *,
+        state: str,
+        nonce: str,
+        now: datetime,
+        issuer: str | None = None,
+        client_id: str | None = None,
+        deployment_id: str | None = None,
+    ) -> "LTIOIDCSession | None":
+        """
+        Validate a launch callback against a pending session and mark it consumed.
+
+        Returns the session row if valid; otherwise returns None.
+        """
+        oidc_session = await cls.get_by_state(session, state)
+        if oidc_session is None:
+            return None
+
+        if oidc_session.is_consumed() or oidc_session.is_expired(now):
+            return None
+
+        if issuer is not None and oidc_session.issuer != issuer:
+            return None
+        if client_id is not None and oidc_session.client_id != client_id:
+            return None
+        if deployment_id is not None and oidc_session.deployment_id != deployment_id:
+            return None
+
+        if oidc_session.nonce_sha256 != cls.hash_nonce(nonce):
+            return None
+
+        oidc_session.consumed_at = now
+        session.add(oidc_session)
+        await session.flush()
+        return oidc_session

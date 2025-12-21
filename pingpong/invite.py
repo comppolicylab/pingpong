@@ -12,6 +12,71 @@ from .template import summary_template
 from .time import convert_seconds
 
 
+async def send_lti_registration_submitted(
+    sender: EmailSender,
+    *,
+    admin_email: str,
+    admin_name: str,
+    integration_name: str,
+):
+    subject = f"PingPong LTI registration submitted: {integration_name}"
+
+    message = notification_template.substitute(
+        {
+            "title": "We received your LTI registration.",
+            "subtitle": f"Thanks, {admin_name}.</p><p>We received your LTI registration for <b>{integration_name}</b>. Our team will review it before activation. You'll receive an email notification once your integration is approved.",
+            "legal_text": "because you submitted an LTI registration to PingPong",
+        }
+    )
+
+    await sender.send(admin_email, subject, message)
+
+
+async def send_lti_registration_approved(
+    sender: EmailSender,
+    *,
+    admin_email: str,
+    admin_name: str,
+    integration_name: str,
+):
+    subject = f"PingPong LTI registration approved: {integration_name}"
+
+    message = notification_template.substitute(
+        {
+            "title": "Your LTI registration has been approved!",
+            "subtitle": f"Great news, {admin_name}!</p><p>Your LTI registration for <b>{integration_name}</b> has been approved and is now active. Your users can now access PingPong through your LMS.",
+            "legal_text": "because you submitted an LTI registration to PingPong",
+        }
+    )
+
+    await sender.send(admin_email, subject, message)
+
+
+async def send_lti_registration_rejected(
+    sender: EmailSender,
+    *,
+    admin_email: str,
+    admin_name: str,
+    integration_name: str,
+    review_notes: str | None = None,
+):
+    subject = f"PingPong LTI registration rejected: {integration_name}"
+
+    notes_text = ""
+    if review_notes:
+        notes_text = f"</p><p><b>Review notes:</b> {review_notes}"
+
+    message = notification_template.substitute(
+        {
+            "title": "Your LTI registration was not approved.",
+            "subtitle": f"Hi {admin_name},</p><p>Unfortunately, your LTI registration for <b>{integration_name}</b> was not approved.{notes_text}</p><p>If you have questions or believe this was a mistake, please contact our support team.",
+            "legal_text": "because you submitted an LTI registration to PingPong",
+        }
+    )
+
+    await sender.send(admin_email, subject, message)
+
+
 async def send_invite(
     sender: EmailSender,
     invite: CreateInvite,
