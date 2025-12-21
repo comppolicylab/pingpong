@@ -313,10 +313,7 @@ LTIKeyStoreSettings = Union[AWSLTIKeyStoreSettings, LocalLTIKeyStoreSettings]
 class LTISettings(BaseSettings):
     """LTI Advantage Service settings."""
 
-    issuer: str
-    key_store: LTIKeyStoreSettings = Field(
-        LocalLTIKeyStoreSettings(directory="local_exports/lti_keys")
-    )
+    key_store: LTIKeyStoreSettings
 
     # Key rotation settings
     rotation_schedule: str = Field("0 0 1 * *")  # First day of every month at midnight
