@@ -501,6 +501,44 @@ async def test_lti_login_redirect(monkeypatch):
     assert response.headers["location"].startswith(registration.auth_login_url)
 
 
+@pytest.mark.asyncio
+async def test_lti_login_redirect_post(monkeypatch):
+    registration = _make_registration()
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "create_pending",
+        lambda *args, **kwargs: _async_return((1, "state", "nonce")),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        SimpleNamespace(url=lambda path: f"https://tool.example.com{path}"),
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    payload = {
+        "client_id": "client",
+        "iss": "issuer",
+        "login_hint": "hint",
+        "target_link_uri": "https://tool.example.com/launch",
+    }
+    request = FakeRequest(
+        method="POST", payload=payload, state=SimpleNamespace(db="db")
+    )
+
+    response = await server_module.lti_login(request)
+
+    assert response.status_code == 302
+    assert response.headers["location"].startswith(registration.auth_login_url)
+
+
 def test_is_instructor_and_student():
     assert server_module._is_instructor(
         ["http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"]

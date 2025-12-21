@@ -480,7 +480,7 @@ async def register_lti_instance(request: Request, data: LTIRegisterRequest):
     return {"status": "ok"}
 
 
-@lti_router.post("/login")
+@lti_router.api_route("/login", methods=["GET", "POST"])
 async def lti_login(request: Request):
     """Handle LTI login requests.
 
