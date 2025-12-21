@@ -40,6 +40,6 @@ jobs:
 
             Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
 
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
+          # Tools based on CLAUDE.md development commands
+          # Includes: poetry (pytest, alembic, python), pnpm (check, lint, test), and gh CLI
+          claude_args: '--allowed-tools "Bash(poetry run pytest:*),Bash(poetry run alembic:*),Bash(poetry run python:*),Bash(poetry install:*),Bash(pnpm install:*),Bash(pnpm check:*),Bash(pnpm lint:*),Bash(pnpm format:*),Bash(pnpm test:*),Bash(pnpm build:*),Bash(gh issue:*),Bash(gh pr:*),Bash(gh search:*)"'

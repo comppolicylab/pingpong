@@ -57,3 +57,7 @@ jobs:
 
           additional_permissions: |
             actions: read
+
+          # Tools based on CLAUDE.md development commands
+          claude_args: |
+            --allowed-tools "Bash(poetry run pytest:*),Bash(poetry run alembic:*),Bash(poetry run python:*),Bash(poetry install:*),Bash(pnpm install:*),Bash(pnpm check:*),Bash(pnpm lint:*),Bash(pnpm format:*),Bash(pnpm test:*),Bash(pnpm build:*),Bash(gh issue:*),Bash(gh pr:*),Bash(gh search:*)"
