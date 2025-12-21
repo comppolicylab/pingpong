@@ -2658,6 +2658,7 @@ class LTIClass(Base):
     lti_status = Column(SQLEnum(schemas.LTIStatus), nullable=False)
     last_synced = Column(DateTime(timezone=True), nullable=True)
     last_sync_error = Column(String, nullable=True)
+    context_memberships_url = Column(String, nullable=True)
 
     setup_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     lti_platform = Column(SQLEnum(schemas.LMSPlatform), nullable=False)
@@ -5393,6 +5394,20 @@ class Thread(Base):
         return result.scalar_one_or_none()
 
 
+lti_registration_institution_association = Table(
+    "lti_registrations_institutions",
+    Base.metadata,
+    Column("lti_registration_id", Integer, ForeignKey("lti_registrations.id")),
+    Column("institution_id", Integer, ForeignKey("institutions.id")),
+    Index(
+        "lti_registration_institution_idx",
+        "lti_registration_id",
+        "institution_id",
+        unique=True,
+    ),
+)
+
+
 class LTIRegistration(Base):
     __tablename__ = "lti_registrations"
 
@@ -5406,22 +5421,29 @@ class LTIRegistration(Base):
     lms_platform = Column(SQLEnum(schemas.LMSPlatform), nullable=True)
     canvas_account_name = Column(String, nullable=True)
 
-    configuration = Column(String, nullable=True)
+    openid_configuration = Column(String, nullable=True)
+    registration_data = Column(String, nullable=True)
+    institutions = relationship(
+        "Institution",
+        secondary=lti_registration_institution_association,
+        back_populates="lti_registrations",
+    )
 
     admin_name = Column(String, nullable=True)
     admin_email = Column(String, nullable=True)
     friendly_name = Column(String, nullable=True)
 
+    enabled = Column(Boolean, default=False)
     review_status = Column(
         SQLEnum(schemas.LTIRegistrationReviewStatus),
         server_default=schemas.LTIRegistrationReviewStatus.PENDING.name,
     )
+    internal_notes = Column(String, nullable=True)
     review_notes = Column(String, nullable=True)
-    public_notes = Column(String, nullable=True)
     review_by_id = Column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    review_by = relationship("User", uselist=False, lazy="selectin")
+    review_by = relationship("User", uselist=False)
     lti_classes = relationship("LTIClass", back_populates="registration")
 
     created = Column(DateTime(timezone=True), server_default=func.now())
