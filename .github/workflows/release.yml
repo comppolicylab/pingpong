@@ -242,3 +242,4 @@ jobs:
         with:
           environment: ${{ github.event.release.prerelease && 'staging' || 'production' }}
           version: ${{ env.RELEASE_VERSION }}
+          set_commits: auto
