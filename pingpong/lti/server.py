@@ -368,6 +368,7 @@ async def register_lti_instance(request: Request, data: LTIRegisterRequest):
         "client_name": "PingPong",
         "jwks_uri": config.url("/api/v1/lti/.well-known/jwks.json"),
         "token_endpoint_auth_method": "private_key_jwt",
+        "logo_uri": config.url("/pingpong_icon_2x.png"),
         "scope": " ".join(REQUIRED_SCOPES + ["openid"]),
         "https://purl.imsglobal.org/spec/lti-tool-configuration": {
             "domain": config.public_url.replace("https://", "")
