@@ -1,13 +1,21 @@
-from pingpong.files import _file_grants
 import pingpong.schemas as schemas
 from pingpong import models
 
 from .testutil import with_authz
 
 
-@with_authz(grants=[])
+@with_authz(
+    grants=[
+        # File permissions will be set up below after file is created
+        # Thread creation permission
+        ("anonymous_link:share-token-123", "can_create_thread", "class:1"),
+        # File viewer permissions (from _file_grants)
+        ("anonymous_link:share-token-123", "can_view", "user_file:1"),
+        ("anonymous_link:share-token-123", "can_delete", "user_file:1"),
+    ]
+)
 async def test_anonymous_share_file_delete_permission_revoked_on_thread_create(
-    api, authz, config, db, monkeypatch
+    api, authz, db, monkeypatch
 ):
     async def fake_generate_name(*_args, **_kwargs):
         return schemas.ThreadName(name="Test Thread", can_generate=True)
@@ -60,23 +68,6 @@ async def test_anonymous_share_file_delete_permission_revoked_on_thread_create(
             class_id=class_.id,
         )
         await session.commit()
-
-    async with config.authz.driver.get_client() as authz_client:
-        await authz_client.write_safe(
-            grant=_file_grants(
-                file, class_.id, None, f"anonymous_link:{share_token}", None
-            )
-        )
-
-        await authz_client.write_safe(
-            grant=[
-                (
-                    f"anonymous_link:{share_token}",
-                    "can_create_thread",
-                    f"class:{class_.id}",
-                )
-            ]
-        )
 
     response = api.post(
         f"/api/v1/class/{class_.id}/thread",
