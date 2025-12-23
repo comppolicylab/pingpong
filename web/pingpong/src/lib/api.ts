@@ -1471,6 +1471,7 @@ export type AssistantModel = {
   supports_verbosity: boolean;
   supports_web_search: boolean;
   supports_reasoning: boolean;
+  supports_mcp_server: boolean;
   hide_in_model_selector?: boolean;
   reasoning_effort_levels?: number[];
   default_prompt_id?: string | null;

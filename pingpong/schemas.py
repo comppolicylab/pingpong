@@ -465,7 +465,12 @@ def temperature_validator(self):
 
 
 class ToolOption(TypedDict):
-    type: Literal["file_search"] | Literal["code_interpreter"] | Literal["web_search"]
+    type: (
+        Literal["file_search"]
+        | Literal["code_interpreter"]
+        | Literal["web_search"]
+        | Literal["mcp_server"]
+    )
 
 
 class CreateAssistant(BaseModel):
@@ -1457,6 +1462,7 @@ class AssistantModel(BaseModel):
     supports_none_reasoning_effort: bool
     supports_verbosity: bool
     supports_web_search: bool
+    supports_mcp_server: bool
     supports_vision: bool
     vision_support_override: bool | None = None
     supports_file_search: bool
@@ -1493,6 +1499,7 @@ class AssistantModelDict(TypedDict):
     supports_none_reasoning_effort: bool
     supports_verbosity: bool
     supports_web_search: bool
+    supports_mcp_server: bool
     supports_vision: bool
     supports_file_search: bool
     supports_code_interpreter: bool

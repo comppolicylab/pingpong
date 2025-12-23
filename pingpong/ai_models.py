@@ -27,6 +27,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": True,
         "supports_verbosity": True,
         "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "Best model for complex tasks, instruction following, and long conversations. Control how long the model spends thinking in Advanced Options.",
     },
     "gpt-5": {
@@ -47,6 +48,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": True,
         "supports_verbosity": False,
         "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "Previous intelligent reasoning model for coding, reasoning and tasks across domains. Control how long the model spends thinking in Advanced Options.",
     },
     "gpt-5-mini": {
@@ -67,6 +69,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": True,
         "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "A faster reasoning model, great for well-defined tasks and precise prompts. Tune how long the model spends thinking in Advanced Options.",
     },
     "gpt-5-nano": {
@@ -86,7 +89,8 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_minimal_reasoning_effort": True,
         "supports_none_reasoning_effort": False,
         "supports_verbosity": True,
-        "supports_web_search": False,
+        "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "Fastest version of GPT-5. It's great for summarization and classification tasks. Not recommended for use in class assistants. Tune how long the model spends thinking in Advanced Options.",
     },
     #
@@ -110,6 +114,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "Smartest non-reasoning model. Excels at instruction following, with broad knowledge across domains.",
     },
     "gpt-4.1-mini": {
@@ -129,7 +134,8 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_minimal_reasoning_effort": False,
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
-        "supports_web_search": True,
+        "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "Smaller, faster GPT 4.1 model.",
     },
     "gpt-4.1-nano": {
@@ -149,7 +155,8 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_minimal_reasoning_effort": False,
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
-        "supports_web_search": False,
+        "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "Fastest GPT 4.1 model. Not recommended for use in class assistants.",
     },
     #
@@ -173,6 +180,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "Excels at tasks that benefit from creative, open-ended thinking and conversation, such as writing, learning, or exploring new ideas.",
     },
     #
@@ -196,6 +204,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "Fast reasoning model, succeeded by GPT-5 mini.",
     },
     "o3": {
@@ -216,6 +225,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "Reasoning model for complex tasks, succeeded by GPT-5.",
     },
     "o3-pro": {
@@ -236,6 +246,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "Version of o3 with more compute for better responses.",
     },
     "o1": {
@@ -256,6 +267,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "Reasoning model designed to solve hard problems across domains. Succeeded by o3.",
     },
     "o3-mini": {
@@ -276,6 +288,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "Fast reasoning model particularly good at coding, math, and science. Succeeded by o4 mini.",
     },
     #
@@ -299,6 +312,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "Fast, intelligent, flexible GPT model suitable for a wide range of tasks. We recommend upgrading to GPT-4.1.",
     },
     "gpt-4o-mini": {
@@ -319,6 +333,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "Fast, small model for focused tasks. We recommend upgrading to GPT-4.1 mini.",
     },
     #
@@ -342,6 +357,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "The latest GPT-4 Turbo model.",
     },
     "gpt-4-turbo-preview": {
@@ -362,6 +378,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "The latest GPT-4 Turbo preview model.",
     },
     #
@@ -385,6 +402,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "The latest GPT-3.5 Turbo model. Choose the more capable GPT-4o mini model instead.",
     },
     # gpt-3.5-turbo equivalent model in Azure
@@ -406,6 +424,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "The latest GPT-3.5 Turbo model. Choose the more capable GPT-4o mini model instead.",
     },
     #
@@ -430,6 +449,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "Flagship model capable of responding to audio inputs in real-time.",
     },
     "gpt-realtime-mini": {
@@ -451,6 +471,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "A cost-efficient version of GPT Realtime, capable of responding to audio inputs in real-time.",
     },
     "gpt-4o-realtime-preview": {
@@ -472,6 +493,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "Preview model capable of responding to audio inputs in real-time. Use GPT Realtime for better performance.",
     },
     "gpt-4o-mini-realtime-preview": {
@@ -493,6 +515,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "Smaller model capable of responding to audio inputs in real-time. Use GPT Realtime mini for better performance.",
     },
     #
@@ -518,6 +541,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": True,
         "supports_verbosity": True,
         "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "Best model for complex tasks, instruction following, and long conversations. Control how long the model spends thinking in Advanced Options.",
     },
     "gpt-5.1-chat-latest": {
@@ -539,6 +563,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "reasoning_effort_levels": [1],
         "supports_verbosity": True,
         "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "GPT-5.1 Chat points to the GPT-5.1 snapshot currently used in ChatGPT. We recommend GPT-5.1 for most assistants. Control how long the model spends thinking in Advanced Options.",
     },
     "gpt-5-2025-08-07": {
@@ -559,6 +584,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": True,
         "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "Previous intelligent reasoning model for coding, reasoning and tasks across domains. Tune how long the model spends thinking in Advanced Options.",
     },
     "gpt-5-mini-2025-08-07": {
@@ -579,6 +605,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": True,
         "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "A faster reasoning model, great for well-defined tasks and precise prompts. Tune how long the model spends thinking in Advanced Options.",
     },
     "gpt-5-nano-2025-08-07": {
@@ -599,6 +626,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": True,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "Fastest version of GPT-5. It's great for summarization and classification tasks. Not recommended for use in class assistants. Tune how long the model spends thinking in Advanced Options.",
     },
     #
@@ -622,6 +650,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "Smartest non-reasoning model. Excels at instruction following, with broad knowledge across domains.",
     },
     "gpt-4.1-mini-2025-04-14": {
@@ -642,6 +671,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "Smaller, faster GPT 4.1 model.",
     },
     "gpt-4.1-nano-2025-04-14": {
@@ -662,6 +692,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "Fastest GPT 4.1 model. Not recommended for use in class assistants.",
     },
     #
@@ -685,6 +716,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "Excels at tasks that benefit from creative, open-ended thinking and conversation, such as writing, learning, or exploring new ideas.",
     },
     #
@@ -708,6 +740,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "Reasoning model designed to solve hard problems across domains. Succeeded by o3.",
     },
     "o3-mini-2025-01-31": {
@@ -728,6 +761,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "Fast reasoning model particularly good at coding, math, and science. Succeeded by o4 mini.",
     },
     # -----------------   gpt-4o Family   -----------------
@@ -749,6 +783,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "GPT-4o is a fast, intelligent, flexible GPT model suitable for a wide range of tasks. We recommend upgrading to GPT-4.1. This snapshot includes enhanced creative writing capabilities.",
     },
     "gpt-4o-2024-08-06": {
@@ -769,6 +804,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "Fast, intelligent, flexible GPT model suitable for a wide range of tasks. We recommend upgrading to GPT-4.1. GPT-4o (Latest) points to this snapshot.",
     },
     "gpt-4o-2024-05-13": {
@@ -789,6 +825,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "Fast, intelligent, flexible GPT model suitable for a wide range of tasks. We recommend upgrading to GPT-4.1.",
     },
     "gpt-4o-mini-2024-07-18": {
@@ -809,6 +846,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "Fast, small model for focused tasks. We recommend upgrading to GPT-4.1 mini.",
     },
     # -----------------   gpt-4 Family   -----------------
@@ -830,6 +868,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "GPT-4 Turbo with Vision model.",
     },
     "gpt-4-0125-preview": {
@@ -850,6 +889,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": 'GPT-4 Turbo preview model with a fix for "laziness," where the model doesn\'t complete a task.',
     },
     # Azure model equivalent
@@ -871,6 +911,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": 'GPT-4 Turbo preview model with a fix for "laziness," where the model doesn\'t complete a task.',
     },
     "gpt-4-1106-preview": {
@@ -891,6 +932,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "GPT-4 Turbo preview model with improved instruction following, reproducible outputs, and more.",
     },
     # Azure model equivalent
@@ -912,6 +954,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "GPT-4 Turbo preview model with improved instruction following, reproducible outputs, and more.",
     },
     # -----------------   gpt-3.5 Family   -----------------
@@ -933,6 +976,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "GPT-3.5 Turbo model with higher accuracy at responding in requested formats.",
     },
     # Azure model equivalent
@@ -954,6 +998,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "GPT-3.5 Turbo model with higher accuracy at responding in requested formats.",
     },
     "gpt-3.5-turbo-1106": {
@@ -974,6 +1019,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "GPT-3.5 Turbo model with improved instruction following, reproducible outputs, and more.",
     },
     # Azure model equivalent
@@ -995,6 +1041,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "GPT-3.5 Turbo model with improved instruction following, reproducible outputs, and more.",
     },
     #
@@ -1019,6 +1066,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "GPT Realtime initial release version.",
     },
     "gpt-realtime-mini-2025-10-06": {
@@ -1040,6 +1088,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "GPT Realtime mini initial release version.",
     },
     "gpt-4o-realtime-preview-2024-12-17": {
@@ -1061,6 +1110,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "Higher intelligence version of the GPT-4o Realtime model. gpt-4o-realtime-preview points to this version.",
     },
     "gpt-4o-realtime-preview-2024-10-01": {
@@ -1082,6 +1132,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "GPT-4o Realtime initial release version.",
     },
     "gpt-4o-mini-realtime-preview-2024-12-17": {
@@ -1103,6 +1154,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
         "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "GPT-4o mini Realtime initial release version.",
     },
     #

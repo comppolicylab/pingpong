@@ -2684,6 +2684,7 @@ async def list_class_models(
             ],
             "supports_verbosity": KNOWN_MODELS[m.id]["supports_verbosity"],
             "supports_web_search": KNOWN_MODELS[m.id]["supports_web_search"],
+            "supports_mcp_server": KNOWN_MODELS[m.id]["supports_mcp_server"],
             "supports_temperature": KNOWN_MODELS[m.id]["supports_temperature"],
             "supports_reasoning": KNOWN_MODELS[m.id]["supports_reasoning"],
             "reasoning_effort_levels": KNOWN_MODELS[m.id].get(
@@ -2718,6 +2719,7 @@ async def list_class_models(
                 "supports_none_reasoning_effort": False,
                 "supports_verbosity": False,
                 "supports_web_search": False,
+                "supports_mcp_server": False,
                 "description": "The latest GPT-4 Turbo model.",
             }
         )
@@ -2746,6 +2748,7 @@ async def list_class_models(
                 "supports_none_reasoning_effort": False,
                 "supports_verbosity": False,
                 "supports_web_search": False,
+                "supports_mcp_server": False,
                 "description": "The latest GPT-4 Turbo preview model.",
             }
         )

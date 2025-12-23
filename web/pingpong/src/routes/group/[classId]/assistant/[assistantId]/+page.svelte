@@ -175,6 +175,12 @@
     description:
       'Web search allows models to access up-to-date information from the internet and provide answers with sourced citations.'
   };
+  const mcpServerMetadata = {
+    value: 'mcp_server',
+    name: 'MCP Servers',
+    description:
+      'Use remote MCP servers to give models new capabilities. MCP Server support is currently in preview and may be unstable. Do not use for important tasks. Make sure you trust the MCP server you are connecting to.'
+  };
   const defaultTools = [{ type: 'file_search' }];
 
   let createClassicAssistantByProviderOrUser = false;
@@ -335,6 +341,10 @@
     (model) => model.id
   );
   $: supportsWebSearch = supportsWebSearchModels.includes(selectedModel);
+  $: supportsMCPServerModels = (data.models.filter((model) => model.supports_mcp_server) || []).map(
+    (model) => model.id
+  );
+  $: supportsMCPServer = supportsMCPServerModels.includes(selectedModel);
   $: supportsVision = supportVisionModels.includes(selectedModel);
   $: visionSupportOverride = data.models.find(
     (model) => model.id === selectedModel
@@ -380,6 +390,12 @@
   $: if (initialTools !== undefined && initialTools !== null && !hasSetWebSearchToolSelect) {
     webSearchToolSelect = initialTools.includes('web_search');
     hasSetWebSearchToolSelect = true;
+  }
+  let mcpServerToolSelect = false;
+  let hasSetMCPServerToolSelect = false;
+  $: if (initialTools !== undefined && initialTools !== null && !hasSetMCPServerToolSelect) {
+    mcpServerToolSelect = initialTools.includes('mcp_server');
+    hasSetMCPServerToolSelect = true;
   }
   let isPublished = false;
   let hasSetIsPublished = false;
@@ -1615,6 +1631,69 @@
         {/if}
       </div>
     {/if}
+    {#if !data?.enforceClassicAssistants}
+      <div class="col-span-2 mb-4">
+        {#if (data.isCreating && createClassicAssistant) || (!data.isCreating && assistantVersion !== 3)}
+          <div class="col-span-2 mb-3">
+            <div class="flex flex-col gap-y-1">
+              <Badge
+                class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
+                ><CloseOutline size="sm" />
+                <div>No MCP Server capabilities in Classic Assistants</div>
+              </Badge>
+              <Helper
+                >Classic Assistants do not support MCP Server capabilities. To use MCP Server,
+                create a Next-Gen Assistant.</Helper
+              >
+            </div>
+          </div>
+        {:else if !supportsMCPServer}
+          <div class="flex flex-col gap-y-1">
+            <Badge
+              class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
+              ><CloseOutline size="sm" />
+              <div>No MCP Server capabilities</div>
+            </Badge>
+            <Helper
+              >This model does not support MCP Server capabilities. To use MCP Server, select a
+              different model.</Helper
+            >
+          </div>
+        {:else if supportsMCPServer && supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort}
+          <div class="col-span-2 mb-3">
+            <div class="flex flex-col gap-y-1">
+              <Badge
+                class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
+                ><CloseOutline size="sm" />
+                <div>No MCP Server capabilities in Minimal reasoning effort</div>
+              </Badge>
+              <Helper
+                >Minimal reasoning effort does not support MCP Server capabilities. To use MCP
+                Server, select a higher reasoning effort level.</Helper
+              >
+            </div>
+          </div>
+        {:else}
+          <Checkbox
+            id={mcpServerMetadata.value}
+            name={mcpServerMetadata.value}
+            disabled={preventEdits || !supportsMCPServer}
+            checked={supportsMCPServer && (mcpServerToolSelect || false)}
+            on:change={() => {
+              mcpServerToolSelect = !mcpServerToolSelect;
+            }}
+            ><div class="flex flex-wrap gap-1.5">
+              <div>{mcpServerMetadata.name}</div>
+              <DropdownBadge
+                extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
+                ><span slot="name">Preview</span></DropdownBadge
+              >
+            </div></Checkbox
+          >
+          <Helper>{mcpServerMetadata.description}</Helper>
+        {/if}
+      </div>
+    {/if}
 
     {#if fileSearchToolSelect && supportsFileSearch && !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort)}
       <div class="col-span-2 mb-4">
@@ -1688,6 +1767,18 @@
       </div>
     {/if}
 
+    {#if mcpServerToolSelect && supportsMCPServer && !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort)}
+      <div class="col-span-2 mb-4">
+        <Label for="mcpServers">MCP Server Configuration</Label>
+        <Helper class="pb-1"
+          >Configure which remote MCP servers this assistant can use. In addition to built-in tools
+          you make available to the assistant, you can give assistants new capabilities using remote
+          MCP servers. These tools give the assistant the ability to connect to and control external
+          services when needed to respond to a user's prompt.
+        </Helper>
+      </div>
+    {/if}
+
     <div class="col-span-2 mb-4">
       <Checkbox
         id="published"
@@ -1715,12 +1806,12 @@
           name="use_image_descriptions"
           class="mb-1"
           checked={useImageDescriptions}
-          ><div class="flex flex-row gap-1">
+          ><div class="flex flex-row gap-1.5">
+            <div>Enable Vision capabilities through Image Descriptions</div>
             <DropdownBadge
               extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
               ><span slot="name">Experimental</span></DropdownBadge
             >
-            <div>Enable Vision capabilities through Image Descriptions</div>
           </div></Checkbox
         >
         <Helper
