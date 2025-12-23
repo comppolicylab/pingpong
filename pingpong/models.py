@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import hashlib
 import json
 import secrets
@@ -2314,6 +2315,20 @@ class AnonymousLink(Base):
         return result.scalar_one_or_none()
 
 
+mcp_server_tool_assistant_association = Table(
+    "mcp_server_tool_assistant_associations",
+    Base.metadata,
+    Column("mcp_server_tool_id", Integer, ForeignKey("mcp_server_tools.id")),
+    Column("assistant_id", Integer, ForeignKey("assistants.id")),
+    Index(
+        "mcp_server_tool_assistant_idx",
+        "mcp_server_tool_id",
+        "assistant_id",
+        unique=True,
+    ),
+)
+
+
 class Assistant(Base):
     __tablename__ = "assistants"
 
@@ -2346,6 +2361,9 @@ class Assistant(Base):
     hide_file_search_queries = Column(Boolean, server_default="true")
     hide_web_search_sources = Column(Boolean, server_default="false")
     hide_web_search_actions = Column(Boolean, server_default="false")
+    mcp_server_tools = relationship(
+        "MCPServerTool", secondary=mcp_server_tool_assistant_association
+    )
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="assistants", foreign_keys=[class_id])
     threads = relationship("Thread", back_populates="assistant")
@@ -3688,6 +3706,71 @@ class AnonymousSession(Base):
         return result.scalars().first()
 
 
+class MCPServerTool(Base):
+    __tablename__ = "mcp_server_tools"
+
+    id = Column(Integer, primary_key=True)
+    server_url = Column(String, nullable=False)
+    server_label = Column(String, nullable=False, unique=True, index=True)
+    headers = Column(String, nullable=True)
+    authorization_token = Column(String, nullable=True)
+    description = Column(String, nullable=True)
+    enabled = Column(Boolean, default=True)
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    @classmethod
+    def generate_server_label(cls, prefix: str = "mcp") -> str:
+        """
+        Generate an opaque, non-inferable, URL-safe server label.
+
+        Example:
+            mcp_QL82uAYjbes9RsCkQKJ3mL5Y
+        """
+        token = (
+            base64.urlsafe_b64encode(
+                secrets.token_bytes(18)  # 144 bits entropy
+            )
+            .rstrip(b"=")
+            .decode("ascii")
+        )
+
+        return f"{prefix}_{token}"
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> "MCPServerTool":
+        data["server_label"] = cls.generate_server_label()
+        server_tool = MCPServerTool(**data)
+        session.add(server_tool)
+        await session.flush()
+        await session.refresh(server_tool)
+        return server_tool
+
+
+class MCPListToolsTool(Base):
+    __tablename__ = "mcp_list_tools_tools"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    input_schema = Column(String, nullable=True)
+    annotations = Column(String, nullable=True)
+    mcp_server_tool_id = Column(
+        Integer, ForeignKey("mcp_server_tools.id", ondelete="SET NULL"), nullable=True
+    )
+
+    tool_call_id = Column(
+        Integer, ForeignKey("tool_calls.id", ondelete="CASCADE"), nullable=False
+    )
+    tool_call = relationship(
+        "ToolCall", back_populates="mcp_tools_listed", uselist=False
+    )
+
+
 class Annotation(Base):
     __tablename__ = "annotations"
 
@@ -3897,9 +3980,11 @@ class ToolCall(Base):
     )
     completed = Column(DateTime(timezone=True), nullable=True)
 
+    # File Search specific fields
     queries = Column(String, nullable=True)
     results = relationship("FileSearchCallResult", back_populates="tool_call")
 
+    # Code Interpreter specific fields
     code = Column(String, nullable=True)
     container_id = Column(String, nullable=True)
     outputs = relationship(
@@ -3907,7 +3992,24 @@ class ToolCall(Base):
         back_populates="tool_call",
     )
 
+    # Web Search specific fields
     web_search_actions = relationship("WebSearchCallAction", back_populates="tool_call")
+
+    # MCP specific fields
+    mcp_server_tool_id = Column(
+        Integer, ForeignKey("mcp_server_tools.id", ondelete="SET NULL"), nullable=True
+    )
+    mcp_server_tool = relationship("MCPServerTool", uselist=False)
+    mcp_tool_name = Column(String, nullable=True)
+    mcp_arguments = Column(String, nullable=True)
+    mcp_output = Column(String, nullable=True)
+
+    error = Column(String, nullable=True)
+
+    mcp_tools_listed = relationship(
+        "MCPListToolsTool",
+        back_populates="tool_call",
+    )
 
     @classmethod
     async def mark_as_incomplete(cls, session: AsyncSession, id: int) -> None:
@@ -4342,6 +4444,20 @@ class Message(Base):
         await session.execute(stmt)
 
 
+mcp_server_tool_run_association = Table(
+    "mcp_server_tool_run_associations",
+    Base.metadata,
+    Column("mcp_server_tool_id", Integer, ForeignKey("mcp_server_tools.id")),
+    Column("run_id", Integer, ForeignKey("runs.id")),
+    Index(
+        "mcp_server_tool_run_idx",
+        "mcp_server_tool_id",
+        "run_id",
+        unique=True,
+    ),
+)
+
+
 class Run(Base):
     __tablename__ = "runs"
 
@@ -4380,6 +4496,10 @@ class Run(Base):
     temperature = Column(Float, nullable=True)
     instructions = Column(String, nullable=True)
     tools_available = Column(String, nullable=True)
+    mcp_server_tools_available = relationship(
+        "MCPServerTool",
+        secondary=mcp_server_tool_run_association,
+    )
 
     creator_id = Column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -4597,6 +4717,20 @@ class Run(Base):
         await session.execute(stmt)
 
 
+mcp_server_tool_thread_association = Table(
+    "mcp_server_tool_thread_associations",
+    Base.metadata,
+    Column("mcp_server_tool_id", Integer, ForeignKey("mcp_server_tools.id")),
+    Column("thread_id", Integer, ForeignKey("threads.id")),
+    Index(
+        "mcp_server_tool_thread_idx",
+        "mcp_server_tool_id",
+        "thread_id",
+        unique=True,
+    ),
+)
+
+
 class Thread(Base):
     __tablename__ = "threads"
 
@@ -4658,6 +4792,10 @@ class Thread(Base):
         back_populates="thread",
     )
     tools_available = Column(String)
+    mcp_server_tools_available = relationship(
+        "MCPServerTool",
+        secondary=mcp_server_tool_thread_association,
+    )
     vector_store_id = Column(
         Integer,
         ForeignKey("vector_stores.id", name="fk_threads_vector_store_id_vector_store"),

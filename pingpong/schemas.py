@@ -2052,12 +2052,15 @@ class ToolCallType(StrEnum):
     CODE_INTERPRETER = "code_interpreter_call"
     FILE_SEARCH = "file_search_call"
     WEB_SEARCH = "web_search_call"
+    MCP_SERVER = "mcp_server_call"
+    MCP_LIST_TOOLS = "mcp_list_tools_call"
 
 
 class ToolCallStatus(StrEnum):
     IN_PROGRESS = "in_progress"
     SEARCHING = "searching"
     INTERPRETING = "interpreting"
+    CALLING = "calling"
     COMPLETED = "completed"
     INCOMPLETE = "incomplete"
     FAILED = "failed"

@@ -46,6 +46,7 @@ from openai.types.responses import ToolParam, FileSearchToolParam, WebSearchTool
 from openai._streaming import AsyncStream
 from openai.types.responses.tool_param import (
     CodeInterpreter,
+    Mcp,
     CodeInterpreterContainerCodeInterpreterToolAuto,
 )
 from openai.types.responses.response_output_item import (
@@ -2872,7 +2873,18 @@ async def run_response(
                     )
                 )
                 include_with.append("code_interpreter_call.outputs")
-
+            tools.append(
+                Mcp(
+                    server_url="https://policybot.io/mcp",
+                    server_label="policybot",
+                    type="mcp",
+                    headers={
+                        "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwb2xpY3lib3RfZ3B0X2FjdGlvbiIsImV4cCI6MTc3MzA5OTM1MiwiaWF0IjoxNzY1MzIzMzUyfQ.TwbeNUCU8_o1Modnp3S1Apziy52PNTIqQtxcj-YSrp0"
+                    },
+                    require_approval="never",
+                    server_description="PolicyBot MCP server",
+                )
+            )
             try:
                 stream: AsyncStream[ResponseStreamEvent] = await cli.responses.create(
                     include=include_with,
@@ -3034,7 +3046,8 @@ async def run_response(
                         case "error":
                             await handler.on_response_error(event)
                         case _:
-                            pass
+                            logger.info(f"Unknown event type: {event.type}")
+                            logger.info(f"Full event data: {event}")
                     yield handler.flush()
             except (
                 BrokenPipeError,
