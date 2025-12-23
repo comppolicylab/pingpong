@@ -473,6 +473,44 @@ class ToolOption(TypedDict):
     )
 
 
+class MCPAuthType(StrEnum):
+    NONE = "none"
+    TOKEN = "token"
+    HEADER = "header"
+
+
+class MCPServerToolInput(BaseModel):
+    """Input for create/update MCP servers - used in assistant requests"""
+
+    server_label: str | None = None  # None = create new, present = update existing
+    server_url: str = Field(..., min_length=1)
+    auth_type: MCPAuthType = MCPAuthType.NONE  # Determines which auth method to use
+    authorization_token: str | None = None  # Used when auth_type="token"
+    headers: dict[str, str] | None = None  # Used when auth_type="header"
+    description: str | None = None
+    enabled: bool = True
+
+
+class MCPServerToolResponse(BaseModel):
+    """Response model for MCP servers - uses server_label as identifier"""
+
+    server_label: str  # Primary identifier for UI
+    server_url: str
+    auth_type: MCPAuthType  # Indicates which auth method is configured
+    headers: dict[str, str] | None = None  # Returned as dict when auth_type="header"
+    description: str | None = None
+    enabled: bool
+
+    class Config:
+        from_attributes = True
+
+
+class MCPServerToolsResponse(BaseModel):
+    """Response model for list of MCP servers"""
+
+    mcp_servers: list[MCPServerToolResponse]
+
+
 class CreateAssistant(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
     code_interpreter_file_ids: list[str] | None = None
@@ -501,6 +539,7 @@ class CreateAssistant(BaseModel):
     hide_web_search_actions: bool = False
     deleted_private_files: list[int] = []
     create_classic_assistant: bool = False
+    mcp_servers: list[MCPServerToolInput] = []
 
     _temperature_check = model_validator(mode="after")(temperature_validator)
 
@@ -556,6 +595,7 @@ class UpdateAssistant(BaseModel):
     hide_web_search_actions: bool | None = None
     use_image_descriptions: bool | None = None
     deleted_private_files: list[int] = []
+    mcp_servers: list[MCPServerToolInput] | None = None
 
     _temperature_check = model_validator(mode="after")(temperature_validator)
 

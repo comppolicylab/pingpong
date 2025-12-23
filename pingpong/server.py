@@ -6615,6 +6615,30 @@ async def create_assistant(
             status_code=400,
             detail="The selected model does not support Web Search. Please select a different model or remove the Web Search tool.",
         )
+
+    uses_mcp_server = {"type": "mcp_server"} in req.tools
+    if uses_mcp_server and not model_record.supports_mcp_server:
+        raise HTTPException(
+            status_code=400,
+            detail="The selected model does not support MCP Servers. Please select a different model or remove the MCP Server tool.",
+        )
+
+    # Validate MCP servers - auth_type must match provided credentials
+    for mcp_input in req.mcp_servers:
+        if (
+            mcp_input.auth_type == schemas.MCPAuthType.TOKEN
+            and not mcp_input.authorization_token
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=f"MCP server '{mcp_input.server_url}' has auth_type 'token' but no authorization_token provided.",
+            )
+        if mcp_input.auth_type == schemas.MCPAuthType.HEADER and not mcp_input.headers:
+            raise HTTPException(
+                status_code=400,
+                detail=f"MCP server '{mcp_input.server_url}' has auth_type 'header' but no headers provided.",
+            )
+
     if uses_web_search and assistant_version <= 2:
         raise HTTPException(
             status_code=400,
@@ -6719,6 +6743,8 @@ async def create_assistant(
     try:
         deleted_private_files = req.deleted_private_files or []
         del req.deleted_private_files
+        mcp_servers_input = req.mcp_servers or []
+        del req.mcp_servers
 
         asst = await models.Assistant.create(
             request.state.db,
@@ -6741,6 +6767,32 @@ async def create_assistant(
             files_to_delete,
             class_id=int(class_id),
         )
+
+        # Create MCP servers and associate with assistant
+        if mcp_servers_input:
+            for mcp_input in mcp_servers_input:
+                # Only store credentials that match the auth_type
+                headers_json = None
+                authorization_token = None
+                if mcp_input.auth_type == schemas.MCPAuthType.HEADER:
+                    headers_json = (
+                        json.dumps(mcp_input.headers) if mcp_input.headers else None
+                    )
+                elif mcp_input.auth_type == schemas.MCPAuthType.TOKEN:
+                    authorization_token = mcp_input.authorization_token
+
+                mcp_server = await models.MCPServerTool.create(
+                    request.state.db,
+                    {
+                        "server_url": mcp_input.server_url,
+                        "headers": headers_json,
+                        "authorization_token": authorization_token,
+                        "description": mcp_input.description,
+                        "enabled": mcp_input.enabled,
+                    },
+                )
+                asst.mcp_server_tools.append(mcp_server)
+            await request.state.db.flush()
 
         grants = [
             (f"class:{class_id}", "parent", f"assistant:{asst.id}"),
@@ -7424,6 +7476,73 @@ async def update_assistant(
             "The selected model does not support Web Search. Please select a different model or remove the Web Search tool.",
         )
 
+    # Check MCP server support
+    uses_mcp_server = False
+    if "tools" in req.model_fields_set:
+        if req.tools is not None and len(req.tools) > 0:
+            uses_mcp_server = {"type": "mcp_server"} in req.tools
+    else:
+        uses_mcp_server = asst.tools is not None and {
+            "type": "mcp_server"
+        } in json.loads(asst.tools)
+
+    if uses_mcp_server and (model_record and not model_record.supports_mcp_server):
+        raise HTTPException(
+            400,
+            "The selected model does not support MCP Servers. Please select a different model or remove the MCP Server tool.",
+        )
+
+    # Validate MCP servers - auth_type must match provided credentials
+    if "mcp_servers" in req.model_fields_set and req.mcp_servers:
+        # Build lookup of existing servers by label for validation
+        existing_mcp_by_label = {s.server_label: s for s in asst.mcp_server_tools}
+
+        for mcp_input in req.mcp_servers:
+            if not mcp_input.server_label:
+                # New server - require credentials matching auth_type
+                if (
+                    mcp_input.auth_type == schemas.MCPAuthType.TOKEN
+                    and not mcp_input.authorization_token
+                ):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"MCP server '{mcp_input.server_url}' has auth_type 'token' but no authorization_token provided.",
+                    )
+                if (
+                    mcp_input.auth_type == schemas.MCPAuthType.HEADER
+                    and not mcp_input.headers
+                ):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"MCP server '{mcp_input.server_url}' has auth_type 'header' but no headers provided.",
+                    )
+            else:
+                # Existing server - validate auth_type change is valid
+                existing_server = existing_mcp_by_label.get(mcp_input.server_label)
+                if not existing_server:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"MCP server with label '{mcp_input.server_label}' not found.",
+                    )
+
+                if mcp_input.auth_type == schemas.MCPAuthType.TOKEN:
+                    # For token auth, we need either a new token or existing token must exist
+                    if (
+                        not mcp_input.authorization_token
+                        and not existing_server.authorization_token
+                    ):
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"MCP server '{mcp_input.server_url}' has auth_type 'token' but no authorization_token provided and none exists.",
+                        )
+                elif mcp_input.auth_type == schemas.MCPAuthType.HEADER:
+                    # For header auth, headers must be provided
+                    if not mcp_input.headers:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"MCP server '{mcp_input.server_url}' has auth_type 'header' but no headers provided.",
+                        )
+
     if "verbosity" in req.model_fields_set:
         if req.verbosity is not None and (
             model_record and not model_record.supports_verbosity
@@ -7563,6 +7682,70 @@ async def update_assistant(
     if "tools" in req.model_fields_set and req.tools is not None:
         openai_update["tools"] = req.tools
         asst.tools = json.dumps(req.tools)
+
+    # --------------------- MCP Servers ---------------------
+    if "mcp_servers" in req.model_fields_set and req.mcp_servers is not None:
+        # Build lookup of existing servers (already validated above)
+        existing_by_label = {s.server_label: s for s in asst.mcp_server_tools}
+        request_labels = {
+            s.server_label for s in req.mcp_servers if s.server_label is not None
+        }
+
+        # Delete servers no longer in the request
+        servers_to_remove = [
+            s for s in asst.mcp_server_tools if s.server_label not in request_labels
+        ]
+        for server in servers_to_remove:
+            asst.mcp_server_tools.remove(server)
+            await request.state.db.delete(server)
+
+        # Update existing and create new servers
+        for mcp_input in req.mcp_servers:
+            # Determine credentials based on auth_type
+            headers_json = None
+            authorization_token = None
+
+            if mcp_input.auth_type == schemas.MCPAuthType.HEADER:
+                headers_json = (
+                    json.dumps(mcp_input.headers) if mcp_input.headers else None
+                )
+            elif mcp_input.auth_type == schemas.MCPAuthType.TOKEN:
+                authorization_token = mcp_input.authorization_token
+
+            if mcp_input.server_label and mcp_input.server_label in existing_by_label:
+                # Update existing server
+                existing_server = existing_by_label[mcp_input.server_label]
+                existing_server.server_url = mcp_input.server_url
+                existing_server.description = mcp_input.description
+                existing_server.enabled = mcp_input.enabled
+
+                # Apply auth based on auth_type
+                if mcp_input.auth_type == schemas.MCPAuthType.NONE:
+                    existing_server.headers = None
+                    existing_server.authorization_token = None
+                elif mcp_input.auth_type == schemas.MCPAuthType.HEADER:
+                    existing_server.headers = headers_json
+                    existing_server.authorization_token = None
+                elif mcp_input.auth_type == schemas.MCPAuthType.TOKEN:
+                    existing_server.headers = None
+                    # Only update token if provided, otherwise keep existing
+                    if authorization_token:
+                        existing_server.authorization_token = authorization_token
+            else:
+                # Create new server
+                mcp_server = await models.MCPServerTool.create(
+                    request.state.db,
+                    {
+                        "server_url": mcp_input.server_url,
+                        "headers": headers_json,
+                        "authorization_token": authorization_token,
+                        "description": mcp_input.description,
+                        "enabled": mcp_input.enabled,
+                    },
+                )
+                asst.mcp_server_tools.append(mcp_server)
+
+        await request.state.db.flush()
 
     if "temperature" in req.model_fields_set:
         openai_update["temperature"] = req.temperature
@@ -7771,6 +7954,54 @@ async def update_assistant(
 
     await request.state.authz.write_safe(grant=grants, revoke=revokes)
     return asst
+
+
+def mcp_server_to_response(
+    server: models.MCPServerTool,
+) -> schemas.MCPServerToolResponse:
+    """Convert an MCPServerTool to MCPServerToolResponse with inferred auth_type"""
+    # Infer auth_type from stored data
+    if server.authorization_token:
+        auth_type = schemas.MCPAuthType.TOKEN
+    elif server.headers:
+        auth_type = schemas.MCPAuthType.HEADER
+    else:
+        auth_type = schemas.MCPAuthType.NONE
+
+    # Parse headers JSON if present
+    headers_dict = None
+    if server.headers:
+        headers_dict = json.loads(server.headers)
+
+    return schemas.MCPServerToolResponse(
+        server_label=server.server_label,
+        server_url=server.server_url,
+        auth_type=auth_type,
+        headers=headers_dict,
+        description=server.description,
+        enabled=server.enabled,
+    )
+
+
+@v1.get(
+    "/class/{class_id}/assistant/{assistant_id}/mcp_servers",
+    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    response_model=schemas.MCPServerToolsResponse,
+)
+async def get_assistant_mcp_servers(class_id: str, assistant_id: str, request: Request):
+    """Get MCP servers configured for an assistant"""
+    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    if not asst:
+        raise HTTPException(404, "Assistant not found.")
+
+    # Load MCP servers relationship
+    await request.state.db.refresh(asst, ["mcp_server_tools"])
+
+    return {
+        "mcp_servers": [
+            mcp_server_to_response(server) for server in asst.mcp_server_tools
+        ]
+    }
 
 
 @v1.post(

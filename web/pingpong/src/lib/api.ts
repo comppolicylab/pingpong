@@ -1722,10 +1722,43 @@ export const getAssistantFiles = async (f: Fetcher, classId: number, assistantId
 };
 
 /**
+ * Get MCP servers configured for an assistant.
+ */
+export const getAssistantMCPServers = async (f: Fetcher, classId: number, assistantId: number) => {
+  const url = `/class/${classId}/assistant/${assistantId}/mcp_servers`;
+  return await GET<never, MCPServerToolsResponse>(f, url);
+};
+
+/**
  * OpenAI tool.
  */
 export type Tool = {
   type: string;
+};
+
+/**
+ * MCP Server authentication type.
+ */
+export type MCPAuthType = 'none' | 'token' | 'header';
+
+/**
+ * MCP Server input for create/update.
+ */
+export type MCPServerToolInput = {
+  server_label?: string;
+  server_url: string;
+  auth_type: MCPAuthType;
+  authorization_token?: string;
+  headers?: Record<string, string>;
+  description?: string;
+  enabled?: boolean;
+};
+
+/**
+ * Response containing list of MCP servers.
+ */
+export type MCPServerToolsResponse = {
+  mcp_servers: MCPServerToolInput[];
 };
 
 /**
@@ -1759,6 +1792,7 @@ export type CreateAssistantRequest = {
   hide_file_search_queries?: boolean;
   hide_web_search_sources?: boolean;
   hide_web_search_actions?: boolean;
+  mcp_servers?: MCPServerToolInput[];
 };
 
 export type CopyAssistantRequest = {
@@ -1797,6 +1831,7 @@ export type UpdateAssistantRequest = {
   hide_file_search_queries?: boolean;
   hide_web_search_sources?: boolean;
   hide_web_search_actions?: boolean;
+  mcp_servers?: MCPServerToolInput[];
 };
 
 /**

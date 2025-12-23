@@ -3750,6 +3750,24 @@ class MCPServerTool(Base):
         await session.refresh(server_tool)
         return server_tool
 
+    @classmethod
+    async def get_by_labels(
+        cls, session: AsyncSession, labels: list[str]
+    ) -> list["MCPServerTool"]:
+        """Get MCP servers by their server_label identifiers"""
+        if not labels:
+            return []
+        result = await session.execute(select(cls).where(cls.server_label.in_(labels)))
+        return list(result.scalars().all())
+
+    @classmethod
+    async def get_by_label(
+        cls, session: AsyncSession, label: str
+    ) -> "MCPServerTool | None":
+        """Get single MCP server by server_label"""
+        result = await session.execute(select(cls).where(cls.server_label == label))
+        return result.scalar_one_or_none()
+
 
 class MCPListToolsTool(Base):
     __tablename__ = "mcp_list_tools_tools"
