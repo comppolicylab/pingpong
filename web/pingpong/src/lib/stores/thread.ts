@@ -43,17 +43,24 @@ export type Message = {
 };
 
 function getOrderValue(a: api.OpenAIMessage, b: api.OpenAIMessage): [number, number] {
-  const aHasOutputIndex = typeof a.output_index === 'number';
-  const bHasOutputIndex = typeof b.output_index === 'number';
-  if (aHasOutputIndex && bHasOutputIndex) {
-    return [a.output_index as number, b.output_index as number];
+  const aRunId = a.run_id ?? null;
+  const bRunId = b.run_id ?? null;
+
+  // If both messages are from the same run, compare by output_index
+  if (aRunId !== null && bRunId !== null && aRunId === bRunId) {
+    const aHasOutputIndex = typeof a.output_index === 'number';
+    const bHasOutputIndex = typeof b.output_index === 'number';
+    if (aHasOutputIndex && bHasOutputIndex) {
+      return [a.output_index as number, b.output_index as number];
+    }
+    const aHasMetadataIndex = a.metadata && !isNaN(Number(a.metadata.output_index));
+    const bHasMetadataIndex = b.metadata && !isNaN(Number(b.metadata.output_index));
+    if (aHasMetadataIndex && bHasMetadataIndex) {
+      return [Number(a.metadata?.output_index), Number(b.metadata?.output_index)];
+    }
   }
-  const aHasMetadataIndex = a.metadata && !isNaN(Number(a.metadata.output_index));
-  const bHasMetadataIndex = b.metadata && !isNaN(Number(b.metadata.output_index));
-  if (aHasMetadataIndex && bHasMetadataIndex) {
-    return [Number(a.metadata?.output_index), Number(b.metadata?.output_index)];
-  }
-  // Fallback to created_at (should always be present)
+
+  // Different runs or missing run_id: compare by created_at to maintain chronological order
   const aCreated = typeof a.created_at === 'number' ? a.created_at : 0;
   const bCreated = typeof b.created_at === 'number' ? b.created_at : 0;
   return [aCreated, bCreated];

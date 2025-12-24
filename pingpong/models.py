@@ -4180,7 +4180,7 @@ class ToolCall(Base):
         cls,
         session: AsyncSession,
         id: int,
-        status: schemas.ToolCallStatus,
+        status: schemas.ToolCallStatus | None = None,
         mcp_tool_name: str | None = None,
         mcp_arguments: str | None = None,
         mcp_output: str | None = None,
@@ -4191,7 +4191,7 @@ class ToolCall(Base):
             update(ToolCall)
             .where(ToolCall.id == id)
             .values(
-                status=status,
+                status=status if status else ToolCall.status,
                 mcp_tool_name=mcp_tool_name,
                 mcp_arguments=mcp_arguments,
                 mcp_output=mcp_output,
@@ -5792,6 +5792,8 @@ class Thread(Base):
                 selectinload(ToolCall.web_search_actions).selectinload(
                     WebSearchCallAction.sources
                 ),
+                selectinload(ToolCall.mcp_server_tool),
+                selectinload(ToolCall.mcp_tools_listed),
             )
         )
         result = await session.execute(stmt)

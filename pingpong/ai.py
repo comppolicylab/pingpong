@@ -99,6 +99,9 @@ from openai.types.responses.response_input_item_param import (
     EasyInputMessageParam,
     ResponseInputMessageContentListParam,
     ResponseCodeInterpreterToolCallParam,
+    McpListToolsTool as McpListToolsToolParam,
+    McpListTools as McpListToolsParam,
+    McpCall as McpCallParam,
 )
 from openai.types.responses.response_output_message_param import (
     ResponseOutputMessageParam,
@@ -767,6 +770,56 @@ async def build_response_input_item_list(
                             action=action,
                             status=ToolCallStatus(tool_call.status).value,
                             type="web_search_call",
+                        ),
+                    )
+                )
+
+            case ToolCallType.MCP_SERVER:
+                try:
+                    error = json.loads(tool_call.error) if tool_call.error else None
+                except json.JSONDecodeError:
+                    error = {"message": tool_call.error}
+                response_input_items_with_time.append(
+                    (
+                        tool_call.created,
+                        McpCallParam(
+                            id=tool_call.tool_call_id,
+                            arguments=tool_call.mcp_arguments,
+                            name=tool_call.mcp_tool_name,
+                            server_label=tool_call.mcp_server_tool.server_label,
+                            type="mcp_call",
+                            approval_request_id=None,
+                            error=error,
+                            output=tool_call.mcp_output,
+                            status=ToolCallStatus(tool_call.status).value,
+                        ),
+                    )
+                )
+            case ToolCallType.MCP_LIST_TOOLS:
+                mcp_tools: list[McpListToolsToolParam] = []
+                for tool in tool_call.mcp_tools_listed:
+                    mcp_tools.append(
+                        McpListToolsToolParam(
+                            input_schema=json.loads(tool.input_schema),
+                            name=tool.name,
+                            description=tool.description,
+                            annotations=json.loads(tool.annotations),
+                        )
+                    )
+                try:
+                    error = json.loads(tool_call.error) if tool_call.error else None
+                except json.JSONDecodeError:
+                    error = {"message": tool_call.error}
+
+                response_input_items_with_time.append(
+                    (
+                        tool_call.created,
+                        McpListToolsParam(
+                            id=tool_call.tool_call_id,
+                            server_label=tool_call.mcp_server_tool.server_label,
+                            tools=mcp_tools,
+                            type="mcp_list_tools",
+                            error=error,
                         ),
                     )
                 )
@@ -2024,7 +2077,7 @@ class BufferedResponseStreamHandler:
             "run_id": self.run_id,
             "tool_call_id": data.id,
             "type": ToolCallType.MCP_LIST_TOOLS,
-            "status": ToolCallStatus(data.status),
+            "status": ToolCallStatus.IN_PROGRESS,
             "thread_id": self.thread_id,
             "output_index": self.prev_output_index,
             "mcp_server_tool_id": mcp_server_tool.id,
@@ -2189,7 +2242,6 @@ class BufferedResponseStreamHandler:
             await models.ToolCall.update_mcp_call(
                 session_,
                 self.tool_call_id,
-                status=ToolCallStatus(data.status),
                 error=json.dumps(data.error) if data.error else None,
             )
             await session_.commit()
@@ -3235,10 +3287,13 @@ async def run_response(
                 run.temperature if run.temperature is not None else openai.NOT_GIVEN
             )
             async with config.db.driver.async_session() as session_:
-                input_items, input_count = await build_response_input_item_list(
+                input_items, _ = await build_response_input_item_list(
                     session_,
                     thread_id=run.thread_id,
                     uses_reasoning=not isinstance(reasoning_settings, openai.NotGiven),
+                )
+                max_output_index = await models.Thread.get_max_output_sequence(
+                    session_, run.thread_id
                 )
 
             tools: list[ToolParam] = []
@@ -3329,7 +3384,7 @@ async def run_response(
                     cli=cli,
                     run_id=run.id,
                     run_status=RunStatus(run.status),
-                    prev_output_index=input_count - 1,
+                    prev_output_index=max_output_index,
                     file_names=file_names,
                     class_id=int(class_id),
                     thread_id=run.thread_id,
