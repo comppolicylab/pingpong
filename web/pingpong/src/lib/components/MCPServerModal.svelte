@@ -1,0 +1,241 @@
+<script lang="ts">
+  import type { MCPAuthType, MCPServerToolInput } from '$lib/api';
+  import {
+    ArrowUpRightFromSquareOutline,
+    EyeOutline,
+    EyeSlashOutline
+  } from 'flowbite-svelte-icons';
+  import {
+    Button,
+    ButtonGroup,
+    Helper,
+    Input,
+    InputAddon,
+    Label,
+    Modal,
+    Select,
+    Textarea,
+    type SelectOptionType
+  } from 'flowbite-svelte';
+  import { createEventDispatcher } from 'svelte';
+  import { sadToast } from '$lib/toast';
+
+  export let mcpServerDraftFromServer: MCPServerToolInput | null = null;
+  let mcpServerDraft: MCPServerToolInput = mcpServerDraftFromServer
+    ? structuredClone(mcpServerDraftFromServer)
+    : {
+        server_label: undefined,
+        server_url: '',
+        display_name: '',
+        description: '',
+        auth_type: 'token',
+        authorization_token: '',
+        headers: {}
+      };
+  export let mcpServerEditIndex: number | null = null;
+
+  const dispatcher = createEventDispatcher();
+
+  let isCreating = mcpServerEditIndex === null;
+  let showToken = false;
+
+  type MCPHeaderEntry = { key: string; value: string };
+
+  const mcpAuthOptions: SelectOptionType<MCPAuthType>[] = [
+    { value: 'token', name: 'Access token/API key' },
+    { value: 'header', name: 'Custom headers' },
+    { value: 'none', name: 'None' }
+  ];
+
+  const headersToRows = (headers: Record<string, string>): MCPHeaderEntry[] => {
+    return Object.entries(headers).map(([key, value]) => ({ key, value }));
+  };
+
+  let mcpServerHeaderRows: MCPHeaderEntry[] =
+    mcpServerDraft.headers && Object.keys(mcpServerDraft.headers).length > 0
+      ? headersToRows(mcpServerDraft.headers)
+      : [{ key: '', value: '' }];
+
+  const addMcpServerHeaderRow = () => {
+    mcpServerHeaderRows = [...mcpServerHeaderRows, { key: '', value: '' }];
+  };
+  const removeMcpServerHeaderRow = (index: number) => {
+    mcpServerHeaderRows = mcpServerHeaderRows.filter((_, i) => i !== index);
+  };
+
+  const saveMcpServer = (e: Event) => {
+    e.preventDefault();
+
+    // Verify fields
+    // Server URL is required
+    if (!mcpServerDraft.server_url || mcpServerDraft.server_url.trim() === '') {
+      sadToast('Please enter a valid MCP server URL.');
+      return;
+    }
+
+    // If auth type is token, token is required (unless editing and token is blank)
+    if (
+      mcpServerDraft.auth_type === 'token' &&
+      mcpServerDraft.authorization_token?.trim() === '' &&
+      mcpServerEditIndex === null
+    ) {
+      sadToast('Please enter an access token/API key for token authentication.');
+      return;
+    }
+
+    // If auth type is header, at least one header is required
+    if (mcpServerDraft.auth_type === 'header') {
+      const hasValidHeader = mcpServerHeaderRows.some((row) => row.key.trim() !== '');
+      if (!hasValidHeader) {
+        sadToast('Please enter at least one valid header for header authentication.');
+        return;
+      }
+    }
+
+    const headers: Record<string, string> = {};
+    mcpServerHeaderRows.forEach((row) => {
+      if (row.key.trim() !== '') {
+        headers[row.key.trim()] = row.value.trim();
+      }
+    });
+    mcpServerDraft.headers = headers;
+    dispatcher('save', { mcpServer: mcpServerDraft, index: mcpServerEditIndex });
+  };
+</script>
+
+<Modal
+  size="md"
+  open
+  outsideclose
+  on:close={() => dispatcher('close')}
+  on:cancel={() => dispatcher('close')}
+>
+  <div class="flex flex-col">
+    <div class="mx-auto my-10 flex w-2/3 flex-col items-center gap-4 text-center">
+      <div
+        class="rounded-full border border-gray-200 bg-gradient-to-b from-gray-50 to-gray-100 p-3 text-gray-700"
+      >
+        <ArrowUpRightFromSquareOutline class="h-6 w-6" />
+      </div>
+      <div>
+        <h2 class="text-xl font-semibold text-gray-900">
+          {isCreating ? 'Set up MCP Server' : 'Edit MCP Server'}
+        </h2>
+      </div>
+    </div>
+    <div class="flex flex-1 flex-col gap-4 px-1 w-2/3 mx-auto">
+      <div class="flex flex-col gap-2">
+        <Label for="mcp-server-url">URL</Label>
+        <Helper class="-mt-1">Only use MCP servers you trust and verify.</Helper>
+        <Input
+          id="mcp-server-url"
+          name="mcp-server-url"
+          type="url"
+          placeholder="https://mcp.example.com"
+          bind:value={mcpServerDraft.server_url}
+        />
+      </div>
+      <div class="flex flex-col gap-2">
+        <Label for="mcp-server-display-name">Server Name</Label>
+        <Helper class="-mt-1">Will be displayed when the assistant uses this MCP server.</Helper>
+        <Input
+          id="mcp-server-display-name"
+          name="mcp-server-display-name"
+          type="text"
+          placeholder="My MCP Server"
+          bind:value={mcpServerDraft.display_name}
+        />
+      </div>
+      <div class="flex flex-col gap-2">
+        <Label for="mcp-server-description">
+          Description <span class="text-xs text-gray-500">(optional)</span>
+        </Label>
+        <Helper class="-mt-1"
+          >Add a description to help the assistant understand when to use this MCP server.</Helper
+        >
+        <Textarea
+          id="mcp-server-description"
+          name="mcp-server-description"
+          rows={2}
+          placeholder="MCP server for handling advanced queries."
+          bind:value={mcpServerDraft.description}
+        />
+      </div>
+      <div class="flex flex-col gap-2">
+        <Label for="mcp-auth-type" class="flex items-center gap-1">Authentication</Label>
+        <Select
+          id="mcp-auth-type"
+          name="mcp-auth-type"
+          items={mcpAuthOptions}
+          bind:value={mcpServerDraft.auth_type}
+        />
+      </div>
+      {#if mcpServerDraft.auth_type === 'token'}
+        <div class="flex flex-col gap-2">
+          <Label for="mcp-auth-token">Access token / API key</Label>
+          <ButtonGroup class="w-full">
+            <InputAddon>
+              <button on:click={() => (showToken = !showToken)}>
+                {#if showToken}
+                  <EyeOutline class="h-6 w-6" />
+                {:else}
+                  <EyeSlashOutline class="h-6 w-6" />
+                {/if}
+              </button>
+            </InputAddon>
+            <Input
+              id="mcp-auth-token"
+              name="mcp-auth-token"
+              type={showToken ? 'text' : 'password'}
+              placeholder="Add your access token"
+              bind:value={mcpServerDraft.authorization_token}
+            />
+          </ButtonGroup>
+
+          {#if mcpServerDraft.server_label && mcpServerDraft.auth_type === 'token'}
+            <Helper class="-mt-1">Leave blank to keep the existing token.</Helper>
+          {:else}
+            <Helper class="-mt-1">Required for token authentication.</Helper>
+          {/if}
+        </div>
+      {/if}
+      {#if mcpServerDraft.auth_type === 'header'}
+        <div class="flex flex-col gap-2">
+          <Label>Headers</Label>
+          <div class="flex flex-col gap-2">
+            {#each mcpServerHeaderRows as row, index (index)}
+              <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <div class="flex-1">
+                  <Input placeholder="header" bind:value={mcpServerHeaderRows[index].key} />
+                </div>
+                <span class="hidden text-gray-400 sm:block">:</span>
+                <div class="flex-1">
+                  <Input placeholder="value" bind:value={mcpServerHeaderRows[index].value} />
+                </div>
+                <Button
+                  type="button"
+                  size="xs"
+                  color="light"
+                  class="text-red-600 sm:ml-1"
+                  on:click={() => removeMcpServerHeaderRow(index)}
+                  disabled={mcpServerHeaderRows.length === 1}>Remove</Button
+                >
+              </div>
+            {/each}
+            <Button
+              type="button"
+              size="xs"
+              color="light"
+              class="w-fit"
+              on:click={addMcpServerHeaderRow}>Add header</Button
+            >
+          </div>
+        </div>
+      {/if}
+    </div>
+    <div class="mt-6 flex w-full items-end justify-between">
+      <Button type="button" color="light" on:click={() => dispatcher('close')}>Cancel</Button>
+      <Button type="submit" color="blue" on:click={saveMcpServer}>Save</Button>
+    </div>
+  </div>
+</Modal>

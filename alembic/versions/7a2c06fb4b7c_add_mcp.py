@@ -119,6 +119,7 @@ def upgrade() -> None:
     op.create_table(
         "mcp_server_tools",
         sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("display_name", sa.String(), nullable=False),
         sa.Column("server_url", sa.String(), nullable=False),
         sa.Column("server_label", sa.String(), nullable=False),
         sa.Column("headers", sa.String(), nullable=True),

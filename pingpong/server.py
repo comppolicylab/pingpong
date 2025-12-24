@@ -7974,6 +7974,7 @@ def mcp_server_to_response(
         headers_dict = json.loads(server.headers)
 
     return schemas.MCPServerToolResponse(
+        display_name=server.display_name,
         server_label=server.server_label,
         server_url=server.server_url,
         auth_type=auth_type,

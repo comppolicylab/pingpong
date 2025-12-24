@@ -482,11 +482,12 @@ class MCPAuthType(StrEnum):
 class MCPServerToolInput(BaseModel):
     """Input for create/update MCP servers - used in assistant requests"""
 
-    server_label: str | None = None  # None = create new, present = update existing
+    display_name: str
+    server_label: str | None = None
     server_url: str = Field(..., min_length=1)
-    auth_type: MCPAuthType = MCPAuthType.NONE  # Determines which auth method to use
-    authorization_token: str | None = None  # Used when auth_type="token"
-    headers: dict[str, str] | None = None  # Used when auth_type="header"
+    auth_type: MCPAuthType = MCPAuthType.NONE
+    authorization_token: str | None = None
+    headers: dict[str, str] | None = None
     description: str | None = None
     enabled: bool = True
 
@@ -494,10 +495,11 @@ class MCPServerToolInput(BaseModel):
 class MCPServerToolResponse(BaseModel):
     """Response model for MCP servers - uses server_label as identifier"""
 
-    server_label: str  # Primary identifier for UI
+    display_name: str
+    server_label: str
     server_url: str
-    auth_type: MCPAuthType  # Indicates which auth method is configured
-    headers: dict[str, str] | None = None  # Returned as dict when auth_type="header"
+    auth_type: MCPAuthType
+    headers: dict[str, str] | None = None
     description: str | None = None
     enabled: bool
 

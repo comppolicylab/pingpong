@@ -1746,6 +1746,7 @@ export type MCPAuthType = 'none' | 'token' | 'header';
  */
 export type MCPServerToolInput = {
   server_label?: string;
+  display_name: string;
   server_url: string;
   auth_type: MCPAuthType;
   authorization_token?: string;

@@ -3710,6 +3710,7 @@ class MCPServerTool(Base):
     __tablename__ = "mcp_server_tools"
 
     id = Column(Integer, primary_key=True)
+    display_name = Column(String, nullable=False)
     server_url = Column(String, nullable=False)
     server_label = Column(String, nullable=False, unique=True, index=True)
     headers = Column(String, nullable=True)
