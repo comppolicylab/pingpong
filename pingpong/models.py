@@ -5869,6 +5869,8 @@ class Thread(Base):
                 selectinload(ToolCall.web_search_actions).selectinload(
                     WebSearchCallAction.sources
                 ),
+                selectinload(ToolCall.mcp_server_tool),
+                selectinload(ToolCall.mcp_tools_listed),
             )
         )
         reasoning_steps = await session.execute(

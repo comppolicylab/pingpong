@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from enum import Enum, StrEnum, auto
-from typing import Generic, Literal, NotRequired, TypeVar, Union
+from typing import Any, Generic, Literal, NotRequired, TypeVar, Union
 from typing_extensions import TypedDict, Annotated, TypeAlias
 
 from openai._utils import PropertyInfo
@@ -1694,6 +1694,67 @@ class WebSearchMessage(BaseModel):
     output_index: int | None = None
 
 
+class MCPListToolsTool(BaseModel):
+    name: str
+    description: str | None = None
+    input_schema: dict[str, Any] | None = None
+    annotations: dict[str, Any] | None = None
+
+
+class MCPServerCall(BaseModel):
+    step_id: str
+    type: Literal["mcp_server_call"]
+    server_label: str
+    server_name: str | None = None
+    tool_name: str | None = None
+    arguments: str | None = None
+    output: str | None = None
+    error: dict[str, Any] | str | None = None
+    status: (
+        Literal[
+            "in_progress",
+            "completed",
+            "incomplete",
+            "calling",
+            "failed",
+        ]
+        | None
+    ) = None
+
+
+class MCPListToolsCall(BaseModel):
+    step_id: str
+    type: Literal["mcp_list_tools_call"]
+    server_label: str
+    server_name: str | None = None
+    tools: list[MCPListToolsTool] = []
+    error: dict[str, Any] | str | None = None
+    status: (
+        Literal[
+            "in_progress",
+            "completed",
+            "incomplete",
+            "calling",
+            "failed",
+        ]
+        | None
+    ) = None
+
+
+class MCPMessage(BaseModel):
+    id: str
+    assistant_id: str
+    created_at: float
+    content: list[MCPServerCall | MCPListToolsCall]
+    metadata: dict[str, str]
+    object: Literal["thread.message"]
+    message_type: Literal["mcp_server_call", "mcp_list_tools_call"]
+    role: Literal["assistant"]
+    run_id: str
+    thread_id: str
+    output_index: int | None = None
+
+
 class CodeInterpreterMessage(BaseModel):
     id: str
     assistant_id: str
@@ -1792,6 +1853,7 @@ class ThreadMessages(BaseModel):
     fs_messages: list[FileSearchMessage] = []
     ci_messages: list[CodeInterpreterMessage] = []
     ws_messages: list[WebSearchMessage] = []
+    mcp_messages: list[MCPMessage] = []
     reasoning_messages: list["ReasoningMessage"] = []
     has_more: bool
 
@@ -1814,6 +1876,7 @@ class ThreadWithMeta(BaseModel):
     ci_messages: list[CodeInterpreterMessage] | None
     fs_messages: list[FileSearchMessage] | None = None
     ws_messages: list[WebSearchMessage] | None = None
+    mcp_messages: list[MCPMessage] | None = None
     reasoning_messages: list["ReasoningMessage"] | None = None
     attachments: dict[str, File] | None
     instructions: str | None

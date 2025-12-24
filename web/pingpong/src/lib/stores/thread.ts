@@ -222,6 +222,11 @@ export class ThreadManager {
         error: null,
         persisted: true
       }));
+      const mcp_messages = ($data.data?.mcp_messages || []).map((message) => ({
+        data: message,
+        error: null,
+        persisted: true
+      }));
       const reasoning_messages = ($data.data?.reasoning_messages || []).map((message) => ({
         data: message,
         error: null,
@@ -237,6 +242,7 @@ export class ThreadManager {
         .concat(ci_messages)
         .concat(fs_messages)
         .concat(ws_messages)
+        .concat(mcp_messages)
         .concat(reasoning_messages)
         .concat(optimisticMessages)
         .sort(compareMessageDataAsc);
@@ -538,6 +544,7 @@ export class ThreadManager {
           ci_messages: [...(response.ci_messages || []), ...d.data.ci_messages],
           fs_messages: [...(response.fs_messages || []), ...d.data.fs_messages],
           ws_messages: [...(response.ws_messages || []), ...d.data.ws_messages],
+          mcp_messages: [...(response.mcp_messages || []), ...(d.data.mcp_messages || [])],
           reasoning_messages: [
             ...(response.reasoning_messages || []),
             ...(d.data.reasoning_messages || [])
@@ -790,6 +797,7 @@ export class ThreadManager {
       ...(state.data?.ci_messages ?? []),
       ...(state.data?.fs_messages ?? []),
       ...(state.data?.ws_messages ?? []),
+      ...(state.data?.mcp_messages ?? []),
       ...(state.data?.reasoning_messages ?? []),
       ...state.optimistic
     ];
@@ -906,12 +914,12 @@ export class ThreadManager {
 
   #createReasoningStep(call: api.ThreadStreamReasoningStepCreatedChunk['reasoning_step']) {
     this.#data.update((d) => {
-      const messages = get(this.messages);
+      const messages = d.data?.messages;
       if (!messages?.length) {
         console.warn('createReasoningStep: Received a tool call without any messages.');
         return d;
       }
-      const sortedMessages = [...messages].sort(compareMessageDataDesc);
+      const sortedMessages = [...messages].sort(compareApiMessagesDesc);
       const lastMessage = sortedMessages[0];
       if (!lastMessage) {
         console.warn('createReasoningStep: Received a tool call without a previous message.');
@@ -919,8 +927,8 @@ export class ThreadManager {
       }
 
       if (
-        lastMessage.data.role !== 'assistant' ||
-        (lastMessage.data.run_id && call.run_id && lastMessage.data.run_id !== call.run_id)
+        lastMessage.role !== 'assistant' ||
+        (lastMessage.run_id && call.run_id && lastMessage.run_id !== call.run_id)
       ) {
         const version = get(this.version);
         const callOutputIndex =
@@ -956,7 +964,7 @@ export class ThreadManager {
           output_index: callOutputIndex
         });
       } else {
-        lastMessage.data.content.push({
+        lastMessage.content.push({
           step_id: String(call.id),
           type: 'reasoning',
           summary: (call.summary || []).map((part) => {
@@ -982,22 +990,20 @@ export class ThreadManager {
         return d;
       }
       const sortedMessages = [...messages].sort(compareApiMessagesDesc);
-      const lastMessage = sortedMessages[0];
-      if (!lastMessage) {
+      const messageWithReasoning = sortedMessages.find((message) =>
+        message.content.some(
+          (content) =>
+            content.type === 'reasoning' && content.step_id === String(part.reasoning_step_id)
+        )
+      );
+      if (!messageWithReasoning) {
         console.warn(
-          'createReasoningSummaryPart: Received a tool call without a previous message.'
+          'createReasoningSummaryPart: Received a reasoning summary part for a reasoning step that does not exist in the messages.'
         );
         return d;
       }
 
-      if (lastMessage.message_type !== 'reasoning') {
-        console.warn(
-          'createReasoningSummaryPart: Received a reasoning summary part for a non-reasoning message.'
-        );
-        return d;
-      }
-
-      const reasoningStep = lastMessage.content.find((content) => {
+      const reasoningStep = messageWithReasoning.content.find((content) => {
         return content.type === 'reasoning' && content.step_id === String(part.reasoning_step_id);
       }) as api.ReasoningCallItem | undefined;
 
@@ -1026,22 +1032,20 @@ export class ThreadManager {
         return d;
       }
       const sortedMessages = [...messages].sort(compareApiMessagesDesc);
-      const lastMessage = sortedMessages[0];
-      if (!lastMessage) {
+      const messageWithReasoning = sortedMessages.find((message) =>
+        message.content.some(
+          (content) =>
+            content.type === 'reasoning' && content.step_id === String(call.reasoning_step_id)
+        )
+      );
+      if (!messageWithReasoning) {
         console.warn(
-          'appendToReasoningSummaryPart: Received a tool call without a previous message.'
+          'appendToReasoningSummaryPart: Received a reasoning summary delta for a reasoning step that does not exist in the messages.'
         );
         return d;
       }
 
-      if (lastMessage.message_type !== 'reasoning') {
-        console.warn(
-          'appendToReasoningSummaryPart: Received a reasoning summary part for a non-reasoning message.'
-        );
-        return d;
-      }
-
-      const reasoningStep = lastMessage.content.find((content) => {
+      const reasoningStep = messageWithReasoning.content.find((content) => {
         return content.type === 'reasoning' && content.step_id === String(call.reasoning_step_id);
       }) as api.ReasoningCallItem | undefined;
 
@@ -1073,20 +1077,20 @@ export class ThreadManager {
         return d;
       }
       const sortedMessages = [...messages].sort(compareApiMessagesDesc);
-      const lastMessage = sortedMessages[0];
-      if (!lastMessage) {
-        console.warn('completeReasoningStep: Received a tool call without a previous message.');
-        return d;
-      }
-
-      if (lastMessage.message_type !== 'reasoning') {
+      const messageWithReasoning = sortedMessages.find((message) =>
+        message.content.some(
+          (content) =>
+            content.type === 'reasoning' && content.step_id === String(call.reasoning_step_id)
+        )
+      );
+      if (!messageWithReasoning) {
         console.warn(
-          'completeReasoningStep: Received a reasoning summary part for a non-reasoning message.'
+          'completeReasoningStep: Received a reasoning summary part for a reasoning step that does not exist in the messages.'
         );
         return d;
       }
 
-      const reasoningStep = lastMessage.content.find((content) => {
+      const reasoningStep = messageWithReasoning.content.find((content) => {
         return content.type === 'reasoning' && content.step_id === String(call.reasoning_step_id);
       }) as api.ReasoningCallItem | undefined;
 
@@ -1124,7 +1128,9 @@ export class ThreadManager {
         lastMessage.data.role !== 'assistant' &&
         (call.type === 'code_interpreter' ||
           call.type === 'file_search' ||
-          call.type === 'web_search')
+          call.type === 'web_search' ||
+          call.type === 'mcp_call' ||
+          call.type === 'mcp_list_tools')
       ) {
         const version = get(this.version);
         const callOutputIndex =
@@ -1235,6 +1241,73 @@ export class ThreadManager {
             step_id: chunk.id,
             action: chunk.action || null,
             status: chunk.status
+          });
+        }
+      } else if (chunk.type === 'mcp_call') {
+        const placeholder = lastMessage.content.find(
+          (c) => c.type === 'mcp_server_call' && c.step_id === chunk.id
+        ) as api.MCPServerCallItem | undefined;
+
+        const nextArguments =
+          typeof chunk.arguments_delta === 'string'
+            ? `${placeholder?.arguments ?? ''}${chunk.arguments_delta}`
+            : typeof chunk.arguments === 'string'
+              ? chunk.arguments
+              : (placeholder?.arguments ?? null);
+
+        if (placeholder) {
+          placeholder.server_label = chunk.server_label ?? placeholder.server_label;
+          placeholder.server_name = chunk.server_name ?? placeholder.server_name;
+          placeholder.tool_name = chunk.name ?? placeholder.tool_name;
+          placeholder.arguments = nextArguments ?? placeholder.arguments;
+          if (chunk.output !== undefined) {
+            placeholder.output = chunk.output;
+          }
+          if (chunk.error !== undefined) {
+            placeholder.error = chunk.error;
+          }
+          if (chunk.status) {
+            placeholder.status = chunk.status;
+          }
+        } else {
+          lastMessage.content.push({
+            type: 'mcp_server_call',
+            step_id: chunk.id,
+            server_label: chunk.server_label ?? '',
+            server_name: chunk.server_name ?? null,
+            tool_name: chunk.name ?? null,
+            arguments: nextArguments,
+            output: chunk.output ?? null,
+            error: chunk.error ?? null,
+            status: chunk.status ?? 'in_progress'
+          });
+        }
+      } else if (chunk.type === 'mcp_list_tools') {
+        const placeholder = lastMessage.content.find(
+          (c) => c.type === 'mcp_list_tools_call' && c.step_id === chunk.id
+        ) as api.MCPListToolsCallItem | undefined;
+
+        if (placeholder) {
+          placeholder.server_label = chunk.server_label ?? placeholder.server_label;
+          placeholder.server_name = chunk.server_name ?? placeholder.server_name;
+          if (chunk.tools) {
+            placeholder.tools = chunk.tools;
+          }
+          if (chunk.error !== undefined) {
+            placeholder.error = chunk.error;
+          }
+          if (chunk.status) {
+            placeholder.status = chunk.status;
+          }
+        } else {
+          lastMessage.content.push({
+            type: 'mcp_list_tools_call',
+            step_id: chunk.id,
+            server_label: chunk.server_label ?? '',
+            server_name: chunk.server_name ?? null,
+            tools: chunk.tools ?? [],
+            error: chunk.error ?? null,
+            status: chunk.status ?? 'in_progress'
           });
         }
       }

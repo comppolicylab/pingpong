@@ -1899,6 +1899,26 @@ class BufferedResponseStreamHandler:
         self.tool_call_id = tool_call.id
         self.tool_call_external_id = tool_call.tool_call_id
 
+        self.enqueue(
+            {
+                "type": "tool_call_created",
+                "tool_call": {
+                    "id": str(data.id),
+                    "index": self.prev_output_index,
+                    "output_index": self.prev_output_index,
+                    "type": "mcp_call",
+                    "server_label": data.server_label,
+                    "server_name": mcp_server_tool.display_name,
+                    "name": data.name,
+                    "arguments": data.arguments,
+                    "output": data.output,
+                    "error": data.error,
+                    "status": data.status,
+                    "run_id": str(self.run_id),
+                },
+            }
+        )
+
     async def on_mcp_tool_call_in_progress(self, data: ResponseMcpCallInProgressEvent):
         if not self.tool_call_id:
             logger.exception(
@@ -1951,6 +1971,19 @@ class BufferedResponseStreamHandler:
             await session_.commit()
 
         await add_cached_tool_call_on_mcp_tool_call_arguments_delta()
+
+        self.enqueue(
+            {
+                "type": "tool_call_delta",
+                "delta": {
+                    "index": data.output_index,
+                    "output_index": data.output_index,
+                    "type": "mcp_call",
+                    "id": data.item_id,
+                    "arguments_delta": data.delta,
+                },
+            }
+        )
 
     async def on_mcp_tool_call_completed(self, data: ResponseMcpCallCompletedEvent):
         if not self.tool_call_id:
@@ -2047,6 +2080,25 @@ class BufferedResponseStreamHandler:
             await session_.commit()
 
         await add_cached_tool_call_on_mcp_call_done()
+
+        self.enqueue(
+            {
+                "type": "tool_call_delta",
+                "delta": {
+                    "type": "mcp_call",
+                    "id": data.id,
+                    "index": self.prev_output_index,
+                    "output_index": self.prev_output_index,
+                    "run_id": str(self.run_id),
+                    "server_label": data.server_label,
+                    "name": data.name,
+                    "arguments": data.arguments,
+                    "output": data.output,
+                    "error": data.error,
+                    "status": data.status,
+                },
+            }
+        )
         self.tool_call_id = None
         self.tool_call_external_id = None
 
@@ -2095,6 +2147,26 @@ class BufferedResponseStreamHandler:
         tool_call = await add_cached_tool_call_on_mcp_list_tools_call_created()
         self.tool_call_id = tool_call.id
         self.tool_call_external_id = tool_call.tool_call_id
+
+        tools = [tool.model_dump() for tool in (data.tools or [])]
+
+        self.enqueue(
+            {
+                "type": "tool_call_created",
+                "tool_call": {
+                    "id": str(data.id),
+                    "index": self.prev_output_index,
+                    "output_index": self.prev_output_index,
+                    "type": "mcp_list_tools",
+                    "server_label": data.server_label,
+                    "server_name": mcp_server_tool.display_name,
+                    "tools": tools,
+                    "error": data.error,
+                    "status": ToolCallStatus.IN_PROGRESS.value,
+                    "run_id": str(self.run_id),
+                },
+            }
+        )
 
     async def on_mcp_list_tools_call_in_progress(
         self, data: ResponseMcpListToolsInProgressEvent
@@ -2247,6 +2319,30 @@ class BufferedResponseStreamHandler:
             await session_.commit()
 
         await add_cached_tool_call_on_mcp_list_tools_call_done()
+
+        tools = [tool.model_dump() for tool in (data.tools or [])]
+
+        self.enqueue(
+            {
+                "type": "tool_call_delta",
+                "delta": {
+                    "type": "mcp_list_tools",
+                    "id": data.id,
+                    "index": self.prev_output_index,
+                    "output_index": self.prev_output_index,
+                    "run_id": str(self.run_id),
+                    "server_label": data.server_label,
+                    "server_name": mcp_server_tool.display_name
+                    if mcp_server_tool
+                    else None,
+                    "tools": tools,
+                    "error": data.error,
+                    "status": ToolCallStatus.COMPLETED.value
+                    if data.error is None
+                    else ToolCallStatus.FAILED.value,
+                },
+            }
+        )
         self.tool_call_id = None
         self.tool_call_external_id = None
 

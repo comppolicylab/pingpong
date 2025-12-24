@@ -2945,6 +2945,7 @@ async def get_thread(
             "ci_messages": placeholder_ci_calls,
             "fs_messages": [],
             "ws_messages": [],
+            "mcp_messages": [],
             "reasoning_messages": [],
             "attachments": all_files,
             "instructions": thread.instructions if can_view_prompt else None,
@@ -3020,6 +3021,7 @@ async def get_thread(
         file_search_calls: list[schemas.FileSearchMessage] = []
         file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
         web_search_calls: list[schemas.WebSearchMessage] = []
+        mcp_messages: list[schemas.MCPMessage] = []
         reasoning_messages: list[schemas.ReasoningMessage] = []
         for tool_call in tool_calls_v3:
             if tool_call.type == schemas.ToolCallType.CODE_INTERPRETER:
@@ -3160,6 +3162,108 @@ async def get_thread(
                         thread_id=str(thread.id),
                         output_index=tool_call.output_index,
                         message_type="web_search_call",
+                    )
+                )
+            elif tool_call.type == schemas.ToolCallType.MCP_SERVER:
+                parsed_error: dict[str, Any] | str | None = None
+                if tool_call.error:
+                    try:
+                        parsed_error = json.loads(tool_call.error)
+                    except json.JSONDecodeError:
+                        parsed_error = tool_call.error
+
+                mcp_server = tool_call.mcp_server_tool
+                mcp_messages.append(
+                    schemas.MCPMessage(
+                        id=str(tool_call.id),
+                        assistant_id=str(assistant.id) if assistant else "",
+                        created_at=tool_call.created.timestamp(),
+                        content=[
+                            schemas.MCPServerCall(
+                                step_id=str(tool_call.id),
+                                type="mcp_server_call",
+                                server_label=mcp_server.server_label
+                                if mcp_server
+                                else "",
+                                server_name=mcp_server.display_name
+                                if mcp_server
+                                else None,
+                                tool_name=tool_call.mcp_tool_name,
+                                arguments=tool_call.mcp_arguments,
+                                output=tool_call.mcp_output,
+                                error=parsed_error,
+                                status=tool_call.status.value,
+                            )
+                        ],
+                        metadata={},
+                        object="thread.message",
+                        role="assistant",
+                        run_id=str(tool_call.run_id),
+                        thread_id=str(thread.id),
+                        message_type="mcp_server_call",
+                        output_index=tool_call.output_index,
+                    )
+                )
+            elif tool_call.type == schemas.ToolCallType.MCP_LIST_TOOLS:
+                parsed_error_list_tools: dict[str, Any] | str | None = None
+                if tool_call.error:
+                    try:
+                        parsed_error_list_tools = json.loads(tool_call.error)
+                    except json.JSONDecodeError:
+                        parsed_error_list_tools = tool_call.error
+
+                mcp_tools: list[schemas.MCPListToolsTool] = []
+                for tool in tool_call.mcp_tools_listed:
+                    try:
+                        input_schema = (
+                            json.loads(tool.input_schema) if tool.input_schema else None
+                        )
+                    except json.JSONDecodeError:
+                        input_schema = None
+                    try:
+                        annotations = (
+                            json.loads(tool.annotations) if tool.annotations else None
+                        )
+                    except json.JSONDecodeError:
+                        annotations = None
+
+                    mcp_tools.append(
+                        schemas.MCPListToolsTool(
+                            name=tool.name,
+                            description=tool.description,
+                            input_schema=input_schema,
+                            annotations=annotations,
+                        )
+                    )
+
+                mcp_server = tool_call.mcp_server_tool
+                mcp_messages.append(
+                    schemas.MCPMessage(
+                        id=str(tool_call.id),
+                        assistant_id=str(assistant.id) if assistant else "",
+                        created_at=tool_call.created.timestamp(),
+                        content=[
+                            schemas.MCPListToolsCall(
+                                step_id=str(tool_call.id),
+                                type="mcp_list_tools_call",
+                                server_label=mcp_server.server_label
+                                if mcp_server
+                                else "",
+                                server_name=mcp_server.display_name
+                                if mcp_server
+                                else None,
+                                tools=mcp_tools,
+                                error=parsed_error_list_tools,
+                                status=tool_call.status.value,
+                            )
+                        ],
+                        metadata={},
+                        object="thread.message",
+                        role="assistant",
+                        run_id=str(tool_call.run_id),
+                        thread_id=str(thread.id),
+                        message_type="mcp_list_tools_call",
+                        output_index=tool_call.output_index,
                     )
                 )
 
@@ -3437,6 +3541,7 @@ async def get_thread(
             "ci_messages": placeholder_ci_calls,
             "fs_messages": file_search_calls,
             "ws_messages": web_search_calls,
+            "mcp_messages": mcp_messages,
             "reasoning_messages": reasoning_messages,
             "attachments": all_files,
             "instructions": thread.instructions if can_view_prompt else None,
@@ -3954,6 +4059,7 @@ async def list_thread_messages(
             "ci_messages": placeholder_ci_calls,
             "fs_messages": [],
             "ws_messages": [],
+            "mcp_messages": [],
             "limit": limit,
             "has_more": messages.has_more,
         }
@@ -3983,6 +4089,7 @@ async def list_thread_messages(
                 "ci_messages": [],
                 "fs_messages": [],
                 "ws_messages": [],
+                "mcp_messages": [],
                 "limit": limit,
                 "has_more": False,
             }
@@ -4060,6 +4167,7 @@ async def list_thread_messages(
         file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
         reasoning_messages: list[schemas.ReasoningMessage] = []
         web_search_calls: list[schemas.WebSearchMessage] = []
+        mcp_messages: list[schemas.MCPMessage] = []
         for tool_call in tool_calls_v3:
             if tool_call.type == schemas.ToolCallType.CODE_INTERPRETER:
                 tool_content: list[schemas.CodeInterpreterMessageContent] = []
@@ -4201,6 +4309,112 @@ async def list_thread_messages(
                         thread_id=str(thread.id),
                         output_index=tool_call.output_index,
                         message_type="web_search_call",
+                    )
+                )
+            elif tool_call.type == schemas.ToolCallType.MCP_SERVER:
+                parsed_error: dict[str, Any] | str | None = None
+                if tool_call.error:
+                    try:
+                        parsed_error = json.loads(tool_call.error)
+                    except json.JSONDecodeError:
+                        parsed_error = tool_call.error
+
+                mcp_server = tool_call.mcp_server_tool
+                mcp_messages.append(
+                    schemas.MCPMessage(
+                        id=str(tool_call.id),
+                        assistant_id=str(thread.assistant_id)
+                        if thread.assistant_id
+                        else "",
+                        created_at=tool_call.created.timestamp(),
+                        content=[
+                            schemas.MCPServerCall(
+                                step_id=str(tool_call.id),
+                                type="mcp_server_call",
+                                server_label=mcp_server.server_label
+                                if mcp_server
+                                else "",
+                                server_name=mcp_server.display_name
+                                if mcp_server
+                                else None,
+                                tool_name=tool_call.mcp_tool_name,
+                                arguments=tool_call.mcp_arguments,
+                                output=tool_call.mcp_output,
+                                error=parsed_error,
+                                status=tool_call.status.value,
+                            )
+                        ],
+                        metadata={},
+                        object="thread.message",
+                        role="assistant",
+                        run_id=str(tool_call.run_id),
+                        thread_id=str(thread.id),
+                        message_type="mcp_server_call",
+                        output_index=tool_call.output_index,
+                    )
+                )
+            elif tool_call.type == schemas.ToolCallType.MCP_LIST_TOOLS:
+                parsed_error_list_tools: dict[str, Any] | str | None = None
+                if tool_call.error:
+                    try:
+                        parsed_error_list_tools = json.loads(tool_call.error)
+                    except json.JSONDecodeError:
+                        parsed_error_list_tools = tool_call.error
+
+                mcp_tools: list[schemas.MCPListToolsTool] = []
+                for tool in tool_call.mcp_tools_listed:
+                    try:
+                        input_schema = (
+                            json.loads(tool.input_schema) if tool.input_schema else None
+                        )
+                    except json.JSONDecodeError:
+                        input_schema = None
+                    try:
+                        annotations = (
+                            json.loads(tool.annotations) if tool.annotations else None
+                        )
+                    except json.JSONDecodeError:
+                        annotations = None
+
+                    mcp_tools.append(
+                        schemas.MCPListToolsTool(
+                            name=tool.name,
+                            description=tool.description,
+                            input_schema=input_schema,
+                            annotations=annotations,
+                        )
+                    )
+
+                mcp_server = tool_call.mcp_server_tool
+                mcp_messages.append(
+                    schemas.MCPMessage(
+                        id=str(tool_call.id),
+                        assistant_id=str(thread.assistant_id)
+                        if thread.assistant_id
+                        else "",
+                        created_at=tool_call.created.timestamp(),
+                        content=[
+                            schemas.MCPListToolsCall(
+                                step_id=str(tool_call.id),
+                                type="mcp_list_tools_call",
+                                server_label=mcp_server.server_label
+                                if mcp_server
+                                else "",
+                                server_name=mcp_server.display_name
+                                if mcp_server
+                                else None,
+                                tools=mcp_tools,
+                                error=parsed_error_list_tools,
+                                status=tool_call.status.value,
+                            )
+                        ],
+                        metadata={},
+                        object="thread.message",
+                        role="assistant",
+                        run_id=str(tool_call.run_id),
+                        thread_id=str(thread.id),
+                        message_type="mcp_list_tools_call",
+                        output_index=tool_call.output_index,
                     )
                 )
 
@@ -4429,6 +4643,7 @@ async def list_thread_messages(
             "ci_messages": [],
             "fs_messages": file_search_calls,
             "ws_messages": web_search_calls,
+            "mcp_messages": mcp_messages,
             "reasoning_messages": reasoning_messages,
             "limit": limit,
             "has_more": has_more_runs,
