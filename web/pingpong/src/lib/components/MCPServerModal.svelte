@@ -172,7 +172,12 @@
       </div>
       {#if mcpServerDraft.auth_type === 'token'}
         <div class="flex flex-col gap-2">
-          <Label for="mcp-auth-token">Access token / API key</Label>
+          <Label for="mcp-auth-token">Access token/API key</Label>
+          <Helper
+            >Your token will be provided in the Authorization header. <code
+              >Authorization: Bearer &lt;token&gt;</code
+            ></Helper
+          >
           <ButtonGroup class="w-full">
             <InputAddon>
               <button on:click={() => (showToken = !showToken)}>
@@ -187,7 +192,9 @@
               id="mcp-auth-token"
               name="mcp-auth-token"
               type={showToken ? 'text' : 'password'}
-              placeholder="Add your access token"
+              placeholder={mcpServerDraft.server_label
+                ? 'Leave blank to keep the existing token'
+                : 'Add your access token'}
               bind:value={mcpServerDraft.authorization_token}
             />
           </ButtonGroup>

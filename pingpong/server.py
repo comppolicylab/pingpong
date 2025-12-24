@@ -5229,6 +5229,14 @@ async def create_thread(
     try:
         thread_db_record = await models.Thread.create(request.state.db, new_thread)
 
+        mcp_tool_ids = await models.Assistant.get_mcp_tool_ids_by_assistant_id(
+            request.state.db, assistant.id
+        )
+        if mcp_tool_ids:
+            await models.Thread.add_mcp_server_tools(
+                request.state.db, thread_db_record.id, mcp_tool_ids
+            )
+
         if assistant.version == 3:
             thread_db_record.instructions = format_instructions(
                 assistant.instructions,
@@ -5316,6 +5324,10 @@ async def create_thread(
 
             request.state.db.add(run)
             await request.state.db.flush()
+
+            await models.Run.add_mcp_server_tools(
+                request.state.db, run.id, mcp_tool_ids
+            )
 
         grants = [
             (f"class:{class_id}", "parent", f"thread:{thread_db_record.id}"),
@@ -5422,6 +5434,9 @@ async def create_run(
         request.state.db, int(thread_id)
     )
     asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
+    mcp_tool_ids = await models.Thread.get_mcp_tool_ids_by_thread_id(
+        request.state.db, thread.id
+    )
 
     if not thread or not asst:
         raise HTTPException(
@@ -5522,6 +5537,14 @@ async def create_run(
             )
 
             is_supervisor = is_supervisor_check[0]
+            mcp_server_tools_by_server_label: dict[str, models.MCPServerTool] = {}
+
+            if mcp_tool_ids:
+                mcp_server_tools = await models.Run.add_mcp_server_tools_return_tools(
+                    request.state.db, run_to_complete.id, mcp_tool_ids
+                )
+                for tool in mcp_server_tools:
+                    mcp_server_tools_by_server_label[tool.server_label] = tool
 
             run_to_complete.status = schemas.RunStatus.QUEUED
             request.state.db.add(run_to_complete)
@@ -5539,6 +5562,7 @@ async def create_run(
                 code_interpreter_file_ids=[
                     file.file_id for file in thread.code_interpreter_files
                 ],
+                mcp_server_tools_by_server_label=mcp_server_tools_by_server_label,
                 user_auth=request.state.auth_user
                 if hasattr(request.state, "auth_user")
                 else None,
@@ -5643,8 +5667,14 @@ async def send_message(
     request: Request,
     openai_client: OpenAIClient,
 ):
+    mcp_tool_ids: list[int] = []
     try:
         thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+        if "mcp_server" in thread.tools_available:
+            mcp_tool_ids = await models.Thread.get_mcp_tool_ids_by_thread_id(
+                request.state.db, thread.id
+            )
+
         tool_resources: ToolResources = {}
 
         # Check that assistant exists
@@ -6024,6 +6054,16 @@ async def send_message(
                     )
                 ],
             )
+
+            mcp_server_tools_by_server_label: dict[str, models.MCPServerTool] = {}
+
+            if mcp_tool_ids:
+                mcp_server_tools = await models.Run.add_mcp_server_tools_return_tools(
+                    request.state.db, run_to_complete.id, mcp_tool_ids
+                )
+                for tool in mcp_server_tools:
+                    mcp_server_tools_by_server_label[tool.server_label] = tool
+
             request.state.db.add(run_to_complete)
             await request.state.db.flush()
             await request.state.db.refresh(run_to_complete)
@@ -6045,6 +6085,7 @@ async def send_message(
                 thread_vector_store_id=thread_vector_store_id,
                 attached_file_search_file_ids=data.file_search_file_ids or [],
                 code_interpreter_file_ids=ci_all_files,
+                mcp_server_tools_by_server_label=mcp_server_tools_by_server_label,
                 show_reasoning_summaries=show_reasoning_summaries,
                 show_file_search_queries=show_file_search_queries,
                 show_file_search_result_quotes=show_file_search_result_quotes,
@@ -6770,8 +6811,8 @@ async def create_assistant(
 
         # Create MCP servers and associate with assistant
         if mcp_servers_input:
-            for mcp_input in mcp_servers_input:
-                # Only store credentials that match the auth_type
+
+            async def create_mcp_server(mcp_input: schemas.MCPServerToolInput):
                 headers_json = None
                 authorization_token = None
                 if mcp_input.auth_type == schemas.MCPAuthType.HEADER:
@@ -6781,9 +6822,10 @@ async def create_assistant(
                 elif mcp_input.auth_type == schemas.MCPAuthType.TOKEN:
                     authorization_token = mcp_input.authorization_token
 
-                mcp_server = await models.MCPServerTool.create(
+                return await models.MCPServerTool.create(
                     request.state.db,
                     {
+                        "display_name": mcp_input.display_name,
                         "server_url": mcp_input.server_url,
                         "headers": headers_json,
                         "authorization_token": authorization_token,
@@ -6791,8 +6833,13 @@ async def create_assistant(
                         "enabled": mcp_input.enabled,
                     },
                 )
-                asst.mcp_server_tools.append(mcp_server)
-            await request.state.db.flush()
+
+            mcp_servers = await asyncio.gather(
+                *[create_mcp_server(mcp_input) for mcp_input in mcp_servers_input]
+            )
+            await models.Assistant.synchronize_assistant_mcp_server_tools(
+                request.state.db, asst.id, [s.id for s in mcp_servers], skip_delete=True
+            )
 
         grants = [
             (f"class:{class_id}", "parent", f"assistant:{asst.id}"),
@@ -6863,7 +6910,7 @@ async def copy_assistant(
     openai_client: OpenAIClient,
     copy_options: schemas.CopyAssistantRequest | None = Body(default=None),
 ):
-    assistant = await models.Assistant.get_by_id_with_ci_files(
+    assistant = await models.Assistant.get_by_id_with_ci_files_mcp(
         request.state.db, int(assistant_id)
     )
     class_id_int = int(class_id)
@@ -7191,7 +7238,7 @@ async def update_assistant(
     openai_client: OpenAIClient,
 ):
     # Get the existing assistant.
-    asst = await models.Assistant.get_by_id_with_ci_files(
+    asst = await models.Assistant.get_by_id_with_ci_files_mcp(
         request.state.db, int(assistant_id)
     )
     grants = list[Relation]()
@@ -7476,7 +7523,6 @@ async def update_assistant(
             "The selected model does not support Web Search. Please select a different model or remove the Web Search tool.",
         )
 
-    # Check MCP server support
     uses_mcp_server = False
     if "tools" in req.model_fields_set:
         if req.tools is not None and len(req.tools) > 0:
@@ -7492,14 +7538,12 @@ async def update_assistant(
             "The selected model does not support MCP Servers. Please select a different model or remove the MCP Server tool.",
         )
 
-    # Validate MCP servers - auth_type must match provided credentials
+    existing_mcp_by_label = {}
     if "mcp_servers" in req.model_fields_set and req.mcp_servers:
-        # Build lookup of existing servers by label for validation
         existing_mcp_by_label = {s.server_label: s for s in asst.mcp_server_tools}
 
         for mcp_input in req.mcp_servers:
             if not mcp_input.server_label:
-                # New server - require credentials matching auth_type
                 if (
                     mcp_input.auth_type == schemas.MCPAuthType.TOKEN
                     and not mcp_input.authorization_token
@@ -7517,7 +7561,6 @@ async def update_assistant(
                         detail=f"MCP server '{mcp_input.server_url}' has auth_type 'header' but no headers provided.",
                     )
             else:
-                # Existing server - validate auth_type change is valid
                 existing_server = existing_mcp_by_label.get(mcp_input.server_label)
                 if not existing_server:
                     raise HTTPException(
@@ -7526,7 +7569,6 @@ async def update_assistant(
                     )
 
                 if mcp_input.auth_type == schemas.MCPAuthType.TOKEN:
-                    # For token auth, we need either a new token or existing token must exist
                     if (
                         not mcp_input.authorization_token
                         and not existing_server.authorization_token
@@ -7536,7 +7578,6 @@ async def update_assistant(
                             detail=f"MCP server '{mcp_input.server_url}' has auth_type 'token' but no authorization_token provided and none exists.",
                         )
                 elif mcp_input.auth_type == schemas.MCPAuthType.HEADER:
-                    # For header auth, headers must be provided
                     if not mcp_input.headers:
                         raise HTTPException(
                             status_code=400,
@@ -7683,25 +7724,9 @@ async def update_assistant(
         openai_update["tools"] = req.tools
         asst.tools = json.dumps(req.tools)
 
-    # --------------------- MCP Servers ---------------------
     if "mcp_servers" in req.model_fields_set and req.mcp_servers is not None:
-        # Build lookup of existing servers (already validated above)
-        existing_by_label = {s.server_label: s for s in asst.mcp_server_tools}
-        request_labels = {
-            s.server_label for s in req.mcp_servers if s.server_label is not None
-        }
 
-        # Delete servers no longer in the request
-        servers_to_remove = [
-            s for s in asst.mcp_server_tools if s.server_label not in request_labels
-        ]
-        for server in servers_to_remove:
-            asst.mcp_server_tools.remove(server)
-            await request.state.db.delete(server)
-
-        # Update existing and create new servers
-        for mcp_input in req.mcp_servers:
-            # Determine credentials based on auth_type
+        async def upsert_mcp_server(mcp_input: schemas.MCPServerToolInput) -> int:
             headers_json = None
             authorization_token = None
 
@@ -7712,14 +7737,16 @@ async def update_assistant(
             elif mcp_input.auth_type == schemas.MCPAuthType.TOKEN:
                 authorization_token = mcp_input.authorization_token
 
-            if mcp_input.server_label and mcp_input.server_label in existing_by_label:
-                # Update existing server
-                existing_server = existing_by_label[mcp_input.server_label]
+            if (
+                mcp_input.server_label
+                and mcp_input.server_label in existing_mcp_by_label
+            ):
+                existing_server = existing_mcp_by_label[mcp_input.server_label]
                 existing_server.server_url = mcp_input.server_url
                 existing_server.description = mcp_input.description
                 existing_server.enabled = mcp_input.enabled
+                existing_server.display_name = mcp_input.display_name
 
-                # Apply auth based on auth_type
                 if mcp_input.auth_type == schemas.MCPAuthType.NONE:
                     existing_server.headers = None
                     existing_server.authorization_token = None
@@ -7728,14 +7755,16 @@ async def update_assistant(
                     existing_server.authorization_token = None
                 elif mcp_input.auth_type == schemas.MCPAuthType.TOKEN:
                     existing_server.headers = None
-                    # Only update token if provided, otherwise keep existing
                     if authorization_token:
                         existing_server.authorization_token = authorization_token
+
+                request.state.db.add(existing_server)
+                return existing_server.id
             else:
-                # Create new server
                 mcp_server = await models.MCPServerTool.create(
                     request.state.db,
                     {
+                        "display_name": mcp_input.display_name,
                         "server_url": mcp_input.server_url,
                         "headers": headers_json,
                         "authorization_token": authorization_token,
@@ -7743,9 +7772,22 @@ async def update_assistant(
                         "enabled": mcp_input.enabled,
                     },
                 )
-                asst.mcp_server_tools.append(mcp_server)
+                return mcp_server.id
 
+        mcp_server_ids = await asyncio.gather(
+            *[upsert_mcp_server(mcp_input) for mcp_input in req.mcp_servers]
+        )
         await request.state.db.flush()
+        await models.Assistant.synchronize_assistant_mcp_server_tools(
+            request.state.db, asst.id, list(mcp_server_ids)
+        )
+        await models.Thread.update_mcp_server_tools_available(
+            request.state.db,
+            asst.id,
+            list(mcp_server_ids),
+            asst.version,
+            asst.interaction_mode,
+        )
 
     if "temperature" in req.model_fields_set:
         openai_update["temperature"] = req.temperature
@@ -7970,7 +8012,7 @@ def mcp_server_to_response(
 
     # Parse headers JSON if present
     headers_dict = None
-    if server.headers:
+    if server.headers and auth_type == schemas.MCPAuthType.HEADER:
         headers_dict = json.loads(server.headers)
 
     return schemas.MCPServerToolResponse(

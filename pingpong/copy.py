@@ -1,3 +1,4 @@
+import asyncio
 import json
 import openai
 from openai.types.beta.assistant_create_params import ToolResources
@@ -349,6 +350,27 @@ async def copy_assistant(
         for f in assistant.code_interpreter_files:
             ci_grants.extend(_file_grants(f, target_class_id))
         await client.write_safe(grant=ci_grants)
+
+    if assistant.mcp_server_tools:
+        new_mcp_servers = await asyncio.gather(
+            *[
+                models.MCPServerTool.create(
+                    session,
+                    {
+                        "display_name": mcp_tool.display_name,
+                        "server_url": mcp_tool.server_url,
+                        "headers": mcp_tool.headers,
+                        "authorization_token": mcp_tool.authorization_token,
+                        "description": mcp_tool.description,
+                        "enabled": mcp_tool.enabled,
+                    },
+                )
+                for mcp_tool in assistant.mcp_server_tools
+            ]
+        )
+        await models.Assistant.synchronize_assistant_mcp_server_tools(
+            session, new_assistant.id, [s.id for s in new_mcp_servers], skip_delete=True
+        )
 
     if assistant.version <= 2:
         code_interpreter_file_obj_ids = (

@@ -125,6 +125,7 @@
   $: supportsFileSearch = assistant.tools?.includes('file_search') || false;
   $: supportsCodeInterpreter = assistant.tools?.includes('code_interpreter') || false;
   $: supportsWebSearch = assistant.tools?.includes('web_search') || false;
+  $: supportsMCPServer = assistant.tools?.includes('mcp_server') || false;
   let supportsVision = false;
   $: {
     const supportVisionModels = (
@@ -226,6 +227,9 @@
     if (supportsWebSearch) {
       tools.push({ type: 'web_search' });
     }
+    if (supportsMCPServer) {
+      tools.push({ type: 'mcp_server' });
+    }
     try {
       const newThreadOpts = api.explodeResponse(
         await api.createThread(fetch, data.class.id, {
@@ -282,6 +286,9 @@
     }
     if (supportsWebSearch) {
       tools.push({ type: 'web_search' });
+    }
+    if (supportsMCPServer) {
+      tools.push({ type: 'mcp_server' });
     }
 
     try {
