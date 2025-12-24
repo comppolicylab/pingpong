@@ -218,6 +218,18 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["tool_call_id"], ["tool_calls.id"], ondelete="CASCADE"
         ),
+        sa.Column(
+            "created",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=True,
+        ),
+        sa.Column(
+            "updated",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=True,
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.add_column(
