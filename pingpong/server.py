@@ -5887,7 +5887,7 @@ async def send_message(
     mcp_tool_ids: list[int] = []
     try:
         thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
-        if "mcp_server" in thread.tools_available:
+        if thread.tools_available and "mcp_server" in thread.tools_available:
             mcp_tool_ids = await models.Thread.get_mcp_tool_ids_by_thread_id(
                 request.state.db, thread.id
             )
