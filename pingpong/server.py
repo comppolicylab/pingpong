@@ -7051,7 +7051,7 @@ async def create_assistant(
                     request.state.db,
                     {
                         "display_name": mcp_input.display_name,
-                        "server_url": mcp_input.server_url,
+                        "server_url": mcp_input.server_url_str,
                         "headers": headers_json,
                         "authorization_token": authorization_token,
                         "description": mcp_input.description,
@@ -7791,7 +7791,7 @@ async def update_assistant(
                 ):
                     raise HTTPException(
                         status_code=400,
-                        detail=f"MCP server '{mcp_input.server_url}' has auth_type 'token' but no authorization_token provided.",
+                        detail=f"MCP server '{mcp_input.server_url_str}' has auth_type 'token' but no authorization_token provided.",
                     )
                 if (
                     mcp_input.auth_type == schemas.MCPAuthType.HEADER
@@ -7799,7 +7799,7 @@ async def update_assistant(
                 ):
                     raise HTTPException(
                         status_code=400,
-                        detail=f"MCP server '{mcp_input.server_url}' has auth_type 'header' but no headers provided.",
+                        detail=f"MCP server '{mcp_input.server_url_str}' has auth_type 'header' but no headers provided.",
                     )
             else:
                 existing_server = existing_mcp_by_label.get(mcp_input.server_label)
@@ -7816,13 +7816,13 @@ async def update_assistant(
                     ):
                         raise HTTPException(
                             status_code=400,
-                            detail=f"MCP server '{mcp_input.server_url}' has auth_type 'token' but no authorization_token provided and none exists.",
+                            detail=f"MCP server '{mcp_input.server_label}' has auth_type 'token' but no authorization_token provided and none exists.",
                         )
                 elif mcp_input.auth_type == schemas.MCPAuthType.HEADER:
                     if not mcp_input.headers:
                         raise HTTPException(
                             status_code=400,
-                            detail=f"MCP server '{mcp_input.server_url}' has auth_type 'header' but no headers provided.",
+                            detail=f"MCP server '{mcp_input.server_label}' has auth_type 'header' but no headers provided.",
                         )
 
     if "verbosity" in req.model_fields_set:
@@ -7984,11 +7984,11 @@ async def update_assistant(
             ):
                 existing_server = existing_mcp_by_label[mcp_input.server_label]
                 has_changes = False
-                if existing_server.server_url != mcp_input.server_url:
+                if existing_server.server_url != mcp_input.server_url_str:
                     logger.info(
-                        f"User {request.state.session.user.id} updated MCP server tool URL for tool {existing_server.server_label} for assistant {assistant_id} from {existing_server.server_url} to {mcp_input.server_url}"
+                        f"User {request.state.session.user.id} updated MCP server tool URL for tool {existing_server.server_label} for assistant {assistant_id} from {existing_server.server_url} to {mcp_input.server_url_str}"
                     )
-                    existing_server.server_url = mcp_input.server_url
+                    existing_server.server_url = mcp_input.server_url_str
                     has_changes = True
                 if existing_server.description != mcp_input.description:
                     existing_server.description = mcp_input.description
@@ -8053,7 +8053,7 @@ async def update_assistant(
                     request.state.db,
                     {
                         "display_name": mcp_input.display_name,
-                        "server_url": mcp_input.server_url,
+                        "server_url": mcp_input.server_url_str,
                         "headers": headers_json,
                         "authorization_token": authorization_token,
                         "description": mcp_input.description,

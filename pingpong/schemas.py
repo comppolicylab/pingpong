@@ -24,6 +24,7 @@ from openai.types.responses.response_function_web_search import (
 from pydantic import (
     BaseModel,
     Field,
+    HttpUrl,
     SecretStr,
     computed_field,
     field_validator,
@@ -482,14 +483,20 @@ class MCPAuthType(StrEnum):
 class MCPServerToolInput(BaseModel):
     """Input for create/update MCP servers - used in assistant requests"""
 
-    display_name: str
+    display_name: str = Field(..., min_length=1, max_length=100)
     server_label: str | None = None
-    server_url: str = Field(..., min_length=1)
+    server_url: HttpUrl = Field(..., max_length=2048)
     auth_type: MCPAuthType = MCPAuthType.NONE
     authorization_token: str | None = None
     headers: dict[str, str] | None = None
-    description: str | None = None
+    description: str | None = Field(None, max_length=1000)
     enabled: bool = True
+
+    @computed_field
+    @property
+    def server_url_str(self) -> str:
+        return str(self.server_url)
+
 
 
 class MCPServerToolResponse(BaseModel):
