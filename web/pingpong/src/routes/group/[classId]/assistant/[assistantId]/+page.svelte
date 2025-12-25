@@ -602,7 +602,7 @@
   }
 
   let hasSetHideMCPServerCallDetails = false;
-  let hideMCPServerCallDetails = false;
+  let hideMCPServerCallDetails = true;
   $: if (
     assistant?.hide_mcp_server_call_details !== undefined &&
     assistant?.hide_mcp_server_call_details !== null &&
