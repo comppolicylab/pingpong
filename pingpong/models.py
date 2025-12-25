@@ -3833,6 +3833,20 @@ class MCPServerTool(Base):
         result = await session.execute(select(cls).where(cls.server_label == label))
         return result.scalar_one_or_none()
 
+    @classmethod
+    async def get_for_assistant(
+        cls, session: AsyncSession, assistant_id: int
+    ) -> list["MCPServerTool"]:
+        """Get MCP servers configured for an assistant."""
+        assoc = mcp_server_tool_assistant_association
+        stmt = (
+            select(cls)
+            .join(assoc, assoc.c.mcp_server_tool_id == cls.id)
+            .where(assoc.c.assistant_id == assistant_id)
+        )
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
 
 class MCPListToolsTool(Base):
     __tablename__ = "mcp_list_tools_tools"

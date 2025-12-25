@@ -8329,14 +8329,11 @@ async def get_assistant_mcp_servers(class_id: str, assistant_id: str, request: R
     if not asst:
         raise HTTPException(404, "Assistant not found.")
 
-    # Load MCP servers relationship
-    await request.state.db.refresh(asst, ["mcp_server_tools"])
+    mcp_servers = await models.MCPServerTool.get_for_assistant(
+        request.state.db, asst.id
+    )
 
-    return {
-        "mcp_servers": [
-            mcp_server_to_response(server) for server in asst.mcp_server_tools
-        ]
-    }
+    return {"mcp_servers": [mcp_server_to_response(server) for server in mcp_servers]}
 
 
 @v1.post(
