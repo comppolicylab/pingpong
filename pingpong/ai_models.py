@@ -9,8 +9,8 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     #
     # ---------------   GPT-5 Family   ---------------
     #
-    "gpt-5.1": {
-        "name": "GPT-5.1",
+    "gpt-5.2": {
+        "name": "GPT-5.2",
         "sort_order": 0.1,
         "type": "chat",
         "is_new": True,
@@ -28,11 +28,32 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_verbosity": True,
         "supports_web_search": True,
         "supports_mcp_server": True,
-        "description": "Best model for complex tasks, instruction following, and long conversations. Control how long the model spends thinking in Advanced Options.",
+        "description": "Best model for complex tasks that require broad world knowledge, with advances instruction following. Control how long the model spends thinking in Advanced Options.",
+    },
+    "gpt-5.1": {
+        "name": "GPT-5.1",
+        "sort_order": 0.2,
+        "type": "chat",
+        "is_new": True,
+        "highlight": False,
+        "is_latest": True,
+        "supports_vision": True,
+        "supports_file_search": True,
+        "supports_code_interpreter": True,
+        "supports_temperature": False,
+        "supports_reasoning": True,
+        "supports_classic_assistants": False,
+        "supports_next_gen_assistants": True,
+        "supports_minimal_reasoning_effort": False,
+        "supports_none_reasoning_effort": True,
+        "supports_verbosity": True,
+        "supports_web_search": True,
+        "supports_mcp_server": True,
+        "description": "Previous intelligent reasoning model for coding, reasoning and tasks across domains. We recommend upgrading to GPT-5.2. Control how long the model spends thinking in Advanced Options.",
     },
     "gpt-5": {
         "name": "GPT-5",
-        "sort_order": 0.2,
+        "sort_order": 0.3,
         "type": "chat",
         "is_new": False,
         "highlight": False,
@@ -53,7 +74,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-5-mini": {
         "name": "GPT-5 mini",
-        "sort_order": 0.3,
+        "sort_order": 0.4,
         "type": "chat",
         "is_new": False,
         "highlight": False,
@@ -74,7 +95,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-5-nano": {
         "name": "GPT-5 nano",
-        "sort_order": 0.4,
+        "sort_order": 0.5,
         "type": "chat",
         "is_new": False,
         "highlight": False,
@@ -98,7 +119,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     #
     "gpt-4.1": {
         "name": "GPT-4.1",
-        "sort_order": 0.5,
+        "sort_order": 0.6,
         "type": "chat",
         "is_new": False,
         "highlight": True,
@@ -119,7 +140,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-4.1-mini": {
         "name": "GPT-4.1 mini",
-        "sort_order": 0.6,
+        "sort_order": 0.7,
         "type": "chat",
         "is_new": False,
         "highlight": False,
@@ -140,7 +161,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-4.1-nano": {
         "name": "GPT-4.1 nano",
-        "sort_order": 0.7,
+        "sort_order": 0.8,
         "type": "chat",
         "is_new": False,
         "highlight": False,
@@ -523,8 +544,8 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     #
     # ---------------   GPT-5 Family   ---------------
     #
-    "gpt-5.1-2025-11-13": {
-        "name": "gpt-5.1-2025-11-13",
+    "gpt-5.2-2025-12-11": {
+        "name": "gpt-5.2-2025-12-11",
         "sort_order": 0.1,
         "type": "chat",
         "is_new": True,
@@ -542,13 +563,56 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_verbosity": True,
         "supports_web_search": True,
         "supports_mcp_server": True,
-        "description": "Best model for complex tasks, instruction following, and long conversations. Control how long the model spends thinking in Advanced Options.",
+        "description": "Best model for complex tasks that require broad world knowledge, with advances instruction following. Control how long the model spends thinking in Advanced Options.",
+    },
+    "gpt-5.2-chat-latest": {
+        "name": "gpt-5.2-chat-latest",
+        "sort_order": 0.11,
+        "type": "chat",
+        "is_new": False,
+        "highlight": False,
+        "is_latest": False,
+        "supports_vision": True,
+        "supports_file_search": True,
+        "supports_code_interpreter": True,
+        "supports_temperature": False,
+        "supports_reasoning": True,
+        "supports_classic_assistants": False,
+        "supports_next_gen_assistants": True,
+        "supports_minimal_reasoning_effort": False,
+        "supports_none_reasoning_effort": False,
+        "reasoning_effort_levels": [1],
+        "supports_verbosity": True,
+        "supports_web_search": True,
+        "supports_mcp_server": True,
+        "description": "GPT-5.2 Chat points to the GPT-5.2 snapshot currently used in ChatGPT. We recommend GPT-5.2 for most assistants. Control how long the model spends thinking in Advanced Options.",
+    },
+    "gpt-5.1-2025-11-13": {
+        "name": "gpt-5.1-2025-11-13",
+        "sort_order": 0.2,
+        "type": "chat",
+        "is_new": False,
+        "highlight": False,
+        "is_latest": False,
+        "supports_vision": True,
+        "supports_file_search": True,
+        "supports_code_interpreter": True,
+        "supports_temperature": False,
+        "supports_reasoning": True,
+        "supports_classic_assistants": False,
+        "supports_next_gen_assistants": True,
+        "supports_minimal_reasoning_effort": False,
+        "supports_none_reasoning_effort": True,
+        "supports_verbosity": True,
+        "supports_web_search": True,
+        "supports_mcp_server": True,
+        "description": "Previous intelligent reasoning model for coding, reasoning and tasks across domains. We recommend upgrading to GPT-5.2. Control how long the model spends thinking in Advanced Options.",
     },
     "gpt-5.1-chat-latest": {
         "name": "gpt-5.1-chat-latest",
-        "sort_order": 0.2,
+        "sort_order": 0.3,
         "type": "chat",
-        "is_new": True,
+        "is_new": False,
         "highlight": False,
         "is_latest": False,
         "supports_vision": True,
@@ -568,7 +632,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-5-2025-08-07": {
         "name": "gpt-5-2025-08-07",
-        "sort_order": 0.3,
+        "sort_order": 0.4,
         "type": "chat",
         "is_new": False,
         "highlight": False,
@@ -589,7 +653,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-5-mini-2025-08-07": {
         "name": "gpt-5-mini-2025-08-07",
-        "sort_order": 0.2,
+        "sort_order": 0.5,
         "type": "chat",
         "is_new": False,
         "highlight": False,
@@ -610,7 +674,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-5-nano-2025-08-07": {
         "name": "gpt-5-nano-2025-08-07",
-        "sort_order": 0.4,
+        "sort_order": 0.6,
         "type": "chat",
         "is_new": False,
         "highlight": False,
@@ -634,7 +698,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     #
     "gpt-4.1-2025-04-14": {
         "name": "gpt-4.1-2025-04-14",
-        "sort_order": 0.5,
+        "sort_order": 0.7,
         "type": "chat",
         "is_new": False,
         "highlight": False,
@@ -655,7 +719,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-4.1-mini-2025-04-14": {
         "name": "gpt-4.1-mini-2025-04-14",
-        "sort_order": 0.6,
+        "sort_order": 0.8,
         "type": "chat",
         "is_new": False,
         "highlight": False,
@@ -676,7 +740,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     },
     "gpt-4.1-nano-2025-04-14": {
         "name": "gpt-4.1-nano-2025-04-14",
-        "sort_order": 0.7,
+        "sort_order": 0.9,
         "type": "chat",
         "is_new": False,
         "highlight": False,
@@ -1164,6 +1228,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
 # but are still available for use in existing assistants
 # Users should not be able to select these models.
 HIDDEN_MODELS = [
+    "gpt-5.1",
     "gpt-5",
     "gpt-5-nano",
     "gpt-5-nano-2025-08-07",
@@ -1206,6 +1271,12 @@ ADMIN_ONLY_MODELS: list[str] = []
 # and should not be visible to Azure users.
 # These models are only available for OpenAI users.
 AZURE_UNAVAILABLE_MODELS = [
+    "gpt-5.2",
+    "gpt-5.2-2025-12-11",
+    "gpt-5.2-chat-latest",
+    "gpt-5.1",
+    "gpt-5.1-2025-11-13",
+    "gpt-5.1-chat-latest",
     "gpt-5",
     "gpt-5-mini",
     "gpt-5-nano",
