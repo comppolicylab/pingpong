@@ -2,12 +2,45 @@ name: Claude Code Review
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened]
     paths: [web/**, pingpong/**, .github/workflows/**, conftest.py, poetry.lock, pyproject.toml]
+  issue_comment:
+    types: [created]
 
 jobs:
-  claude-review:
+  detect-claude-command:
+    if: |
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      contains(
+        fromJson('["OWNER","MEMBER","COLLABORATOR"]'),
+        github.event.comment.author_association
+      )
     runs-on: ubuntu-latest
+    outputs:
+      run_review: ${{ steps.check.outputs.run_review }}
+    steps:
+      - name: Check for exact @claude review command
+        id: check
+        run: |
+          body="$(echo "${{ github.event.comment.body }}" | xargs)"
+          if [ "$body" = "@claude review" ]; then
+            echo "run_review=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_review=false" >> "$GITHUB_OUTPUT"
+          fi
+  claude-review:
+    needs: [detect-claude-command]
+    if: |
+      always() &&
+      (
+        github.event_name == 'pull_request' ||
+        needs.detect-claude-command.outputs.run_review == 'true'
+      )
+    runs-on:
+      ubuntu-latest
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
     permissions:
       contents: read
       pull-requests: read
@@ -27,7 +60,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
             REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number }}
+            PR NUMBER: ${{ env.PR_NUMBER }}
 
             Please review this pull request and provide feedback on:
             - Code quality and best practices
