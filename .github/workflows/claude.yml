@@ -11,30 +11,55 @@ on:
     types: [submitted]
 
 jobs:
+  detect-non-claude-review:
+    runs-on: ubuntu-latest
+    outputs:
+      run_claude: ${{ steps.check.outputs.run_claude }}
+    steps:
+      - name: Skip exact @claude review command
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" != "issue_comment" ]; then
+            echo "run_claude=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          body="$(echo "${{ github.event.comment.body }}" | xargs)"
+          if [ "$body" = "@claude review" ]; then
+            echo "run_claude=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_claude=true" >> "$GITHUB_OUTPUT"
+          fi
+
   claude:
+    needs: [detect-non-claude-review]
     if: |
+      always() &&
       (
-        github.event_name == 'issue_comment' &&
-        contains(github.event.comment.body, '@claude') &&
-        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
-      ) ||
-      (
-        github.event_name == 'pull_request_review_comment' &&
-        contains(github.event.comment.body, '@claude') &&
-        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
-      ) ||
-      (
-        github.event_name == 'pull_request_review' &&
-        contains(github.event.review.body, '@claude') &&
-        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)
-      ) ||
-      (
-        github.event_name == 'issues' &&
         (
-          contains(github.event.issue.body, '@claude') ||
-          contains(github.event.issue.title, '@claude')
-        ) &&
-        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
+          github.event_name == 'issue_comment' &&
+          contains(github.event.comment.body, '@claude') &&
+          (!github.event.issue.pull_request ||
+          needs.detect-non-claude-review.outputs.run_claude == 'true') &&
+          contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+        ) ||
+        (
+          github.event_name == 'pull_request_review_comment' &&
+          contains(github.event.comment.body, '@claude') &&
+          contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+        ) ||
+        (
+          github.event_name == 'pull_request_review' &&
+          contains(github.event.review.body, '@claude') &&
+          contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)
+        ) ||
+        (
+          github.event_name == 'issues' &&
+          (
+            contains(github.event.issue.body, '@claude') ||
+            contains(github.event.issue.title, '@claude')
+          ) &&
+          contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
+        )
       )
     runs-on: ubuntu-latest
     permissions:
