@@ -33,8 +33,10 @@ jobs:
     needs: [detect-claude-command]
     if: |
       always() &&
-      github.event_name == 'pull_request' ||
-      needs.detect-claude-command.outputs.run_review == 'true'
+      (
+        github.event_name == 'pull_request' ||
+        needs.detect-claude-command.outputs.run_review == 'true'
+      )
     runs-on:
       ubuntu-latest
     env:
