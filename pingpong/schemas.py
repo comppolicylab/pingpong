@@ -492,11 +492,10 @@ class MCPServerToolInput(BaseModel):
     description: str | None = Field(None, max_length=1000)
     enabled: bool = True
 
-    @computed_field
+    @computed_field  # type: ignore
     @property
     def server_url_str(self) -> str:
         return str(self.server_url)
-
 
 
 class MCPServerToolResponse(BaseModel):

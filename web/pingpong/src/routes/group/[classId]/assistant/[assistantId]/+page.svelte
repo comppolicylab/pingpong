@@ -1000,17 +1000,15 @@
     ) {
       tools.push({ type: 'web_search' });
     }
-    const allowMcpServerTool =
+    let mcpServersForRequest: MCPServerToolInput[] = [];
+    if (
       mcpServerToolSelect &&
       supportsMCPServer &&
       !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort) &&
-      ((data.isCreating && !createClassicAssistant) || assistantVersion === 3);
-    if (allowMcpServerTool) {
+      ((data.isCreating && !createClassicAssistant) || assistantVersion === 3)
+    ) {
       tools.push({ type: 'mcp_server' });
-    }
-    let mcpServersForRequest: MCPServerToolInput[] | undefined = undefined;
-    if (allowMcpServerTool || data.isCreating) {
-      mcpServersForRequest = allowMcpServerTool ? mcpServers.map(cleanMcpServerForRequest) : [];
+      mcpServersForRequest = mcpServers.map(cleanMcpServerForRequest);
     }
     const params = {
       name: preventEdits ? assistant?.name || '' : body.name.toString(),

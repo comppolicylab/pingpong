@@ -8080,6 +8080,19 @@ async def update_assistant(
             asst.version,
             asst.interaction_mode,
         )
+    elif "tools" in req.model_fields_set and (
+        req.tools is None or {"type": "mcp_server"} not in req.tools
+    ):
+        await models.Assistant.synchronize_assistant_mcp_server_tools(
+            request.state.db, asst.id, []
+        )
+        await models.Thread.update_mcp_server_tools_available(
+            request.state.db,
+            asst.id,
+            [],
+            asst.version,
+            asst.interaction_mode,
+        )
 
     if "temperature" in req.model_fields_set:
         openai_update["temperature"] = req.temperature
