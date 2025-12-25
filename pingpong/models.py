@@ -2361,6 +2361,7 @@ class Assistant(Base):
     hide_file_search_queries = Column(Boolean, server_default="true")
     hide_web_search_sources = Column(Boolean, server_default="false")
     hide_web_search_actions = Column(Boolean, server_default="false")
+    hide_mcp_server_call_details = Column(Boolean, server_default="true")
     mcp_server_tools = relationship(
         "MCPServerTool", secondary=mcp_server_tool_assistant_association
     )

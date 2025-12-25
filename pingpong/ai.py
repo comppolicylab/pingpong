@@ -948,6 +948,7 @@ class BufferedResponseStreamHandler:
         show_web_search_sources: bool | None = None,
         show_web_search_actions: bool | None = None,
         show_reasoning_summaries: bool | None = None,
+        show_mcp_server_call_details: bool | None = None,
         *args,
         **kwargs,
     ):
@@ -1007,6 +1008,11 @@ class BufferedResponseStreamHandler:
         )
         self.show_web_search_actions = (
             show_web_search_actions if show_web_search_actions is not None else True
+        )
+        self.show_mcp_server_call_details = (
+            show_mcp_server_call_details
+            if show_mcp_server_call_details is not None
+            else True
         )
 
     def enqueue(self, data: Dict) -> None:
@@ -1941,9 +1947,13 @@ class BufferedResponseStreamHandler:
                     "server_label": data.server_label,
                     "server_name": mcp_server_tool.display_name,
                     "name": data.name,
-                    "arguments": data.arguments,
-                    "output": data.output,
-                    "error": data.error,
+                    "arguments": data.arguments
+                    if self.show_mcp_server_call_details
+                    else None,
+                    "output": data.output
+                    if self.show_mcp_server_call_details
+                    else None,
+                    "error": data.error if self.show_mcp_server_call_details else None,
                     "status": data.status,
                     "run_id": str(self.run_id),
                 },
@@ -2003,6 +2013,8 @@ class BufferedResponseStreamHandler:
 
         await add_cached_tool_call_on_mcp_tool_call_arguments_delta()
 
+        if not self.show_mcp_server_call_details:
+            return
         self.enqueue(
             {
                 "type": "tool_call_delta",
@@ -2123,9 +2135,13 @@ class BufferedResponseStreamHandler:
                     "run_id": str(self.run_id),
                     "server_label": data.server_label,
                     "name": data.name,
-                    "arguments": data.arguments,
-                    "output": data.output,
-                    "error": data.error,
+                    "arguments": data.arguments
+                    if self.show_mcp_server_call_details
+                    else None,
+                    "output": data.output
+                    if self.show_mcp_server_call_details
+                    else None,
+                    "error": data.error if self.show_mcp_server_call_details else None,
                     "status": data.status,
                 },
             }
@@ -2192,8 +2208,8 @@ class BufferedResponseStreamHandler:
                     "type": "mcp_list_tools",
                     "server_label": data.server_label,
                     "server_name": mcp_server_tool.display_name,
-                    "tools": tools,
-                    "error": data.error,
+                    "tools": tools if self.show_mcp_server_call_details else None,
+                    "error": data.error if self.show_mcp_server_call_details else None,
                     "status": ToolCallStatus.IN_PROGRESS.value,
                     "run_id": str(self.run_id),
                 },
@@ -2367,8 +2383,8 @@ class BufferedResponseStreamHandler:
                     "server_name": mcp_server_tool.display_name
                     if mcp_server_tool
                     else None,
-                    "tools": tools,
-                    "error": data.error,
+                    "tools": tools if self.show_mcp_server_call_details else None,
+                    "error": data.error if self.show_mcp_server_call_details else None,
                     "status": ToolCallStatus.COMPLETED.value
                     if data.error is None
                     else ToolCallStatus.FAILED.value,
@@ -3374,6 +3390,7 @@ async def run_response(
     show_web_search_sources: bool | None = None,
     show_web_search_actions: bool | None = None,
     show_reasoning_summaries: bool | None = None,
+    show_mcp_server_call_details: bool | None = None,
     user_auth: str | None = None,
     anonymous_link_auth: str | None = None,
     anonymous_user_auth: str | None = None,
@@ -3524,6 +3541,7 @@ async def run_response(
                     show_web_search_sources=show_web_search_sources,
                     show_web_search_actions=show_web_search_actions,
                     show_reasoning_summaries=show_reasoning_summaries,
+                    show_mcp_server_call_details=show_mcp_server_call_details,
                     user_id=run.creator_id,
                     user_auth=user_auth,
                     anonymous_user_auth=anonymous_user_auth,

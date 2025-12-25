@@ -50,6 +50,7 @@
 
   $: serverLabel = content.server_name || content.server_label || 'MCP server';
   $: errorPayload = formatError(content.error);
+  $: hasTools = !!content.tools && content.tools.length > 0;
   $: statusLabel =
     content.status === 'completed'
       ? `Listed tools${open ? '...' : ''}`
@@ -114,29 +115,33 @@
     </div>
   {/if}
   <div class={showServerLabel ? 'mt-1' : 'mt-0'}>
-    <button type="button" class="flex flex-row items-center gap-1" on:click={toggle}>
+    {#if hasTools}
+      <button type="button" class="flex flex-row items-center gap-1" on:click={toggle}>
+        <span class={statusClasses}>{statusLabel}</span>
+        {#if open}
+          <ChevronDownOutline class="transform rotate-180 text-gray-600" />
+        {:else}
+          <ChevronDownOutline class="text-gray-600" />
+        {/if}
+      </button>
+    {:else}
       <span class={statusClasses}>{statusLabel}</span>
-      {#if open}
-        <ChevronDownOutline class="transform rotate-180 text-gray-600" />
-      {:else}
-        <ChevronDownOutline class="text-gray-600" />
-      {/if}
-    </button>
+    {/if}
   </div>
 
-  {#if open}
-    <div
-      class="ml-2 mt-2 border-l border-gray-200 pl-4 text-sm text-gray-600 font-light"
-      transition:slide={{ duration: 250 }}
-    >
-      {#if errorPayload}
-        <div class="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-          {errorPayload}
-        </div>
-      {/if}
-      {#if content.tools && content.tools.length > 0}
+  {#if hasTools}
+    {#if open}
+      <div
+        class="ml-2 mt-2 border-l border-gray-200 pl-4 text-sm text-gray-600 font-light"
+        transition:slide={{ duration: 250 }}
+      >
+        {#if errorPayload}
+          <div class="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            {errorPayload}
+          </div>
+        {/if}
         <div class="flex flex-wrap gap-2">
-          {#each content.tools as tool, i (tool.name)}
+          {#each content.tools ?? [] as tool, i (tool.name)}
             <button
               type="button"
               class="rounded border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-mono text-gray-700 hover:bg-gray-100"
@@ -147,10 +152,8 @@
             </button>
           {/each}
         </div>
-      {:else}
-        <div class="text-xs text-gray-500">No tools listed.</div>
-      {/if}
-    </div>
+      </div>
+    {/if}
   {/if}
 </div>
 

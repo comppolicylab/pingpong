@@ -3015,6 +3015,9 @@ async def get_thread(
         show_web_search_actions = is_supervisor or (
             assistant and not assistant.hide_web_search_actions
         )
+        show_mcp_server_call_details = is_supervisor or (
+            assistant and not assistant.hide_mcp_server_call_details
+        )
 
         thread_messages: list[schemas.ThreadMessage] = []
         placeholder_ci_calls = []
@@ -3166,7 +3169,7 @@ async def get_thread(
                 )
             elif tool_call.type == schemas.ToolCallType.MCP_SERVER:
                 parsed_error: dict[str, Any] | str | None = None
-                if tool_call.error:
+                if tool_call.error and show_mcp_server_call_details:
                     try:
                         parsed_error = json.loads(tool_call.error)
                     except json.JSONDecodeError:
@@ -3189,8 +3192,12 @@ async def get_thread(
                                 if mcp_server
                                 else None,
                                 tool_name=tool_call.mcp_tool_name,
-                                arguments=tool_call.mcp_arguments,
-                                output=tool_call.mcp_output,
+                                arguments=tool_call.mcp_arguments
+                                if show_mcp_server_call_details
+                                else None,
+                                output=tool_call.mcp_output
+                                if show_mcp_server_call_details
+                                else None,
                                 error=parsed_error,
                                 status=tool_call.status.value,
                             )
@@ -3206,35 +3213,40 @@ async def get_thread(
                 )
             elif tool_call.type == schemas.ToolCallType.MCP_LIST_TOOLS:
                 parsed_error_list_tools: dict[str, Any] | str | None = None
-                if tool_call.error:
+                if tool_call.error and show_mcp_server_call_details:
                     try:
                         parsed_error_list_tools = json.loads(tool_call.error)
                     except json.JSONDecodeError:
                         parsed_error_list_tools = tool_call.error
 
                 mcp_tools: list[schemas.MCPListToolsTool] = []
-                for tool in tool_call.mcp_tools_listed:
-                    try:
-                        input_schema = (
-                            json.loads(tool.input_schema) if tool.input_schema else None
-                        )
-                    except json.JSONDecodeError:
-                        input_schema = None
-                    try:
-                        annotations = (
-                            json.loads(tool.annotations) if tool.annotations else None
-                        )
-                    except json.JSONDecodeError:
-                        annotations = None
+                if show_mcp_server_call_details:
+                    for tool in tool_call.mcp_tools_listed:
+                        try:
+                            input_schema = (
+                                json.loads(tool.input_schema)
+                                if tool.input_schema
+                                else None
+                            )
+                        except json.JSONDecodeError:
+                            input_schema = None
+                        try:
+                            annotations = (
+                                json.loads(tool.annotations)
+                                if tool.annotations
+                                else None
+                            )
+                        except json.JSONDecodeError:
+                            annotations = None
 
-                    mcp_tools.append(
-                        schemas.MCPListToolsTool(
-                            name=tool.name,
-                            description=tool.description,
-                            input_schema=input_schema,
-                            annotations=annotations,
+                        mcp_tools.append(
+                            schemas.MCPListToolsTool(
+                                name=tool.name,
+                                description=tool.description,
+                                input_schema=input_schema,
+                                annotations=annotations,
+                            )
                         )
-                    )
 
                 mcp_server = tool_call.mcp_server_tool
                 mcp_messages.append(
@@ -4160,6 +4172,9 @@ async def list_thread_messages(
         show_web_search_actions = is_supervisor or (
             assistant and not assistant.hide_web_search_actions
         )
+        show_mcp_server_call_details = is_supervisor or (
+            assistant and not assistant.hide_mcp_server_call_details
+        )
 
         thread_messages: list[schemas.ThreadMessage] = []
         placeholder_ci_calls = []
@@ -4313,7 +4328,7 @@ async def list_thread_messages(
                 )
             elif tool_call.type == schemas.ToolCallType.MCP_SERVER:
                 parsed_error: dict[str, Any] | str | None = None
-                if tool_call.error:
+                if tool_call.error and show_mcp_server_call_details:
                     try:
                         parsed_error = json.loads(tool_call.error)
                     except json.JSONDecodeError:
@@ -4338,8 +4353,12 @@ async def list_thread_messages(
                                 if mcp_server
                                 else None,
                                 tool_name=tool_call.mcp_tool_name,
-                                arguments=tool_call.mcp_arguments,
-                                output=tool_call.mcp_output,
+                                arguments=tool_call.mcp_arguments
+                                if show_mcp_server_call_details
+                                else None,
+                                output=tool_call.mcp_output
+                                if show_mcp_server_call_details
+                                else None,
                                 error=parsed_error,
                                 status=tool_call.status.value,
                             )
@@ -4355,35 +4374,40 @@ async def list_thread_messages(
                 )
             elif tool_call.type == schemas.ToolCallType.MCP_LIST_TOOLS:
                 parsed_error_list_tools: dict[str, Any] | str | None = None
-                if tool_call.error:
+                if tool_call.error and show_mcp_server_call_details:
                     try:
                         parsed_error_list_tools = json.loads(tool_call.error)
                     except json.JSONDecodeError:
                         parsed_error_list_tools = tool_call.error
 
                 mcp_tools: list[schemas.MCPListToolsTool] = []
-                for tool in tool_call.mcp_tools_listed:
-                    try:
-                        input_schema = (
-                            json.loads(tool.input_schema) if tool.input_schema else None
-                        )
-                    except json.JSONDecodeError:
-                        input_schema = None
-                    try:
-                        annotations = (
-                            json.loads(tool.annotations) if tool.annotations else None
-                        )
-                    except json.JSONDecodeError:
-                        annotations = None
+                if show_mcp_server_call_details:
+                    for tool in tool_call.mcp_tools_listed:
+                        try:
+                            input_schema = (
+                                json.loads(tool.input_schema)
+                                if tool.input_schema
+                                else None
+                            )
+                        except json.JSONDecodeError:
+                            input_schema = None
+                        try:
+                            annotations = (
+                                json.loads(tool.annotations)
+                                if tool.annotations
+                                else None
+                            )
+                        except json.JSONDecodeError:
+                            annotations = None
 
-                    mcp_tools.append(
-                        schemas.MCPListToolsTool(
-                            name=tool.name,
-                            description=tool.description,
-                            input_schema=input_schema,
-                            annotations=annotations,
+                        mcp_tools.append(
+                            schemas.MCPListToolsTool(
+                                name=tool.name,
+                                description=tool.description,
+                                input_schema=input_schema,
+                                annotations=annotations,
+                            )
                         )
-                    )
 
                 mcp_server = tool_call.mcp_server_tool
                 mcp_messages.append(
@@ -5807,6 +5831,8 @@ async def create_run(
                 or not asst.hide_web_search_sources,
                 show_web_search_actions=is_supervisor
                 or not asst.hide_web_search_actions,
+                show_mcp_server_call_details=is_supervisor
+                or not asst.hide_mcp_server_call_details,
             )
         except Exception as e:
             logger.exception("Error running thread")
@@ -6223,6 +6249,9 @@ async def send_message(
             show_web_search_actions = is_supervisor or (
                 asst and not asst.hide_web_search_actions
             )
+            show_mcp_server_call_details = is_supervisor or (
+                asst and not asst.hide_mcp_server_call_details
+            )
 
             messageContentParts: list[models.MessagePart] = []
             part_index = 0
@@ -6310,6 +6339,7 @@ async def send_message(
                 show_file_search_document_names=show_file_search_document_names,
                 show_web_search_sources=show_web_search_sources,
                 show_web_search_actions=show_web_search_actions,
+                show_mcp_server_call_details=show_mcp_server_call_details,
                 user_auth=request.state.auth_user
                 if hasattr(request.state, "auth_user")
                 else None,
@@ -8155,6 +8185,12 @@ async def update_assistant(
         and req.hide_file_search_queries is not None
     ):
         asst.hide_file_search_queries = req.hide_file_search_queries
+
+    if (
+        "hide_mcp_server_call_details" in req.model_fields_set
+        and req.hide_mcp_server_call_details is not None
+    ):
+        asst.hide_mcp_server_call_details = req.hide_mcp_server_call_details
 
     if (
         "hide_web_search_sources" in req.model_fields_set
