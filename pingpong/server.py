@@ -7035,7 +7035,9 @@ async def create_assistant(
         # Create MCP servers and associate with assistant
         if mcp_servers_input:
 
-            async def create_mcp_server(mcp_input: schemas.MCPServerToolInput):
+            async def create_mcp_server(
+                mcp_input: schemas.MCPServerToolInput, assistant_id: int
+            ) -> models.MCPServerTool:
                 headers_json = None
                 authorization_token = None
                 if mcp_input.auth_type == schemas.MCPAuthType.HEADER:
@@ -7045,7 +7047,7 @@ async def create_assistant(
                 elif mcp_input.auth_type == schemas.MCPAuthType.TOKEN:
                     authorization_token = mcp_input.authorization_token
 
-                return await models.MCPServerTool.create(
+                tool = await models.MCPServerTool.create(
                     request.state.db,
                     {
                         "display_name": mcp_input.display_name,
@@ -7054,11 +7056,21 @@ async def create_assistant(
                         "authorization_token": authorization_token,
                         "description": mcp_input.description,
                         "enabled": mcp_input.enabled,
+                        "created_by_user_id": request.state.session.user.id,
                     },
                 )
 
+                # Log which user created the MCP server tool and some basic info
+                logger.info(
+                    f"User {request.state.session.user.id} created MCP server tool {tool.server_label} for assistant {assistant_id} with URL {tool.server_url} and display name '{tool.display_name}'"
+                )
+                return tool
+
             mcp_servers = await asyncio.gather(
-                *[create_mcp_server(mcp_input) for mcp_input in mcp_servers_input]
+                *[
+                    create_mcp_server(mcp_input, asst.id)
+                    for mcp_input in mcp_servers_input
+                ]
             )
             await models.Assistant.synchronize_assistant_mcp_server_tools(
                 request.state.db, asst.id, [s.id for s in mcp_servers], skip_delete=True
@@ -7971,23 +7983,70 @@ async def update_assistant(
                 and mcp_input.server_label in existing_mcp_by_label
             ):
                 existing_server = existing_mcp_by_label[mcp_input.server_label]
-                existing_server.server_url = mcp_input.server_url
-                existing_server.description = mcp_input.description
-                existing_server.enabled = mcp_input.enabled
-                existing_server.display_name = mcp_input.display_name
+                has_changes = False
+                if existing_server.server_url != mcp_input.server_url:
+                    logger.info(
+                        f"User {request.state.session.user.id} updated MCP server tool URL for tool {existing_server.server_label} for assistant {assistant_id} from {existing_server.server_url} to {mcp_input.server_url}"
+                    )
+                    existing_server.server_url = mcp_input.server_url
+                    has_changes = True
+                if existing_server.description != mcp_input.description:
+                    existing_server.description = mcp_input.description
+                    has_changes = True
+                if existing_server.enabled != mcp_input.enabled:
+                    logger.info(
+                        f"User {request.state.session.user.id} updated MCP server tool enabled status for tool {existing_server.server_label} for assistant {assistant_id} from {existing_server.enabled} to {mcp_input.enabled}"
+                    )
+                    existing_server.enabled = mcp_input.enabled
+                    has_changes = True
+                if existing_server.display_name != mcp_input.display_name:
+                    logger.info(
+                        f"User {request.state.session.user.id} updated MCP server tool display name for tool {existing_server.server_label} for assistant {assistant_id} from '{existing_server.display_name}' to '{mcp_input.display_name}'"
+                    )
+                    existing_server.display_name = mcp_input.display_name
+                    has_changes = True
 
                 if mcp_input.auth_type == schemas.MCPAuthType.NONE:
-                    existing_server.headers = None
-                    existing_server.authorization_token = None
+                    logger.info(
+                        f"User {request.state.session.user.id} removed authentication for MCP server tool {existing_server.server_label} for assistant {assistant_id}"
+                    )
+                    if existing_server.headers is not None:
+                        existing_server.headers = None
+                        has_changes = True
+                    if existing_server.authorization_token is not None:
+                        existing_server.authorization_token = None
+                        has_changes = True
                 elif mcp_input.auth_type == schemas.MCPAuthType.HEADER:
-                    existing_server.headers = headers_json
-                    existing_server.authorization_token = None
+                    if existing_server.headers != headers_json:
+                        logger.info(
+                            f"User {request.state.session.user.id} updated MCP server tool headers for tool {existing_server.server_label} for assistant {assistant_id}"
+                        )
+                        existing_server.headers = headers_json
+                        has_changes = True
+                    if existing_server.authorization_token is not None:
+                        logger.info(
+                            f"User {request.state.session.user.id} switched MCP server tool {existing_server.server_label} for assistant {assistant_id} to header-based authentication, removing existing authorization token"
+                        )
+                        existing_server.authorization_token = None
+                        has_changes = True
                 elif mcp_input.auth_type == schemas.MCPAuthType.TOKEN:
-                    existing_server.headers = None
+                    if existing_server.headers is not None:
+                        logger.info(
+                            f"User {request.state.session.user.id} switched MCP server tool {existing_server.server_label} for assistant {assistant_id} to token-based authentication, removing existing headers"
+                        )
+                        existing_server.headers = None
+                        has_changes = True
                     if authorization_token:
-                        existing_server.authorization_token = authorization_token
+                        if existing_server.authorization_token != authorization_token:
+                            logger.info(
+                                f"User {request.state.session.user.id} updated MCP server tool authorization token for tool {existing_server.server_label} for assistant {assistant_id}"
+                            )
+                            existing_server.authorization_token = authorization_token
+                            has_changes = True
 
-                request.state.db.add(existing_server)
+                if has_changes:
+                    existing_server.updated_by_user_id = request.state.session.user.id
+                    request.state.db.add(existing_server)
                 return existing_server.id
             else:
                 mcp_server = await models.MCPServerTool.create(
@@ -7999,7 +8058,11 @@ async def update_assistant(
                         "authorization_token": authorization_token,
                         "description": mcp_input.description,
                         "enabled": mcp_input.enabled,
+                        "created_by_user_id": request.state.session.user.id,
                     },
+                )
+                logger.info(
+                    f"User {request.state.session.user.id} created MCP server tool {mcp_server.server_label} for assistant {assistant_id} with URL {mcp_server.server_url} and display name '{mcp_server.display_name}'"
                 )
                 return mcp_server.id
 

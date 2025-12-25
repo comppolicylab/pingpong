@@ -138,6 +138,14 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
             nullable=True,
         ),
+        sa.Column("created_by_user_id", sa.Integer(), nullable=True),
+        sa.Column("updated_by_user_id", sa.Integer(), nullable=True),
+        sa.ForeignKeyConstraint(
+            ["created_by_user_id"], ["users.id"], ondelete="SET NULL"
+        ),
+        sa.ForeignKeyConstraint(
+            ["updated_by_user_id"], ["users.id"], ondelete="SET NULL"
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
