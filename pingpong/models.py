@@ -2698,18 +2698,24 @@ class Assistant(Base):
         skip_delete=False,
     ) -> None:
         """Synchronize MCP server tools for an assistant."""
-        if not skip_delete and mcp_tool_ids:
-            delete_stmt = (
-                delete(mcp_server_tool_assistant_association)
-                .where(
-                    mcp_server_tool_assistant_association.c.assistant_id == assistant_id
-                )
-                .where(
-                    mcp_server_tool_assistant_association.c.mcp_server_tool_id.not_in(
-                        mcp_tool_ids
+        if not skip_delete:
+            if mcp_tool_ids:
+                delete_stmt = (
+                    delete(mcp_server_tool_assistant_association)
+                    .where(
+                        mcp_server_tool_assistant_association.c.assistant_id
+                        == assistant_id
+                    )
+                    .where(
+                        mcp_server_tool_assistant_association.c.mcp_server_tool_id.not_in(
+                            mcp_tool_ids
+                        )
                     )
                 )
-            )
+            else:
+                delete_stmt = delete(mcp_server_tool_assistant_association).where(
+                    mcp_server_tool_assistant_association.c.assistant_id == assistant_id
+                )
             await session.execute(delete_stmt)
 
         if not mcp_tool_ids:
