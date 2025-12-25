@@ -16,7 +16,6 @@ jobs:
       (
         github.event_name == 'issue_comment' &&
         contains(github.event.comment.body, '@claude') &&
-        !contains(github.event.comment.body, '@claude review') &&
         contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
       ) ||
       (
@@ -37,8 +36,6 @@ jobs:
           contains(github.event.issue.body, '@claude') ||
           contains(github.event.issue.title, '@claude')
         ) &&
-        !contains(github.event.issue.body, '@claude review') &&
-        !contains(github.event.issue.title, '@claude review') &&
         contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
       )
     runs-on: ubuntu-latest
