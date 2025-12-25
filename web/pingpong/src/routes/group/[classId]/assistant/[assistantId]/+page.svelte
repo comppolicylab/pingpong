@@ -601,6 +601,17 @@
     hideFileSearchResultQuotes = true;
   }
 
+  let hasSetHideMCPServerCallDetails = false;
+  let hideMCPServerCallDetails = false;
+  $: if (
+    assistant?.hide_mcp_server_call_details !== undefined &&
+    assistant?.hide_mcp_server_call_details !== null &&
+    !hasSetHideMCPServerCallDetails
+  ) {
+    hideMCPServerCallDetails = assistant?.hide_mcp_server_call_details;
+    hasSetHideMCPServerCallDetails = true;
+  }
+
   let hideWebSearchSources = false;
   let hasSetHideWebSearchSources = false;
   $: if (
@@ -1057,7 +1068,8 @@
       hide_file_search_queries: hideFileSearchQueries,
       hide_web_search_sources: hideWebSearchActions ? true : hideWebSearchSources,
       hide_web_search_actions: hideWebSearchActions,
-      mcp_servers: mcpServersForRequest
+      mcp_servers: mcpServersForRequest,
+      hide_mcp_server_call_details: hideMCPServerCallDetails
     };
     return params;
   };
@@ -2287,6 +2299,28 @@
                 assistant's internal logic or prompt. When checked, members will not see the
                 reasoning summaries. Moderators can always review reasoning summaries. <b
                   >This setting will only apply to Chat Mode reasoning models.</b
+                ></Helper
+              >
+            </div>
+            <hr />
+
+            <div class="col-span-2 mb-1">
+              <Checkbox
+                id="hide_mcp_server_call_details"
+                name="hide_mcp_server_call_details"
+                disabled={preventEdits}
+                bind:checked={hideMCPServerCallDetails}
+                ><div class="flex flex-row gap-1">
+                  <div>Hide MCP Server call details from Members</div>
+                </div></Checkbox
+              >
+              <Helper
+                >Control whether members can see MCP Server call details. In some cases, this
+                material may contain sensitive information or insights about the assistant's
+                internal logic or prompt. When checked, members will not see the MCP Server call
+                details. Moderators can always review MCP Server call details. <b
+                  >This setting will only apply to Chat Mode models with the MCP Server tool
+                  enabled.</b
                 ></Helper
               >
             </div>

@@ -44,6 +44,7 @@
   $: requestPayload = formatPayload(content.arguments);
   $: responsePayload = formatPayload(content.output);
   $: errorPayload = formatError(content.error);
+  $: hasResult = !!requestPayload || !!responsePayload || !!errorPayload;
 
   $: statusLabel =
     content.status === 'completed'
@@ -72,42 +73,49 @@
     </div>
   {/if}
   <div class={showServerLabel ? 'mt-1' : 'mt-0'}>
-    <button type="button" class="flex flex-row items-center gap-1" on:click={toggle}>
+    {#if hasResult}
+      <button type="button" class="flex flex-row items-center gap-1" on:click={toggle}>
+        <span class={statusClasses}>{statusLabel}</span>
+        {#if open}
+          <ChevronDownOutline class="transform rotate-180 text-gray-600" />
+        {:else}
+          <ChevronDownOutline class="text-gray-600" />
+        {/if}
+      </button>
+    {:else}
       <span class={statusClasses}>{statusLabel}</span>
-      {#if open}
-        <ChevronDownOutline class="transform rotate-180 text-gray-600" />
-      {:else}
-        <ChevronDownOutline class="text-gray-600" />
-      {/if}
-    </button>
+    {/if}
   </div>
 
-  {#if open}
-    <div
-      class="ml-2 mt-2 border-l border-gray-200 pl-4 text-sm text-gray-600 font-light"
-      transition:slide={{ duration: 250 }}
-    >
-      {#if requestPayload}
-        <div class="pb-3">
-          <div class="rounded border border-gray-200 bg-gray-50 px-4 py-3">
-            <div class="mb-2 text-xs text-gray-500">Request</div>
-            <pre class="text-xs whitespace-pre-wrap font-mono text-gray-700">{requestPayload}</pre>
+  {#if hasResult}
+    {#if open}
+      <div
+        class="ml-2 mt-2 border-l border-gray-200 pl-4 text-sm text-gray-600 font-light"
+        transition:slide={{ duration: 250 }}
+      >
+        {#if requestPayload}
+          <div class="pb-3">
+            <div class="rounded border border-gray-200 bg-gray-50 px-4 py-3">
+              <div class="mb-2 text-xs text-gray-500">Request</div>
+              <pre
+                class="text-xs whitespace-pre-wrap font-mono text-gray-700">{requestPayload}</pre>
+            </div>
           </div>
-        </div>
-      {/if}
+        {/if}
 
-      {#if responsePayload || errorPayload}
-        <div class="pb-3">
-          <div class="rounded border border-gray-200 bg-gray-50 px-4 py-3">
-            <div class="mb-2 text-xs text-gray-500">{errorPayload ? 'Error' : 'Response'}</div>
-            <pre class="text-xs whitespace-pre-wrap font-mono text-gray-700">{errorPayload ||
-                responsePayload}</pre>
+        {#if responsePayload || errorPayload}
+          <div class="pb-3">
+            <div class="rounded border border-gray-200 bg-gray-50 px-4 py-3">
+              <div class="mb-2 text-xs text-gray-500">{errorPayload ? 'Error' : 'Response'}</div>
+              <pre class="text-xs whitespace-pre-wrap font-mono text-gray-700">{errorPayload ||
+                  responsePayload}</pre>
+            </div>
           </div>
-        </div>
-      {:else}
-        <div class="text-xs text-gray-500">Waiting for response...</div>
-      {/if}
-    </div>
+        {:else}
+          <div class="text-xs text-gray-500">Waiting for response...</div>
+        {/if}
+      </div>
+    {/if}
   {/if}
 </div>
 

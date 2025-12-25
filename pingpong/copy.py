@@ -331,6 +331,7 @@ async def copy_assistant(
         hide_file_search_queries=assistant.hide_file_search_queries,
         hide_web_search_sources=assistant.hide_web_search_sources,
         hide_web_search_actions=assistant.hide_web_search_actions,
+        hide_mcp_server_call_details=assistant.hide_mcp_server_call_details,
     )
 
     session.add(new_assistant)
