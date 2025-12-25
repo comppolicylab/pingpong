@@ -3783,12 +3783,12 @@ class MCPServerTool(Base):
     )
 
     @classmethod
-    def generate_server_label(cls, prefix: str = "mcp") -> str:
+    def generate_server_label(cls, prefix: str = "srv") -> str:
         """
         Generate an opaque, non-inferable, URL-safe server label.
 
         Example:
-            mcp_QL82uAYjbes9RsCkQKJ3mL5Y
+            srv_QL82uAYjbes9RsCkQKJ3mL5Y
         """
         token = (
             base64.urlsafe_b64encode(
@@ -4155,7 +4155,10 @@ class ToolCall(Base):
         stmt = (
             update(ToolCall)
             .where(ToolCall.id == id)
-            .values(mcp_arguments=ToolCall.mcp_arguments + arguments_delta)
+            .values(
+                mcp_arguments=func.coalesce(ToolCall.mcp_arguments, "")
+                + arguments_delta
+            )
         )
         await session.execute(stmt)
 
@@ -4851,6 +4854,8 @@ class Run(Base):
         mcp_server_tool_ids: list[int],
     ) -> None:
         """Add MCP server tools to a run."""
+        if not mcp_server_tool_ids:
+            return
         stmt = (
             _get_upsert_stmt(session)(mcp_server_tool_run_association)
             .values([(tool_id, id) for tool_id in mcp_server_tool_ids])
@@ -5511,6 +5516,8 @@ class Thread(Base):
         mcp_tool_ids: list[int],
     ) -> None:
         """Add MCP server tools to a thread."""
+        if not mcp_tool_ids:
+            return
         stmt = (
             _get_upsert_stmt(session)(mcp_server_tool_thread_association)
             .values([(tool_id, thread_id) for tool_id in mcp_tool_ids])

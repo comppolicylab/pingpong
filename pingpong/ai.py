@@ -569,7 +569,7 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
 
 async def build_response_input_item_list(
     session: AsyncSession, thread_id: int, uses_reasoning: bool = False
-) -> tuple[list[ResponseInputItemParam], int]:
+) -> list[ResponseInputItemParam]:
     """Build a list of ResponseInputItem from a thread run step."""
     response_input_items: list[ResponseInputItemParam] = []
     # Store ResponseInputItemParam and time created to sort later
@@ -713,7 +713,9 @@ async def build_response_input_item_list(
                 for result in tool_call.results:
                     file_search_results.append(
                         Result(
-                            attributes=json.loads(result.attributes),
+                            attributes=json.loads(result.attributes)
+                            if result.attributes
+                            else {},
                             file_id=result.file_id,
                             filename=result.filename,
                             score=result.score,
@@ -725,7 +727,9 @@ async def build_response_input_item_list(
                         tool_call.created,
                         ResponseFileSearchToolCallParam(
                             id=tool_call.tool_call_id,
-                            queries=json.loads(tool_call.queries),
+                            queries=json.loads(tool_call.queries)
+                            if tool_call.queries
+                            else [],
                             status=ToolCallStatus(tool_call.status).value,
                             results=file_search_results,
                             type="file_search_call",
@@ -800,10 +804,14 @@ async def build_response_input_item_list(
                 for tool in tool_call.mcp_tools_listed:
                     mcp_tools.append(
                         McpListToolsToolParam(
-                            input_schema=json.loads(tool.input_schema),
+                            input_schema=json.loads(tool.input_schema)
+                            if tool.input_schema
+                            else {},
                             name=tool.name,
                             description=tool.description,
-                            annotations=json.loads(tool.annotations),
+                            annotations=json.loads(tool.annotations)
+                            if tool.annotations
+                            else {},
                         )
                     )
                 try:
@@ -890,7 +898,7 @@ async def build_response_input_item_list(
                 response_input_items[response_input_items.index(item)] = (
                     convert_to_message(item, uses_reasoning)
                 )
-    return response_input_items, len(response_input_items)
+    return response_input_items
 
 
 class BufferedResponseStreamHandler:
@@ -905,8 +913,8 @@ class BufferedResponseStreamHandler:
         class_id: int,
         thread_id: int,
         assistant_id: int,
-        mcp_server_tools_by_server_label: dict[str, models.MCPServerTool] | None,
         user_id: int,
+        mcp_server_tools_by_server_label: dict[str, models.MCPServerTool] | None = None,
         user_auth: str | None = None,
         anonymous_link_auth: str | None = None,
         anonymous_user_auth: str | None = None,
@@ -3383,7 +3391,7 @@ async def run_response(
                 run.temperature if run.temperature is not None else openai.NOT_GIVEN
             )
             async with config.db.driver.async_session() as session_:
-                input_items, _ = await build_response_input_item_list(
+                input_items = await build_response_input_item_list(
                     session_,
                     thread_id=run.thread_id,
                     uses_reasoning=not isinstance(reasoning_settings, openai.NotGiven),

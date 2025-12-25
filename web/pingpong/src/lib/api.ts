@@ -1752,7 +1752,7 @@ export type MCPServerToolInput = {
   authorization_token?: string;
   headers?: Record<string, string>;
   description?: string;
-  enabled?: boolean;
+  enabled: boolean;
 };
 
 /**

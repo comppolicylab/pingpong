@@ -143,7 +143,6 @@
       sadToast('Error: MCP Server data is missing.');
       return;
     }
-    console.log('Saving MCP Server:', server, 'at index:', index);
     if (index !== null) {
       mcpServers[index] = server;
     } else {
@@ -1934,7 +1933,7 @@
                     <input
                       type="checkbox"
                       class="h-4 w-4 rounded border-gray-300 text-blue-dark-40 focus:ring-blue-dark-40 disabled:opacity-50"
-                      checked={server.enabled ?? true}
+                      bind:checked={server.enabled}
                       disabled={preventEdits}
                       aria-label="Enable MCP server"
                     />
@@ -1946,7 +1945,6 @@
                       color="light"
                       class="w-fit"
                       on:click={() => {
-                        console.log('Editing MCP server at index', index);
                         mcpServerEditIndex = index;
                         showMCPServerModal = true;
                       }}

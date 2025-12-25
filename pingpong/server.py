@@ -5540,9 +5540,10 @@ async def create_thread(
             request.state.db.add(run)
             await request.state.db.flush()
 
-            await models.Run.add_mcp_server_tools(
-                request.state.db, run.id, mcp_tool_ids
-            )
+            if mcp_tool_ids:
+                await models.Run.add_mcp_server_tools(
+                    request.state.db, run.id, mcp_tool_ids
+                )
 
         grants = [
             (f"class:{class_id}", "parent", f"thread:{thread_db_record.id}"),
@@ -5759,7 +5760,8 @@ async def create_run(
                     request.state.db, run_to_complete.id, mcp_tool_ids
                 )
                 for tool in mcp_server_tools:
-                    mcp_server_tools_by_server_label[tool.server_label] = tool
+                    if tool.enabled:
+                        mcp_server_tools_by_server_label[tool.server_label] = tool
 
             run_to_complete.status = schemas.RunStatus.QUEUED
             request.state.db.add(run_to_complete)
@@ -6277,7 +6279,8 @@ async def send_message(
                     request.state.db, run_to_complete.id, mcp_tool_ids
                 )
                 for tool in mcp_server_tools:
-                    mcp_server_tools_by_server_label[tool.server_label] = tool
+                    if tool.enabled:
+                        mcp_server_tools_by_server_label[tool.server_label] = tool
 
             request.state.db.add(run_to_complete)
             await request.state.db.flush()
@@ -6877,6 +6880,11 @@ async def create_assistant(
         raise HTTPException(
             status_code=400,
             detail="The selected model does not support MCP Servers. Please select a different model or remove the MCP Server tool.",
+        )
+    if uses_mcp_server and assistant_version <= 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Classic Assistants do not support MCP Server tools. To use MCP Servers, create a Next-Gen Assistant.",
         )
 
     # Validate MCP servers - auth_type must match provided credentials
@@ -7746,6 +7754,12 @@ async def update_assistant(
         uses_mcp_server = asst.tools is not None and {
             "type": "mcp_server"
         } in json.loads(asst.tools)
+
+    if uses_mcp_server and asst.version <= 2:
+        raise HTTPException(
+            400,
+            "Classic Assistants do not support MCP Server tools. To use MCP Servers, create a Next-Gen Assistant.",
+        )
 
     if uses_mcp_server and (model_record and not model_record.supports_mcp_server):
         raise HTTPException(

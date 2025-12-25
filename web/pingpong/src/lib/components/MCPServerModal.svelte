@@ -30,7 +30,8 @@
         description: '',
         auth_type: 'token',
         authorization_token: '',
-        headers: {}
+        headers: {},
+        enabled: true
       };
   export let mcpServerEditIndex: number | null = null;
 
