@@ -779,6 +779,17 @@ async def build_response_input_item_list(
                 )
 
             case ToolCallType.MCP_SERVER:
+                server_label = tool_call.mcp_server_label or (
+                    tool_call.mcp_server_tool.server_label
+                    if tool_call.mcp_server_tool
+                    else None
+                )
+                if not server_label:
+                    logger.warning(
+                        "Skipping MCP tool call %s due to missing server label.",
+                        tool_call.tool_call_id,
+                    )
+                    continue
                 try:
                     error = json.loads(tool_call.error) if tool_call.error else None
                 except json.JSONDecodeError:
@@ -790,7 +801,7 @@ async def build_response_input_item_list(
                             id=tool_call.tool_call_id,
                             arguments=tool_call.mcp_arguments,
                             name=tool_call.mcp_tool_name,
-                            server_label=tool_call.mcp_server_tool.server_label,
+                            server_label=server_label,
                             type="mcp_call",
                             approval_request_id=None,
                             error=error,
@@ -800,6 +811,17 @@ async def build_response_input_item_list(
                     )
                 )
             case ToolCallType.MCP_LIST_TOOLS:
+                server_label = tool_call.mcp_server_label or (
+                    tool_call.mcp_server_tool.server_label
+                    if tool_call.mcp_server_tool
+                    else None
+                )
+                if not server_label:
+                    logger.warning(
+                        "Skipping MCP list tools call %s due to missing server label.",
+                        tool_call.tool_call_id,
+                    )
+                    continue
                 mcp_tools: list[McpListToolsToolParam] = []
                 for tool in tool_call.mcp_tools_listed:
                     mcp_tools.append(
@@ -824,7 +846,7 @@ async def build_response_input_item_list(
                         tool_call.created,
                         McpListToolsParam(
                             id=tool_call.tool_call_id,
-                            server_label=tool_call.mcp_server_tool.server_label,
+                            server_label=server_label,
                             tools=mcp_tools,
                             type="mcp_list_tools",
                             error=error,
@@ -1889,6 +1911,7 @@ class BufferedResponseStreamHandler:
             "thread_id": self.thread_id,
             "output_index": self.prev_output_index,
             "mcp_server_tool_id": mcp_server_tool.id,
+            "mcp_server_label": data.server_label,
             "mcp_tool_name": data.name,
             "mcp_arguments": data.arguments,
             "mcp_output": data.output,
@@ -2141,6 +2164,7 @@ class BufferedResponseStreamHandler:
             "thread_id": self.thread_id,
             "output_index": self.prev_output_index,
             "mcp_server_tool_id": mcp_server_tool.id,
+            "mcp_server_label": data.server_label,
             "created": utcnow(),
         }
 

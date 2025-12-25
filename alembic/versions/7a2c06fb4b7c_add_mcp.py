@@ -244,6 +244,9 @@ def upgrade() -> None:
         "tool_calls", sa.Column("mcp_server_tool_id", sa.Integer(), nullable=True)
     )
     op.add_column("tool_calls", sa.Column("mcp_tool_name", sa.String(), nullable=True))
+    op.add_column(
+        "tool_calls", sa.Column("mcp_server_label", sa.String(), nullable=True)
+    )
     op.add_column("tool_calls", sa.Column("mcp_arguments", sa.String(), nullable=True))
     op.add_column("tool_calls", sa.Column("mcp_output", sa.String(), nullable=True))
     op.add_column("tool_calls", sa.Column("error", sa.String(), nullable=True))
@@ -325,6 +328,7 @@ def downgrade() -> None:
     op.drop_column("tool_calls", "mcp_arguments")
     op.drop_column("tool_calls", "mcp_tool_name")
     op.drop_column("tool_calls", "mcp_server_tool_id")
+    op.drop_column("tool_calls", "mcp_server_label")
     op.drop_table("mcp_list_tools_tools")
     op.drop_index(
         "mcp_server_tool_run_idx", table_name="mcp_server_tool_run_associations"

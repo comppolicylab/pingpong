@@ -4110,6 +4110,7 @@ class ToolCall(Base):
         Integer, ForeignKey("mcp_server_tools.id", ondelete="SET NULL"), nullable=True
     )
     mcp_server_tool = relationship("MCPServerTool", uselist=False)
+    mcp_server_label = Column(String, nullable=True)
     mcp_tool_name = Column(String, nullable=True)
     mcp_arguments = Column(String, nullable=True)
     mcp_output = Column(String, nullable=True)
