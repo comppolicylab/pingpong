@@ -33,7 +33,7 @@ jobs:
   claude:
     needs: [detect-non-claude-review]
     if: |
-      needs.detect-non-claude-review.outputs.run_claude == 'true' &&
+      always() &&
       (
         github.event_name == 'issue_comment' &&
         contains(github.event.comment.body, '@claude') &&
