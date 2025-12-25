@@ -127,16 +127,19 @@
     useLatex = assistant?.use_latex;
     hasSetUseLatex = true;
   }
-  let mcpServers: MCPServerToolInput[] = [];
+  let mcpServersLocal: MCPServerToolInput[] = [];
+  $: mcpServersFromRequest = data.mcpServers.slice();
   let hasSetMCPServers = false;
   $: if (data.mcpServers !== undefined && data.mcpServers !== null && !hasSetMCPServers) {
-    mcpServers = data.mcpServers.slice();
+    mcpServersLocal = data.mcpServers.slice();
     hasSetMCPServers = true;
   }
   let showMCPServerModal = false;
   let mcpServerEditIndex: number | null = null;
 
-  $: mcpServerEdit = mcpServerEditIndex !== null ? mcpServers[mcpServerEditIndex] : null;
+  $: mcpServerEditFromServer =
+    mcpServerEditIndex !== null ? mcpServersFromRequest[mcpServerEditIndex] : null;
+  $: mcpServerEdit = mcpServerEditIndex !== null ? mcpServersLocal[mcpServerEditIndex] : null;
 
   const saveMCPServerAndCloseModal = (server: MCPServerToolInput, index: number | null) => {
     if (!server) {
@@ -144,9 +147,9 @@
       return;
     }
     if (index !== null) {
-      mcpServers[index] = server;
+      mcpServersLocal[index] = server;
     } else {
-      mcpServers = [...mcpServers, server];
+      mcpServersLocal = [...mcpServersLocal, server];
     }
     mcpServerEditIndex = null;
     showMCPServerModal = false;
@@ -158,7 +161,7 @@
   };
 
   const removeServer = (index: number) => {
-    mcpServers = mcpServers.filter((_, i) => i !== index);
+    mcpServersLocal = mcpServersLocal.filter((_, i) => i !== index);
   };
 
   let selectedFileSearchFiles = writable(
@@ -958,7 +961,7 @@
     ) {
       modifiedFields.push('file search files');
     }
-    if (!areMcpServersEqual(mcpServers, data.mcpServers || [])) {
+    if (!areMcpServersEqual(mcpServersLocal, data.mcpServers || [])) {
       modifiedFields.push('mcp servers');
     }
 
@@ -1008,7 +1011,7 @@
       ((data.isCreating && !createClassicAssistant) || assistantVersion === 3)
     ) {
       tools.push({ type: 'mcp_server' });
-      mcpServersForRequest = mcpServers.map(cleanMcpServerForRequest);
+      mcpServersForRequest = mcpServersLocal.map(cleanMcpServerForRequest);
     }
     const params = {
       name: preventEdits ? assistant?.name || '' : body.name.toString(),
@@ -1326,7 +1329,8 @@
   >
   {#if showMCPServerModal}
     <MCPServerModal
-      mcpServerDraftFromServer={mcpServerEdit}
+      mcpServerRecordFromServer={mcpServerEditFromServer}
+      mcpServerLocalDraft={mcpServerEdit}
       {mcpServerEditIndex}
       on:save={(e) => saveMCPServerAndCloseModal(e.detail.mcpServer, e.detail.index)}
       on:close={() => resetDraftMCPServerAndCloseModal()}
@@ -1908,10 +1912,10 @@
             <div class="sm:col-span-1 text-center">Enabled</div>
             <div class="sm:col-span-1 text-right">Actions</div>
           </div>
-          {#if mcpServers.length === 0}
+          {#if mcpServersLocal.length === 0}
             <div class="px-4 py-6 text-sm text-gray-500">No MCP servers configured yet.</div>
           {:else}
-            {#each mcpServers as server, index (index)}
+            {#each mcpServersLocal as server, index (index)}
               <div class="border-t border-gray-100 px-4 py-3">
                 <div class="flex flex-col gap-3 sm:grid sm:grid-cols-12 sm:items-center sm:gap-3">
                   <div class="sm:col-span-4">

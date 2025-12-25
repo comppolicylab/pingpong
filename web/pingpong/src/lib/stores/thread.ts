@@ -914,8 +914,8 @@ export class ThreadManager {
 
   #createReasoningStep(call: api.ThreadStreamReasoningStepCreatedChunk['reasoning_step']) {
     this.#data.update((d) => {
-      const messages = d.data?.messages;
-      if (!messages?.length) {
+      const messages = d.data?.messages ?? [];
+      if (!messages.length) {
         console.warn('createReasoningStep: Received a tool call without any messages.');
         return d;
       }

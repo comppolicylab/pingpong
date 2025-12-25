@@ -125,7 +125,7 @@ def upgrade() -> None:
         sa.Column("headers", sa.String(), nullable=True),
         sa.Column("authorization_token", sa.String(), nullable=True),
         sa.Column("description", sa.String(), nullable=True),
-        sa.Column("enabled", sa.Boolean(), nullable=True),
+        sa.Column("enabled", sa.Boolean(), server_default="true", nullable=False),
         sa.Column(
             "created",
             sa.DateTime(timezone=True),

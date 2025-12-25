@@ -2698,7 +2698,7 @@ class Assistant(Base):
         skip_delete=False,
     ) -> None:
         """Synchronize MCP server tools for an assistant."""
-        if not skip_delete:
+        if not skip_delete and mcp_tool_ids:
             delete_stmt = (
                 delete(mcp_server_tool_assistant_association)
                 .where(
@@ -3774,7 +3774,7 @@ class MCPServerTool(Base):
     headers = Column(String, nullable=True)
     authorization_token = Column(String, nullable=True)
     description = Column(String, nullable=True)
-    enabled = Column(Boolean, default=True)
+    enabled = Column(Boolean, server_default="true", nullable=False)
     created_by_user_id = Column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

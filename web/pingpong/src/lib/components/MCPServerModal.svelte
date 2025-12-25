@@ -20,9 +20,13 @@
   import { createEventDispatcher } from 'svelte';
   import { sadToast } from '$lib/toast';
 
-  export let mcpServerDraftFromServer: MCPServerToolInput | null = null;
-  let mcpServerDraft: MCPServerToolInput = mcpServerDraftFromServer
-    ? structuredClone(mcpServerDraftFromServer)
+  export let mcpServerLocalDraft: MCPServerToolInput | null = null;
+  export let mcpServerEditIndex: number | null = null;
+  export let mcpServerRecordFromServer: MCPServerToolInput | null = null;
+  const dispatcher = createEventDispatcher();
+
+  let mcpServerDraft: MCPServerToolInput = mcpServerLocalDraft
+    ? structuredClone(mcpServerLocalDraft)
     : {
         server_label: undefined,
         server_url: '',
@@ -33,12 +37,11 @@
         headers: {},
         enabled: true
       };
-  export let mcpServerEditIndex: number | null = null;
 
-  const dispatcher = createEventDispatcher();
-
-  let isCreating = mcpServerEditIndex === null;
+  let isCreating = mcpServerRecordFromServer === null;
   let showToken = false;
+
+  let serverRecordUsesTokenAuth = mcpServerRecordFromServer?.auth_type === 'token';
 
   type MCPHeaderEntry = { key: string; value: string };
 
@@ -74,11 +77,11 @@
       return;
     }
 
-    // If auth type is token, token is required (unless editing and token is blank)
+    // If auth type is token, token is required (unless retaining existing token auth)
     if (
       mcpServerDraft.auth_type === 'token' &&
-      mcpServerDraft.authorization_token?.trim() === '' &&
-      mcpServerEditIndex === null
+      !serverRecordUsesTokenAuth &&
+      (!mcpServerDraft.authorization_token || mcpServerDraft.authorization_token.trim() === '')
     ) {
       sadToast('Please enter an access token/API key for token authentication.');
       return;
@@ -93,24 +96,26 @@
       }
     }
 
-    const headers: Record<string, string> = {};
-    mcpServerHeaderRows.forEach((row) => {
-      if (row.key.trim() !== '') {
-        headers[row.key.trim()] = row.value.trim();
-      }
-    });
-    mcpServerDraft.headers = headers;
+    if (mcpServerDraft.auth_type === 'none') {
+      mcpServerDraft.authorization_token = '';
+      mcpServerDraft.headers = {};
+    } else if (mcpServerDraft.auth_type === 'token') {
+      mcpServerDraft.headers = {};
+    } else if (mcpServerDraft.auth_type === 'header') {
+      const headers: Record<string, string> = {};
+      mcpServerHeaderRows.forEach((row) => {
+        if (row.key.trim() !== '') {
+          headers[row.key.trim()] = row.value.trim();
+        }
+      });
+      mcpServerDraft.headers = headers;
+      mcpServerDraft.authorization_token = '';
+    }
     dispatcher('save', { mcpServer: mcpServerDraft, index: mcpServerEditIndex });
   };
 </script>
 
-<Modal
-  size="md"
-  open
-  outsideclose
-  on:close={() => dispatcher('close')}
-  on:cancel={() => dispatcher('close')}
->
+<Modal size="md" open on:close={() => dispatcher('close')} on:cancel={() => dispatcher('close')}>
   <div class="flex flex-col">
     <div class="mx-auto my-10 flex w-2/3 flex-col items-center gap-4 text-center">
       <div
@@ -193,14 +198,14 @@
               id="mcp-auth-token"
               name="mcp-auth-token"
               type={showToken ? 'text' : 'password'}
-              placeholder={mcpServerDraft.server_label
+              placeholder={serverRecordUsesTokenAuth
                 ? 'Leave blank to keep the existing token'
                 : 'Add your access token'}
               bind:value={mcpServerDraft.authorization_token}
             />
           </ButtonGroup>
 
-          {#if mcpServerDraft.server_label && mcpServerDraft.auth_type === 'token'}
+          {#if serverRecordUsesTokenAuth}
             <Helper class="-mt-1">Leave blank to keep the existing token.</Helper>
           {:else}
             <Helper class="-mt-1">Required for token authentication.</Helper>
