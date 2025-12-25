@@ -2684,6 +2684,7 @@ async def list_class_models(
             ],
             "supports_verbosity": KNOWN_MODELS[m.id]["supports_verbosity"],
             "supports_web_search": KNOWN_MODELS[m.id]["supports_web_search"],
+            "supports_mcp_server": KNOWN_MODELS[m.id]["supports_mcp_server"],
             "supports_temperature": KNOWN_MODELS[m.id]["supports_temperature"],
             "supports_reasoning": KNOWN_MODELS[m.id]["supports_reasoning"],
             "reasoning_effort_levels": KNOWN_MODELS[m.id].get(
@@ -2718,6 +2719,7 @@ async def list_class_models(
                 "supports_none_reasoning_effort": False,
                 "supports_verbosity": False,
                 "supports_web_search": False,
+                "supports_mcp_server": False,
                 "description": "The latest GPT-4 Turbo model.",
             }
         )
@@ -2746,6 +2748,7 @@ async def list_class_models(
                 "supports_none_reasoning_effort": False,
                 "supports_verbosity": False,
                 "supports_web_search": False,
+                "supports_mcp_server": False,
                 "description": "The latest GPT-4 Turbo preview model.",
             }
         )
@@ -2942,6 +2945,7 @@ async def get_thread(
             "ci_messages": placeholder_ci_calls,
             "fs_messages": [],
             "ws_messages": [],
+            "mcp_messages": [],
             "reasoning_messages": [],
             "attachments": all_files,
             "instructions": thread.instructions if can_view_prompt else None,
@@ -3017,6 +3021,7 @@ async def get_thread(
         file_search_calls: list[schemas.FileSearchMessage] = []
         file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
         web_search_calls: list[schemas.WebSearchMessage] = []
+        mcp_messages: list[schemas.MCPMessage] = []
         reasoning_messages: list[schemas.ReasoningMessage] = []
         for tool_call in tool_calls_v3:
             if tool_call.type == schemas.ToolCallType.CODE_INTERPRETER:
@@ -3157,6 +3162,108 @@ async def get_thread(
                         thread_id=str(thread.id),
                         output_index=tool_call.output_index,
                         message_type="web_search_call",
+                    )
+                )
+            elif tool_call.type == schemas.ToolCallType.MCP_SERVER:
+                parsed_error: dict[str, Any] | str | None = None
+                if tool_call.error:
+                    try:
+                        parsed_error = json.loads(tool_call.error)
+                    except json.JSONDecodeError:
+                        parsed_error = tool_call.error
+
+                mcp_server = tool_call.mcp_server_tool
+                mcp_messages.append(
+                    schemas.MCPMessage(
+                        id=str(tool_call.id),
+                        assistant_id=str(assistant.id) if assistant else "",
+                        created_at=tool_call.created.timestamp(),
+                        content=[
+                            schemas.MCPServerCall(
+                                step_id=str(tool_call.id),
+                                type="mcp_server_call",
+                                server_label=mcp_server.server_label
+                                if mcp_server
+                                else "",
+                                server_name=mcp_server.display_name
+                                if mcp_server
+                                else None,
+                                tool_name=tool_call.mcp_tool_name,
+                                arguments=tool_call.mcp_arguments,
+                                output=tool_call.mcp_output,
+                                error=parsed_error,
+                                status=tool_call.status.value,
+                            )
+                        ],
+                        metadata={},
+                        object="thread.message",
+                        role="assistant",
+                        run_id=str(tool_call.run_id),
+                        thread_id=str(thread.id),
+                        message_type="mcp_server_call",
+                        output_index=tool_call.output_index,
+                    )
+                )
+            elif tool_call.type == schemas.ToolCallType.MCP_LIST_TOOLS:
+                parsed_error_list_tools: dict[str, Any] | str | None = None
+                if tool_call.error:
+                    try:
+                        parsed_error_list_tools = json.loads(tool_call.error)
+                    except json.JSONDecodeError:
+                        parsed_error_list_tools = tool_call.error
+
+                mcp_tools: list[schemas.MCPListToolsTool] = []
+                for tool in tool_call.mcp_tools_listed:
+                    try:
+                        input_schema = (
+                            json.loads(tool.input_schema) if tool.input_schema else None
+                        )
+                    except json.JSONDecodeError:
+                        input_schema = None
+                    try:
+                        annotations = (
+                            json.loads(tool.annotations) if tool.annotations else None
+                        )
+                    except json.JSONDecodeError:
+                        annotations = None
+
+                    mcp_tools.append(
+                        schemas.MCPListToolsTool(
+                            name=tool.name,
+                            description=tool.description,
+                            input_schema=input_schema,
+                            annotations=annotations,
+                        )
+                    )
+
+                mcp_server = tool_call.mcp_server_tool
+                mcp_messages.append(
+                    schemas.MCPMessage(
+                        id=str(tool_call.id),
+                        assistant_id=str(assistant.id) if assistant else "",
+                        created_at=tool_call.created.timestamp(),
+                        content=[
+                            schemas.MCPListToolsCall(
+                                step_id=str(tool_call.id),
+                                type="mcp_list_tools_call",
+                                server_label=mcp_server.server_label
+                                if mcp_server
+                                else "",
+                                server_name=mcp_server.display_name
+                                if mcp_server
+                                else None,
+                                tools=mcp_tools,
+                                error=parsed_error_list_tools,
+                                status=tool_call.status.value,
+                            )
+                        ],
+                        metadata={},
+                        object="thread.message",
+                        role="assistant",
+                        run_id=str(tool_call.run_id),
+                        thread_id=str(thread.id),
+                        message_type="mcp_list_tools_call",
+                        output_index=tool_call.output_index,
                     )
                 )
 
@@ -3434,6 +3541,7 @@ async def get_thread(
             "ci_messages": placeholder_ci_calls,
             "fs_messages": file_search_calls,
             "ws_messages": web_search_calls,
+            "mcp_messages": mcp_messages,
             "reasoning_messages": reasoning_messages,
             "attachments": all_files,
             "instructions": thread.instructions if can_view_prompt else None,
@@ -3951,6 +4059,7 @@ async def list_thread_messages(
             "ci_messages": placeholder_ci_calls,
             "fs_messages": [],
             "ws_messages": [],
+            "mcp_messages": [],
             "limit": limit,
             "has_more": messages.has_more,
         }
@@ -3980,6 +4089,7 @@ async def list_thread_messages(
                 "ci_messages": [],
                 "fs_messages": [],
                 "ws_messages": [],
+                "mcp_messages": [],
                 "limit": limit,
                 "has_more": False,
             }
@@ -4057,6 +4167,7 @@ async def list_thread_messages(
         file_search_results: dict[str, schemas.FileSearchToolAnnotationResult] = {}
         reasoning_messages: list[schemas.ReasoningMessage] = []
         web_search_calls: list[schemas.WebSearchMessage] = []
+        mcp_messages: list[schemas.MCPMessage] = []
         for tool_call in tool_calls_v3:
             if tool_call.type == schemas.ToolCallType.CODE_INTERPRETER:
                 tool_content: list[schemas.CodeInterpreterMessageContent] = []
@@ -4198,6 +4309,112 @@ async def list_thread_messages(
                         thread_id=str(thread.id),
                         output_index=tool_call.output_index,
                         message_type="web_search_call",
+                    )
+                )
+            elif tool_call.type == schemas.ToolCallType.MCP_SERVER:
+                parsed_error: dict[str, Any] | str | None = None
+                if tool_call.error:
+                    try:
+                        parsed_error = json.loads(tool_call.error)
+                    except json.JSONDecodeError:
+                        parsed_error = tool_call.error
+
+                mcp_server = tool_call.mcp_server_tool
+                mcp_messages.append(
+                    schemas.MCPMessage(
+                        id=str(tool_call.id),
+                        assistant_id=str(thread.assistant_id)
+                        if thread.assistant_id
+                        else "",
+                        created_at=tool_call.created.timestamp(),
+                        content=[
+                            schemas.MCPServerCall(
+                                step_id=str(tool_call.id),
+                                type="mcp_server_call",
+                                server_label=mcp_server.server_label
+                                if mcp_server
+                                else "",
+                                server_name=mcp_server.display_name
+                                if mcp_server
+                                else None,
+                                tool_name=tool_call.mcp_tool_name,
+                                arguments=tool_call.mcp_arguments,
+                                output=tool_call.mcp_output,
+                                error=parsed_error,
+                                status=tool_call.status.value,
+                            )
+                        ],
+                        metadata={},
+                        object="thread.message",
+                        role="assistant",
+                        run_id=str(tool_call.run_id),
+                        thread_id=str(thread.id),
+                        message_type="mcp_server_call",
+                        output_index=tool_call.output_index,
+                    )
+                )
+            elif tool_call.type == schemas.ToolCallType.MCP_LIST_TOOLS:
+                parsed_error_list_tools: dict[str, Any] | str | None = None
+                if tool_call.error:
+                    try:
+                        parsed_error_list_tools = json.loads(tool_call.error)
+                    except json.JSONDecodeError:
+                        parsed_error_list_tools = tool_call.error
+
+                mcp_tools: list[schemas.MCPListToolsTool] = []
+                for tool in tool_call.mcp_tools_listed:
+                    try:
+                        input_schema = (
+                            json.loads(tool.input_schema) if tool.input_schema else None
+                        )
+                    except json.JSONDecodeError:
+                        input_schema = None
+                    try:
+                        annotations = (
+                            json.loads(tool.annotations) if tool.annotations else None
+                        )
+                    except json.JSONDecodeError:
+                        annotations = None
+
+                    mcp_tools.append(
+                        schemas.MCPListToolsTool(
+                            name=tool.name,
+                            description=tool.description,
+                            input_schema=input_schema,
+                            annotations=annotations,
+                        )
+                    )
+
+                mcp_server = tool_call.mcp_server_tool
+                mcp_messages.append(
+                    schemas.MCPMessage(
+                        id=str(tool_call.id),
+                        assistant_id=str(thread.assistant_id)
+                        if thread.assistant_id
+                        else "",
+                        created_at=tool_call.created.timestamp(),
+                        content=[
+                            schemas.MCPListToolsCall(
+                                step_id=str(tool_call.id),
+                                type="mcp_list_tools_call",
+                                server_label=mcp_server.server_label
+                                if mcp_server
+                                else "",
+                                server_name=mcp_server.display_name
+                                if mcp_server
+                                else None,
+                                tools=mcp_tools,
+                                error=parsed_error_list_tools,
+                                status=tool_call.status.value,
+                            )
+                        ],
+                        metadata={},
+                        object="thread.message",
+                        role="assistant",
+                        run_id=str(tool_call.run_id),
+                        thread_id=str(thread.id),
+                        message_type="mcp_list_tools_call",
+                        output_index=tool_call.output_index,
                     )
                 )
 
@@ -4426,6 +4643,7 @@ async def list_thread_messages(
             "ci_messages": [],
             "fs_messages": file_search_calls,
             "ws_messages": web_search_calls,
+            "mcp_messages": mcp_messages,
             "reasoning_messages": reasoning_messages,
             "limit": limit,
             "has_more": has_more_runs,
@@ -5226,6 +5444,14 @@ async def create_thread(
     try:
         thread_db_record = await models.Thread.create(request.state.db, new_thread)
 
+        mcp_tool_ids = await models.Assistant.get_mcp_tool_ids_by_assistant_id(
+            request.state.db, assistant.id
+        )
+        if mcp_tool_ids:
+            await models.Thread.add_mcp_server_tools(
+                request.state.db, thread_db_record.id, mcp_tool_ids
+            )
+
         if assistant.version == 3:
             thread_db_record.instructions = format_instructions(
                 assistant.instructions,
@@ -5313,6 +5539,11 @@ async def create_thread(
 
             request.state.db.add(run)
             await request.state.db.flush()
+
+            if mcp_tool_ids:
+                await models.Run.add_mcp_server_tools(
+                    request.state.db, run.id, mcp_tool_ids
+                )
 
         grants = [
             (f"class:{class_id}", "parent", f"thread:{thread_db_record.id}"),
@@ -5419,6 +5650,9 @@ async def create_run(
         request.state.db, int(thread_id)
     )
     asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
+    mcp_tool_ids = await models.Thread.get_mcp_tool_ids_by_thread_id(
+        request.state.db, thread.id
+    )
 
     if not thread or not asst:
         raise HTTPException(
@@ -5519,6 +5753,15 @@ async def create_run(
             )
 
             is_supervisor = is_supervisor_check[0]
+            mcp_server_tools_by_server_label: dict[str, models.MCPServerTool] = {}
+
+            if mcp_tool_ids:
+                mcp_server_tools = await models.Run.add_mcp_server_tools_return_tools(
+                    request.state.db, run_to_complete.id, mcp_tool_ids
+                )
+                for tool in mcp_server_tools:
+                    if tool.enabled:
+                        mcp_server_tools_by_server_label[tool.server_label] = tool
 
             run_to_complete.status = schemas.RunStatus.QUEUED
             request.state.db.add(run_to_complete)
@@ -5536,6 +5779,7 @@ async def create_run(
                 code_interpreter_file_ids=[
                     file.file_id for file in thread.code_interpreter_files
                 ],
+                mcp_server_tools_by_server_label=mcp_server_tools_by_server_label,
                 user_auth=request.state.auth_user
                 if hasattr(request.state, "auth_user")
                 else None,
@@ -5640,8 +5884,14 @@ async def send_message(
     request: Request,
     openai_client: OpenAIClient,
 ):
+    mcp_tool_ids: list[int] = []
     try:
         thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+        if thread.tools_available and "mcp_server" in thread.tools_available:
+            mcp_tool_ids = await models.Thread.get_mcp_tool_ids_by_thread_id(
+                request.state.db, thread.id
+            )
+
         tool_resources: ToolResources = {}
 
         # Check that assistant exists
@@ -6021,6 +6271,17 @@ async def send_message(
                     )
                 ],
             )
+
+            mcp_server_tools_by_server_label: dict[str, models.MCPServerTool] = {}
+
+            if mcp_tool_ids:
+                mcp_server_tools = await models.Run.add_mcp_server_tools_return_tools(
+                    request.state.db, run_to_complete.id, mcp_tool_ids
+                )
+                for tool in mcp_server_tools:
+                    if tool.enabled:
+                        mcp_server_tools_by_server_label[tool.server_label] = tool
+
             request.state.db.add(run_to_complete)
             await request.state.db.flush()
             await request.state.db.refresh(run_to_complete)
@@ -6042,6 +6303,7 @@ async def send_message(
                 thread_vector_store_id=thread_vector_store_id,
                 attached_file_search_file_ids=data.file_search_file_ids or [],
                 code_interpreter_file_ids=ci_all_files,
+                mcp_server_tools_by_server_label=mcp_server_tools_by_server_label,
                 show_reasoning_summaries=show_reasoning_summaries,
                 show_file_search_queries=show_file_search_queries,
                 show_file_search_result_quotes=show_file_search_result_quotes,
@@ -6612,6 +6874,35 @@ async def create_assistant(
             status_code=400,
             detail="The selected model does not support Web Search. Please select a different model or remove the Web Search tool.",
         )
+
+    uses_mcp_server = {"type": "mcp_server"} in req.tools
+    if uses_mcp_server and not model_record.supports_mcp_server:
+        raise HTTPException(
+            status_code=400,
+            detail="The selected model does not support MCP Servers. Please select a different model or remove the MCP Server tool.",
+        )
+    if uses_mcp_server and assistant_version <= 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Classic Assistants do not support MCP Server tools. To use MCP Servers, create a Next-Gen Assistant.",
+        )
+
+    # Validate MCP servers - auth_type must match provided credentials
+    for mcp_input in req.mcp_servers:
+        if (
+            mcp_input.auth_type == schemas.MCPAuthType.TOKEN
+            and not mcp_input.authorization_token
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=f"MCP server '{mcp_input.server_url}' has auth_type 'token' but no authorization_token provided.",
+            )
+        if mcp_input.auth_type == schemas.MCPAuthType.HEADER and not mcp_input.headers:
+            raise HTTPException(
+                status_code=400,
+                detail=f"MCP server '{mcp_input.server_url}' has auth_type 'header' but no headers provided.",
+            )
+
     if uses_web_search and assistant_version <= 2:
         raise HTTPException(
             status_code=400,
@@ -6716,6 +7007,8 @@ async def create_assistant(
     try:
         deleted_private_files = req.deleted_private_files or []
         del req.deleted_private_files
+        mcp_servers_input = req.mcp_servers or []
+        del req.mcp_servers
 
         asst = await models.Assistant.create(
             request.state.db,
@@ -6738,6 +7031,50 @@ async def create_assistant(
             files_to_delete,
             class_id=int(class_id),
         )
+
+        # Create MCP servers and associate with assistant
+        if mcp_servers_input:
+
+            async def create_mcp_server(
+                mcp_input: schemas.MCPServerToolInput, assistant_id: int
+            ) -> models.MCPServerTool:
+                headers_json = None
+                authorization_token = None
+                if mcp_input.auth_type == schemas.MCPAuthType.HEADER:
+                    headers_json = (
+                        json.dumps(mcp_input.headers) if mcp_input.headers else None
+                    )
+                elif mcp_input.auth_type == schemas.MCPAuthType.TOKEN:
+                    authorization_token = mcp_input.authorization_token
+
+                tool = await models.MCPServerTool.create(
+                    request.state.db,
+                    {
+                        "display_name": mcp_input.display_name,
+                        "server_url": mcp_input.server_url_str,
+                        "headers": headers_json,
+                        "authorization_token": authorization_token,
+                        "description": mcp_input.description,
+                        "enabled": mcp_input.enabled,
+                        "created_by_user_id": request.state.session.user.id,
+                    },
+                )
+
+                # Log which user created the MCP server tool and some basic info
+                logger.info(
+                    f"User {request.state.session.user.id} created MCP server tool {tool.server_label} for assistant {assistant_id} with URL {tool.server_url} and display name '{tool.display_name}'"
+                )
+                return tool
+
+            mcp_servers = await asyncio.gather(
+                *[
+                    create_mcp_server(mcp_input, asst.id)
+                    for mcp_input in mcp_servers_input
+                ]
+            )
+            await models.Assistant.synchronize_assistant_mcp_server_tools(
+                request.state.db, asst.id, [s.id for s in mcp_servers], skip_delete=True
+            )
 
         grants = [
             (f"class:{class_id}", "parent", f"assistant:{asst.id}"),
@@ -6808,7 +7145,7 @@ async def copy_assistant(
     openai_client: OpenAIClient,
     copy_options: schemas.CopyAssistantRequest | None = Body(default=None),
 ):
-    assistant = await models.Assistant.get_by_id_with_ci_files(
+    assistant = await models.Assistant.get_by_id_with_ci_files_mcp(
         request.state.db, int(assistant_id)
     )
     class_id_int = int(class_id)
@@ -7136,7 +7473,7 @@ async def update_assistant(
     openai_client: OpenAIClient,
 ):
     # Get the existing assistant.
-    asst = await models.Assistant.get_by_id_with_ci_files(
+    asst = await models.Assistant.get_by_id_with_ci_files_mcp(
         request.state.db, int(assistant_id)
     )
     grants = list[Relation]()
@@ -7421,6 +7758,73 @@ async def update_assistant(
             "The selected model does not support Web Search. Please select a different model or remove the Web Search tool.",
         )
 
+    uses_mcp_server = False
+    if "tools" in req.model_fields_set:
+        if req.tools is not None and len(req.tools) > 0:
+            uses_mcp_server = {"type": "mcp_server"} in req.tools
+    else:
+        uses_mcp_server = asst.tools is not None and {
+            "type": "mcp_server"
+        } in json.loads(asst.tools)
+
+    if uses_mcp_server and asst.version <= 2:
+        raise HTTPException(
+            400,
+            "Classic Assistants do not support MCP Server tools. To use MCP Servers, create a Next-Gen Assistant.",
+        )
+
+    if uses_mcp_server and (model_record and not model_record.supports_mcp_server):
+        raise HTTPException(
+            400,
+            "The selected model does not support MCP Servers. Please select a different model or remove the MCP Server tool.",
+        )
+
+    existing_mcp_by_label = {}
+    if "mcp_servers" in req.model_fields_set and req.mcp_servers:
+        existing_mcp_by_label = {s.server_label: s for s in asst.mcp_server_tools}
+
+        for mcp_input in req.mcp_servers:
+            if not mcp_input.server_label:
+                if (
+                    mcp_input.auth_type == schemas.MCPAuthType.TOKEN
+                    and not mcp_input.authorization_token
+                ):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"MCP server '{mcp_input.server_url_str}' has auth_type 'token' but no authorization_token provided.",
+                    )
+                if (
+                    mcp_input.auth_type == schemas.MCPAuthType.HEADER
+                    and not mcp_input.headers
+                ):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"MCP server '{mcp_input.server_url_str}' has auth_type 'header' but no headers provided.",
+                    )
+            else:
+                existing_server = existing_mcp_by_label.get(mcp_input.server_label)
+                if not existing_server:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"MCP server with label '{mcp_input.server_label}' not found.",
+                    )
+
+                if mcp_input.auth_type == schemas.MCPAuthType.TOKEN:
+                    if (
+                        not mcp_input.authorization_token
+                        and not existing_server.authorization_token
+                    ):
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"MCP server '{mcp_input.server_label}' has auth_type 'token' but no authorization_token provided and none exists.",
+                        )
+                elif mcp_input.auth_type == schemas.MCPAuthType.HEADER:
+                    if not mcp_input.headers:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"MCP server '{mcp_input.server_label}' has auth_type 'header' but no headers provided.",
+                        )
+
     if "verbosity" in req.model_fields_set:
         if req.verbosity is not None and (
             model_record and not model_record.supports_verbosity
@@ -7560,6 +7964,135 @@ async def update_assistant(
     if "tools" in req.model_fields_set and req.tools is not None:
         openai_update["tools"] = req.tools
         asst.tools = json.dumps(req.tools)
+
+    if "mcp_servers" in req.model_fields_set and req.mcp_servers is not None:
+
+        async def upsert_mcp_server(mcp_input: schemas.MCPServerToolInput) -> int:
+            headers_json = None
+            authorization_token = None
+
+            if mcp_input.auth_type == schemas.MCPAuthType.HEADER:
+                headers_json = (
+                    json.dumps(mcp_input.headers) if mcp_input.headers else None
+                )
+            elif mcp_input.auth_type == schemas.MCPAuthType.TOKEN:
+                authorization_token = mcp_input.authorization_token
+
+            if (
+                mcp_input.server_label
+                and mcp_input.server_label in existing_mcp_by_label
+            ):
+                existing_server = existing_mcp_by_label[mcp_input.server_label]
+                has_changes = False
+                if existing_server.server_url != mcp_input.server_url_str:
+                    logger.info(
+                        f"User {request.state.session.user.id} updated MCP server tool URL for tool {existing_server.server_label} for assistant {assistant_id} from {existing_server.server_url} to {mcp_input.server_url_str}"
+                    )
+                    existing_server.server_url = mcp_input.server_url_str
+                    has_changes = True
+                if existing_server.description != mcp_input.description:
+                    existing_server.description = mcp_input.description
+                    has_changes = True
+                if existing_server.enabled != mcp_input.enabled:
+                    logger.info(
+                        f"User {request.state.session.user.id} updated MCP server tool enabled status for tool {existing_server.server_label} for assistant {assistant_id} from {existing_server.enabled} to {mcp_input.enabled}"
+                    )
+                    existing_server.enabled = mcp_input.enabled
+                    has_changes = True
+                if existing_server.display_name != mcp_input.display_name:
+                    logger.info(
+                        f"User {request.state.session.user.id} updated MCP server tool display name for tool {existing_server.server_label} for assistant {assistant_id} from '{existing_server.display_name}' to '{mcp_input.display_name}'"
+                    )
+                    existing_server.display_name = mcp_input.display_name
+                    has_changes = True
+
+                if mcp_input.auth_type == schemas.MCPAuthType.NONE:
+                    logger.info(
+                        f"User {request.state.session.user.id} removed authentication for MCP server tool {existing_server.server_label} for assistant {assistant_id}"
+                    )
+                    if existing_server.headers is not None:
+                        existing_server.headers = None
+                        has_changes = True
+                    if existing_server.authorization_token is not None:
+                        existing_server.authorization_token = None
+                        has_changes = True
+                elif mcp_input.auth_type == schemas.MCPAuthType.HEADER:
+                    if existing_server.headers != headers_json:
+                        logger.info(
+                            f"User {request.state.session.user.id} updated MCP server tool headers for tool {existing_server.server_label} for assistant {assistant_id}"
+                        )
+                        existing_server.headers = headers_json
+                        has_changes = True
+                    if existing_server.authorization_token is not None:
+                        logger.info(
+                            f"User {request.state.session.user.id} switched MCP server tool {existing_server.server_label} for assistant {assistant_id} to header-based authentication, removing existing authorization token"
+                        )
+                        existing_server.authorization_token = None
+                        has_changes = True
+                elif mcp_input.auth_type == schemas.MCPAuthType.TOKEN:
+                    if existing_server.headers is not None:
+                        logger.info(
+                            f"User {request.state.session.user.id} switched MCP server tool {existing_server.server_label} for assistant {assistant_id} to token-based authentication, removing existing headers"
+                        )
+                        existing_server.headers = None
+                        has_changes = True
+                    if authorization_token:
+                        if existing_server.authorization_token != authorization_token:
+                            logger.info(
+                                f"User {request.state.session.user.id} updated MCP server tool authorization token for tool {existing_server.server_label} for assistant {assistant_id}"
+                            )
+                            existing_server.authorization_token = authorization_token
+                            has_changes = True
+
+                if has_changes:
+                    existing_server.updated_by_user_id = request.state.session.user.id
+                    request.state.db.add(existing_server)
+                return existing_server.id
+            else:
+                mcp_server = await models.MCPServerTool.create(
+                    request.state.db,
+                    {
+                        "display_name": mcp_input.display_name,
+                        "server_url": mcp_input.server_url_str,
+                        "headers": headers_json,
+                        "authorization_token": authorization_token,
+                        "description": mcp_input.description,
+                        "enabled": mcp_input.enabled,
+                        "created_by_user_id": request.state.session.user.id,
+                    },
+                )
+                logger.info(
+                    f"User {request.state.session.user.id} created MCP server tool {mcp_server.server_label} for assistant {assistant_id} with URL {mcp_server.server_url} and display name '{mcp_server.display_name}'"
+                )
+                return mcp_server.id
+
+        mcp_server_ids = await asyncio.gather(
+            *[upsert_mcp_server(mcp_input) for mcp_input in req.mcp_servers]
+        )
+        await request.state.db.flush()
+        await models.Assistant.synchronize_assistant_mcp_server_tools(
+            request.state.db, asst.id, list(mcp_server_ids)
+        )
+        await models.Thread.update_mcp_server_tools_available(
+            request.state.db,
+            asst.id,
+            list(mcp_server_ids),
+            asst.version,
+            asst.interaction_mode,
+        )
+    elif "tools" in req.model_fields_set and (
+        req.tools is None or {"type": "mcp_server"} not in req.tools
+    ):
+        await models.Assistant.synchronize_assistant_mcp_server_tools(
+            request.state.db, asst.id, []
+        )
+        await models.Thread.update_mcp_server_tools_available(
+            request.state.db,
+            asst.id,
+            [],
+            asst.version,
+            asst.interaction_mode,
+        )
 
     if "temperature" in req.model_fields_set:
         openai_update["temperature"] = req.temperature
@@ -7768,6 +8301,52 @@ async def update_assistant(
 
     await request.state.authz.write_safe(grant=grants, revoke=revokes)
     return asst
+
+
+def mcp_server_to_response(
+    server: models.MCPServerTool,
+) -> schemas.MCPServerToolResponse:
+    """Convert an MCPServerTool to MCPServerToolResponse with inferred auth_type"""
+    # Infer auth_type from stored data
+    if server.authorization_token:
+        auth_type = schemas.MCPAuthType.TOKEN
+    elif server.headers:
+        auth_type = schemas.MCPAuthType.HEADER
+    else:
+        auth_type = schemas.MCPAuthType.NONE
+
+    # Parse headers JSON if present
+    headers_dict = None
+    if server.headers and auth_type == schemas.MCPAuthType.HEADER:
+        headers_dict = json.loads(server.headers)
+
+    return schemas.MCPServerToolResponse(
+        display_name=server.display_name,
+        server_label=server.server_label,
+        server_url=server.server_url,
+        auth_type=auth_type,
+        headers=headers_dict,
+        description=server.description,
+        enabled=server.enabled,
+    )
+
+
+@v1.get(
+    "/class/{class_id}/assistant/{assistant_id}/mcp_servers",
+    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    response_model=schemas.MCPServerToolsResponse,
+)
+async def get_assistant_mcp_servers(class_id: str, assistant_id: str, request: Request):
+    """Get MCP servers configured for an assistant"""
+    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    if not asst:
+        raise HTTPException(404, "Assistant not found.")
+
+    mcp_servers = await models.MCPServerTool.get_for_assistant(
+        request.state.db, asst.id
+    )
+
+    return {"mcp_servers": [mcp_server_to_response(server) for server in mcp_servers]}
 
 
 @v1.post(

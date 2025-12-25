@@ -16,7 +16,7 @@
     ButtonGroup,
     RadioButton
   } from 'flowbite-svelte';
-  import type { Tool, ServerFile, FileUploadInfo } from '$lib/api';
+  import type { Tool, ServerFile, FileUploadInfo, MCPServerToolInput, MCPAuthType } from '$lib/api';
   import { beforeNavigate, goto, invalidate } from '$app/navigation';
   import * as api from '$lib/api';
   import { setsEqual } from '$lib/set';
@@ -56,6 +56,7 @@
   import { computeLatestIncidentTimestamps, filterLatestIncidentUpdates } from '$lib/statusUpdates';
   import { tick } from 'svelte';
   import WebSourceChip from '$lib/components/WebSourceChip.svelte';
+  import MCPServerModal from '$lib/components/MCPServerModal.svelte';
   export let data;
 
   // Flag indicating whether we should check for changes before navigating away.
@@ -126,6 +127,42 @@
     useLatex = assistant?.use_latex;
     hasSetUseLatex = true;
   }
+  let mcpServersLocal: MCPServerToolInput[] = [];
+  $: mcpServersFromRequest = data.mcpServers.slice();
+  let hasSetMCPServers = false;
+  $: if (data.mcpServers !== undefined && data.mcpServers !== null && !hasSetMCPServers) {
+    mcpServersLocal = data.mcpServers.slice();
+    hasSetMCPServers = true;
+  }
+  let showMCPServerModal = false;
+  let mcpServerEditIndex: number | null = null;
+
+  $: mcpServerEditFromServer =
+    mcpServerEditIndex !== null ? mcpServersFromRequest[mcpServerEditIndex] : null;
+  $: mcpServerEdit = mcpServerEditIndex !== null ? mcpServersLocal[mcpServerEditIndex] : null;
+
+  const saveMCPServerAndCloseModal = (server: MCPServerToolInput, index: number | null) => {
+    if (!server) {
+      sadToast('Error: MCP Server data is missing.');
+      return;
+    }
+    if (index !== null) {
+      mcpServersLocal[index] = server;
+    } else {
+      mcpServersLocal = [...mcpServersLocal, server];
+    }
+    mcpServerEditIndex = null;
+    showMCPServerModal = false;
+  };
+
+  const resetDraftMCPServerAndCloseModal = () => {
+    mcpServerEditIndex = null;
+    showMCPServerModal = false;
+  };
+
+  const removeServer = (index: number) => {
+    mcpServersLocal = mcpServersLocal.filter((_, i) => i !== index);
+  };
 
   let selectedFileSearchFiles = writable(
     data.selectedFileSearchFiles.slice().map((f) => f.file_id)
@@ -175,7 +212,66 @@
     description:
       'Web search allows models to access up-to-date information from the internet and provide answers with sourced citations.'
   };
+  const mcpServerMetadata = {
+    value: 'mcp_server',
+    name: 'MCP Servers',
+    description:
+      'Use remote MCP servers to give models new capabilities. MCP Server support is currently in preview and may be unstable. Do not use for important tasks. Make sure you trust the MCP server you are connecting to.'
+  };
   const defaultTools = [{ type: 'file_search' }];
+  const mcpAuthTypeLabels: Record<MCPAuthType, string> = {
+    token: 'Access token/API key',
+    header: 'Custom headers',
+    none: 'None'
+  };
+
+  const normalizeMcpServersForCompare = (servers: MCPServerToolInput[]) =>
+    servers
+      .map((server) => ({
+        server_label: server.server_label ?? '',
+        server_url: server.server_url ?? '',
+        display_name: server.display_name ?? '',
+        auth_type: server.auth_type ?? 'none',
+        authorization_token: server.authorization_token ?? '',
+        description: server.description ?? '',
+        enabled: server.enabled ?? true,
+        headers: server.headers
+          ? Object.entries(server.headers)
+              .map(([key, value]) => [key, value])
+              .sort(([a], [b]) => a.localeCompare(b))
+          : []
+      }))
+      .sort((a, b) => {
+        const labelCompare = a.server_label.localeCompare(b.server_label);
+        if (labelCompare !== 0) {
+          return labelCompare;
+        }
+        return a.server_url.localeCompare(b.server_url);
+      });
+
+  const areMcpServersEqual = (left: MCPServerToolInput[], right: MCPServerToolInput[]) =>
+    JSON.stringify(normalizeMcpServersForCompare(left)) ===
+    JSON.stringify(normalizeMcpServersForCompare(right));
+
+  const cleanMcpServerForRequest = (server: MCPServerToolInput): MCPServerToolInput => {
+    const cleaned: MCPServerToolInput = {
+      server_label: server.server_label?.trim() || undefined,
+      display_name: server.display_name.trim(),
+      server_url: server.server_url.trim(),
+      auth_type: server.auth_type,
+      description: server.description?.trim() || undefined,
+      enabled: server.enabled ?? true
+    };
+
+    if (server.auth_type === 'token' && server.authorization_token) {
+      cleaned.authorization_token = server.authorization_token;
+    }
+    if (server.auth_type === 'header' && server.headers && Object.keys(server.headers).length) {
+      cleaned.headers = server.headers;
+    }
+
+    return cleaned;
+  };
 
   let createClassicAssistantByProviderOrUser = false;
   let hasSetCreateClassicAssistant = false;
@@ -335,6 +431,10 @@
     (model) => model.id
   );
   $: supportsWebSearch = supportsWebSearchModels.includes(selectedModel);
+  $: supportsMCPServerModels = (data.models.filter((model) => model.supports_mcp_server) || []).map(
+    (model) => model.id
+  );
+  $: supportsMCPServer = supportsMCPServerModels.includes(selectedModel);
   $: supportsVision = supportVisionModels.includes(selectedModel);
   $: visionSupportOverride = data.models.find(
     (model) => model.id === selectedModel
@@ -380,6 +480,12 @@
   $: if (initialTools !== undefined && initialTools !== null && !hasSetWebSearchToolSelect) {
     webSearchToolSelect = initialTools.includes('web_search');
     hasSetWebSearchToolSelect = true;
+  }
+  let mcpServerToolSelect = false;
+  let hasSetMCPServerToolSelect = false;
+  $: if (initialTools !== undefined && initialTools !== null && !hasSetMCPServerToolSelect) {
+    mcpServerToolSelect = initialTools.includes('mcp_server');
+    hasSetMCPServerToolSelect = true;
   }
   let isPublished = false;
   let hasSetIsPublished = false;
@@ -855,6 +961,9 @@
     ) {
       modifiedFields.push('file search files');
     }
+    if (!areMcpServersEqual(mcpServersLocal, data.mcpServers || [])) {
+      modifiedFields.push('mcp servers');
+    }
 
     return modifiedFields;
   };
@@ -893,6 +1002,16 @@
       ((data.isCreating && !createClassicAssistant) || assistantVersion === 3)
     ) {
       tools.push({ type: 'web_search' });
+    }
+    let mcpServersForRequest: MCPServerToolInput[] = [];
+    if (
+      mcpServerToolSelect &&
+      supportsMCPServer &&
+      !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort) &&
+      ((data.isCreating && !createClassicAssistant) || assistantVersion === 3)
+    ) {
+      tools.push({ type: 'mcp_server' });
+      mcpServersForRequest = mcpServersLocal.map(cleanMcpServerForRequest);
     }
     const params = {
       name: preventEdits ? assistant?.name || '' : body.name.toString(),
@@ -937,7 +1056,8 @@
       hide_file_search_document_names: hideFileSearchDocumentNames,
       hide_file_search_queries: hideFileSearchQueries,
       hide_web_search_sources: hideWebSearchActions ? true : hideWebSearchSources,
-      hide_web_search_actions: hideWebSearchActions
+      hide_web_search_actions: hideWebSearchActions,
+      mcp_servers: mcpServersForRequest
     };
     return params;
   };
@@ -1207,6 +1327,15 @@
     ><span class="whitespace-pre-wrap text-gray-700"><Sanitize html={instructionsPreview} /></span
     ></Modal
   >
+  {#if showMCPServerModal}
+    <MCPServerModal
+      mcpServerRecordFromServer={mcpServerEditFromServer}
+      mcpServerLocalDraft={mcpServerEdit}
+      {mcpServerEditIndex}
+      on:save={(e) => saveMCPServerAndCloseModal(e.detail.mcpServer, e.detail.index)}
+      on:close={() => resetDraftMCPServerAndCloseModal()}
+    />
+  {/if}
 
   <form on:submit={submitForm} bind:this={assistantForm}>
     <div class="mb-4">
@@ -1615,6 +1744,69 @@
         {/if}
       </div>
     {/if}
+    {#if !data?.enforceClassicAssistants}
+      <div class="col-span-2 mb-4">
+        {#if (data.isCreating && createClassicAssistant) || (!data.isCreating && assistantVersion !== 3)}
+          <div class="col-span-2 mb-3">
+            <div class="flex flex-col gap-y-1">
+              <Badge
+                class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
+                ><CloseOutline size="sm" />
+                <div>No MCP Server capabilities in Classic Assistants</div>
+              </Badge>
+              <Helper
+                >Classic Assistants do not support MCP Server capabilities. To use MCP Server,
+                create a Next-Gen Assistant.</Helper
+              >
+            </div>
+          </div>
+        {:else if !supportsMCPServer}
+          <div class="flex flex-col gap-y-1">
+            <Badge
+              class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
+              ><CloseOutline size="sm" />
+              <div>No MCP Server capabilities</div>
+            </Badge>
+            <Helper
+              >This model does not support MCP Server capabilities. To use MCP Server, select a
+              different model.</Helper
+            >
+          </div>
+        {:else if supportsMCPServer && supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort}
+          <div class="col-span-2 mb-3">
+            <div class="flex flex-col gap-y-1">
+              <Badge
+                class="flex flex-row items-center gap-x-2 py-0.5 px-2 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit"
+                ><CloseOutline size="sm" />
+                <div>No MCP Server capabilities in Minimal reasoning effort</div>
+              </Badge>
+              <Helper
+                >Minimal reasoning effort does not support MCP Server capabilities. To use MCP
+                Server, select a higher reasoning effort level.</Helper
+              >
+            </div>
+          </div>
+        {:else}
+          <Checkbox
+            id={mcpServerMetadata.value}
+            name={mcpServerMetadata.value}
+            disabled={preventEdits || !supportsMCPServer}
+            checked={supportsMCPServer && (mcpServerToolSelect || false)}
+            on:change={() => {
+              mcpServerToolSelect = !mcpServerToolSelect;
+            }}
+            ><div class="flex flex-wrap gap-1.5">
+              <div>{mcpServerMetadata.name}</div>
+              <DropdownBadge
+                extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
+                ><span slot="name">Preview</span></DropdownBadge
+              >
+            </div></Checkbox
+          >
+          <Helper>{mcpServerMetadata.description}</Helper>
+        {/if}
+      </div>
+    {/if}
 
     {#if fileSearchToolSelect && supportsFileSearch && !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort)}
       <div class="col-span-2 mb-4">
@@ -1688,6 +1880,95 @@
       </div>
     {/if}
 
+    {#if mcpServerToolSelect && supportsMCPServer && !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort)}
+      <div class="col-span-2 mb-4">
+        <Label for="mcpServers">MCP Server Configuration</Label>
+        <Helper class="pb-1"
+          >Configure which remote MCP servers this assistant can use. In addition to built-in tools
+          you make available to the assistant, you can give assistants new capabilities using remote
+          MCP servers. These tools give the assistant the ability to connect to and control external
+          services when needed to respond to a user's prompt.
+        </Helper>
+        <div class="mt-4 rounded-2xl border border-gray-200 bg-white">
+          <div
+            class="flex flex-col gap-3 border-b border-gray-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div class="text-sm font-semibold text-gray-900">Configured servers</div>
+            <Button
+              type="button"
+              size="xs"
+              color="light"
+              class="w-fit"
+              on:click={() => (showMCPServerModal = true)}
+              disabled={preventEdits}>Add MCP Server</Button
+            >
+          </div>
+          <div
+            class="hidden border-b border-gray-100 px-4 py-2 text-xs uppercase tracking-[0.14em] text-gray-500 sm:grid sm:grid-cols-12 sm:gap-3"
+          >
+            <div class="sm:col-span-4">Server Name</div>
+            <div class="sm:col-span-4">URL</div>
+            <div class="sm:col-span-2">Authentication</div>
+            <div class="sm:col-span-1 text-center">Enabled</div>
+            <div class="sm:col-span-1 text-right">Actions</div>
+          </div>
+          {#if mcpServersLocal.length === 0}
+            <div class="px-4 py-6 text-sm text-gray-500">No MCP servers configured yet.</div>
+          {:else}
+            {#each mcpServersLocal as server, index (index)}
+              <div class="border-t border-gray-100 px-4 py-3">
+                <div class="flex flex-col gap-3 sm:grid sm:grid-cols-12 sm:items-center sm:gap-3">
+                  <div class="sm:col-span-4">
+                    <div class="truncate text-sm text-gray-700" title={server.display_name}>
+                      {server.display_name}
+                    </div>
+                  </div>
+                  <div class="sm:col-span-4">
+                    <div class="truncate text-sm text-gray-700" title={server.server_url}>
+                      {server.server_url}
+                    </div>
+                  </div>
+                  <div class="sm:col-span-2">
+                    <div class="text-sm text-gray-600">{mcpAuthTypeLabels[server.auth_type]}</div>
+                  </div>
+                  <div class="sm:col-span-1 sm:text-center">
+                    <input
+                      type="checkbox"
+                      class="h-4 w-4 rounded border-gray-300 text-blue-dark-40 focus:ring-blue-dark-40 disabled:opacity-50"
+                      bind:checked={server.enabled}
+                      disabled={preventEdits}
+                      aria-label="Enable MCP server"
+                    />
+                  </div>
+                  <div class="flex flex-wrap items-center gap-2 sm:col-span-1 sm:justify-end">
+                    <Button
+                      type="button"
+                      size="xs"
+                      color="light"
+                      class="w-fit"
+                      on:click={() => {
+                        mcpServerEditIndex = index;
+                        showMCPServerModal = true;
+                      }}
+                      disabled={preventEdits}>Edit</Button
+                    >
+                    <Button
+                      type="button"
+                      size="xs"
+                      color="light"
+                      class="w-fit text-red-600"
+                      on:click={() => removeServer(index)}
+                      disabled={preventEdits}>Remove</Button
+                    >
+                  </div>
+                </div>
+              </div>
+            {/each}
+          {/if}
+        </div>
+      </div>
+    {/if}
+
     <div class="col-span-2 mb-4">
       <Checkbox
         id="published"
@@ -1715,12 +1996,12 @@
           name="use_image_descriptions"
           class="mb-1"
           checked={useImageDescriptions}
-          ><div class="flex flex-row gap-1">
+          ><div class="flex flex-row gap-1.5">
+            <div>Enable Vision capabilities through Image Descriptions</div>
             <DropdownBadge
               extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
               ><span slot="name">Experimental</span></DropdownBadge
             >
-            <div>Enable Vision capabilities through Image Descriptions</div>
           </div></Checkbox
         >
         <Helper

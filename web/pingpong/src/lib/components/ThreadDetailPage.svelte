@@ -43,6 +43,7 @@
     PlaySolid,
     StopSolid,
     CheckOutline,
+    ServerOutline,
     MicrophoneSlashOutline,
     UsersSolid,
     LinkOutline,
@@ -63,6 +64,8 @@
   import FileCitation from './FileCitation.svelte';
   import StatusErrors from './StatusErrors.svelte';
   import FileSearchCallItem from './FileSearchCallItem.svelte';
+  import MCPListToolsCallItem from './MCPListToolsCallItem.svelte';
+  import MCPServerCallItem from './MCPServerCallItem.svelte';
   import ReasoningCallItem from './ReasoningCallItem.svelte';
   import WebSearchCallItem from './WebSearchCallItem.svelte';
   export let data;
@@ -240,6 +243,61 @@
       timeZoneName: 'short',
       timeZone: userTimezone
     }).format(new Date(timestamp * 1000));
+  };
+
+  type MCPContent = api.MCPServerCallItem | api.MCPListToolsCallItem;
+  type ContentBlock =
+    | { type: 'content'; key: string; content: api.Content }
+    | { type: 'mcp_group'; key: string; serverLabel: string; items: MCPContent[] };
+
+  const isMCPContent = (content: api.Content): content is MCPContent => {
+    return content.type === 'mcp_server_call' || content.type === 'mcp_list_tools_call';
+  };
+
+  const getMCPServerKey = (content: MCPContent) => {
+    return content.server_label || content.server_name || 'mcp';
+  };
+
+  const groupMessageContent = (contents: api.Content[]): ContentBlock[] => {
+    const blocks: ContentBlock[] = [];
+    let index = 0;
+
+    while (index < contents.length) {
+      const content = contents[index];
+      if (!isMCPContent(content)) {
+        blocks.push({ type: 'content', key: `content-${index}`, content });
+        index += 1;
+        continue;
+      }
+
+      const serverKey = getMCPServerKey(content);
+      const items: MCPContent[] = [content];
+      let cursor = index + 1;
+      while (cursor < contents.length) {
+        const next = contents[cursor];
+        if (!isMCPContent(next) || getMCPServerKey(next) !== serverKey) {
+          break;
+        }
+        items.push(next);
+        cursor += 1;
+      }
+
+      if (items.length > 1) {
+        const label = items[0].server_name || items[0].server_label || 'MCP server';
+        blocks.push({
+          type: 'mcp_group',
+          key: `mcp-group-${serverKey}-${index}`,
+          serverLabel: label,
+          items
+        });
+      } else {
+        blocks.push({ type: 'content', key: `content-${index}`, content });
+      }
+
+      index = cursor;
+    }
+
+    return blocks;
   };
 
   let currentMessageAttachments: api.ServerFile[] = [];
@@ -1045,131 +1103,146 @@
           <Tooltip triggeredBy={`#short-timestamp-${message.data.id}`}>
             {getMessageTimestamp(message.data.created_at)}
           </Tooltip>
-          {#each message.data.content as content}
-            {#if content.type === 'text'}
-              {@const { clean_string, images } = processString(content.text.value)}
-              {@const imageInfo = convertImageProxyToInfo(images)}
-              {@const quoteCitations = (content.text.annotations ?? []).filter(isFileCitation)}
-              {@const parsedTextContent = parseTextContent(
-                { value: clean_string, annotations: content.text.annotations },
-                $version,
-                api.fullPath(`/class/${classId}/thread/${threadId}`)
-              )}
-
-              <div class="leading-6">
-                <Markdown
-                  content={parsedTextContent.content}
-                  inlineWebSources={parsedTextContent.inlineWebSources}
-                  syntax={true}
-                  latex={useLatex}
-                />
-              </div>
-              {#if quoteCitations.length > 0}
-                <div class="flex flex-wrap gap-2">
-                  {#each quoteCitations as citation}
-                    <FileCitation
-                      name={citation.file_citation.file_name}
-                      quote={citation.file_citation.quote}
-                    />
-                  {/each}
+          {#each groupMessageContent(message.data.content) as block (block.key)}
+            {#if block.type === 'mcp_group'}
+              <div class="my-3">
+                <div class="flex items-center gap-2 text-gray-600">
+                  <ServerOutline class="h-4 w-4 text-gray-600" />
+                  <span class="text-xs font-medium uppercase tracking-wide"
+                    >{block.serverLabel}</span
+                  >
                 </div>
-              {/if}
-              {#if attachment_file_ids.size > 0}
-                <div class="flex flex-wrap gap-2">
-                  {#each imageInfo as image}
-                    {#if !(image.response && 'file_id' in image.response && image.response.file_id in allFiles)}
-                      <FilePlaceholder
-                        info={image}
-                        purpose="vision"
-                        mimeType={data.uploadInfo.mimeType}
-                        preventDeletion={true}
-                        on:delete={() => {}}
+                <div class="ml-2 mt-2 border-l border-gray-200 pl-4">
+                  {#each block.items as item (item.step_id)}
+                    {#if item.type === 'mcp_server_call'}
+                      <MCPServerCallItem
+                        content={item}
+                        forceOpen={printingThread}
+                        showServerLabel={false}
+                        compact={true}
+                      />
+                    {:else if item.type === 'mcp_list_tools_call'}
+                      <MCPListToolsCallItem
+                        content={item}
+                        forceOpen={printingThread}
+                        showServerLabel={false}
+                        compact={true}
                       />
                     {/if}
                   {/each}
                 </div>
-              {/if}
-            {:else if content.type === 'code'}
-              {#if printingThread}
-                <div class="leading-6 w-full">
-                  <div class="flex-row flex items-center space-x-2 mb-2">
-                    <div><CodeOutline size="lg" /></div>
-                    <div>Code Interpreter Code</div>
-                  </div>
-                  <pre style="white-space: pre-wrap;" class="text-black">{content.code}</pre>
-                </div>
-              {:else}
-                <div class="leading-6 w-full">
-                  <Accordion flush>
-                    <AccordionItem>
-                      <span slot="header"
-                        ><div class="flex-row flex items-center space-x-2">
-                          <div><CodeOutline size="lg" /></div>
-                          <div>Code Interpreter Code</div>
-                        </div></span
-                      >
-                      <pre style="white-space: pre-wrap;" class="text-black">{content.code}</pre>
-                    </AccordionItem>
-                  </Accordion>
-                </div>
-              {/if}
-            {:else if content.type === 'code_interpreter_call_placeholder'}
-              <Card padding="md" class="max-w-full flex-row flex items-center justify-between">
-                <div class="flex-row flex items-center space-x-2">
-                  <div><CodeOutline size="lg" /></div>
-                  <div>Code Interpreter</div>
-                </div>
+              </div>
+            {:else}
+              {@const content = block.content}
+              {#if content.type === 'text'}
+                {@const { clean_string, images } = processString(content.text.value)}
+                {@const imageInfo = convertImageProxyToInfo(images)}
+                {@const quoteCitations = (content.text.annotations ?? []).filter(isFileCitation)}
+                {@const parsedTextContent = parseTextContent(
+                  { value: clean_string, annotations: content.text.annotations },
+                  $version,
+                  api.fullPath(`/class/${classId}/thread/${threadId}`)
+                )}
 
-                <div class="flex flex-wrap items-center gap-2">
-                  <Button
-                    outline
-                    disabled={$loading || $submitting || $waiting}
-                    pill
-                    size="xs"
-                    color="alternative"
-                    on:click={() => fetchCodeInterpreterResult(content)}
-                    on:touchstart={() => fetchCodeInterpreterResult(content)}
-                  >
-                    Load Code Interpreter Results
-                  </Button>
-                </div></Card
-              >
-            {:else if content.type === 'file_search_call'}
-              <FileSearchCallItem {content} forceOpen={printingThread} />
-            {:else if content.type === 'web_search_call'}
-              <WebSearchCallItem
-                {content}
-                forceOpen={printingThread}
-                forceEagerImages={printingThread}
-              />
-            {:else if content.type === 'reasoning'}
-              <ReasoningCallItem {content} forceOpen={printingThread} />
-            {:else if content.type === 'code_output_image_file'}
-              {#if printingThread}
-                <div class="leading-6 w-full">
-                  <div class="flex-row flex items-center space-x-2 mb-2">
-                    <div><ImageSolid size="lg" /></div>
-                    <div>Output Image</div>
-                  </div>
-                  <div class="leading-6 w-full">
-                    <img
-                      class="img-attachment m-auto"
-                      src={api.fullPath(
-                        `/class/${classId}/thread/${threadId}/image/${content.image_file.file_id}`
-                      )}
-                      alt="Attachment generated by the assistant"
-                    />
-                  </div>
+                <div class="leading-6">
+                  <Markdown
+                    content={parsedTextContent.content}
+                    inlineWebSources={parsedTextContent.inlineWebSources}
+                    syntax={true}
+                    latex={useLatex}
+                  />
                 </div>
-              {:else}
-                <Accordion flush>
-                  <AccordionItem>
-                    <span slot="header"
-                      ><div class="flex-row flex items-center space-x-2">
-                        <div><ImageSolid size="lg" /></div>
-                        <div>Output Image</div>
-                      </div></span
+                {#if quoteCitations.length > 0}
+                  <div class="flex flex-wrap gap-2">
+                    {#each quoteCitations as citation}
+                      <FileCitation
+                        name={citation.file_citation.file_name}
+                        quote={citation.file_citation.quote}
+                      />
+                    {/each}
+                  </div>
+                {/if}
+                {#if attachment_file_ids.size > 0}
+                  <div class="flex flex-wrap gap-2">
+                    {#each imageInfo as image}
+                      {#if !(image.response && 'file_id' in image.response && image.response.file_id in allFiles)}
+                        <FilePlaceholder
+                          info={image}
+                          purpose="vision"
+                          mimeType={data.uploadInfo.mimeType}
+                          preventDeletion={true}
+                          on:delete={() => {}}
+                        />
+                      {/if}
+                    {/each}
+                  </div>
+                {/if}
+              {:else if content.type === 'code'}
+                {#if printingThread}
+                  <div class="leading-6 w-full">
+                    <div class="flex-row flex items-center space-x-2 mb-2">
+                      <div><CodeOutline size="lg" /></div>
+                      <div>Code Interpreter Code</div>
+                    </div>
+                    <pre style="white-space: pre-wrap;" class="text-black">{content.code}</pre>
+                  </div>
+                {:else}
+                  <div class="leading-6 w-full">
+                    <Accordion flush>
+                      <AccordionItem>
+                        <span slot="header"
+                          ><div class="flex-row flex items-center space-x-2">
+                            <div><CodeOutline size="lg" /></div>
+                            <div>Code Interpreter Code</div>
+                          </div></span
+                        >
+                        <pre style="white-space: pre-wrap;" class="text-black">{content.code}</pre>
+                      </AccordionItem>
+                    </Accordion>
+                  </div>
+                {/if}
+              {:else if content.type === 'code_interpreter_call_placeholder'}
+                <Card padding="md" class="max-w-full flex-row flex items-center justify-between">
+                  <div class="flex-row flex items-center space-x-2">
+                    <div><CodeOutline size="lg" /></div>
+                    <div>Code Interpreter</div>
+                  </div>
+
+                  <div class="flex flex-wrap items-center gap-2">
+                    <Button
+                      outline
+                      disabled={$loading || $submitting || $waiting}
+                      pill
+                      size="xs"
+                      color="alternative"
+                      on:click={() => fetchCodeInterpreterResult(content)}
+                      on:touchstart={() => fetchCodeInterpreterResult(content)}
                     >
+                      Load Code Interpreter Results
+                    </Button>
+                  </div></Card
+                >
+              {:else if content.type === 'file_search_call'}
+                <FileSearchCallItem {content} forceOpen={printingThread} />
+              {:else if content.type === 'web_search_call'}
+                <WebSearchCallItem
+                  {content}
+                  forceOpen={printingThread}
+                  forceEagerImages={printingThread}
+                />
+              {:else if content.type === 'mcp_server_call'}
+                <MCPServerCallItem {content} forceOpen={printingThread} />
+              {:else if content.type === 'mcp_list_tools_call'}
+                <MCPListToolsCallItem {content} forceOpen={printingThread} />
+              {:else if content.type === 'reasoning'}
+                <ReasoningCallItem {content} forceOpen={printingThread} />
+              {:else if content.type === 'code_output_image_file'}
+                {#if printingThread}
+                  <div class="leading-6 w-full">
+                    <div class="flex-row flex items-center space-x-2 mb-2">
+                      <div><ImageSolid size="lg" /></div>
+                      <div>Output Image</div>
+                    </div>
                     <div class="leading-6 w-full">
                       <img
                         class="img-attachment m-auto"
@@ -1179,33 +1252,35 @@
                         alt="Attachment generated by the assistant"
                       />
                     </div>
-                  </AccordionItem>
-                </Accordion>
-              {/if}
-            {:else if content.type === 'code_output_image_url'}
-              {#if printingThread}
-                <div class="leading-6 w-full">
-                  <div class="flex-row flex items-center space-x-2 mb-2">
-                    <div><ImageSolid size="lg" /></div>
-                    <div>Output Image</div>
                   </div>
+                {:else}
+                  <Accordion flush>
+                    <AccordionItem>
+                      <span slot="header"
+                        ><div class="flex-row flex items-center space-x-2">
+                          <div><ImageSolid size="lg" /></div>
+                          <div>Output Image</div>
+                        </div></span
+                      >
+                      <div class="leading-6 w-full">
+                        <img
+                          class="img-attachment m-auto"
+                          src={api.fullPath(
+                            `/class/${classId}/thread/${threadId}/image/${content.image_file.file_id}`
+                          )}
+                          alt="Attachment generated by the assistant"
+                        />
+                      </div>
+                    </AccordionItem>
+                  </Accordion>
+                {/if}
+              {:else if content.type === 'code_output_image_url'}
+                {#if printingThread}
                   <div class="leading-6 w-full">
-                    <img
-                      class="img-attachment m-auto"
-                      src={content.url}
-                      alt="Attachment generated by the assistant"
-                    />
-                  </div>
-                </div>
-              {:else}
-                <Accordion flush>
-                  <AccordionItem>
-                    <span slot="header"
-                      ><div class="flex-row flex items-center space-x-2">
-                        <div><ImageSolid size="lg" /></div>
-                        <div>Output Image</div>
-                      </div></span
-                    >
+                    <div class="flex-row flex items-center space-x-2 mb-2">
+                      <div><ImageSolid size="lg" /></div>
+                      <div>Output Image</div>
+                    </div>
                     <div class="leading-6 w-full">
                       <img
                         class="img-attachment m-auto"
@@ -1213,47 +1288,65 @@
                         alt="Attachment generated by the assistant"
                       />
                     </div>
-                  </AccordionItem>
-                </Accordion>
-              {/if}
-            {:else if content.type === 'code_output_logs'}
-              {#if printingThread}
-                <div class="leading-6 w-full">
-                  <div class="flex-row flex items-center space-x-2 mb-2">
-                    <div><TerminalOutline size="lg" /></div>
-                    <div>Output Logs</div>
                   </div>
+                {:else}
+                  <Accordion flush>
+                    <AccordionItem>
+                      <span slot="header"
+                        ><div class="flex-row flex items-center space-x-2">
+                          <div><ImageSolid size="lg" /></div>
+                          <div>Output Image</div>
+                        </div></span
+                      >
+                      <div class="leading-6 w-full">
+                        <img
+                          class="img-attachment m-auto"
+                          src={content.url}
+                          alt="Attachment generated by the assistant"
+                        />
+                      </div>
+                    </AccordionItem>
+                  </Accordion>
+                {/if}
+              {:else if content.type === 'code_output_logs'}
+                {#if printingThread}
                   <div class="leading-6 w-full">
-                    <pre style="white-space: pre-wrap;" class="text-black">{content.logs}</pre>
-                  </div>
-                </div>
-              {:else}
-                <Accordion flush>
-                  <AccordionItem>
-                    <span slot="header"
-                      ><div class="flex-row flex items-center space-x-2">
-                        <div><TerminalOutline size="lg" /></div>
-                        <div>Output Logs</div>
-                      </div></span
-                    >
+                    <div class="flex-row flex items-center space-x-2 mb-2">
+                      <div><TerminalOutline size="lg" /></div>
+                      <div>Output Logs</div>
+                    </div>
                     <div class="leading-6 w-full">
                       <pre style="white-space: pre-wrap;" class="text-black">{content.logs}</pre>
                     </div>
-                  </AccordionItem>
-                </Accordion>
+                  </div>
+                {:else}
+                  <Accordion flush>
+                    <AccordionItem>
+                      <span slot="header"
+                        ><div class="flex-row flex items-center space-x-2">
+                          <div><TerminalOutline size="lg" /></div>
+                          <div>Output Logs</div>
+                        </div></span
+                      >
+                      <div class="leading-6 w-full">
+                        <pre style="white-space: pre-wrap;" class="text-black">{content.logs}</pre>
+                      </div>
+                    </AccordionItem>
+                  </Accordion>
+                {/if}
+              {:else if content.type === 'image_file'}
+                <div class="leading-6 w-full">
+                  <img
+                    class="img-attachment m-auto"
+                    src={api.fullPath(
+                      `/class/${classId}/thread/${threadId}/image/${content.image_file.file_id}`
+                    )}
+                    alt="Attachment generated by the assistant"
+                  />
+                </div>
+              {:else}
+                <div class="leading-6"><pre>{JSON.stringify(content, null, 2)}</pre></div>
               {/if}
-            {:else if content.type === 'image_file'}
-              <div class="leading-6 w-full">
-                <img
-                  class="img-attachment m-auto"
-                  src={api.fullPath(
-                    `/class/${classId}/thread/${threadId}/image/${content.image_file.file_id}`
-                  )}
-                  alt="Attachment generated by the assistant"
-                />
-              </div>
-            {:else}
-              <div class="leading-6"><pre>{JSON.stringify(content, null, 2)}</pre></div>
             {/if}
           {/each}
           {#if attachment_file_ids.size > 0}

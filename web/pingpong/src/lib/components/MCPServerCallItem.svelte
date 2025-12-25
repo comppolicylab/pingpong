@@ -1,0 +1,151 @@
+<script lang="ts">
+  import { slide } from 'svelte/transition';
+  import { ChevronDownOutline, ServerOutline } from 'flowbite-svelte-icons';
+  import type { MCPServerCallItem, MCPToolError } from '$lib/api';
+
+  export let content: MCPServerCallItem;
+  export let forceOpen = false;
+  export let showServerLabel = true;
+  export let compact = false;
+
+  let open = false;
+  let previousOpen: boolean | null = null;
+  $: {
+    if (forceOpen) {
+      if (previousOpen === null) {
+        previousOpen = open;
+      }
+      open = true;
+    } else if (previousOpen !== null) {
+      open = previousOpen;
+      previousOpen = null;
+    }
+  }
+
+  const toggle = () => (open = !open);
+
+  const formatPayload = (payload?: string | null) => {
+    if (!payload) return '';
+    try {
+      return JSON.stringify(JSON.parse(payload), null, 2);
+    } catch {
+      return payload;
+    }
+  };
+
+  const formatError = (error?: MCPToolError | null) => {
+    if (!error) return '';
+    if (typeof error === 'string') return formatPayload(error);
+    return JSON.stringify(error, null, 2);
+  };
+
+  $: serverLabel = content.server_name || content.server_label || 'MCP server';
+  $: toolLabel = content.tool_name || 'MCP tool';
+  $: requestPayload = formatPayload(content.arguments);
+  $: responsePayload = formatPayload(content.output);
+  $: errorPayload = formatError(content.error);
+
+  $: statusLabel =
+    content.status === 'completed'
+      ? `Ran ${toolLabel}${open ? '...' : ''}`
+      : content.status === 'failed'
+        ? 'MCP call failed'
+        : content.status === 'incomplete'
+          ? 'MCP call was canceled'
+          : `Calling ${toolLabel}...`;
+
+  $: statusClasses =
+    content.status === 'in_progress' || content.status === 'calling'
+      ? 'text-sm font-medium shimmer'
+      : content.status === 'failed'
+        ? 'text-sm font-medium text-red-600'
+        : content.status === 'incomplete'
+          ? 'text-sm font-medium text-yellow-600'
+          : 'text-sm font-medium text-gray-600';
+</script>
+
+<div class={compact ? 'my-2' : 'my-3'}>
+  {#if showServerLabel}
+    <div class="flex items-center gap-2 text-gray-600">
+      <ServerOutline class="h-4 w-4 text-gray-600" />
+      <span class="text-xs font-medium uppercase tracking-wide">{serverLabel}</span>
+    </div>
+  {/if}
+  <div class={showServerLabel ? 'mt-1' : 'mt-0'}>
+    <button type="button" class="flex flex-row items-center gap-1" on:click={toggle}>
+      <span class={statusClasses}>{statusLabel}</span>
+      {#if open}
+        <ChevronDownOutline class="transform rotate-180 text-gray-600" />
+      {:else}
+        <ChevronDownOutline class="text-gray-600" />
+      {/if}
+    </button>
+  </div>
+
+  {#if open}
+    <div
+      class="ml-2 mt-2 border-l border-gray-200 pl-4 text-sm text-gray-600 font-light"
+      transition:slide={{ duration: 250 }}
+    >
+      {#if requestPayload}
+        <div class="pb-3">
+          <div class="rounded border border-gray-200 bg-gray-50 px-4 py-3">
+            <div class="mb-2 text-xs text-gray-500">Request</div>
+            <pre class="text-xs whitespace-pre-wrap font-mono text-gray-700">{requestPayload}</pre>
+          </div>
+        </div>
+      {/if}
+
+      {#if responsePayload || errorPayload}
+        <div class="pb-3">
+          <div class="rounded border border-gray-200 bg-gray-50 px-4 py-3">
+            <div class="mb-2 text-xs text-gray-500">{errorPayload ? 'Error' : 'Response'}</div>
+            <pre class="text-xs whitespace-pre-wrap font-mono text-gray-700">{errorPayload ||
+                responsePayload}</pre>
+          </div>
+        </div>
+      {:else}
+        <div class="text-xs text-gray-500">Waiting for response...</div>
+      {/if}
+    </div>
+  {/if}
+</div>
+
+<style lang="css">
+  .shimmer {
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    animation-delay: 0s;
+    animation-duration: 2s;
+    animation-iteration-count: infinite;
+    animation-name: shimmer;
+    background: #4b5563 -webkit-gradient(linear, 100% 0, 0 0, from(#5d5d5d), color-stop(0.4, #ffffffbf), to(#4b5563), color-stop(0.6, #ffffffbf), to(#4b5563));
+    -webkit-background-clip: text;
+    background-clip: text;
+    background-position: -100% 0;
+    background-position: unset top;
+    background-repeat: no-repeat;
+    background-size: 50% 200%;
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: -100% 0;
+    }
+    100% {
+      background-position: 250% 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .shimmer {
+      animation: none;
+    }
+  }
+
+  .shimmer:hover {
+    -webkit-text-fill-color: #374151;
+    color: #374151;
+    background: 0 0;
+  }
+</style>

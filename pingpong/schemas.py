@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from enum import Enum, StrEnum, auto
-from typing import Generic, Literal, NotRequired, TypeVar, Union
+from typing import Any, Generic, Literal, NotRequired, TypeVar, Union
 from typing_extensions import TypedDict, Annotated, TypeAlias
 
 from openai._utils import PropertyInfo
@@ -24,6 +24,7 @@ from openai.types.responses.response_function_web_search import (
 from pydantic import (
     BaseModel,
     Field,
+    HttpUrl,
     SecretStr,
     computed_field,
     field_validator,
@@ -465,7 +466,57 @@ def temperature_validator(self):
 
 
 class ToolOption(TypedDict):
-    type: Literal["file_search"] | Literal["code_interpreter"] | Literal["web_search"]
+    type: (
+        Literal["file_search"]
+        | Literal["code_interpreter"]
+        | Literal["web_search"]
+        | Literal["mcp_server"]
+    )
+
+
+class MCPAuthType(StrEnum):
+    NONE = "none"
+    TOKEN = "token"
+    HEADER = "header"
+
+
+class MCPServerToolInput(BaseModel):
+    """Input for create/update MCP servers - used in assistant requests"""
+
+    display_name: str = Field(..., min_length=1, max_length=100)
+    server_label: str | None = None
+    server_url: HttpUrl = Field(..., max_length=2048)
+    auth_type: MCPAuthType = MCPAuthType.NONE
+    authorization_token: str | None = None
+    headers: dict[str, str] | None = None
+    description: str | None = Field(None, max_length=1000)
+    enabled: bool = True
+
+    @computed_field  # type: ignore
+    @property
+    def server_url_str(self) -> str:
+        return str(self.server_url)
+
+
+class MCPServerToolResponse(BaseModel):
+    """Response model for MCP servers - uses server_label as identifier"""
+
+    display_name: str
+    server_label: str
+    server_url: str
+    auth_type: MCPAuthType
+    headers: dict[str, str] | None = None
+    description: str | None = None
+    enabled: bool
+
+    class Config:
+        from_attributes = True
+
+
+class MCPServerToolsResponse(BaseModel):
+    """Response model for list of MCP servers"""
+
+    mcp_servers: list[MCPServerToolResponse]
 
 
 class CreateAssistant(BaseModel):
@@ -496,6 +547,7 @@ class CreateAssistant(BaseModel):
     hide_web_search_actions: bool = False
     deleted_private_files: list[int] = []
     create_classic_assistant: bool = False
+    mcp_servers: list[MCPServerToolInput] = []
 
     _temperature_check = model_validator(mode="after")(temperature_validator)
 
@@ -551,6 +603,7 @@ class UpdateAssistant(BaseModel):
     hide_web_search_actions: bool | None = None
     use_image_descriptions: bool | None = None
     deleted_private_files: list[int] = []
+    mcp_servers: list[MCPServerToolInput] | None = None
 
     _temperature_check = model_validator(mode="after")(temperature_validator)
 
@@ -1457,6 +1510,7 @@ class AssistantModel(BaseModel):
     supports_none_reasoning_effort: bool
     supports_verbosity: bool
     supports_web_search: bool
+    supports_mcp_server: bool
     supports_vision: bool
     vision_support_override: bool | None = None
     supports_file_search: bool
@@ -1493,6 +1547,7 @@ class AssistantModelDict(TypedDict):
     supports_none_reasoning_effort: bool
     supports_verbosity: bool
     supports_web_search: bool
+    supports_mcp_server: bool
     supports_vision: bool
     supports_file_search: bool
     supports_code_interpreter: bool
@@ -1645,6 +1700,67 @@ class WebSearchMessage(BaseModel):
     output_index: int | None = None
 
 
+class MCPListToolsTool(BaseModel):
+    name: str
+    description: str | None = None
+    input_schema: dict[str, Any] | None = None
+    annotations: dict[str, Any] | None = None
+
+
+class MCPServerCall(BaseModel):
+    step_id: str
+    type: Literal["mcp_server_call"]
+    server_label: str
+    server_name: str | None = None
+    tool_name: str | None = None
+    arguments: str | None = None
+    output: str | None = None
+    error: dict[str, Any] | str | None = None
+    status: (
+        Literal[
+            "in_progress",
+            "completed",
+            "incomplete",
+            "calling",
+            "failed",
+        ]
+        | None
+    ) = None
+
+
+class MCPListToolsCall(BaseModel):
+    step_id: str
+    type: Literal["mcp_list_tools_call"]
+    server_label: str
+    server_name: str | None = None
+    tools: list[MCPListToolsTool] = []
+    error: dict[str, Any] | str | None = None
+    status: (
+        Literal[
+            "in_progress",
+            "completed",
+            "incomplete",
+            "calling",
+            "failed",
+        ]
+        | None
+    ) = None
+
+
+class MCPMessage(BaseModel):
+    id: str
+    assistant_id: str
+    created_at: float
+    content: list[MCPServerCall | MCPListToolsCall]
+    metadata: dict[str, str]
+    object: Literal["thread.message"]
+    message_type: Literal["mcp_server_call", "mcp_list_tools_call"]
+    role: Literal["assistant"]
+    run_id: str
+    thread_id: str
+    output_index: int | None = None
+
+
 class CodeInterpreterMessage(BaseModel):
     id: str
     assistant_id: str
@@ -1743,6 +1859,7 @@ class ThreadMessages(BaseModel):
     fs_messages: list[FileSearchMessage] = []
     ci_messages: list[CodeInterpreterMessage] = []
     ws_messages: list[WebSearchMessage] = []
+    mcp_messages: list[MCPMessage] = []
     reasoning_messages: list["ReasoningMessage"] = []
     has_more: bool
 
@@ -1765,6 +1882,7 @@ class ThreadWithMeta(BaseModel):
     ci_messages: list[CodeInterpreterMessage] | None
     fs_messages: list[FileSearchMessage] | None = None
     ws_messages: list[WebSearchMessage] | None = None
+    mcp_messages: list[MCPMessage] | None = None
     reasoning_messages: list["ReasoningMessage"] | None = None
     attachments: dict[str, File] | None
     instructions: str | None
@@ -2052,12 +2170,15 @@ class ToolCallType(StrEnum):
     CODE_INTERPRETER = "code_interpreter_call"
     FILE_SEARCH = "file_search_call"
     WEB_SEARCH = "web_search_call"
+    MCP_SERVER = "mcp_server_call"
+    MCP_LIST_TOOLS = "mcp_list_tools_call"
 
 
 class ToolCallStatus(StrEnum):
     IN_PROGRESS = "in_progress"
     SEARCHING = "searching"
     INTERPRETING = "interpreting"
+    CALLING = "calling"
     COMPLETED = "completed"
     INCOMPLETE = "incomplete"
     FAILED = "failed"

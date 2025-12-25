@@ -46,6 +46,7 @@ from openai.types.responses import ToolParam, FileSearchToolParam, WebSearchTool
 from openai._streaming import AsyncStream
 from openai.types.responses.tool_param import (
     CodeInterpreter,
+    Mcp,
     CodeInterpreterContainerCodeInterpreterToolAuto,
 )
 from openai.types.responses.response_output_item import (
@@ -54,6 +55,8 @@ from openai.types.responses.response_output_item import (
     ResponseFileSearchToolCall,
     ResponseFunctionWebSearch,
     ResponseReasoningItem,
+    McpCall,
+    McpListTools,
 )
 from openai.types.responses.response_function_web_search import (
     ActionSearch,
@@ -83,12 +86,22 @@ from openai.types.responses.response_stream_event import (
     ResponseReasoningSummaryPartAddedEvent,
     ResponseReasoningSummaryTextDeltaEvent,
     ResponseReasoningSummaryPartDoneEvent,
+    ResponseMcpCallInProgressEvent,
+    ResponseMcpCallArgumentsDeltaEvent,
+    ResponseMcpCallCompletedEvent,
+    ResponseMcpCallFailedEvent,
+    ResponseMcpListToolsInProgressEvent,
+    ResponseMcpListToolsCompletedEvent,
+    ResponseMcpListToolsFailedEvent,
 )
 from openai.types.responses.response_input_item_param import (
     ResponseInputItemParam,
     EasyInputMessageParam,
     ResponseInputMessageContentListParam,
     ResponseCodeInterpreterToolCallParam,
+    McpListToolsTool as McpListToolsToolParam,
+    McpListTools as McpListToolsParam,
+    McpCall as McpCallParam,
 )
 from openai.types.responses.response_output_message_param import (
     ResponseOutputMessageParam,
@@ -556,7 +569,7 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
 
 async def build_response_input_item_list(
     session: AsyncSession, thread_id: int, uses_reasoning: bool = False
-) -> tuple[list[ResponseInputItemParam], int]:
+) -> list[ResponseInputItemParam]:
     """Build a list of ResponseInputItem from a thread run step."""
     response_input_items: list[ResponseInputItemParam] = []
     # Store ResponseInputItemParam and time created to sort later
@@ -700,7 +713,9 @@ async def build_response_input_item_list(
                 for result in tool_call.results:
                     file_search_results.append(
                         Result(
-                            attributes=json.loads(result.attributes),
+                            attributes=json.loads(result.attributes)
+                            if result.attributes
+                            else {},
                             file_id=result.file_id,
                             filename=result.filename,
                             score=result.score,
@@ -712,7 +727,9 @@ async def build_response_input_item_list(
                         tool_call.created,
                         ResponseFileSearchToolCallParam(
                             id=tool_call.tool_call_id,
-                            queries=json.loads(tool_call.queries),
+                            queries=json.loads(tool_call.queries)
+                            if tool_call.queries
+                            else [],
                             status=ToolCallStatus(tool_call.status).value,
                             results=file_search_results,
                             type="file_search_call",
@@ -757,6 +774,82 @@ async def build_response_input_item_list(
                             action=action,
                             status=ToolCallStatus(tool_call.status).value,
                             type="web_search_call",
+                        ),
+                    )
+                )
+
+            case ToolCallType.MCP_SERVER:
+                server_label = tool_call.mcp_server_label or (
+                    tool_call.mcp_server_tool.server_label
+                    if tool_call.mcp_server_tool
+                    else None
+                )
+                if not server_label:
+                    logger.warning(
+                        "Skipping MCP tool call %s due to missing server label.",
+                        tool_call.tool_call_id,
+                    )
+                    continue
+                try:
+                    error = json.loads(tool_call.error) if tool_call.error else None
+                except json.JSONDecodeError:
+                    error = {"message": tool_call.error}
+                response_input_items_with_time.append(
+                    (
+                        tool_call.created,
+                        McpCallParam(
+                            id=tool_call.tool_call_id,
+                            arguments=tool_call.mcp_arguments,
+                            name=tool_call.mcp_tool_name,
+                            server_label=server_label,
+                            type="mcp_call",
+                            approval_request_id=None,
+                            error=error,
+                            output=tool_call.mcp_output,
+                            status=ToolCallStatus(tool_call.status).value,
+                        ),
+                    )
+                )
+            case ToolCallType.MCP_LIST_TOOLS:
+                server_label = tool_call.mcp_server_label or (
+                    tool_call.mcp_server_tool.server_label
+                    if tool_call.mcp_server_tool
+                    else None
+                )
+                if not server_label:
+                    logger.warning(
+                        "Skipping MCP list tools call %s due to missing server label.",
+                        tool_call.tool_call_id,
+                    )
+                    continue
+                mcp_tools: list[McpListToolsToolParam] = []
+                for tool in tool_call.mcp_tools_listed:
+                    mcp_tools.append(
+                        McpListToolsToolParam(
+                            input_schema=json.loads(tool.input_schema)
+                            if tool.input_schema
+                            else {},
+                            name=tool.name,
+                            description=tool.description,
+                            annotations=json.loads(tool.annotations)
+                            if tool.annotations
+                            else {},
+                        )
+                    )
+                try:
+                    error = json.loads(tool_call.error) if tool_call.error else None
+                except json.JSONDecodeError:
+                    error = {"message": tool_call.error}
+
+                response_input_items_with_time.append(
+                    (
+                        tool_call.created,
+                        McpListToolsParam(
+                            id=tool_call.tool_call_id,
+                            server_label=server_label,
+                            tools=mcp_tools,
+                            type="mcp_list_tools",
+                            error=error,
                         ),
                     )
                 )
@@ -827,7 +920,7 @@ async def build_response_input_item_list(
                 response_input_items[response_input_items.index(item)] = (
                     convert_to_message(item, uses_reasoning)
                 )
-    return response_input_items, len(response_input_items)
+    return response_input_items
 
 
 class BufferedResponseStreamHandler:
@@ -843,6 +936,7 @@ class BufferedResponseStreamHandler:
         thread_id: int,
         assistant_id: int,
         user_id: int,
+        mcp_server_tools_by_server_label: dict[str, models.MCPServerTool] | None = None,
         user_auth: str | None = None,
         anonymous_link_auth: str | None = None,
         anonymous_user_auth: str | None = None,
@@ -885,6 +979,7 @@ class BufferedResponseStreamHandler:
         self.current_reasoning_content_index: int | None = None
         self.thread_id: int = thread_id
         self.assistant_id: int = assistant_id
+        self.mcp_server_tools_by_server_label = mcp_server_tools_by_server_label or {}
         self.prev_part_index = -1
         self.file_search_results: dict[str, FileSearchToolAnnotationResult] = {}
         self.file_ids_file_citation_annotation: set[str] = set()
@@ -1784,6 +1879,504 @@ class BufferedResponseStreamHandler:
             case _:
                 return None
         return None
+
+    async def on_mcp_tool_call_created(self, data: McpCall):
+        if not self.run_id:
+            logger.exception(
+                f"Received MCP tool call created event without a cached run. Data: {data}"
+            )
+            return
+
+        if self.tool_call_id:
+            logger.exception(
+                f"Received MCP tool call created with an existing tool call. Data: {data}"
+            )
+            return
+
+        self.prev_output_index += 1
+        self.last_output_item_type = "mcp_call"
+
+        mcp_server_tool = self.mcp_server_tools_by_server_label.get(data.server_label)
+        if not mcp_server_tool:
+            logger.exception(
+                f"Received MCP tool call created for unknown MCP server label: {data.server_label}. Data: {data}"
+            )
+            return
+
+        tool_call_data = {
+            "run_id": self.run_id,
+            "tool_call_id": data.id,
+            "type": ToolCallType.MCP_SERVER,
+            "status": ToolCallStatus(data.status),
+            "thread_id": self.thread_id,
+            "output_index": self.prev_output_index,
+            "mcp_server_tool_id": mcp_server_tool.id,
+            "mcp_server_label": data.server_label,
+            "mcp_tool_name": data.name,
+            "mcp_arguments": data.arguments,
+            "mcp_output": data.output,
+            "created": utcnow(),
+        }
+
+        @db_session_handler
+        async def add_cached_tool_call_on_mcp_tool_call_created(
+            session_: AsyncSession,
+        ):
+            tool_call = await models.ToolCall.create(session_, tool_call_data)
+            await session_.commit()
+            return tool_call
+
+        tool_call = await add_cached_tool_call_on_mcp_tool_call_created()
+        self.tool_call_id = tool_call.id
+        self.tool_call_external_id = tool_call.tool_call_id
+
+        self.enqueue(
+            {
+                "type": "tool_call_created",
+                "tool_call": {
+                    "id": str(data.id),
+                    "index": self.prev_output_index,
+                    "output_index": self.prev_output_index,
+                    "type": "mcp_call",
+                    "server_label": data.server_label,
+                    "server_name": mcp_server_tool.display_name,
+                    "name": data.name,
+                    "arguments": data.arguments,
+                    "output": data.output,
+                    "error": data.error,
+                    "status": data.status,
+                    "run_id": str(self.run_id),
+                },
+            }
+        )
+
+    async def on_mcp_tool_call_in_progress(self, data: ResponseMcpCallInProgressEvent):
+        if not self.tool_call_id:
+            logger.exception(
+                f"Received MCP call in progress without a current tool call. Data: {data}"
+            )
+            return
+        if self.tool_call_external_id != data.item_id:
+            logger.exception(
+                f"Received MCP call in progress with a different tool call ID. Data: {data}"
+            )
+            return
+
+        @db_session_handler
+        async def add_cached_tool_call_on_mcp_tool_call_in_progress(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+
+            await models.ToolCall.update_status(
+                session_, self.tool_call_id, ToolCallStatus.IN_PROGRESS
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_mcp_tool_call_in_progress()
+
+    async def on_mcp_tool_call_arguments_delta(
+        self, data: ResponseMcpCallArgumentsDeltaEvent
+    ):
+        if not self.tool_call_id:
+            logger.exception(
+                f"Received MCP tool call arguments delta without a current tool call. Data: {data}"
+            )
+            return
+        if self.tool_call_external_id != data.item_id:
+            logger.exception(
+                f"Received MCP tool call arguments delta with a different tool call ID. Data: {data}"
+            )
+            return
+
+        @db_session_handler
+        async def add_cached_tool_call_on_mcp_tool_call_arguments_delta(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.add_mcp_arguments_delta(
+                session_, self.tool_call_id, data.delta
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_mcp_tool_call_arguments_delta()
+
+        self.enqueue(
+            {
+                "type": "tool_call_delta",
+                "delta": {
+                    "index": data.output_index,
+                    "output_index": data.output_index,
+                    "type": "mcp_call",
+                    "id": data.item_id,
+                    "arguments_delta": data.delta,
+                },
+            }
+        )
+
+    async def on_mcp_tool_call_completed(self, data: ResponseMcpCallCompletedEvent):
+        if not self.tool_call_id:
+            logger.exception(
+                f"Received MCP call completed without a current tool call. Data: {data}"
+            )
+            return
+        if self.tool_call_external_id != data.item_id:
+            logger.exception(
+                f"Received MCP call completed with a different tool call ID. Data: {data}"
+            )
+            return
+
+        completed_at = utcnow()
+
+        @db_session_handler
+        async def add_cached_tool_call_on_mcp_tool_call_completed(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_status(
+                session_,
+                self.tool_call_id,
+                ToolCallStatus.COMPLETED,
+                completed=completed_at,
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_mcp_tool_call_completed()
+
+    async def on_mcp_tool_call_failed(self, data: ResponseMcpCallFailedEvent):
+        if not self.tool_call_id:
+            logger.exception(
+                f"Received MCP call failed without a current tool call. Data: {data}"
+            )
+            return
+        if self.tool_call_external_id != data.item_id:
+            logger.exception(
+                f"Received MCP call failed with a different tool call ID. Data: {data}"
+            )
+            return
+
+        completed_at = utcnow()
+
+        @db_session_handler
+        async def add_cached_tool_call_on_mcp_tool_call_failed(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_status(
+                session_,
+                self.tool_call_id,
+                ToolCallStatus.FAILED,
+                completed=completed_at,
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_mcp_tool_call_failed()
+
+    async def on_mcp_tool_call_done(self, data: McpCall):
+        if not self.run_id:
+            logger.exception(
+                f"Received MCP call done without a cached run. Data: {data}"
+            )
+            return
+        if not self.tool_call_id:
+            logger.exception(
+                f"Received MCP call done without a current tool call. Data: {data}"
+            )
+            return
+        if self.tool_call_external_id != data.id:
+            logger.exception(
+                f"Received MCP call done with a different tool call ID. Data: {data}"
+            )
+            return
+
+        @db_session_handler
+        async def add_cached_tool_call_on_mcp_call_done(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_mcp_call(
+                session_,
+                self.tool_call_id,
+                status=ToolCallStatus(data.status),
+                error=json.dumps(data.error) if data.error else None,
+                mcp_tool_name=data.name,
+                mcp_arguments=data.arguments,
+                mcp_output=data.output,
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_mcp_call_done()
+
+        self.enqueue(
+            {
+                "type": "tool_call_delta",
+                "delta": {
+                    "type": "mcp_call",
+                    "id": data.id,
+                    "index": self.prev_output_index,
+                    "output_index": self.prev_output_index,
+                    "run_id": str(self.run_id),
+                    "server_label": data.server_label,
+                    "name": data.name,
+                    "arguments": data.arguments,
+                    "output": data.output,
+                    "error": data.error,
+                    "status": data.status,
+                },
+            }
+        )
+        self.tool_call_id = None
+        self.tool_call_external_id = None
+
+    async def on_mcp_list_tools_call_created(self, data: McpListTools):
+        if not self.run_id:
+            logger.exception(
+                f"Received MCP list tools call created event without a cached run. Data: {data}"
+            )
+            return
+
+        if self.tool_call_id:
+            logger.exception(
+                f"Received MCP list tools call created with an existing tool call. Data: {data}"
+            )
+            return
+
+        self.prev_output_index += 1
+        self.last_output_item_type = "mcp_list_tools"
+
+        mcp_server_tool = self.mcp_server_tools_by_server_label.get(data.server_label)
+        if not mcp_server_tool:
+            logger.exception(
+                f"Received MCP list tools call created for unknown MCP server label: {data.server_label}. Data: {data}"
+            )
+            return
+
+        tool_call_data = {
+            "run_id": self.run_id,
+            "tool_call_id": data.id,
+            "type": ToolCallType.MCP_LIST_TOOLS,
+            "status": ToolCallStatus.IN_PROGRESS,
+            "thread_id": self.thread_id,
+            "output_index": self.prev_output_index,
+            "mcp_server_tool_id": mcp_server_tool.id,
+            "mcp_server_label": data.server_label,
+            "created": utcnow(),
+        }
+
+        @db_session_handler
+        async def add_cached_tool_call_on_mcp_list_tools_call_created(
+            session_: AsyncSession,
+        ):
+            tool_call = await models.ToolCall.create(session_, tool_call_data)
+            await session_.commit()
+            return tool_call
+
+        tool_call = await add_cached_tool_call_on_mcp_list_tools_call_created()
+        self.tool_call_id = tool_call.id
+        self.tool_call_external_id = tool_call.tool_call_id
+
+        tools = [tool.model_dump() for tool in (data.tools or [])]
+
+        self.enqueue(
+            {
+                "type": "tool_call_created",
+                "tool_call": {
+                    "id": str(data.id),
+                    "index": self.prev_output_index,
+                    "output_index": self.prev_output_index,
+                    "type": "mcp_list_tools",
+                    "server_label": data.server_label,
+                    "server_name": mcp_server_tool.display_name,
+                    "tools": tools,
+                    "error": data.error,
+                    "status": ToolCallStatus.IN_PROGRESS.value,
+                    "run_id": str(self.run_id),
+                },
+            }
+        )
+
+    async def on_mcp_list_tools_call_in_progress(
+        self, data: ResponseMcpListToolsInProgressEvent
+    ):
+        if not self.tool_call_id:
+            logger.exception(
+                f"Received MCP list tools call in progress without a current tool call. Data: {data}"
+            )
+            return
+        if self.tool_call_external_id != data.item_id:
+            logger.exception(
+                f"Received MCP list tools call in progress with a different tool call ID. Data: {data}"
+            )
+            return
+
+        @db_session_handler
+        async def add_cached_tool_call_on_mcp_list_tools_call_in_progress(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+
+            await models.ToolCall.update_status(
+                session_, self.tool_call_id, ToolCallStatus.IN_PROGRESS
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_mcp_list_tools_call_in_progress()
+
+    async def on_mcp_list_tools_call_completed(
+        self, data: ResponseMcpListToolsCompletedEvent
+    ):
+        if not self.tool_call_id:
+            logger.exception(
+                f"Received MCP list tools call completed without a current tool call. Data: {data}"
+            )
+            return
+        if self.tool_call_external_id != data.item_id:
+            logger.exception(
+                f"Received MCP list tools call completed with a different tool call ID. Data: {data}"
+            )
+            return
+
+        completed_at = utcnow()
+
+        @db_session_handler
+        async def add_cached_tool_call_on_mcp_list_tools_call_completed(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_status(
+                session_,
+                self.tool_call_id,
+                ToolCallStatus.COMPLETED,
+                completed=completed_at,
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_mcp_list_tools_call_completed()
+
+    async def on_mcp_list_tools_call_failed(
+        self, data: ResponseMcpListToolsFailedEvent
+    ):
+        if not self.tool_call_id:
+            logger.exception(
+                f"Received MCP list tools call failed without a current tool call. Data: {data}"
+            )
+            return
+        if self.tool_call_external_id != data.item_id:
+            logger.exception(
+                f"Received MCP list tools call failed with a different tool call ID. Data: {data}"
+            )
+            return
+
+        completed_at = utcnow()
+
+        @db_session_handler
+        async def add_cached_tool_call_on_mcp_list_tools_call_failed(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_status(
+                session_,
+                self.tool_call_id,
+                ToolCallStatus.FAILED,
+                completed=completed_at,
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_mcp_list_tools_call_failed()
+
+    async def on_mcp_list_tools_call_done(self, data: McpListTools):
+        if not self.run_id:
+            logger.exception(
+                f"Received MCP list tools call done without a cached run. Data: {data}"
+            )
+            return
+        if not self.tool_call_id:
+            logger.exception(
+                f"Received MCP list tools call done without a current tool call. Data: {data}"
+            )
+            return
+        if self.tool_call_external_id != data.id:
+            logger.exception(
+                f"Received MCP list tools call done with a different tool call ID. Data: {data}"
+            )
+            return
+
+        mcp_server_tool = self.mcp_server_tools_by_server_label.get(data.server_label)
+        if not mcp_server_tool:
+            logger.exception(
+                f"Received MCP list tools call created for unknown MCP server label: {data.server_label}. Data: {data}"
+            )
+            return
+
+        @db_session_handler
+        async def add_mcp_list_tools_tool_on_mcp_list_tools_call_done(
+            session_: AsyncSession, data: dict
+        ):
+            await models.MCPListToolsTool.create(session_, data)
+            await session_.commit()
+
+        for tool in data.tools:
+            list_tools_tool_data = {
+                "mcp_server_tool_id": mcp_server_tool.id,
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": json.dumps(tool.input_schema),
+                "annotations": json.dumps(tool.annotations),
+                "tool_call_id": self.tool_call_id,
+                "created": utcnow(),
+            }
+            await add_mcp_list_tools_tool_on_mcp_list_tools_call_done(
+                list_tools_tool_data
+            )
+
+        @db_session_handler
+        async def add_cached_tool_call_on_mcp_list_tools_call_done(
+            session_: AsyncSession,
+        ):
+            if not self.tool_call_id:
+                return
+            await models.ToolCall.update_mcp_call(
+                session_,
+                self.tool_call_id,
+                error=json.dumps(data.error) if data.error else None,
+            )
+            await session_.commit()
+
+        await add_cached_tool_call_on_mcp_list_tools_call_done()
+
+        tools = [tool.model_dump() for tool in (data.tools or [])]
+
+        self.enqueue(
+            {
+                "type": "tool_call_delta",
+                "delta": {
+                    "type": "mcp_list_tools",
+                    "id": data.id,
+                    "index": self.prev_output_index,
+                    "output_index": self.prev_output_index,
+                    "run_id": str(self.run_id),
+                    "server_label": data.server_label,
+                    "server_name": mcp_server_tool.display_name
+                    if mcp_server_tool
+                    else None,
+                    "tools": tools,
+                    "error": data.error,
+                    "status": ToolCallStatus.COMPLETED.value
+                    if data.error is None
+                    else ToolCallStatus.FAILED.value,
+                },
+            }
+        )
+        self.tool_call_id = None
+        self.tool_call_external_id = None
 
     async def on_web_search_call_created(self, data: ResponseFunctionWebSearch):
         if not self.run_id:
@@ -2774,6 +3367,7 @@ async def run_response(
     thread_vector_store_id: str | None = None,
     attached_file_search_file_ids: list[str] | None = None,
     code_interpreter_file_ids: list[str] | None = None,
+    mcp_server_tools_by_server_label: dict[str, models.MCPServerTool] | None = None,
     show_file_search_result_quotes: bool | None = None,
     show_file_search_document_names: bool | None = None,
     show_file_search_queries: bool | None = None,
@@ -2821,10 +3415,13 @@ async def run_response(
                 run.temperature if run.temperature is not None else openai.NOT_GIVEN
             )
             async with config.db.driver.async_session() as session_:
-                input_items, input_count = await build_response_input_item_list(
+                input_items = await build_response_input_item_list(
                     session_,
                     thread_id=run.thread_id,
                     uses_reasoning=not isinstance(reasoning_settings, openai.NotGiven),
+                )
+                max_output_index = await models.Thread.get_max_output_sequence(
+                    session_, run.thread_id
                 )
 
             tools: list[ToolParam] = []
@@ -2835,6 +3432,27 @@ async def run_response(
                     )
                 )
                 include_with.append("web_search_call.action.sources")
+
+            if run.tools_available and "mcp_server" in run.tools_available:
+                if mcp_server_tools_by_server_label:
+                    for (
+                        server_label,
+                        mcp_tool,
+                    ) in mcp_server_tools_by_server_label.items():
+                        tools.append(
+                            Mcp(
+                                server_url=mcp_tool.server_url,
+                                server_label=server_label,
+                                type="mcp",
+                                headers=json.loads(mcp_tool.headers)
+                                if mcp_tool.headers
+                                else {},
+                                authorization=mcp_tool.authorization_token,
+                                require_approval="never",
+                                server_description=mcp_tool.description
+                                or ("MCP server: " + mcp_tool.display_name),
+                            )
+                        )
 
             if run.tools_available and "file_search" in run.tools_available:
                 vector_store_ids = []
@@ -2894,11 +3512,12 @@ async def run_response(
                     cli=cli,
                     run_id=run.id,
                     run_status=RunStatus(run.status),
-                    prev_output_index=input_count - 1,
+                    prev_output_index=max_output_index,
                     file_names=file_names,
                     class_id=int(class_id),
                     thread_id=run.thread_id,
                     assistant_id=run.assistant_id,
+                    mcp_server_tools_by_server_label=mcp_server_tools_by_server_label,
                     show_file_search_queries=show_file_search_queries,
                     show_file_search_result_quotes=show_file_search_result_quotes,
                     show_file_search_document_names=show_file_search_document_names,
@@ -2943,6 +3562,12 @@ async def run_response(
                                     await handler.on_web_search_call_created(event.item)
                                 case "reasoning":
                                     await handler.on_reasoning_created(event.item)
+                                case "mcp_call":
+                                    await handler.on_mcp_tool_call_created(event.item)
+                                case "mcp_list_tools":
+                                    await handler.on_mcp_list_tools_call_created(
+                                        event.item
+                                    )
                                 case _:
                                     pass
                         case "response.content_part.added":
@@ -3003,6 +3628,20 @@ async def run_response(
                             await handler.on_web_search_call_searching(event)
                         case "response.web_search_call.completed":
                             await handler.on_web_search_call_completed(event)
+                        case "response.mcp_call.in_progress":
+                            await handler.on_mcp_tool_call_in_progress(event)
+                        case "response.mcp_call_arguments.delta":
+                            await handler.on_mcp_tool_call_arguments_delta(event)
+                        case "response.mcp_call.completed":
+                            await handler.on_mcp_tool_call_completed(event)
+                        case "response.mcp_call.failed":
+                            await handler.on_mcp_tool_call_failed(event)
+                        case "response.mcp_list_tools.in_progress":
+                            await handler.on_mcp_list_tools_call_in_progress(event)
+                        case "response.mcp_list_tools.completed":
+                            await handler.on_mcp_list_tools_call_completed(event)
+                        case "response.mcp_list_tools.failed":
+                            await handler.on_mcp_list_tools_call_failed(event)
                         case "response.reasoning_summary_part.added":
                             await handler.on_reasoning_summary_part_added(event)
                         case "response.reasoning_summary_text.delta":
@@ -3023,6 +3662,12 @@ async def run_response(
                                     await handler.on_web_search_call_done(event.item)
                                 case "reasoning":
                                     await handler.on_reasoning_completed(event.item)
+                                case "mcp_call":
+                                    await handler.on_mcp_tool_call_done(event.item)
+                                case "mcp_list_tools":
+                                    await handler.on_mcp_list_tools_call_done(
+                                        event.item
+                                    )
                                 case _:
                                     pass
                         case "response.completed":

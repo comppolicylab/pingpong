@@ -1,6 +1,12 @@
 import type { PageLoad } from './$types';
-import type { Assistant, AssistantFiles, AssistantModel, AssistantDefaultPrompt } from '$lib/api';
-import { getAssistantFiles, expandResponse, getModels } from '$lib/api';
+import type {
+  Assistant,
+  AssistantFiles,
+  AssistantModel,
+  AssistantDefaultPrompt,
+  MCPServerToolInput
+} from '$lib/api';
+import { getAssistantFiles, getAssistantMCPServers, expandResponse, getModels } from '$lib/api';
 import { modelsPromptsStore } from '$lib/stores/general';
 import { get } from 'svelte/store';
 
@@ -51,6 +57,15 @@ async function loadAssistantFilesOrNull(
   return assistantFilesResponse.error ? null : assistantFilesResponse.data.files;
 }
 
+async function loadAssistantMCPServers(
+  fetchFn: typeof fetch,
+  classId: number,
+  assistantId: number
+): Promise<MCPServerToolInput[]> {
+  const response = await getAssistantMCPServers(fetchFn, classId, assistantId).then(expandResponse);
+  return response.error ? [] : response.data.mcp_servers;
+}
+
 /**
  * Load additional data needed for managing the class.
  */
@@ -62,6 +77,7 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 
   let assistant: Assistant | null = null;
   let assistantFiles: AssistantFiles | null = null;
+  let mcpServers: MCPServerToolInput[] = [];
 
   if (!isCreating) {
     const assistants = parentData.assistants ?? [];
@@ -69,7 +85,12 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
     assistant = assistants.find((a) => a.id === id) ?? null;
 
     if (assistant) {
-      assistantFiles = await loadAssistantFilesOrNull(fetch, classId, assistant.id);
+      const [files, servers] = await Promise.all([
+        loadAssistantFilesOrNull(fetch, classId, assistant.id),
+        loadAssistantMCPServers(fetch, classId, assistant.id)
+      ]);
+      assistantFiles = files;
+      mcpServers = servers;
     }
   }
 
@@ -79,6 +100,7 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
     assistant,
     selectedFileSearchFiles: assistantFiles ? assistantFiles.file_search_files : [],
     selectedCodeInterpreterFiles: assistantFiles ? assistantFiles.code_interpreter_files : [],
+    mcpServers,
     models,
     defaultPrompts,
     enforceClassicAssistants,

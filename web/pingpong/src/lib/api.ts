@@ -1471,6 +1471,7 @@ export type AssistantModel = {
   supports_verbosity: boolean;
   supports_web_search: boolean;
   supports_reasoning: boolean;
+  supports_mcp_server: boolean;
   hide_in_model_selector?: boolean;
   reasoning_effort_levels?: number[];
   default_prompt_id?: string | null;
@@ -1721,10 +1722,44 @@ export const getAssistantFiles = async (f: Fetcher, classId: number, assistantId
 };
 
 /**
+ * Get MCP servers configured for an assistant.
+ */
+export const getAssistantMCPServers = async (f: Fetcher, classId: number, assistantId: number) => {
+  const url = `/class/${classId}/assistant/${assistantId}/mcp_servers`;
+  return await GET<never, MCPServerToolsResponse>(f, url);
+};
+
+/**
  * OpenAI tool.
  */
 export type Tool = {
   type: string;
+};
+
+/**
+ * MCP Server authentication type.
+ */
+export type MCPAuthType = 'none' | 'token' | 'header';
+
+/**
+ * MCP Server input for create/update.
+ */
+export type MCPServerToolInput = {
+  server_label?: string;
+  display_name: string;
+  server_url: string;
+  auth_type: MCPAuthType;
+  authorization_token?: string;
+  headers?: Record<string, string>;
+  description?: string;
+  enabled: boolean;
+};
+
+/**
+ * Response containing list of MCP servers.
+ */
+export type MCPServerToolsResponse = {
+  mcp_servers: MCPServerToolInput[];
 };
 
 /**
@@ -1758,6 +1793,7 @@ export type CreateAssistantRequest = {
   hide_file_search_queries?: boolean;
   hide_web_search_sources?: boolean;
   hide_web_search_actions?: boolean;
+  mcp_servers?: MCPServerToolInput[];
 };
 
 export type CopyAssistantRequest = {
@@ -1796,6 +1832,7 @@ export type UpdateAssistantRequest = {
   hide_file_search_queries?: boolean;
   hide_web_search_sources?: boolean;
   hide_web_search_actions?: boolean;
+  mcp_servers?: MCPServerToolInput[];
 };
 
 /**
@@ -2641,6 +2678,39 @@ export type WebSearchCallItem = {
   status: 'in_progress' | 'completed' | 'incomplete' | 'searching' | 'failed';
 };
 
+export type MCPToolCallStatus = 'in_progress' | 'completed' | 'incomplete' | 'calling' | 'failed';
+
+export type MCPToolError = Record<string, unknown> | string;
+
+export type MCPListToolsTool = {
+  name: string;
+  description?: string | null;
+  input_schema?: Record<string, unknown> | null;
+  annotations?: Record<string, unknown> | null;
+};
+
+export type MCPServerCallItem = {
+  step_id: string;
+  type: 'mcp_server_call';
+  server_label: string;
+  server_name?: string | null;
+  tool_name?: string | null;
+  arguments?: string | null;
+  output?: string | null;
+  error?: MCPToolError | null;
+  status?: MCPToolCallStatus | null;
+};
+
+export type MCPListToolsCallItem = {
+  step_id: string;
+  type: 'mcp_list_tools_call';
+  server_label: string;
+  server_name?: string | null;
+  tools?: MCPListToolsTool[];
+  error?: MCPToolError | null;
+  status?: MCPToolCallStatus | null;
+};
+
 export type ReasoningSummaryPart = {
   id?: number;
   part_index: number;
@@ -2665,6 +2735,8 @@ export type Content =
   | CodeInterpreterCallPlaceholder
   | FileSearchCallItem
   | WebSearchCallItem
+  | MCPServerCallItem
+  | MCPListToolsCallItem
   | ReasoningCallItem;
 
 export type OpenAIMessage = {
@@ -2678,7 +2750,13 @@ export type OpenAIMessage = {
   vision_file_ids?: string[];
   metadata: Record<string, unknown> | null;
   object: 'thread.message' | 'code_interpreter_call_placeholder';
-  message_type?: 'file_search_call' | 'code_interpreter_call' | 'reasoning' | null;
+  message_type?:
+    | 'file_search_call'
+    | 'code_interpreter_call'
+    | 'reasoning'
+    | 'mcp_server_call'
+    | 'mcp_list_tools_call'
+    | null;
   role: 'user' | 'assistant';
   run_id: string | null;
   attachments: OpenAIAttachment[] | null;
@@ -2705,6 +2783,7 @@ export type ThreadWithMeta = {
   ci_messages: OpenAIMessage[];
   fs_messages: OpenAIMessage[];
   ws_messages: OpenAIMessage[];
+  mcp_messages: OpenAIMessage[];
   reasoning_messages: OpenAIMessage[];
   attachments: Record<string, ServerFile>;
   instructions: string | null;
@@ -2776,6 +2855,7 @@ export type ThreadMessages = {
   ci_messages: OpenAIMessage[];
   fs_messages: OpenAIMessage[];
   ws_messages: OpenAIMessage[];
+  mcp_messages: OpenAIMessage[];
   reasoning_messages: OpenAIMessage[];
   limit: number;
   has_more: boolean;
@@ -2799,6 +2879,7 @@ export const getThreadMessages = async (
       messages: [],
       fs_messages: [],
       ws_messages: [],
+      mcp_messages: [],
       ci_messages: [],
       reasoning_messages: [],
       has_more: false,
@@ -2813,6 +2894,7 @@ export const getThreadMessages = async (
     ci_messages: expanded.data.ci_messages,
     fs_messages: expanded.data.fs_messages,
     ws_messages: expanded.data.ws_messages,
+    mcp_messages: expanded.data.mcp_messages,
     reasoning_messages: expanded.data.reasoning_messages,
     limit: expanded.data.limit,
     has_more: hasMore,
@@ -2927,6 +3009,35 @@ export type WebSearchCall = {
   status: 'in_progress' | 'completed' | 'incomplete' | 'failed' | 'searching';
 };
 
+export type McpCall = {
+  type: 'mcp_call';
+  id: string;
+  index: number;
+  output_index?: number;
+  run_id?: string | null;
+  server_label?: string | null;
+  server_name?: string | null;
+  name?: string | null;
+  arguments?: string | null;
+  arguments_delta?: string | null;
+  output?: string | null;
+  error?: MCPToolError | null;
+  status?: MCPToolCallStatus | null;
+};
+
+export type McpListToolsCall = {
+  type: 'mcp_list_tools';
+  id: string;
+  index: number;
+  output_index?: number;
+  run_id?: string | null;
+  server_label?: string | null;
+  server_name?: string | null;
+  tools?: MCPListToolsTool[];
+  error?: MCPToolError | null;
+  status?: MCPToolCallStatus | null;
+};
+
 export type ReasoningStepSummaryPartChunk = {
   reasoning_step_id: number;
   part_index: number;
@@ -2945,7 +3056,12 @@ export type ReasoningCall = {
 };
 
 // TODO(jnu): support function calling, updates for v2
-export type ToolCallDelta = CodeInterpreterCall | FileSearchCall | WebSearchCall;
+export type ToolCallDelta =
+  | CodeInterpreterCall
+  | FileSearchCall
+  | WebSearchCall
+  | McpCall
+  | McpListToolsCall;
 
 export type ThreadStreamToolCallCreatedChunk = {
   type: 'tool_call_created';

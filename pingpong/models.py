@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import hashlib
 import json
 import secrets
@@ -2314,6 +2315,20 @@ class AnonymousLink(Base):
         return result.scalar_one_or_none()
 
 
+mcp_server_tool_assistant_association = Table(
+    "mcp_server_tool_assistant_associations",
+    Base.metadata,
+    Column("mcp_server_tool_id", Integer, ForeignKey("mcp_server_tools.id")),
+    Column("assistant_id", Integer, ForeignKey("assistants.id")),
+    Index(
+        "mcp_server_tool_assistant_idx",
+        "mcp_server_tool_id",
+        "assistant_id",
+        unique=True,
+    ),
+)
+
+
 class Assistant(Base):
     __tablename__ = "assistants"
 
@@ -2346,6 +2361,9 @@ class Assistant(Base):
     hide_file_search_queries = Column(Boolean, server_default="true")
     hide_web_search_sources = Column(Boolean, server_default="false")
     hide_web_search_actions = Column(Boolean, server_default="false")
+    mcp_server_tools = relationship(
+        "MCPServerTool", secondary=mcp_server_tool_assistant_association
+    )
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="assistants", foreign_keys=[class_id])
     threads = relationship("Thread", back_populates="assistant")
@@ -2391,6 +2409,20 @@ class Assistant(Base):
             select(Assistant)
             .where(Assistant.id == int(id_))
             .options(selectinload(Assistant.code_interpreter_files))
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_with_ci_files_mcp(
+        cls, session: AsyncSession, id_: int | None
+    ) -> "Assistant":
+        if not id_:
+            return Assistant()
+        stmt = (
+            select(Assistant)
+            .where(Assistant.id == int(id_))
+            .options(selectinload(Assistant.code_interpreter_files))
+            .options(selectinload(Assistant.mcp_server_tools))
         )
         return await session.scalar(stmt)
 
@@ -2656,6 +2688,56 @@ class Assistant(Base):
         result = await session.execute(stmt)
         for assistant in result:
             yield assistant.Assistant
+
+    @classmethod
+    async def synchronize_assistant_mcp_server_tools(
+        cls,
+        session: AsyncSession,
+        assistant_id: int,
+        mcp_tool_ids: list[int],
+        skip_delete=False,
+    ) -> None:
+        """Synchronize MCP server tools for an assistant."""
+        if not skip_delete:
+            if mcp_tool_ids:
+                delete_stmt = (
+                    delete(mcp_server_tool_assistant_association)
+                    .where(
+                        mcp_server_tool_assistant_association.c.assistant_id
+                        == assistant_id
+                    )
+                    .where(
+                        mcp_server_tool_assistant_association.c.mcp_server_tool_id.not_in(
+                            mcp_tool_ids
+                        )
+                    )
+                )
+            else:
+                delete_stmt = delete(mcp_server_tool_assistant_association).where(
+                    mcp_server_tool_assistant_association.c.assistant_id == assistant_id
+                )
+            await session.execute(delete_stmt)
+
+        if not mcp_tool_ids:
+            return
+        stmt = (
+            _get_upsert_stmt(session)(mcp_server_tool_assistant_association)
+            .values([(tool_id, assistant_id) for tool_id in mcp_tool_ids])
+            .on_conflict_do_nothing(
+                index_elements=["mcp_server_tool_id", "assistant_id"],
+            )
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def get_mcp_tool_ids_by_assistant_id(
+        cls, session: AsyncSession, assistant_id: int
+    ) -> List[int]:
+        stmt = select(mcp_server_tool_assistant_association.c.mcp_server_tool_id).where(
+            mcp_server_tool_assistant_association.c.assistant_id == assistant_id
+        )
+        result = await session.execute(stmt)
+        return [row[0] for row in result]
 
 
 class LMSClass(Base):
@@ -3688,6 +3770,123 @@ class AnonymousSession(Base):
         return result.scalars().first()
 
 
+class MCPServerTool(Base):
+    __tablename__ = "mcp_server_tools"
+
+    id = Column(Integer, primary_key=True)
+    display_name = Column(String, nullable=False)
+    server_url = Column(String, nullable=False)
+    server_label = Column(String, nullable=False, unique=True, index=True)
+    headers = Column(String, nullable=True)
+    authorization_token = Column(String, nullable=True)
+    description = Column(String, nullable=True)
+    enabled = Column(Boolean, server_default="true", nullable=False)
+    created_by_user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_by_user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    @classmethod
+    def generate_server_label(cls, prefix: str = "srv") -> str:
+        """
+        Generate an opaque, non-inferable, URL-safe server label.
+
+        Example:
+            srv_QL82uAYjbes9RsCkQKJ3mL5Y
+        """
+        token = (
+            base64.urlsafe_b64encode(
+                secrets.token_bytes(18)  # 144 bits entropy
+            )
+            .rstrip(b"=")
+            .decode("ascii")
+        )
+
+        return f"{prefix}_{token}"
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> "MCPServerTool":
+        data["server_label"] = cls.generate_server_label()
+        server_tool = MCPServerTool(**data)
+        session.add(server_tool)
+        await session.flush()
+        await session.refresh(server_tool)
+        return server_tool
+
+    @classmethod
+    async def get_by_labels(
+        cls, session: AsyncSession, labels: list[str]
+    ) -> list["MCPServerTool"]:
+        """Get MCP servers by their server_label identifiers"""
+        if not labels:
+            return []
+        result = await session.execute(select(cls).where(cls.server_label.in_(labels)))
+        return list(result.scalars().all())
+
+    @classmethod
+    async def get_by_label(
+        cls, session: AsyncSession, label: str
+    ) -> "MCPServerTool | None":
+        """Get single MCP server by server_label"""
+        result = await session.execute(select(cls).where(cls.server_label == label))
+        return result.scalar_one_or_none()
+
+    @classmethod
+    async def get_for_assistant(
+        cls, session: AsyncSession, assistant_id: int
+    ) -> list["MCPServerTool"]:
+        """Get MCP servers configured for an assistant."""
+        assoc = mcp_server_tool_assistant_association
+        stmt = (
+            select(cls)
+            .join(assoc, assoc.c.mcp_server_tool_id == cls.id)
+            .where(assoc.c.assistant_id == assistant_id)
+        )
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+
+class MCPListToolsTool(Base):
+    __tablename__ = "mcp_list_tools_tools"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    input_schema = Column(String, nullable=True)
+    annotations = Column(String, nullable=True)
+    mcp_server_tool_id = Column(
+        Integer, ForeignKey("mcp_server_tools.id", ondelete="SET NULL"), nullable=True
+    )
+
+    tool_call_id = Column(
+        Integer, ForeignKey("tool_calls.id", ondelete="CASCADE"), nullable=False
+    )
+    tool_call = relationship(
+        "ToolCall", back_populates="mcp_tools_listed", uselist=False
+    )
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> None:
+        tool = MCPListToolsTool(**data)
+        session.add(tool)
+        await session.flush()
+
+
 class Annotation(Base):
     __tablename__ = "annotations"
 
@@ -3897,9 +4096,11 @@ class ToolCall(Base):
     )
     completed = Column(DateTime(timezone=True), nullable=True)
 
+    # File Search specific fields
     queries = Column(String, nullable=True)
     results = relationship("FileSearchCallResult", back_populates="tool_call")
 
+    # Code Interpreter specific fields
     code = Column(String, nullable=True)
     container_id = Column(String, nullable=True)
     outputs = relationship(
@@ -3907,7 +4108,25 @@ class ToolCall(Base):
         back_populates="tool_call",
     )
 
+    # Web Search specific fields
     web_search_actions = relationship("WebSearchCallAction", back_populates="tool_call")
+
+    # MCP specific fields
+    mcp_server_tool_id = Column(
+        Integer, ForeignKey("mcp_server_tools.id", ondelete="SET NULL"), nullable=True
+    )
+    mcp_server_tool = relationship("MCPServerTool", uselist=False)
+    mcp_server_label = Column(String, nullable=True)
+    mcp_tool_name = Column(String, nullable=True)
+    mcp_arguments = Column(String, nullable=True)
+    mcp_output = Column(String, nullable=True)
+
+    error = Column(String, nullable=True)
+
+    mcp_tools_listed = relationship(
+        "MCPListToolsTool",
+        back_populates="tool_call",
+    )
 
     @classmethod
     async def mark_as_incomplete(cls, session: AsyncSession, id: int) -> None:
@@ -3956,6 +4175,21 @@ class ToolCall(Base):
         await session.execute(stmt)
 
     @classmethod
+    async def add_mcp_arguments_delta(
+        cls, session: AsyncSession, id: int, arguments_delta: str
+    ) -> None:
+        """Append an arguments delta to a tool call."""
+        stmt = (
+            update(ToolCall)
+            .where(ToolCall.id == id)
+            .values(
+                mcp_arguments=func.coalesce(ToolCall.mcp_arguments, "")
+                + arguments_delta
+            )
+        )
+        await session.execute(stmt)
+
+    @classmethod
     async def add_status_queries(
         cls,
         session: AsyncSession,
@@ -3968,6 +4202,31 @@ class ToolCall(Base):
             update(ToolCall)
             .where(ToolCall.id == id)
             .values(queries=queries, status=status)
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def update_mcp_call(
+        cls,
+        session: AsyncSession,
+        id: int,
+        status: schemas.ToolCallStatus | None = None,
+        mcp_tool_name: str | None = None,
+        mcp_arguments: str | None = None,
+        mcp_output: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Update the MCP tool call."""
+        stmt = (
+            update(ToolCall)
+            .where(ToolCall.id == id)
+            .values(
+                status=status if status else ToolCall.status,
+                mcp_tool_name=mcp_tool_name,
+                mcp_arguments=mcp_arguments,
+                mcp_output=mcp_output,
+                error=error,
+            )
         )
         await session.execute(stmt)
 
@@ -4342,6 +4601,20 @@ class Message(Base):
         await session.execute(stmt)
 
 
+mcp_server_tool_run_association = Table(
+    "mcp_server_tool_run_associations",
+    Base.metadata,
+    Column("mcp_server_tool_id", Integer, ForeignKey("mcp_server_tools.id")),
+    Column("run_id", Integer, ForeignKey("runs.id")),
+    Index(
+        "mcp_server_tool_run_idx",
+        "mcp_server_tool_id",
+        "run_id",
+        unique=True,
+    ),
+)
+
+
 class Run(Base):
     __tablename__ = "runs"
 
@@ -4380,6 +4653,10 @@ class Run(Base):
     temperature = Column(Float, nullable=True)
     instructions = Column(String, nullable=True)
     tools_available = Column(String, nullable=True)
+    mcp_server_tools_available = relationship(
+        "MCPServerTool",
+        secondary=mcp_server_tool_run_association,
+    )
 
     creator_id = Column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -4596,6 +4873,56 @@ class Run(Base):
         )
         await session.execute(stmt)
 
+    @classmethod
+    async def add_mcp_server_tools(
+        cls,
+        session: AsyncSession,
+        id: int,
+        mcp_server_tool_ids: list[int],
+    ) -> None:
+        """Add MCP server tools to a run."""
+        if not mcp_server_tool_ids:
+            return
+        stmt = (
+            _get_upsert_stmt(session)(mcp_server_tool_run_association)
+            .values([(tool_id, id) for tool_id in mcp_server_tool_ids])
+            .on_conflict_do_nothing(
+                index_elements=["mcp_server_tool_id", "run_id"],
+            )
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def add_mcp_server_tools_return_tools(
+        cls,
+        session: AsyncSession,
+        id: int,
+        mcp_server_tool_ids: list[int],
+    ) -> list["MCPServerTool"]:
+        """Add MCP server tools to a run and return the tools."""
+        tools_stmt = select(MCPServerTool).where(
+            MCPServerTool.id.in_(mcp_server_tool_ids)
+        )
+        result = await session.execute(tools_stmt)
+        tools = [row[0] for row in result]
+
+        await cls.add_mcp_server_tools(session, id, mcp_server_tool_ids)
+        return tools
+
+
+mcp_server_tool_thread_association = Table(
+    "mcp_server_tool_thread_associations",
+    Base.metadata,
+    Column("mcp_server_tool_id", Integer, ForeignKey("mcp_server_tools.id")),
+    Column("thread_id", Integer, ForeignKey("threads.id")),
+    Index(
+        "mcp_server_tool_thread_idx",
+        "mcp_server_tool_id",
+        "thread_id",
+        unique=True,
+    ),
+)
+
 
 class Thread(Base):
     __tablename__ = "threads"
@@ -4658,6 +4985,10 @@ class Thread(Base):
         back_populates="thread",
     )
     tools_available = Column(String)
+    mcp_server_tools_available = relationship(
+        "MCPServerTool",
+        secondary=mcp_server_tool_thread_association,
+    )
     vector_store_id = Column(
         Integer,
         ForeignKey("vector_stores.id", name="fk_threads_vector_store_id_vector_store"),
@@ -5133,6 +5464,107 @@ class Thread(Base):
         await session.execute(stmt)
 
     @classmethod
+    async def update_mcp_server_tools_available(
+        cls,
+        session: AsyncSession,
+        assistant_id: int,
+        mcp_tool_ids: list[int],
+        version: int,
+        interaction_mode: str,
+    ) -> None:
+        """Update MCP server tools available for all threads of an assistant."""
+        # Get all thread IDs that match the criteria
+        thread_ids_stmt = select(Thread.id).where(
+            and_(
+                Thread.assistant_id == assistant_id,
+                Thread.version == version,
+                Thread.interaction_mode == interaction_mode,
+            )
+        )
+        result = await session.execute(thread_ids_stmt)
+        thread_ids = [row[0] for row in result.fetchall()]
+
+        if not thread_ids:
+            return
+
+        # Delete existing associations for these threads
+        delete_stmt = delete(mcp_server_tool_thread_association).where(
+            mcp_server_tool_thread_association.c.thread_id.in_(thread_ids)
+        )
+        await session.execute(delete_stmt)
+
+        # Insert new associations
+        if mcp_tool_ids:
+            values = [
+                (tool_id, thread_id)
+                for thread_id in thread_ids
+                for tool_id in mcp_tool_ids
+            ]
+            insert_stmt = (
+                _get_upsert_stmt(session)(mcp_server_tool_thread_association)
+                .values(values)
+                .on_conflict_do_nothing(
+                    index_elements=["mcp_server_tool_id", "thread_id"],
+                )
+            )
+            await session.execute(insert_stmt)
+
+    @classmethod
+    async def synchronize_thread_mcp_server_tools(
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        mcp_tool_ids: list[int],
+    ) -> None:
+        """Synchronize MCP server tools for a thread."""
+        # Delete existing associations for this thread
+        delete_stmt = delete(mcp_server_tool_thread_association).where(
+            mcp_server_tool_thread_association.c.thread_id == thread_id
+        )
+        await session.execute(delete_stmt)
+
+        # Insert new associations
+        if mcp_tool_ids:
+            values = [(tool_id, thread_id) for tool_id in mcp_tool_ids]
+            insert_stmt = (
+                _get_upsert_stmt(session)(mcp_server_tool_thread_association)
+                .values(values)
+                .on_conflict_do_nothing(
+                    index_elements=["mcp_server_tool_id", "thread_id"],
+                )
+            )
+            await session.execute(insert_stmt)
+
+    @classmethod
+    async def add_mcp_server_tools(
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        mcp_tool_ids: list[int],
+    ) -> None:
+        """Add MCP server tools to a thread."""
+        if not mcp_tool_ids:
+            return
+        stmt = (
+            _get_upsert_stmt(session)(mcp_server_tool_thread_association)
+            .values([(tool_id, thread_id) for tool_id in mcp_tool_ids])
+            .on_conflict_do_nothing(
+                index_elements=["mcp_server_tool_id", "thread_id"],
+            )
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def get_mcp_tool_ids_by_thread_id(
+        cls, session: AsyncSession, thread_id: int
+    ) -> list[int]:
+        stmt = select(mcp_server_tool_thread_association.c.mcp_server_tool_id).where(
+            mcp_server_tool_thread_association.c.thread_id == thread_id
+        )
+        result = await session.execute(stmt)
+        return [row[0] for row in result.fetchall()]
+
+    @classmethod
     async def add_image_files(
         cls, session: AsyncSession, thread_id: int, file_ids: list[str]
     ) -> None:
@@ -5394,6 +5826,8 @@ class Thread(Base):
                 selectinload(ToolCall.web_search_actions).selectinload(
                     WebSearchCallAction.sources
                 ),
+                selectinload(ToolCall.mcp_server_tool),
+                selectinload(ToolCall.mcp_tools_listed),
             )
         )
         result = await session.execute(stmt)
@@ -5469,6 +5903,8 @@ class Thread(Base):
                 selectinload(ToolCall.web_search_actions).selectinload(
                     WebSearchCallAction.sources
                 ),
+                selectinload(ToolCall.mcp_server_tool),
+                selectinload(ToolCall.mcp_tools_listed),
             )
         )
         reasoning_steps = await session.execute(
