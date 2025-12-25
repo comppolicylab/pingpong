@@ -2317,8 +2317,9 @@
               <Helper
                 >Control whether members can see MCP Server call details. In some cases, this
                 material may contain sensitive information or insights about the assistant's
-                internal logic or prompt. When checked, members will not see the MCP Server call
-                details. Moderators can always review MCP Server call details. <b
+                internal logic or prompt. When checked, members will see when the assistant makes
+                calls to an MCP Server, including which tools are called, but will not see detailed
+                payloads or responses. Moderators can always review MCP Server call details. <b
                   >This setting will only apply to Chat Mode models with the MCP Server tool
                   enabled.</b
                 ></Helper
