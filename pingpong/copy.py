@@ -363,6 +363,7 @@ async def copy_assistant(
                         "authorization_token": mcp_tool.authorization_token,
                         "description": mcp_tool.description,
                         "enabled": mcp_tool.enabled,
+                        "created_by_user_id": mcp_tool.created_by_user_id,
                     },
                 )
                 for mcp_tool in assistant.mcp_server_tools

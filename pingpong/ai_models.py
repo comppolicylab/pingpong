@@ -134,8 +134,8 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_minimal_reasoning_effort": False,
         "supports_none_reasoning_effort": False,
         "supports_verbosity": False,
-        "supports_web_search": False,
-        "supports_mcp_server": False,
+        "supports_web_search": True,
+        "supports_mcp_server": True,
         "description": "Smaller, faster GPT 4.1 model.",
     },
     "gpt-4.1-nano": {
