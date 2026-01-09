@@ -18,12 +18,15 @@ jobs:
     steps:
       - name: Skip exact @claude review command
         id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          if [ "${{ github.event_name }}" != "issue_comment" ]; then
+          if [ "$EVENT_NAME" != "issue_comment" ]; then
             echo "run_claude=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          body="$(echo "${{ github.event.comment.body }}" | xargs)"
+          body="$(echo "$COMMENT_BODY" | xargs)"
           if [ "$body" = "@claude review" ]; then
             echo "run_claude=false" >> "$GITHUB_OUTPUT"
           else
