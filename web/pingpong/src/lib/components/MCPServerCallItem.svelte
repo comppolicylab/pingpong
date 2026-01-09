@@ -1,6 +1,7 @@
 <script lang="ts">
   import { slide } from 'svelte/transition';
-  import { ChevronDownOutline, ServerOutline } from 'flowbite-svelte-icons';
+  import { Tooltip } from 'flowbite-svelte';
+  import { ChevronDownOutline, QuestionCircleOutline, ServerOutline } from 'flowbite-svelte-icons';
   import type { MCPServerCallItem, MCPToolError } from '$lib/api';
 
   export let content: MCPServerCallItem;
@@ -59,7 +60,7 @@
     content.status === 'in_progress' || content.status === 'calling'
       ? 'text-sm font-medium shimmer'
       : content.status === 'failed'
-        ? 'text-sm font-medium text-red-600'
+        ? 'text-sm font-medium text-yellow-600'
         : content.status === 'incomplete'
           ? 'text-sm font-medium text-yellow-600'
           : 'text-sm font-medium text-gray-600';
@@ -76,6 +77,19 @@
     {#if hasResult}
       <button type="button" class="flex flex-row items-center gap-1" on:click={toggle}>
         <span class={statusClasses}>{statusLabel}</span>
+        {#if content.status === 'failed'}
+          <span class="inline-flex">
+            <QuestionCircleOutline class="h-4 w-4 text-gray-500" />
+          </span>
+          <Tooltip
+            type="custom"
+            arrow={false}
+            class="z-10 max-w-xs bg-gray-900 px-3 py-2 text-sm font-light text-white"
+          >
+            This error may be normal. If the assistant made another call that succeeded, there's
+            nothing to worry about.
+          </Tooltip>
+        {/if}
         {#if open}
           <ChevronDownOutline class="transform rotate-180 text-gray-600" />
         {:else}
@@ -83,7 +97,22 @@
         {/if}
       </button>
     {:else}
-      <span class={statusClasses}>{statusLabel}</span>
+      <span class="flex flex-row items-center gap-1">
+        <span class={statusClasses}>{statusLabel}</span>
+        {#if content.status === 'failed'}
+          <span class="inline-flex">
+            <QuestionCircleOutline class="h-4 w-4 text-gray-600" />
+          </span>
+          <Tooltip
+            type="custom"
+            arrow={false}
+            class="z-10 max-w-xs bg-gray-900 px-3 py-2 text-sm font-light text-white text-center"
+          >
+            This error may be normal. If the assistant made another call that succeeded, there's
+            nothing to worry about.
+          </Tooltip>
+        {/if}
+      </span>
     {/if}
   </div>
 

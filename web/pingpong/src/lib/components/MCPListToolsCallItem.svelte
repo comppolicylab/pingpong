@@ -64,7 +64,7 @@
     content.status === 'in_progress' || content.status === 'calling'
       ? 'text-sm font-medium shimmer'
       : content.status === 'failed'
-        ? 'text-sm font-medium text-red-600'
+        ? 'text-sm font-medium text-yellow-600'
         : content.status === 'incomplete'
           ? 'text-sm font-medium text-yellow-600'
           : 'text-sm font-medium text-gray-600';
