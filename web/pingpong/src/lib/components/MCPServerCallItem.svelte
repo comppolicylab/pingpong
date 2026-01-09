@@ -41,7 +41,7 @@
   };
 
   $: serverLabel = content.server_name || content.server_label || 'MCP server';
-  $: toolLabel = content.tool_name || 'MCP tool';
+  $: toolLabel = content.tool_name || 'MCP call';
   $: requestPayload = formatPayload(content.arguments);
   $: responsePayload = formatPayload(content.output);
   $: errorPayload = formatError(content.error);
@@ -51,9 +51,9 @@
     content.status === 'completed'
       ? `Ran ${toolLabel}${open ? '...' : ''}`
       : content.status === 'failed'
-        ? 'MCP call failed'
+        ? `${toolLabel} failed${open ? '...' : ''}`
         : content.status === 'incomplete'
-          ? 'MCP call was canceled'
+          ? `${toolLabel} was canceled`
           : `Calling ${toolLabel}...`;
 
   $: statusClasses =
