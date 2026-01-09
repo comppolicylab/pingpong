@@ -54,7 +54,7 @@
               >{/if}</span
           >
         {:else if content.status === 'failed'}
-          <span class="text-sm font-medium text-red-600">Web search failed</span>
+          <span class="text-sm font-medium text-yellow-600">Web search failed</span>
         {:else if content.status === 'incomplete'}
           <span class="text-sm font-medium text-yellow-600">Web search was canceled</span>
         {:else}
@@ -99,7 +99,7 @@
                 : ' the web'}</span
             >
           {:else if content.status === 'failed'}
-            <span class="text-sm font-medium text-red-600">Web search failed</span>
+            <span class="text-sm font-medium text-yellow-600">Web search failed</span>
           {:else if content.status === 'incomplete'}
             <span class="text-sm font-medium text-yellow-600">Web search was canceled</span>
           {:else}
@@ -117,7 +117,7 @@
                 for {content.action.pattern}{/if}</span
             >
           {:else if content.status === 'failed'}
-            <span class="text-sm font-medium text-red-600">Web search failed</span>
+            <span class="text-sm font-medium text-yellow-600">Web search failed</span>
           {:else if content.status === 'incomplete'}
             <span class="text-sm font-medium text-yellow-600">Web search was canceled</span>
           {:else}
@@ -134,7 +134,7 @@
                 />{:else}Looked through web sources{/if}</span
             >
           {:else if content.status === 'failed'}
-            <span class="text-sm font-medium text-red-600">Web search failed</span>
+            <span class="text-sm font-medium text-yellow-600">Web search failed</span>
           {:else if content.status === 'incomplete'}
             <span class="text-sm font-medium text-yellow-600">Web search was canceled</span>
           {:else}
@@ -150,7 +150,7 @@
         {#if content.status === 'completed'}
           <span class="text-sm font-medium text-gray-600">Searched the web</span>
         {:else if content.status === 'failed'}
-          <span class="text-sm font-medium text-red-600">Web search failed</span>
+          <span class="text-sm font-medium text-yellow-600">Web search failed</span>
         {:else if content.status === 'incomplete'}
           <span class="text-sm font-medium text-yellow-600">Web search was canceled</span>
         {:else}
