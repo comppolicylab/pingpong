@@ -22,8 +22,10 @@ jobs:
     steps:
       - name: Check for exact @claude review command
         id: check
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          body="$(echo "${{ github.event.comment.body }}" | xargs)"
+          body="$(echo "$COMMENT_BODY" | xargs)"
           if [ "$body" = "@claude review" ]; then
             echo "run_review=true" >> "$GITHUB_OUTPUT"
           else
