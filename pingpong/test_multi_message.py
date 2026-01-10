@@ -169,6 +169,39 @@ async def _create_server_thread_alt(db, *, class_id: int, thread_id: int, run_id
     )
 
 
+async def _create_thread_with_visible_prompt(
+    db,
+    *,
+    class_id: int,
+    thread_id: int,
+    assistant_id: int,
+    instructions: str,
+    hide_prompt: bool,
+) -> None:
+    async with db.async_session() as session:
+        class_ = models.Class(id=class_id, name=f"Class {class_id}", api_key="sk-test")
+        assistant = models.Assistant(
+            id=assistant_id,
+            name=f"Assistant {assistant_id}",
+            class_id=class_id,
+            assistant_id=f"asst-{assistant_id}",
+            model="gpt-4o-mini",
+            hide_prompt=hide_prompt,
+        )
+        thread = models.Thread(
+            id=thread_id,
+            thread_id=f"thread-{thread_id}",
+            class_id=class_id,
+            assistant_id=assistant_id,
+            version=3,
+            tools_available="",
+            private=False,
+            instructions=instructions,
+        )
+        session.add_all([class_, assistant, thread])
+        await session.commit()
+
+
 async def _create_thread_with_tool_call_between_messages(
     db,
     *,
@@ -454,6 +487,58 @@ async def test_get_thread_skips_duplicate_assistant_messages(api, db, valid_user
     assert len(messages) == 1
     assert messages[0]["output_index"] == 2
     assert messages[0]["run_id"] == str(run_id)
+
+
+@with_user(222)
+@with_authz(grants=[("user:222", "can_view", "thread:7101")])
+async def test_get_thread_shows_prompt_when_not_hidden(api, db, valid_user_token):
+    class_id = 7001
+    thread_id = 7101
+    assistant_id = 7201
+    instructions = "Visible instructions"
+
+    await _create_thread_with_visible_prompt(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        assistant_id=assistant_id,
+        instructions=instructions,
+        hide_prompt=False,
+    )
+
+    response = api.get(
+        f"/api/v1/class/{class_id}/thread/{thread_id}",
+        cookies={"session": valid_user_token},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["instructions"] == instructions
+
+
+@with_user(223)
+@with_authz(grants=[("user:223", "can_view", "thread:7201")])
+async def test_get_thread_hides_prompt_when_hidden(api, db, valid_user_token):
+    class_id = 7101
+    thread_id = 7201
+    assistant_id = 7301
+    instructions = "Hidden instructions"
+
+    await _create_thread_with_visible_prompt(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        assistant_id=assistant_id,
+        instructions=instructions,
+        hide_prompt=True,
+    )
+
+    response = api.get(
+        f"/api/v1/class/{class_id}/thread/{thread_id}",
+        cookies={"session": valid_user_token},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["instructions"] is None
 
 
 @with_user(333)
