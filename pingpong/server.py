@@ -2929,11 +2929,14 @@ async def get_thread(
 
         can_view_prompt = False
         if thread.instructions and assistant:
-            can_view_prompt = await request.state.authz.test(
-                f"user:{request.state.session.user.id}",
-                "can_edit",
-                f"assistant:{assistant.id}",
-            )
+            if not assistant.hide_prompt:
+                can_view_prompt = True
+            else:
+                can_view_prompt = await request.state.authz.test(
+                    f"user:{request.state.session.user.id}",
+                    "can_edit",
+                    f"assistant:{assistant.id}",
+                )
 
         return {
             "thread": thread,
@@ -3510,11 +3513,14 @@ async def get_thread(
 
         can_view_prompt = False
         if thread.instructions and assistant:
-            can_view_prompt = await request.state.authz.test(
-                f"user:{request.state.session.user.id}",
-                "can_edit",
-                f"assistant:{assistant.id}",
-            )
+            if not assistant.hide_prompt:
+                can_view_prompt = True
+            else:
+                can_view_prompt = await request.state.authz.test(
+                    f"user:{request.state.session.user.id}",
+                    "can_edit",
+                    f"assistant:{assistant.id}",
+                )
 
         if latest_run:
             last_run_db = schemas.OpenAIRun(
