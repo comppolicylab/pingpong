@@ -9,6 +9,7 @@ on:
 
 jobs:
   detect-claude-command:
+    name: Claude Review Check
     if: |
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request &&
@@ -32,11 +33,12 @@ jobs:
             echo "run_review=false" >> "$GITHUB_OUTPUT"
           fi
   claude-review:
+    name: Run Claude Code Review
     needs: [detect-claude-command]
     if: |
       always() &&
       (
-        github.event_name == 'pull_request' ||
+        (github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot') ||
         needs.detect-claude-command.outputs.run_review == 'true'
       )
     runs-on:

@@ -12,6 +12,7 @@ on:
 
 jobs:
   detect-non-claude-review:
+    name: Skip Exact @claude Review Command
     runs-on: ubuntu-latest
     outputs:
       run_claude: ${{ steps.check.outputs.run_claude }}
@@ -34,6 +35,7 @@ jobs:
           fi
 
   claude:
+    name: Run Claude Code (Non-Review)
     needs: [detect-non-claude-review]
     if: |
       always() &&
