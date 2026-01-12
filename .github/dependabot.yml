@@ -23,11 +23,6 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "deps(gha)/"
-    cooldown:
-      default-days: 7
-      semver-major-days: 30
-      semver-minor-days: 14
-      semver-patch-days: 7
   - package-ecosystem: "npm"
     directory: "web/pingpong/"
     schedule:
