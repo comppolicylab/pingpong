@@ -6772,7 +6772,9 @@ async def create_assistant(
     creator_id = request.state.session.user.id
 
     class_models_response = schemas.AssistantModels.model_validate(
-        await list_class_models(request.state.db, request, openai_client)
+        await list_class_models(
+            class_id=class_id, request=request, openai_client=openai_client
+        )
     )
     class_models = class_models_response.models
 
@@ -7620,7 +7622,9 @@ async def update_assistant(
 
         if _model != asst.model:
             class_models_response = schemas.AssistantModels.model_validate(
-                await list_class_models(request.state.db, request, openai_client)
+                await list_class_models(
+                    class_id=class_id, request=request, openai_client=openai_client
+                )
             )
             class_models = class_models_response.models
 
@@ -7678,7 +7682,9 @@ async def update_assistant(
         )
 
         class_models_response = schemas.AssistantModels.model_validate(
-            await list_class_models(request.state.db, request, openai_client)
+            await list_class_models(
+                class_id=class_id, request=request, openai_client=openai_client
+            )
         )
         class_models = class_models_response.models
 
