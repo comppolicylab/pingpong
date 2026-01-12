@@ -9,6 +9,7 @@ from fastapi import UploadFile
 import openai
 import orjson
 from pingpong.ai_models import VERBOSITY_MAP, get_reasoning_effort_map
+from pingpong.animal_hash import name as user_display_name
 from pingpong.auth import encode_auth_token
 from pingpong.authz.base import AuthzClient
 from pingpong.db import db_session_handler
@@ -4154,6 +4155,28 @@ def generate_user_hash(class_: models.Class, user: models.User) -> str:
     return hash_object.hexdigest().rstrip("=")[0:10]
 
 
+def export_user_identifier(thread: models.Thread, class_: models.Class) -> str:
+    """
+    Generate an identifier for a user in a thread within a class.
+
+    :param thread: The thread object.
+    :type thread: models.Thread
+    :param class\_: The class object.
+    :type class\_: models.Class
+    :return: A unique identifier for the user in the thread.
+    :rtype: str
+    """
+
+    if thread.display_user_info and not class_.private:
+        user_names = [user_display_name(user) for user in thread.users]
+        return ", ".join(user_names)
+
+    user_hashes = [generate_user_hash(class_, user) for user in thread.users] or [
+        "Unknown user"
+    ]
+    return ", ".join(user_hashes)
+
+
 async def export_class_threads_anonymized(
     cli: openai.AsyncClient,
     class_id: str,
@@ -4250,10 +4273,11 @@ async def export_threads_multiple_classes(
                 assistant_id = assistant.id if assistant else "Deleted Assistant"
                 assistant_name = assistant.name if assistant else "Deleted Assistant"
 
-                user_hashes = [
-                    generate_user_hash(class_, user) for user in thread.users
-                ] or ["Unknown user"]
-                user_hashes_str = ", ".join(user_hashes)
+                user_hashes_str = ""
+                if thread.conversation_id:
+                    user_hashes_str = thread.conversation_id
+                else:
+                    user_hashes_str = export_user_identifier(thread, class_)
 
                 user_emails_str = "REDACTED"
                 if include_user_emails:
@@ -4452,10 +4476,7 @@ async def export_class_threads(
             if thread.conversation_id:
                 user_hashes_str = thread.conversation_id
             else:
-                user_hashes = [
-                    generate_user_hash(class_, user) for user in thread.users
-                ] or ["Unknown user"]
-                user_hashes_str = ", ".join(user_hashes)
+                user_hashes_str = export_user_identifier(thread, class_)
 
             user_emails_str = "REDACTED"
             if include_user_emails:
