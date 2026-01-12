@@ -30,8 +30,8 @@
       math, economics, statistics and/or computer science, to participate in a randomized
       large-scale study. Initial access to PingPong will be provided to half of the participating
       instructors, with access provided to all instructors in the following semester. An
-      <b>honorarium of $1,000</b> will be available to all eligible participating instructors, along
-      with the opportunity to earn bonuses for referring other eligible instructors.</P
+      <b>honorarium of $1,000</b> will be available to all eligible participating instructors, along with
+      the opportunity to earn bonuses for referring other eligible instructors.</P
     >
     <P class="mt-4"
       >We are now considering applications for Spring 2026 courses. <b
@@ -234,8 +234,8 @@
       <h4 class="text-lg font-semibold">
         Will instructors and students receive free access to PingPong after the study?
       </h4>
-      Yes, after the study concludes, all instructors and students—both those in the treatment group
-      and the control group—will receive free access for the following semester. (During the study, instructors
+      Yes, after the study concludes, all instructors and students—both those in the treatment group and
+      the control group—will receive free access for the following semester. (During the study, instructors
       and students in the treatment group will have free access to PingPong.)
     </li>
     <li class="my-2">

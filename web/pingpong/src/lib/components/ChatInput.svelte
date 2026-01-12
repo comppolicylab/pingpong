@@ -20,7 +20,6 @@
   import { writable } from 'svelte/store';
   import type { Writable } from 'svelte/store';
   import { Button, Heading, Li, List, Modal, P, Popover } from 'flowbite-svelte';
-  import { page } from '$app/stores';
   import { browser } from '$app/environment';
   import type {
     MimeTypeLookupFn,
@@ -45,6 +44,7 @@
   } from 'flowbite-svelte-icons';
   import Sanitize from '$lib/components/Sanitize.svelte';
   import DropdownBadge from './DropdownBadge.svelte';
+  import type { Action } from 'svelte/action';
 
   const dispatcher = createEventDispatcher();
 
@@ -291,7 +291,7 @@
   // Focus textarea when component is mounted. Since we can only use `use` on
   // native DOM elements, we need to wrap the textarea in a div and then
   // access its child to imperatively focus it.
-  const init = (node: HTMLDivElement, newThreadId: string) => {
+  const init: Action<HTMLElement> = () => {
     focusMessage();
     return {
       update: () => {
@@ -440,7 +440,7 @@
   };
 </script>
 
-<div use:init={$page.params.threadId} class="w-full relative">
+<div use:init class="w-full relative">
   <input type="hidden" name="vision_file_ids" bind:value={visionFileIds} />
   <input type="hidden" name="file_search_file_ids" bind:value={fileSearchFileIds} />
   <input type="hidden" name="code_interpreter_file_ids" bind:value={codeInterpreterFileIds} />
@@ -622,8 +622,7 @@
             <Popover defaultClass="py-2 px-3 w-52 text-sm" arrow={false}
               ><div class="flex flex-col h-fit align-center">
                 <span class="pb-2 text-sm"
-                  >You can't upload any more files {tooManyVisionFiles ? 'or photos' : ''} with this
-                  message{!tooManyVisionFiles
+                  >You can't upload any more files {tooManyVisionFiles ? 'or photos' : ''} with this message{!tooManyVisionFiles
                     ? '. You can still add more photos to this message.'
                     : '.'}</span
                 >{#if !tooManyVisionFiles}<span class="text-sm"

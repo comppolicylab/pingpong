@@ -71,8 +71,8 @@
   export let data;
 
   let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  $: classId = parseInt($page.params.classId);
-  $: threadId = parseInt($page.params.threadId);
+  $: classId = parseInt($page.params.classId ?? '');
+  $: threadId = parseInt($page.params.threadId ?? '');
   $: threadMgr = new ThreadManager(
     fetch,
     classId,
@@ -995,7 +995,8 @@
       chunks.push(chunk as Uint8Array);
     }
 
-    const blob = new Blob(chunks, { type: 'audio/webm' });
+    // eslint-disable-next-line no-undef
+    const blob = new Blob(chunks as BlobPart[], { type: 'audio/webm' });
     audioUrl = URL.createObjectURL(blob);
     showPlayer = true;
   };

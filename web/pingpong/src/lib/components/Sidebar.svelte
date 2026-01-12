@@ -78,7 +78,7 @@
     {}
   );
   $: threads = ($page.data.threads || []) as api.Thread[];
-  $: currentClassId = parseInt($page.params.classId, 10);
+  $: currentClassId = parseInt($page.params.classId ?? '', 10);
   $: currentAssistantIdQuery = parseInt($page.url.searchParams.get('assistant') || '0', 10);
   $: currentAssistantId = $page.data.threadData?.thread?.assistant_id || currentAssistantIdQuery;
   $: assistants = ($page.data.assistants || []) as api.Assistant[];
