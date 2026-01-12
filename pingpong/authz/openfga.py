@@ -5,7 +5,8 @@ from typing import List, Tuple
 from openfga_sdk import Configuration, Node, TupleKey
 from openfga_sdk.client import OpenFgaClient
 from openfga_sdk.client.models import (
-    ClientCheckRequest,
+    ClientBatchCheckItem,
+    ClientBatchCheckRequest,
     ClientExpandRequest,
     ClientListObjectsRequest,
     ClientTuple,
@@ -219,15 +220,15 @@ class OpenFgaAuthzClient(AuthzClient):
 
     async def check(self, checks: List[Relation]) -> List[bool]:
         query = [
-            ClientCheckRequest(
+            ClientBatchCheckItem(
                 user=entity,
                 relation=relation,
                 object=target,
             )
             for entity, relation, target in checks
         ]
-        response = await self._cli.batch_check(query)
-        return [c.allowed for c in response]
+        response = await self._cli.batch_check(ClientBatchCheckRequest(checks=query))
+        return [c.allowed for c in response.result]
 
     async def write(
         self,

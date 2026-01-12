@@ -54,6 +54,9 @@ class _MockFgaAuthzServer:
             f"/stores/{self._test_store_id}/authorization-models/{self._test_model_id}"
         )(self._api_test_store_get_model)
         self.app.post(f"/stores/{self._test_store_id}/check")(self._api_check)
+        self.app.post(f"/stores/{self._test_store_id}/batch-check")(
+            self._api_batch_check
+        )
         self.app.post(f"/stores/{self._test_store_id}/list-objects")(
             self._api_list_objects
         )
@@ -102,6 +105,43 @@ class _MockFgaAuthzServer:
         return {
             "allowed": self._has_grant((user, relation, obj)),
         }
+
+    async def _api_batch_check(self, request: Request):
+        body = await request.json()
+        checks = body.get("checks")
+        if not checks:
+            raise ValueError("Missing checks")
+
+        result = {}
+        for check in checks:
+            tup = check.get("tuple_key")
+            if not tup:
+                raise ValueError("Missing tuple_key")
+
+            user = tup.get("user")
+            relation = tup.get("relation")
+            obj = tup.get("object")
+            correlation_id = check.get("correlation_id")
+            if not correlation_id:
+                raise ValueError("Missing correlation_id")
+
+            allowed = self._has_grant((user, relation, obj))
+            if not allowed:
+                contextual = (check.get("contextual_tuples") or {}).get(
+                    "tuple_keys", []
+                )
+                for ctx in contextual:
+                    if (
+                        ctx.get("user") == user
+                        and ctx.get("relation") == relation
+                        and ctx.get("object") == obj
+                    ):
+                        allowed = True
+                        break
+
+            result[correlation_id] = {"allowed": allowed}
+
+        return {"result": result}
 
     async def _api_list_objects(self, request: Request):
         body = await request.json()
