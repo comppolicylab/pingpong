@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import time
+from contextlib import asynccontextmanager
 from collections import defaultdict
 from datetime import datetime, timedelta
 from math import ceil
@@ -9234,6 +9235,7 @@ async def post_support(
         raise HTTPException(status_code=500, detail="Failed to post support request.")
 
 
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     """Run services in the background."""
     if not await config.db.driver.exists():

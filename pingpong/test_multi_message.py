@@ -479,7 +479,7 @@ async def test_get_thread_skips_duplicate_assistant_messages(api, db, valid_user
 
     response = api.get(
         f"/api/v1/class/{class_id}/thread/{thread_id}",
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
 
     assert response.status_code == 200
@@ -508,7 +508,7 @@ async def test_get_thread_shows_prompt_when_not_hidden(api, db, valid_user_token
 
     response = api.get(
         f"/api/v1/class/{class_id}/thread/{thread_id}",
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
 
     assert response.status_code == 200
@@ -534,7 +534,7 @@ async def test_get_thread_hides_prompt_when_hidden(api, db, valid_user_token):
 
     response = api.get(
         f"/api/v1/class/{class_id}/thread/{thread_id}",
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
 
     assert response.status_code == 200
@@ -558,7 +558,7 @@ async def test_list_thread_messages_deduplicates_extra_assistant_messages(
 
     response = api.get(
         f"/api/v1/class/{class_id}/thread/{thread_id}/messages",
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
 
     assert response.status_code == 200
@@ -588,7 +588,7 @@ async def test_get_thread_keeps_assistant_message_after_tool_call(
 
     response = api.get(
         f"/api/v1/class/{class_id}/thread/{thread_id}",
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
 
     assert response.status_code == 200
@@ -618,7 +618,7 @@ async def test_list_thread_messages_keeps_assistant_message_after_tool_call(
 
     response = api.get(
         f"/api/v1/class/{class_id}/thread/{thread_id}/messages",
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
 
     assert response.status_code == 200
@@ -648,7 +648,7 @@ async def test_get_thread_includes_reasoning_messages(api, db, valid_user_token)
 
     response = api.get(
         f"/api/v1/class/{class_id}/thread/{thread_id}",
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
 
     assert response.status_code == 200
@@ -701,7 +701,7 @@ async def test_list_thread_messages_includes_reasoning_messages(
 
     response = api.get(
         f"/api/v1/class/{class_id}/thread/{thread_id}/messages",
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
 
     assert response.status_code == 200

@@ -38,7 +38,7 @@ async def test_copy_class_requires_permission(api, db, institution, valid_user_t
             "copy_assistants": "moderators",
             "copy_users": "moderators",
         },
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 403
     assert response.json() == {"detail": "Missing required role"}
@@ -79,7 +79,7 @@ async def test_copy_class_allows_root_admin(api, db, institution, valid_user_tok
             "copy_assistants": "moderators",
             "copy_users": "moderators",
         },
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
@@ -122,7 +122,7 @@ async def test_copy_class_allows_institution_admin(
             "copy_assistants": "moderators",
             "copy_users": "moderators",
         },
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
@@ -160,7 +160,7 @@ async def test_copy_class_rejects_other_institution_admin(
             "copy_assistants": "moderators",
             "copy_users": "moderators",
         },
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 403
     assert response.json() == {"detail": "Missing required role"}
@@ -206,7 +206,7 @@ async def test_copy_class_allows_copy_to_other_institution(
             "copy_users": "moderators",
             "institution_id": other_institution.id,
         },
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
@@ -247,7 +247,7 @@ async def test_copy_class_rejects_unauthorized_target_institution(
             "copy_users": "moderators",
             "institution_id": other_institution.id,
         },
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 403
     assert response.json() == {
@@ -282,7 +282,7 @@ async def test_transfer_class(api, db, institution, valid_user_token):
     response = api.post(
         "/api/v1/class/1/transfer",
         json={"institution_id": 22},
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
     assert response.json()["institution_id"] == 22
@@ -320,7 +320,7 @@ async def test_transfer_class_requires_permission_on_current_institution(
     response = api.post(
         "/api/v1/class/1/transfer",
         json={"institution_id": 22},
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 403
     assert response.json() == {
@@ -356,7 +356,7 @@ async def test_transfer_class_requires_permission_on_target_institution(
     response = api.post(
         "/api/v1/class/1/transfer",
         json={"institution_id": 22},
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 403
     assert response.json() == {
@@ -380,8 +380,8 @@ async def test_me_without_token(api):
 async def test_me_with_expired_token(api, now):
     response = api.get(
         "/api/v1/me",
-        cookies={
-            "session": encode_session_token(123, nowfn=offset(now, seconds=-100_000)),
+        headers={
+            "Authorization": f"Bearer {encode_session_token(123, nowfn=offset(now, seconds=-100_000))}"
         },
     )
     assert response.status_code == 200
@@ -398,10 +398,10 @@ async def test_me_with_expired_token(api, now):
 async def test_me_with_invalid_token(api):
     response = api.get(
         "/api/v1/me",
-        cookies={
+        headers={
             # Token with invalid signature
-            "session": (
-                "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+            "Authorization": (
+                "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
                 "eyJzdWIiOiIxMjMiLCJleHAiOjE3MDk0NDg1MzQsImlhdCI6MTcwOTQ0ODUzM30."
                 "pRnnClaC1a6yIBFKMdA32pqoaJOcpHyY4lq_NU28gQ"
             ),
@@ -421,8 +421,8 @@ async def test_me_with_invalid_token(api):
 async def test_me_with_valid_token_but_missing_user(api, now):
     response = api.get(
         "/api/v1/me",
-        cookies={
-            "session": encode_session_token(123, nowfn=offset(now, seconds=-5)),
+        headers={
+            "Authorization": f"Bearer {encode_session_token(123, nowfn=offset(now, seconds=-5))}",
         },
     )
     assert response.status_code == 200
@@ -440,9 +440,7 @@ async def test_me_with_valid_token_but_missing_user(api, now):
 async def test_me_with_valid_user(api, user, now, valid_user_token):
     response = api.get(
         "/api/v1/me",
-        cookies={
-            "session": valid_user_token,
-        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
     response_json = response.json()
@@ -501,9 +499,7 @@ async def test_me_with_valid_user(api, user, now, valid_user_token):
 async def test_config_no_permissions(api, valid_user_token):
     response = api.get(
         "/api/v1/config",
-        cookies={
-            "session": valid_user_token,
-        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 403
     assert response.json() == {"detail": "Missing required role"}
@@ -518,9 +514,7 @@ async def test_config_no_permissions(api, valid_user_token):
 async def test_config_correct_permissions(api, valid_user_token):
     response = api.get(
         "/api/v1/config",
-        cookies={
-            "session": valid_user_token,
-        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
 
@@ -530,9 +524,7 @@ async def test_config_correct_permissions(api, valid_user_token):
 async def test_default_api_keys_requires_permissions(api, valid_user_token):
     response = api.get(
         "/api/v1/api_keys/default",
-        cookies={
-            "session": valid_user_token,
-        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 403
     assert response.json() == {"detail": "Missing required role"}
@@ -543,9 +535,7 @@ async def test_default_api_keys_requires_permissions(api, valid_user_token):
 async def test_default_api_keys_allows_institution_admin(api, valid_user_token):
     response = api.get(
         "/api/v1/api_keys/default",
-        cookies={
-            "session": valid_user_token,
-        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
     assert response.json() == {"default_keys": []}
@@ -556,9 +546,7 @@ async def test_default_api_keys_allows_institution_admin(api, valid_user_token):
 async def test_default_api_keys_allows_root_admin(api, valid_user_token):
     response = api.get(
         "/api/v1/api_keys/default",
-        cookies={
-            "session": valid_user_token,
-        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
     assert response.json() == {"default_keys": []}
@@ -583,7 +571,7 @@ async def test_set_institution_default_api_key_success(
     response = api.patch(
         f"/api/v1/admin/institutions/{institution.id}/default_api_key",
         json={"default_api_key_id": api_key.id},
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
     data = response.json()
@@ -610,7 +598,7 @@ async def test_clear_institution_default_api_key_success(
     response = api.patch(
         f"/api/v1/admin/institutions/{institution.id}/default_api_key",
         json={"default_api_key_id": api_key.id},
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
     assert response.json()["default_api_key_id"] == api_key.id
@@ -618,7 +606,7 @@ async def test_clear_institution_default_api_key_success(
     response = api.patch(
         f"/api/v1/admin/institutions/{institution.id}/default_api_key",
         json={"default_api_key_id": None},
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
     assert response.json()["default_api_key_id"] is None
@@ -632,7 +620,7 @@ async def test_set_institution_default_api_key_institution_not_found(
     response = api.patch(
         "/api/v1/admin/institutions/999999/default_api_key",
         json={"default_api_key_id": None},
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 404
     assert response.json() == {"detail": "Institution not found"}
@@ -647,7 +635,7 @@ async def test_set_institution_default_api_key_key_not_found(
     response = api.patch(
         f"/api/v1/admin/institutions/{institution.id}/default_api_key",
         json={"default_api_key_id": 999999},
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 404
     assert response.json() == {"detail": "API key not found"}
@@ -672,7 +660,7 @@ async def test_set_institution_default_api_key_key_not_available_as_default(
     response = api.patch(
         f"/api/v1/admin/institutions/{institution.id}/default_api_key",
         json={"default_api_key_id": api_key.id},
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 400
     assert response.json() == {"detail": "API key is not available as default"}
@@ -1208,9 +1196,7 @@ async def test_create_class_missing_permission(api, now, valid_user_token, insti
             "term": "Fall 2024",
             "private": False,
         },
-        cookies={
-            "session": valid_user_token,
-        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 403
 
@@ -1230,9 +1216,7 @@ async def test_create_class(api, now, institution, valid_user_token, authz):
             "term": "Fall 2024",
             "private": False,
         },
-        cookies={
-            "session": valid_user_token,
-        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
     response_data = response.json()
@@ -1291,9 +1275,7 @@ async def test_create_class_private(api, now, institution, valid_user_token, aut
             "term": "Fall 2024",
             "private": True,
         },
-        cookies={
-            "session": valid_user_token,
-        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
     response_data = response.json()
@@ -1372,7 +1354,7 @@ async def test_get_institution_thread_counts(api, db, valid_user_token, institut
 
     response = api.get(
         f"/api/v1/stats/institutions/{institution.id}/threads",
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
     assert response.json() == {
@@ -1423,7 +1405,7 @@ async def test_copy_assistant_within_class(
     response = api.post(
         f"/api/v1/class/{class_id}/assistant/{assistant_id}/copy",
         json={},
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
     data = response.json()
@@ -1483,7 +1465,7 @@ async def test_copy_assistant_to_other_class(
     response = api.post(
         f"/api/v1/class/{source_class.id}/assistant/{assistant.id}/copy",
         json={"target_class_id": target_class.id, "name": "Assistant Copy"},
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
     data = response.json()
@@ -1539,7 +1521,7 @@ async def test_copy_assistant_missing_target_api_key(
     response = api.post(
         f"/api/v1/class/{source_class.id}/assistant/{assistant.id}/copy",
         json={"target_class_id": target_class.id, "name": "Assistant Copy"},
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 400
     assert response.json() == {
@@ -1586,7 +1568,7 @@ async def test_copy_assistant_mismatched_api_key(
     response = api.post(
         f"/api/v1/class/{source_class.id}/assistant/{assistant.id}/copy",
         json={"target_class_id": target_class.id, "name": "Assistant Copy"},
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 400
     assert response.json() == {
@@ -1631,7 +1613,7 @@ async def test_copy_assistant_missing_target_permissions(
     response = api.post(
         f"/api/v1/class/{source_class.id}/assistant/{assistant.id}/copy",
         json={"target_class_id": target_class.id, "name": "Assistant Copy"},
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 403
     assert response.json() == {
@@ -1676,7 +1658,7 @@ async def test_copy_assistant_check_endpoint(api, db, institution, valid_user_to
     response = api.post(
         f"/api/v1/class/{source_class.id}/assistant/{assistant.id}/copy/check",
         json={"target_class_id": target_class.id},
-        cookies={"session": valid_user_token},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
     assert response.json() == {"allowed": True}
