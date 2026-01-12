@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { courses as coursesStore } from '$lib/stores/courses';
 	import type { Course } from '$lib/api/types';
 	import Progress from '$lib/components/completion-progress/progress.svelte';
@@ -157,7 +158,7 @@
 					{#each allCourses as { course, info } (course.id)}
 						<div class="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:gap-4">
 							<div class="min-w-0 sm:w-1/4">
-								<a class="font-medium hover:underline" href={`/courses/${course.id}`}
+								<a class="font-medium hover:underline" href={resolve(`/courses/${course.id}`)}
 									>{course.name ?? 'Untitled course'}</a
 								>
 								<div class="mt-1 text-xs text-muted-foreground">
