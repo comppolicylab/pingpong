@@ -23,6 +23,10 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "deps(gha)/"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
   - package-ecosystem: "npm"
     directory: "web/pingpong/"
     schedule:
