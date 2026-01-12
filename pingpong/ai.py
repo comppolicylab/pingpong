@@ -2142,10 +2142,8 @@ class BufferedResponseStreamHandler:
             return tool_call
 
         tool_call = await add_cached_tool_call_on_mcp_list_tools_call_created()
-        tool_call_cache = self.tool_calls[tool_call.tool_call_id] = (
-            BufferedStreamHandlerToolCallState(
-                tool_call_id=tool_call.id, output_index=self.prev_output_index
-            )
+        tool_call_cache = BufferedStreamHandlerToolCallState(
+            tool_call_id=tool_call.id, output_index=self.prev_output_index
         )
         self.tool_calls[tool_call.tool_call_id] = tool_call_cache
 
@@ -2428,11 +2426,6 @@ class BufferedResponseStreamHandler:
         if not tool_call:
             logger.exception(
                 f"Received web search call searching without a current tool call. Data: {data}"
-            )
-            return
-        if tool_call.tool_call_id != data.item_id:
-            logger.exception(
-                f"Received web search call searching with a different tool call ID. Data: {data}"
             )
             return
 
@@ -3244,7 +3237,7 @@ class BufferedResponseStreamHandler:
             for item in data.response.output:
                 if item.type == "mcp_list_tools" and self.tool_calls.get(item.id):
                     await self.on_mcp_list_tools_call_done(item)
-                elif item.type == "mcp_server_call" and self.tool_calls.get(item.id):
+                elif item.type == "mcp_call" and self.tool_calls.get(item.id):
                     await self.on_mcp_tool_call_done(item)
 
         await self.cleanup(
