@@ -224,11 +224,14 @@ class OpenFgaAuthzClient(AuthzClient):
                 user=entity,
                 relation=relation,
                 object=target,
+                correlation_id=str(index),
             )
-            for entity, relation, target in checks
+            for index, (entity, relation, target) in enumerate(checks)
         ]
         response = await self._cli.batch_check(ClientBatchCheckRequest(checks=query))
-        return [c.allowed for c in response.result]
+        ordered = {item.correlation_id: item for item in response.result}
+        results = [ordered[str(index)] for index in range(len(query))]
+        return [c.allowed for c in results]
 
     async def write(
         self,
