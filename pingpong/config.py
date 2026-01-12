@@ -334,7 +334,9 @@ class Config(BaseSettings):
 
     log_level: str = Field("INFO")
     realtime_log_level: str | None = Field(None)
-    realtime_recorder_log_level: str | None = Field(None)
+    realtime_recorder_log_level: str | None = Field(
+        None, validation_alias="REALTIME_LOGGER_LOG_LEVEL"
+    )
     prompt_randomizer_log_level: str | None = Field(None)
     responses_api_log_level: str | None = Field(None)
     feature_flags: FeatureFlags = Field(FeatureFlags())
