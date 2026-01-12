@@ -26,7 +26,12 @@ jobs:
         env:
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          body="$(echo "$COMMENT_BODY" | xargs)"
+          body="$(python - <<'PY'
+          import os
+          body = os.environ.get("COMMENT_BODY", "")
+          print(" ".join(body.split()))
+          PY
+          )"
           if [ "$body" = "@claude review" ]; then
             echo "run_review=true" >> "$GITHUB_OUTPUT"
           else

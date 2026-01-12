@@ -27,7 +27,12 @@ jobs:
             echo "run_claude=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          body="$(echo "$COMMENT_BODY" | xargs)"
+          body="$(python - <<'PY'
+          import os
+          body = os.environ.get("COMMENT_BODY", "")
+          print(" ".join(body.split()))
+          PY
+          )"
           if [ "$body" = "@claude review" ]; then
             echo "run_claude=false" >> "$GITHUB_OUTPUT"
           else
