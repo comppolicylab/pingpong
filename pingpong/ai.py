@@ -1603,18 +1603,19 @@ class BufferedResponseStreamHandler:
             return tool_call
 
         tool_call = await add_cached_tool_call_on_code_interpreter_tool_call_created()
-        self.tool_calls[tool_call.tool_call_id] = BufferedStreamHandlerToolCallState(
+        tool_call_cache = BufferedStreamHandlerToolCallState(
             tool_call_id=tool_call.id,
             output_index=self.prev_output_index,
         )
+        self.tool_calls[tool_call.tool_call_id] = tool_call_cache
 
         self.enqueue(
             {
                 "type": "tool_call_created",
                 "tool_call": {
                     "id": str(data.id),
-                    "index": self.prev_output_index,
-                    "output_index": self.prev_output_index,
+                    "index": tool_call_cache.output_index,
+                    "output_index": tool_call_cache.output_index,
                     "type": "code_interpreter",
                     "code_interpreter": {"input": data.code or "", "outputs": None},
                     "status": data.status,
@@ -1904,17 +1905,19 @@ class BufferedResponseStreamHandler:
             return tool_call
 
         tool_call = await add_cached_tool_call_on_mcp_tool_call_created()
-        self.tool_calls[tool_call.tool_call_id] = BufferedStreamHandlerToolCallState(
-            tool_call_id=tool_call.id, output_index=self.prev_output_index
+        tool_call_cache = BufferedStreamHandlerToolCallState(
+            tool_call_id=tool_call.id,
+            output_index=self.prev_output_index,
         )
+        self.tool_calls[tool_call.tool_call_id] = tool_call_cache
 
         self.enqueue(
             {
                 "type": "tool_call_created",
                 "tool_call": {
                     "id": str(data.id),
-                    "index": self.prev_output_index,
-                    "output_index": self.prev_output_index,
+                    "index": tool_call_cache.output_index,
+                    "output_index": tool_call_cache.output_index,
                     "type": "mcp_call",
                     "server_label": data.server_label,
                     "server_name": mcp_server_tool.display_name,
@@ -2083,8 +2086,8 @@ class BufferedResponseStreamHandler:
                 "delta": {
                     "type": "mcp_call",
                     "id": data.id,
-                    "index": self.prev_output_index,
-                    "output_index": self.prev_output_index,
+                    "index": tool_call.output_index,
+                    "output_index": tool_call.output_index,
                     "run_id": str(self.run_id),
                     "server_label": data.server_label,
                     "name": data.name,
@@ -2153,8 +2156,8 @@ class BufferedResponseStreamHandler:
                 "type": "tool_call_created",
                 "tool_call": {
                     "id": str(data.id),
-                    "index": self.prev_output_index,
-                    "output_index": self.prev_output_index,
+                    "index": tool_call_cache.output_index,
+                    "output_index": tool_call_cache.output_index,
                     "type": "mcp_list_tools",
                     "server_label": data.server_label,
                     "server_name": mcp_server_tool.display_name,
@@ -2325,8 +2328,8 @@ class BufferedResponseStreamHandler:
                 "delta": {
                     "type": "mcp_list_tools",
                     "id": data.id,
-                    "index": self.prev_output_index,
-                    "output_index": self.prev_output_index,
+                    "index": tool_call.output_index,
+                    "output_index": tool_call.output_index,
                     "run_id": str(self.run_id),
                     "server_label": data.server_label,
                     "server_name": mcp_server_tool.display_name
