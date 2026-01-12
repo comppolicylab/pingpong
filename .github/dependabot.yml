@@ -34,6 +34,15 @@ updates:
     commit-message:
       prefix: "deps(web)"
       prefix-development: "deps(web-dev)"
+    ignore:
+      - dependency-name: "flowbite-svelte"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "svelte"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
     cooldown:
       default-days: 5
       semver-major-days: 30
