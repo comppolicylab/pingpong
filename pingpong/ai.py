@@ -4156,19 +4156,17 @@ def generate_user_hash(class_: models.Class, user: models.User) -> str:
 
 
 def export_user_identifier(thread: models.Thread, class_: models.Class) -> str:
-    """
-    Generate an identifier for a user in a thread within a class.
+    """Return a comma-separated identifier for users in an exported thread.
 
-    :param thread: The thread object.
-    :type thread: models.Thread
-    :param class\_: The class object.
-    :type class\_: models.Class
-    :return: A unique identifier for the user in the thread.
-    :rtype: str
+    When user info can be shown, this returns display names. Otherwise it returns
+    deterministic hashes. If there are no users, it returns "Unknown user".
     """
 
-    if thread.display_user_info and not class_.private:
-        user_names = [user_display_name(user) for user in thread.users]
+    can_show_names = thread.display_user_info and not class_.private
+    if can_show_names:
+        user_names = [user_display_name(user) for user in thread.users] or [
+            "Unknown user"
+        ]
         return ", ".join(user_names)
 
     user_hashes = [generate_user_hash(class_, user) for user in thread.users] or [
