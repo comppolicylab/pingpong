@@ -33,8 +33,8 @@ updates:
     schedule:
       interval: "daily"
     commit-message:
-      prefix: "deps(web-pp)"
-      prefix-development: "deps(web-pp-dev)"
+      prefix: "deps(web)"
+      prefix-development: "deps(web-dev)"
     cooldown:
       default-days: 5
       semver-major-days: 30
@@ -50,8 +50,8 @@ updates:
     schedule:
       interval: "daily"
     commit-message:
-      prefix: "deps(web-study)"
-      prefix-development: "deps(web-study-dev)"
+      prefix: "deps(study)"
+      prefix-development: "deps(study-dev)"
     cooldown:
       default-days: 5
       semver-major-days: 30
