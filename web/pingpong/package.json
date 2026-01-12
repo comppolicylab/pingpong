@@ -44,25 +44,24 @@
   },
   "type": "module",
   "dependencies": {
-    "@sentry/sveltekit": "^7.119.0",
-    "@zerodevx/svelte-toast": "^0.9.5",
-    "dayjs": "^1.11.13",
-    "dotenv": "^16.4.5",
+    "@sentry/sveltekit": "^10.30.0",
+    "@zerodevx/svelte-toast": "^0.9.6",
+    "dayjs": "^1.11.19",
+    "dotenv": "^17.2.3",
     "flowbite-svelte-icons": "^1.6.2",
-    "highlight.js": "^11.10.0",
-    "isomorphic-dompurify": "^2.15.0",
-    "katex": "^0.16.21",
-    "marked": "^11.2.0",
-    "marked-highlight": "^2.1.4",
+    "highlight.js": "^11.11.1",
+    "isomorphic-dompurify": "^2.35.0",
+    "katex": "^0.16.27",
+    "marked": "^17.0.1",
+    "marked-highlight": "^2.2.3",
     "svelte-copy": "^1.4.2",
-    "tldts": "^7.0.18"
+    "tldts": "^7.0.19"
   },
   "pnpm": {
     "overrides": {
-      "cookie": "0.7.0",
-      "esbuild": "0.25.0",
-      "@sentry/browser": "7.119.1",
-      "glob": ">=10.5.0"
+      "cookie": "^0.7.0",
+      "esbuild": "^0.25.0",
+      "glob": "^10.5.0"
     }
   }
 }
