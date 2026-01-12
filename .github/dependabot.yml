@@ -39,6 +39,8 @@ updates:
         update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
       - dependency-name: "flowbite-svelte-icons"
         update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "flowbite"
+        update-types: ["version-update:semver-major"]
       - dependency-name: "@sveltejs/kit"
         update-types: ["version-update:semver-major"]
       - dependency-name: "@sveltejs/vite-plugin-svelte"
