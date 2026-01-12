@@ -24,6 +24,7 @@ from pingpong.prompt import replace_random_blocks
 from pingpong.schemas import (
     APIKeyValidationResponse,
     AnnotationType,
+    BufferedStreamHandlerToolCallState,
     CodeInterpreterOutputType,
     FileSearchToolAnnotationResult,
     MessageStatus,
@@ -970,8 +971,7 @@ class BufferedResponseStreamHandler:
         self.message_created_at: datetime | None = None
         self.message_part_id: int | None = None
         self.prev_output_index = prev_output_index
-        self.tool_call_id: int | None = None
-        self.tool_call_external_id: int | None = None
+        self.tool_calls: dict[str, BufferedStreamHandlerToolCallState] = {}
         self.reasoning_id: int | None = None
         self.reasoning_external_id: str | None = None
         self.prev_reasoning_summary_part_index = -1
@@ -1578,11 +1578,6 @@ class BufferedResponseStreamHandler:
                 f"Received code interpreter tool call created event without a cached run. Data: {data}"
             )
             return
-        if self.tool_call_id:
-            logger.exception(
-                f"Received code interpreter tool call created with an existing tool call. Data: {data}"
-            )
-            return
 
         self.prev_output_index += 1
         self.last_output_item_type = "code_interpreter_call"
@@ -1608,16 +1603,19 @@ class BufferedResponseStreamHandler:
             return tool_call
 
         tool_call = await add_cached_tool_call_on_code_interpreter_tool_call_created()
-        self.tool_call_id = tool_call.id
-        self.tool_call_external_id = tool_call.tool_call_id
+        tool_call_cache = BufferedStreamHandlerToolCallState(
+            tool_call_id=tool_call.id,
+            output_index=self.prev_output_index,
+        )
+        self.tool_calls[tool_call.tool_call_id] = tool_call_cache
 
         self.enqueue(
             {
                 "type": "tool_call_created",
                 "tool_call": {
                     "id": str(data.id),
-                    "index": self.prev_output_index,
-                    "output_index": self.prev_output_index,
+                    "index": tool_call_cache.output_index,
+                    "output_index": tool_call_cache.output_index,
                     "type": "code_interpreter",
                     "code_interpreter": {"input": data.code or "", "outputs": None},
                     "status": data.status,
@@ -1629,14 +1627,10 @@ class BufferedResponseStreamHandler:
     async def on_code_interpreter_tool_call_in_progress(
         self, data: ResponseCodeInterpreterCallInProgressEvent
     ):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received code interpreter tool call in progress without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received code interpreter tool call in progress with a different tool call ID. Data: {data}"
             )
             return
 
@@ -1644,10 +1638,10 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_code_interpreter_tool_call_in_progress(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_status(
-                session_, self.tool_call_id, ToolCallStatus.IN_PROGRESS
+                session_, tool_call.tool_call_id, ToolCallStatus.IN_PROGRESS
             )
             await session_.commit()
 
@@ -1656,14 +1650,10 @@ class BufferedResponseStreamHandler:
     async def on_code_interpreter_tool_call_code_delta(
         self, data: ResponseCodeInterpreterCallCodeDeltaEvent
     ):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received code interpreter tool call code delta without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received code interpreter tool call code delta with a different tool call ID. Data: {data}"
             )
             return
 
@@ -1671,10 +1661,10 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_code_interpreter_tool_call_in_progress(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.add_code_delta(
-                session_, self.tool_call_id, data.delta
+                session_, tool_call.tool_call_id, data.delta
             )
             await session_.commit()
 
@@ -1695,14 +1685,10 @@ class BufferedResponseStreamHandler:
     async def on_code_interpreter_tool_call_interpreting(
         self, data: ResponseCodeInterpreterCallInterpretingEvent
     ):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received code interpreter tool call interpreting without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received code interpreter tool call interpreting with a different tool call ID. Data: {data}"
             )
             return
 
@@ -1710,10 +1696,10 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_code_interpreter_tool_call_interpreting(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_status(
-                session_, self.tool_call_id, ToolCallStatus.INTERPRETING
+                session_, tool_call.tool_call_id, ToolCallStatus.INTERPRETING
             )
             await session_.commit()
 
@@ -1722,14 +1708,10 @@ class BufferedResponseStreamHandler:
     async def on_code_interpreter_tool_call_completed(
         self, data: ResponseCodeInterpreterCallCompletedEvent
     ):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received code interpreter tool call completed without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received code interpreter tool call completed with a different tool call ID. Data: {data}"
             )
             return
 
@@ -1739,11 +1721,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_code_interpreter_tool_call_completed(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_status(
                 session_,
-                self.tool_call_id,
+                tool_call.tool_call_id,
                 ToolCallStatus.COMPLETED,
                 completed=completed_at,
             )
@@ -1759,14 +1741,10 @@ class BufferedResponseStreamHandler:
                 f"Received code interpreter tool call done without a cached run. Data: {data}"
             )
             return
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.id)
+        if not tool_call:
             logger.exception(
                 f"Received code interpreter tool call done without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.id:
-            logger.exception(
-                f"Received code interpreter tool call done with a different tool call ID. Data: {data}"
             )
             return
 
@@ -1785,7 +1763,7 @@ class BufferedResponseStreamHandler:
                             )
                             return
                         image_data = {
-                            "tool_call_id": self.tool_call_id,
+                            "tool_call_id": tool_call.tool_call_id,
                             "output_type": CodeInterpreterOutputType.IMAGE,
                             "url": output.url,
                             "created": utcnow(),
@@ -1795,7 +1773,7 @@ class BufferedResponseStreamHandler:
                             {
                                 "type": "tool_call_delta",
                                 "delta": {
-                                    "index": self.prev_output_index,
+                                    "index": tool_call.output_index,
                                     "type": "code_interpreter",
                                     "id": data.id,
                                     "code_interpreter": {
@@ -1812,7 +1790,7 @@ class BufferedResponseStreamHandler:
                         )
                     case "logs":
                         logs_data = {
-                            "tool_call_id": self.tool_call_id,
+                            "tool_call_id": tool_call.tool_call_id,
                             "output_type": CodeInterpreterOutputType.LOGS,
                             "created": utcnow(),
                             "logs": output.logs,
@@ -1823,7 +1801,7 @@ class BufferedResponseStreamHandler:
                             {
                                 "type": "tool_call_delta",
                                 "delta": {
-                                    "index": self.prev_output_index,
+                                    "index": tool_call.output_index,
                                     "type": "code_interpreter",
                                     "id": data.id,
                                     "code_interpreter": {
@@ -1843,18 +1821,17 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_code_interpreter_tool_call_done(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_status(
                 session_,
-                self.tool_call_id,
+                tool_call.tool_call_id,
                 ToolCallStatus(data.status),
             )
             await session_.commit()
 
         await add_cached_tool_call_on_code_interpreter_tool_call_done()
-        self.tool_call_id = None
-        self.tool_call_external_id = None
+        self.tool_calls.pop(data.id, None)
 
     def get_action_payload(
         self,
@@ -1894,12 +1871,6 @@ class BufferedResponseStreamHandler:
             )
             return
 
-        if self.tool_call_id:
-            logger.exception(
-                f"Received MCP tool call created with an existing tool call. Data: {data}"
-            )
-            return
-
         self.prev_output_index += 1
         self.last_output_item_type = "mcp_call"
 
@@ -1934,16 +1905,19 @@ class BufferedResponseStreamHandler:
             return tool_call
 
         tool_call = await add_cached_tool_call_on_mcp_tool_call_created()
-        self.tool_call_id = tool_call.id
-        self.tool_call_external_id = tool_call.tool_call_id
+        tool_call_cache = BufferedStreamHandlerToolCallState(
+            tool_call_id=tool_call.id,
+            output_index=self.prev_output_index,
+        )
+        self.tool_calls[tool_call.tool_call_id] = tool_call_cache
 
         self.enqueue(
             {
                 "type": "tool_call_created",
                 "tool_call": {
                     "id": str(data.id),
-                    "index": self.prev_output_index,
-                    "output_index": self.prev_output_index,
+                    "index": tool_call_cache.output_index,
+                    "output_index": tool_call_cache.output_index,
                     "type": "mcp_call",
                     "server_label": data.server_label,
                     "server_name": mcp_server_tool.display_name,
@@ -1962,14 +1936,10 @@ class BufferedResponseStreamHandler:
         )
 
     async def on_mcp_tool_call_in_progress(self, data: ResponseMcpCallInProgressEvent):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received MCP call in progress without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received MCP call in progress with a different tool call ID. Data: {data}"
             )
             return
 
@@ -1977,11 +1947,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_mcp_tool_call_in_progress(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
 
             await models.ToolCall.update_status(
-                session_, self.tool_call_id, ToolCallStatus.IN_PROGRESS
+                session_, tool_call.tool_call_id, ToolCallStatus.IN_PROGRESS
             )
             await session_.commit()
 
@@ -1990,14 +1960,10 @@ class BufferedResponseStreamHandler:
     async def on_mcp_tool_call_arguments_delta(
         self, data: ResponseMcpCallArgumentsDeltaEvent
     ):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received MCP tool call arguments delta without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received MCP tool call arguments delta with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2005,10 +1971,10 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_mcp_tool_call_arguments_delta(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.add_mcp_arguments_delta(
-                session_, self.tool_call_id, data.delta
+                session_, tool_call.tool_call_id, data.delta
             )
             await session_.commit()
 
@@ -2030,14 +1996,10 @@ class BufferedResponseStreamHandler:
         )
 
     async def on_mcp_tool_call_completed(self, data: ResponseMcpCallCompletedEvent):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received MCP call completed without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received MCP call completed with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2047,11 +2009,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_mcp_tool_call_completed(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_status(
                 session_,
-                self.tool_call_id,
+                tool_call.tool_call_id,
                 ToolCallStatus.COMPLETED,
                 completed=completed_at,
             )
@@ -2060,14 +2022,10 @@ class BufferedResponseStreamHandler:
         await add_cached_tool_call_on_mcp_tool_call_completed()
 
     async def on_mcp_tool_call_failed(self, data: ResponseMcpCallFailedEvent):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received MCP call failed without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received MCP call failed with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2077,11 +2035,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_mcp_tool_call_failed(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_status(
                 session_,
-                self.tool_call_id,
+                tool_call.tool_call_id,
                 ToolCallStatus.FAILED,
                 completed=completed_at,
             )
@@ -2095,14 +2053,11 @@ class BufferedResponseStreamHandler:
                 f"Received MCP call done without a cached run. Data: {data}"
             )
             return
-        if not self.tool_call_id:
+
+        tool_call = self.tool_calls.get(data.id)
+        if not tool_call:
             logger.exception(
                 f"Received MCP call done without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.id:
-            logger.exception(
-                f"Received MCP call done with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2110,11 +2065,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_mcp_call_done(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_mcp_call(
                 session_,
-                self.tool_call_id,
+                tool_call.tool_call_id,
                 status=ToolCallStatus(data.status),
                 error=json.dumps(data.error) if data.error else None,
                 mcp_tool_name=data.name,
@@ -2131,8 +2086,8 @@ class BufferedResponseStreamHandler:
                 "delta": {
                     "type": "mcp_call",
                     "id": data.id,
-                    "index": self.prev_output_index,
-                    "output_index": self.prev_output_index,
+                    "index": tool_call.output_index,
+                    "output_index": tool_call.output_index,
                     "run_id": str(self.run_id),
                     "server_label": data.server_label,
                     "name": data.name,
@@ -2147,19 +2102,12 @@ class BufferedResponseStreamHandler:
                 },
             }
         )
-        self.tool_call_id = None
-        self.tool_call_external_id = None
+        self.tool_calls.pop(data.id, None)
 
     async def on_mcp_list_tools_call_created(self, data: McpListTools):
         if not self.run_id:
             logger.exception(
                 f"Received MCP list tools call created event without a cached run. Data: {data}"
-            )
-            return
-
-        if self.tool_call_id:
-            logger.exception(
-                f"Received MCP list tools call created with an existing tool call. Data: {data}"
             )
             return
 
@@ -2194,8 +2142,10 @@ class BufferedResponseStreamHandler:
             return tool_call
 
         tool_call = await add_cached_tool_call_on_mcp_list_tools_call_created()
-        self.tool_call_id = tool_call.id
-        self.tool_call_external_id = tool_call.tool_call_id
+        tool_call_cache = BufferedStreamHandlerToolCallState(
+            tool_call_id=tool_call.id, output_index=self.prev_output_index
+        )
+        self.tool_calls[tool_call.tool_call_id] = tool_call_cache
 
         tools = [tool.model_dump() for tool in (data.tools or [])]
 
@@ -2204,8 +2154,8 @@ class BufferedResponseStreamHandler:
                 "type": "tool_call_created",
                 "tool_call": {
                     "id": str(data.id),
-                    "index": self.prev_output_index,
-                    "output_index": self.prev_output_index,
+                    "index": tool_call_cache.output_index,
+                    "output_index": tool_call_cache.output_index,
                     "type": "mcp_list_tools",
                     "server_label": data.server_label,
                     "server_name": mcp_server_tool.display_name,
@@ -2220,14 +2170,10 @@ class BufferedResponseStreamHandler:
     async def on_mcp_list_tools_call_in_progress(
         self, data: ResponseMcpListToolsInProgressEvent
     ):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received MCP list tools call in progress without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received MCP list tools call in progress with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2235,11 +2181,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_mcp_list_tools_call_in_progress(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
 
             await models.ToolCall.update_status(
-                session_, self.tool_call_id, ToolCallStatus.IN_PROGRESS
+                session_, tool_call.tool_call_id, ToolCallStatus.IN_PROGRESS
             )
             await session_.commit()
 
@@ -2248,14 +2194,10 @@ class BufferedResponseStreamHandler:
     async def on_mcp_list_tools_call_completed(
         self, data: ResponseMcpListToolsCompletedEvent
     ):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received MCP list tools call completed without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received MCP list tools call completed with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2265,11 +2207,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_mcp_list_tools_call_completed(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_status(
                 session_,
-                self.tool_call_id,
+                tool_call.tool_call_id,
                 ToolCallStatus.COMPLETED,
                 completed=completed_at,
             )
@@ -2277,17 +2219,27 @@ class BufferedResponseStreamHandler:
 
         await add_cached_tool_call_on_mcp_list_tools_call_completed()
 
+        self.enqueue(
+            {
+                "type": "tool_call_delta",
+                "delta": {
+                    "type": "mcp_list_tools",
+                    "id": data.item_id,
+                    "index": tool_call.output_index,
+                    "output_index": tool_call.output_index,
+                    "run_id": str(self.run_id),
+                    "status": ToolCallStatus.COMPLETED.value,
+                },
+            }
+        )
+
     async def on_mcp_list_tools_call_failed(
         self, data: ResponseMcpListToolsFailedEvent
     ):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received MCP list tools call failed without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received MCP list tools call failed with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2297,11 +2249,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_mcp_list_tools_call_failed(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_status(
                 session_,
-                self.tool_call_id,
+                tool_call.tool_call_id,
                 ToolCallStatus.FAILED,
                 completed=completed_at,
             )
@@ -2315,14 +2267,11 @@ class BufferedResponseStreamHandler:
                 f"Received MCP list tools call done without a cached run. Data: {data}"
             )
             return
-        if not self.tool_call_id:
+
+        tool_call = self.tool_calls.get(data.id)
+        if not tool_call:
             logger.exception(
                 f"Received MCP list tools call done without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.id:
-            logger.exception(
-                f"Received MCP list tools call done with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2347,7 +2296,7 @@ class BufferedResponseStreamHandler:
                 "description": tool.description,
                 "input_schema": json.dumps(tool.input_schema),
                 "annotations": json.dumps(tool.annotations),
-                "tool_call_id": self.tool_call_id,
+                "tool_call_id": tool_call.tool_call_id,
                 "created": utcnow(),
             }
             await add_mcp_list_tools_tool_on_mcp_list_tools_call_done(
@@ -2358,11 +2307,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_mcp_list_tools_call_done(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_mcp_call(
                 session_,
-                self.tool_call_id,
+                tool_call.tool_call_id,
                 error=json.dumps(data.error) if data.error else None,
             )
             await session_.commit()
@@ -2377,8 +2326,8 @@ class BufferedResponseStreamHandler:
                 "delta": {
                     "type": "mcp_list_tools",
                     "id": data.id,
-                    "index": self.prev_output_index,
-                    "output_index": self.prev_output_index,
+                    "index": tool_call.output_index,
+                    "output_index": tool_call.output_index,
                     "run_id": str(self.run_id),
                     "server_label": data.server_label,
                     "server_name": mcp_server_tool.display_name
@@ -2392,18 +2341,12 @@ class BufferedResponseStreamHandler:
                 },
             }
         )
-        self.tool_call_id = None
-        self.tool_call_external_id = None
+        self.tool_calls.pop(data.id, None)
 
     async def on_web_search_call_created(self, data: ResponseFunctionWebSearch):
         if not self.run_id:
             logger.exception(
                 f"Received web search call created event without a cached run. Data: {data}"
-            )
-            return
-        if self.tool_call_id:
-            logger.exception(
-                f"Received web search tool call created with an existing tool call. Data: {data}"
             )
             return
 
@@ -2429,16 +2372,18 @@ class BufferedResponseStreamHandler:
             return tool_call
 
         tool_call = await add_cached_tool_call_on_web_search_call_created()
-        self.tool_call_id = tool_call.id
-        self.tool_call_external_id = tool_call.tool_call_id
+        tool_call_cache = BufferedStreamHandlerToolCallState(
+            tool_call_id=tool_call.id, output_index=self.prev_output_index
+        )
+        self.tool_calls[tool_call.tool_call_id] = tool_call_cache
 
         self.enqueue(
             {
                 "type": "tool_call_created",
                 "tool_call": {
                     "id": str(data.id),
-                    "index": self.prev_output_index,
-                    "output_index": self.prev_output_index,
+                    "index": tool_call_cache.output_index,
+                    "output_index": tool_call_cache.output_index,
                     "type": "web_search",
                     "web_search": {
                         "action": self.get_action_payload(data.action)
@@ -2453,14 +2398,10 @@ class BufferedResponseStreamHandler:
     async def on_web_search_call_in_progress(
         self, data: ResponseWebSearchCallInProgressEvent
     ):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received web search call in progress without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received web search call in progress with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2468,11 +2409,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_web_search_call_in_progress(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
 
             await models.ToolCall.update_status(
-                session_, self.tool_call_id, ToolCallStatus.IN_PROGRESS
+                session_, tool_call.tool_call_id, ToolCallStatus.IN_PROGRESS
             )
             await session_.commit()
 
@@ -2481,14 +2422,10 @@ class BufferedResponseStreamHandler:
     async def on_web_search_call_searching(
         self, data: ResponseWebSearchCallSearchingEvent
     ):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received web search call searching without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received web search call searching with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2496,10 +2433,10 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_web_search_call_searching(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_status(
-                session_, self.tool_call_id, ToolCallStatus.SEARCHING
+                session_, tool_call.tool_call_id, ToolCallStatus.SEARCHING
             )
             await session_.commit()
 
@@ -2508,14 +2445,10 @@ class BufferedResponseStreamHandler:
     async def on_web_search_call_completed(
         self, data: ResponseWebSearchCallCompletedEvent
     ):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received web search call completed without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received web search call completed with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2525,11 +2458,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_web_search_call_completed(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_status(
                 session_,
-                self.tool_call_id,
+                tool_call.tool_call_id,
                 ToolCallStatus.COMPLETED,
                 completed=completed_at,
             )
@@ -2543,14 +2476,10 @@ class BufferedResponseStreamHandler:
                 f"Received web search call done without a cached run. Data: {data}"
             )
             return
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.id)
+        if not tool_call:
             logger.exception(
                 f"Received web search call done without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.id:
-            logger.exception(
-                f"Received web search call done with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2573,7 +2502,7 @@ class BufferedResponseStreamHandler:
             match data.action.type:
                 case "search":
                     search_data = {
-                        "tool_call_id": self.tool_call_id,
+                        "tool_call_id": tool_call.tool_call_id,
                         "query": data.action.query,
                         "type": WebSearchActionType.SEARCH,
                         "created": utcnow(),
@@ -2587,7 +2516,7 @@ class BufferedResponseStreamHandler:
                     for source in data.action.sources or []:
                         source_data = {
                             "web_search_call_action_id": search_action.id,
-                            "tool_call_id": self.tool_call_id,
+                            "tool_call_id": tool_call.tool_call_id,
                             "url": source.url if hasattr(source, "url") else None,
                             "created": utcnow(),
                             "name": source.name if hasattr(source, "name") else None,
@@ -2598,7 +2527,7 @@ class BufferedResponseStreamHandler:
 
                 case "find":
                     find_data = {
-                        "tool_call_id": self.tool_call_id,
+                        "tool_call_id": tool_call.tool_call_id,
                         "pattern": data.action.pattern,
                         "url": data.action.url,
                         "type": WebSearchActionType.FIND,
@@ -2609,7 +2538,7 @@ class BufferedResponseStreamHandler:
 
                 case "open_page":
                     open_page_data = {
-                        "tool_call_id": self.tool_call_id,
+                        "tool_call_id": tool_call.tool_call_id,
                         "url": data.action.url,
                         "type": WebSearchActionType.OPEN_PAGE,
                         "created": utcnow(),
@@ -2623,11 +2552,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_web_search_call_done(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_status(
                 session_,
-                self.tool_call_id,
+                tool_call.tool_call_id,
                 ToolCallStatus(data.status),
             )
             await session_.commit()
@@ -2638,7 +2567,7 @@ class BufferedResponseStreamHandler:
                 "delta": {
                     "type": "web_search",
                     "id": data.id,
-                    "index": self.prev_output_index,
+                    "index": tool_call.output_index,
                     "run_id": str(self.run_id),
                     "status": data.status,
                     "action": self.get_action_payload(data.action)
@@ -2649,18 +2578,12 @@ class BufferedResponseStreamHandler:
         )
 
         await add_cached_tool_call_on_web_search_call_done()
-        self.tool_call_id = None
-        self.tool_call_external_id = None
+        self.tool_calls.pop(data.id, None)
 
     async def on_file_search_call_created(self, data: ResponseFileSearchToolCall):
         if not self.run_id:
             logger.exception(
                 f"Received file search call created event without a cached run. Data: {data}"
-            )
-            return
-        if self.tool_call_id:
-            logger.exception(
-                f"Received code interpreter tool call created with an existing tool call. Data: {data}"
             )
             return
 
@@ -2687,16 +2610,18 @@ class BufferedResponseStreamHandler:
             return tool_call
 
         tool_call = await add_cached_tool_call_on_file_search_call_created()
-        self.tool_call_id = tool_call.id
-        self.tool_call_external_id = tool_call.tool_call_id
+        tool_call_cache = BufferedStreamHandlerToolCallState(
+            tool_call_id=tool_call.id, output_index=self.prev_output_index
+        )
+        self.tool_calls[tool_call.tool_call_id] = tool_call_cache
 
         self.enqueue(
             {
                 "type": "tool_call_created",
                 "tool_call": {
                     "id": str(data.id),
-                    "index": self.prev_output_index,
-                    "output_index": self.prev_output_index,
+                    "index": tool_call_cache.output_index,
+                    "output_index": tool_call_cache.output_index,
                     "type": "file_search",
                     "queries": data.queries if self.show_file_search_queries else [],
                     "status": data.status,
@@ -2708,14 +2633,10 @@ class BufferedResponseStreamHandler:
     async def on_file_search_call_in_progress(
         self, data: ResponseFileSearchCallInProgressEvent
     ):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received file search call in progress without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received file search call in progress with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2723,11 +2644,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_file_search_call_in_progress(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
 
             await models.ToolCall.update_status(
-                session_, self.tool_call_id, ToolCallStatus.IN_PROGRESS
+                session_, tool_call.tool_call_id, ToolCallStatus.IN_PROGRESS
             )
             await session_.commit()
 
@@ -2736,14 +2657,10 @@ class BufferedResponseStreamHandler:
     async def on_file_search_call_searching(
         self, data: ResponseFileSearchCallSearchingEvent
     ):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received file search call searching without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received file search call searching with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2751,10 +2668,10 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_file_search_call_searching(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_status(
-                session_, self.tool_call_id, ToolCallStatus.SEARCHING
+                session_, tool_call.tool_call_id, ToolCallStatus.SEARCHING
             )
             await session_.commit()
 
@@ -2763,14 +2680,10 @@ class BufferedResponseStreamHandler:
     async def on_file_search_call_completed(
         self, data: ResponseFileSearchCallCompletedEvent
     ):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received file search call completed without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received file search call completed with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2780,11 +2693,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_file_search_call_completed(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_status(
                 session_,
-                self.tool_call_id,
+                tool_call.tool_call_id,
                 ToolCallStatus.COMPLETED,
                 completed=completed_at,
             )
@@ -2798,14 +2711,10 @@ class BufferedResponseStreamHandler:
                 f"Received file search call done without a cached run. Data: {data}"
             )
             return
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.id)
+        if not tool_call:
             logger.exception(
                 f"Received file search call done without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.id:
-            logger.exception(
-                f"Received file search call done with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2849,7 +2758,7 @@ class BufferedResponseStreamHandler:
                 "score": result.score,
                 "text": result.text,
                 "created": utcnow(),
-                "tool_call_id": self.tool_call_id,
+                "tool_call_id": tool_call.tool_call_id,
             }
 
             await add_current_tool_call_on_file_search_call_done(fs_result_data)
@@ -2858,11 +2767,11 @@ class BufferedResponseStreamHandler:
         async def update_status_queries_on_file_search_call_done(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.add_status_queries(
                 session_,
-                self.tool_call_id,
+                tool_call.tool_call_id,
                 ToolCallStatus(data.status),
                 json.dumps(data.queries),
             )
@@ -2876,7 +2785,7 @@ class BufferedResponseStreamHandler:
                 "delta": {
                     "type": "file_search",
                     "id": data.id,
-                    "index": self.prev_output_index,
+                    "index": tool_call.output_index,
                     "run_id": str(self.run_id),
                     "queries": data.queries if self.show_file_search_queries else [],
                     "status": data.status,
@@ -2884,8 +2793,7 @@ class BufferedResponseStreamHandler:
             }
         )
 
-        self.tool_call_id = None
-        self.tool_call_external_id = None
+        self.tool_calls.pop(data.id, None)
 
     async def on_reasoning_created(self, data: ResponseReasoningItem):
         if not self.run_id:
@@ -3226,12 +3134,14 @@ class BufferedResponseStreamHandler:
                     await session_.commit()
 
             @db_session_handler
-            async def mark_cached_tool_call_as_incomplete_on_cleanup(
+            async def mark_cached_tool_calls_as_incomplete_on_cleanup(
                 session_: AsyncSession,
             ):
-                if self.tool_call_id:
-                    await models.ToolCall.mark_as_incomplete(
-                        session_, self.tool_call_id
+                if self.tool_calls:
+                    await models.ToolCall.mark_as_incomplete_batch(
+                        session_,
+                        [tc.tool_call_id for tc in self.tool_calls.values()],
+                        only_if_in_progress=True,
                     )
                     await session_.commit()
 
@@ -3256,9 +3166,9 @@ class BufferedResponseStreamHandler:
             if self.message_id:
                 await mark_cached_message_as_incomplete_on_cleanup()
                 self.message_id = None
-            if self.tool_call_id:
-                await mark_cached_tool_call_as_incomplete_on_cleanup()
-                self.tool_call_id = None
+            if self.tool_calls:
+                await mark_cached_tool_calls_as_incomplete_on_cleanup()
+                self.tool_calls = {}
             if self.reasoning_id:
                 await mark_cached_reasoning_as_incomplete_on_cleanup()
                 self.reasoning_id = None
@@ -3322,6 +3232,13 @@ class BufferedResponseStreamHandler:
             )
             self.force_stop_incomplete_reason = None
             return
+
+        if isinstance(data, ResponseCompletedEvent):
+            for item in data.response.output:
+                if item.type == "mcp_list_tools" and self.tool_calls.get(item.id):
+                    await self.on_mcp_list_tools_call_done(item)
+                elif item.type == "mcp_call" and self.tool_calls.get(item.id):
+                    await self.on_mcp_tool_call_done(item)
 
         await self.cleanup(
             run_status=RunStatus(data.response.status),
@@ -3515,7 +3432,7 @@ async def run_response(
                     input=input_items,
                     instructions=run.instructions,
                     model=run.model,
-                    parallel_tool_calls=False,
+                    parallel_tool_calls=True,
                     reasoning=reasoning_settings,
                     tools=tools,
                     store=True,
