@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
@@ -13,7 +14,7 @@
 	async function logout() {
 		if (browser) {
 			document.cookie = 'study_session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
-			await goto('/login');
+			await goto(resolve('/login'));
 		}
 	}
 </script>

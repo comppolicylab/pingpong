@@ -4,6 +4,7 @@
 
 	// State
 	import { page } from '$app/state';
+	import { resolve } from '$app/paths';
 
 	// Icons
 	import Building2 from '@lucide/svelte/icons/building-2';
@@ -58,7 +59,7 @@
 			<Sidebar.MenuItem>
 				<Sidebar.MenuButton size="lg">
 					{#snippet child({ props })}
-						<a href="/" {...props}>
+						<a href={resolve('/')} {...props}>
 							<div
 								class="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground"
 							>
@@ -80,7 +81,7 @@
 				<Sidebar.MenuItem>
 					<Sidebar.MenuButton tooltipContent="Dashboard" isActive={page.url.pathname === '/'}>
 						{#snippet child({ props })}
-							<a href="/" {...props}>
+							<a href={resolve('/')} {...props}>
 								<LayoutDashboard class="size-4" />
 								<span>Dashboard</span>
 							</a>
@@ -150,7 +151,7 @@
 												isActive={page.url.pathname === `/courses/${subItem.id}`}
 											>
 												{#snippet child({ props })}
-													<a href={`/courses/${subItem.id}`} {...props}>
+													<a href={resolve(`/courses/${subItem.id}`)} {...props}>
 														<span>{subItem.name}</span>
 													</a>
 												{/snippet}
@@ -170,7 +171,7 @@
 				<Sidebar.MenuItem>
 					<Sidebar.MenuButton tooltipContent="Profile" isActive={page.url.pathname === '/profile'}>
 						{#snippet child({ props })}
-							<a href="/profile" {...props}>
+							<a href={resolve('/profile')} {...props}>
 								<User class="size-4" />
 								<span>Profile</span>
 							</a>
@@ -200,7 +201,7 @@
 						isActive={page.url.pathname === '/resources'}
 					>
 						{#snippet child({ props })}
-							<a href="/resources" {...props}>
+							<a href={resolve('/resources')} {...props}>
 								<BookOpenTextIcon />
 								<span>Resources</span>
 							</a>
