@@ -24,7 +24,7 @@
     "autoprefixer": "^10.4.23",
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-svelte": "^3.13.1",
+    "eslint-plugin-svelte": "^2.46.1",
     "flowbite": "^2.5.2",
     "flowbite-svelte": "^0.47.4",
     "postcss": "^8.5.6",

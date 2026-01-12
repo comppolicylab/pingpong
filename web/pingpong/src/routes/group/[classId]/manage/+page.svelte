@@ -62,7 +62,7 @@
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
-  import { goto, invalidateAll, onNavigate } from '$app/navigation';
+  import { afterNavigate, goto, invalidateAll, onNavigate } from '$app/navigation';
   import { browser } from '$app/environment';
   import { submitParentForm } from '$lib/form';
   import { page } from '$app/stores';
@@ -820,6 +820,8 @@
   onNavigate(() => {
     uploads.set([]);
     trashFiles.set([]);
+  });
+  afterNavigate(() => {
     invalidateAll();
   });
 
@@ -1710,8 +1712,8 @@
                     >{canvasLinkedClass?.course_code}: {canvasLinkedClass?.name}</span
                   >
                   on Canvas. The class roster is automatically synced with this group's user list about
-                  once every hour. Use the Sync button below to request an immediate sync. Users are
-                  not notified when they get added to this group though Canvas Sync.
+                  once every hour. Use the Sync button below to request an immediate sync. Users are not
+                  notified when they get added to this group though Canvas Sync.
                 </p>
                 <p class="mt-2 mb-4 text-sm">
                   Last sync: {data.class.lms_last_synced
@@ -1908,10 +1910,9 @@
                 </div>
                 <p class="mt-2 text-sm">
                   {data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
-                  with this group. However, we faced an issue when trying to connect to their Canvas
-                  account. Ask {data.class.lms_user?.name || 'them'} to reauthorize Pingpong to access
-                  your Canvas account through this page and ensure uninterrupted syncing of your class
-                  roster.
+                  with this group. However, we faced an issue when trying to connect to their Canvas account.
+                  Ask {data.class.lms_user?.name || 'them'} to reauthorize Pingpong to access your Canvas
+                  account through this page and ensure uninterrupted syncing of your class roster.
                 </p>
                 <p class="mt-2 mb-4 text-sm">
                   Last sync: {data.class.lms_last_synced

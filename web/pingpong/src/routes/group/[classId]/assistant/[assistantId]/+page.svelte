@@ -1589,9 +1589,8 @@
             <div class="flex flex-col text-xs">
               <span class="font-bold">Tool reliability may be reduced</span>
               <span
-                >The current <span class="font-mono">none</span> reasoning effort prioritizes speed,
-                which can impact the reliability of tool calls. You can adjust this setting in Advanced
-                Options.</span
+                >The current <span class="font-mono">none</span> reasoning effort prioritizes speed, which
+                can impact the reliability of tool calls. You can adjust this setting in Advanced Options.</span
               >
             </div>
           </div>
@@ -2539,15 +2538,15 @@
                       concise answers or simple code generation, such as SQL queries.
                     </li>
                   </ol>
-                  Models before GPT-5 have used medium verbosity by default. With GPT-5, this option
-                  is configurable as one of<span class="font-mono">high</span>,
+                  Models before GPT-5 have used medium verbosity by default. With GPT-5, this option is
+                  configurable as one of<span class="font-mono">high</span>,
                   <span class="font-mono">medium</span>, or <span class="font-mono">low</span>. When
                   generating code, <span class="font-mono">medium</span> and
                   <span class="font-mono">high</span>
                   verbosity levels yield longer, more structured code with inline explanations, while
                   <span class="font-mono">low</span>
-                  verbosity produces shorter, more concise code with minimal commentary. The default
-                  value is
+                  verbosity produces shorter, more concise code with minimal commentary. The default value
+                  is
                   <span class="font-mono">medium</span>.</Helper
                 >
               </div>

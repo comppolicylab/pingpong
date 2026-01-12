@@ -48,7 +48,7 @@ export interface AudioAnalysisOutputType {
  * @class
  */
 export class AudioAnalysis {
-  private fftResults: Float32Array[] = [];
+  private fftResults: Float32Array<ArrayBuffer>[] = [];
   private audio: HTMLAudioElement;
   private context: AudioContext | OfflineAudioContext;
   private analyser: AnalyserNode;
@@ -69,13 +69,13 @@ export class AudioAnalysis {
   static getFrequencies(
     analyser: AnalyserNode,
     sampleRate: number,
-    fftResult: Float32Array | null,
+    fftResult: Float32Array<ArrayBuffer> | null,
     analysisType: 'frequency' | 'music' | 'voice' = 'frequency',
     minDecibels: number = -100,
     maxDecibels: number = -30
   ) {
     if (!fftResult) {
-      fftResult = new Float32Array(analyser.frequencyBinCount);
+      fftResult = new Float32Array(analyser.frequencyBinCount) as Float32Array<ArrayBuffer>;
       analyser.getFloatFrequencyData(fftResult);
     }
     const nyquistFrequency = sampleRate / 2;
@@ -152,7 +152,9 @@ export class AudioAnalysis {
         const suspendTime = renderQuantumInSeconds * index;
         if (suspendTime < durationInSeconds) {
           offlineAudioContext.suspend(suspendTime).then(() => {
-            const fftResult = new Float32Array(analyser.frequencyBinCount);
+            const fftResult = new Float32Array(
+              analyser.frequencyBinCount
+            ) as Float32Array<ArrayBuffer>;
             analyser.getFloatFrequencyData(fftResult);
             this.fftResults.push(fftResult);
             analyze(index + 1);
