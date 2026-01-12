@@ -23,6 +23,7 @@ from openai.types.responses.response_function_web_search import (
 )
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     HttpUrl,
     SecretStr,
@@ -275,23 +276,26 @@ class ExternalLoginProvider(BaseModel):
     display_name: str | None
     description: str | None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class ExternalLoginProviders(BaseModel):
     providers: list[ExternalLoginProvider]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class UpdateExternalLoginProvider(BaseModel):
     display_name: str | None
     description: str | None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class ExternalLogin(BaseModel):
@@ -300,8 +304,9 @@ class ExternalLogin(BaseModel):
     identifier: str
     provider_obj: ExternalLoginProvider
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class ExternalLogins(BaseModel):
@@ -315,8 +320,9 @@ class User(BaseModel, UserNameMixin):
     created: datetime
     updated: datetime | None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class File(BaseModel):
@@ -334,30 +340,34 @@ class File(BaseModel):
     updated: datetime | None
     image_description: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class Files(BaseModel):
     files: list[File]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class AssistantFiles(BaseModel):
     code_interpreter_files: list[File]
     file_search_files: list[File]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class AssistantFilesResponse(BaseModel):
     files: AssistantFiles
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 FileUploadPurpose = Union[
@@ -379,16 +389,18 @@ class VectorStore(BaseModel):
     created: datetime
     updated: datetime | None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class VectorStoreDeleteResponse(BaseModel):
     vector_store_id: str
     deleted_file_ids: list[int]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class VectorStoreType(Enum):
@@ -413,8 +425,9 @@ class AnonymousLink(BaseModel):
 class AnonymousLinkResponse(BaseModel):
     link: AnonymousLink
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class Assistant(BaseModel):
@@ -452,8 +465,9 @@ class Assistant(BaseModel):
     updated: datetime | None
     share_links: list[AnonymousLink] | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 def temperature_validator(self):
@@ -510,8 +524,9 @@ class MCPServerToolResponse(BaseModel):
     description: str | None = None
     enabled: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class MCPServerToolsResponse(BaseModel):
@@ -561,8 +576,9 @@ class AssistantInstructionsPreviewRequest(BaseModel):
 class AssistantInstructionsPreviewResponse(BaseModel):
     instructions_preview: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class CopyAssistantRequest(BaseModel):
@@ -620,8 +636,9 @@ class Assistants(BaseModel):
     assistants: list[Assistant]
     creators: dict[int, User]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class Thread(BaseModel):
@@ -641,16 +658,18 @@ class Thread(BaseModel):
     anonymous_session: bool = False
     is_current_user_participant: bool = False
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class ThreadWithOptionalToken(BaseModel):
     thread: Thread
     session_token: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 def file_validator(self):
@@ -833,8 +852,9 @@ class NewThreadMessage(BaseModel):
 class Threads(BaseModel):
     threads: list[Thread]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class Role(Enum):
@@ -887,8 +907,9 @@ class UserClassRole(BaseModel):
     lms_type: LMSType | None = None
     roles: ClassUserRoles
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class UserClassRoles(BaseModel):
@@ -998,8 +1019,9 @@ class ClassUsers(BaseModel):
     offset: int
     total: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class CreateInstitution(BaseModel):
@@ -1023,15 +1045,17 @@ class Institution(BaseModel):
     created: datetime
     updated: datetime | None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class Institutions(BaseModel):
     institutions: list[Institution]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class AddInstitutionAdminRequest(BaseModel):
@@ -1041,16 +1065,18 @@ class AddInstitutionAdminRequest(BaseModel):
 class InstitutionAdmin(BaseModel, UserNameMixin):
     id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class InstitutionWithAdmins(Institution):
     admins: list[InstitutionAdmin] = Field(default_factory=list)
     root_admins: list[InstitutionAdmin] = Field(default_factory=list)
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class InstitutionAdminResponse(BaseModel):
@@ -1078,8 +1104,9 @@ class LTIRegistrationInstitution(BaseModel):
     id: int
     name: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class LTIRegistrationReviewer(BaseModel):
@@ -1089,8 +1116,9 @@ class LTIRegistrationReviewer(BaseModel):
     last_name: str | None
     display_name: str | None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class LTIRegistration(BaseModel):
@@ -1115,15 +1143,17 @@ class LTIRegistration(BaseModel):
     created: datetime
     updated: datetime | None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class LTIRegistrations(BaseModel):
     registrations: list[LTIRegistration]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class LTIRegistrationDetail(LTIRegistration):
@@ -1131,8 +1161,9 @@ class LTIRegistrationDetail(LTIRegistration):
     registration_data: str | None
     lti_classes_count: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class UpdateLTIRegistration(BaseModel):
@@ -1159,15 +1190,17 @@ class InstitutionWithDefaultAPIKey(BaseModel):
     id: int
     name: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class InstitutionsWithDefaultAPIKey(BaseModel):
     institutions: list[InstitutionWithDefaultAPIKey]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class SetInstitutionDefaultAPIKeyRequest(BaseModel):
@@ -1200,15 +1233,17 @@ class LMSInstance(BaseModel):
     type: LMSType
     base_url: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class LMSInstances(BaseModel):
     instances: list[LMSInstance]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class CreateUserClassRoles(BaseModel):
@@ -1228,15 +1263,17 @@ class LMSClass(BaseModel):
     course_code: str
     term: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class LMSClasses(BaseModel):
     classes: list[LMSClass]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class LMSClassRequest(BaseModel):
@@ -1247,15 +1284,17 @@ class LMSClassRequest(BaseModel):
     lms_type: LMSType
     lms_tenant: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class LMSUser(BaseModel, UserNameMixin):
     id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class CanvasAccessToken(BaseModel):
@@ -1263,8 +1302,9 @@ class CanvasAccessToken(BaseModel):
     expires_in: int
     refresh_token: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class CanvasStoredAccessToken(BaseModel):
@@ -1275,8 +1315,9 @@ class CanvasStoredAccessToken(BaseModel):
     token_added_at: datetime | None = None
     now: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class CanvasInitialAccessTokenRequest(BaseModel):
@@ -1286,8 +1327,9 @@ class CanvasInitialAccessTokenRequest(BaseModel):
     code: str
     redirect_uri: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class CanvasRefreshAccessTokenRequest(BaseModel):
@@ -1296,8 +1338,9 @@ class CanvasRefreshAccessTokenRequest(BaseModel):
     grant_type: str
     refresh_token: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 T = TypeVar("T")
@@ -1313,8 +1356,9 @@ class CreateUpdateCanvasClass(BaseModel):
     user_id: int
     canvas_course: LMSClass
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class AIProvider(StrEnum):
@@ -1362,8 +1406,9 @@ class Class(BaseModel):
     last_rate_limited_at: datetime | None = None
     ai_provider: AIProvider | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class ClassLMSInfo(BaseModel):
@@ -1443,8 +1488,9 @@ class UpdateApiKey(BaseModel):
             return v.strip()
         return v
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class ApiKey(BaseModel):
@@ -1454,8 +1500,9 @@ class ApiKey(BaseModel):
     api_version: str | None = None
     available_as_default: bool | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class APIKeyValidationResponse(BaseModel):
@@ -1466,16 +1513,18 @@ class APIKeyValidationResponse(BaseModel):
 class APIKeyResponse(BaseModel):
     api_key: ApiKey | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class APIKeyModelResponse(BaseModel):
     api_key: str | None = None
     api_key_obj: ApiKey | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class DefaultAPIKey(BaseModel):
@@ -1485,15 +1534,17 @@ class DefaultAPIKey(BaseModel):
     provider: str
     endpoint: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class DefaultAPIKeys(BaseModel):
     default_keys: list[DefaultAPIKey]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class AssistantModel(BaseModel):
@@ -1533,8 +1584,9 @@ class AssistantModelLite(BaseModel):
 class AssistantModelLiteResponse(BaseModel):
     models: list[AssistantModelLite]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class AssistantModelDict(TypedDict):
@@ -1575,8 +1627,9 @@ class AssistantModels(BaseModel):
 class Classes(BaseModel):
     classes: list[Class]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class OpenAIRunError(BaseModel):
@@ -1788,8 +1841,9 @@ class ThreadRun(BaseModel):
     thread: Thread
     run: OpenAIRun | None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class ThreadParticipants(BaseModel):
@@ -1871,8 +1925,9 @@ class VoiceModeRecording(BaseModel):
     recording_id: str
     duration: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class ThreadWithMeta(BaseModel):
@@ -1892,8 +1947,9 @@ class ThreadWithMeta(BaseModel):
     recording: VoiceModeRecording | None = None
     has_more: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class FileSearchToolAnnotationResult(BaseModel):
@@ -2043,8 +2099,9 @@ class AgreementBody(BaseModel):
     id: int
     body: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class Agreement(BaseModel):
@@ -2053,22 +2110,25 @@ class Agreement(BaseModel):
     created: datetime
     updated: datetime | None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class Agreements(BaseModel):
     agreements: list[Agreement]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class AgreementPolicyLite(BaseModel):
     id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class AgreementDetail(BaseModel):
@@ -2077,16 +2137,18 @@ class AgreementDetail(BaseModel):
     body: str
     policies: list[AgreementPolicyLite]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class AgreementLite(BaseModel):
     id: int
     name: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class AgreementPolicy(BaseModel):
@@ -2098,15 +2160,17 @@ class AgreementPolicy(BaseModel):
     not_after: datetime | None
     apply_to_all: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class ExternalLoginProviderLite(BaseModel):
     id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class AgreementPolicyDetail(BaseModel):
@@ -2118,15 +2182,17 @@ class AgreementPolicyDetail(BaseModel):
     apply_to_all: bool
     limit_to_providers: list[ExternalLoginProviderLite] | None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class AgreementPolicies(BaseModel):
     policies: list[AgreementPolicy]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class CreateAgreementRequest(BaseModel):

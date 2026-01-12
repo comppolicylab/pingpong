@@ -8,7 +8,7 @@ from typing import Literal, Union
 
 from glowplug import PostgresSettings, SqliteSettings
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from pingpong.artifacts import LocalArtifactStore, S3ArtifactStore
 from pingpong.audio_store import LocalAudioStore, S3AudioStore
@@ -330,21 +330,19 @@ class FeatureFlags(BaseSettings):
 class Config(BaseSettings):
     """Stats Chat Bot config."""
 
-    log_level: str = Field("INFO", env="LOG_LEVEL")
-    realtime_log_level: str | None = Field(None, env="REALTIME_LOG_LEVEL")
-    realtime_recorder_log_level: str | None = Field(
-        None, env="REALTIME_LOGGER_LOG_LEVEL"
-    )
-    prompt_randomizer_log_level: str | None = Field(
-        None, env="PROMPT_RANDOMIZER_LOG_LEVEL"
-    )
-    responses_api_log_level: str | None = Field(None, env="RESPONSES_API_LOG_LEVEL")
+    model_config = SettingsConfigDict(case_sensitive=False)
+
+    log_level: str = Field("INFO")
+    realtime_log_level: str | None = Field(None)
+    realtime_recorder_log_level: str | None = Field(None)
+    prompt_randomizer_log_level: str | None = Field(None)
+    responses_api_log_level: str | None = Field(None)
     feature_flags: FeatureFlags = Field(FeatureFlags())
 
     reload: int = Field(0)
     public_url: str = Field("http://localhost:8000")
     study_public_url: str | None = Field(None)
-    development: bool = Field(False, env="DEVELOPMENT")
+    development: bool = Field(False)
     artifact_store: ArtifactStoreSettings = LocalStoreSettings(
         save_target="local_exports/thread_exports"
     )
