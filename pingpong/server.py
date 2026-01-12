@@ -8050,9 +8050,13 @@ async def update_assistant(
                     has_changes = True
 
                 if mcp_input.auth_type == schemas.MCPAuthType.NONE:
-                    logger.info(
-                        f"User {request.state.session.user.id} removed authentication for MCP server tool {existing_server.server_label} for assistant {assistant_id}"
-                    )
+                    if (
+                        existing_server.headers is not None
+                        or existing_server.authorization_token is not None
+                    ):
+                        logger.info(
+                            f"User {request.state.session.user.id} removed authentication for MCP server tool {existing_server.server_label} for assistant {assistant_id}"
+                        )
                     if existing_server.headers is not None:
                         existing_server.headers = None
                         has_changes = True

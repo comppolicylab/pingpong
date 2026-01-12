@@ -4130,13 +4130,28 @@ class ToolCall(Base):
     )
 
     @classmethod
-    async def mark_as_incomplete(cls, session: AsyncSession, id: int) -> None:
-        """Mark a tool call as incomplete."""
-        stmt = (
-            update(ToolCall)
-            .where(ToolCall.id == id)
-            .values(status=schemas.ToolCallStatus.INCOMPLETE)
-        )
+    async def mark_as_incomplete_batch(
+        cls,
+        session: AsyncSession,
+        ids: list[int],
+        only_if_in_progress: bool = False,
+    ) -> None:
+        """Mark a batch of tool calls as incomplete."""
+        if not ids:
+            return
+        stmt = update(ToolCall).where(ToolCall.id.in_(ids))
+        if only_if_in_progress:
+            stmt = stmt.where(
+                ToolCall.status.in_(
+                    [
+                        schemas.ToolCallStatus.IN_PROGRESS,
+                        schemas.ToolCallStatus.SEARCHING,
+                        schemas.ToolCallStatus.INTERPRETING,
+                        schemas.ToolCallStatus.CALLING,
+                    ]
+                )
+            )
+        stmt = stmt.values(status=schemas.ToolCallStatus.INCOMPLETE)
         await session.execute(stmt)
 
     @classmethod
